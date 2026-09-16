@@ -146,7 +146,14 @@ it.each(['mapfile values', 'read -N 131072 value'])(
       await expect(
         ws.execute(command, { stdin: source(), signal: controller.signal }),
       ).rejects.toMatchObject({ name: 'AbortError' })
-      expect(closed).toBe(true)
+      // Polled rather than read once, because the producer is allowed to
+      // close on a later turn than the abort that rejected above:
+      // `CachableIterator.discard` fires the source's `return()` without
+      // awaiting it while a pull is still outstanding, deliberately, so
+      // cleanup cannot hang behind a pull that never settles. Reading
+      // `closed` right here made the case a race, and CI lost it under
+      // load. A producer that never closes still fails, just later.
+      await expect.poll(() => closed).toBe(true)
       const events = await ws.observer.commandEvents()
       expect(events).toHaveLength(1)
       expect(events[0]?.exit_code).toBe(130)

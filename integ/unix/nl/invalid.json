@@ -1,0 +1,3196 @@
+{
+  "cases": [
+    {
+      "id": "nl_v_invalid_word",
+      "seq": 601700,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -v abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid starting line number: 'abc'\n"
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "nl_w_invalid_word",
+      "seq": 601701,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: 'abc'\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_i_invalid_word",
+      "seq": 601702,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -i abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number increment: 'abc'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "nl_l_invalid_word",
+      "seq": 601703,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -l abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number of blank lines: 'abc'\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "nl_v_trailing_garbage_quotes_whole_arg",
+      "seq": 601704,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -v 2x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid starting line number: '2x'\n"
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "nl_w_trailing_garbage_quotes_whole_arg",
+      "seq": 601705,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w 2x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: '2x'\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_v_valid_start",
+      "seq": 601706,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -v 5",
+      "expect": {
+        "exit": 0,
+        "stdout": "     5\tx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "nl_v_negative_start_is_accepted",
+      "seq": 601707,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -v -5",
+      "expect": {
+        "exit": 0,
+        "stdout": "    -5\tx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "nl_i_negative_increment_decrements",
+      "seq": 601708,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\ny\\nz\\n' | nl -i -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tx\n    -1\ty\n    -3\tz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "nl_w_zero_is_out_of_range",
+      "seq": 601709,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w 0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: '0': Numerical result out of range\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_w_negative_is_out_of_range",
+      "seq": 601710,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w -3",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: '-3': Numerical result out of range\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_l_zero_is_out_of_range",
+      "seq": 601711,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -l 0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number of blank lines: '0': Numerical result out of range\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "nl_l_negative_is_out_of_range",
+      "seq": 601712,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -l -2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number of blank lines: '-2': Numerical result out of range\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "nl_w_empty_omits_the_range_clause",
+      "seq": 601713,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: ''\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_l_empty_omits_the_range_clause",
+      "seq": 601714,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -l ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number of blank lines: ''\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "nl_w_leading_plus_is_a_sign",
+      "seq": 601715,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w +3",
+      "expect": {
+        "exit": 0,
+        "stdout": "  1\tx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_first_on_line_wins_w_before_v",
+      "seq": 601716,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w abc -v xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: 'abc'\n"
+      },
+      "flags": [
+        "w",
+        "v"
+      ]
+    },
+    {
+      "id": "nl_first_on_line_wins_v_before_w",
+      "seq": 601717,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -v xyz -w abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid starting line number: 'xyz'\n"
+      },
+      "flags": [
+        "v",
+        "w"
+      ]
+    },
+    {
+      "id": "nl_first_on_line_wins_l_before_w",
+      "seq": 601718,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -l abc -w xyz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number of blank lines: 'abc'\n"
+      },
+      "flags": [
+        "l",
+        "w"
+      ]
+    },
+    {
+      "id": "nl_first_on_line_wins_w_before_l",
+      "seq": 601719,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w xyz -l abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: 'xyz'\n"
+      },
+      "flags": [
+        "w",
+        "l"
+      ]
+    },
+    {
+      "id": "nl_b_invalid_style_is_refused",
+      "seq": 601720,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid body numbering style: 'bogus'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_empty_style_is_refused",
+      "seq": 601721,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid body numbering style: ''\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_uppercase_style_is_refused",
+      "seq": 601722,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b A",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid body numbering style: 'A'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_style_reads_only_its_first_character",
+      "seq": 601723,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b nn",
+      "expect": {
+        "exit": 0,
+        "stdout": "       x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_n_invalid_format_is_refused",
+      "seq": 601724,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -n bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line numbering format: 'bogus'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "nl_n_format_compares_the_whole_word",
+      "seq": 601725,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -n rnn",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line numbering format: 'rnn'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "nl_f_invalid_style_is_refused",
+      "seq": 601726,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -f bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid footer numbering style: 'bogus'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "nl_h_invalid_style_is_refused",
+      "seq": 601727,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -h bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid header numbering style: 'bogus'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "h"
+      ]
+    },
+    {
+      "id": "nl_style_refusal_drops_the_hint_for_a_later_bad_width",
+      "seq": 601728,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b bogus -w abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid body numbering style: 'bogus'\nnl: invalid line number field width: 'abc'\n"
+      },
+      "flags": [
+        "b",
+        "w"
+      ]
+    },
+    {
+      "id": "nl_style_refusal_keeps_the_hint_for_a_valid_width",
+      "seq": 601729,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b bogus -w 3",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid body numbering style: 'bogus'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "b",
+        "w"
+      ]
+    },
+    {
+      "id": "nl_bad_width_exits_before_a_later_bad_style",
+      "seq": 601730,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w abc -b bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: 'abc'\n"
+      },
+      "flags": [
+        "w",
+        "b"
+      ]
+    },
+    {
+      "id": "nl_two_style_refusals_accumulate_then_hint",
+      "seq": 601731,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b bogus -h bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid body numbering style: 'bogus'\nnl: invalid header numbering style: 'bogus'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "b",
+        "h"
+      ]
+    },
+    {
+      "id": "nl_repeated_width_refuses_the_earlier_bad_value",
+      "seq": 601732,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w abc -w 3",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: 'abc'\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_repeated_width_around_a_bad_start_names_the_start",
+      "seq": 601733,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w 3 -v xyz -w abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid starting line number: 'xyz'\n"
+      },
+      "flags": [
+        "w",
+        "v"
+      ]
+    },
+    {
+      "id": "nl_repeated_width_around_a_bad_start_names_the_width",
+      "seq": 601734,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w abc -v xyz -w 3",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: 'abc'\n"
+      },
+      "flags": [
+        "w",
+        "v"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_bare_bracket_is_invalid_regex",
+      "seq": 601735,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p['",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid regular expression\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_unterminated_bracket_names_the_bracket",
+      "seq": 601736,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p[a'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Unmatched [, [^, [:, [., or [=\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_unmatched_open_group",
+      "seq": 601737,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p\\('",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Unmatched ( or \\(\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_unmatched_close_group",
+      "seq": 601738,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p\\)'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Unmatched ) or \\)\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_trailing_backslash",
+      "seq": 601739,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p\\'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Trailing backslash\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_backreference_without_a_group",
+      "seq": 601740,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p\\1'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid back reference\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_unknown_character_class",
+      "seq": 601741,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p[[:bogus:]]'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid character class name\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_multibyte_collating_element",
+      "seq": 601742,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p[[.ab.]]'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid collation character\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_unclosed_interval",
+      "seq": 601743,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'pa\\{1,'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Unmatched \\{\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_inverted_interval_bounds",
+      "seq": 601744,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'pa\\{2,1\\}'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid content of \\{\\}\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_interval_past_re_dup_max",
+      "seq": 601745,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'pa\\{32768\\}'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Regular expression too big\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_second_range_end",
+      "seq": 601746,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p[a-c-e]'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid range end\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_f_pattern_failure_words_the_same_way",
+      "seq": 601747,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -f 'p['",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid regular expression\n"
+      },
+      "flags": [
+        "f"
+      ]
+    },
+    {
+      "id": "nl_h_pattern_failure_words_the_same_way",
+      "seq": 601748,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -h 'p\\)'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Unmatched ) or \\)\n"
+      },
+      "flags": [
+        "h"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_leading_star_is_a_literal",
+      "seq": 601749,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '*a\\n' | nl -b 'p*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t*a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_interval_with_nothing_to_repeat_is_literal",
+      "seq": 601750,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '{1}\\n' | nl -b 'p\\{1\\}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t{1}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_escaped_parens_are_the_group",
+      "seq": 601751,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | nl -b 'p\\(a\\)b'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tab\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_bare_parens_are_literal",
+      "seq": 601752,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '(a)\\n' | nl -b 'p(a)'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t(a)\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_bare_plus_is_literal",
+      "seq": 601753,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a+b\\n' | nl -b 'pa+b'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\ta+b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_open_low_interval_bound_is_zero",
+      "seq": 601754,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'pa\\{,3\\}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_negated_inverted_range_compiles",
+      "seq": 601755,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'q\\n' | nl -b 'p[^z-a]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tq\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_search_is_unanchored",
+      "seq": 601756,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'foo\\n' | nl -b po",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tfoo\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_b_pattern_failure_is_fatal_before_a_later_bad_width",
+      "seq": 601757,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p[' -w abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid regular expression\n"
+      },
+      "flags": [
+        "b",
+        "w"
+      ]
+    },
+    {
+      "id": "nl_bad_width_exits_before_a_later_bad_pattern",
+      "seq": 601758,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w abc -b 'p['",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: 'abc'\n"
+      },
+      "flags": [
+        "w",
+        "b"
+      ]
+    },
+    {
+      "id": "nl_pattern_failure_flushes_a_deferred_style_line",
+      "seq": 601759,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -h bogus -b 'p['",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid header numbering style: 'bogus'\nnl: Invalid regular expression\n"
+      },
+      "flags": [
+        "h",
+        "b"
+      ]
+    },
+    {
+      "id": "nl_pattern_failure_drops_a_later_bad_style",
+      "seq": 601760,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b 'p[' -h bogus",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: Invalid regular expression\n"
+      },
+      "flags": [
+        "b",
+        "h"
+      ]
+    },
+    {
+      "id": "nl_a_bad_style_outranks_its_own_pattern",
+      "seq": 601761,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b '['",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid body numbering style: '['\nTry 'nl --help' for more information.\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_boolean_long_with_a_value_is_refused",
+      "seq": 601762,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl --no-renumber=2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: option '--no-renumber' doesn't allow an argument\nTry 'nl --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "nl_help_with_a_value_is_refused",
+      "seq": 601763,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "nl --help=2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: option '--help' doesn't allow an argument\nTry 'nl --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "nl_boolean_long_with_an_empty_value_is_refused",
+      "seq": 601764,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl --no-renumber=",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: option '--no-renumber' doesn't allow an argument\nTry 'nl --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "nl_undeclared_long_with_a_value_stays_unrecognized",
+      "seq": 601765,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "nl --bogus=2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: unrecognized option '--bogus=2'\nTry 'nl --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "nl_unnumbered_line_pads_over_the_separator",
+      "seq": 601766,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b n",
+      "expect": {
+        "exit": 0,
+        "stdout": "       x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_unnumbered_padding_follows_the_number_width",
+      "seq": 601767,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b n -w 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "    x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "w"
+      ]
+    },
+    {
+      "id": "nl_unnumbered_padding_with_an_empty_separator",
+      "seq": 601768,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b n -s ''",
+      "expect": {
+        "exit": 0,
+        "stdout": "      x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "s"
+      ]
+    },
+    {
+      "id": "nl_unnumbered_padding_follows_the_separator_length",
+      "seq": 601769,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b n -s '::'",
+      "expect": {
+        "exit": 0,
+        "stdout": "        x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "s"
+      ]
+    },
+    {
+      "id": "nl_unnumbered_padding_sums_width_and_separator",
+      "seq": 601770,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b n -w 3 -s '::'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "w",
+        "s"
+      ]
+    },
+    {
+      "id": "nl_unnumbered_padding_ignores_the_number_format",
+      "seq": 601771,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b n -n rz",
+      "expect": {
+        "exit": 0,
+        "stdout": "       x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "n"
+      ]
+    },
+    {
+      "id": "nl_a_blank_line_is_padded_the_same_way",
+      "seq": 601772,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n\\nb\\n' | nl",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\ta\n       \n     2\tb\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "nl_a_pattern_that_does_not_match_is_padded_too",
+      "seq": 601773,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -b pfoo",
+      "expect": {
+        "exit": 0,
+        "stdout": "       x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "nl_w_past_int_max_is_too_large_for_the_type",
+      "seq": 602260,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w 2147483648",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: '2147483648': Value too large for defined data type\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_w_twenty_digits_is_too_large_for_the_type",
+      "seq": 602261,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w 99999999999999999999",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: '99999999999999999999': Value too large for defined data type\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_l_past_intmax_is_too_large_for_the_type",
+      "seq": 602262,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -l 9223372036854775808",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number of blank lines: '9223372036854775808': Value too large for defined data type\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "nl_v_past_intmax_is_too_large_for_the_type",
+      "seq": 602263,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -v 9223372036854775808",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid starting line number: '9223372036854775808': Value too large for defined data type\n"
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "nl_i_below_intmax_min_is_too_large_for_the_type",
+      "seq": 602264,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -i -9223372036854775809",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number increment: '-9223372036854775809': Value too large for defined data type\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "nl_l_past_int_max_is_still_in_range",
+      "seq": 602265,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -l 2147483648",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "nl_v_past_int_max_is_still_in_range",
+      "seq": 602266,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -v 2147483648",
+      "expect": {
+        "exit": 0,
+        "stdout": "2147483648\tx\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v"
+      ]
+    },
+    {
+      "id": "nl_w_at_the_overflow_floor_stays_out_of_range",
+      "seq": 602267,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w -1073741824",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: '-1073741824': Numerical result out of range\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_w_below_the_overflow_floor_is_too_large_for_the_type",
+      "seq": 602268,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w -1073741825",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: '-1073741825': Value too large for defined data type\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_i_has_no_overflow_floor_of_its_own",
+      "seq": 602269,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\ny\\n' | nl -i -2000000000",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tx\n-1999999999\ty\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "nl_w_a_trailing_newline_is_refused",
+      "seq": 602270,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -w $'3\\n'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid line number field width: '3\\n'\n"
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "nl_v_a_trailing_newline_is_refused",
+      "seq": 602271,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | nl -v $'5\\n'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "nl: invalid starting line number: '5\\n'\n"
+      },
+      "flags": [
+        "v"
+      ]
+    }
+  ]
+}

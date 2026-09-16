@@ -16,10 +16,15 @@ import posixpath
 
 from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.grep_context import grep_context_lines
+from mirage.commands.builtin.grep_offsets import (decode_line, line_offsets,
+                                                  match_offset, prefix_of,
+                                                  printable)
 from mirage.commands.builtin.grep_pattern import compile_pattern
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.types import (AsyncReadBytes, AsyncReaddir,
                                                  AsyncStat)
 from mirage.commands.resolve import get_extension
+from mirage.io.types import IOResult
 from mirage.types import FileType
 from mirage.utils.errors import WALK_ERRORS, fs_strerror
 from mirage.utils.fnmatch import fnmatch
@@ -89,7 +94,44 @@ async def rg_full(
     warnings: list[str] | None,
     file_prefix: str | None = None,
     no_filename: bool = False,
+    byte_offsets: bool = False,
+    io: IOResult | None = None,
 ) -> list[str]:
+    """Search one operand, returning the lines ripgrep would print.
+
+    Args:
+        readdir_fn (AsyncReaddir): backend directory reader.
+        stat_fn (AsyncStat): backend stat reader.
+        read_bytes_fn (AsyncReadBytes): whole-file reader.
+        path (str): the operand to search.
+        pattern (str): the pattern text.
+        ignore_case (bool): -i, case-insensitive matching.
+        invert (bool): -v, select the lines that do not match.
+        line_numbers (bool): -n, prefix each line with its number.
+        count_only (bool): -c, answer with per-file counts.
+        files_only (bool): -l, answer with the paths that matched.
+        fixed_string (bool): -F, read the pattern literally.
+        only_matching (bool): -o, print the matched text.
+        max_count (int | None): -m, stop after this many selected lines.
+        whole_word (bool): -w, match whole words.
+        context_before (int): -B, leading context lines.
+        context_after (int): -A, trailing context lines.
+        file_type (str | None): --type, restrict by extension set.
+        glob_pattern (str | None): --glob, restrict by basename glob.
+        hidden (bool): --hidden, walk dot-entries too.
+        warnings (list[str] | None): collects per-operand errors.
+        file_prefix (str | None): the label a single-file run carries.
+        no_filename (bool): -I, drop per-file labels in a walk.
+        byte_offsets (bool): -b, prefix each line with the byte offset of
+            its own start, or of the match itself under -o.
+        io (IOResult | None): when given, receives exit status 0 as soon
+            as a line is selected. Selection cannot be read off the
+            returned list: under -o a zero-width match selects the line
+            and prints nothing, so a caller deriving the status from an
+            empty list reports 1 where GNU says 0. The twin of the
+            channel ``grep_lines`` and ``grep_stream`` already take, and
+            `grep -r` is the reference.
+    """
     compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
 
     is_dir = False
@@ -108,11 +150,15 @@ async def rg_full(
         if not _rg_matches_filter(path, file_type, glob_pattern, hidden):
             return []
         try:
-            data = (await
-                    read_bytes_fn(path)).decode(errors="replace").splitlines()
+            data = split_lines(decode_line(await read_bytes_fn(path)))
         except WALK_ERRORS as exc:
             if warnings is not None:
                 warnings.append(f"rg: {path}: {fs_strerror(exc) or exc}")
+            return []
+        if max_count == 0:
+            # ripgrep and GNU both select no line at all under -m0 and
+            # print nothing, count included; read before the scan because
+            # `count >= 0` is already true further down.
             return []
         if ((context_before or context_after) and not files_only
                 and not count_only and not only_matching
@@ -123,26 +169,55 @@ async def rg_full(
             # mirroring grep's -H divergence.
             rendered = grep_context_lines(data, compiled, invert, line_numbers,
                                           max_count, context_after,
-                                          context_before)
-            return [b.decode().rstrip("\n") for b in rendered]
+                                          context_before, byte_offsets)
+            if rendered and io is not None:
+                io.exit_code = 0
+            # `decode_line` because the renderer now puts a smuggled byte
+            # back as itself; `printable` because this branch answers in
+            # `list[str]`, which `format_records` encodes strictly.
+            return [printable(decode_line(b).rstrip("\n")) for b in rendered]
         results: list[str] = []
         count = 0
+        offsets = line_offsets(data) if byte_offsets else []
         for i_ln, line in enumerate(data, 1):
+            start = offsets[i_ln - 1] if byte_offsets else 0
             m = compiled.search(line)
             matched = bool(m) != invert
             if not matched:
                 continue
             count += 1
+            if io is not None:
+                io.exit_code = 0
             if files_only:
                 return [path]
-            if only_matching and m and not invert:
-                text = m.group(0)
+            if only_matching:
+                # GNU -o prints every match on the line, one per line, and
+                # prints nothing at all for an empty match nor for an
+                # inverted selection, which has no match to print -- but
+                # the line is still selected, so `count` is already
+                # incremented above and -c, -l and the exit status see
+                # it. Mirrors `searchFile` in rg_scan.ts and `grep_lines`
+                # in grep_scan.py; a bare `search` here printed only the
+                # first match, and printed a prefix with no match after it
+                # for an empty one.
+                if not invert:
+                    for found in compiled.finditer(line):
+                        text = found.group(0)
+                        if not text:
+                            continue
+                        one = prefix_of(
+                            i_ln if line_numbers else None,
+                            match_offset(start, line, found.start())
+                            if byte_offsets else None) + text
+                        results.append(
+                            f"{file_prefix}:{printable(one)}"
+                            if file_prefix is not None else printable(one))
             else:
-                text = line
-            pfx = f"{i_ln}:{text}" if line_numbers else text
-            if file_prefix is not None:
-                pfx = f"{file_prefix}:{pfx}"
-            results.append(pfx)
+                one = printable(
+                    prefix_of(i_ln if line_numbers else None,
+                              start if byte_offsets else None) + line)
+                results.append(
+                    f"{file_prefix}:{one}" if file_prefix is not None else one)
             if max_count is not None and count >= max_count:
                 break
         if count_only:
@@ -194,6 +269,8 @@ async def rg_full(
                 hidden,
                 warnings,
                 no_filename=no_filename,
+                byte_offsets=byte_offsets,
+                io=io,
             ))
         elif s.type is FileType.FILE:
             if get_extension(entry) in BINARY_EXTENSIONS:
@@ -201,15 +278,20 @@ async def rg_full(
             if not _rg_matches_filter(entry, file_type, glob_pattern, hidden):
                 continue
             try:
-                data = (await read_bytes_fn(entry)).decode(
-                    errors="replace").splitlines()
+                data = split_lines(decode_line(await read_bytes_fn(entry)))
+                if max_count == 0:
+                    continue
                 file_count = 0
+                offsets = line_offsets(data) if byte_offsets else []
                 for i_ln, line in enumerate(data, 1):
+                    start = offsets[i_ln - 1] if byte_offsets else 0
                     m = compiled.search(line)
                     matched = bool(m) != invert
                     if not matched:
                         continue
                     file_count += 1
+                    if io is not None:
+                        io.exit_code = 0
                     if files_only:
                         results.append(entry)
                         break
@@ -217,13 +299,39 @@ async def rg_full(
                         if max_count is not None and file_count >= max_count:
                             break
                         continue
-                    if only_matching and m and not invert:
-                        text = m.group(0)
+                    # ripgrep -I drops per-file labels in directory
+                    # walks, which is the only thing this branch words
+                    # differently from the single-file one above; -o
+                    # itself reads the same, one printed line per
+                    # non-empty match and nothing at all for an empty
+                    # one.
+                    if only_matching:
+                        if not invert:
+                            for found in compiled.finditer(line):
+                                text = found.group(0)
+                                if not text:
+                                    continue
+                                one = printable(
+                                    prefix_of(
+                                        i_ln if line_numbers else None,
+                                        match_offset(start, line, found.start(
+                                        )) if byte_offsets else None) + text)
+                                results.append(
+                                    one if no_filename else f"{entry}:{one}")
                     else:
-                        text = line
-                    pfx = f"{i_ln}:{text}" if line_numbers else text
-                    # ripgrep -I drops per-file labels in directory walks.
-                    results.append(pfx if no_filename else f"{entry}:{pfx}")
+                        one = printable(
+                            prefix_of(i_ln if line_numbers else None,
+                                      start if byte_offsets else None) + line)
+                        results.append(
+                            one if no_filename else f"{entry}:{one}")
+                    if max_count is not None and file_count >= max_count:
+                        # -m is per file in a walk, as ripgrep's is
+                        # (`rg -m1 a dir` prints one line per file on
+                        # ripgrep 14.1.0). This branch had the limit only
+                        # inside its count arm, so a printing walk ignored
+                        # it and printed every match where `searchFile` in
+                        # rg_scan.ts stopped at the first.
+                        break
                 if count_only and file_count > 0:
                     results.append(
                         str(file_count

@@ -74,6 +74,80 @@
         "i",
         "m"
       ]
+    },
+    {
+      "id": "grep_i_case_folding_is_ascii_kelvin",
+      "seq": 612040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\342\\204\\252\\n' > /data/gi1.txt; grep -i k /data/gi1.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "grep_i_case_folding_is_ascii_long_s",
+      "seq": 612041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\305\\277\\n' > /data/gi2.txt; grep -i s /data/gi2.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
     }
   ]
 }

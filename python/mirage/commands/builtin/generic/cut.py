@@ -7,6 +7,7 @@ from mirage.commands.builtin.utils.operands import (merge_split_errors,
                                                     split_readable)
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import CommandOpts
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.io.stream import async_chain
@@ -47,7 +48,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CutFlags:
         whitespace = "default"
     elif isinstance(raw_whitespace, str):
         if raw_whitespace != "trimmed":
-            raise ValueError(f"cut: invalid argument '{raw_whitespace}' for "
+            raise ValueError(f"cut: invalid argument "
+                             f"'{quote_text(raw_whitespace)}' for "
                              "'--whitespace-delimited'")
         whitespace = "trimmed"
     if whitespace is not None and mode != "fields":
@@ -80,7 +82,7 @@ async def cut(
 ) -> tuple[ByteSource | None, IOResult]:
     try:
         parsed = parse_flags(flags or {})
-        ranges = parse_ranges(parsed.ranges)
+        ranges = parse_ranges(parsed.ranges, parsed.mode)
     except (TypeError, ValueError) as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     if paths:

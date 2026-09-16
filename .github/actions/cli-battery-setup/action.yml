@@ -1,0 +1,66 @@
+name: CLI battery setup
+description: >-
+  Toolchain for the CLI exit-code batteries: both CLIs built and runnable from
+  the repo root. All four battery legs use this so the setup stays defined once.
+inputs:
+  libfuse:
+    description: >-
+      Install the OS FUSE driver. Needed by any leg whose batteries mount a
+      `backend: fuse` workspace, which is parity.sh and cli_fuse.sh. This is a
+      RUNTIME need, not a build one: @zkochan/fuse-native compiles against its
+      own bundled FUSE 2.x, but the addon it produces carries
+      DT_NEEDED libfuse.so.2, and mfusepy resolves the system libfuse at import.
+      Kept as the first step because that is where the cross job had it;
+      reordering is unverified.
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Install libfuse (mfusepy + @zkochan/fuse-native)
+      if: ${{ inputs.libfuse == 'true' }}
+      shell: bash
+      run: |
+        for i in $(seq 1 5); do
+          sudo apt-get update && break
+          echo "apt-get update failed (attempt $i), retrying"; sleep 10
+        done
+        sudo apt-get install -y fuse3 libfuse3-dev libfuse2t64 || \
+          sudo apt-get install -y fuse3 libfuse3-dev libfuse2
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: "0.12.9"
+        enable-cache: true
+
+    - name: Install Python dependencies
+      working-directory: python
+      shell: bash
+      run: uv sync --all-extras --no-extra camel
+
+    - name: Set up Node and pnpm
+      uses: ./.github/actions/setup-node-pnpm
+      with:
+        node-version: "24"
+
+    # `integ` is a pnpm workspace member, so this install is what creates
+    # integ/node_modules: state_store.sh and index_store.sh need `pnpm exec tsx`
+    # from it, and the ref batteries resolve @struktoai/mirage-{core,node}
+    # through it. The downloaded artifact carries compiled JS only, never
+    # node_modules, so it is not a substitute. --frozen-lockfile=false matches
+    # what the cross job used; the build jobs deliberately use the strict form.
+    - name: Install TypeScript dependencies
+      working-directory: typescript
+      shell: bash
+      run: pnpm install --frozen-lockfile=false
+
+    - name: Download TypeScript build outputs
+      uses: actions/download-artifact@v8
+      with:
+        name: cli-typescript-dist
+        path: typescript/packages

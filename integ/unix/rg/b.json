@@ -1,0 +1,375 @@
+{
+  "cases": [
+    {
+      "id": "rg_b_offset_is_the_line_start",
+      "seq": 500440,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -b abc /data/rgb.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0:abc\n4:defabc\n11:abc abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "rg_bn_field_order_is_line_then_byte",
+      "seq": 500441,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -bn abc /data/rgb.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:0:abc\n2:4:defabc\n3:11:abc abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "n"
+      ]
+    },
+    {
+      "id": "rg_bn_directory_puts_the_filename_first",
+      "seq": 500442,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgb1 && printf 'abc\\ndefabc\\n' > /data/rgb1/x.txt && rg -bn abc /data/rgb1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rgb1/x.txt:1:0:abc\n/data/rgb1/x.txt:2:4:defabc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "n"
+      ]
+    },
+    {
+      "id": "rg_b_counts_bytes_not_characters",
+      "seq": 612100,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/rb5.txt; rg -b abc /data/rb5.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0:café abc\n10:xéy abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "rg_bo_counts_bytes_not_characters",
+      "seq": 612101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/rb5.txt; rg -bo abc /data/rb5.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "6:abc\n15:abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "o"
+      ]
+    },
+    {
+      "id": "rg_b_counts_an_invalid_byte_as_one",
+      "seq": 612102,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '\\377\\na\\n' > /data/rbinv.bin; rg -b a /data/rbinv.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "2:a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "rg_b_counts_an_invalid_byte_as_one_over_two_operands",
+      "seq": 612103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '\\377\\na\\n' > /data/rbinv.bin; printf 'zzz\\n' > /data/rbz.txt; rg -b a /data/rbinv.bin /data/rbz.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rbinv.bin:2:a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "rg_bo_counts_an_invalid_byte_as_one",
+      "seq": 612104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '\\377a\\n' > /data/rbinv2.bin; rg -bo a /data/rbinv2.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "o"
+      ]
+    },
+    {
+      "id": "rg_b_line_ends_only_at_a_newline",
+      "seq": 612105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\r\\nb\\r\\n' > /data/rbcrlf.txt; rg -b b /data/rbcrlf.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "3:b\r\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "rg_b_with_after_context_counts_an_invalid_byte_as_one",
+      "seq": 612106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/rcx.bin; rg -b -A1 abc /data/rcx.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "6:two abc\n14-three\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "A"
+      ]
+    },
+    {
+      "id": "rg_bn_context_gets_every_field_right",
+      "seq": 612107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/rcx.bin; rg -bn -A1 -B1 abc /data/rcx.bin",
+      "expect": {
+        "exit": 0,
+        "stdout": "2-4-�\n3:6:two abc\n4-14-three\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "n",
+        "A",
+        "B"
+      ]
+    }
+  ]
+}

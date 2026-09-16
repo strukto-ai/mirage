@@ -8,11 +8,14 @@ from mirage.commands.builtin.constants import (SPLIT_BYTE_SUFFIXES,
                                                SPLIT_TRY_HELP, UINTMAX)
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.errors import UsageError
+from mirage.commands.quote import quote_text
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+_CHUNK_KIND_PREFIXES = ("l/", "r/")
 
 
 def parse_bytes_value(value: str) -> int:
@@ -24,7 +27,8 @@ def parse_bytes_value(value: str) -> int:
     suffix = next((u for u in SPLIT_BYTE_SUFFIXES if value.endswith(u)), "")
     digits = value[:-len(suffix)] if suffix else value
     if SPLIT_COUNT_PATTERN.fullmatch(digits) is None or int(digits) == 0:
-        raise UsageError(f"split: invalid number of bytes: '{value}'", 1)
+        raise UsageError(
+            f"split: invalid number of bytes: '{quote_text(value)}'", 1)
     return int(digits) * SPLIT_BYTE_UNITS.get(suffix, 1)
 
 
@@ -35,7 +39,8 @@ def parse_lines_value(value: str) -> int:
         value (str): the raw flag value.
     """
     if SPLIT_COUNT_PATTERN.fullmatch(value) is None or int(value) == 0:
-        raise UsageError(f"split: invalid number of lines: '{value}'", 1)
+        raise UsageError(
+            f"split: invalid number of lines: '{quote_text(value)}'", 1)
     return int(value)
 
 
@@ -45,17 +50,29 @@ def parse_chunks_value(value: str) -> int:
     Args:
         value (str): the raw flag value, e.g. ``4``, ``l/4``, ``2/3``.
     """
-    # A malformed head (the l/r kind letter or the K component) quotes the
-    # whole spec; a malformed trailing N quotes only N (GNU).
-    parts = value.split("/")
-    kinds = ("l", "r")
-    if any(p not in kinds and SPLIT_COUNT_PATTERN.fullmatch(p) is None
-           for p in parts[:-1]):
-        raise UsageError(f"split: invalid number of chunks: '{value}'", 1)
-    tail = parts[-1]
-    if SPLIT_COUNT_PATTERN.fullmatch(tail) is None or int(tail) == 0:
-        raise UsageError(f"split: invalid number of chunks: '{tail}'", 1)
-    return int(tail)
+    # GNU strips ONE leading `l/` or `r/` and then cuts what is left at
+    # its FIRST slash into K and N: a K it cannot parse names the whole
+    # remainder, and every other refusal names N, which is the rest of
+    # the spec however many slashes that still holds. Measured on
+    # coreutils 9.4: `l/xé/4` names `xé/4`, `2/3/4` and `l/2/3/4` name
+    # `3/4`, `l//4` names `/4`, `r/l/4` names `l/4`, and `+l/2` and
+    # `x/3` name themselves because neither carries a kind prefix.
+    # mirage used to name the whole spec for every malformed head and
+    # credited that to 9.7; 9.4 disagrees, and so does the accepted set
+    # -- a third component is N's problem, not a head component.
+    spec = next(
+        (value[len(prefix):]
+         for prefix in _CHUNK_KIND_PREFIXES if value.startswith(prefix)),
+        value)
+    head, slash, tail = spec.partition("/")
+    if slash and SPLIT_COUNT_PATTERN.fullmatch(head) is None:
+        raise UsageError(
+            f"split: invalid number of chunks: '{quote_text(spec)}'", 1)
+    count = tail if slash else head
+    if SPLIT_COUNT_PATTERN.fullmatch(count) is None or int(count) == 0:
+        raise UsageError(
+            f"split: invalid number of chunks: '{quote_text(count)}'", 1)
+    return int(count)
 
 
 def parse_suffix_length(value: str) -> int:
@@ -65,7 +82,8 @@ def parse_suffix_length(value: str) -> int:
         value (str): the raw flag value.
     """
     if SPLIT_COUNT_PATTERN.fullmatch(value) is None:
-        raise UsageError(f"split: invalid suffix length: '{value}'", 1)
+        raise UsageError(
+            f"split: invalid suffix length: '{quote_text(value)}'", 1)
     length = int(value)
     # xstrtoumax overflow: past 2**64 - 1 GNU refuses the width at parse
     # time (byte and line counts saturate instead — a count bigger than
@@ -73,13 +91,19 @@ def parse_suffix_length(value: str) -> int:
     # built into a file name).
     if length > UINTMAX:
         raise UsageError(
-            f"split: invalid suffix length: '{value}': "
+            f"split: invalid suffix length: '{quote_text(value)}': "
             "Value too large for defined data type", 1)
     return length
 
 
 def parse_suffix_start(value: str, hex_mode: bool, suffix_len: int) -> int:
     """GNU ``--numeric-suffixes=``/``--hex-suffixes=`` start value.
+
+    The refused value is named through gnulib's ``quote()`` like every
+    other word split reports, and it comes FIRST in this clause where
+    the four count clauses put it last (measured on coreutils 9.4:
+    ``split: 'x\\303\\251': invalid start value for numerical
+    suffix``).
 
     Args:
         value (str): the raw start value; hex digits when ``hex_mode``.
@@ -90,8 +114,8 @@ def parse_suffix_start(value: str, hex_mode: bool, suffix_len: int) -> int:
     if pattern.fullmatch(value) is None:
         kind = "hexadecimal" if hex_mode else "numerical"
         raise UsageError(
-            f"split: '{value}': invalid start value for {kind} suffix" +
-            SPLIT_TRY_HELP, 1)
+            f"split: '{quote_text(value)}': invalid start value for "
+            f"{kind} suffix" + SPLIT_TRY_HELP, 1)
     start = int(value, 16 if hex_mode else 10)
     if len(format(start, "x" if hex_mode else "d")) > suffix_len:
         raise UsageError(

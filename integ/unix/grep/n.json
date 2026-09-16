@@ -265,6 +265,44 @@
         "n",
         "C"
       ]
+    },
+    {
+      "id": "grep_nb_field_order_does_not_follow_the_flags",
+      "seq": 601809,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -nb abc /data/qb.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:0:abc\n2:4:defabc\n3:11:abc abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "b"
+      ]
     }
   ]
 }

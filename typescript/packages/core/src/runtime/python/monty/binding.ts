@@ -36,14 +36,24 @@ export interface MontyPoolLike {
   close(): Promise<void>
 }
 
+/** The policy options a `ClassInstance` wrapper takes. */
+export interface MontyClassInstanceOptions {
+  name?: string
+  eagerAttrs?: readonly string[] | 'all'
+}
+
 /**
- * The two door pieces `MirageOSAccess` needs from the binding: the
- * decline sentinel, and the handle class an `open` answer must be an
- * instance of (the binding wraps it into the guest's `_io.*` object).
+ * The three door pieces `MirageOSAccess` needs from the binding: the
+ * decline sentinel, the handle class an `open` answer must be an
+ * instance of (the binding wraps it into the guest's `_io.*` object),
+ * and the wrapper that carries a host object into the guest as a class
+ * instance rather than a dict, which is what lets a stat answer arrive
+ * with `st_size` on it.
  */
 export interface MontyBindingBits {
   NOT_HANDLED: symbol
   MontyFileHandle: new (path: string, mode: string) => unknown
+  ClassInstance: new (instance: object, options?: MontyClassInstanceOptions) => object
 }
 
 /** A worker-death error, the one shape run() maps to an exit code. */

@@ -12,10 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { VFSStat } from '../../vfs.ts'
 import type { OpenMode } from '../../handles/mode.ts'
 
 interface FileNode {
   content: string | Uint8Array
+  // Epoch ms of the last write, so a scratch stat reports when the
+  // guest made the file rather than when it asked. Rides on the node,
+  // so a rename carries it without re-keying anything.
+  mtimeMs: number
 }
 
 type DirNode = Map<string, TreeNode>
@@ -119,6 +124,11 @@ function concatBytes(head: Uint8Array, tail: Uint8Array): Uint8Array {
  */
 export class ScratchTree {
   private readonly root: DirNode = new Map([['/', new Map()]])
+  // The stamp every scratch directory reports. A file carries its own
+  // on the node; a directory is a bare Map with nowhere to put one, so
+  // it reports when the tree came into being instead. The tree lives
+  // one command, so the two are within that command of each other.
+  private readonly born = Date.now()
 
   private entryAt(path: string): TreeNode | null {
     const all = parts(path)
@@ -171,6 +181,28 @@ export class ScratchTree {
     return isDir(this.entryAt(path))
   }
 
+  /**
+   * The path's row, in the same struct a mount answers stat with.
+   *
+   * The modes are the ones monty's own tree reports (0o644 for a file,
+   * 0o755 for a directory), since a scratch path has no backend to
+   * carry a chmod. A missing path raises, exactly as reading one does.
+   *
+   * Args:
+   *   path: the scratch path to stat.
+   */
+  stat(path: string): VFSStat {
+    const entry = this.entryAt(path)
+    if (entry === null) throw notFound(path)
+    if (isDir(entry)) return { size: 0, isDir: true, mtimeMs: this.born, mode: 0o40755 }
+    return {
+      size: toBytes(entry.content).length,
+      isDir: false,
+      mtimeMs: entry.mtimeMs,
+      mode: 0o100644,
+    }
+  }
+
   readText(path: string): string {
     return toText(this.fileAt(path).content)
   }
@@ -183,13 +215,14 @@ export class ScratchTree {
     const entry = this.entryAt(path)
     if (isFile(entry)) {
       entry.content = data
+      entry.mtimeMs = Date.now()
       return
     }
     if (isDir(entry)) throw isADirectory(path)
     const parent = this.parentOf(path)
     if (!isDir(parent)) throw notFound(path)
     const all = parts(path)
-    parent.set(fromEnd(all, 1), { content: data })
+    parent.set(fromEnd(all, 1), { content: data, mtimeMs: Date.now() })
   }
 
   /**
@@ -204,6 +237,7 @@ export class ScratchTree {
         typeof data === 'string'
           ? toText(entry.content) + data
           : concatBytes(toBytes(entry.content), data)
+      entry.mtimeMs = Date.now()
       return
     }
     if (isDir(entry)) throw isADirectory(path)

@@ -18,12 +18,20 @@ concurrency:
 # extra) before any test ran.
 env:
   UV_HTTP_TIMEOUT: 120
+  # Whole-repo checks a shorter file list cannot speed up, each already
+  # run by a Test workflow. Un-skipping integ-typecheck means restoring
+  # `pnpm run prisma:clients` with it, or every integ fake is TS2307.
+  SKIP: no-commit-to-branch,py-mypy,integ-typecheck,ts-knip
 
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
+      # `--from-ref` needs a merge base and both PR parents; the default
+      # depth-1 fetch of refs/pull/N/merge has neither.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -61,6 +69,12 @@ jobs:
         working-directory: python
         run: uv sync --all-extras --no-extra camel
 
+      # Straight after the venv it needs, and before the two slowest
+      # steps in the job: a sub-second check should not cost a pnpm
+      # install and a full build to report.
+      - name: SKIP hook ids
+        run: ./python/.venv/bin/python scripts/check_skip_hooks.py
+
       - name: Install TypeScript dependencies
         working-directory: typescript
         run: pnpm install --frozen-lockfile
@@ -69,15 +83,63 @@ jobs:
         working-directory: typescript
         run: pnpm -r build
 
-      # The integ mock servers import their generated Prisma clients, which are
-      # gitignored, so the integ-typecheck hook cannot resolve a single one of
-      # them until this has run.
-      - name: Generate integ Prisma clients
-        working-directory: integ
-        run: pnpm run prisma:clients
-
+      # Plain `git`, not a paths-filter action: an action reads the API
+      # and can disagree with the three-dot diff pre-commit itself uses,
+      # and asking for `pull-requests: read` at job level would replace
+      # the workflow's `contents: read` rather than add to it.
       - name: Run pre-commit
-        run: SKIP=no-commit-to-branch ./python/.venv/bin/pre-commit run --all-files
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          scope=(--all-files)
+          if [ "$EVENT" = "pull_request" ]; then
+            # Version files too, not just config: a `rev:` pins every
+            # python tool, but the typescript hooks are `language: system`
+            # and take theirs from the lockfile, so a bot's prettier bump
+            # would reflow the tree behind a one-file diff. uv.lock counts
+            # because check_test_pathspec.py shells out to the venv's mypy.
+            # knip's inputs are absent because this job skips ts-knip.
+            wide='^(\.pre-commit-config\.yaml|\.github/workflows/pre-commit\.yml|ruff\.toml|\.isort\.cfg|python/(pyproject\.toml|uv\.lock)|typescript/(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.base\.json|packages/[^/]+/tsconfig(\.build)?\.json|eslint\.config\.js|\.prettierrc\.json|\.prettierignore|scripts/precommit-run\.sh)|integ/(package\.json|eslint\.config\.js|\.prettierrc\.json|\.prettierignore|scripts/precommit-run\.sh))$'
+            # Captured, not piped: `grep -q` exits on its first match, so
+            # under `pipefail` git's SIGPIPE would become the status and
+            # invert this test in the case where a config DID change.
+            if ! changed="$(git diff --name-only "$BASE...$HEAD_SHA")"; then
+              echo "::warning::cannot resolve $BASE...$HEAD_SHA; linting everything"
+            else
+              # grep exits 2 on a malformed pattern and `if ! grep` cannot
+              # tell that from "no match", so a typo above would silently
+              # narrow every PR. Only a clean 1 may narrow.
+              rc=0
+              grep -qE "$wide" <<<"$changed" || rc=$?
+              case "$rc" in
+                0) ;;
+                1)
+                  # --show-diff-on-failure only here: on the --all-files
+                  # branch the dump is a whole-tree diff of a reflowed repo.
+                  scope=(--show-diff-on-failure --from-ref "$BASE" --to-ref "$HEAD_SHA")
+                  ;;
+                *)
+                  # A repo bug, not an environment hiccup like the range
+                  # above: fail the PR that broke it rather than warn.
+                  echo "::error::the scope pattern is malformed (grep rc=$rc)"
+                  exit 1
+                  ;;
+              esac
+            fi
+          fi
+          echo "pre-commit scope: ${scope[*]}"
+          # pre-commit prints its own hint only under --all-files, which
+          # is not the command that reproduces a diff-scoped run.
+          ./python/.venv/bin/pre-commit run "${scope[@]}" || {
+            rc=$?
+            echo "reproduce locally: pre-commit run ${scope[*]}"
+            # pre-commit's own code, not a flattened 1: it exits 3 for a
+            # config it could not use, which is not a hook failure.
+            exit "$rc"
+          }
 
       - name: Spec drift
         run: |
@@ -117,6 +179,17 @@ jobs:
       - name: Case target coverage
         run: ./python/.venv/bin/python integ/runners/tools/check_case_targets.py --strict
 
+      # Two paths that differ only by case or Unicode form are ONE file on
+      # macOS and Windows: a checkout writes whichever lands last, the tree
+      # reads as dirty, and one file's bytes stand in for the other's. CI
+      # runs on Linux, where both exist, so nothing else here can see it.
+      # --selftest first, for the same reason the rename gate has one: the
+      # fold is what the gate trusts.
+      - name: Path collisions
+        run: |
+          ./python/.venv/bin/python scripts/check_path_collisions.py --selftest
+          ./python/.venv/bin/python scripts/check_path_collisions.py
+
       # knip cannot police core's barrel: its project root is typescript/, so
       # the barrel's real consumers (examples, docs, integ) sit outside its
       # graph, and core's `./*` exports map makes every module an entry.
@@ -137,8 +210,31 @@ jobs:
           ./python/.venv/bin/python scripts/check_normalize_renames.py --selftest
           ./python/.venv/bin/python scripts/check_normalize_renames.py
 
+      # The mirage CLI spawns once per shell line in the integ batteries and
+      # once per agent command in production, so a single import added to a
+      # leaf module is a regression every one of those pays. Walks the built
+      # chunk graph, so it sees a heavy package reached three chunks deep.
+      # --selftest first, for the reason the rename gate has one.
+      - name: CLI cold start
+        run: |
+          ./python/.venv/bin/python scripts/check_cli_cold_start.py --selftest
+          ./python/.venv/bin/python scripts/check_cli_cold_start.py
+
       # The docs build parses frontmatter as YAML and stops on the first page
       # it cannot read, so an unquoted description holding ": " fails the
       # deploy with no local signal at all.
       - name: Docs frontmatter
         run: ./python/.venv/bin/python scripts/check_docs_frontmatter.py
+
+      # The Test (TypeScript) leg table is split across two files -- the
+      # `test:leg:*` scripts carry the package selections, the workflow matrix
+      # decides which of them run -- so either half can drift into silence: a
+      # new package no leg claims, or a leg the matrix stopped invoking. pnpm
+      # reports neither, because a filter that matches nothing and a script
+      # nobody calls both exit 0. --selftest first, for the same reason the
+      # rename gate runs one: a gate that sees nothing looks identical to a
+      # clean tree.
+      - name: CI test legs
+        run: |
+          ./python/.venv/bin/python scripts/ci_test_legs/check.py --selftest
+          ./python/.venv/bin/python scripts/ci_test_legs/check.py

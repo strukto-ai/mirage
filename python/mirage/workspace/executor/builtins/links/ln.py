@@ -24,6 +24,7 @@ from mirage.commands.spec.parser import parse_to_kwargs
 from mirage.commands.spec.types import FlagValue, FlagView, ParsedArgs
 from mirage.commands.spec.usage import (ambiguous_option_error,
                                         missing_value_error,
+                                        unexpected_value_error,
                                         unknown_option_error, usage_hint)
 from mirage.context import path_allowed
 from mirage.io.stream import materialize
@@ -134,7 +135,10 @@ def option_refusal(parsed: ParsedArgs) -> tuple[str, int] | None:
         msg, code = ambiguous_option_error("ln", token, candidates)
         return msg.decode(), code
     if parsed.invalid_options:
-        msg, code = unknown_option_error("ln", parsed.invalid_options[0])
+        if parsed.option_error_kinds[:1] == ["unexpected_value"]:
+            msg, code = unexpected_value_error("ln", parsed.invalid_options[0])
+        else:
+            msg, code = unknown_option_error("ln", parsed.invalid_options[0])
         return msg.decode(), code
     if parsed.ambiguous_options:
         token, candidates = parsed.ambiguous_options[0]

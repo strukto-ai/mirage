@@ -17,18 +17,20 @@ import { FlagView } from '../../spec/types.ts'
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
-import { usageHint } from '../../spec/usage.ts'
+import { argmatchError } from '../../spec/usage.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import {
   countNewlines,
   normalizeCounts,
   numberFlagError,
   parseCounts,
+  parseSeconds,
   tailBytes,
   type TailCounts,
 } from '../tail_counts.ts'
 import { fsErrorLine, fsStrerror, isEisdir, isFsError } from '../../../utils/errors.ts'
 import { readStdinAsync } from '../utils/stream.ts'
+import { quoteText } from '../../quote.ts'
 
 const ENC = new TextEncoder()
 
@@ -37,6 +39,8 @@ type Stat = (p: PathSpec) => Promise<FileStat>
 type ReadRange = (p: PathSpec, offset: number, size: number) => Promise<Uint8Array>
 
 const DEFAULT_SLEEP_INTERVAL = 1
+// GNU's `follow_mode_string`, in declaration order.
+const FOLLOW_ARGS = ['descriptor', 'name'] as const
 
 /** -f/--follow[=HOW], -F, --retry and -s as tail reads them. */
 export interface FollowFlags {
@@ -52,12 +56,8 @@ export interface FollowFlags {
 // while -F's --retry half stays on either way.
 export function followFlags(fl: FlagView): FollowFlags | string {
   const raw: unknown = fl.raw('follow')
-  if (typeof raw === 'string' && raw !== 'name' && raw !== 'descriptor') {
-    return (
-      `tail: invalid argument '${raw}' for '--follow'\n` +
-      "Valid arguments are:\n  - 'descriptor'\n  - 'name'\n" +
-      `${usageHint('tail')}\n`
-    )
+  if (typeof raw === 'string' && !(FOLLOW_ARGS as readonly string[]).includes(raw)) {
+    return argmatchError('tail', '--follow', raw, FOLLOW_ARGS).message + '\n'
   }
   const typed = fl
     .typedOrder('follow', 'F')
@@ -70,10 +70,14 @@ export function followFlags(fl: FlagView): FollowFlags | string {
   const rawSeconds = fl.asStr('sleep_interval')
   let interval = DEFAULT_SLEEP_INTERVAL
   if (rawSeconds !== undefined) {
-    interval = rawSeconds.trim() === '' ? Number.NaN : Number(rawSeconds)
-    if (!Number.isFinite(interval) || interval < 0) {
-      return `tail: invalid number of seconds: '${rawSeconds}'\n`
+    const seconds = parseSeconds(rawSeconds)
+    // GNU's own two-part test, `xstrtod(...) && 0 <= s`: the grammar
+    // first, then the range. `0 <= nan` is false, so NaN is refused, while
+    // `inf` passes both and is ACCEPTED (measured, coreutils 9.4).
+    if (seconds === null || !(0 <= seconds)) {
+      return `tail: invalid number of seconds: '${quoteText(rawSeconds)}'\n`
     }
+    interval = seconds
   }
   return { follow, byName, retry, interval }
 }
@@ -97,6 +101,24 @@ function aborted(signal: AbortSignal | undefined): boolean {
 async function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> {
   if (aborted(signal)) return
   await new Promise<void>((resolve) => {
+    // An infinite interval waits on the abort signal alone, never on a
+    // timer. `setTimeout` holds a 32-bit signed delay, so Node warns
+    // (`TimeoutOverflowWarning`) and clamps `Infinity` to 1ms, which
+    // would poll the backend continuously where python's
+    // `asyncio.sleep(inf)` waits. GNU accepts `-s inf` (measured,
+    // coreutils 9.4), so the acceptance is right and only the wait was
+    // wrong. With no signal there is nothing to wake on, which is the
+    // indefinite wait python performs.
+    if (!Number.isFinite(seconds)) {
+      signal?.addEventListener(
+        'abort',
+        () => {
+          resolve()
+        },
+        { once: true },
+      )
+      return
+    }
     const onAbort = (): void => {
       clearTimeout(timer)
       resolve()

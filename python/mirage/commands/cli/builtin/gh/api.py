@@ -295,8 +295,7 @@ async def api(
         if isinstance(pages[0], str):
             return text_out(pages[0])
         return json_out(pages[0])
-    rendered = "".join(
-        "" if page is None else
-        page if isinstance(page, str) else f"{json.dumps(page, indent=2)}\n"
-        for page in pages)
+    rendered = "".join("" if page is None else page if isinstance(
+        page, str) else f"{json.dumps(page, indent=2, ensure_ascii=False)}\n"
+                       for page in pages)
     return text_out(rendered)

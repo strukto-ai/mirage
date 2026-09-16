@@ -1,8 +1,9 @@
 from mirage.commands.spec.usage import (  # yapf: disable
-    ambiguous_option_error, extra_operand_error, invalid_argument_error,
+    ambiguous_option_error, argmatch_error, argmatch_line,
+    argmatch_valid_block, extra_operand_error, invalid_argument_error,
     invalid_float_error, invalid_int_error, missing_required_error,
     missing_value_error, old_option_error, read_fail_exit, read_fail_exit_line,
-    unknown_option_error, usage_exit_code)
+    unexpected_value_error, unknown_option_error, usage_exit_code)
 
 
 def test_exit_codes_match_gnu():
@@ -205,3 +206,151 @@ def test_curl_bad_number_uses_curl_wording():
     assert invalid_float_error("curl", "--max-time", "abc") == (
         ("curl: option --max-time: expected a proper numerical parameter\n" +
          hint).encode(), 2)
+
+
+# GNU getopt_long refuses a value on a BOOLEAN long option with its own
+# message, which is not the unrecognized-option one: it names the option
+# and drops the value, where the unrecognized message quotes the whole
+# token. Measured on GNU grep 3.11 and coreutils 9.4 (new ground-truth
+# section W): `grep --byte-offset=2`, `nl --help=2`, `cut --complement=2`,
+# `sed --debug=2`. The per-tool usage block GNU prints between the message
+# and the hint is omitted here, as it is for every other refusal in this
+# module.
+def test_boolean_long_with_a_value_names_the_option_without_it():
+    msg, code = unexpected_value_error("grep", "--byte-offset=2")
+    assert msg == (b"grep: option '--byte-offset' doesn't allow an argument\n"
+                   b"Try 'grep --help' for more information.\n")
+    assert code == 2
+
+
+def test_boolean_long_with_a_value_carries_the_commands_exit_code():
+    """coreutils exit 1 where grep and sort exit 2."""
+    for name, expected in (("nl", 1), ("cut", 1), ("wc", 1), ("sort", 2)):
+        msg, code = unexpected_value_error(name, "--bogus-bool=2")
+        assert msg.startswith(
+            f"{name}: option '--bogus-bool' doesn't allow an argument\n".
+            encode())
+        assert code == expected
+
+
+def test_boolean_long_with_an_empty_value_still_refuses():
+    """`grep --byte-offset=` is the same refusal: the `=` is enough."""
+    msg, _ = unexpected_value_error("grep", "--byte-offset=")
+    assert msg.startswith(
+        b"grep: option '--byte-offset' doesn't allow an argument\n")
+
+
+def test_boolean_long_with_two_equals_names_only_the_option():
+    """Measured: `grep --byte-offset=2=3` still names `--byte-offset`."""
+    msg, _ = unexpected_value_error("grep", "--byte-offset=2=3")
+    assert msg.startswith(
+        b"grep: option '--byte-offset' doesn't allow an argument\n")
+
+
+def test_a_program_that_is_not_getopt_long_keeps_its_unknown_wording():
+    """curl, python, jq and find answer this as an unknown option.
+
+    Each measured: `curl --silent=2` is `option --silent=2: is unknown`,
+    `python3 --version=2` is `unknown option --version=2`, and
+    `jq --tab=2` is jq's own unknown-option line. Routing them through
+    the getopt_long wording would put GNU's words in a program that does
+    not use GNU's parser.
+    """
+    msg, code = unexpected_value_error("curl", "--silent=2")
+    assert msg.startswith(b"curl: option --silent=2: is unknown\n")
+    assert code == 2
+    msg, _ = unexpected_value_error("jq", "--tab=2")
+    assert msg.startswith(b"jq: unrecognized option '--tab=2'\n")
+    msg, _ = unexpected_value_error("python3", "--version=2")
+    assert msg.startswith(b"unknown option --version=2\n")
+    msg, _ = unexpected_value_error("find", "--help=2")
+    assert msg == b"find: unknown predicate `--help=2'\n"
+
+
+def test_unknown_option_leaves_the_token_unescaped():
+    """getopt prints `argv[optind]` with a plain `%s`, never quote().
+
+    Every coreutils clause that names a *value* runs it through gnulib's
+    `quote()` (an `é` comes back as `\\303\\251`), but the
+    unrecognized-option clause is getopt's own and carries the token's
+    bytes as typed. Measured under `LC_ALL=C` with a raw `bytes` argv on
+    coreutils 9.4: `cut --zzz=é` reports `'--zzz=é'` with the two UTF-8
+    bytes intact, and `wc --zzz=$'\\001'` carries the raw 0x01. Same for
+    nl, expand, shuf, tail, split, du, sort, uniq, ls and cp. This
+    asymmetry is deliberate; do not route this clause through quote().
+    """
+    msg, _ = unknown_option_error("cut", "--zzz=é")
+    assert msg.startswith("cut: unrecognized option '--zzz=é'\n".encode())
+    msg, _ = unknown_option_error("wc", "--zzz=\x01")
+    assert msg.startswith(b"wc: unrecognized option '--zzz=\x01'\n")
+
+
+# Every row below is a measured GNU coreutils 9.4 answer under
+# `LC_ALL=C LANG=C TZ=UTC`, with a raw `bytes` argv so a non-UTF-8
+# value is reachable (ground truth QS.1 and QS.3a). Mirrored in
+# usage.test.ts.
+def test_invalid_argument_escapes_the_word_through_quote():
+    r"""`tee --output-error=xe-acute` is
+    `tee: invalid argument 'xÃ©' for '--output-error'`, exit 1.
+
+    Two octal escapes, not one character: gnulib's `quote()` counts
+    bytes and nothing above 0x7f is printable in the C locale.
+    """
+    stderr, code = invalid_argument_error(
+        "tee", "--output-error", "xé",
+        ("warn", "warn-nopipe", "exit", "exit-nopipe"))
+    assert stderr.startswith(
+        rb"tee: invalid argument 'x\303\251' for '--output-error'"
+        b"\n")
+    assert code == 1
+
+
+def test_an_empty_argmatch_value_is_ambiguous_not_invalid():
+    """GNU: `tee --output-error=` is `ambiguous argument ''`, exit 1.
+
+    gnulib's argmatch matches on a prefix and `""` is a prefix of every
+    candidate, so it comes back ambiguous. Measured the same way at
+    `tail --follow=`, `sort --check=`, `wc --total=`,
+    `uniq --all-repeated=`, `uniq --group=`, `ls --format=`,
+    `ls -l --time-style=` and `cp --update=`.
+    """
+    stderr, code = invalid_argument_error(
+        "tee", "--output-error", "",
+        ("warn", "warn-nopipe", "exit", "exit-nopipe"))
+    assert stderr.startswith(
+        b"tee: ambiguous argument '' for '--output-error'\n")
+    assert code == 1
+
+
+def test_argmatch_line_words_both_kinds_and_quotes_the_slot():
+    assert argmatch_line("ls", "time style",
+                         "x") == ("ls: invalid argument 'x' for 'time style'")
+    assert argmatch_line("ls", "time style",
+                         "") == ("ls: ambiguous argument '' for 'time style'")
+
+
+def test_argmatch_valid_block_joins_aliases_of_one_value():
+    """GNU `sort --check=x` prints `  - 'quiet', 'silent'` on ONE line.
+
+    `argmatch_valid` starts a new `  - ` row only when the VALUE
+    changes, so two spellings of one value share a row.
+    """
+    assert argmatch_valid_block(
+        (("quiet", "silent"),
+         ("diagnose-first", ))) == ("Valid arguments are:\n"
+                                    "  - 'quiet', 'silent'\n"
+                                    "  - 'diagnose-first'")
+
+
+def test_argmatch_error_carries_the_block_and_the_given_code():
+    err = argmatch_error("sort", "--check", "x",
+                         (("quiet", "silent"), ("diagnose-first", )), 1)
+    assert str(err) == ("sort: invalid argument 'x' for '--check'\n"
+                        "Valid arguments are:\n"
+                        "  - 'quiet', 'silent'\n"
+                        "  - 'diagnose-first'\n"
+                        "Try 'sort --help' for more information.")
+    # sort's other usage errors are 2; gnulib's `argmatch_die` always
+    # calls `usage (EXIT_FAILURE)`, so this one is 1.
+    assert err.exit_code == 1
+    assert usage_exit_code("sort") == 2

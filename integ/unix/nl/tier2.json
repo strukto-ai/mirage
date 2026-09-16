@@ -13,7 +13,7 @@
       "seq": 910021,
       "targets": ["ram", "disk"],
       "command": "printf '!:!:\na\n\n\n!:\nb\n' | nl --section-delimiter=! --body-numbering=a --footer-numbering=a --join-blank-lines=2 --no-renumber --number-width=1 --number-separator=:",
-      "expect": { "exit": 0, "stdout": "\n1:a\n :\n2:\n\n3:b\n", "stderr": "" },
+      "expect": { "exit": 0, "stdout": "\n1:a\n  \n2:\n\n3:b\n", "stderr": "" },
       "flags": ["section-delimiter", "body-numbering", "footer-numbering", "join-blank-lines", "no-renumber", "number-width", "number-separator"]
     }
   ]

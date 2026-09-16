@@ -34,8 +34,10 @@ import {
   overwriteGate,
   parseFlags,
   targetDirError,
+  updateMode,
   type CpFlags,
 } from './cp.ts'
+import { UsageError } from '../../errors.ts'
 import { FlagView, type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 
@@ -919,5 +921,79 @@ describe('cp probes propagate non-missing stat failures', () => {
     expect(await targetDirError('cp', missing, spec('/d'))).toBe(
       "cp: target directory '/d': No such file or directory",
     )
+  })
+})
+
+// Both of cp's argument clauses name the refused word through gnulib's
+// quote(), so a byte outside 0x20-0x7e comes back escaped rather than
+// interpolated raw. Every row measured against GNU coreutils 9.4 under
+// `LC_ALL=C` with a raw `bytes` argv (`cp --update=<w>`,
+// `cp --backup=<w>`). Mirrors test_cp.py.
+describe('cp quotes the word its argument clauses name', () => {
+  const words: [string, string][] = [
+    ['xé', 'x\\303\\251'],
+    ['x\r', 'x\\r'],
+    ['x\x01', 'x\\001'],
+    ['x\x7f', 'x\\177'],
+    ["x'", "x\\'"],
+    ['x\\', 'x\\\\'],
+  ]
+
+  it.each(words)('escapes %j in the --update clause', (value, escaped) => {
+    let message = ''
+    try {
+      parseFlags(view({ update: value }))
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    expect(message.startsWith(`cp: invalid argument '${escaped}' for '--update'\n`)).toBe(true)
+  })
+
+  it.each(words)('escapes %j in the backup-type clause', (value, escaped) => {
+    let message = ''
+    try {
+      parseFlags(view({ backup: value }))
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    expect(message.startsWith(`cp: invalid argument '${escaped}' for 'backup type'\n`)).toBe(true)
+  })
+})
+
+// GNU 9.4's `--update` candidates are `all none older`; `none-fail` arrived
+// in 9.5. mirage still ACCEPTS `none-fail` (cp implements its `not
+// replacing` refusal and mv's --exchange conflict names it), so the
+// accepted set is 9.5's while the list printed back is 9.4's. Mirrors
+// test_cp.py.
+describe('cp --update lists GNU 9.4 candidates', () => {
+  it('lists all/none/older and still accepts none-fail', () => {
+    let caught: unknown = null
+    try {
+      updateMode('cp', new FlagView({ update: 'x' }, specOf('cp')))
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(UsageError)
+    expect((caught as UsageError).message).toBe(
+      "cp: invalid argument 'x' for '--update'\n" +
+        "Valid arguments are:\n  - 'all'\n  - 'none'\n  - 'older'\n" +
+        "Try 'cp --help' for more information.",
+    )
+    expect((caught as UsageError).exitCode).toBe(1)
+    expect(updateMode('cp', new FlagView({ update: 'none-fail' }, specOf('cp')))).toBe('none-fail')
+  })
+
+  it('words an empty --update as ambiguous', () => {
+    let caught: unknown = null
+    try {
+      updateMode('cp', new FlagView({ update: '' }, specOf('cp')))
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(UsageError)
+    expect(
+      (caught as UsageError).message.startsWith("cp: ambiguous argument '' for '--update'\n"),
+    ).toBe(true)
+    expect((caught as UsageError).exitCode).toBe(1)
   })
 })

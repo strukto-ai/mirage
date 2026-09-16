@@ -63,6 +63,37 @@ describe('ScratchTree reads and writes', () => {
   })
 })
 
+describe('ScratchTree stat', () => {
+  it('reports a file at its byte length, with the mode monty gives a tree file', () => {
+    const tree = new ScratchTree()
+    const before = Date.now()
+    tree.write('/a.txt', 'héllo')
+    const st = tree.stat('/a.txt')
+    expect(st).toMatchObject({ size: 6, isDir: false, mode: 0o100644 })
+    expect(st.mtimeMs).toBeGreaterThanOrEqual(before)
+  })
+
+  it('reports a directory with monty tree defaults', () => {
+    const tree = new ScratchTree()
+    tree.mkdir('/d', false, false)
+    expect(tree.stat('/d')).toMatchObject({ isDir: true, mode: 0o40755 })
+  })
+
+  it('spells a missing path the way every other read does', () => {
+    expect(() => new ScratchTree().stat('/nope')).toThrow(
+      "[Errno 2] No such file or directory: '/nope'",
+    )
+  })
+
+  it('carries the stamp through a rename, since it rides on the node', () => {
+    const tree = new ScratchTree()
+    tree.write('/a.txt', 'x')
+    const stamp = tree.stat('/a.txt').mtimeMs
+    tree.rename('/a.txt', '/b.txt')
+    expect(tree.stat('/b.txt').mtimeMs).toBe(stamp)
+  })
+})
+
 describe('ScratchTree open establishing', () => {
   it("'r' verifies, 'w' truncates or creates, 'a' creates what is missing", () => {
     const tree = new ScratchTree()

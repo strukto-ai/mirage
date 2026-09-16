@@ -4,6 +4,7 @@ from functools import partial
 
 from mirage.cache.read_through import (cache_aware_bound_bytes,
                                        cache_aware_bound_stream)
+from mirage.commands.builtin.grep_offsets import decode_line
 from mirage.commands.builtin.grep_pattern import (  # yapf: disable
     compile_pattern, resolve_pattern)
 from mirage.commands.builtin.grep_scan import (exit_code_for,
@@ -23,7 +24,6 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
-from mirage.io.stream import exit_on_empty
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, WALK_ERRORS, fs_strerror
@@ -37,6 +37,7 @@ class RgFlags:
     ignore_case: bool
     invert: bool
     line_numbers: bool
+    byte_offsets: bool
     count_only: bool
     files_only: bool
     whole_word: bool
@@ -72,6 +73,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> RgFlags:
         ignore_case=fl.as_bool("i"),
         invert=fl.as_bool("v"),
         line_numbers=fl.as_bool("n"),
+        byte_offsets=fl.as_bool("byte_offset"),
         count_only=fl.as_bool("c"),
         files_only=fl.as_bool("args_l"),
         whole_word=fl.as_bool("w"),
@@ -169,6 +171,11 @@ async def rg(
         if needs_full:
             warnings_f: list[str] = []
             results: list[str] = []
+            # Status comes from selection, not from the printed lines:
+            # under -o a zero-width match selects the line and prints
+            # nothing, so an empty `results` is not "nothing matched".
+            # `grep -r` reads its status the same way.
+            full_io = IOResult(exit_code=1)
             for p in paths:
                 hits_full = await rg_full(
                     rd,
@@ -193,10 +200,13 @@ async def rg(
                     warnings=warnings_f,
                     file_prefix=p.raw_path if label else None,
                     no_filename=f.no_filename,
+                    byte_offsets=f.byte_offsets,
+                    io=full_io,
                 )
                 results.extend(respell_raw(hits_full, p.virtual, p.raw_path))
             stderr = format_optional_records(warnings_f)
-            code = exit_code_for(bool(results), bool(warnings_f), False)
+            code = exit_code_for(full_io.exit_code == 0, bool(warnings_f),
+                                 False)
             if not results:
                 return b"", IOResult(exit_code=code, stderr=stderr)
             return format_records(results), IOResult(exit_code=code,
@@ -208,6 +218,12 @@ async def rg(
         if len(paths) > 1 or f.with_filename:
             all_results: list[str] = []
             warnings: list[str] = []
+            # Status comes from selection, not from the printed lines:
+            # with -o a zero-width match selects the line and prints
+            # nothing, so `all_results` is no longer a proxy for
+            # "nothing matched". Same per-file IOResult that
+            # `grep_generic` reads selection off.
+            matched = False
             for p in paths:
                 try:
                     raw = await rb(p.virtual)
@@ -216,10 +232,19 @@ async def rg(
                     # searching the rest.
                     warnings.append(f"rg: {p.raw_path}: {fs_strerror(exc)}")
                     continue
-                data = split_lines(raw.decode(errors="replace"))
+                # `decode_line`, not a replacing decode: `grep_lines`
+                # counts its -b offsets back out of this text, and one
+                # invalid byte read as U+FFFD is three bytes wide there,
+                # so `rg -b a f1 f2` over `\xff\na\n` answered 4 where
+                # GNU and the single-operand path (which counts raw
+                # bytes in `grep_stream`) both say 2.
+                data = split_lines(decode_line(raw))
+                file_io = IOResult(exit_code=1)
                 hits = grep_lines(p.raw_path, data, pat, f.invert,
                                   f.line_numbers, f.count_only, f.files_only,
-                                  f.only_matching, f.max_count)
+                                  f.only_matching, f.max_count, file_io,
+                                  f.byte_offsets)
+                matched = matched or file_io.exit_code == 0
                 if f.count_only:
                     if grep_count_has_matches(hits):
                         all_results.append(
@@ -231,7 +256,7 @@ async def rg(
                 else:
                     all_results.extend(hits)
             stderr = format_optional_records(warnings)
-            code = exit_code_for(bool(all_results), bool(warnings), False)
+            code = exit_code_for(matched, bool(warnings), False)
             if not all_results:
                 return b"", IOResult(exit_code=code, stderr=stderr)
             return format_records(all_results), IOResult(exit_code=code,
@@ -247,6 +272,10 @@ async def rg(
         else:
             raw_bytes = await rb(paths[0].virtual)
             source = _wrap_bytes(raw_bytes)
+        # Status comes from selection, not from an empty stream: with -o
+        # a zero-width match selects the line and prints nothing, so
+        # emptiness is no longer a proxy for "nothing matched".
+        io = IOResult(exit_code=1)
         stream = grep_stream(
             source,
             pat,
@@ -255,16 +284,18 @@ async def rg(
             only_matching=f.only_matching,
             max_count=f.max_count,
             count_only=f.count_only,
+            io=io,
+            byte_offsets=f.byte_offsets,
         )
         if f.count_only:
             stream = nonzero_count_stream(stream)
-        io = IOResult()
-        return exit_on_empty(stream, io), io
+        return stream, io
 
     source = resolve_source(stdin,
                             "rg: usage: rg [flags] pattern [path]",
                             error_cls=UsageError)
     pat = compile_pattern(pattern, f.ignore_case, f.fixed_string, f.whole_word)
+    io = IOResult(exit_code=1)
     stream = grep_stream(
         source,
         pat,
@@ -273,11 +304,12 @@ async def rg(
         only_matching=f.only_matching,
         max_count=f.max_count,
         count_only=f.count_only,
+        io=io,
+        byte_offsets=f.byte_offsets,
     )
     if f.count_only:
         stream = nonzero_count_stream(stream)
-    io = IOResult()
-    return exit_on_empty(stream, io), io
+    return stream, io
 
 
 async def _wrap_bytes(data: bytes) -> AsyncIterator[bytes]:

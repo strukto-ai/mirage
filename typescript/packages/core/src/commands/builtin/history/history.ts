@@ -19,6 +19,7 @@ import { type PathSpec } from '../../../types.ts'
 import { command } from '../../config.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/types.ts'
 import { ResourceName } from '../../../types.ts'
 
 const ENC = new TextEncoder()
@@ -59,15 +60,11 @@ async function historyFn(
     throw new Error("history requires the caller's session id")
   }
   const session = opts.sessionId
-  const flags = opts.flags
-  const c = flags.c === true
-  const s = flags.s === true
-  const p = flags.p === true
-  const a = flags.a === true
-  const r = flags.r === true
-  const w = flags.w === true
-  const n = flags.n === true
-  const d = typeof flags.d === 'string' ? flags.d : undefined
+  const fl = new FlagView(opts.flags, specOf('history'))
+  const c = fl.asBool('c')
+  const s = fl.asBool('s')
+  const p = fl.asBool('p')
+  const d = fl.asStr('d')
 
   if (c) await observer.logClear(session)
   if (d !== undefined) {
@@ -85,7 +82,15 @@ async function historyFn(
     const out = texts.length > 0 ? texts.join('\n') + '\n' : ''
     return [ENC.encode(out), new IOResult()]
   }
-  if (c || d !== undefined || s || a || r || w || n) {
+  if (
+    c ||
+    d !== undefined ||
+    s ||
+    fl.asBool('a') ||
+    fl.asBool('r') ||
+    fl.asBool('w') ||
+    fl.asBool('n')
+  ) {
     return [null, new IOResult()]
   }
   if (texts.length > 1) {

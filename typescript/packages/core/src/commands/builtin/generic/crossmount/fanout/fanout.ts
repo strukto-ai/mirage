@@ -20,7 +20,8 @@ import { duTotal } from './du.ts'
 import { combineWc } from './wc.ts'
 import { Cmd, type CrossResult, type OperandRun, type RunSingle } from '../types.ts'
 import { mergeOperandIos, runOperands } from '../utils.ts'
-import type { FlagValue } from '../../../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../../../spec/types.ts'
+import { specOf } from '../../../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 
@@ -73,17 +74,20 @@ export async function runFanout(
   if (cmdName === Cmd.TEE) {
     stdinBytes = stdin !== null ? await materialize(stdin) : new Uint8Array()
   }
-  if (cmdName === Cmd.GREP && flags.h !== true) {
+  if (cmdName === Cmd.GREP && !new FlagView(flags, specOf(Cmd.GREP)).asBool('h')) {
     flags.H = true
   }
-  if (cmdName === Cmd.RG && flags.args_I !== true) {
+  if (cmdName === Cmd.RG && !new FlagView(flags, specOf(Cmd.RG)).asBool('args_I')) {
     flags.H = true
   }
   // head pairs -q/--quiet and -v/--verbose (canonical dests), tail declares
   // them short-only.
   const quietKey = cmdName === Cmd.HEAD ? 'quiet' : 'q'
   const verboseKey = cmdName === Cmd.HEAD ? 'verbose' : 'v'
-  if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags[quietKey] !== true) {
+  if (
+    (cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) &&
+    !new FlagView(flags, specOf(cmdName)).asBool(quietKey)
+  ) {
     flags[verboseKey] = true
   }
   // Both re-totalling combines below need raw per-file rows from every run:
@@ -98,15 +102,15 @@ export async function runFanout(
     }
     flags.total = 'never'
   }
-  const duC = cmdName === Cmd.DU && flagKwargs.c === true
-  const duHuman = duC && flagKwargs.h === true
+  const duC = cmdName === Cmd.DU && new FlagView(flagKwargs, specOf(Cmd.DU)).asBool('c')
+  const duHuman = duC && new FlagView(flagKwargs, specOf(Cmd.DU)).asBool('h')
   if (duHuman) {
     flags.h = false
   }
 
   const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags, stdinBytes)
   const errored = results.map((r) => r.io.exitCode !== 0 && r.io.stderr !== null)
-  const quiet = cmdName === Cmd.GREP && flags.q === true
+  const quiet = cmdName === Cmd.GREP && new FlagView(flags, specOf(Cmd.GREP)).asBool('q')
   const exitCode = combinedExit(
     cmdName,
     results.map((r) => r.io.exitCode),
@@ -121,7 +125,10 @@ export async function runFanout(
     body = duTotal(results, duHuman)
   } else if (cmdName === Cmd.TEE) {
     body = stdinBytes ?? new Uint8Array()
-  } else if ((cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) && flags[verboseKey] === true) {
+  } else if (
+    (cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) &&
+    new FlagView(flags, specOf(cmdName)).asBool(verboseKey)
+  ) {
     // Blank line between per-operand blocks, like one native run separates
     // its own file blocks.
     body = joinRunsWithBlankLine(results)

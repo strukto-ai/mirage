@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -28,6 +28,13 @@ import { SPECS, specFlagNames } from './spec/index.ts'
 // tests/commands/test_flag_query_names.py.
 
 const QUERY_RE = /\.(?:asBool|asInt|asFloat|asStr|asList|raw)\(\s*'([^']+)'\s*\)/g
+
+// Python's twin walks `mirage.commands.__path__[0]`, the whole commands
+// tree. TypeScript splits commands across three packages, so all three
+// roots are scanned or the guarantee stops at the core package boundary
+// (issue #1089 item 8): `packages/node/src/commands` alone holds 40
+// non-test modules, including the email push-down's spec-bound queries.
+const PACKAGES = ['core', 'node', 'browser'] as const
 const SPEC_RE = /(?:specOf\(\s*'([^']+)'\s*\)|SPECS\[\s*'([^']+)'\s*\]|SPECS\.([A-Za-z_$][\w$]*))/g
 
 function* sourceFiles(dir: string): Generator<string> {
@@ -41,37 +48,57 @@ function* sourceFiles(dir: string): Generator<string> {
   }
 }
 
+function* commandRoots(): Generator<[string, string]> {
+  const packagesDir = join(import.meta.dirname, '..', '..', '..')
+  for (const pkg of PACKAGES) {
+    const root = join(packagesDir, pkg, 'src', 'commands')
+    if (!existsSync(root)) continue
+    yield [pkg, root]
+  }
+}
+
 describe('flag query names', () => {
   it('every literal FlagView query names a dest of a spec bound in its module', () => {
-    const root = join(import.meta.dirname, '.')
     const offenders: string[] = []
-    for (const file of sourceFiles(root)) {
-      const src = readFileSync(file, 'utf8')
-      const keys = new Set<string>()
-      for (const m of src.matchAll(SPEC_RE)) {
-        const key = m[1] ?? m[2] ?? m[3]
-        if (key !== undefined) keys.add(key)
-      }
-      if (keys.size === 0) continue
-      const allowed = new Set<string>()
-      for (const key of keys) {
-        const spec = SPECS[key]
-        if (spec !== undefined) {
-          for (const name of specFlagNames(spec)) allowed.add(name)
+    const scanned: string[] = []
+    for (const [pkg, root] of commandRoots()) {
+      scanned.push(pkg)
+      for (const file of sourceFiles(root)) {
+        const src = readFileSync(file, 'utf8')
+        const keys = new Set<string>()
+        for (const m of src.matchAll(SPEC_RE)) {
+          const key = m[1] ?? m[2] ?? m[3]
+          if (key !== undefined) keys.add(key)
         }
-      }
-      if (allowed.size === 0) continue
-      for (const m of src.matchAll(QUERY_RE)) {
-        const name = m[1]
-        if (name !== undefined && !allowed.has(name)) {
-          const line = String(src.slice(0, m.index).split('\n').length)
-          offenders.push(
-            `${file.slice(root.length + 1)}:${line}: ${m[0]} — not a dest of ` +
-              `[${[...keys].sort().join(', ')}]`,
-          )
+        // A module binding no spec has nothing to validate against: the
+        // view it queries was constructed by its caller, which is where
+        // the names are checked. Python's twin skips the same shape for
+        // the same reason, and the spec-less CLI-tier sites (over a
+        // hundred in each language) are a shared design gap, not drift.
+        if (keys.size === 0) continue
+        const allowed = new Set<string>()
+        for (const key of keys) {
+          const spec = SPECS[key]
+          if (spec !== undefined) {
+            for (const name of specFlagNames(spec)) allowed.add(name)
+          }
+        }
+        if (allowed.size === 0) continue
+        for (const m of src.matchAll(QUERY_RE)) {
+          const name = m[1]
+          if (name !== undefined && !allowed.has(name)) {
+            const line = String(src.slice(0, m.index).split('\n').length)
+            offenders.push(
+              `${pkg}/${file.slice(root.length + 1)}:${line}: ${m[0]} — not a dest of ` +
+                `[${[...keys].sort().join(', ')}]`,
+            )
+          }
         }
       }
     }
+    // A package that silently stopped being scanned is the defect this
+    // test had: it reported green because it never opened those files.
+    expect(scanned).toEqual([...PACKAGES])
     expect(
       offenders,
       'these FlagView queries name a flag no spec bound in the module declares ' +

@@ -177,7 +177,8 @@ describe('split flag values', () => {
     [{ lines: '1k' }, "split: invalid number of lines: '1k'"],
     [{ number: 'l/abc' }, "split: invalid number of chunks: 'abc'"],
     [{ number: '0' }, "split: invalid number of chunks: '0'"],
-    // A malformed head (signed kind letter, junk kind) quotes the whole spec.
+    // A malformed head quotes the whole remainder after one leading kind
+    // prefix, so an unprefixed spec names itself.
     [{ number: '+l/2' }, "split: invalid number of chunks: '+l/2'"],
     [{ number: 'x/3' }, "split: invalid number of chunks: 'x/3'"],
     [{ suffix_length: 'abc', lines: '1' }, "split: invalid suffix length: 'abc'"],
@@ -210,4 +211,133 @@ describe('split flag values', () => {
       expect(written).toEqual({})
     },
   )
+})
+
+// GNU strips ONE leading `l/` or `r/` and then cuts what is left at its
+// FIRST slash: a head it cannot parse names the whole remainder, everything
+// else names the tail. mirage used to name the whole spec whenever the head
+// was bad, which is right only when no kind prefix was typed. Every row
+// measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw `bytes`
+// argv. Mirrors test_split.py.
+const CHUNK_SPECS: [string, string][] = [
+  ['xé', 'x\\303\\251'],
+  ['l/xé', 'x\\303\\251'],
+  ['2/xé', 'x\\303\\251'],
+  ['l/1/xé', 'x\\303\\251'],
+  ['l/2/xé', 'x\\303\\251'],
+  ['+l/2', '+l/2'],
+  ['x/3', 'x/3'],
+  ['l/xé/4', 'x\\303\\251/4'],
+  ['r/xé/4', 'x\\303\\251/4'],
+  ['l/2/xé/4', 'x\\303\\251/4'],
+  ['l/xé/yé', 'x\\303\\251/y\\303\\251'],
+  ['xé/2', 'x\\303\\251/2'],
+  ['l/2/3/4', '3/4'],
+  ['1/2/3/4', '2/3/4'],
+  ['l//4', '/4'],
+  ['r/l/4', 'l/4'],
+  ['2/l/4', 'l/4'],
+  ['/', '/'],
+  ['l', 'l'],
+  ['r', 'r'],
+  ['l/', ''],
+  ['', ''],
+  ['l/2/4/', '4/'],
+]
+
+describe('split -n names the component GNU names', () => {
+  it.each(CHUNK_SPECS)('names %j as %j', async (value, named) => {
+    await expect(runSplit({ number: value })).rejects.toThrow(
+      new UsageError(`split: invalid number of chunks: '${named}'`, 1),
+    )
+  })
+
+  it.each([['4'], ['l/4'], ['r/4'], ['2/4'], ['l/2/4'], ['r/2/4']])(
+    'accepts the shape %j',
+    async (value) => {
+      expect(Object.keys(await runSplit({ number: value })).length).toBeGreaterThan(0)
+    },
+  )
+})
+
+// All four of split's count clauses name the refused word through gnulib's
+// quote(), so a byte outside 0x20-0x7e comes back escaped rather than
+// interpolated raw. `-n` quotes only the trailing component, which is the
+// one the escaping applies to. Every row measured against GNU coreutils 9.4
+// under `LC_ALL=C` with a raw `bytes` argv. Mirrors test_split.py.
+const QUOTED_VALUES: [string, string][] = [
+  ['1é', '1\\303\\251'],
+  ['1\r', '1\\r'],
+  ['1\x01', '1\\001'],
+  ['1\x7f', '1\\177'],
+  ["1'", "1\\'"],
+  ['1\\', '1\\\\'],
+  ['', ''],
+]
+
+describe('split quotes the word it names', () => {
+  it.each(QUOTED_VALUES)('escapes %j in the byte-count clause', async (value, escaped) => {
+    await expect(runSplit({ bytes: value })).rejects.toThrow(
+      new UsageError(`split: invalid number of bytes: '${escaped}'`, 1),
+    )
+  })
+
+  it.each(QUOTED_VALUES)('escapes %j in the line-count clause', async (value, escaped) => {
+    await expect(runSplit({ lines: value })).rejects.toThrow(
+      new UsageError(`split: invalid number of lines: '${escaped}'`, 1),
+    )
+  })
+
+  it.each(QUOTED_VALUES)('escapes %j in the chunk-count clause', async (value, escaped) => {
+    await expect(runSplit({ number: value })).rejects.toThrow(
+      new UsageError(`split: invalid number of chunks: '${escaped}'`, 1),
+    )
+  })
+
+  it.each(QUOTED_VALUES)('escapes %j in the named chunk component', async (value, escaped) => {
+    await expect(runSplit({ number: `l/${value}` })).rejects.toThrow(
+      new UsageError(`split: invalid number of chunks: '${escaped}'`, 1),
+    )
+  })
+
+  it.each(QUOTED_VALUES)('escapes %j in the suffix-length clause', async (value, escaped) => {
+    await expect(runSplit({ suffix_length: value })).rejects.toThrow(
+      new UsageError(`split: invalid suffix length: '${escaped}'`, 1),
+    )
+  })
+
+  // The digit run cannot itself carry a byte quote() would escape, so a
+  // blank leading run is what puts one in the slot: `strtoumax` skips
+  // leading whitespace, and the raw argument including it is what GNU
+  // quotes (measured: `split -a $'\r18446744073709551616'`).
+  it('escapes the word in the Value-too-large tail', async () => {
+    await expect(runSplit({ suffix_length: '\r18446744073709551616' })).rejects.toThrow(
+      new UsageError(
+        "split: invalid suffix length: '\\r18446744073709551616': " +
+          'Value too large for defined data type',
+        1,
+      ),
+    )
+  })
+})
+
+// The suffix-start clause puts its word FIRST, where the four count clauses
+// put it last, and it escapes the word the same way (measured on GNU
+// coreutils 9.4 for both spellings). The empty word is absent on purpose:
+// `--numeric-suffixes=` is not a refusal in GNU at all, it exits 0, which
+// is a separate divergence from the escaping.
+describe('split quotes the suffix start value', () => {
+  const NON_EMPTY = QUOTED_VALUES.filter(([value]) => value !== '')
+
+  it.each(NON_EMPTY)('escapes %j in the numerical start clause', async (value, escaped) => {
+    await expect(runSplit({ numeric_suffixes: value, lines: '1' })).rejects.toThrow(
+      new UsageError(`split: '${escaped}': invalid start value for numerical suffix${TRY}`, 1),
+    )
+  })
+
+  it.each(NON_EMPTY)('escapes %j in the hexadecimal start clause', async (value, escaped) => {
+    await expect(runSplit({ hex_suffixes: value, lines: '1' })).rejects.toThrow(
+      new UsageError(`split: '${escaped}': invalid start value for hexadecimal suffix${TRY}`, 1),
+    )
+  })
 })

@@ -42,6 +42,27 @@
         "stdout_text": "/data/a.txt /data/b.txt differ: char 1, line 1\n",
         "stderr_text": ""
       }
+    },
+    {
+      "id": "cmp_n_leaves_a_multibyte_value_unescaped",
+      "cmd": "cmp -n '1é' /data/same_a.txt /data/same_b.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "cmp: invalid --bytes value '1é'\ncmp: Try 'cmp --help' for more information.\n"
+      }
     }
   ]
 }

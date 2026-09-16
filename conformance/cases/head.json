@@ -21,6 +21,48 @@
         "stdout_text": "hello",
         "stderr_text": ""
       }
+    },
+    {
+      "id": "head_c_quotes_a_control_byte",
+      "cmd": "head -c $'1\\001' /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "head: invalid number of bytes: '1\\001'\n"
+      }
+    },
+    {
+      "id": "head_n_quotes_a_multibyte_word",
+      "cmd": "head -n '1é' /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "head: invalid number of lines: '1\\303\\251'\n"
+      }
     }
   ]
 }

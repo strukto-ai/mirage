@@ -20,6 +20,7 @@ import type { DispatchFn } from '@struktoai/mirage-core/runtime/types'
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/utils/errors'
 import { fnmatch } from '@struktoai/mirage-core/utils/fnmatch'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { createRepo } from '../../../../core/hf_hub/admin.ts'
 import { repoUrl } from '../../../../core/hf_hub/client.ts'
 import { commit, type Addition } from '../../../../core/hf_hub/commit.ts'
@@ -85,7 +86,7 @@ async function collect(
     }
   }
   return {
-    rows: rows.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+    rows: rows.sort((a, b) => compareCodePoints(a.name, b.name)),
     fromDir: true,
   }
 }

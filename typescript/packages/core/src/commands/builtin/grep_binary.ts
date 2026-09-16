@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { byteChar, encodeText } from '../../shell/bytes.ts'
 import { closeQuietly } from '../../io/stream.ts'
+import { decodeLine, encodeLine, matchOffset, prefixOf } from './grep_offsets.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { IOResult } from '../../io/types.ts'
 import type { WalkFilters } from './grep_select.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 
 export interface FlagSet {
   filters: WalkFilters
@@ -28,6 +27,7 @@ export interface FlagSet {
   ignoreCase: boolean
   invert: boolean
   lineNumbers: boolean
+  byteOffsets: boolean
   countOnly: boolean
   filesOnly: boolean
   wholeWord: boolean
@@ -100,6 +100,11 @@ export function validUtf8(data: Uint8Array): boolean {
   }
 }
 
+/**
+ * One output line, prefix fields in GNU's fixed order: filename, then line
+ * number, then byte offset, whatever order the flags were given in. `offset`
+ * is the line's own start, or the match itself under -o.
+ */
 function outputLine(
   raw: Uint8Array,
   number: number,
@@ -107,10 +112,12 @@ function outputLine(
   path: string,
   showFilename: boolean,
   f: FlagSet,
+  offset = 0,
 ): Uint8Array {
   const separator = selected ? ':' : '-'
   const prefix = ENC.encode(
-    (showFilename ? path + separator : '') + (f.lineNumbers ? String(number) + separator : ''),
+    (showFilename ? path + separator : '') +
+      prefixOf(f.lineNumbers ? number : null, f.byteOffsets ? offset : null, selected),
   )
   const out = new Uint8Array(prefix.length + raw.length + 1)
   out.set(prefix)
@@ -136,23 +143,34 @@ export async function* grepInput(
   const binary = new BinaryInput(f.binaryMode)
   let count = 0
   let notified = false
-  const previous: [number, Uint8Array][] = []
+  const previous: [number, Uint8Array, number][] = []
   let lastPrinted = 0
   let afterUntil = 0
   const hasContext = (f.afterContext > 0 || f.beforeContext > 0) && !f.onlyMatching
   if (f.maxCount === 0) {
+    // GNU selects no line at all and the whole command goes quiet:
+    // `grep -m0 -c a f` prints NOTHING and exits 1, and so does
+    // `grep -m0 -c a f g` -- no per-file zeros either. That is not the same
+    // as a genuine zero, which `grep -c a g` still prints as `0`, so -c
+    // cannot answer from the count here. Measured on GNU grep 3.11 across
+    // `-m0`, `-m 0` and `--max-count=0`.
     // Nothing is read, but the backend already opened the source.
     await closeQuietly(source)
-    if (f.countOnly && !(f.quiet || f.filesOnly))
-      yield ENC.encode((showFilename ? path + ':' : '') + '0\n')
     return
   }
   let number = 0
+  // GNU counts BYTES from the start of the input and keeps counting across
+  // lines, so the position advances by one more than the line to cover the
+  // terminator the iterator strips. The extra byte past a final line with no
+  // newline is never read.
+  let bytePos = 0
   const input = binary.read(source)
   try {
     for await (const raw of new AsyncLineIterator(input)) {
       if (binary.nul && f.binaryMode === 'without-match') break
       number += 1
+      const lineStart = bytePos
+      bytePos += raw.length + 1
       const line = decodeLine(raw)
       let hit = pat.test(line) !== f.invert
       if (f.maxCount !== null && count >= f.maxCount) hit = false
@@ -176,7 +194,17 @@ export async function* grepInput(
             const re = new RegExp(pat.source, pat.flags.includes('g') ? pat.flags : pat.flags + 'g')
             for (const m of line.matchAll(re)) {
               if (m[0] !== '')
-                chunks.push(outputLine(encodeText(m[0]), number, true, path, showFilename, f))
+                chunks.push(
+                  outputLine(
+                    encodeLine(m[0]),
+                    number,
+                    true,
+                    path,
+                    showFilename,
+                    f,
+                    matchOffset(lineStart, line, m.index),
+                  ),
+                )
             }
           }
         } else {
@@ -185,15 +213,15 @@ export async function* grepInput(
             const first = pending[0]?.[0] ?? number
             if ((lastPrinted && first > lastPrinted + 1) || (!lastPrinted && afterOutput))
               chunks.push(ENC.encode('--\n'))
-            for (const [n, data] of pending)
-              chunks.push(outputLine(data, n, false, path, showFilename, f))
+            for (const [n, data, at] of pending)
+              chunks.push(outputLine(data, n, false, path, showFilename, f, at))
           }
-          chunks.push(outputLine(raw, number, true, path, showFilename, f))
+          chunks.push(outputLine(raw, number, true, path, showFilename, f, lineStart))
           lastPrinted = number
           afterUntil = number + f.afterContext
         }
       } else if (hasContext && number <= afterUntil) {
-        chunks.push(outputLine(raw, number, false, path, showFilename, f))
+        chunks.push(outputLine(raw, number, false, path, showFilename, f, lineStart))
         lastPrinted = number
       }
       // A selected line with nothing to print (-o on a zero-width match)
@@ -213,7 +241,7 @@ export async function* grepInput(
         yield chunk
       }
       if (binary.nul && count && f.binaryMode === 'binary') return
-      previous.push([number, raw])
+      previous.push([number, raw, lineStart])
       if (previous.length > f.beforeContext) previous.shift()
       if (f.maxCount !== null && count >= f.maxCount && number >= afterUntil) break
     }
@@ -230,25 +258,6 @@ export async function* grepInput(
 
   if (f.countOnly && !(f.quiet || f.filesOnly))
     yield ENC.encode((showFilename ? path + ':' : '') + String(count) + '\n')
-}
-
-function decodeLine(raw: Uint8Array): string {
-  if (validUtf8(raw)) return DEC.decode(raw)
-  let text = ''
-  for (let i = 0; i < raw.length; ) {
-    const byte = raw[i]
-    if (byte === undefined) break
-    const width = byte < 0x80 ? 1 : byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4
-    const part = raw.subarray(i, i + width)
-    if (part.length === width && validUtf8(part)) {
-      text += DEC.decode(part)
-      i += width
-    } else {
-      text += byteChar(byte)
-      i += 1
-    }
-  }
-  return text
 }
 
 function utf8Pattern(pat: RegExp): RegExp {

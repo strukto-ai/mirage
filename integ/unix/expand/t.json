@@ -70,6 +70,1077 @@
       "flags": [
         "t"
       ]
+    },
+    {
+      "id": "expand_tabs_invalid_word",
+      "seq": 601251,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand --tabs=abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab size contains invalid character(s): 'abc'\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_invalid_suffix_quotes_remainder",
+      "seq": 601252,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand --tabs=8x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab size contains invalid character(s): 'x'\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_leading_plus_is_a_sign",
+      "seq": 601253,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand --tabs=+4",
+      "expect": {
+        "exit": 0,
+        "stdout": "a   b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_empty_list_is_the_default_size",
+      "seq": 601254,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand --tabs=''",
+      "expect": {
+        "exit": 0,
+        "stdout": "a       b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_minus_is_an_invalid_character",
+      "seq": 601255,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand --tabs=-4",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab size contains invalid character(s): '-4'\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_one_stop_repeats_as_a_size",
+      "seq": 602200,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "a  b  c  d  e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_several_stops_are_absolute_columns",
+      "seq": 602201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t 1,3",
+      "expect": {
+        "exit": 0,
+        "stdout": "a  b c d e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_past_the_last_stop_is_one_blank",
+      "seq": 602202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t 2,5",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b  c d e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_blanks_separate_stops",
+      "seq": 602203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t '2 4 6'",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b c d e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_an_empty_element_is_skipped",
+      "seq": 602204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t 1,,3",
+      "expect": {
+        "exit": 0,
+        "stdout": "a  b c d e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_slash_is_the_multiples_of_n",
+      "seq": 602205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t /4",
+      "expect": {
+        "exit": 0,
+        "stdout": "a   b   c   d   e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_plus_steps_from_the_last_stop",
+      "seq": 602206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t 2,+4",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b   c   d   e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_slash_extends_past_the_last_stop",
+      "seq": 602207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t 2,/4",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b c   d   e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_accumulate_across_occurrences",
+      "seq": 602208,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t 2,4 -t 6",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b c d e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_a_plus_occurrence_joins_a_stop_occurrence",
+      "seq": 602209,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\tc\\td\\te\\n' | expand -t +4 -t 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b   c   d   e\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_one_stop_keeps_repeating_where_two_do_not",
+      "seq": 602210,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'xxxxxxxxxx\\tY\\n' | expand -t 5",
+      "expect": {
+        "exit": 0,
+        "stdout": "xxxxxxxxxx     Y\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_two_stops_give_one_blank_at_the_same_column",
+      "seq": 602211,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'xxxxxxxxxx\\tY\\n' | expand -t 5,9",
+      "expect": {
+        "exit": 0,
+        "stdout": "xxxxxxxxxx Y\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_zero_is_refused",
+      "seq": 602212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand --tabs=0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab size cannot be 0\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_a_zero_anywhere_in_the_list_is_refused",
+      "seq": 602213,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand -t 3,0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab size cannot be 0\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_a_decreasing_list_is_refused",
+      "seq": 602214,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand -t 3,1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab sizes must be ascending\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_non_ascending_across_occurrences",
+      "seq": 602215,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand -t 6 -t 2,4",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab sizes must be ascending\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_an_invalid_character_outranks_a_zero",
+      "seq": 602216,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand -t 0,x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab size contains invalid character(s): 'x'\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_a_too_large_stop_is_refused",
+      "seq": 602217,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand -t 99999999999999999999",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab stop is too large '99999999999999999999'\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_plus_must_carry_the_last_value",
+      "seq": 602218,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand -t +4,2",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: '+' specifier only allowed with the last value\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_plus_must_start_a_number",
+      "seq": 602219,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand -t 4+",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: '+' specifier not at start of number: '+'\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_tabs_a_trailing_newline_is_an_invalid_character",
+      "seq": 602220,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand --tabs=$'8\\n'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab size contains invalid character(s): '\\n'\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_a_carriage_return_does_not_reset_the_column",
+      "seq": 602221,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\r\\tb\\n' | expand | cat -A",
+      "expect": {
+        "exit": 0,
+        "stdout": "a^M      b$\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "expand_a_carriage_return_keeps_the_column_under_a_tab_size",
+      "seq": 602222,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\r\\tb\\n' | expand -t 4 | cat -A",
+      "expect": {
+        "exit": 0,
+        "stdout": "a^M  b$\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "expand_initial_only_reads_the_same_tab_list",
+      "seq": 602223,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\ta\\tb\\n' | expand -i -t 1,3 | cat -A",
+      "expect": {
+        "exit": 0,
+        "stdout": " a^Ib$\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "i"
+      ]
     }
   ]
 }

@@ -753,6 +753,32 @@
         "stdout": "CI - active\nID: 101\nFile: .github/workflows/ci.yml\n",
         "stderr": "gh workflow view: could not find any workflows named Nightly\n"
       }
+    },
+    {
+      "id": "gh_api_json_keeps_raw_utf8",
+      "seq": 569060,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh api repos/integ/repo-cli/issues -f title='h\u00e9llo \u2615' | grep '\"title\"'",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \"title\": \"h\u00e9llo \u2615\",\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gh_typed_json_keeps_raw_utf8",
+      "seq": 569061,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "url=$(gh issue create --title 'na\u00efve \u65e5\u672c' --body ok) && gh issue view \"$url\" --json title",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"title\": \"na\u00efve \u65e5\u672c\"\n}\n",
+        "stderr": ""
+      }
     }
   ]
 }

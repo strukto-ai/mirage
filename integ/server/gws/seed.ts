@@ -17,6 +17,7 @@ import type { JsonValue } from '../kit/typescript/index.ts'
 import { createDriveItem } from './drive/item.ts'
 import { eventsOf, makeEvent, readEventTimes } from './calendar/event.ts'
 import { DEFAULT_CALENDAR_TZ } from './store/state.ts'
+import { isIanaZone } from './calendar/zone.ts'
 import type { GwsState } from './store/state.ts'
 import type { DocTab, FormDoc } from './store/types.ts'
 import { newFormItem } from './forms/form.ts'
@@ -39,16 +40,25 @@ import { isReply } from './wire/reply.ts'
 export function seedCalendars(st: GwsState, entries: JsonObj[]): void {
   for (const entry of entries) {
     const id = asStr(entry.id) ?? ''
+    const timeZone = asStr(entry.timeZone) ?? DEFAULT_CALENDAR_TZ
+    // Every timed event now renders in the calendar's zone, so an
+    // unresolvable one would throw a RangeError out of Intl on read
+    // rather than here. The fake fails at the door instead.
+    if (!isIanaZone(timeZone)) {
+      throw new ResetBodyError(
+        `seed calendar ${entry.id ?? ''} timeZone is not a zone: ${timeZone}`,
+      )
+    }
     st.calendars.set(id, {
       id,
       summary: asStr(entry.summary) ?? '',
-      timeZone: asStr(entry.timeZone) ?? DEFAULT_CALENDAR_TZ,
+      timeZone,
       accessRole: asStr(entry.accessRole) ?? 'owner',
       ...(asBool(entry.hidden) === true ? { hidden: true } : {}),
     })
     const bucket = eventsOf(st, id)
     for (const raw of asObjArr(entry.events)) {
-      const times = readEventTimes(raw)
+      const times = readEventTimes(raw, timeZone)
       if (isReply(times)) {
         throw new Error(`seed event ${JSON.stringify(raw)} refused: ${JSON.stringify(times.body)}`)
       }
@@ -175,6 +185,9 @@ export function applyExtras(st: GwsState, extras: Record<string, JsonValue>): vo
   if (tz !== undefined) {
     if (typeof tz !== 'string') {
       throw new ResetBodyError('/reset extras.calendarTimeZone must be a string')
+    }
+    if (!isIanaZone(tz)) {
+      throw new ResetBodyError(`/reset extras.calendarTimeZone is not a zone: ${tz}`)
     }
     // The primary calendar is a fixture row, so its zone is the fixture's
     // default until a reset says otherwise; retuning it here rather than

@@ -16,14 +16,17 @@ import type { MountRegistry } from '../../../../workspace/mount/registry.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { CROSS_MOUNT_COMMANDS, RELAY_COMMANDS, STREAM_COMMANDS } from './constants.ts'
 import { Cmd, Strategy } from './types.ts'
-import type { FlagValue } from '../../../spec/types.ts'
+import { FlagView, type FlagValue } from '../../../spec/types.ts'
+import { specOf } from '../../../spec/builtins.ts'
 
 // Pick the combine strategy for one cross-mount command invocation. Flags can
 // flip the strategy: `sed -i` edits each operand in place (per-operand
 // independent), so it fans out instead of streaming.
 export function strategyFor(cmdName: Cmd, flagKwargs: Record<string, FlagValue>): Strategy {
   if (RELAY_COMMANDS.has(cmdName)) return Strategy.RELAY
-  if (cmdName === Cmd.SED && flagKwargs.i === true) return Strategy.FANOUT
+  if (cmdName === Cmd.SED && new FlagView(flagKwargs, specOf(Cmd.SED)).asBool('i')) {
+    return Strategy.FANOUT
+  }
   if (STREAM_COMMANDS.has(cmdName)) return Strategy.STREAM
   return Strategy.FANOUT
 }

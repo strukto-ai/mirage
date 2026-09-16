@@ -216,6 +216,37 @@
         "stdout": "Thu|  Thu|00Thu|  THU|  THU|+26|+0026|26|+0|   +0|+00000|      +0|+00|+0:00| +0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "date_d_quotes_a_multibyte_expression",
+      "seq": 962392,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -d 'xé'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "date: invalid date 'x\\303\\251'\n"
+      }
     }
   ]
 }

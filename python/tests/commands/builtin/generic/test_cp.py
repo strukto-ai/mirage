@@ -714,3 +714,81 @@ async def test_primitive_recursive_walk_names_a_directory_it_may_not_open():
                          b"Permission denied\n")
     assert files["/dst/a.txt"] == b"A" and files["/dst/sub/b"] == b"B"
     assert "/dst/sealed" in dirs and "/dst/sealed/s" not in files
+
+
+# Both of cp's argument clauses name the refused word through gnulib's
+# quote(), so a byte outside 0x20-0x7e comes back escaped rather than
+# interpolated raw. Rows measured against GNU coreutils 9.4 under
+# `LC_ALL=C` with a raw `bytes` argv (`cp --update=<w>`,
+# `cp --backup=<w>`). Mirrored in cp.test.ts.
+QUOTED_WORDS = [
+    ("xé", r"x\303\251"),
+    ("x\r", r"x\r"),
+    ("x\x01", r"x\001"),
+    ("x\x7f", r"x\177"),
+    ("x'", r"x\'"),
+    ("x\\", r"x\\"),
+]
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_WORDS)
+def test_update_clause_quotes_the_word(value, escaped):
+    from mirage.commands.builtin.generic.cp import parse_flags
+    from mirage.commands.errors import UsageError
+    from mirage.commands.spec import SPECS
+    from mirage.commands.spec.types import FlagView
+
+    with pytest.raises(UsageError) as exc:
+        parse_flags(FlagView({"update": value}, spec=SPECS["cp"]))
+    assert str(exc.value).startswith(
+        f"cp: invalid argument '{escaped}' for '--update'\n")
+    assert exc.value.exit_code == 1
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_WORDS)
+def test_backup_clause_quotes_the_word(value, escaped):
+    from mirage.commands.builtin.generic.cp import parse_flags
+    from mirage.commands.errors import UsageError
+    from mirage.commands.spec import SPECS
+    from mirage.commands.spec.types import FlagView
+
+    with pytest.raises(UsageError) as exc:
+        parse_flags(FlagView({"backup": value}, spec=SPECS["cp"]))
+    assert str(exc.value).startswith(
+        f"cp: invalid argument '{escaped}' for 'backup type'\n")
+    assert exc.value.exit_code == 1
+
+
+# GNU 9.4's `--update` candidates are `all none older`; `none-fail`
+# arrived in 9.5. mirage still ACCEPTS `none-fail` (cp implements its
+# `not replacing` refusal and mv's --exchange conflict names it), so the
+# accepted set is 9.5's while the list printed back is 9.4's.
+def test_update_lists_gnu_94_candidates():
+    from mirage.commands.builtin.generic.cp import parse_flags
+    from mirage.commands.errors import UsageError
+    from mirage.commands.spec import SPECS
+    from mirage.commands.spec.types import FlagView
+
+    with pytest.raises(UsageError) as exc:
+        parse_flags(FlagView({"update": "x"}, spec=SPECS["cp"]))
+    assert str(exc.value) == ("cp: invalid argument 'x' for '--update'\n"
+                              "Valid arguments are:\n"
+                              "  - 'all'\n  - 'none'\n  - 'older'\n"
+                              "Try 'cp --help' for more information.")
+    assert exc.value.exit_code == 1
+    assert parse_flags(FlagView({"update": "none-fail"},
+                                spec=SPECS["cp"])).update == "none-fail"
+
+
+def test_an_empty_update_is_ambiguous():
+    """`cp --update=` is `ambiguous argument ''`, exit 1 (measured)."""
+    from mirage.commands.builtin.generic.cp import parse_flags
+    from mirage.commands.errors import UsageError
+    from mirage.commands.spec import SPECS
+    from mirage.commands.spec.types import FlagView
+
+    with pytest.raises(UsageError) as exc:
+        parse_flags(FlagView({"update": ""}, spec=SPECS["cp"]))
+    assert str(
+        exc.value).startswith("cp: ambiguous argument '' for '--update'\n")
+    assert exc.value.exit_code == 1

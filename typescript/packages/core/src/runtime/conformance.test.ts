@@ -34,19 +34,6 @@ import { PrefixResolver } from './resolver.ts'
 // it.fails with the reason beside the table; the mark comes off as
 // each one is fixed.
 
-// Path.stat is not a missing case, it is a shape the seam cannot carry:
-// the binding converts whatever the os callback returns structurally, so
-// every candidate (plain object, class instance, tuple, proxy) arrives in
-// the guest as a dict or a list and `st.st_size` raises AttributeError.
-// The JS package exports no StatResult to build the real thing with,
-// where python's binding hands over an OSAccess subclass and constructs
-// monty's own. Declining, so the sandbox raises PermissionError, is the
-// honest answer until the binding grows a stat shape (drafted as an
-// upstream ask, alongside iterdir's str-not-Path elements). Probed
-// against @pydantic/monty 0.0.19 and again on 0.0.21.
-const MONTY_STAT_UNSUPPORTED =
-  'ts monty: the os callback cannot return an os.stat_result (@pydantic/monty 0.0.21)'
-
 // The pyodide shim patches only open/io.open, os.listdir, os.stat and
 // os.scandir, so every mutation spelling mutates MEMFS and never
 // reaches the mount: a pre-boot file succeeds silently (exit 0), a
@@ -145,7 +132,6 @@ const MONTY_ROWS: Row[] = [
     line: `python3 -c "from pathlib import Path; print(Path('/data/st.txt').stat().st_size)"`,
     setup: ['echo -n four > /data/st.txt'],
     lineOut: '4',
-    broken: MONTY_STAT_UNSUPPORTED,
   },
   {
     capability: 'append',

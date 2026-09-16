@@ -12,8 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { encodeLine, lineOffsets, prefixOf } from './grep_offsets.ts'
+
 const SEPARATOR = new TextEncoder().encode('--\n')
 
+/**
+ * Render selected lines with their context, GNU's separators included.
+ *
+ * `byteOffsets` is -b: every line carries the byte offset of its own start, a
+ * context line renders it with `-` like every other field, and the `--` group
+ * separator carries no fields at all. The offsets are derived from the lines
+ * because this renderer is handed text rather than bytes, which is exact only
+ * for text that came through `decodeLine` -- so that is what a caller must
+ * hand over. The rendered line is put back with `encodeLine`, so a byte that
+ * is not valid UTF-8 prints as GNU prints it rather than as U+FFFD.
+ */
 export function grepContextLines(
   lines: readonly string[],
   pat: RegExp,
@@ -22,8 +35,18 @@ export function grepContextLines(
   maxCount: number | null,
   afterContext: number,
   beforeContext: number,
+  byteOffsets = false,
 ): Uint8Array[] {
+  if (maxCount === 0) {
+    // GNU selects no line at all under -m0, context and all, so there is
+    // nothing to group and nothing to print. Read before the scan because
+    // `matchIndices.length >= 0` is already true, so the check below would
+    // keep the first selected line. `grepInput` and both scans in
+    // `grep_scan` take the same early return.
+    return []
+  }
   const total = lines.length
+  const offsets = byteOffsets ? lineOffsets(lines) : []
   const matchIndices: number[] = []
   for (let idx = 0; idx < lines.length; idx++) {
     const line = lines[idx] ?? ''
@@ -71,19 +94,18 @@ export function grepContextLines(
   if (currentGroup.length > 0) groups.push(currentGroup)
 
   const matchSet = new Set(matchIndices)
-  const enc = new TextEncoder()
   const result: Uint8Array[] = []
   for (let gi = 0; gi < groups.length; gi++) {
     if (gi > 0) result.push(SEPARATOR)
     const group = groups[gi] ?? []
     for (const ln of group) {
       const line = lines[ln] ?? ''
-      if (lineNumbers) {
-        const sep = matchSet.has(ln) ? ':' : '-'
-        result.push(enc.encode(`${String(ln + 1)}${sep}${line}\n`))
-      } else {
-        result.push(enc.encode(`${line}\n`))
-      }
+      const fields = prefixOf(
+        lineNumbers ? ln + 1 : null,
+        byteOffsets ? (offsets[ln] ?? 0) : null,
+        matchSet.has(ln),
+      )
+      result.push(encodeLine(`${fields}${line}\n`))
     }
   }
   return result

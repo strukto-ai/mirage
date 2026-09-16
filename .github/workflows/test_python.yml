@@ -7,10 +7,19 @@ permissions:
   push:
     branches: [main]
     paths:
+      # Keep in lockstep with the `changes` filter below.
       - python/**
       - examples/python/**
       - integ/**
       - conformance/**
+      # mypy reads these now. Without the entry a PR touching only a
+      # generator would skip this workflow, which is the only place
+      # mypy runs, so the gate would pass by never starting.
+      - scripts/**
+      # A hook definition changing here must reach the workflow
+      # that now runs it: Pre-commit skips it, so this is the
+      # only job left that would catch the edit.
+      - .pre-commit-config.yaml
       - .github/workflows/test_python.yml
   pull_request:
     branches: [main]
@@ -39,11 +48,14 @@ jobs:
         id: filter
         with:
           filters: |
+            # Keep in lockstep with `push.paths` above.
             hit:
               - 'python/**'
               - 'examples/python/**'
               - 'integ/**'
               - 'conformance/**'
+              - 'scripts/**'
+              - '.pre-commit-config.yaml'
               - '.github/workflows/test_python.yml'
 
   test:
@@ -96,14 +108,18 @@ jobs:
         uses: actions/cache@v6
         with:
           path: python/.mypy_cache
-          key: mypy-${{ runner.os }}-py3.12-${{ hashFiles('python/uv.lock') }}-${{ hashFiles('python/mirage/**/*.py') }}
+          key: mypy-${{ runner.os }}-py3.12-${{ hashFiles('python/uv.lock') }}-${{ hashFiles('python/mirage/**/*.py', 'scripts/**/*.py') }}
           restore-keys: |
             mypy-${{ runner.os }}-py3.12-${{ hashFiles('python/uv.lock') }}-
             mypy-${{ runner.os }}-py3.12-
 
+      # Bare, not `mypy mirage`: pyproject's `[tool.mypy] files` already
+      # names both roots -- `mirage` and the repo-root `scripts/` that
+      # generate `spec/` -- and this is the repo's only mypy run, so it is
+      # spelled exactly as the py-mypy hook spells it locally.
       - name: Type check (mypy)
         working-directory: python
-        run: uv run mypy mirage
+        run: uv run mypy
 
       - name: Run pytest (main suite, camel excluded)
         working-directory: python

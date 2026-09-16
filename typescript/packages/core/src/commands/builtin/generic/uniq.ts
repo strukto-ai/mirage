@@ -15,8 +15,9 @@
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
-import { extraOperandError } from '../../spec/usage.ts'
-import { CommandName, type FlagValue } from '../../spec/types.ts'
+import { argmatchError, extraOperandError } from '../../spec/usage.ts'
+import { CommandName, FlagView, type FlagValue } from '../../spec/types.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -45,42 +46,41 @@ function parseCount(value: string | boolean | number | string[] | undefined): nu
   return count
 }
 
-function stringAlias(
-  flags: Record<string, FlagValue>,
-  short: string,
-  long: string,
-): string | boolean | number | string[] | undefined {
-  return flags[short] ?? flags[long]
-}
+// GNU's `delimit_method_string` and `grouping_method_string`, in
+// declaration order, which is what each option lists back. No aliases in
+// either, so one candidate per line.
+const ALL_REPEATED_ARGS = ['none', 'prepend', 'separate'] as const
+const GROUP_ARGS = ['prepend', 'append', 'separate', 'both'] as const
 
 function optionalMethod(
   value: string | boolean | number | string[] | undefined,
   defaultValue: string,
-  allowed: string[],
+  allowed: readonly string[],
   option: string,
 ): string | null {
   if (value === undefined || value === false) return null
   const normalized = value === true ? defaultValue : value
   if (typeof normalized !== 'string' || !allowed.includes(normalized)) {
-    throw new Error(`uniq: invalid argument '${String(normalized)}' for '--${option}'`)
+    throw argmatchError('uniq', `--${option}`, String(normalized), allowed)
   }
   return normalized
 }
 
-function parseFlags(flags: Record<string, FlagValue>): UniqFlags {
-  const count = flags.count === true
-  const duplicatesOnly = flags.repeated === true
-  const uniqueOnly = flags.unique === true
+function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
+  const fl = new FlagView(bag, specOf('uniq'))
+  const count = fl.asBool('count')
+  const duplicatesOnly = fl.asBool('repeated')
+  const uniqueOnly = fl.asBool('unique')
   const allRepeated = optionalMethod(
-    flags.D === true ? true : flags.all_repeated,
+    fl.asBool('D') ? true : fl.raw('all_repeated'),
     'none',
-    ['none', 'prepend', 'separate'],
+    ALL_REPEATED_ARGS,
     'all-repeated',
   ) as UniqFlags['allRepeated']
   const group = optionalMethod(
-    flags.group,
+    fl.raw('group'),
     'separate',
-    ['separate', 'prepend', 'append', 'both'],
+    GROUP_ARGS,
     'group',
   ) as UniqFlags['group']
   if (group !== null && (count || duplicatesOnly || uniqueOnly || allRepeated !== null)) {
@@ -93,13 +93,13 @@ function parseFlags(flags: Record<string, FlagValue>): UniqFlags {
     count,
     duplicatesOnly,
     uniqueOnly,
-    skipFields: parseCount(stringAlias(flags, 'f', 'skip_fields')) ?? 0,
-    skipChars: parseCount(stringAlias(flags, 's', 'skip_chars')) ?? 0,
-    checkChars: parseCount(stringAlias(flags, 'w', 'check_chars')),
-    ignoreCase: flags.ignore_case === true,
+    skipFields: parseCount(fl.asStr('skip_fields')) ?? 0,
+    skipChars: parseCount(fl.asStr('skip_chars')) ?? 0,
+    checkChars: parseCount(fl.asStr('check_chars')),
+    ignoreCase: fl.asBool('ignore_case'),
     allRepeated,
     group,
-    zeroTerminated: flags.zero_terminated === true,
+    zeroTerminated: fl.asBool('zero_terminated'),
   }
 }
 

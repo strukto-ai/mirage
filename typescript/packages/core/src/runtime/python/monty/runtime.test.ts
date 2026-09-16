@@ -134,7 +134,9 @@ function makeBridge(
     for (const d of dirs) {
       if (d.startsWith(prefix) && !d.slice(prefix.length).includes('/')) entries.push(d + '/')
     }
-    if (entries.length === 0) return Promise.reject(new Error(`no such dir: ${prefix}`))
+    if (entries.length === 0) {
+      return Promise.reject(Object.assign(new Error(`no such dir: ${prefix}`), { code: 'ENOENT' }))
+    }
     return Promise.resolve(entries)
   }
   return { dispatch, files, writes, mutations, creates, truncates, appends, mkdirAttrs }

@@ -15,7 +15,17 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/bin/daemon.ts'],
+  entry: [
+    'src/index.ts',
+    'src/bin/daemon.ts',
+    'src/paths.ts',
+    'src/env.ts',
+    'src/daemon_config.ts',
+    'src/host_validation_constants.ts',
+    'src/workspace_config.ts',
+    'src/auth/config.ts',
+    'src/auth/storage.ts',
+  ],
   format: ['esm'],
   dts: {
     compilerOptions: {

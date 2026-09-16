@@ -28,7 +28,7 @@ import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult } from '../../../config.ts'
 import { CLISpec } from '../../types.ts'
 import type { CLIInvocation } from '../../types.ts'
-import { Option } from '../../../spec/types.ts'
+import { FlagView, Option } from '../../../spec/types.ts'
 import type { GwsMethod, GwsService } from './methods.ts'
 import { GWS_METHODS, SERVICE_BASES, gwsMethodDescription } from './methods.ts'
 
@@ -204,11 +204,12 @@ export async function runGwsMethod(
   method: GwsMethod,
   inv: CLIInvocation<GoogleConfig>,
 ): Promise<CommandFnResult> {
+  const fl = new FlagView(inv.flags)
   let params: Record<string, unknown>
   let body: Record<string, unknown>
   try {
-    params = parseJsonFlag(inv.flags.params, '--params')
-    body = parseJsonFlag(inv.flags.json, '--json')
+    params = parseJsonFlag(fl.asStr('params') ?? '', '--params')
+    body = parseJsonFlag(fl.asStr('json') ?? '', '--json')
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
@@ -235,7 +236,7 @@ export async function runGwsMethod(
   if (method.http === 'GET') {
     let pageLimit: number | null
     try {
-      pageLimit = parsePageLimit(inv.flags.page_limit)
+      pageLimit = parsePageLimit(fl.asStr('page_limit'))
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]

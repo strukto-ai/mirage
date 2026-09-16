@@ -138,12 +138,70 @@ async def test_an_unusable_first_character_quotes_only_the_field(
 
 
 @pytest.mark.asyncio
-async def test_iec_i_demands_its_i():
+@pytest.mark.parametrize("value", [
+    "1",
+    "1.5",
+    "0",
+    "1000",
+    "1K",
+    "1Ké",
+    "1Kx",
+    "1KB",
+    "1KI",
+    "1KII",
+    "1M",
+])
+async def test_iec_i_demands_its_i(value):
+    # GNU tests for the 'i' OUTSIDE the suffix branch of
+    # simple_strtod_human, so this clause answers for every field whose
+    # unit letter is not followed by one -- a field with no unit at all
+    # included. Measured on coreutils 9.4; mirage used to reach it only
+    # with a bare unit and called `1Kx` and `1Ké` invalid suffixes, and
+    # it accepted a bare number outright.
+    escaped = value.replace("é", r"\303\251")
     with pytest.raises(UsageError) as exc:
-        await run("1K", from_mode="iec-i")
+        await run(value, from_mode="iec-i")
     assert str(exc.value) == (
-        "numfmt: missing 'i' suffix in input: '1K' (e.g Ki/Mi/Gi)")
+        f"numfmt: missing 'i' suffix in input: '{escaped}' (e.g Ki/Mi/Gi)")
     assert exc.value.exit_code == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("value", "message"), [
+    ("1Kii", "numfmt: invalid suffix in input '1Kii': 'i'"),
+    ("1KiB", "numfmt: invalid suffix in input '1KiB': 'B'"),
+    ("1Kié", r"numfmt: invalid suffix in input '1Ki\303\251': "
+     r"'\303\251'"),
+    ("1i", "numfmt: invalid suffix in input: '1i'"),
+    ("1iK", "numfmt: invalid suffix in input: '1iK'"),
+    ("1iB", "numfmt: invalid suffix in input: '1iB'"),
+    ("x", "numfmt: invalid number: 'x'"),
+    ("", "numfmt: invalid number: ''"),
+])
+async def test_iec_i_gets_past_its_i_and_then_names_the_leftover(
+        value, message):
+    # The other side of the branch above: once the 'i' is consumed the
+    # field reports its remainder like any other mode, and a first
+    # character that is not a unit letter never reaches the 'i' test at
+    # all (coreutils 9.4).
+    with pytest.raises(UsageError) as exc:
+        await run(value, from_mode="iec-i")
+    assert str(exc.value) == message
+    assert exc.value.exit_code == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("value", "expected"), [
+    ("1000", "1000"),
+    ("1024", "1.0Ki"),
+    ("2048", "2.0Ki"),
+    ("0", "0"),
+])
+async def test_to_iec_i_has_no_missing_i_clause(value, expected):
+    # The clause is an INPUT one: --to=iec-i renders a bare number
+    # happily, so the demand above must not leak onto the output mode
+    # (coreutils 9.4).
+    assert await run(value, to_mode="iec-i") == expected
 
 
 @pytest.mark.asyncio
@@ -170,3 +228,53 @@ async def test_bad_numbers_report_the_number(value, from_mode):
         await run(value, from_mode=from_mode)
     assert str(exc.value) == f"numfmt: invalid number: '{value}'"
     assert exc.value.exit_code == 2
+
+
+# Every numfmt clause that names a field names it through gnulib's
+# quote(), so a byte outside 0x20-0x7e comes back escaped rather than
+# interpolated raw. Rows measured against GNU coreutils 9.4 under
+# `LC_ALL=C` with a raw `bytes` argv (`numfmt <w>`,
+# `numfmt --from=si <w>`). Mirrored in numfmt.test.ts.
+QUOTED_FIELDS = [
+    ("é", r"\303\251"),
+    ("\r", r"\r"),
+    ("\x01", r"\001"),
+    ("\x7f", r"\177"),
+    ("'", r"\'"),
+    ("\\", r"\\"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("tail", "escaped"), QUOTED_FIELDS)
+async def test_unusable_first_character_clause_quotes_the_field(tail, escaped):
+    with pytest.raises(UsageError) as exc:
+        await run(f"1{tail}", from_mode="si")
+    assert str(exc.value) == (f"numfmt: invalid suffix in input: '1{escaped}'")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("tail", "escaped"), QUOTED_FIELDS)
+async def test_junk_after_a_unit_clause_quotes_both_words(tail, escaped):
+    with pytest.raises(UsageError) as exc:
+        await run(f"1K{tail}", from_mode="si")
+    assert str(exc.value) == (
+        f"numfmt: invalid suffix in input '1K{escaped}': '{escaped}'")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("tail", "escaped"), QUOTED_FIELDS)
+async def test_invalid_number_clause_quotes_the_field(tail, escaped):
+    with pytest.raises(UsageError) as exc:
+        await run(f"x{tail}", from_mode="none")
+    assert str(exc.value) == f"numfmt: invalid number: 'x{escaped}'"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("tail", "escaped"), QUOTED_FIELDS)
+async def test_rejecting_suffix_clause_quotes_the_field(tail, escaped):
+    with pytest.raises(UsageError) as exc:
+        await run(f"1K{tail}", from_mode="none")
+    assert str(
+        exc.value) == (f"numfmt: rejecting suffix in input: '1K{escaped}' "
+                       "(consider using --from)")

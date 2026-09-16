@@ -32,6 +32,207 @@
       "flags": [
         "m"
       ]
+    },
+    {
+      "id": "rg_m_zero_selects_nothing",
+      "seq": 612110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/rm0.txt; rg -m 0 a /data/rm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    },
+    {
+      "id": "rg_m_zero_counts_nothing",
+      "seq": 612111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/rm0.txt; rg -m 0 -c a /data/rm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "c"
+      ]
+    },
+    {
+      "id": "rg_m_zero_names_no_file",
+      "seq": 612112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/rm0.txt; rg -m 0 -l a /data/rm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "l"
+      ]
+    },
+    {
+      "id": "rg_m_is_per_file_in_a_walk",
+      "seq": 612113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rmw && printf 'a1\\na2\\n' > /data/rmw/x.txt && printf 'a3\\na4\\n' > /data/rmw/y.txt && rg -m1 a /data/rmw",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rmw/x.txt:a1\n/data/rmw/y.txt:a3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    },
+    {
+      "id": "rg_m_two_per_file_in_a_walk",
+      "seq": 612114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rmw && printf 'a1\\na2\\n' > /data/rmw/x.txt && printf 'a3\\na4\\n' > /data/rmw/y.txt && rg -m2 a /data/rmw",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rmw/x.txt:a1\n/data/rmw/x.txt:a2\n/data/rmw/y.txt:a3\n/data/rmw/y.txt:a4\n",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    },
+    {
+      "id": "rg_m_zero_prints_no_context",
+      "seq": 612115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/rm0.txt; rg -m 0 -A1 a /data/rm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "A"
+      ]
     }
   ]
 }

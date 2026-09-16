@@ -8,7 +8,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "head: invalid number of lines: '١٢'\n"
+        "stderr": "head: invalid number of lines: '\\331\\241\\331\\242'\n"
       },
       "flags": ["n"]
     }

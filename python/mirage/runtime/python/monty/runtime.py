@@ -43,8 +43,10 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     is the script name) and piped input as the `stdin` global (bytes,
     None when nothing was piped). Monty implements a Python subset;
     host-only features (`sys.stdin`, `sys.argv`, third-party imports)
-    are unavailable, and the stdlib is json/re/math/datetime/typing —
-    use the `local` runtime for those.
+    are unavailable, the importable stdlib is the sixteen modules
+    listed in docs/python/runtime/python.mdx, and the parser refuses
+    class inheritance, method decorators and `yield` — use the `wasi`
+    or `local` runtime for a program that needs those.
     """
 
     name = "monty"

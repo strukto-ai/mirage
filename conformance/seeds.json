@@ -34,5 +34,14 @@
   },
   "/data/sk_colon.txt": {
     "text": "apple:12\nbee:3\ncat:100\n"
+  },
+  "/data/astral.txt": {
+    "text": "😀\n\nb\n"
+  },
+  "/data/cjk.txt": {
+    "text": "漢字 cjk\nテスト test\n"
+  },
+  "/data/utf8.txt": {
+    "text": "école\ncafé\n"
   }
 }

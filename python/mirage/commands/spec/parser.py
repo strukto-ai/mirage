@@ -20,13 +20,14 @@ from mirage.commands.spec.constants import (ARG_PLACEHOLDER, FLOAT_VALUE,
                                             INT_VALUE, NUMERIC_SHORT,
                                             flag_kwarg_name)
 from mirage.commands.spec.oldstyle import expand_old_style
-from mirage.commands.spec.types import (CommandSpec, ParsedArgs,
-                                        ParsedFlagValue, ValueType)
+from mirage.commands.spec.types import (VALUE_OCCURRENCES_KEY, CommandSpec,
+                                        ParsedArgs, ParsedFlagValue, ValueType)
 from mirage.utils.path import resolve_path
 
 
 def _set_value_flag(
     flags: dict[str, ParsedFlagValue],
+    occurrences: list[tuple[str, str]],
     cs: CompiledSpec,
     spelling: str,
     value: str,
@@ -38,8 +39,16 @@ def _set_value_flag(
     is ``--update=older``) and ``multiple`` options accumulate in true
     command-line order (``sort -k1 --key=2`` is ``[1, 2]``).
 
+    Last-wins is where the bag loses information, so the scalar branch
+    also appends to ``occurrences``: the value it drops is the one GNU
+    already validated and refused (``nl -w abc -w 3``), and nothing else
+    on the parse result remembers it. An accumulating dest needs no
+    entry -- its list already is the per-occurrence record.
+
     Args:
         flags (dict): parsed flag bag, updated in place.
+        occurrences (list): per-occurrence (dest, raw value) record,
+            appended to in place.
         cs (CompiledSpec): compiled spec tables.
         spelling (str): dashed spelling as typed.
         value (str): the flag's value.
@@ -52,6 +61,7 @@ def _set_value_flag(
         else:
             flags[name] = [value]
     else:
+        occurrences.append((name, value))
         flags.pop(name, None)
         flags[name] = value
 
@@ -183,6 +193,10 @@ def parse_command(
             i += 1
 
     flags: dict[str, ParsedFlagValue] = {}
+    # Every scalar value-flag occurrence, in scan order, beside the bag
+    # that keeps only the last of each. Appended to by _set_value_flag
+    # and read by nobody here: it leaves on the parse result.
+    occurrences: list[tuple[str, str]] = []
     raw_args: list[str] = []
     # raw_indices[k] = argv position of raw_args[k]
     raw_indices: list[int] = []
@@ -263,8 +277,10 @@ def parse_command(
             elif is_pair and eq == -1 and i + 2 < len(filtered_argv):
                 # Two tokens, both recorded under the one dest, so the
                 # command reads the accumulated list in twos.
-                _set_value_flag(flags, cs, spelling, filtered_argv[i + 1])
-                _set_value_flag(flags, cs, spelling, filtered_argv[i + 2])
+                _set_value_flag(flags, occurrences, cs, spelling,
+                                filtered_argv[i + 1])
+                _set_value_flag(flags, occurrences, cs, spelling,
+                                filtered_argv[i + 2])
                 # The first token names the value and is always textual;
                 # the option's own kind describes the second.
                 word_kinds[orig_indices[i + 1]] = "str"
@@ -272,7 +288,8 @@ def parse_command(
                 i += 3
             elif (not is_pair and etok in cs.long_value_spellings
                   and i + 1 < len(filtered_argv)):
-                _set_value_flag(flags, cs, etok, filtered_argv[i + 1])
+                _set_value_flag(flags, occurrences, cs, etok,
+                                filtered_argv[i + 1])
                 word_kinds[orig_indices[i + 1]] = cs.kind_of[etok]
                 if cs.dest_of(etok) == cs.base_dest:
                     word_bases[orig_indices[i + 1]] = base
@@ -290,7 +307,8 @@ def parse_command(
             else:
                 if eq != -1 and (spelling in cs.long_value_spellings
                                  or spelling in cs.long_optional_spellings):
-                    _set_value_flag(flags, cs, spelling, tok[eq + 1:])
+                    _set_value_flag(flags, occurrences, cs, spelling,
+                                    tok[eq + 1:])
                     base = _rebase(flags, cs, spelling, tok[eq + 1:], base)
                 elif etok in cs.long_value_spellings:
                     # Declared value flag at end of line with no argument.
@@ -299,6 +317,22 @@ def parse_command(
                     raw_args.append(tok)
                     raw_indices.append(orig_indices[i])
                     raw_bases.append(base)
+                elif eq != -1 and spelling in cs.long_bool_spellings:
+                    # A boolean long handed a value. getopt_long knows
+                    # the option, so it refuses the VALUE and names the
+                    # option without it, which is a different message
+                    # from the unrecognized one below (`grep
+                    # --byte-offset=2` is "option '--byte-offset'
+                    # doesn't allow an argument", not "unrecognized
+                    # option '--byte-offset=2'"). Reported as the
+                    # CANONICAL spelling plus the typed value, because
+                    # GNU names the canonical one even for an
+                    # abbreviation -- `grep --byte=2` answers for
+                    # --byte-offset -- and because the programs that
+                    # word this as an unknown option quote the value
+                    # along with it.
+                    invalid_options.append(spelling + tok[eq:])
+                    option_error_kinds.append("unexpected_value")
                 else:
                     invalid_options.append(tok)
                     option_error_kinds.append("invalid")
@@ -313,7 +347,7 @@ def parse_command(
             matched_optional = False
             for vf in cs.attach_spellings:
                 if tok.startswith(vf) and len(tok) > len(vf):
-                    _set_value_flag(flags, cs, vf, tok[len(vf):])
+                    _set_value_flag(flags, occurrences, cs, vf, tok[len(vf):])
                     base = _rebase(flags, cs, vf, tok[len(vf):], base)
                     i += 1
                     matched_optional = True
@@ -323,7 +357,8 @@ def parse_command(
             matched_value = False
             for vf in cs.value_spellings:
                 if tok == vf and i + 1 < len(filtered_argv):
-                    _set_value_flag(flags, cs, vf, filtered_argv[i + 1])
+                    _set_value_flag(flags, occurrences, cs, vf,
+                                    filtered_argv[i + 1])
                     word_kinds[orig_indices[i + 1]] = cs.kind_of[vf]
                     if cs.dest_of(vf) == cs.base_dest:
                         word_bases[orig_indices[i + 1]] = base
@@ -332,7 +367,7 @@ def parse_command(
                     matched_value = True
                     break
                 if tok.startswith(vf) and len(tok) > len(vf):
-                    _set_value_flag(flags, cs, vf, tok[len(vf):])
+                    _set_value_flag(flags, occurrences, cs, vf, tok[len(vf):])
                     base = _rebase(flags, cs, vf, tok[len(vf):], base)
                     i += 1
                     matched_value = True
@@ -362,14 +397,15 @@ def parse_command(
                 if attached is not None:
                     for name in cluster_bools:
                         _set_bool_flag(flags, cs, name)
-                    _set_value_flag(flags, cs, vflag, attached)
+                    _set_value_flag(flags, occurrences, cs, vflag, attached)
                     base = _rebase(flags, cs, vflag, attached, base)
                     i += 1
                     continue
                 if i + 1 < len(filtered_argv):
                     for name in cluster_bools:
                         _set_bool_flag(flags, cs, name)
-                    _set_value_flag(flags, cs, vflag, filtered_argv[i + 1])
+                    _set_value_flag(flags, occurrences, cs, vflag,
+                                    filtered_argv[i + 1])
                     word_kinds[orig_indices[i + 1]] = cs.kind_of[vflag]
                     if cs.dest_of(vflag) == cs.base_dest:
                         word_bases[orig_indices[i + 1]] = base
@@ -600,12 +636,50 @@ def parse_command(
         missing_required_options=missing_required_options,
         missing_required_operands=missing_required_operands,
         typed_dests=typed_dests,
+        value_occurrences=occurrences,
         old_option_needs_value=old.needs_value if old is not None else None,
     )
+
+
+def _shadowed_occurrences(
+        occurrences: list[tuple[str, str]]) -> list[str] | None:
+    """The occurrence record to carry in the kwargs bag, or None.
+
+    The bag is a faithful record of a line that typed each scalar option
+    at most once: one value per dest, in scan order. Only a repeat makes
+    it lie -- the earlier value is gone and the dest's position is the
+    later occurrence's -- so only a repeat needs the record carried
+    alongside, and every other command line's bag stays exactly what it
+    was. Flattened to [dest, value, ...] because a bag value is a str, a
+    bool, an int or a list of str, which is the same reason a ``pair``
+    option flattens its (name, value) list.
+
+    Args:
+        occurrences (list): (dest, raw value) pairs in scan order.
+
+    Returns:
+        list[str] | None: the flattened record when one dest occurred
+            more than once, else None.
+    """
+    seen: set[str] = set()
+    for dest, _ in occurrences:
+        if dest in seen:
+            break
+        seen.add(dest)
+    else:
+        return None
+    flat: list[str] = []
+    for dest, value in occurrences:
+        flat.append(flag_kwarg_name(dest))
+        flat.append(value)
+    return flat
 
 
 def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, ParsedFlagValue]:
     result: dict[str, ParsedFlagValue] = {}
     for key, value in parsed.flags.items():
         result[flag_kwarg_name(key)] = value
+    shadowed = _shadowed_occurrences(parsed.value_occurrences)
+    if shadowed is not None:
+        result[VALUE_OCCURRENCES_KEY] = shadowed
     return result

@@ -49,12 +49,10 @@ export interface RuntimesInit {
 export class Runtimes {
   readonly entries: Runtime[] = []
   bindings: Record<string, Runtime>
-  private readonly registry: MountRegistry
   private readonly binding: WorkspaceBinding
   private readonly registerCloser: (fn: () => Promise<void>) => void
 
   constructor(init: RuntimesInit) {
-    this.registry = init.registry
     this.binding = init.binding
     this.registerCloser = init.registerCloser
     if (init.entries === undefined) {

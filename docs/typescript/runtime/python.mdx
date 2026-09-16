@@ -105,11 +105,26 @@ switch interpreters when an API is missing. The shared
 `integ/runtime/monty.json` suite records these gaps and the working forms
 so a dependency update can revisit them.
 
+- The importable stdlib is `asyncio`, `base64`, `binascii`, `collections`, `dataclasses`,
+  `datetime`, `functools`, `itertools`, `json`, `math`, `os`, `pathlib`,
+  `re`, `sys`, `typing` and `unicodedata`, and each is
+  itself partial (`json` has `loads`/`dumps` but no `load`/`dump`).
+- The parser refuses class inheritance and metaclasses, the
+  `classmethod`/`staticmethod`/`property` method decorators, and `yield`.
+  Plain classes, function decorators, `with`, f-strings and
+  comprehensions all work.
+- Introspection builtins are absent: `dir`, `vars`, `globals`, `locals`,
+  `help`, `callable`, `issubclass`, `super`, `eval`, `exec` and
+  `compile`. There is no `__dict__` on any object, so none of them can
+  be written by hand either.
 - Command-line arguments are the `argv` global; `sys.argv` does not exist.
-- The builtin `open()` is not bridged yet in the JS binding; use
-  `pathlib` (`Path(...).read_text()`, `.write_text()`, `.iterdir()`).
 - No `sys.stdin` and no third-party imports.
 - `os.environ` reflects the session env only.
+- `os.stat()` and `Path.stat()` answer with every attribute CPython's
+  `stat_result` carries, but not its sequence half: `st[6]`, `len(st)`
+  and iterating it raise `TypeError` here and work on the Python host,
+  because the JS wire has no namedtuple shape to send one in. Read the
+  fields by name (`st.st_size`, `st.st_mode`).
 
 ## Selecting in YAML
 

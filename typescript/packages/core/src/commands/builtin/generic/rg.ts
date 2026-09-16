@@ -14,7 +14,6 @@
 
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { cacheAwareStream } from '../../../cache/read_through.ts'
-import { exitOnEmpty } from '../../../io/stream.ts'
 import { mountParentReaddir, mountParentStat } from '../utils/operands.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
@@ -24,7 +23,13 @@ import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/types.ts'
 import { compilePattern, resolvePattern } from '../grep_pattern.ts'
-import { grepStream, nonzeroCountStream, prefixLines } from '../grep_scan.ts'
+import {
+  exitCodeFor,
+  grepStream,
+  nonzeroCountStream,
+  prefixLines,
+  type GrepStreamOptions,
+} from '../grep_scan.ts'
 import { rgFolderFiletype, rgFull } from '../rg_scan.ts'
 import { resolveSource } from '../utils/stream.ts'
 
@@ -39,6 +44,7 @@ interface RgFlags {
   ignoreCase: boolean
   invert: boolean
   lineNumbers: boolean
+  byteOffsets: boolean
   countOnly: boolean
   filesOnly: boolean
   wholeWord: boolean
@@ -62,6 +68,7 @@ function parseFlags(fl: FlagView): RgFlags {
     ignoreCase: fl.asBool('i'),
     invert: fl.asBool('v'),
     lineNumbers: fl.asBool('n'),
+    byteOffsets: fl.asBool('byte_offset'),
     countOnly: fl.asBool('c'),
     filesOnly: fl.asBool('args_l'),
     wholeWord: fl.asBool('w'),
@@ -75,6 +82,23 @@ function parseFlags(fl: FlagView): RgFlags {
     fileType: fl.asStr('type') ?? null,
     globPattern: fl.asStr('glob') ?? null,
     hidden: fl.asBool('hidden'),
+  }
+}
+
+// The stream reports selection on `io` rather than the caller reading it off
+// an empty output: under -o a line whose only match is empty prints nothing
+// and is still selected, so it exits 0 (GNU grep 3.11).
+function streamOptionsOf(flags: RgFlags, io: IOResult): GrepStreamOptions {
+  return {
+    invert: flags.invert,
+    lineNumbers: flags.lineNumbers,
+    byteOffsets: flags.byteOffsets,
+    countOnly: flags.countOnly,
+    onlyMatching: flags.onlyMatching,
+    maxCount: flags.maxCount,
+    afterContext: flags.afterContext,
+    beforeContext: flags.beforeContext,
+    io,
   }
 }
 
@@ -124,17 +148,12 @@ export async function rgGeneric(
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${msg}\n`) })]
     }
     const pat = compilePattern(exprText, flags.ignoreCase, flags.fixedString, flags.wholeWord)
-    const matched = grepStream(source, pat, {
-      invert: flags.invert,
-      lineNumbers: flags.lineNumbers,
-      countOnly: flags.countOnly,
-      onlyMatching: flags.onlyMatching,
-      maxCount: flags.maxCount,
-      afterContext: flags.afterContext,
-      beforeContext: flags.beforeContext,
-    })
-    const io = new IOResult()
-    return [exitOnEmpty(matched, io), io]
+    // Seeded to 1 the way the python twin and the multi-operand branch
+    // below are: grepStream flips it to 0 on the first selected line, and
+    // seeding here means the status does not depend on the generator having
+    // been started.
+    const io = new IOResult({ exitCode: 1 })
+    return [grepStream(source, pat, streamOptionsOf(flags, io)), io]
   }
 
   const mounts = opts.ns?.mounts
@@ -170,6 +189,7 @@ export async function rgGeneric(
       ignoreCase: flags.ignoreCase,
       invert: flags.invert,
       lineNumbers: flags.lineNumbers,
+      byteOffsets: flags.byteOffsets,
       countOnly: flags.countOnly,
       filesOnly: flags.filesOnly,
       onlyMatching: flags.onlyMatching,
@@ -181,6 +201,11 @@ export async function rgGeneric(
       hidden: flags.hidden,
     }
     const results: string[] = []
+    // Status comes from selection, not from the printed lines: under -o a
+    // zero-width match selects the line and prints nothing, so an empty
+    // `results` is not "nothing matched". The branch below reads it the same
+    // way, and so does `grep -r`.
+    const folderIO = new IOResult({ exitCode: 1 })
     for (const p of paths) {
       results.push(
         ...(await rgFolderFiletype(
@@ -191,17 +216,19 @@ export async function rgGeneric(
           exprText,
           folderOpts,
           warnings,
+          folderIO,
         )),
       )
     }
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
+    const code = exitCodeFor(folderIO.exitCode === 0, warnings.length > 0, false)
     if (results.length === 0) {
-      const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
+      const io = new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) })
       return [new Uint8Array(0), io]
     }
     const out: ByteSource = ENC.encode(results.join('\n') + '\n')
     const io = new IOResult({
-      exitCode: warnings.length > 0 ? 1 : 0,
+      exitCode: code,
       ...(stderr !== undefined ? { stderr } : {}),
     })
     return [out, io]
@@ -220,6 +247,7 @@ export async function rgGeneric(
       ignoreCase: flags.ignoreCase,
       invert: flags.invert,
       lineNumbers: flags.lineNumbers,
+      byteOffsets: flags.byteOffsets,
       countOnly: flags.countOnly,
       filesOnly: flags.filesOnly,
       fixedString: flags.fixedString,
@@ -234,6 +262,11 @@ export async function rgGeneric(
       noFilename: flags.noFilename,
     }
     const results: string[] = []
+    // Status comes from selection, not from the printed lines: under -o a
+    // zero-width match selects the line and prints nothing, so an empty
+    // `results` is not "nothing matched". `grep -r` reads its status the
+    // same way.
+    const fullIO = new IOResult({ exitCode: 1 })
     for (const p of paths) {
       const hitsFull = await rgFull(
         readdirFn,
@@ -244,19 +277,26 @@ export async function rgGeneric(
         fullOpts,
         warnings,
         label ? p.rawPath : null,
+        fullIO,
       )
       results.push(...respellRaw(hitsFull, p.virtual, p.rawPath))
     }
     const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
+    // `exitCodeFor` is the one contract both commands share: an operand the
+    // search could not read is exit 2 and it outranks a match. This branch
+    // answered 1 where the python twin, the multi-operand branch below and
+    // `grep` all answer 2.
+    const code = exitCodeFor(fullIO.exitCode === 0, warnings.length > 0, false)
     if (results.length === 0) {
-      const io = new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) })
+      const io = new IOResult({
+        exitCode: code,
+        ...(stderr !== undefined ? { stderr } : {}),
+      })
       return [new Uint8Array(0), io]
     }
     const out: ByteSource = ENC.encode(results.join('\n') + '\n')
-    // A failed operand fails the command (deliberate divergence: ripgrep
-    // uses exit 2 for errors, mirage flattens fs errors to 1).
     const io = new IOResult({
-      exitCode: warnings.length > 0 ? 1 : 0,
+      exitCode: code,
       ...(stderr !== undefined ? { stderr } : {}),
     })
     return [out, io]
@@ -267,6 +307,7 @@ export async function rgGeneric(
     const streamOpts = {
       invert: flags.invert,
       lineNumbers: false,
+      byteOffsets: false,
       onlyMatching: flags.onlyMatching,
       maxCount: flags.maxCount,
       countOnly: true,
@@ -290,44 +331,48 @@ export async function rgGeneric(
         if (n > 0) results.push(label ? `${p.rawPath}:${String(n)}` : String(n))
       }
       const stderr = warnings.length > 0 ? ENC.encode(warnings.join('\n') + '\n') : undefined
+      const code = exitCodeFor(results.length > 0, warnings.length > 0, false)
       if (results.length === 0)
         return [
           new Uint8Array(0),
-          new IOResult({ exitCode: 1, ...(stderr !== undefined ? { stderr } : {}) }),
+          new IOResult({ exitCode: code, ...(stderr !== undefined ? { stderr } : {}) }),
         ]
       return [
         ENC.encode(results.join('\n') + '\n'),
         new IOResult({
-          exitCode: warnings.length > 0 ? 1 : 0,
+          exitCode: code,
           ...(stderr !== undefined ? { stderr } : {}),
         }),
       ]
     }
-    const io = new IOResult()
-    const counted = nonzeroCountStream(grepStream(stream(first), pat, streamOpts))
-    return [exitOnEmpty(counted, io), io]
+    const io = new IOResult({ exitCode: 1 })
+    const counted = nonzeroCountStream(grepStream(stream(first), pat, { ...streamOpts, io }))
+    return [counted, io]
   }
 
   const pat = compilePattern(exprText, flags.ignoreCase, flags.fixedString, flags.wholeWord)
   if (paths.length > 1 || flags.withFilename) {
     const results: string[] = []
     const warnings: string[] = []
+    let selected = false
     for (const p of paths) {
       let data: Uint8Array
+      const fileIO = new IOResult({ exitCode: 1 })
       try {
-        const matched = grepStream(stream(p), pat, flags)
+        const matched = grepStream(stream(p), pat, streamOptionsOf(flags, fileIO))
         data = await materialize(label ? prefixLines(matched, p.rawPath + ':') : matched)
       } catch (error) {
         if (!isFsError(error)) throw error
         warnings.push(`rg: ${p.rawPath}: ${String(fsStrerror(error))}`)
         continue
       }
+      selected ||= fileIO.exitCode === 0
       if (data.length) results.push(DEC.decode(data))
     }
     return [
       ENC.encode(results.join('')),
       new IOResult({
-        exitCode: warnings.length ? 2 : results.length ? 0 : 1,
+        exitCode: exitCodeFor(selected, warnings.length > 0, false),
         ...(warnings.length ? { stderr: ENC.encode(warnings.join('\n') + '\n') } : {}),
       }),
     ]
@@ -345,6 +390,6 @@ export async function rgGeneric(
       }),
     ]
   }
-  const io = new IOResult()
-  return [exitOnEmpty(grepStream(stream(first), pat, flags), io), io]
+  const io = new IOResult({ exitCode: 1 })
+  return [grepStream(stream(first), pat, streamOptionsOf(flags, io)), io]
 }

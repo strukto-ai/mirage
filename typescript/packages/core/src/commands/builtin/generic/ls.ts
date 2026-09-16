@@ -29,7 +29,7 @@ import {
   timeOf,
 } from '../utils/formatting.ts'
 import { UsageError } from '../../errors.ts'
-import { invalidArgumentError, usageHint } from '../../spec/usage.ts'
+import { argmatchError, argmatchLine, usageHint } from '../../spec/usage.ts'
 import { identityOf, type Identity } from '../utils/identity.ts'
 import { gnuStrerror, isEacces, isWalkError } from '../../../utils/errors.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -641,13 +641,17 @@ export interface LsFlags {
   readonly hyperlink: boolean
 }
 
+// GNU's own `sort_args`, in its own order, which is what `--sort=x` lists
+// back. `name` is deliberately absent: coreutils 9.4 refuses
+// `ls --sort=name` (name order is what no `--sort` at all means), and a
+// word mirage accepted but GNU did not was also a word missing from the
+// list GNU prints.
 const SORT_WORDS: Readonly<Record<string, LsSortBy>> = {
   none: 'none',
-  size: 'size',
   time: 'time',
-  version: 'version',
+  size: 'size',
   extension: 'extension',
-  name: 'name',
+  version: 'version',
   width: 'width',
 }
 const SORT_FLAGS: Readonly<Record<string, LsSortBy>> = {
@@ -676,17 +680,14 @@ const HYPERLINK_GROUPS: readonly (readonly string[])[] = [
 ]
 
 // GNU's ARGMATCH refusal for an option whose values have aliases, listed
-// one group per line (--time, --hyperlink); exit 1, as ls answers it.
+// one group per line (--time, --hyperlink); exit 1, as ls answers it. The
+// value goes in as typed -- the shared renderer escapes it.
 function groupedArgumentError(
   option: string,
   value: string,
   groups: readonly (readonly string[])[],
 ): UsageError {
-  const valid = groups.map((g) => `  - ${g.map((w) => `'${w}'`).join(', ')}`).join('\n')
-  return new UsageError(
-    `ls: invalid argument '${value}' for '${option}'\nValid arguments are:\n${valid}\n${usageHint('ls')}`,
-    1,
-  )
+  return argmatchError('ls', option, value, groups, 1)
 }
 
 // The sort key the line asked for, last spelling winning, and whether it
@@ -699,8 +700,7 @@ function sortFlag(fl: FlagView): [SortBy, boolean] {
   const word = fl.asStr('sort') ?? ''
   const key = SORT_WORDS[word]
   if (key === undefined) {
-    const [msg] = invalidArgumentError('ls', '--sort', word, Object.keys(SORT_WORDS))
-    throw new UsageError(new TextDecoder().decode(msg).replace(/\n$/, ''), 1)
+    throw argmatchError('ls', '--sort', word, Object.keys(SORT_WORDS), 1)
   }
   return [key, true]
 }
@@ -729,8 +729,12 @@ function timeStyleFlag(fl: FlagView): string {
   const posix = style.startsWith('posix-')
   const bare = posix ? style.slice(6) : style
   if (LS_TIME_STYLES.includes(bare) || bare.startsWith('+')) return posix ? 'locale' : bare
+  // ls hand-writes this block rather than letting argmatch print
+  // `time_style_args`, so it is the one ARGMATCH refusal in the repo whose
+  // candidates are neither quoted nor a subset of the words it accepts --
+  // and the one that exits 2, ls's own `usage (LS_FAILURE)`.
   throw new UsageError(
-    `ls: invalid argument '${style}' for 'time style'\n` +
+    `${argmatchLine('ls', 'time style', style)}\n` +
       'Valid arguments are:\n' +
       '  - [posix-]full-iso\n' +
       '  - [posix-]long-iso\n' +

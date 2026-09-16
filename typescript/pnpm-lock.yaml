@@ -786,6 +786,8 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@22.19.17)(vite@7.3.5(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
 
+  scripts: {}
+
 packages:
 
   '@1password/sdk-core@0.5.0':

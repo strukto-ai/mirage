@@ -1,4 +1,3 @@
-import type { FlagValue } from '../spec/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -159,22 +158,42 @@ export function parseKeydef(spec: string, globalMods: KeyMods, globalSkip: boole
   }
 }
 
-export function buildConfig(flags: Record<string, FlagValue>): SortConfig {
+// The already-parsed global ordering options, named the way Python's
+// `build_config` keyword arguments are. It takes values rather than a flag
+// bag because the caller has read them through FlagView once; re-minting a
+// short-letter bag here made the letters a second, undeclared flag
+// vocabulary that no spec could validate.
+export interface SortGlobals {
+  keyDefs: readonly string[]
+  fieldSep: string | null
+  reverse: boolean
+  numeric: boolean
+  unique: boolean
+  foldCase: boolean
+  humanNumeric: boolean
+  versionSort: boolean
+  monthSort: boolean
+  ignoreBlanks: boolean
+  stable: boolean
+  generalNumeric: boolean
+  dictionary: boolean
+  ignoreNonprinting: boolean
+}
+
+export function buildConfig(globals: SortGlobals): SortConfig {
   const globalMods: KeyMods = {
-    numeric: flags.n === true,
-    generalNumeric: flags.g === true,
-    human: flags.h === true,
-    version: flags.V === true,
-    month: flags.M === true,
-    fold: flags.f === true,
-    reverse: flags.r === true,
-    dictionary: flags.d === true,
-    ignoreNonprinting: flags.i === true,
+    numeric: globals.numeric,
+    generalNumeric: globals.generalNumeric,
+    human: globals.humanNumeric,
+    version: globals.versionSort,
+    month: globals.monthSort,
+    fold: globals.foldCase,
+    reverse: globals.reverse,
+    dictionary: globals.dictionary,
+    ignoreNonprinting: globals.ignoreNonprinting,
   }
-  const ignoreBlanks = flags.b === true
-  const rawK = flags.k
-  const keyDefs =
-    rawK === undefined ? [] : Array.isArray(rawK) ? rawK : typeof rawK === 'string' ? [rawK] : []
+  const ignoreBlanks = globals.ignoreBlanks
+  const keyDefs = globals.keyDefs
   let keys: Key[]
   if (keyDefs.length > 0) {
     keys = keyDefs.map((spec) => parseKeydef(spec, globalMods, ignoreBlanks))
@@ -193,10 +212,10 @@ export function buildConfig(flags: Record<string, FlagValue>): SortConfig {
   }
   return {
     keys,
-    fieldSep: typeof flags.t === 'string' ? flags.t : null,
-    reverse: flags.r === true,
-    unique: flags.u === true,
-    stable: flags.s === true,
+    fieldSep: globals.fieldSep,
+    reverse: globals.reverse,
+    unique: globals.unique,
+    stable: globals.stable,
   }
 }
 

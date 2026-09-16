@@ -36,6 +36,43 @@
       "flags": [
         "max-depth"
       ]
+    },
+    {
+      "id": "du_max_depth_quotes_a_multibyte_word",
+      "seq": 323,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du --max-depth='1é' /data/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: invalid maximum depth '1\\303\\251'\nTry 'du --help' for more information.\n"
+      },
+      "flags": [
+        "max-depth"
+      ]
     }
   ]
 }

@@ -41,6 +41,34 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./paths": {
+      "types": "./dist/paths.d.ts",
+      "import": "./dist/paths.js"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js"
+    },
+    "./daemon_config": {
+      "types": "./dist/daemon_config.d.ts",
+      "import": "./dist/daemon_config.js"
+    },
+    "./host_validation_constants": {
+      "types": "./dist/host_validation_constants.d.ts",
+      "import": "./dist/host_validation_constants.js"
+    },
+    "./workspace_config": {
+      "types": "./dist/workspace_config.d.ts",
+      "import": "./dist/workspace_config.js"
+    },
+    "./auth/config": {
+      "types": "./dist/auth/config.d.ts",
+      "import": "./dist/auth/config.js"
+    },
+    "./auth/storage": {
+      "types": "./dist/auth/storage.d.ts",
+      "import": "./dist/auth/storage.js"
+    },
     "./package.json": "./package.json",
     "./bin/daemon": "./dist/bin/daemon.js"
   },

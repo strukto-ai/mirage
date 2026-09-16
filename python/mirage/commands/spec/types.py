@@ -104,6 +104,16 @@ ParsedFlagValue: TypeAlias = str | bool | int | list[str]
 FlagValue: TypeAlias = (ParsedFlagValue | PathSpec | list[PathSpec]
                         | list[str | PathSpec])
 
+# The one key in a flag bag that is not an option's dest: the parser's
+# per-occurrence record of the scalar value flags the line carried,
+# flattened to [dest, value, dest, value, ...] the way a ``pair``
+# option's list is. ``parse_to_kwargs`` writes it and only when the bag
+# lost something (one dest typed twice); ``FlagView.value_occurrences``
+# is the one reader. The leading dashes make it unspellable as a dest --
+# ``flag_kwarg_name`` strips them off every real one -- so no option can
+# ever collide with it.
+VALUE_OCCURRENCES_KEY = "--value-occurrences"
+
 
 @dataclass(frozen=True)
 class Option:
@@ -317,6 +327,47 @@ class FlagView:
         wanted = {self._key(n) for n in names}
         return [k for k in self._flags if k in wanted]
 
+    def value_occurrences(self, *names: str) -> list[tuple[str, str]]:
+        """The named options' occurrences, in the order the line typed them.
+
+        ``typed_order`` can only answer out of the bag, which keeps one
+        value per scalar option -- the LAST occurrence of a repeated
+        one. GNU validates each value the moment getopt hands it over,
+        so a command that has to answer for the leftmost bad value
+        (``nl -w abc -w 3`` refuses ``abc``) needs the occurrences the
+        bag threw away. The parser records every scalar value-flag
+        occurrence as it scans, and ``parse_to_kwargs`` carries that
+        record in the bag under ``VALUE_OCCURRENCES_KEY`` -- but only
+        when the bag actually lost something, i.e. when one dest was
+        typed twice. When it is absent the bag IS the record: every dest
+        occurred once, so its bag position is that occurrence and
+        ``typed_order`` reproduces the line exactly.
+
+        Args:
+            names (str): flag names to report the occurrences of.
+
+        Returns:
+            list[tuple[str, str]]: (name, raw value) pairs in scan
+                order, for the named options the line carried. Values
+                are raw argv text: a PATH-typed option's value is the
+                word as typed, not the resolved path, and the bare
+                boolean form of an optional-value flag carries no value
+                and so does not appear.
+        """
+        wanted = {self._key(n) for n in names}
+        packed = self._flags.get(VALUE_OCCURRENCES_KEY)
+        if isinstance(packed, list):
+            return [(dest, value)
+                    for dest, value in zip(packed[0::2], packed[1::2])
+                    if isinstance(dest, str) and isinstance(value, str)
+                    and dest in wanted]
+        recorded: list[tuple[str, str]] = []
+        for dest in self.typed_order(*names):
+            value = self._flags.get(dest)
+            if isinstance(value, str):
+                recorded.append((dest, value))
+        return recorded
+
     def as_bool(self, name: str) -> bool:
         value = self._flags.get(self._key(name))
         if isinstance(value, bool):
@@ -426,11 +477,16 @@ class ParsedArgs:
     ambiguous_options: list[tuple[str,
                                   tuple[str,
                                         ...]]] = field(default_factory=list)
-    # "invalid" / "ambiguous" tags in scan encounter order, so the refusal
-    # names the FIRST offending token like GNU (grep --c --bogus reports
-    # --c; reversed reports --bogus). needs_value is absent by
-    # construction: it only fires on the line's final token, so it can
-    # never precede another scan error.
+    # "invalid" / "unexpected_value" / "ambiguous" tags in scan encounter
+    # order, so the refusal names the FIRST offending token like GNU (grep
+    # --c --bogus reports --c; reversed reports --bogus). needs_value is
+    # absent by construction: it only fires on the line's final token, so
+    # it can never precede another scan error. "unexpected_value" is a
+    # boolean long handed a value, which getopt_long refuses in its own
+    # words rather than as an unrecognized option; its entry in
+    # invalid_options is the option's canonical spelling with the typed
+    # value ("--byte-offset=2"), so the two tags share one list and the
+    # renderer tells them apart by the tag.
     option_error_kinds: list[str] = field(default_factory=list)
     needs_value_options: list[str] = field(default_factory=list)
     invalid_value_options: list[tuple[str, str, tuple[str, ...]]] = field(
@@ -447,6 +503,16 @@ class ParsedArgs:
     # what was supplied (clap's) needs exactly this distinction: a
     # defaulted option is invisible there, a typed one is not.
     typed_dests: list[str] = field(default_factory=list)
+    # Every scalar value-flag occurrence the line carried, as (dest, raw
+    # value) in scan order. The bag above keeps one value per scalar
+    # dest, so a repeated option throws the earlier value away; this is
+    # where it survives, for a command that must answer for a value the
+    # bag no longer holds (nl refuses the LEFTMOST invalid one, which is
+    # the order GNU validates in). Parser bookkeeping, not grammar: no
+    # spec field switches it on, an accumulating (``multiple``) option
+    # is absent because its own list already is the record, and every
+    # command is free to ignore it -- all of them but nl do.
+    value_occurrences: list[tuple[str, str]] = field(default_factory=list)
     # The old-style cluster letter whose argument ran off the end of the
     # line (`tar xzf` with no archive). Its own report because GNU tar
     # words it differently and exits differently from every getopt

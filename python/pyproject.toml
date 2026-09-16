@@ -334,7 +334,16 @@ markers = [
 
 [tool.mypy]
 python_version = "3.12"
-packages = ["mirage"]
+# `files`, not `packages`: the two are mutually exclusive ("May only
+# specify one of: module/package, files, or command") and `scripts/` is a
+# directory of top-level modules, not a package. It is listed for the
+# reason typescript/scripts is a pnpm workspace member -- those 13 files
+# generate `spec/` and gate CI (`gen_specs.py` is what the Spec drift
+# step runs), and no typechecker read one of them. The first run found
+# 27 errors in 5 files, among them six capability slots read off a bare
+# `type` in `gen_specs.py`: the same shape `resource_facts.ts` was fixed
+# for on the typescript side.
+files = ["mirage", "../scripts"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true

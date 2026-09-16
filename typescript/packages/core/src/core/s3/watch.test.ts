@@ -81,7 +81,7 @@ describe('S3Walk', () => {
     vi.clearAllMocks()
   })
 
-  it('yields files fingerprinted on the ETag', async () => {
+  it('leads each file fingerprint with the ETag', async () => {
     mockListing([
       { key: 'data/a.txt', size: 5, etag: 'etag-a' },
       { key: 'data/b.txt', size: 4, etag: 'etag-b' },
@@ -90,10 +90,10 @@ describe('S3Walk', () => {
     const files = entries.filter((e) => !e.isDir)
     expect(files.map((e) => e.virtual).sort()).toEqual(['/s3/data/a.txt', '/s3/data/b.txt'])
     // The ETag leads the composite, which is what keeps two files of equal
-    // size apart: LastModified is constant here, so mtime and size alone
-    // would collide across them.
-    expect(files[0]?.fingerprint).toBe('etag-a|2026-03-31T00:00:00.000Z|5')
-    expect(files[1]?.fingerprint).toBe('etag-b|2026-03-31T00:00:00.000Z|4')
+    // size apart: LastModified is constant here, so the size alone would
+    // collide across them.
+    expect(files[0]?.fingerprint).toBe('etag-a|5')
+    expect(files[1]?.fingerprint).toBe('etag-b|4')
     expect(files[0]?.size).toBe(5)
   })
 
@@ -129,7 +129,7 @@ describe('s3 delta hook', () => {
     'preserves persisted fallback fingerprints for %s',
     async (stamp) => {
       mockListing([{ key: 'a.txt', size: 5, etag: '', modified: new Date(stamp) }])
-      const checkpoint = JSON.stringify({ '/s3/a.txt': `|${stamp}|5` })
+      const checkpoint = JSON.stringify({ '/s3/a.txt': `${stamp}|5` })
       const hook = buildDeltaHook(accessor())
       const spec = root('/s3', '')
       const unchanged = await hook.pull(spec, checkpoint)

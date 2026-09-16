@@ -9,15 +9,19 @@ from mirage.commands.builtin.utils.operands import operands_io
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import CommandOpts
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.usage import argmatch_error
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 from mirage.utils.width import advance_column, is_space
 
-_TOTAL_MODES = frozenset({"auto", "always", "only", "never"})
+# GNU's `total_types` in declaration order, which is both the accepted
+# set and what `--total=x` lists back. No aliases, so one per line.
+TOTAL_ARGS = ("auto", "always", "only", "never")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,9 +36,14 @@ class WCFlags:
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> WCFlags:
     fl = FlagView(flags, spec=SPECS["wc"])
-    total = fl.as_str("total") or "auto"
-    if total not in _TOTAL_MODES:
-        raise ValueError(f"wc: invalid argument '{total}' for '--total'")
+    raw_total = fl.as_str("total")
+    # `--total=` is NOT the default: GNU reads the empty word as a prefix
+    # of every candidate and answers `ambiguous argument ''` (exit 1).
+    # The old `or "auto"` took it as `auto` and exited 0, which was also
+    # the one py/ts split here -- TypeScript refused it.
+    total = "auto" if raw_total is None else raw_total
+    if total not in TOTAL_ARGS:
+        raise argmatch_error("wc", "--total", total, TOTAL_ARGS)
     return WCFlags(
         lines=fl.as_bool("lines"),
         words=fl.as_bool("words"),
@@ -334,6 +343,9 @@ async def wc_generic(
     """
     try:
         parsed = parse_flags(opts.flags)
+    except UsageError as exc:
+        return None, IOResult(exit_code=exc.exit_code,
+                              stderr=(str(exc) + "\n").encode())
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
     if paths:

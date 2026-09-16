@@ -2,6 +2,7 @@ import errno
 
 import pytest
 from aioresponses import aioresponses
+from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.onedrive.rmdir import rmdir
@@ -27,6 +28,7 @@ async def test_rmdir_deletes_an_empty_folder():
         m.get(_BASE + "/root:/dir:/children" + _PROBE, payload={"value": []})
         m.delete(_BASE + "/root:/dir", status=204)
         await rmdir(_accessor(), PathSpec.from_str_path("/dir"))
+        assert ("DELETE", URL(_BASE + "/root:/dir")) in m.requests
 
 
 @pytest.mark.asyncio

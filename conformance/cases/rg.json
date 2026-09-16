@@ -1,0 +1,523 @@
+{
+  "command": "rg",
+  "cases": [
+    {
+      "id": "rg_o_every_match_on_the_line",
+      "cmd": "rg -o '[0-9]'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a1b2c\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_non_empty_matches_across_lines",
+      "cmd": "printf 'error: disk full\\nwarning: low memory\\ninfo: all good\\nerror: timeout\\nnote: done\\n' > /data/rglog.txt; rg -o 'err[a-z]*' /data/rglog.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "error\nerror\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_empty_match_prints_nothing",
+      "cmd": "rg -o '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_empty_pattern_prints_nothing",
+      "cmd": "rg -o ''",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_start_anchor_prints_nothing",
+      "cmd": "rg -o '^'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_end_anchor_prints_nothing",
+      "cmd": "rg -o '$'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_empty_matches_dropped_around_a_real_one",
+      "cmd": "rg -o '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a1b\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_nonempty_runs_kept_in_order",
+      "cmd": "rg -o '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "1a22b\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n22\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_star_keeps_only_the_nonempty_match",
+      "cmd": "rg -o 'b*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "abc\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_oc_still_counts_the_selected_line",
+      "cmd": "rg -oc '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_empty_match_on_every_line_prints_nothing",
+      "cmd": "rg -o '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a\nb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_b_offset_is_the_line_start",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -b abc /data/rgb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:abc\n4:defabc\n11:abc abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_ob_offset_is_the_match",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -ob abc /data/rgb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:abc\n7:abc\n11:abc\n15:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_bn_field_order_is_line_then_byte",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -bn abc /data/rgb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:0:abc\n2:4:defabc\n3:11:abc abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_ob_empty_matches_dropped_around_a_real_one",
+      "cmd": "rg -ob '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a1b\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_o_directory_empty_match_still_exits_0",
+      "cmd": "mkdir -p /data/rgo5; printf 'ab\\n' > /data/rgo5/z.txt; rg -o '[0-9]*' /data/rgo5",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_b_counts_bytes_not_characters",
+      "cmd": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/rc5.txt; rg -b abc /data/rc5.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:caf\u00e9 abc\n10:x\u00e9y abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_bo_counts_bytes_not_characters",
+      "cmd": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/rc5.txt; rg -bo abc /data/rc5.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "6:abc\n15:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_b_counts_an_invalid_byte_as_one",
+      "cmd": "printf '\\377\\na\\n' > /data/rcinv.bin; rg -b a /data/rcinv.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2:a\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_b_counts_an_invalid_byte_as_one_over_two_operands",
+      "cmd": "printf '\\377\\na\\n' > /data/rcinv.bin; printf 'zzz\\n' > /data/rcz.txt; rg -b a /data/rcinv.bin /data/rcz.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/rcinv.bin:2:a\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_bo_counts_an_invalid_byte_as_one",
+      "cmd": "printf '\\377a\\n' > /data/rcinv2.bin; rg -bo a /data/rcinv2.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:a\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_b_line_ends_only_at_a_newline",
+      "cmd": "printf 'a\\r\\nb\\r\\n' > /data/rccrlf.txt; rg -b b /data/rccrlf.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3:b\r\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_v_keeps_a_carriage_return_in_the_line",
+      "cmd": "printf 'a\\r\\nb\\r\\n' > /data/rccrlf.txt; rg -n -v zqxjv /data/rccrlf.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:a\r\n2:b\r\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_v_does_not_count_a_last_empty_line",
+      "cmd": "printf 'a\\r\\nb\\r\\n' > /data/rccrlf.txt; rg -c -v zqxjv /data/rccrlf.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_m_zero_selects_nothing",
+      "cmd": "rg -m 0 hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_m_zero_counts_nothing",
+      "cmd": "rg -m 0 -c hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_m_zero_names_no_file",
+      "cmd": "rg -m 0 -l hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_m_zero_walks_nothing",
+      "cmd": "rg -m 0 nested /data/sub",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_ov_prints_nothing",
+      "cmd": "rg -ov hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_ovc_still_counts_the_selected_lines",
+      "cmd": "rg -ovc hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_l_names_a_single_unlabelled_operand",
+      "cmd": "rg -l hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/a.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_files_only_missing_operand_exits_2",
+      "cmd": "rg -l hello /data/nosuch.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_files_only_missing_among_files_exits_2",
+      "cmd": "rg -l hello /data/a.txt /data/nosuch.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "/data/a.txt\n",
+        "stderr_text": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_count_missing_among_files_exits_2",
+      "cmd": "rg -c hello /data/a.txt /data/nosuch.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "/data/a.txt:1\n",
+        "stderr_text": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_context_missing_among_files_exits_2",
+      "cmd": "rg -A1 hello /data/a.txt /data/nosuch.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "/data/a.txt:hello\n",
+        "stderr_text": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_m_is_per_file_in_a_walk",
+      "cmd": "mkdir -p /data/cmw && printf 'a1\\na2\\n' > /data/cmw/x.txt && printf 'a3\\na4\\n' > /data/cmw/y.txt && rg -m1 a /data/cmw",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/cmw/x.txt:a1\n/data/cmw/y.txt:a3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_b_after_context_counts_an_invalid_byte_as_one",
+      "cmd": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/rccx.bin; rg -b -A1 abc /data/rccx.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "6:two abc\n14-three\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_bn_context_gets_every_field_right",
+      "cmd": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/rccx.bin; rg -bn -A1 -B1 abc /data/rccx.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2-4-\ufffd\n3:6:two abc\n4-14-three\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "rg_m_zero_prints_no_context",
+      "cmd": "rg -m 0 -A1 hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

@@ -20,6 +20,7 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { pureProvision } from '../generic_bind/provision.ts'
 import { DAY_NAMES, MONTH_NAMES, pad2, pad4, strftime } from '../utils/strftime.ts'
+import { quoteText } from '../../quote.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, FlagView } from '../../spec/types.ts'
 import { LOCAL_ZONE, UTC_ZONE, type Zone, zoneFromEnv } from '../../../utils/timezone.ts'
@@ -57,14 +58,26 @@ function dateCommand(
   const named = u ? UTC_ZONE : zoneFromEnv(opts.env)
   const zone = named ?? LOCAL_ZONE
   let dt: Date
-  if (d !== null) {
+  if (d !== null && d.trim() === '') {
+    // GNU ACCEPTS an empty (or blank) expression, exit 0: gnulib's
+    // parse-datetime sees no component at all and falls through to "a date
+    // with no time", which is today at midnight. Measured on coreutils
+    // 9.4: `date -d ''` and `date -d '   '` both print today 00:00:00 in
+    // the command's zone.
+    const midnight = parseDateExpr(strftime(new Date(), '%Y-%m-%d', zone), zone)
+    // Today's own ISO date always parses; the fallback is for the type.
+    dt = midnight ?? new Date()
+  } else if (d !== null) {
     const parsed = parseDateExpr(d, zone)
     if (parsed === null) {
       // GNU's refusal, exit 1: a NaN render with exit 0 poisons whatever
       // consumed it (the 0NaN-NaN-NaN corpus failure).
       return [
         null,
-        new IOResult({ exitCode: 1, stderr: ENC.encode(`date: invalid date '${d}'\n`) }),
+        new IOResult({
+          exitCode: 1,
+          stderr: ENC.encode(`date: invalid date '${quoteText(d)}'\n`),
+        }),
       ]
     }
     dt = parsed

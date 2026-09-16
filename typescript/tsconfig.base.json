@@ -9,6 +9,15 @@
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
+    // Dead state, which is always a defect: all three it found on landing were
+    // a private field assigned in a constructor and never read again, in a
+    // file category eslint's `ignores` also skipped. Its sibling
+    // `noUnusedParameters` is deliberately NOT set: a command handler must
+    // declare `(accessor, paths, texts, opts)` whether or not it reads each
+    // one, so the flag would demand 11 `_` prefixes purely to appease itself.
+    // eslint's own `no-unused-vars` declines to report those too -- its
+    // default `args: 'after-used'` stops at the last parameter actually used.
+    "noUnusedLocals": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,

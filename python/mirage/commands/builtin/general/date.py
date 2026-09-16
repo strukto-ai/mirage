@@ -19,6 +19,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic_bind.provision import pure_provision
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.config import CommandOpts
+from mirage.commands.quote import quote_text
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import CommandName, FlagView
@@ -54,13 +55,22 @@ async def date(
     if len(texts) > 1:
         raise extra_operand_error(CommandName.DATE, texts[1])
     zone = timezone.utc if u else zone_from_env(opts.env)
-    if d is not None:
+    if d is not None and not d.strip():
+        # GNU ACCEPTS an empty (or blank) expression, exit 0: gnulib's
+        # parse-datetime sees no component at all and falls through to
+        # "a date with no time", which is today at midnight. Measured on
+        # coreutils 9.4: `date -d ''` and `date -d '   '` both print
+        # today 00:00:00 in the command's zone.
+        now = datetime.now(zone)
+        dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif d is not None:
         parsed_d = parse_date_expr(d, tz=zone)
         if parsed_d is None:
             # GNU's refusal, exit 1: a wrong answer with exit 0 poisons
             # whatever consumed it (the NaN-timestamp corpus failure).
             return None, IOResult(
-                exit_code=1, stderr=f"date: invalid date '{d}'\n".encode())
+                exit_code=1,
+                stderr=f"date: invalid date '{quote_text(d)}'\n".encode())
         dt = parsed_d
     else:
         dt = datetime.now(zone)

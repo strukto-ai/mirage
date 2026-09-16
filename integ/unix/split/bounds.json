@@ -47,6 +47,54 @@
         "stderr": "split: output file suffixes exhausted\n"
       },
       "flags": ["b", "numeric-suffixes"]
+    },
+    {
+      "id": "split_b_quotes_a_multibyte_word",
+      "seq": 960013,
+      "targets": ["ram", "disk"],
+      "command": "split -b '1é' /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "split: invalid number of bytes: '1\\303\\251'\n"
+      },
+      "flags": ["b"]
+    },
+    {
+      "id": "split_l_quotes_a_carriage_return",
+      "seq": 960014,
+      "targets": ["ram", "disk"],
+      "command": "split -l $'1\\r' /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "split: invalid number of lines: '1\\r'\n"
+      },
+      "flags": ["l"]
+    },
+    {
+      "id": "split_n_quotes_a_multibyte_word",
+      "seq": 960015,
+      "targets": ["ram", "disk"],
+      "command": "split -n '1é' /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "split: invalid number of chunks: '1\\303\\251'\n"
+      },
+      "flags": ["n"]
+    },
+    {
+      "id": "split_a_escapes_a_single_quote",
+      "seq": 960016,
+      "targets": ["ram", "disk"],
+      "command": "split -a \"1'\" /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "split: invalid suffix length: '1\\''\n"
+      },
+      "flags": ["a"]
     }
   ]
 }

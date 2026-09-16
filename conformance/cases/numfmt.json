@@ -1,0 +1,152 @@
+{
+  "command": "numfmt",
+  "cases": [
+    {
+      "id": "numfmt_iec_i_missing_i_names_a_multibyte_field",
+      "cmd": "numfmt --from=iec-i '1Ké'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "numfmt: missing 'i' suffix in input: '1K\\303\\251' (e.g Ki/Mi/Gi)\n"
+      }
+    },
+    {
+      "id": "numfmt_iec_i_missing_i_names_trailing_junk",
+      "cmd": "numfmt --from=iec-i 1Kx",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "numfmt: missing 'i' suffix in input: '1Kx' (e.g Ki/Mi/Gi)\n"
+      }
+    },
+    {
+      "id": "numfmt_iec_i_missing_i_names_a_bare_number",
+      "cmd": "numfmt --from=iec-i 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "numfmt: missing 'i' suffix in input: '1' (e.g Ki/Mi/Gi)\n"
+      }
+    },
+    {
+      "id": "numfmt_iec_i_names_the_leftover_past_its_i",
+      "cmd": "numfmt --from=iec-i 1Kii",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "numfmt: invalid suffix in input '1Kii': 'i'\n"
+      }
+    },
+    {
+      "id": "numfmt_iec_i_lone_i_is_not_a_unit",
+      "cmd": "numfmt --from=iec-i 1i",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "numfmt: invalid suffix in input: '1i'\n"
+      }
+    },
+    {
+      "id": "numfmt_iec_takes_no_trailing_i",
+      "cmd": "numfmt --from=iec 1Ki",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "numfmt: invalid suffix in input '1Ki': 'i'\n"
+      }
+    },
+    {
+      "id": "numfmt_to_iec_i_renders_a_bare_number",
+      "cmd": "numfmt --to=iec-i 2048",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2.0Ki\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

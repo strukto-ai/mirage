@@ -54,7 +54,8 @@ def gh_repo(config: GhConfig, spec: str | None) -> RepoRef:
 
 
 def json_out(value: JsonValue) -> tuple[ByteSource | None, IOResult]:
-    text = "" if value is None else f"{json.dumps(value, indent=2)}\n"
+    text = ("" if value is None else
+            f"{json.dumps(value, indent=2, ensure_ascii=False)}\n")
     return yield_bytes(text.encode()), IOResult()
 
 

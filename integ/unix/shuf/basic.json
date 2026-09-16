@@ -61,6 +61,108 @@
         "stdout": "abc",
         "stderr": ""
       }
+    },
+    {
+      "id": "shuf_n_invalid_word",
+      "seq": 601352,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -n abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid line count: 'abc'\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "shuf_n_trailing_garbage_quotes_whole_arg",
+      "seq": 601353,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -n 2x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid line count: '2x'\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "shuf_n_valid_one",
+      "seq": 601354,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

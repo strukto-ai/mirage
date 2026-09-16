@@ -117,6 +117,20 @@ export function zonedMidnight(date: string, timeZone: string): number {
   return wallClockMs(wall, timeZone)
 }
 
+// The instant a `dateTime` slot names, or null when it names none: the
+// value is not a date-time, or it carries no offset and the slot declares
+// no zone to read the wall clock in. Both readers of a stored slot need
+// this and they need it to agree, since one sorts and bounds events by it
+// and the other renders it back.
+function dateTimeMs(slot: EventTime): number | null {
+  if (slot.dateTime === undefined) return null
+  const parsed = parseDateTime(slot.dateTime)
+  if (parsed === null) return null
+  if (parsed.offset !== null) return parsed.wall - parsed.offset * 60_000
+  if (slot.timeZone === undefined) return null
+  return wallClockMs(parsed.wall, slot.timeZone)
+}
+
 // An offset is mandatory on dateTime UNLESS the slot names its own zone, so
 // a bare wall clock there is a zoned event. `readEventTimes` refuses every
 // other spelling before it is stored, which makes a slot this cannot read a
@@ -124,12 +138,11 @@ export function zonedMidnight(date: string, timeZone: string): number {
 // silently drops and a sort silently misplaces.
 export function slotMs(slot: EventTime, fallbackTz: string): number | null {
   if (slot.dateTime !== undefined) {
-    const parsed = parseDateTime(slot.dateTime)
-    if (parsed !== null && parsed.offset !== null) return parsed.wall - parsed.offset * 60_000
-    if (parsed !== null && slot.timeZone !== undefined) {
-      return wallClockMs(parsed.wall, slot.timeZone)
+    const instant = dateTimeMs(slot)
+    if (instant === null) {
+      throw new Error(`a stored event time has no offset and no zone: ${slot.dateTime}`)
     }
-    throw new Error(`a stored event time has no offset and no zone: ${slot.dateTime}`)
+    return instant
   }
   if (slot.date !== undefined) return zonedMidnight(slot.date, fallbackTz)
   return null
@@ -145,15 +158,52 @@ export function eventEndMs(ev: CalendarEvent, tz: string): number {
   return slotMs(ev.end, tz) ?? eventStartMs(ev, tz)
 }
 
-export function formatEventTime(slot: EventTime): EventTime {
+// One slot as the Event resource renders it back.
+//
+// Probed against the live API on 2026-09-15, because every clause here is a
+// choice the docs do not make for you. Google answers a `dateTime` with an
+// OFFSET ALWAYS, and that offset is the CALENDAR's zone, never the event's:
+// a slot written `20:59:00` in `Etc/GMT+12` comes back `01:59:00-07:00` on a
+// Los_Angeles calendar, and one written `Asia/Tokyo` comes back at -07:00
+// too. The `timeZone` field rides along as the event's declared zone, filled
+// in from the calendar when the request named none. An already-offset-bearing
+// value is re-rendered rather than echoed, fractional seconds are dropped,
+// and an all-day `date` slot is left exactly as it came.
+//
+// Args:
+//   slot: the stored event time.
+//   calendarTz: the calendar's own zone, which every rendering is in.
+export function formatEventTime(slot: EventTime, calendarTz: string): EventTime {
   if (slot.dateTime === undefined) return { ...slot }
-  const parsed = parseDateTime(slot.dateTime)
-  if (parsed === null || parsed.offset !== null || slot.timeZone === undefined) return { ...slot }
-  const instant = wallClockMs(parsed.wall, slot.timeZone)
-  const offset = zoneOffsetMs(instant, slot.timeZone) / 60_000
+  const instant = dateTimeMs(slot)
+  // Unreachable for a stored slot (`slotRefusal` runs before anything is
+  // stored), but rendering a NaN would be worse than rendering the input.
+  if (instant === null) return { ...slot }
+  return {
+    ...slot,
+    dateTime: renderIn(instant, calendarTz),
+    timeZone: slot.timeZone ?? calendarTz,
+  }
+}
+
+// An instant as RFC3339 in `timeZone`: seconds precision with a ±hh:mm
+// offset, which is the only dateTime shape the live API emits.
+function renderIn(instant: number, timeZone: string): string {
+  // Whole minutes, and the SAME rounded number on both halves below. A
+  // zone's historical offset can carry seconds -- Europe/Paris ran at
+  // +00:09:21 until 1911, which Intl reports as 9.35 minutes -- and
+  // RFC3339 has nowhere to put them: the raw value rendered `+00:9.35`,
+  // which is not a timestamp at all, and the formatter rewrites even an
+  // input that arrived with its own offset. Rounding the wall clock by
+  // the same number keeps the rendered value pointing at the instant it
+  // came from, which is what a caller reads back; only the local
+  // reading drifts, by under a minute, and only for dates old enough to
+  // predate minute-aligned zones.
+  const offset = Math.round(zoneOffsetMs(instant, timeZone) / 60_000)
   const minutes = Math.abs(offset)
-  const suffix = `${offset < 0 ? '-' : '+'}${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+  const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
+  const mm = String(minutes % 60).padStart(2, '0')
+  const suffix = `${offset < 0 ? '-' : '+'}${hh}:${mm}`
   const wall = new Date(instant + offset * 60_000).toISOString().slice(0, 19)
-  const fraction = DATE_TIME.exec(slot.dateTime)?.[7] ?? ''
-  return { ...slot, dateTime: `${wall}${fraction}${suffix}` }
+  return `${wall}${suffix}`
 }

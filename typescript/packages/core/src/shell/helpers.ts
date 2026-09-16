@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expandTilde } from '../utils/path.ts'
+import { encodeText } from './bytes.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
 import { bodyPrefix, cleanDelimiter, delimiterQuoted } from './parse/heredoc/index.ts'
@@ -21,6 +22,22 @@ import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './t
 
 export function getText(node: TSNodeLike): string {
   return node.text
+}
+
+/**
+ * Where an index into a node's text falls in the parser's offsets, the twin
+ * of python's `byte_offset`.
+ *
+ * tree-sitter places a node by the bytes of the UTF-8 source, so an index
+ * counted in code units reads one place too early for every multibyte
+ * character before it. `grep -ob` reads the same answer for the same reason.
+ * `encodeText` rather than `TextEncoder` because a byte that is not valid
+ * UTF-8 rides as a surrogate escape and stands for one byte. That is a
+ * requirement on the caller, not a hope: grep's family decodes every line
+ * through `grep_offsets.decodeLine` for it.
+ */
+export function byteOffset(text: string, index: number): number {
+  return encodeText(text.slice(0, index)).length
 }
 
 export function getCommandName(node: TSNodeLike): string {

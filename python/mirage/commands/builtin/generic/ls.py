@@ -14,7 +14,8 @@ from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
-from mirage.commands.spec.usage import invalid_argument_error, usage_hint
+from mirage.commands.spec.usage import (argmatch_error, argmatch_line,
+                                        usage_hint)
 from mirage.io.types import IOResult
 from mirage.ops.types import ChildMounts, LinkView, MountView, StatPath
 from mirage.types import FileStat, FileType, LsSortBy, LsTimeKind, PathSpec
@@ -48,13 +49,17 @@ class LsFlags:
     hyperlink: bool = False
 
 
+# GNU's own `sort_args`, in its own order, which is what `--sort=x`
+# lists back. `name` is deliberately absent: coreutils 9.4 refuses
+# `ls --sort=name` (name order is what no `--sort` at all means), and a
+# word mirage accepted but GNU did not was also a word missing from the
+# list GNU prints.
 _SORT_WORDS = {
     "none": LsSortBy.NONE,
-    "size": LsSortBy.SIZE,
     "time": LsSortBy.TIME,
-    "version": LsSortBy.VERSION,
+    "size": LsSortBy.SIZE,
     "extension": LsSortBy.EXTENSION,
-    "name": LsSortBy.NAME,
+    "version": LsSortBy.VERSION,
     "width": LsSortBy.WIDTH,
 }
 _SORT_FLAGS = {
@@ -84,14 +89,12 @@ def _grouped_argument_error(option: str, value: str,
 
     Args:
         option (str): the option's long spelling.
-        value (str): the rejected value.
+        value (str): the rejected value, as typed; the shared renderer
+            escapes it.
         groups (tuple[tuple[str, ...], ...]): the valid values, aliases
             grouped.
     """
-    valid = "\n".join("  - " + ", ".join(f"'{w}'" for w in g) for g in groups)
-    return UsageError(
-        f"ls: invalid argument '{value}' for '{option}'\n"
-        f"Valid arguments are:\n{valid}\n{usage_hint('ls')}", 1)
+    return argmatch_error("ls", option, value, groups, 1)
 
 
 def _sort_flag(fl: FlagView) -> tuple[LsSortBy, bool]:
@@ -110,9 +113,7 @@ def _sort_flag(fl: FlagView) -> tuple[LsSortBy, bool]:
     word = fl.as_str("sort") or ""
     key = _SORT_WORDS.get(word)
     if key is None:
-        msg, _ = invalid_argument_error("ls", "--sort", word,
-                                        tuple(_SORT_WORDS))
-        raise UsageError(msg.decode().rstrip("\n"), 1)
+        raise argmatch_error("ls", "--sort", word, tuple(_SORT_WORDS), 1)
     return key, True
 
 
@@ -153,8 +154,12 @@ def _time_style_flag(fl: FlagView) -> str:
     bare = style[6:] if posix else style
     if bare in formatting.LS_TIME_STYLES or bare.startswith("+"):
         return "locale" if posix else bare
+    # ls hand-writes this block rather than letting argmatch print
+    # `time_style_args`, so it is the one ARGMATCH refusal in the repo
+    # whose candidates are neither quoted nor a subset of the words it
+    # accepts -- and the one that exits 2, ls's own `usage (LS_FAILURE)`.
     raise UsageError(
-        f"ls: invalid argument '{style}' for 'time style'\n"
+        f"{argmatch_line('ls', 'time style', style)}\n"
         "Valid arguments are:\n"
         "  - [posix-]full-iso\n"
         "  - [posix-]long-iso\n"

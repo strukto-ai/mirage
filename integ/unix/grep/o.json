@@ -73,6 +73,461 @@
       "flags": [
         "o"
       ]
+    },
+    {
+      "id": "grep_o_empty_match_prints_nothing",
+      "seq": 601800,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | grep -o '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "grep_o_empty_matches_dropped_around_a_real_one",
+      "seq": 601801,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a1b\\n' | grep -o '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "grep_o_nonempty_runs_kept_in_order",
+      "seq": 601802,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '1a22b\\n' | grep -o '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n22\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "grep_oc_still_counts_the_selected_line",
+      "seq": 601803,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | grep -oc '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "c"
+      ]
+    },
+    {
+      "id": "grep_ob_offset_is_the_match",
+      "seq": 601804,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -ob abc /data/qb.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0:abc\n7:abc\n11:abc\n15:abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "b"
+      ]
+    },
+    {
+      "id": "grep_ob_counts_bytes_not_characters",
+      "seq": 601805,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/qb5.txt; grep -ob abc /data/qb5.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "6:abc\n15:abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "b"
+      ]
+    },
+    {
+      "id": "grep_ob_missing_final_newline_is_not_double_counted",
+      "seq": 601806,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'no-newline-abc' > /data/qb6.txt; grep -ob abc /data/qb6.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "11:abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "b"
+      ]
+    },
+    {
+      "id": "grep_ob_empty_match_prints_nothing",
+      "seq": 601807,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | grep -ob '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "b"
+      ]
+    },
+    {
+      "id": "grep_ob_empty_matches_dropped_around_a_real_one",
+      "seq": 601808,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a1b\\nc2d\\n' | grep -ob '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:1\n5:2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "b"
+      ]
+    },
+    {
+      "id": "grep_ov_prints_nothing",
+      "seq": 612020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\ndef\\n' > /data/gov.txt; grep -ov abc /data/gov.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "v"
+      ]
+    },
+    {
+      "id": "grep_ovc_still_counts_the_selected_line",
+      "seq": 612021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\ndef\\n' > /data/gov.txt; grep -ovc abc /data/gov.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "v",
+        "c"
+      ]
+    },
+    {
+      "id": "grep_ovl_still_names_the_file",
+      "seq": 612022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\ndef\\n' > /data/gov.txt; grep -ovl abc /data/gov.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/gov.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "v",
+        "l"
+      ]
     }
   ]
 }

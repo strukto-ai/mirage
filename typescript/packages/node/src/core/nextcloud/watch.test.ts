@@ -19,6 +19,6 @@ describe('Nextcloud delta hook', () => {
       ['/nc/Documents/a.txt', FileChangeKind.UPDATE],
       ['/nc/Documents/b.txt', FileChangeKind.CREATE],
     ])
-    expect(delta.changes[0]?.metadata?.fingerprint).toBe('etag-7|2026-07-11T12:00:00Z|7')
+    expect(delta.changes[0]?.metadata?.fingerprint).toBe('etag-7|7')
   })
 })

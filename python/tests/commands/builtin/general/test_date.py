@@ -186,3 +186,46 @@ async def test_implicit_host_timezone(monkeypatch, host_zone, summer, winter):
                 await ws.close()
     finally:
         time.tzset()
+
+
+# `date -d` names the refused expression through gnulib's quote(), so a
+# byte outside 0x20-0x7e comes back escaped rather than interpolated raw.
+# Rows measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw
+# `bytes` argv (`date -d x<B>`). Mirrored in date.test.ts.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line,escaped", [
+    ("date -d 'xé'", r"x\303\251"),
+    ("date -d $'x\\001'", r"x\001"),
+    ("date -d $'x\\177'", r"x\177"),
+    ("date -d \"x'\"", r"x\'"),
+    ("date -d 'x\\'", r"x\\"),
+])
+async def test_date_invalid_date_quotes_the_expression(line, escaped):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        assert await _run(ws,
+                          line) == ("", f"date: invalid date '{escaped}'\n", 1)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["date -u -d ''", "date -u -d '   '"])
+async def test_an_empty_expression_is_today_at_midnight(line):
+    """GNU ACCEPTS an empty (or blank) `-d`, exit 0, at today 00:00:00.
+
+    gnulib's parse-datetime sees no component at all and falls through
+    to "a date with no time". Measured on coreutils 9.4 under
+    `LC_ALL=C TZ=UTC`: `date -d ''` prints today's date at 00:00:00, and
+    so does `date -d '   '`. mirage used to answer
+    `date: invalid date ''` and exit 1.
+    """
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    try:
+        out, err, code = await _run(ws, f"{line} +%H:%M:%S")
+        assert (out, err, code) == ("00:00:00\n", "", 0)
+        today, err, code = await _run(ws, f"{line} +%Y-%m-%d")
+        now, _, _ = await _run(ws, "date -u +%Y-%m-%d")
+        assert (today, err, code) == (now, "", 0)
+    finally:
+        await ws.close()

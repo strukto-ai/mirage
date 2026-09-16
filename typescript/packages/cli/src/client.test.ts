@@ -15,7 +15,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DaemonConfigError } from '@struktoai/mirage-server'
+import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DaemonClient } from './client.ts'
 

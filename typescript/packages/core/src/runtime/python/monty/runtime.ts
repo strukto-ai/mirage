@@ -42,11 +42,14 @@ import { MontyExecution } from './execution.ts'
  * `MontyFileHandle` back from the `os` callback), and a path under no
  * mount lives in a per-run in-memory scratch tree, exactly like
  * python's binding-side tree — so `/tmp` is real scratch space on both
- * hosts. Monty implements a Python subset; host-only features
- * (`sys.stdin`, `sys.argv`, third-party imports) are unavailable, and
- * `Path.stat()` stays unbridged until the JS binding grows a
- * StatResult marker (see MirageOSAccess) — use the pyodide runtime
- * when a guest needs stat.
+ * hosts. `Path.stat()` is bridged too, as a class instance carrying
+ * CPython's `stat_result` fields; only its sequence half (`st[6]`,
+ * `len(st)`) is the python host's alone. Monty implements a Python
+ * subset; host-only features (`sys.stdin`, `sys.argv`, third-party
+ * imports) are unavailable, the importable stdlib is the sixteen
+ * modules listed in docs/typescript/runtime/python.mdx, and the parser
+ * refuses class inheritance, method decorators and `yield` — use the
+ * pyodide runtime for a program that needs those.
  */
 export class MontyRuntime extends PythonRuntime implements Evaluator {
   readonly name = 'monty'
@@ -55,7 +58,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   // file I/O can only travel the VFS bridge, so every effect passes
   // the workspace gate (mount modes, policy, recording).
   override readonly reach = 'vfs'
-  override readonly filesystem = ['read', 'write', 'list'] as const
+  override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
   // No import system to resolve a module with, so `-m` has nothing to
   // run; the refusal names this runtime rather than inventing a
   // "No module named" that would imply a search happened.

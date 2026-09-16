@@ -1,0 +1,548 @@
+{
+  "cases": [
+    {
+      "id": "shuf_n_minus_is_an_invalid_character",
+      "seq": 601900,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -n -1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid line count: '-1'\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "shuf_n_zero_prints_nothing",
+      "seq": 601901,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -n 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "shuf_n_empty_is_refused",
+      "seq": 601902,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -n ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid line count: ''\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "shuf_n_leading_plus_is_a_sign",
+      "seq": 601903,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -n +1",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "shuf_i_nonnumeric_high_bound",
+      "seq": 601904,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -i 1-x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid input range: '1-x'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_i_nonnumeric_low_bound",
+      "seq": 601905,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -i x-3",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid input range: 'x-3'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_i_decreasing_range_has_no_diagnostic_of_its_own",
+      "seq": 601906,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -i 3-1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid input range: '3-1'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_i_negative_low_bound",
+      "seq": 601907,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -i -2-1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid input range: '-2-1'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_i_missing_dash",
+      "seq": 601908,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -i 1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid input range: '1'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_i_empty_is_refused",
+      "seq": 601909,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -i ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid input range: ''\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_i_single_element_range_is_valid",
+      "seq": 601910,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -i 2-2",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_i_ascending_range_ignores_stdin",
+      "seq": 601911,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\n' | shuf -i 1-3 | sort | tr -d '\\n'",
+      "expect": {
+        "exit": 0,
+        "stdout": "123",
+        "stderr": ""
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_n_a_trailing_newline_is_refused",
+      "seq": 602280,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\nc\\n' | shuf -n $'2\\n'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid line count: '2\\n'\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "shuf_n_an_interior_newline_is_refused",
+      "seq": 602281,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\nc\\n' | shuf -n $'1\\n2'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid line count: '1\\n2'\n"
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "shuf_i_a_trailing_newline_is_refused",
+      "seq": 602282,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | shuf -i $'1-3\\n'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid input range: '1-3\\n'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    },
+    {
+      "id": "shuf_i_an_interior_newline_is_refused",
+      "seq": 602283,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | shuf -i $'1-3\\n5'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "shuf: invalid input range: '1-3\\n5'\n"
+      },
+      "flags": [
+        "i"
+      ]
+    }
+  ]
+}

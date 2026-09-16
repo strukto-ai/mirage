@@ -21,6 +21,7 @@ import { FlagView, type ParsedArgs } from '../../../../commands/spec/types.ts'
 import {
   ambiguousOptionError,
   missingValueError,
+  unexpectedValueError,
   unknownOptionError,
   usageHint,
 } from '../../../../commands/spec/usage.ts'
@@ -107,7 +108,10 @@ export function optionRefusal(parsed: ParsedArgs): [string, number] | null {
   }
   const invalid = parsed.invalidOptions[0]
   if (invalid !== undefined) {
-    const [msg, code] = unknownOptionError('ln', invalid)
+    const [msg, code] =
+      parsed.optionErrorKinds[0] === 'unexpected_value'
+        ? unexpectedValueError('ln', invalid)
+        : unknownOptionError('ln', invalid)
     return [dec.decode(msg), code]
   }
   if (ambiguousFirst !== undefined) {

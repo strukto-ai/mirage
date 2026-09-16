@@ -472,10 +472,15 @@ def test_follow_flags_parse_gnu_spellings():
     }).interval == 0.5
     with pytest.raises(ValueError) as bad_follow:
         tail_parse_flags({"follow": "bogus"})
+    # A UsageError's message carries no trailing newline: the executor
+    # writes `f"{exc}\n"`, so one here would render a blank line into
+    # stderr. `argmatch_error` rstrips it for that reason, and the
+    # end-to-end bytes are asserted in tests/commands/spec/test_usage.py
+    # and by the integ battery.
     assert str(bad_follow.value) == (
         "tail: invalid argument 'bogus' for '--follow'\n"
         "Valid arguments are:\n  - 'descriptor'\n  - 'name'\n"
-        "Try 'tail --help' for more information.\n")
+        "Try 'tail --help' for more information.")
     with pytest.raises(ValueError) as bad_seconds:
         tail_parse_flags({"follow": True, "sleep_interval": "bogus"})
     assert str(
@@ -638,3 +643,33 @@ async def test_follow_name_without_retry_gives_up_on_a_read_that_finds_nothing(
         b"tail: '/d/f' has become inaccessible: No such file or directory\n"
         b"tail: no files remaining\n")
     assert io.exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_follow_infinite_interval_never_polls():
+    """`tail -f -s inf` waits forever, so growth is never picked up.
+
+    GNU accepts `inf`: its test is `xstrtod(...) && 0 <= s` and `inf`
+    passes both halves (measured, coreutils 9.4). `asyncio.sleep(inf)`
+    already waits, so this is a guard rather than a fix -- the
+    TypeScript twin needed the fix, because `setTimeout` holds a 32-bit
+    signed delay and clamps `Infinity` to 1ms, which polls continuously.
+    Both hosts must report the same thing here: the first window and
+    nothing after it.
+    """
+    fs = _Growing({"/d/log": b"l1\nl2\n"})
+    stream, io = await tail_generic(_paths("/d/log"), [],
+                                    _follow_opts(sleep_interval="inf"),
+                                    fs.stat, fs.read, fs.read_range)
+
+    async def grow() -> None:
+        await asyncio.sleep(0.04)
+        fs.data["/d/log"] += b"l3\n"
+        await asyncio.sleep(0.04)
+        fs.data["/d/log"] += b"l4\n"
+
+    grower = asyncio.create_task(grow())
+    chunks = await _drain_for(stream, 0.25)
+    await grower
+    assert b"".join(chunks) == b"l1\nl2\n"
+    assert io.exit_code == 0

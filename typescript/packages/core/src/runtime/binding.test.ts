@@ -247,12 +247,9 @@ it.each([
   '%s uses each execution context for filesystem callbacks',
   async (_name, create) => {
     const runtime = create()
+    const expected = ['read', 'write', 'list', 'stat']
     expect(runtime.capabilities.filesystem).toEqual(
-      _name === 'monty'
-        ? ['read', 'write', 'list']
-        : _name === 'quickjs'
-          ? ['read', 'write', 'list', 'stat']
-          : ['read', 'write', 'list', 'stat', 'glob'],
+      _name === 'pyodide' ? [...expected, 'glob'] : expected,
     )
     const ws = await world([runtime])
     try {

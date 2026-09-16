@@ -69,7 +69,6 @@ export class MountRegistry {
   readonly retiredResources = new WeakSet<Resource>()
   private rootRef: MountEntry | null = null
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
-  private readonly defaultMode: MountMode
   private cacheStore: FileCache | null = null
   private reconciler: ReadReconciler | null = null
   // The world's vfs runtime, set by Workspace after construction.
@@ -141,7 +140,6 @@ export class MountRegistry {
     defaultMode: MountMode,
     modeOverrides: Record<string, MountMode> = {},
   ) {
-    this.defaultMode = defaultMode
     const mounts: MountEntry[] = []
     const seen = new Set<string>()
     const overrides: Record<string, MountMode> = {}

@@ -13,11 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { materialize } from '../../io/types.ts'
+import { quoteText } from '../quote.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-const OPEN_END = Number.MAX_SAFE_INTEGER
+// Python's cut_ranges.py uses 2**31 - 1; the two must agree so an open-ended
+// range clamps identically in both languages.
+const OPEN_END = 2 ** 31 - 1
+
+const CUT_TRY = "Try 'cut --help' for more information.\n"
 
 export interface CutOptions {
   ranges: [number, number][]
@@ -37,20 +42,96 @@ interface WhitespaceFields {
   sourceEmpty: boolean
 }
 
-export function parseRanges(spec: string): [number, number][] {
-  const ranges: [number, number][] = []
-  for (const part of spec.split(',')) {
-    if (part.includes('-')) {
-      const [loStr, hiStr] = part.split('-', 2) as [string, string]
-      const lo = loStr === '' ? 1 : Number.parseInt(loStr, 10)
-      const hi = hiStr === '' ? OPEN_END : Number.parseInt(hiStr, 10)
-      ranges.push([lo, hi])
-    } else {
-      const val = Number.parseInt(part, 10)
-      ranges.push([val, val])
+function cutError(message: string): string {
+  return `cut: ${message}\n${CUT_TRY}`
+}
+
+interface CutListWords {
+  value: string
+  range: string
+  zero: string
+}
+
+// GNU words the two modes differently and never shares a string between
+// them; only "invalid decreasing range" carries no mode noun.
+function listWords(mode: CutOptions['mode']): CutListWords {
+  if (mode === 'fields') {
+    return {
+      value: 'invalid field value',
+      range: 'invalid field range',
+      zero: 'fields are numbered from 1',
     }
   }
-  return ranges
+  // The two range strings are worded differently from each other on
+  // purpose: the position one joins the nouns with a slash, the range one
+  // spells out ' or '. Both are byte-exact against coreutils 9.4.
+  return {
+    value: 'invalid byte/character position',
+    range: 'invalid byte or character range',
+    zero: 'byte/character positions are numbered from 1',
+  }
+}
+
+/**
+ * GNU's byte/character/field list, parsed the way GNU parses it: one
+ * character at a time, where a comma, a blank, a newline or the end of the
+ * string closes the position being read. Failure returns the two stderr
+ * lines to print (exit 1), never a partially parsed list.
+ *
+ * The scan is what reproduces GNU's quoting: it refuses at the first
+ * character it cannot read and quotes the rest of the string from there, so
+ * `-f 2-3x` and `-f 1,2x` both report `'x'` while `-f abc` reports `'abc'`.
+ * It is also why `-f '2 '` reports "numbered from 1" rather than naming the
+ * blank: the blank closes field 2, and the end of the string then closes a
+ * second, empty position. `-b` and `-c` share the scan and differ only in
+ * wording, which GNU keeps distinct from `-f`'s.
+ */
+export function parseRanges(spec: string, mode: CutOptions['mode']): [number, number][] | string {
+  const words = listWords(mode)
+  const ranges: [number, number][] = []
+  let value = 0
+  let digits = false
+  let lo = 0
+  let dashFound = false
+  for (let index = 0; ; index += 1) {
+    const char = index < spec.length ? spec.charAt(index) : ''
+    if (char >= '0' && char <= '9') {
+      value = value * 10 + ((char.codePointAt(0) ?? 48) - 48)
+      digits = true
+      continue
+    }
+    if (char === '-') {
+      if (dashFound) return cutError(words.range)
+      // `-2` opens the range at 1; `0-2` gave a zero it did read.
+      if (digits && value === 0) return cutError(words.zero)
+      dashFound = true
+      lo = digits ? value : 1
+      value = 0
+      digits = false
+      continue
+    }
+    // What closes the position being read: a comma, a space, a TAB, or the
+    // end of the string. NOT a newline, which is an invalid character here --
+    // `cut -f $'1\n2'` is refused and quotes `'\n2'`, where `-f '1\t2'`
+    // selects fields 1 and 2. Probed over all 255 bytes: the only separators
+    // are 0x09, 0x20 and 0x2c. Ground truth NL3-G.
+    if (char === '' || char === ',' || char === ' ' || char === '\t') {
+      if (dashFound) {
+        const hi = digits ? value : OPEN_END
+        if (hi < lo) return cutError('invalid decreasing range')
+        ranges.push([lo, hi])
+        dashFound = false
+      } else {
+        if (value === 0) return cutError(words.zero)
+        ranges.push([value, value])
+      }
+      value = 0
+      digits = false
+      if (char === '') return ranges
+      continue
+    }
+    return cutError(`${words.value} '${quoteText(spec.slice(index))}'`)
+  }
 }
 
 function selectPositions(

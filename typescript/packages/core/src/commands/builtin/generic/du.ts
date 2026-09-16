@@ -28,6 +28,7 @@ import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { humanSize } from '../utils/formatting.ts'
+import { quoteText } from '../../quote.ts'
 import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
@@ -107,7 +108,7 @@ export function parseFlags(opts: CommandOpts): DuFlags {
   if (typeof raw === 'string') {
     maxDepth = parseDepth(raw)
     if (maxDepth === null) {
-      throw new UsageError(`du: invalid maximum depth '${raw}'\n${USAGE_HINT}`, 1)
+      throw new UsageError(`du: invalid maximum depth '${quoteText(raw)}'\n${USAGE_HINT}`, 1)
     }
   }
   if (s && a) {

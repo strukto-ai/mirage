@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { ALLOWED_KEYS, DaemonConfigError } from '@struktoai/mirage-server'
+import { ALLOWED_KEYS, DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
 import type { Command } from 'commander'
 import { emit, fail } from './output.ts'
 import { getConfig, listConfig, resolvedConfig, setConfig, unsetConfig } from './settings.ts'

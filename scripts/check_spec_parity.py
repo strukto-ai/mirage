@@ -520,18 +520,19 @@ def describe(diff: str, py: dict[str, Any], ts: dict[str, Any],
         }
         lines = [f"    {diff}:"]
         for key in sorted(set(py_by_name) | set(ts_by_name)):
-            a, b = py_by_name.get(key), ts_by_name.get(key)
-            if a == b:
+            py_opt, ts_opt = py_by_name.get(key), ts_by_name.get(key)
+            if py_opt == ts_opt:
                 continue
-            if a is None:
+            if py_opt is None:
                 lines.append(f"      {key}: typescript-only")
-            elif b is None:
+            elif ts_opt is None:
                 lines.append(f"      {key}: python-only")
             else:
-                for k in sorted(set(a) | set(b)):
-                    if a.get(k) != b.get(k):
-                        lines.append(f"      {key}.{k}: python={a.get(k)!r} "
-                                     f"typescript={b.get(k)!r}")
+                for k in sorted(set(py_opt) | set(ts_opt)):
+                    if py_opt.get(k) != ts_opt.get(k):
+                        lines.append(f"      {key}.{k}: "
+                                     f"python={py_opt.get(k)!r} "
+                                     f"typescript={ts_opt.get(k)!r}")
         return "\n".join(lines)
     return f"    {diff}: python={py.get(diff)!r} typescript={ts.get(diff)!r}"
 

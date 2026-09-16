@@ -70,7 +70,7 @@ describe('entryOf', () => {
         fingerprint: 'etag-1',
       }),
     )
-    expect(entry.fingerprint).toBe('etag-1|T|3')
+    expect(entry.fingerprint).toBe('etag-1|3')
   })
 
   it('composites mtime and size when the backend has no version', () => {
@@ -78,7 +78,7 @@ describe('entryOf', () => {
       '/m/f.txt',
       new FileStat({ name: 'f.txt', type: FileType.FILE, size: 3, modified: 'T' }),
     )
-    expect(entry.fingerprint).toBe('|T|3')
+    expect(entry.fingerprint).toBe('T|3')
   })
 })
 

@@ -51,6 +51,19 @@
         "stdout": "3 /pg/public/views/recent_books/rows.jsonl\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "pg_wc_l_two_tables_pushdown",
+      "seq": 610024,
+      "targets": [
+        "postgres"
+      ],
+      "command": "wc -l /pg/public/tables/books/rows.jsonl /pg/public/tables/authors/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "5 /pg/public/tables/books/rows.jsonl\n3 /pg/public/tables/authors/rows.jsonl\n8 total\n",
+        "stderr": ""
+      }
     }
   ]
 }

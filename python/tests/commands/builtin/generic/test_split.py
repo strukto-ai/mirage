@@ -57,13 +57,24 @@ def test_counts_accept_one_leading_plus_and_whitespace():
     assert parse_suffix_length("+0") == 0
 
 
-@pytest.mark.parametrize("value", ["+0", "++10", "-10", "+ 10", "10 ", "١٢"])
-def test_bytes_rejects_bad_signs_and_non_ascii_digits(value):
+@pytest.mark.parametrize("value", ["+0", "++10", "-10", "+ 10", "10 "])
+def test_bytes_rejects_bad_signs(value):
     # '+' does not license zero, a second sign, a gap before the digits, or
-    # trailing space; python's `\d` would have accepted Arabic-Indic digits.
+    # trailing space.
     with pytest.raises(UsageError) as exc:
         parse_bytes_value(value)
     assert str(exc.value) == f"split: invalid number of bytes: '{value}'"
+
+
+def test_bytes_rejects_non_ascii_digits():
+    # python's `\d` would have accepted Arabic-Indic digits (int('١٢') is
+    # 12), which JS /\d/ and GNU's C-locale parser reject. The refused
+    # word is named through gnulib's quote(), so it comes back as one
+    # octal escape per byte (measured: `split -b ١٢`).
+    with pytest.raises(UsageError) as exc:
+        parse_bytes_value("١٢")
+    assert str(
+        exc.value) == (r"split: invalid number of bytes: '\331\241\331\242'")
 
 
 @pytest.mark.parametrize("value",
@@ -97,7 +108,7 @@ def test_chunks_quotes_only_the_count_of_a_spec():
 def test_chunks_validates_the_head_components():
     # The head takes an l/r kind letter or a signed K, never a signed kind:
     # `+2/3` and `l/+2/3` parse, while `+l/2` and `x/3` quote the whole
-    # spec (pinned against coreutils 9.7).
+    # spec (pinned against coreutils 9.4).
     assert parse_chunks_value("2/3") == 3
     assert parse_chunks_value("+2/3") == 3
     assert parse_chunks_value("l/+2/3") == 3
@@ -107,6 +118,59 @@ def test_chunks_validates_the_head_components():
     with pytest.raises(UsageError) as exc:
         parse_chunks_value("x/3")
     assert str(exc.value) == "split: invalid number of chunks: 'x/3'"
+
+
+# Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw
+# `bytes` argv. GNU strips ONE leading `l/` or `r/` and then cuts what is
+# left at its FIRST slash: a head it cannot parse names the whole
+# remainder, everything else names the tail. mirage used to name the
+# whole spec whenever the head was bad, which is right only when no kind
+# prefix was typed. Mirrored in split.test.ts.
+CHUNK_SPECS = [
+    ("xé", r"x\303\251"),
+    ("l/xé", r"x\303\251"),
+    ("2/xé", r"x\303\251"),
+    ("l/1/xé", r"x\303\251"),
+    ("l/2/xé", r"x\303\251"),
+    ("+l/2", "+l/2"),
+    ("x/3", "x/3"),
+    ("l/xé/4", r"x\303\251/4"),
+    ("r/xé/4", r"x\303\251/4"),
+    ("l/2/xé/4", r"x\303\251/4"),
+    ("l/xé/yé", r"x\303\251/y\303\251"),
+    ("xé/2", r"x\303\251/2"),
+    ("l/2/3/4", "3/4"),
+    ("1/2/3/4", "2/3/4"),
+    ("l//4", "/4"),
+    ("r/l/4", "l/4"),
+    ("2/l/4", "l/4"),
+    ("/", "/"),
+    ("l", "l"),
+    ("r", "r"),
+    ("l/", ""),
+    ("", ""),
+    ("l/2/4/", "4/"),
+]
+
+
+@pytest.mark.parametrize("value,named", CHUNK_SPECS)
+def test_chunks_names_the_component_gnu_names(value, named):
+    with pytest.raises(UsageError) as exc:
+        parse_chunks_value(value)
+    assert str(exc.value) == f"split: invalid number of chunks: '{named}'"
+    assert exc.value.exit_code == 1
+
+
+@pytest.mark.parametrize("value,count", [
+    ("4", 4),
+    ("l/4", 4),
+    ("r/4", 4),
+    ("2/4", 4),
+    ("l/2/4", 4),
+    ("r/2/4", 4),
+])
+def test_chunks_accepts_the_shapes_gnu_accepts(value, count):
+    assert parse_chunks_value(value) == count
 
 
 def test_suffix_length_rejects_junk_but_allows_zero():
@@ -225,3 +289,96 @@ def test_suffix_start_hex_junk_says_hexadecimal():
         parse_suffix_start("zz", True, 2)
     assert str(exc.value) == ("split: 'zz': invalid start value "
                               "for hexadecimal suffix" + _TRY)
+
+
+# Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw
+# `bytes` argv: all four of split's count clauses name the refused word
+# through gnulib's quote(), so the value is escaped rather than
+# interpolated raw. `-n` quotes only the trailing component, which is the
+# one the escaping applies to. Mirrored in split.test.ts.
+QUOTED_VALUES = [
+    ("1é", r"1\303\251"),
+    ("1\r", r"1\r"),
+    ("1\x01", r"1\001"),
+    ("1\x7f", r"1\177"),
+    ("1'", r"1\'"),
+    ("1\\", r"1\\"),
+    ("", ""),
+]
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
+def test_bytes_clause_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_bytes_value(value)
+    assert str(exc.value) == f"split: invalid number of bytes: '{escaped}'"
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
+def test_lines_clause_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_lines_value(value)
+    assert str(exc.value) == f"split: invalid number of lines: '{escaped}'"
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
+def test_chunks_clause_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_chunks_value(value)
+    assert str(exc.value) == f"split: invalid number of chunks: '{escaped}'"
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
+def test_chunks_clause_quotes_only_the_escaped_tail(value, escaped):
+    """`-n l/<w>` names the component, so the escaping travels with it."""
+    with pytest.raises(UsageError) as exc:
+        parse_chunks_value(f"l/{value}")
+    assert str(exc.value) == f"split: invalid number of chunks: '{escaped}'"
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_VALUES)
+def test_suffix_length_clause_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_suffix_length(value)
+    assert str(exc.value) == f"split: invalid suffix length: '{escaped}'"
+
+
+def test_suffix_length_overflow_clause_quotes_the_word():
+    """The Value-too-large tail names the same word, escaped the same way.
+
+    The digit run cannot itself carry a byte quote() would escape, so a
+    blank leading run is what puts one in the slot: `strtoumax` skips
+    leading whitespace, and the raw argument including it is what GNU
+    quotes (measured: `split -a $'\\r18446744073709551616'`).
+    """
+    with pytest.raises(UsageError) as exc:
+        parse_suffix_length("\r18446744073709551616")
+    assert str(exc.value) == (
+        r"split: invalid suffix length: '\r18446744073709551616': "
+        "Value too large for defined data type")
+
+
+# The suffix-start clause puts its word FIRST, where the four count
+# clauses above put it last, and it escapes the word the same way
+# (measured on GNU coreutils 9.4 for both spellings). The empty word is
+# absent on purpose: `--numeric-suffixes=` is not a refusal in GNU at
+# all, it exits 0, which is a separate divergence from the escaping.
+@pytest.mark.parametrize("value,escaped",
+                         [row for row in QUOTED_VALUES if row[0]])
+def test_suffix_start_clause_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_suffix_start(value, False, 2)
+    assert str(exc.value) == (
+        f"split: '{escaped}': invalid start value for numerical suffix" + _TRY)
+    assert exc.value.exit_code == 1
+
+
+@pytest.mark.parametrize("value,escaped",
+                         [row for row in QUOTED_VALUES if row[0]])
+def test_hex_suffix_start_clause_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_suffix_start(value, True, 2)
+    assert str(exc.value) == (
+        f"split: '{escaped}': invalid start value for hexadecimal suffix" +
+        _TRY)
+    assert exc.value.exit_code == 1

@@ -1,5 +1,6 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.client import GraphError
@@ -71,6 +72,8 @@ async def test_rename_conflict_deletes_file_destination_and_retries():
         m.delete(_DRIVE + "/root:/b.txt", status=204)
         m.patch(_DRIVE + "/root:/a.txt", status=200, payload={"id": "1"})
         await rename(_accessor(), _spec("a.txt"), _spec("b.txt"))
+        assert ("DELETE", URL(_DRIVE + "/root:/b.txt")) in m.requests
+        assert len(m.requests[("PATCH", URL(_DRIVE + "/root:/a.txt"))]) == 2
 
 
 @pytest.mark.asyncio

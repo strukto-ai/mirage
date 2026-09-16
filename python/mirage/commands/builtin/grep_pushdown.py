@@ -16,10 +16,10 @@ import re
 from collections.abc import Mapping, Sequence
 
 from mirage.commands.builtin.constants import PatternType
+from mirage.commands.builtin.grep_pattern import bre_source
 from mirage.commands.builtin.utils.paths import has_unresolved_glob
 from mirage.commands.spec.types import FlagValue, FlagView
 from mirage.types import PathSpec
-from mirage.utils.bre import bre_to_python
 
 
 def classify_pattern(
@@ -197,17 +197,20 @@ def search_query(pattern: str,
             literal every match of a regex must contain, or None when no
             literal can be searched: a newline-joined pattern list is a set
             of alternatives no one literal is required by.
+
+    Raises:
+        UsageError: a basic expression glibc's compiler would refuse,
+            which grep reports before it reads anything.
     """
     if "\n" in pattern:
         return None
     if is_literal_pattern(pattern, fixed_string):
         return pattern
-    return extract_required_literal(
-        bre_to_python(pattern) if basic else pattern)
+    return extract_required_literal(bre_source(pattern) if basic else pattern)
 
 
-_PUSHDOWN_SHAPING_BOOL = ("v", "n", "c", "args_l", "w", "o", "q", "H", "h",
-                          "args_I", "text")
+_PUSHDOWN_SHAPING_BOOL = ("v", "n", "byte_offset", "c", "args_l", "w", "o",
+                          "q", "H", "h", "args_I", "text")
 _PUSHDOWN_SHAPING_INT = ("m", "A", "B", "C")
 _PUSHDOWN_FILTER_STR = ("type", "glob", "binary_files")
 _PUSHDOWN_FILTER_LIST = ("include", "exclude", "exclude_dir")
@@ -220,7 +223,8 @@ def has_search_shaping_flags(
     """True when a flag alters the match set or output shape of grep/rg.
 
     A search push-down prints each matching record as one whole line, so it
-    cannot honor -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename),
+    cannot honor -v/-n/-b/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no
+    filename),
     nor rg's file-filtering --glob/--type; when any is present the wrapper must
     defer to the generic scan, which applies exact semantics. Reads through a
     spec-less FlagView so the shared key set works for both the grep and rg

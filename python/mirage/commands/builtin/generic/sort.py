@@ -6,10 +6,16 @@ from mirage.commands.builtin.sort_keys import (build_config, compare_lines,
                                                sort_lines)
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import read_stdin_async
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
+from mirage.commands.spec.usage import argmatch_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+
+# `check_args` as gnulib's `argmatch_valid` prints it: `quiet` and
+# `silent` map to the same value, so they share one `  - ` line.
+CHECK_ARGS = (("quiet", "silent"), ("diagnose-first", ))
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +45,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
     fl = FlagView(flags, spec=SPECS["sort"])
     raw_check = fl.raw("check")
     if raw_check not in (None, True, "diagnose-first", "quiet", "silent"):
-        raise ValueError(f"invalid argument '{raw_check}' for '--check'")
+        raise argmatch_error("sort", "--check", str(raw_check), CHECK_ARGS, 1)
     raw_output = fl.raw("output")
     output = raw_output if isinstance(raw_output, PathSpec) else None
     return SortFlags(
@@ -123,6 +129,12 @@ async def sort(
             dictionary=parsed.dictionary,
             ignore_nonprinting=parsed.ignore_nonprinting,
         )
+    except UsageError as exc:
+        # Already GNU-worded and carrying its own code: gnulib's argmatch
+        # dies with EXIT_FAILURE, so `--check=x` is 1 where sort's other
+        # usage errors are 2.
+        return b"", IOResult(stderr=f"{exc}\n".encode(),
+                             exit_code=exc.exit_code)
     except (SortKeyError, ValueError) as exc:
         return b"", IOResult(stderr=f"sort: {exc}\n".encode(), exit_code=2)
 

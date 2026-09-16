@@ -18,7 +18,7 @@
       },
       "expect": {
         "exit": 0,
-        "stdout_text": "a.txt\nb.txt\nbinary.bin\nempty.txt\nno_nl.txt\nsame_a.txt\nsame_b.txt\nsk_colon.txt\nsk_fields.txt\nsk_ties.txt\nsub\n",
+        "stdout_text": "a.txt\nastral.txt\nb.txt\nbinary.bin\ncjk.txt\nempty.txt\nno_nl.txt\nsame_a.txt\nsame_b.txt\nsk_colon.txt\nsk_fields.txt\nsk_ties.txt\nsub\nutf8.txt\n",
         "stderr_text": ""
       }
     },
@@ -188,6 +188,48 @@
         "exit": 2,
         "stdout_text": "",
         "stderr_text": "ls: cannot access '/data/a.txt/x/y': Not a directory\n"
+      }
+    },
+    {
+      "id": "ls_time_quotes_a_multibyte_word",
+      "cmd": "ls --time='xé' /data",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "ls: invalid argument 'x\\303\\251' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n  - 'ctime', 'status'\n  - 'mtime', 'modification'\n  - 'birth', 'creation'\nTry 'ls --help' for more information.\n"
+      }
+    },
+    {
+      "id": "ls_time_style_quotes_a_control_byte",
+      "cmd": "ls -l --time-style=$'x\\001' /data",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "ls: invalid argument 'x\\001' for 'time style'\nValid arguments are:\n  - [posix-]full-iso\n  - [posix-]long-iso\n  - [posix-]iso\n  - [posix-]locale\n  - +FORMAT (e.g., +%H:%M) for a 'date'-style format\nTry 'ls --help' for more information.\n"
       }
     }
   ]

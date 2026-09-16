@@ -683,7 +683,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ls: invalid argument 'bogus' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
+        "stderr": "ls: invalid argument 'bogus' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'time'\n  - 'size'\n  - 'extension'\n  - 'version'\n  - 'width'\nTry 'ls --help' for more information.\n"
       },
       "flags": [
         "sort"
@@ -1415,6 +1415,80 @@
       "flags": [
         "g",
         "o",
+        "time-style"
+      ]
+    },
+    {
+      "id": "ls_time_quotes_a_multibyte_word",
+      "seq": 960146,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls --time='xé' /data",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "ls: invalid argument 'x\\303\\251' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n  - 'ctime', 'status'\n  - 'mtime', 'modification'\n  - 'birth', 'creation'\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
+        "time"
+      ]
+    },
+    {
+      "id": "ls_time_style_quotes_a_control_byte",
+      "seq": 960147,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ls -l --time-style=$'x\\001' /data",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "ls: invalid argument 'x\\001' for 'time style'\nValid arguments are:\n  - [posix-]full-iso\n  - [posix-]long-iso\n  - [posix-]iso\n  - [posix-]locale\n  - +FORMAT (e.g., +%H:%M) for a 'date'-style format\nTry 'ls --help' for more information.\n"
+      },
+      "flags": [
         "time-style"
       ]
     }

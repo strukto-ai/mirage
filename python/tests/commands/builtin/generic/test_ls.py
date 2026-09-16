@@ -1208,8 +1208,8 @@ def test_parse_flags_g_o_n_imply_long_and_shape_the_columns():
     ({
         "sort": "bogus"
     }, "ls: invalid argument 'bogus' for '--sort'\n"
-     "Valid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n"
-     "  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\n"
+     "Valid arguments are:\n  - 'none'\n  - 'time'\n  - 'size'\n"
+     "  - 'extension'\n  - 'version'\n  - 'width'\n"
      "Try 'ls --help' for more information.", 1),
     ({
         "time": "bogus"
@@ -1239,4 +1239,78 @@ def test_parse_flags_refuses_in_gnu_words(flags, message, code):
     with pytest.raises(UsageError) as info:
         parse_flags(flags)
     assert str(info.value) == message
+    assert info.value.exit_code == code
+
+
+# ls's argument clauses name the refused word through gnulib's quote(), so
+# a byte outside 0x20-0x7e comes back escaped rather than interpolated
+# raw. Rows measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw
+# `bytes` argv (`ls --sort=<w>`, `--time=<w>`, `--hyperlink=<w>`,
+# `-l --time-style=<w>`, and `--format=<w>`, which mirage has no option
+# for but which renders through the same clause). Mirrored in ls.test.ts.
+QUOTED_WORDS = [
+    ("xé", r"x\303\251"),
+    ("x\r", r"x\r"),
+    ("x\x01", r"x\001"),
+    ("x\x7f", r"x\177"),
+    ("x'", r"x\'"),
+    ("x\\", r"x\\"),
+]
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_WORDS)
+@pytest.mark.parametrize("dest,option", [
+    ("sort", "'--sort'"),
+    ("time", "'--time'"),
+    ("hyperlink", "'--hyperlink'"),
+    ("time_style", "'time style'"),
+])
+def test_argument_clauses_quote_the_word(dest, option, value, escaped):
+    with pytest.raises(UsageError) as info:
+        parse_flags({dest: value})
+    assert str(info.value).startswith(
+        f"ls: invalid argument '{escaped}' for {option}\n")
+
+
+@pytest.mark.parametrize("value", ["1é", "1\x01"])
+def test_block_size_clause_stays_raw(value):
+    """`--block-size` is quoted but NOT escaped, which is GNU's own split.
+
+    Measured with `ls --block-size=1é`, which reports
+    `invalid suffix in --block-size argument '1é'` with the two UTF-8
+    bytes intact -- so this clause must not be routed through quote()
+    even though its neighbours above are.
+    """
+    with pytest.raises(UsageError) as info:
+        parse_flags({"block_size": value, "human_readable": True})
+    assert value in str(info.value)
+
+
+# GNU's own `sort_args`: `none time size extension version width`, in
+# that order and with no `name`. Measured on coreutils 9.4
+# (`ls --sort=name` is a refusal, not name order) -- an extra word mirage
+# accepted was also a word missing from the list it printed back.
+def test_sort_refuses_name_the_way_gnu_does():
+    with pytest.raises(UsageError) as info:
+        parse_flags({"sort": "name"})
+    assert str(
+        info.value).startswith("ls: invalid argument 'name' for '--sort'\n")
+    assert info.value.exit_code == 1
+
+
+# An EMPTY ARGMATCH value is `ambiguous`, not `invalid`: gnulib's argmatch
+# matches on a prefix and `""` is a prefix of every candidate. Measured on
+# coreutils 9.4: `ls --sort=`, `ls --time=`, `ls --hyperlink=` are exit 1
+# and `ls -l --time-style=` is exit 2, ls's own `usage (LS_FAILURE)`.
+@pytest.mark.parametrize("dest,option,code", [
+    ("sort", "'--sort'", 1),
+    ("time", "'--time'", 1),
+    ("hyperlink", "'--hyperlink'", 1),
+    ("time_style", "'time style'", 2),
+])
+def test_an_empty_argument_is_ambiguous(dest, option, code):
+    with pytest.raises(UsageError) as info:
+        parse_flags({dest: ""})
+    assert str(
+        info.value).startswith(f"ls: ambiguous argument '' for {option}\n")
     assert info.value.exit_code == code

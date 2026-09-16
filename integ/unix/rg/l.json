@@ -34,6 +34,41 @@
       "flags": [
         "l"
       ]
+    },
+    {
+      "id": "rg_l_names_a_single_unlabelled_operand",
+      "seq": 612130,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\n' > /data/rl1.txt; rg -l a /data/rl1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rl1.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
     }
   ]
 }

@@ -1,0 +1,1347 @@
+{
+  "command": "expand",
+  "cases": [
+    {
+      "id": "expand_tabs_invalid_word",
+      "cmd": "expand --tabs=abc",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size contains invalid character(s): 'abc'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_invalid_suffix_quotes_remainder",
+      "cmd": "expand --tabs=8x",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size contains invalid character(s): 'x'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_valid_width",
+      "cmd": "expand --tabs=4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a   b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_leading_plus_is_a_sign",
+      "cmd": "expand --tabs=+4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a   b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_empty_list_is_the_default_size",
+      "cmd": "expand --tabs=''",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a       b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_minus_is_an_invalid_character",
+      "cmd": "expand --tabs=-4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size contains invalid character(s): '-4'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_one_stop_repeats_as_a_size",
+      "cmd": "expand -t 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a  b  c  d  e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_several_stops_are_absolute_columns",
+      "cmd": "expand -t 1,3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a  b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_past_the_last_stop_is_one_blank",
+      "cmd": "expand -t 2,5",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b  c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_three_stops_then_one_blank",
+      "cmd": "expand -t 2,4,6",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_wide_stops",
+      "cmd": "expand -t 10,20",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a         b         c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_takes_the_first_stop_past_the_column",
+      "cmd": "expand -t 2,5",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "ab\tc\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "ab   c\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_a_column_on_the_last_stop_is_past_it",
+      "cmd": "expand -t 5,9",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "xxxxxxxxx\tY\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "xxxxxxxxx Y\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_one_stop_keeps_repeating_where_two_do_not",
+      "cmd": "expand -t 5",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "xxxxxxxxxx\tY\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "xxxxxxxxxx     Y\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_two_stops_give_one_blank_at_the_same_column",
+      "cmd": "expand -t 5,9",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "xxxxxxxxxx\tY\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "xxxxxxxxxx Y\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_an_empty_element_is_skipped",
+      "cmd": "expand -t 1,,3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a  b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_a_trailing_comma_is_skipped",
+      "cmd": "expand -t 1,3,",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a  b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_a_leading_comma_is_skipped",
+      "cmd": "expand -t ,1,3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a  b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_blanks_separate_stops",
+      "cmd": "expand -t '2 4 6'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_blanks_around_one_stop_are_separators",
+      "cmd": "expand -t ' 5 '",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a    b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_slash_is_the_multiples_of_n",
+      "cmd": "expand -t /4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a   b   c   d   e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_slash_rounds_up_strictly",
+      "cmd": "expand -t /4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "abcd\tX\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "abcd    X\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_plus_steps_from_the_last_stop",
+      "cmd": "expand -t 2,+4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b   c   d   e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_slash_extends_past_the_last_stop",
+      "cmd": "expand -t 2,/4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b c   d   e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_a_zero_after_plus_leaves_it_unset",
+      "cmd": "expand -t +0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a       b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_a_stop_after_a_discarded_plus_zero",
+      "cmd": "expand -t +0,4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a   b   c   d   e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_one_stop_after_a_plus_zero_still_repeats",
+      "cmd": "expand -t 2,+0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_accumulate_across_occurrences",
+      "cmd": "expand -t 2,4 -t 6",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_accumulate_across_long_occurrences",
+      "cmd": "expand --tabs=2,4 --tabs=6",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b c d e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_a_plus_occurrence_joins_a_stop_occurrence",
+      "cmd": "expand -t +4 -t 2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b   c   d   e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_an_empty_occurrence_adds_nothing",
+      "cmd": "expand -t 4 -t ''",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\td\te\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a   b   c   d   e\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_zero_is_refused",
+      "cmd": "expand --tabs=0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size cannot be 0\n"
+      }
+    },
+    {
+      "id": "expand_tabs_zero_short_form_is_refused",
+      "cmd": "expand -t 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size cannot be 0\n"
+      }
+    },
+    {
+      "id": "expand_tabs_zero_with_leading_zeros_is_refused",
+      "cmd": "expand -t 00",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size cannot be 0\n"
+      }
+    },
+    {
+      "id": "expand_tabs_a_zero_anywhere_in_the_list_is_refused",
+      "cmd": "expand -t 3,0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size cannot be 0\n"
+      }
+    },
+    {
+      "id": "expand_tabs_a_decreasing_list_is_refused",
+      "cmd": "expand -t 3,1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab sizes must be ascending\n"
+      }
+    },
+    {
+      "id": "expand_tabs_a_repeated_stop_is_refused",
+      "cmd": "expand -t 3,3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab sizes must be ascending\n"
+      }
+    },
+    {
+      "id": "expand_tabs_non_ascending_across_occurrences",
+      "cmd": "expand -t 6 -t 2,4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab sizes must be ascending\n"
+      }
+    },
+    {
+      "id": "expand_tabs_zero_outranks_ascending_on_the_same_element",
+      "cmd": "expand -t 3,0,0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size cannot be 0\n"
+      }
+    },
+    {
+      "id": "expand_tabs_ascending_outranks_a_later_zero",
+      "cmd": "expand -t 3,1,0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab sizes must be ascending\n"
+      }
+    },
+    {
+      "id": "expand_tabs_an_invalid_character_outranks_a_zero",
+      "cmd": "expand -t 0,x",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size contains invalid character(s): 'x'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_quotes_the_remainder_inside_a_list",
+      "cmd": "expand -t 1,3x",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size contains invalid character(s): 'x'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_quotes_the_whole_list_from_position_zero",
+      "cmd": "expand -t x,3,1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size contains invalid character(s): 'x,3,1'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_a_too_large_stop_is_refused",
+      "cmd": "expand -t 99999999999999999999",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab stop is too large '99999999999999999999'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_a_too_large_stop_quotes_only_its_digit_run",
+      "cmd": "expand -t 1,99999999999999999999",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab stop is too large '99999999999999999999'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_a_too_large_stop_does_not_stop_the_scan",
+      "cmd": "expand -t 99999999999999999999,x",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab stop is too large '99999999999999999999'\nexpand: tab size contains invalid character(s): 'x'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_a_too_large_stop_suppresses_the_zero_walk",
+      "cmd": "expand -t 1,99999999999999999999,0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab stop is too large '99999999999999999999'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_plus_must_carry_the_last_value",
+      "cmd": "expand -t +4,2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: '+' specifier only allowed with the last value\n"
+      }
+    },
+    {
+      "id": "expand_tabs_slash_must_carry_the_last_value",
+      "cmd": "expand -t /4,2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: '/' specifier only allowed with the last value\n"
+      }
+    },
+    {
+      "id": "expand_tabs_plus_twice_across_occurrences",
+      "cmd": "expand -t +4 -t +5",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: '+' specifier only allowed with the last value\n"
+      }
+    },
+    {
+      "id": "expand_tabs_plus_must_start_a_number",
+      "cmd": "expand -t 4+",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: '+' specifier not at start of number: '+'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_slash_must_start_a_number",
+      "cmd": "expand -t +4/5",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: '/' specifier not at start of number: '/5'\n"
+      }
+    },
+    {
+      "id": "expand_a_carriage_return_does_not_reset_the_column",
+      "cmd": "expand",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\r\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\r      b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_a_carriage_return_keeps_the_column_under_a_tab_size",
+      "cmd": "expand -t 4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\r\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\r  b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_a_vertical_tab_does_not_reset_the_column",
+      "cmd": "expand",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\u000bb\tX\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\u000bb     X\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_a_form_feed_does_not_reset_the_column",
+      "cmd": "expand",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\fb\tX\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\fb     X\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_a_newline_does_reset_the_column",
+      "cmd": "expand -t 4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\r\n\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\r\n    b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_tabs_a_trailing_newline_is_an_invalid_character",
+      "cmd": "expand --tabs=$'8\\n'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size contains invalid character(s): '\\n'\n"
+      }
+    },
+    {
+      "id": "expand_tabs_a_newline_is_not_a_separator",
+      "cmd": "expand --tabs=$'8\\n4'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size contains invalid character(s): '\\n4'\n"
+      }
+    },
+    {
+      "id": "expand_initial_only_reads_the_same_tab_list",
+      "cmd": "expand -i -t 1,3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "\ta\tb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": " a\tb\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expand_initial_only_refuses_the_same_tab_list",
+      "cmd": "expand -i -t 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "\ta\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "expand: tab size cannot be 0\n"
+      }
+    }
+  ]
+}

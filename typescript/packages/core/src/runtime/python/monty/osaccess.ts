@@ -16,6 +16,7 @@ import { mergeEntries } from './list.ts'
 import { parseMode } from '../../handles/mode.ts'
 import type { MontyBindingBits } from './binding.ts'
 import { guestError } from './errors.ts'
+import { isDirRow, isRegularRow, statResult } from './stat.ts'
 import { ScratchTree } from './tree.ts'
 import type { MontyVFS } from './vfs.ts'
 
@@ -118,8 +119,7 @@ function dateMarker(): Record<string, unknown> {
  * `MontyVFS`, and a path under no mount answers from a per-run
  * `ScratchTree`, so `/tmp` really does behave like `/tmp` on both
  * hosts. Declining is reserved for what neither half can serve: an
- * operation this door does not implement, and `Path.stat` (see the
- * note at that case).
+ * operation this door does not implement.
  *
  * Args:
  *   binding: the loaded binding's door pieces (NOT_HANDLED sentinel
@@ -129,6 +129,7 @@ function dateMarker(): Record<string, unknown> {
  *   vfs: the mount view, or null when no workspace is attached.
  */
 export class MirageOSAccess {
+  private readonly bits: MontyBindingBits
   private readonly notHandled: symbol
   private readonly fileHandle: MontyBindingBits['MontyFileHandle']
   private readonly env: Record<string, string>
@@ -140,6 +141,7 @@ export class MirageOSAccess {
   private readonly bases = new Map<string, Uint8Array>()
 
   constructor(binding: MontyBindingBits, env: Record<string, string>, vfs: MontyVFS | null) {
+    this.bits = binding
     this.notHandled = binding.NOT_HANDLED
     this.fileHandle = binding.MontyFileHandle
     this.env = env
@@ -232,41 +234,43 @@ export class MirageOSAccess {
       }
       case 'Path.iterdir':
         return vfs.readdir(path).then((entries) => entries.map((e) => e.path))
+      // The mount's own row answers the three predicates whenever it
+      // has one, which is what python's door does. A listing is a
+      // second question, not a cheaper spelling of the first: a
+      // backend may serve a stat for a path it will not list, and
+      // asking the listing first reported that as a failure rather
+      // than as the row it had. The fallback stays for the one path
+      // with no row of its own, a directory the mount only implies
+      // (the root above a nested mount).
       case 'Path.is_dir':
-        return vfs.readdir(path).then(
-          () => true,
-          () => false,
-        )
+        return vfs
+          .stat(path)
+          .then((st) =>
+            st !== null ? isDirRow(st) : vfs.readdirOrNull(path).then((e) => e !== null),
+          )
       // Monty's own tree holds no links, so declining would answer
       // False for one the shell made; the mount's name plane is the
       // only place the fact lives. Creation stays out of reach: the
       // binding emits no symlink verb to serve.
       case 'Path.is_symlink':
         return vfs.isLink(path)
+      // No listing fallback here, and that is not an omission: an
+      // implied directory is the only path a mount lists without a
+      // row, and it is not a regular file.
       case 'Path.is_file':
-        return vfs.entryFor(path).then(
-          (e) =>
-            e !== null && !e.isDir && (e.mode === undefined || (e.mode & 0o170000) === 0o100000),
-          () => false,
-        )
+        return vfs.stat(path).then((st) => st !== null && isRegularRow(st))
       case 'Path.exists':
-        return vfs.entryFor(path).then(
-          (e) => e !== null,
-          () =>
-            vfs.readdir(path).then(
-              () => true,
-              () => false,
-            ),
-        )
-      // `Path.stat` is deliberately not served: the JS binding
-      // converts a callback's answer structurally, so a stat object
-      // arrives in the guest as a dict (and a 10-tuple as a list) and
-      // `st.st_size` raises AttributeError — probed on 0.0.21.
-      // Python's binding takes a real `StatResult`, which is why its
-      // guests get a working stat; until @pydantic/monty grows a
-      // StatResult (and Path) marker for the JS side, a guest stat
-      // raises PermissionError here. `Path.iterdir` strings arriving
-      // as guest str (python: PosixPath) is the same upstream gap.
+        return vfs
+          .stat(path)
+          .then((st) => (st !== null ? true : vfs.readdirOrNull(path).then((e) => e !== null)))
+      // A row the mount does not have is not an absence yet: the
+      // path may be a guest scratch file, and only the tree knows.
+      // `Path.iterdir` strings arriving as guest str (python:
+      // PosixPath) remains an upstream gap; the wire has no Path.
+      case 'Path.stat':
+        return vfs
+          .stat(path)
+          .then((st) => (st === null ? this.scratchStat(path, vfs) : statResult(this.bits, st)))
       default:
         return this.notHandled
     }
@@ -339,11 +343,36 @@ export class MirageOSAccess {
         return vfs === null ? false : vfs.isLink(path)
       case 'Path.iterdir':
         return this.scratchIterdir(path, vfs)
-      // `Path.stat` stays declined even for scratch files — see the
-      // upstream-gap note in `mountedOp`.
+      case 'Path.stat':
+        return this.scratchStat(path, vfs)
       default:
         return this.notHandled
     }
+  }
+
+  /**
+   * The scratch tree's row for `path`, as the guest's `os.stat_result`.
+   *
+   * A directory the workspace can list but no mount claims (the root
+   * above nested mounts, `/parent` when only `/parent/child` is
+   * mounted) is not in the tree, and falling straight through reported
+   * it missing although `exists` and `is_dir` both answered True for
+   * it. So the same door those two use answers here, and a hit is
+   * materialized exactly as python's `_ensure_dir` materializes it,
+   * which is what keeps the two hosts' rows identical.
+   *
+   * Args:
+   *   path: the guest path to stat.
+   *   vfs: the mount view, or null outside a workspace.
+   */
+  private scratchStat(path: string, vfs: MontyVFS | null): unknown {
+    if (this.tree.exists(path)) return statResult(this.bits, this.tree.stat(path))
+    const listed = this.remoteIsDir(path, vfs)
+    if (listed === false) return statResult(this.bits, this.tree.stat(path))
+    return Promise.resolve(listed).then((isDir) => {
+      if (isDir) this.tree.mkdir(path, true, true)
+      return statResult(this.bits, this.tree.stat(path))
+    })
   }
 
   /**
@@ -354,10 +383,7 @@ export class MirageOSAccess {
    */
   private remoteIsDir(path: string, vfs: MontyVFS | null): boolean | Promise<boolean> {
     if (vfs === null) return false
-    return vfs.readdir(path).then(
-      () => true,
-      () => false,
-    )
+    return vfs.readdirOrNull(path).then((entries) => entries !== null)
   }
 
   /**
@@ -369,16 +395,14 @@ export class MirageOSAccess {
    */
   private scratchIterdir(path: string, vfs: MontyVFS | null): unknown {
     if (vfs === null) return this.tree.iterdir(path)
-    return vfs.readdir(path).then(
-      (entries) => {
-        return mergeEntries(
-          path,
-          this.tree.isDir(path) ? this.tree.iterdir(path) : [],
-          entries.map((entry) => entry.path),
-        )
-      },
-      () => this.tree.iterdir(path),
-    )
+    return vfs.readdirOrNull(path).then((entries) => {
+      if (entries === null) return this.tree.iterdir(path)
+      return mergeEntries(
+        path,
+        this.tree.isDir(path) ? this.tree.iterdir(path) : [],
+        entries.map((entry) => entry.path),
+      )
+    })
   }
 
   private async openMounted(path: string, mode: string, vfs: MontyVFS): Promise<unknown> {
@@ -409,11 +433,8 @@ export class MirageOSAccess {
     }
     const entry = await vfs.entryFor(path)
     if (entry === null) {
-      const isDir = await vfs.readdir(path).then(
-        () => true,
-        () => false,
-      )
-      throw isDir ? guestError('EISDIR', path) : guestError('ENOENT', path)
+      const listed = await vfs.readdirOrNull(path)
+      throw listed !== null ? guestError('EISDIR', path) : guestError('ENOENT', path)
     }
     if (entry.isDir) throw guestError('EISDIR', path)
     return handle
@@ -450,14 +471,9 @@ export class MirageOSAccess {
     kwargs: Record<string, unknown>,
     vfs: MontyVFS,
   ): Promise<null> {
-    const entry = await vfs.entryFor(path).catch(() => null)
+    const entry = await vfs.entryFor(path)
     if (entry !== null && !entry.isDir) throw guestError('EEXIST', path)
-    const exists =
-      entry !== null ||
-      (await vfs.readdir(path).then(
-        () => true,
-        () => false,
-      ))
+    const exists = entry !== null || (await vfs.readdirOrNull(path)) !== null
     if (exists) {
       if (kwargs.exist_ok === true) return null
       throw guestError('EEXIST', path)

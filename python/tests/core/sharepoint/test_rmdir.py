@@ -2,6 +2,7 @@ import errno
 
 import pytest
 from aioresponses import aioresponses
+from yarl import URL
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.rmdir import rmdir
@@ -41,6 +42,7 @@ async def test_rmdir_deletes_an_empty_folder():
         m.get(_DRIVE + "/root:/dir:/children" + _PROBE, payload={"value": []})
         m.delete(_DRIVE + "/root:/dir", status=204)
         await rmdir(_accessor(), _spec("dir"))
+        assert ("DELETE", URL(_DRIVE + "/root:/dir")) in m.requests
 
 
 @pytest.mark.asyncio

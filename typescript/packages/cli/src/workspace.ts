@@ -14,13 +14,8 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
-import {
-  absolutizeScripts,
-  checkWorkspaceConfigFile,
-  interpolateEnv,
-} from '@struktoai/mirage-server'
-import { parse as yamlParse } from 'yaml'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
 import { loadDaemonSettings } from './settings.ts'
@@ -42,13 +37,23 @@ function envRecord(): Record<string, string> {
 // exactly as `create` rebases them, so `resource: ./wiki.mjs:WikiResource`
 // in an override means "next to this file", never "wherever the daemon
 // runs". Not validated, because an override may name only a subset of
-// mounts. Mirrors `_resolve_config_arg` in the Python CLI.
-function loadConfigArgument(path: string): unknown {
+// mounts. Mirrors `_resolve_config_arg` in the Python CLI, which is sync:
+// this half is async only because it defers `mirage-node/config` and
+// `yaml` so a `mirage` spawn that never loads a config pays neither. The
+// behaviour is the same; the divergence is the `await`, and it is the
+// reason `override` is a JsonValue rather than `unknown` -- dropping that
+// `await` would otherwise typecheck and put `{}` on the wire.
+async function loadConfigArgument(path: string): Promise<JsonValue> {
   if (!existsSync(path)) fail(`config file not found: ${path}`, 2)
+  const { absolutizeScripts, interpolateEnv } = await import('@struktoai/mirage-node/config')
+  const { parse: yamlParse } = await import('yaml')
   const text = readFileSync(path, 'utf-8')
-  let config: unknown
+  let config: JsonValue
   try {
-    config = interpolateEnv(yamlParse(text), envRecord())
+    // `yamlParse` is typed `any`; naming the shape here is what lets
+    // `override` be a JsonValue, which is what makes a dropped `await`
+    // on this function a type error rather than an empty body on the wire.
+    config = interpolateEnv(yamlParse(text) as JsonValue, envRecord())
   } catch (err: unknown) {
     fail(`invalid config YAML/JSON at ${path}: ${String(err)}`, 2)
   }
@@ -202,6 +207,7 @@ export function registerWorkspaceCommands(program: Command): void {
       // source of truth, and a missing var must fail before the round
       // trip), but sent in the file's own spelling: the daemon runs the
       // same check, and it speaks snake_case like the Python one.
+      const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
       const cfg = checkWorkspaceConfigFile(configPath)
       const body: { config: unknown; id?: string } = { config: cfg }
       if (opts.id !== undefined) body.id = opts.id
@@ -418,9 +424,9 @@ export function registerWorkspaceCommands(program: Command): void {
     .option('--id <id>', 'Explicit workspace id')
     .action(async (tarPath: string, configPath: string | undefined, opts: { id?: string }) => {
       if (!existsSync(tarPath)) fail(`tar file not found: ${tarPath}`, 2)
-      const body: { path: string; id?: string; override?: unknown } = { path: resolve(tarPath) }
+      const body: { path: string; id?: string; override?: JsonValue } = { path: resolve(tarPath) }
       if (opts.id !== undefined) body.id = opts.id
-      if (configPath !== undefined) body.override = loadConfigArgument(configPath)
+      if (configPath !== undefined) body.override = await loadConfigArgument(configPath)
       const c = buildClient()
       await c.ensureRunning({ allowSpawn: true })
       const r = await c.request('POST', '/v1/workspaces/load', { body: JSON.stringify(body) })

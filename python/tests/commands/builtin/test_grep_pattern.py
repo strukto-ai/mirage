@@ -1,3 +1,5 @@
+import pytest
+
 from mirage.commands.builtin.grep_pattern import (NEVER_MATCH, compile_pattern,
                                                   merge_pattern_list)
 
@@ -94,3 +96,36 @@ class TestCompilePattern:
         pat = compile_pattern("foo", whole_word=True)
         assert not pat.search("foobar")
         assert pat.search("foo bar")
+
+
+# Every row measured against GNU grep 3.11 under LC_ALL=C, which is the
+# locale mirage renders in: `grep -w ab` on `éab` and `grep -w a` on `aé`
+# both select the line, while `grep -i k` on U+212A and `grep -i s` on
+# U+017F select nothing. python's own defaults answer the opposite way on
+# all four, so the pattern is compiled with `re.ASCII`.
+@pytest.mark.parametrize(
+    "pattern, subject, ignore_case, whole_word, selected",
+    [
+        ("ab", "éab", False, True, True),
+        ("a", "aé", False, True, True),
+        ("k", "K", True, False, False),
+        ("s", "ſ", True, False, False),
+        ("ab", "xab", False, True, False),
+        ("k", "K", True, False, True),
+    ],
+)
+def test_ascii_semantics_for_word_boundaries_and_case_folding(
+        pattern, subject, ignore_case, whole_word, selected):
+    pat = compile_pattern(pattern,
+                          ignore_case=ignore_case,
+                          whole_word=whole_word,
+                          basic=True)
+    assert bool(pat.search(subject)) is selected
+
+
+def test_word_class_stays_ascii_in_an_extended_expression():
+    # -E takes the same compile, so `\w` must not grow a Unicode meaning
+    # there either.
+    pat = compile_pattern(r"\w", basic=False)
+    assert not pat.search("é")
+    assert pat.search("a")

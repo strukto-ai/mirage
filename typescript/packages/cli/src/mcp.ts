@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { serveMirageMcp } from '@struktoai/mirage-agents/mcp'
 import type { Workspace } from '@struktoai/mirage-node'
-import { buildWorkspaceFromConfig, resolveWorkspaceConfig } from '@struktoai/mirage-server'
+import {
+  buildWorkspaceFromConfig,
+  resolveWorkspaceConfig,
+} from '@struktoai/mirage-server/workspace_config'
 import type { Command } from 'commander'
 
 export interface McpConfigResolutionOptions {
@@ -43,6 +45,10 @@ export async function buildMcpWorkspace(configPath: string): Promise<Workspace> 
 
 async function runMcpServer(config: string | undefined, options: McpCommandOptions): Promise<void> {
   const configPath = resolveMcpConfig(config)
+  // Loaded before the workspace exists: this command always serves, so
+  // deferring it past construction buys nothing and a failed import there
+  // would leak a live workspace (and any FUSE mount it opened).
+  const { serveMirageMcp } = await import('@struktoai/mirage-agents/mcp')
   const workspace = await buildMcpWorkspace(configPath)
   try {
     await serveMirageMcp(workspace, {

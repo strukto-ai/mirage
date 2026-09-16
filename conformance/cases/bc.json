@@ -1,0 +1,1019 @@
+{
+  "command": "bc",
+  "cases": [
+    {
+      "id": "bc_div_truncates_at_default_scale",
+      "cmd": "echo '7/2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_div_neg_truncates_toward_zero",
+      "cmd": "echo '-7/2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "-3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_mod_default_scale",
+      "cmd": "echo '7%2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_mod_neg_default_scale",
+      "cmd": "echo '-7%2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "-1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_default_scale_is_zero",
+      "cmd": "echo 'scale' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_scale_pads_trailing_zero",
+      "cmd": "echo 'scale=2; 7/2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3.50\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_decimal_addition_is_exact",
+      "cmd": "echo '0.1+0.2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_divide_by_zero_exits_0",
+      "cmd": "echo '1/0' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "Runtime error (func=(main), adr=3): Divide by zero\n"
+      }
+    },
+    {
+      "id": "bc_modulo_by_zero_exits_0",
+      "cmd": "echo '1%0' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "Runtime error (func=(main), adr=3): Modulo by zero\n"
+      }
+    },
+    {
+      "id": "bc_runtime_error_is_non_fatal",
+      "cmd": "printf '1/0\\n2+2\\n' | bc 2>/dev/null",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_sets_scale_20",
+      "cmd": "echo 'scale' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "20\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_div_no_longer_truncates",
+      "cmd": "echo '7/2' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3.50000000000000000000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_sin_zero_is_bare_zero",
+      "cmd": "echo 's(0)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_cos_zero_is_padded",
+      "cmd": "echo 'c(0)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1.00000000000000000000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_divide_by_zero_exits_0",
+      "cmd": "echo '1/0' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "Runtime error (func=(main), adr=3): Divide by zero\n"
+      }
+    },
+    {
+      "id": "bc_power_is_bignum",
+      "cmd": "echo '2^100' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1267650600228229401496703205376\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_product_truncates_toward_zero",
+      "cmd": "echo '1.5*2.5' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3.7\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_product_below_one_truncates",
+      "cmd": "echo '0.7*0.7' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_negative_product_truncates_toward_zero",
+      "cmd": "echo '-1.5*2.5' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "-3.7\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_quotient_truncates_at_scale_one",
+      "cmd": "echo 'scale=1; 2/3' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".6\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_scale_zero_quotient_truncates_a_half",
+      "cmd": "echo 'scale=0; 1.5/1' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_undefined_variable_reads_as_zero",
+      "cmd": "echo 'x' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_variable_survives_between_statements",
+      "cmd": "echo 'x=5; x*2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "10\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_assignment_prints_nothing",
+      "cmd": "echo 'x=5' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_parenthesised_assignment_prints",
+      "cmd": "echo '(x=5)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "5\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_post_increment_prints_the_old_value",
+      "cmd": "echo 'x=5; x++; x' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "5\n6\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_uppercase_letter_is_a_digit",
+      "cmd": "echo 'X' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "33\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_ibase_reads_the_input_base",
+      "cmd": "echo 'ibase=16; FF' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "255\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_obase_prints_the_output_base",
+      "cmd": "echo 'obase=16; 255' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "FF\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_last_holds_the_printed_value",
+      "cmd": "echo '1+1; last' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_syntax_error_exits_0",
+      "cmd": "echo '1 2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_parse_error_is_non_fatal",
+      "cmd": "printf '1 2\\n5+5\\n' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "10\n",
+        "stderr_text": "(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_illegal_character_exits_0",
+      "cmd": "echo '@' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "(standard_in) 1: illegal character: @\n"
+      }
+    },
+    {
+      "id": "bc_unknown_function_is_a_runtime_error",
+      "cmd": "echo 'foo(1)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "Runtime error (func=(main), adr=3): Function foo not defined.\n"
+      }
+    },
+    {
+      "id": "bc_hash_comment_runs_to_end_of_line",
+      "cmd": "echo '1+1 # trailing' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_comment_line_shifts_the_line_number",
+      "cmd": "printf '@\\n#nope\\n$\\n' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "(standard_in) 1: illegal character: @\n(standard_in) 3: illegal character: $\n"
+      }
+    },
+    {
+      "id": "bc_block_comment_separates_tokens",
+      "cmd": "echo '1+/*c*/2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_quit_stops_reading_input",
+      "cmd": "printf '1+1\\nquit\\n2+2\\n' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_quit_discards_its_own_line",
+      "cmd": "echo '1+1;quit;2+2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_halt_keeps_what_its_line_printed",
+      "cmd": "printf '1+1\\nhalt\\n2+2\\n' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_length_and_scale_builtins",
+      "cmd": "echo 'scale=3; length(1/3); scale(1/3)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_length_counts_trailing_zeros",
+      "cmd": "echo 'length(1.230)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_scale_of_a_literal_is_its_own",
+      "cmd": "echo 'scale(1.23456)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "5\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_double_plus_is_one_token",
+      "cmd": "echo '1++2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_there_is_no_unary_plus",
+      "cmd": "echo '+5' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_parse_error_discards_the_whole_line",
+      "cmd": "echo '5+5;1 2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_discarded_line_rolls_back_its_writes",
+      "cmd": "printf 'x=5;1 2\\nx\\n' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0\n",
+        "stderr_text": "(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_each_bad_statement_on_a_line_reports",
+      "cmd": "echo '1 2;3 4' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "(standard_in) 1: syntax error\n(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_runtime_error_abandons_the_rest_of_its_line",
+      "cmd": "echo '1/0;2+2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "Runtime error (func=(main), adr=3): Divide by zero\n"
+      }
+    },
+    {
+      "id": "bc_runtime_error_does_not_roll_back_its_line",
+      "cmd": "printf 'x=5;1/0;y=7\\nx\\ny\\n' | bc 2>/dev/null",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "5\n0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_incomplete_before_a_semicolon_is_its_own_line",
+      "cmd": "echo '1+;2' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "(standard_in) 1: syntax error\n"
+      }
+    },
+    {
+      "id": "bc_power_of_a_fractional_base",
+      "cmd": "echo '7.8041^15' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "24257295885134.4650\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_power_of_a_fractional_base_truncates",
+      "cmd": "echo 'scale=1; 1.05^3' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1.15\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_power_negative_exponent_takes_the_global_scale",
+      "cmd": "echo 'scale=3; 2^-3' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".125\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_power_exponent_is_truncated_with_a_warning",
+      "cmd": "echo '2^1.5' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": "Runtime warning (func=(main), adr=3): non-zero scale in exponent\n"
+      }
+    },
+    {
+      "id": "bc_power_zero_to_a_negative_power_is_lowercase",
+      "cmd": "echo '0^-1' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "Runtime error (func=(main), adr=3): divide by zero\n"
+      }
+    },
+    {
+      "id": "bc_l_sine_of_one_is_not_exact",
+      "cmd": "echo 's(1)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".84147098480789650000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_cosine_of_a_tenth_is_not_exact",
+      "cmd": "echo 'c(.1)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".99500416527802570000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_arctangent_of_one_is_not_exact",
+      "cmd": "echo 'a(1)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".78539816339744840000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_log_of_three_is_not_exact",
+      "cmd": "echo 'l(3)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1.09861228866810980000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_exponential_of_one_is_not_exact",
+      "cmd": "echo 'e(1)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2.71828182845904550000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_sqrt_of_two_is_not_exact",
+      "cmd": "echo 'sqrt(2)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1.41421356237309510000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_matches_gnu_at_scale_fifteen",
+      "cmd": "echo 'scale=15; s(1); c(.1); l(3); a(1); e(1)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".841470984807896\n.995004165278025\n1.098612288668109\n.785398163397448\n2.718281828459045\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_l_log_of_zero_answers_from_scale",
+      "cmd": "echo 'scale=5; l(0)' | bc -l",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "-99999.00000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_hundredth_digit_truncates_rather_than_rounds",
+      "cmd": "echo 'scale=100; 2^-101' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".0000000000000000000000000000003944304526105059027058642826413931148\\\n366032175545115023851394653320312\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_a_long_value_folds_at_sixty_eight_characters",
+      "cmd": "echo '2^300' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "20370359763344860862684456884093781610514683936659362506361404493543\\\n81299763336706183397376\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_the_fold_boundary_is_sixty_eight_characters",
+      "cmd": "echo 'scale=67; 2^-67' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".0000000000000000000067762635780344027125465800054371356964111328125\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_one_character_past_the_fold_boundary",
+      "cmd": "echo 'scale=68; 2^-68' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": ".0000000000000000000033881317890172013562732900027185678482055664062\\\n5\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_the_fold_column_is_counted_per_value",
+      "cmd": "echo '2^300; 1+1' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "20370359763344860862684456884093781610514683936659362506361404493543\\\n81299763336706183397376\n2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_a_long_diagnostic_does_not_fold",
+      "cmd": "echo 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff(1)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "Runtime error (func=(main), adr=3): Function ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff not defined.\n"
+      }
+    },
+    {
+      "id": "bc_line_length_zero_turns_folding_off",
+      "cmd": "echo '2^300' | BC_LINE_LENGTH=0 bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2037035976334486086268445688409378161051468393665936250636140449354381299763336706183397376\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_line_length_sets_the_fold_width",
+      "cmd": "echo '2^300' | BC_LINE_LENGTH=10 bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "20370359\\\n76334486\\\n08626844\\\n56884093\\\n78161051\\\n46839366\\\n59362506\\\n36140449\\\n35438129\\\n97633367\\\n06183397\\\n376\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_line_length_with_no_digits_turns_folding_off",
+      "cmd": "echo '2^300' | BC_LINE_LENGTH=abc bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2037035976334486086268445688409378161051468393665936250636140449354381299763336706183397376\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_line_length_below_three_falls_back_to_seventy",
+      "cmd": "echo '2^300' | BC_LINE_LENGTH=2 bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "20370359763344860862684456884093781610514683936659362506361404493543\\\n81299763336706183397376\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_sqrt_of_a_negative_number_is_refused",
+      "cmd": "echo 'sqrt(-1)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": "Runtime error (func=(main), adr=3): Square root of a negative number\n"
+      }
+    },
+    {
+      "id": "bc_sqrt_refusal_is_non_fatal",
+      "cmd": "printf 'sqrt(-1)\\n2+2\\n' | bc 2>/dev/null",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_sqrt_of_one_is_a_bare_one",
+      "cmd": "echo 'scale=100; sqrt(1)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "bc_sqrt_of_a_perfect_square_still_pads",
+      "cmd": "echo 'scale=5; sqrt(4)' | bc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2.00000\n",
+        "stderr_text": ""
+      }
+    }
+  ]
+}

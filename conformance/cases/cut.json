@@ -1,0 +1,665 @@
+{
+  "command": "cut",
+  "cases": [
+    {
+      "id": "cut_f_trailing_garbage_quotes_remainder",
+      "cmd": "cut -d, -f 2-3x",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value 'x'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_nonnumeric_quotes_whole_arg",
+      "cmd": "cut -d, -f abc",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value 'abc'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_c_nonnumeric_position_wording",
+      "cmd": "cut -c abc",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid byte/character position 'abc'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_zero_is_numbered_from_1",
+      "cmd": "cut -d, -f 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_decreasing_range",
+      "cmd": "cut -d, -f 3-1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid decreasing range\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_empty_spec",
+      "cmd": "cut -d, -f ''",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_list_member_trailing_garbage",
+      "cmd": "cut -d, -f 1,2x",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value 'x'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_trailing_space_is_numbered_from_1",
+      "cmd": "cut -d, -f '2 '",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_triple_range",
+      "cmd": "cut -d, -f '1-2-3'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field range\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_open_ended_range_valid",
+      "cmd": "cut -d, -f 2-",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "b,c\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "cut_f_open_left_range_valid",
+      "cmd": "cut -d, -f -2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a,b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "cut_c_open_ended_range_valid",
+      "cmd": "cut -c 2-",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": ",b,c\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "cut_c_triple_range_says_byte_or_character",
+      "cmd": "cut -c '1-2-3'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "abc\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid byte or character range\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_b_triple_range_shares_the_char_wording",
+      "cmd": "cut -b '1-2-3'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "abc\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid byte or character range\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_c_zero_is_numbered_from_1",
+      "cmd": "cut -c 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "abc\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: byte/character positions are numbered from 1\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_c_decreasing_range_shares_the_field_wording",
+      "cmd": "cut -c '3-1'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "abc\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid decreasing range\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_trailing_comma_is_numbered_from_1",
+      "cmd": "cut -d, -f '1,'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_leading_comma_is_numbered_from_1",
+      "cmd": "cut -d, -f ',1'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_doubled_comma_is_numbered_from_1",
+      "cmd": "cut -d, -f '1,,2'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a,b,c\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_quotes_a_two_byte_char_as_octal",
+      "cmd": "cut -f '2-3é'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value '\\303\\251'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_b_quotes_a_two_byte_char_as_octal",
+      "cmd": "cut -b '1,é'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid byte/character position '\\303\\251'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_c_quotes_a_two_byte_char_as_octal",
+      "cmd": "cut -c 'xé'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid byte/character position 'x\\303\\251'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_quotes_an_emoji_as_four_octal_escapes",
+      "cmd": "cut -f '😀'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value '\\360\\237\\230\\200'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_escapes_a_backslash",
+      "cmd": "cut -f '1,2\\x'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value '\\\\x'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_escapes_a_single_quote",
+      "cmd": "cut -f \"1,2'x\"",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value '\\'x'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_escapes_a_control_byte_in_octal",
+      "cmd": "cut -f $'1,2\\001x'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value '\\001x'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_a_tab_separates_positions",
+      "cmd": "cut -f $'1\\t2'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\tb\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "cut_f_a_space_separates_positions",
+      "cmd": "cut -f '1 2'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\tb\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "cut_f_a_newline_is_an_invalid_field_value",
+      "cmd": "cut -f $'1\\n2'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value '\\n2'\nTry 'cut --help' for more information.\n"
+      }
+    },
+    {
+      "id": "cut_f_a_newline_after_a_list_is_refused",
+      "cmd": "cut -f $'1,2\\n'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "a\tb\tc\n",
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "cut: invalid field value '\\n'\nTry 'cut --help' for more information.\n"
+      }
+    }
+  ]
+}

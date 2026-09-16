@@ -33,6 +33,262 @@
         "stdout": "     1\thello\n     2\tworld\n     3\tfoo\n     4\tbar\n     5\tbaz\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nl_d_empty_disables_section_delimiters",
+      "seq": 602240,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\\\:\\\\:\\\\:\\nH\\n\\\\:\\\\:\\nB\\n' | nl -d ''",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\t\\:\\:\\:\n     2\tH\n     3\t\\:\\:\n     4\tB\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "nl_d_absent_consumes_section_delimiters",
+      "seq": 602241,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\\\:\\\\:\\\\:\\nH\\n\\\\:\\\\:\\nB\\n' | nl",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n       H\n\n     1\tB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nl_d_a_one_byte_delimiter_is_padded_with_a_colon",
+      "seq": 602242,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x:x:x:\\nH\\nA\\n' | nl -d x",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n       H\n       A\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "nl_d_a_one_byte_delimiter_does_not_match_itself_tripled",
+      "seq": 602243,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'xxx\\nH\\n' | nl -d x",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\txxx\n     2\tH\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "nl_d_a_two_byte_delimiter_is_not_padded",
+      "seq": 602244,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\303\\251\\303\\251\\303\\251\\nH\\nA\\n' | nl -d 'é'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n       H\n       A\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "nl_d_a_two_byte_delimiter_ignores_the_padded_line",
+      "seq": 602245,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\303\\251:\\303\\251:\\303\\251:\\nH\\n' | nl -d 'é'",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\té:é:é:\n     2\tH\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
+    },
+    {
+      "id": "nl_d_a_three_byte_delimiter_is_used_whole",
+      "seq": 602246,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'xyzxyzxyz\\nH\\nA\\n' | nl -d xyz",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n       H\n       A\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
     }
   ]
 }

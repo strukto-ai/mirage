@@ -24,6 +24,7 @@ from mirage.core.ram.read import read
 from mirage.core.ram.readdir import readdir
 from mirage.core.ram.stat import stat
 from mirage.core.ram.write import write_bytes as _async_write_bytes
+from mirage.io.types import IOResult
 
 
 async def _write(backend, path, content):
@@ -69,6 +70,8 @@ async def rg(backend, path, pattern, **kwargs):
         glob_pattern=kwargs.get("glob_pattern", None),
         hidden=kwargs.get("hidden", False),
         warnings=kwargs.get("warnings", None),
+        byte_offsets=kwargs.get("byte_offsets", False),
+        io=kwargs.get("io"),
     )
 
 
@@ -410,3 +413,426 @@ class TestWarnings:
         warnings = []
         result = await rg(backend, "/tmp/nodir", "foo", warnings=warnings)
         assert result == []
+
+
+class TestOnlyMatchingDirectoryWalk:
+    """GNU's -o rule holds on the directory branch, not just single files.
+
+    Every non-empty match prints on its own line and an empty match
+    prints nothing at all, while the line still counts as selected. The
+    directory branch words only the per-file label differently (-I drops
+    it), so it had drifted to printing just the first match and, for an
+    empty match, a label with nothing after it.
+    """
+
+    @pytest.mark.anyio
+    async def test_every_match_on_the_line(self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/x.txt", "a1b2c\n")
+        result = await rg(backend,
+                          "/tmp/d",
+                          "[0-9]",
+                          only_matching=True,
+                          line_numbers=False)
+        assert result == ["/tmp/d/x.txt:1", "/tmp/d/x.txt:2"]
+
+    @pytest.mark.anyio
+    async def test_line_numbers_repeat_per_match(self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/x.txt", "a1b2c\n")
+        result = await rg(backend,
+                          "/tmp/d",
+                          "[0-9]",
+                          only_matching=True,
+                          line_numbers=True)
+        assert result == ["/tmp/d/x.txt:1:1", "/tmp/d/x.txt:1:2"]
+
+    @pytest.mark.anyio
+    async def test_empty_match_prints_no_bare_label(self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/y.txt", "ab\n")
+        result = await rg(backend,
+                          "/tmp/d",
+                          "[0-9]*",
+                          only_matching=True,
+                          line_numbers=False)
+        assert result == []
+
+    @pytest.mark.anyio
+    async def test_empty_matches_dropped_around_a_real_one(self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/z.txt", "1a22b\n")
+        result = await rg(backend,
+                          "/tmp/d",
+                          "[0-9]*",
+                          only_matching=True,
+                          line_numbers=False)
+        assert result == ["/tmp/d/z.txt:1", "/tmp/d/z.txt:22"]
+
+    @pytest.mark.anyio
+    async def test_count_still_counts_the_selected_line(self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/y.txt", "ab\n")
+        result = await rg(backend,
+                          "/tmp/d",
+                          "[0-9]*",
+                          only_matching=True,
+                          count_only=True)
+        assert result == ["/tmp/d/y.txt:1"]
+
+
+class TestRgByteOffsets:
+    """rg -b agrees with GNU grep on offsets and on field order."""
+
+    @pytest.mark.anyio
+    async def test_single_file_prints_the_line_start_offset(self, backend):
+        await _write(backend, "/tmp/f1", "abc\ndefabc\nabc abc\n")
+        result = await rg(backend,
+                          "/tmp/f1",
+                          "abc",
+                          line_numbers=False,
+                          byte_offsets=True)
+        assert result == ["0:abc", "4:defabc", "11:abc abc"]
+
+    @pytest.mark.anyio
+    async def test_single_file_prints_the_match_offset_under_o(self, backend):
+        await _write(backend, "/tmp/f1", "abc\ndefabc\nabc abc\n")
+        result = await rg(backend,
+                          "/tmp/f1",
+                          "abc",
+                          line_numbers=False,
+                          only_matching=True,
+                          byte_offsets=True)
+        assert result == ["0:abc", "7:abc", "11:abc", "15:abc"]
+
+    @pytest.mark.anyio
+    async def test_field_order_is_line_then_byte(self, backend):
+        await _write(backend, "/tmp/f1", "abc\ndefabc\n")
+        result = await rg(backend,
+                          "/tmp/f1",
+                          "abc",
+                          line_numbers=True,
+                          byte_offsets=True)
+        assert result == ["1:0:abc", "2:4:defabc"]
+
+    @pytest.mark.anyio
+    async def test_offsets_count_bytes_not_characters(self, backend):
+        await _write(backend, "/tmp/f5", "café abc\nxéy abc\n")
+        result = await rg(backend,
+                          "/tmp/f5",
+                          "abc",
+                          line_numbers=False,
+                          only_matching=True,
+                          byte_offsets=True)
+        assert result == ["6:abc", "15:abc"]
+
+    @pytest.mark.anyio
+    async def test_walk_keeps_the_filename_ahead_of_the_fields(self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/x.txt", "abc\ndefabc\n")
+        result = await rg(backend,
+                          "/tmp/d",
+                          "abc",
+                          line_numbers=True,
+                          byte_offsets=True)
+        assert result == ["/tmp/d/x.txt:1:0:abc", "/tmp/d/x.txt:2:4:defabc"]
+
+    @pytest.mark.anyio
+    async def test_a_count_carries_no_offset(self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/x.txt", "abc\ndefabc\n")
+        result = await rg(backend,
+                          "/tmp/d",
+                          "abc",
+                          count_only=True,
+                          byte_offsets=True)
+        assert result == ["/tmp/d/x.txt:2"]
+
+
+class TestRgFullReportsSelection:
+    """Selection cannot be read off the printed lines under -o.
+
+    A directory whose only matches are zero-width prints nothing and GNU
+    still exits 0; ``rg_full`` returns only the printed lines, so the
+    status rides the same ``io`` channel ``grep_lines`` and
+    ``grep_stream`` already take.
+    """
+
+    @pytest.mark.anyio
+    async def test_directory_of_empty_matches_reports_selection(self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/y.txt", "ab\n")
+        io = IOResult(exit_code=1)
+        result = await rg(backend,
+                          "/tmp/d",
+                          "[0-9]*",
+                          only_matching=True,
+                          line_numbers=False,
+                          io=io)
+        assert (result, io.exit_code) == ([], 0)
+
+    @pytest.mark.anyio
+    async def test_directory_with_no_match_leaves_the_status_alone(
+            self, backend):
+        await _mkdir(backend, "/tmp/d")
+        await _write(backend, "/tmp/d/y.txt", "ab\n")
+        io = IOResult(exit_code=1)
+        result = await rg(backend,
+                          "/tmp/d",
+                          "[0-9]",
+                          only_matching=True,
+                          line_numbers=False,
+                          io=io)
+        assert (result, io.exit_code) == ([], 1)
+
+    @pytest.mark.anyio
+    async def test_single_file_of_empty_matches_reports_selection(
+            self, backend):
+        await _write(backend, "/tmp/y.txt", "ab\n")
+        io = IOResult(exit_code=1)
+        result = await rg(backend,
+                          "/tmp/y.txt",
+                          "[0-9]*",
+                          only_matching=True,
+                          line_numbers=False,
+                          io=io)
+        assert (result, io.exit_code) == ([], 0)
+
+
+async def _write_bytes(backend, path, content):
+    accessor = backend.accessor
+    await _async_write_bytes(accessor, to_pathspec(path), content)
+
+
+class TestRgSplitsOnNewlinesOnly:
+    """A line ends at `\\n`, and nothing else ends one.
+
+    `str.splitlines` also breaks on `\\r`, `\\v`, `\\f`, `\\x1c`-`\\x1e`,
+    `\\x85`, U+2028 and U+2029, so a CRLF file read as two lines with the
+    carriage returns eaten where GNU (and ripgrep 14.1.0) keep them:
+    `rg -n -v zzz` over `a\\r\\nb\\r\\n` is `1:a\\r` and `2:b\\r`, and
+    `rg -b b` is `3:b\\r`.
+    """
+
+    @pytest.mark.anyio
+    async def test_carriage_return_stays_in_the_line(self, backend):
+        await _write_bytes(backend, "/tmp/crlf.txt", b"a\r\nb\r\n")
+        result = await rg(backend, "/tmp/crlf.txt", "zzz", invert=True)
+        assert result == ["1:a\r", "2:b\r"]
+
+    @pytest.mark.anyio
+    async def test_carriage_return_counts_toward_the_byte_offset(
+            self, backend):
+        await _write_bytes(backend, "/tmp/crlf.txt", b"a\r\nb\r\n")
+        result = await rg(backend,
+                          "/tmp/crlf.txt",
+                          "b",
+                          line_numbers=False,
+                          byte_offsets=True)
+        assert result == ["3:b\r"]
+
+    @pytest.mark.anyio
+    async def test_the_terminator_does_not_open_a_last_empty_line(
+            self, backend):
+        await _write_bytes(backend, "/tmp/ab.txt", b"a\nb\n")
+        result = await rg(backend,
+                          "/tmp/ab.txt",
+                          "zzz",
+                          invert=True,
+                          count_only=True,
+                          line_numbers=False)
+        assert result == ["2"]
+
+    @pytest.mark.anyio
+    async def test_a_vertical_tab_does_not_end_a_line(self, backend):
+        await _write_bytes(backend, "/tmp/vt.txt", b"a\vb\n")
+        result = await rg(backend, "/tmp/vt.txt", "zzz", invert=True)
+        assert result == ["1:a\vb"]
+
+
+class TestRgMaxCountZeroSelectsNothing:
+    """`-m 0` selects no line, which is what GNU and ripgrep both do.
+
+    Measured: `rg -m0 a f`, `rg -m0 -c a f` and `rg -m0 -l a f` on ripgrep
+    14.1.0 and the same three on GNU grep 3.11 all print zero bytes and
+    exit 1.
+    """
+
+    @pytest.mark.anyio
+    async def test_single_file_prints_nothing(self, backend):
+        await _write(backend, "/tmp/m.txt", "a\nab\nb\n")
+        io = IOResult(exit_code=1)
+        result = await rg(backend, "/tmp/m.txt", "a", max_count=0, io=io)
+        assert (result, io.exit_code) == ([], 1)
+
+    @pytest.mark.anyio
+    async def test_single_file_counts_nothing(self, backend):
+        await _write(backend, "/tmp/m.txt", "a\nab\nb\n")
+        result = await rg(backend,
+                          "/tmp/m.txt",
+                          "a",
+                          max_count=0,
+                          count_only=True)
+        assert result == []
+
+    @pytest.mark.anyio
+    async def test_single_file_names_nothing(self, backend):
+        await _write(backend, "/tmp/m.txt", "a\nab\nb\n")
+        result = await rg(backend,
+                          "/tmp/m.txt",
+                          "a",
+                          max_count=0,
+                          files_only=True)
+        assert result == []
+
+    @pytest.mark.anyio
+    async def test_a_walk_prints_nothing(self, backend):
+        await _mkdir(backend, "/tmp/m0")
+        await _write(backend, "/tmp/m0/x.txt", "a\nab\n")
+        result = await rg(backend, "/tmp/m0", "a", max_count=0)
+        assert result == []
+
+
+class TestRgOnlyMatchingWithInvertPrintsNothing:
+    """`-o -v` prints nothing: an unselected pattern has no match to print.
+
+    GNU grep 3.11 over `abc\\ndef\\n` answers zero bytes and exit 0 for
+    `grep -ov abc`, and `1` for `grep -ovc`. ripgrep prints the whole line,
+    and GNU is the reference this family already follows for -o.
+    """
+
+    @pytest.mark.anyio
+    async def test_single_file_prints_nothing(self, backend):
+        await _write(backend, "/tmp/ov.txt", "abc\ndef\n")
+        io = IOResult(exit_code=1)
+        result = await rg(backend,
+                          "/tmp/ov.txt",
+                          "abc",
+                          only_matching=True,
+                          invert=True,
+                          io=io)
+        assert (result, io.exit_code) == ([], 0)
+
+    @pytest.mark.anyio
+    async def test_single_file_still_counts_the_selected_line(self, backend):
+        await _write(backend, "/tmp/ov.txt", "abc\ndef\n")
+        result = await rg(backend,
+                          "/tmp/ov.txt",
+                          "abc",
+                          only_matching=True,
+                          invert=True,
+                          count_only=True)
+        assert result == ["1"]
+
+    @pytest.mark.anyio
+    async def test_a_walk_prints_nothing(self, backend):
+        await _mkdir(backend, "/tmp/ovd")
+        await _write(backend, "/tmp/ovd/x.txt", "abc\ndef\n")
+        result = await rg(backend,
+                          "/tmp/ovd",
+                          "abc",
+                          only_matching=True,
+                          invert=True)
+        assert result == []
+
+
+class TestRgOffsetsOverSmuggledBytes:
+    """A byte offset counts bytes, and an invalid byte is one byte.
+
+    `rg -b a` over `\\xff\\na\\n` is `2:a` on ripgrep 14.1.0 and GNU grep
+    3.11; `rg -bo a` over `\\xffa\\n` is `1:a`. A replacing decode read the
+    invalid byte as U+FFFD, three bytes wide, so both answers ran ahead.
+    """
+
+    @pytest.mark.anyio
+    async def test_line_offset_counts_one_byte(self, backend):
+        await _write_bytes(backend, "/tmp/inv.bin", b"\xff\na\n")
+        result = await rg(backend,
+                          "/tmp/inv.bin",
+                          "a",
+                          line_numbers=False,
+                          byte_offsets=True)
+        assert result == ["2:a"]
+
+    @pytest.mark.anyio
+    async def test_match_offset_counts_one_byte(self, backend):
+        await _write_bytes(backend, "/tmp/inv2.bin", b"\xffa\n")
+        result = await rg(backend,
+                          "/tmp/inv2.bin",
+                          "a",
+                          line_numbers=False,
+                          only_matching=True,
+                          byte_offsets=True)
+        assert result == ["1:a"]
+
+    @pytest.mark.anyio
+    async def test_a_multibyte_character_counts_its_bytes(self, backend):
+        # section Q6 of the GNU truth file: the match on line one is at byte
+        # 6, not at the character index 5, and line two's is at 15.
+        await _write(backend, "/tmp/f5.txt", "café abc\nxéy abc\n")
+        result = await rg(backend,
+                          "/tmp/f5.txt",
+                          "abc",
+                          line_numbers=False,
+                          only_matching=True,
+                          byte_offsets=True)
+        assert result == ["6:abc", "15:abc"]
+
+    @pytest.mark.anyio
+    async def test_a_printed_line_replaces_a_smuggled_byte(self, backend):
+        # The scan answers in `list[str]`, which `format_records` encodes
+        # strictly, so the byte prints as U+FFFD -- what a replacing decode
+        # already gave, with the offset now right.
+        await _write_bytes(backend, "/tmp/inv3.bin", b"\xffa\n")
+        result = await rg(backend,
+                          "/tmp/inv3.bin",
+                          "a",
+                          line_numbers=False,
+                          byte_offsets=True)
+        assert result == ["0:�a"]
+
+
+class TestRgFilesOnlyNamesTheFile:
+    """`-l` answers with the path even when no label was asked for.
+
+    The path IS the output under -l, so it is never dropped for want of a
+    `-H`: `rg -l a f` prints `f` on ripgrep 14.1.0, and the TypeScript twin
+    used to print an empty line for a single unlabelled operand.
+    """
+
+    @pytest.mark.anyio
+    async def test_single_unlabelled_operand(self, backend):
+        await _write(backend, "/tmp/m.txt", "a\nab\n")
+        result = await rg(backend, "/tmp/m.txt", "a", files_only=True)
+        assert result == ["/tmp/m.txt"]
+
+
+class TestRgMaxCountIsPerFileInAWalk:
+    """`-m N` counts per file, not per walk, as ripgrep's does.
+
+    `rg -m1 a dir` prints one line per file on ripgrep 14.1.0. The walk's
+    printing path had the limit only inside its count arm, so it printed
+    every match where `searchFile` in rg_scan.ts stopped at the first.
+    """
+
+    @pytest.mark.anyio
+    async def test_one_line_per_file(self, backend):
+        await _mkdir(backend, "/tmp/mw")
+        await _write(backend, "/tmp/mw/x.txt", "a1\na2\na3\n")
+        result = await rg(backend, "/tmp/mw", "a", max_count=1)
+        assert result == ["/tmp/mw/x.txt:1:a1"]
+
+    @pytest.mark.anyio
+    async def test_two_lines_per_file(self, backend):
+        await _mkdir(backend, "/tmp/mw2")
+        await _write(backend, "/tmp/mw2/x.txt", "a1\na2\na3\n")
+        result = await rg(backend, "/tmp/mw2", "a", max_count=2)
+        assert result == ["/tmp/mw2/x.txt:1:a1", "/tmp/mw2/x.txt:2:a2"]
+
+    @pytest.mark.anyio
+    async def test_the_limit_restarts_for_each_file(self, backend):
+        await _mkdir(backend, "/tmp/mw3")
+        await _write(backend, "/tmp/mw3/x.txt", "a1\na2\n")
+        await _write(backend, "/tmp/mw3/y.txt", "a3\na4\n")
+        result = await rg(backend, "/tmp/mw3", "a", max_count=1)
+        assert result == ["/tmp/mw3/x.txt:1:a1", "/tmp/mw3/y.txt:1:a3"]

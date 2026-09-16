@@ -22,6 +22,8 @@ from dataclasses import MISSING, Field, asdict, fields
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 import mirage.commands.builtin
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.config import RegisteredCommand
@@ -34,8 +36,7 @@ logger = logging.getLogger(__name__)
 
 OUT = Path(__file__).resolve().parent.parent / "spec" / "python" / "general"
 
-BUILTIN = Path(mirage.commands.builtin.__file__).resolve(
-).parent  # type: ignore[arg-type]
+BUILTIN = Path(mirage.commands.builtin.__file__).resolve().parent
 
 # Slots holding a configuration value rather than an operation. Everything
 # else on the adapter is a wired operation, reported by name.
@@ -134,7 +135,7 @@ def _default(o: object) -> object:
     raise TypeError(f"unserializable: {type(o)}")
 
 
-def _default_of(f: Field) -> Any:
+def _default_of(f: "Field[Any]") -> Any:
     if f.default_factory is not MISSING:
         return f.default_factory()
     return f.default
@@ -189,6 +190,53 @@ def _emit_one(name: str, spec: Any, rcs: list[RegisteredCommand]) -> None:
         json.dumps(payload, indent=2, sort_keys=True, default=_default) + "\n")
 
 
+def _resource_class(name: str, ref: str | type) -> type[BaseResource]:
+    """The registry reference resolved to the class the spec reads slots off.
+
+    Refuses rather than coerces, for the reason the typescript twin's
+    ``numericCapability`` does: the six capability slots are read off the
+    class, so a reference resolving to something that is not a resource
+    would emit a spec full of defaults and surface later as a
+    ``check_spec_parity.py`` mismatch naming no class.
+
+    Args:
+        name (str): The registry name, for the refusal.
+        ref (str | type): The entry's ``resource_path``.
+
+    Returns:
+        type[BaseResource]: The resolved resource class.
+
+    Raises:
+        TypeError: The reference does not resolve to a ``BaseResource``.
+    """
+    cls = resolve_class(ref)
+    if not issubclass(cls, BaseResource):
+        raise TypeError(f"{name}: {ref!r} resolves to {cls.__name__}, which "
+                        f"is not a BaseResource; its capability slots would "
+                        f"read as defaults")
+    return cls
+
+
+def _config_model(name: str, ref: str | type) -> type[BaseModel]:
+    """The registry reference resolved to the config model the spec dumps.
+
+    Args:
+        name (str): The registry name, for the refusal.
+        ref (str | type): The entry's ``config_path`` or ``CONFIG_CLS``.
+
+    Returns:
+        type[BaseModel]: The resolved pydantic model.
+
+    Raises:
+        TypeError: The reference does not resolve to a ``BaseModel``.
+    """
+    cls = resolve_class(ref) if isinstance(ref, str) else ref
+    if not isinstance(cls, type) or not issubclass(cls, BaseModel):
+        raise TypeError(f"{name}: {ref!r} does not resolve to a pydantic "
+                        f"model, so it declares no config fields to compare")
+    return cls
+
+
 def _capabilities() -> dict[str, dict[str, Any]]:
     """Per-resource behavior values, read off the class, never an instance.
 
@@ -202,7 +250,7 @@ def _capabilities() -> dict[str, dict[str, Any]]:
     """
     out: dict[str, dict[str, Any]] = {}
     for name in sorted(REGISTRY):
-        cls = resolve_class(REGISTRY[name].resource_path)
+        cls = _resource_class(name, REGISTRY[name].resource_path)
         out[name] = {
             "index_ttl": cls.index_ttl,
             "caches_reads": cls.caches_reads,
@@ -270,13 +318,13 @@ def _configs() -> dict[str, dict[str, Any] | None]:
         if ref is None:
             out[name] = None
             continue
-        cls = resolve_class(ref) if isinstance(ref, str) else ref
+        model = _config_model(name, ref)
         out[name] = {
             "fields": {
                 (field.alias or fname): {
                     "required": field.is_required()
                 }
-                for fname, field in cls.model_fields.items()
+                for fname, field in model.model_fields.items()
             }
         }
     return out

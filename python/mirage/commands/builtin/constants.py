@@ -89,12 +89,19 @@ OD_SIZE_UNITS = size_suffixes("bkKmMGTPE")
 # Q/R/Y/Z are in GNU od's suffix set but always overflow uintmax, so they
 # report as too-large rather than as unknown suffixes.
 OD_OVERFLOW_UNITS = size_suffixes("QRYZ")
+
+# The bytes C `isspace` accepts, which every gnulib scanner skips before
+# the sign. Spelled out rather than written `\s`: python's `\s` also
+# matches 0x1c-0x1f and JavaScript's matches every Unicode space, and GNU
+# refuses both, so a shorthand would accept more than the C library does.
+C_SPACE = r"[ \t\n\v\f\r]*"
+
 # strtoumax base 0: after the whitespace and sign above, 0x… is hex, a leading
 # 0 is octal, else decimal; the unconsumed remainder is the suffix. The sign
 # stays outside group 1 so the radix is picked from the digits alone
 # (`-N +0x10` is hex, `-N +010` is octal).
 XSTRTOUMAX_PATTERN = re.compile(
-    r"^[ \t\n\v\f\r]*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$")
+    rf"^{C_SPACE}\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$")
 
 # GNU cmp (diffutils 3.10) shares od's grammar above but not its letter set:
 # no b/c/w, lowercase only up to k, and its gnulib predates Q/R, so `0Q`
@@ -108,7 +115,7 @@ CMP_SIZE_UNITS = size_suffixes("kKMGTPEZY")
 # hex and octal spellings are invalid numbers.
 SPLIT_BYTE_UNITS = size_suffixes("bkKmMEGPQRTYZ")
 SPLIT_BYTE_SUFFIXES = sorted(SPLIT_BYTE_UNITS, key=len, reverse=True)
-SPLIT_COUNT_PATTERN = re.compile(r"[ \t\n\v\f\r]*\+?[0-9]+")
+SPLIT_COUNT_PATTERN = re.compile(rf"{C_SPACE}\+?[0-9]+")
 # Suffix start values are the exception to the grammar above: coreutils 9.7
 # rejects both `--numeric-suffixes=+5` and `=" 5"`, so they keep the strict
 # digits-only form.

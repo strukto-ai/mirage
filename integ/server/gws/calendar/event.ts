@@ -26,6 +26,7 @@ import {
   isIanaZone,
   parseDate,
   parseDateTime,
+  slotMs,
 } from './zone.ts'
 
 const DEFAULT_MAX_RESULTS = 250
@@ -44,13 +45,17 @@ export function eventsOf(st: GwsState, calendarId: string): Map<string, Calendar
   return bucket
 }
 
-export function fmtEvent(cal: CalendarEntry, ev: CalendarEvent): JsonObj {
+export function fmtEvent(cal: CalendarEntry, ev: CalendarEvent, renderTz?: string): JsonObj {
+  // The calendar's zone is what a single event renders in; a list
+  // renders in the zone its `timeZone` parameter asked for, which is
+  // the only place the two differ.
+  const tz = renderTz ?? cal.timeZone
   const out: JsonObj = {
     kind: 'calendar#event',
     id: ev.id,
     status: ev.status,
-    start: { ...formatEventTime(ev.start) },
-    end: { ...formatEventTime(ev.end) },
+    start: { ...formatEventTime(ev.start, tz) },
+    end: { ...formatEventTime(ev.end, tz) },
     created: ev.created,
     updated: ev.updated,
     iCalUID: `${ev.id}@google.com`,
@@ -79,7 +84,13 @@ export function listCalendarEvents(
   cal: CalendarEntry,
   query: URLSearchParams,
 ): Reply {
-  const tz = query.get('timeZone') ?? cal.timeZone
+  const asked = query.get('timeZone')
+  // Rendering in this zone means handing it to Intl, which throws a
+  // RangeError for anything it cannot resolve. A request door refuses
+  // instead of crashing the read. (The generic refusal, not a probed
+  // per-field wording.)
+  if (asked !== null && !isIanaZone(asked)) return invalidFormat()
+  const tz = asked ?? cal.timeZone
   const showDeleted = query.get('showDeleted') === 'true'
   const q = query.get('q')
   const timeMin = query.get('timeMin')
@@ -110,7 +121,11 @@ export function listCalendarEvents(
     summary: cal.summary,
     timeZone: tz,
     accessRole: cal.accessRole,
-    items: page.map((ev) => fmtEvent(cal, ev)),
+    // The list reports `tz` as the collection's zone, so its items are
+    // rendered in it: `?timeZone=UTC` on a non-UTC calendar otherwise
+    // reported UTC and handed back calendar-offset times, and a caller
+    // grouping by local date read the wrong day.
+    items: page.map((ev) => fmtEvent(cal, ev, tz)),
   }
   if (start + max < rows.length) out.nextPageToken = String(start + max)
   return ok(out)
@@ -122,15 +137,21 @@ export interface EventTimes {
 }
 
 const MISSING_END = 'Missing end time.'
+const EMPTY_RANGE = 'The specified time range is empty.'
+// Google's refusal for an end that falls strictly before its start. Equal
+// ends are ACCEPTED, for a timed event and an all-day one alike (probed
+// live 2026-09-15), so the comparison here is `<`, never `<=`.
 
 function invalidArgument(message: string): Reply {
   return googleError(400, message, 'INVALID_ARGUMENT')
 }
 
-// Google's wording for a value its parser cannot read as the field's type,
-// which is what an offset-free dateTime with no zone is to it too.
-function invalidFormat(value: string): Reply {
-  return invalidArgument(`Invalid value for: Invalid format: "${value}"`)
+// Google's answer for a value its parser cannot read at all: a bare
+// `Bad Request`, with no mention of the field or the value. Probed live
+// against an unparseable dateTime and an impossible calendar date
+// (2026-02-30), which answer identically.
+function invalidFormat(): Reply {
+  return invalidArgument('Bad Request')
 }
 
 function readSlot(
@@ -164,25 +185,42 @@ function slotRefusal(slot: EventTime, which: 'start' | 'end'): Reply | null {
   }
   if (slot.dateTime !== undefined) {
     const parsed = parseDateTime(slot.dateTime)
-    if (parsed === null || (parsed.offset === null && slot.timeZone === undefined)) {
-      return invalidFormat(slot.dateTime)
+    if (parsed === null) return invalidFormat()
+    // A readable wall clock with nothing to resolve it by is a different
+    // refusal from an unreadable value, and the live API says so.
+    if (parsed.offset === null && slot.timeZone === undefined) {
+      return invalidArgument(`Missing time zone definition for ${which} time.`)
     }
   }
-  if (slot.date !== undefined && parseDate(slot.date) === null) return invalidFormat(slot.date)
+  if (slot.date !== undefined && parseDate(slot.date) === null) return invalidFormat()
   return null
 }
 
 // The start and end an insert or patch body asks for, or the 400 that
 // refuses it. A patch falls back to the stored slot it does not mention,
 // and is refused before anything replaces the stored event.
-export function readEventTimes(body: JsonObj, fallback?: CalendarEvent): EventTimes | Reply {
+export function readEventTimes(
+  body: JsonObj,
+  calendarTz: string,
+  fallback?: CalendarEvent,
+): EventTimes | Reply {
   const start = readSlot(body.start, fallback?.start)
   const end = readSlot(body.end, fallback?.end)
   if (start === undefined || end === undefined) return invalidArgument(MISSING_END)
   for (const t of [start, end]) {
     if (t.date === undefined && t.dateTime === undefined) return invalidArgument(MISSING_END)
   }
-  return slotRefusal(start, 'start') ?? slotRefusal(end, 'end') ?? { start, end }
+  const refused = slotRefusal(start, 'start') ?? slotRefusal(end, 'end')
+  if (refused !== null) return refused
+  // Ordering is checked only once both slots are known readable, so a
+  // malformed value earns its own refusal rather than an empty-range one.
+  // The zone is the calendar's, which is what an all-day slot resolves by
+  // and what makes a cross-zone pair compare as instants rather than as
+  // wall clocks.
+  const from = slotMs(start, calendarTz)
+  const to = slotMs(end, calendarTz)
+  if (from !== null && to !== null && to < from) return invalidArgument(EMPTY_RANGE)
+  return { start, end }
 }
 
 export function makeEvent(st: GwsState, body: JsonObj, times: EventTimes): CalendarEvent {

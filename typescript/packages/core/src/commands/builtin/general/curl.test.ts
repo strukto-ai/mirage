@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMResource } from '../../../resource/ram/ram.ts'
-import { GENERAL_CURL } from './curl.ts'
+import { GENERAL_CURL, responseLines as renderResponseLines } from './curl.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -515,5 +515,29 @@ describe('curl option surface (#1065)', () => {
     const r = await runCurl(['http://x.test/f'], { include: true, output: '/tmp/out.txt' })
     expect(r.out).toBe('')
     expect(DEC.decode(r.writes['/tmp/out.txt'] as Uint8Array)).toBe(`${RESPONSE_DUMP}hello body`)
+  })
+})
+
+describe('responseLines header order', () => {
+  // The headers print sorted by name. GNU `sort` orders by byte, which is
+  // code-point order: 'z', then U+FFFD, then U+1D11E. A `<`/`>` comparator
+  // compares UTF-16 code units instead and puts the astral name second,
+  // since its first unit D834 is below FFFD.
+  it('sorts header names by code point, not by UTF-16 code unit', () => {
+    const lines = renderResponseLines({
+      status: 200,
+      reason: 'OK',
+      body: new Uint8Array(),
+      url: 'https://example.test/',
+      method: 'GET',
+      headers: [
+        ['x-z', '1'],
+        ['x-\u{1D11E}', '2'],
+        ['x-\uFFFD', '3'],
+      ],
+      history: [],
+    })
+    expect(lines[0]).toBe('HTTP/1.1 200 OK')
+    expect(lines.slice(1)).toEqual(['x-z: 1', 'x-\uFFFD: 3', 'x-\u{1D11E}: 2'])
   })
 })

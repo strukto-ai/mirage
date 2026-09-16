@@ -13,7 +13,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DaemonConfigError } from '@struktoai/mirage-server'
+import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
 import { buildProgram } from '../main.ts'
 
 const ALIASES: Record<string, string> = {

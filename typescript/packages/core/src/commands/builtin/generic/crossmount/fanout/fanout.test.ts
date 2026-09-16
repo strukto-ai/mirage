@@ -79,7 +79,13 @@ describe('runFanout wc', () => {
     )
     expect(await text(body)).toBe('')
     expect(io.exitCode).toBe(1)
-    expect(await text(io.stderr)).toBe("wc: invalid argument 'bogus' for '--total'\n")
+    // GNU's whole ARGMATCH refusal, candidate list and hint included
+    // (measured: `wc --total=bogus f`, coreutils 9.4, exit 1).
+    expect(await text(io.stderr)).toBe(
+      "wc: invalid argument 'bogus' for '--total'\n" +
+        "Valid arguments are:\n  - 'auto'\n  - 'always'\n  - 'only'\n  - 'never'\n" +
+        "Try 'wc --help' for more information.\n",
+    )
     expect(calls).toEqual([])
   })
 })

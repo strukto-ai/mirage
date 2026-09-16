@@ -1,4 +1,4 @@
-from mirage.cli.output import exit_code_from_response
+from mirage.cli.output import emit, exit_code_from_response
 
 
 def test_io_zero():
@@ -158,3 +158,17 @@ def test_io_missing_exit_code():
 
 def test_io_non_numeric_exit_code():
     assert exit_code_from_response({"kind": "io", "exit_code": "one"}) == 0
+
+
+def test_emit_writes_non_ascii_as_raw_utf8(capsys):
+    # `JSON.stringify` emits raw UTF-8, so `ensure_ascii` made the two
+    # hosts print different bytes for the same value.
+    #
+    # This call is still not at parity: it also passes `default=str`,
+    # which stringifies a value JSON cannot carry where `JSON.stringify`
+    # throws. That divergence is orthogonal and left alone here.
+    emit({"name": "Café", "city": "東京"})
+    printed = capsys.readouterr().out
+    assert '"Café"' in printed
+    assert '"東京"' in printed
+    assert "\\u" not in printed

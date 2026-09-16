@@ -403,6 +403,18 @@ export interface ParsedArgsInit {
    * invisible there, a typed one is not.
    */
   typedDests?: string[]
+  /**
+   * Every scalar value-flag occurrence the line carried, as [dest, raw
+   * value] in scan order. The flag bag keeps one value per scalar dest,
+   * so a repeated option throws the earlier value away; this is where it
+   * survives, for a command that must answer for a value the bag no
+   * longer holds (nl refuses the LEFTMOST invalid one, which is the
+   * order GNU validates in). Parser bookkeeping, not grammar: no spec
+   * field switches it on, an accumulating (`multiple`) option is absent
+   * because its own list already is the record, and every command is
+   * free to ignore it — all of them but nl do.
+   */
+  valueOccurrences?: [string, string][]
   oldOptionNeedsValue?: string | null
 }
 
@@ -430,11 +442,16 @@ export class ParsedArgs {
   // options (canonical spelling).
   readonly invalidOptions: string[]
   readonly ambiguousOptions: [string, readonly string[]][]
-  // "invalid" / "ambiguous" tags in scan encounter order, so the refusal
-  // names the FIRST offending token like GNU (grep --c --bogus reports
-  // --c; reversed reports --bogus). needsValue is absent by construction:
-  // it only fires on the line's final token, so it can never precede
-  // another scan error.
+  // "invalid" / "unexpected_value" / "ambiguous" tags in scan encounter
+  // order, so the refusal names the FIRST offending token like GNU (grep
+  // --c --bogus reports --c; reversed reports --bogus). needsValue is
+  // absent by construction: it only fires on the line's final token, so it
+  // can never precede another scan error. "unexpected_value" is a boolean
+  // long handed a value, which getopt_long refuses in its own words rather
+  // than as an unrecognized option; its entry in invalidOptions is the
+  // option's canonical spelling with the typed value ("--byte-offset=2"),
+  // so the two tags share one list and the renderer tells them apart by
+  // the tag.
   readonly optionErrorKinds: string[]
   readonly needsValueOptions: string[]
   readonly invalidValueOptions: [string, string, readonly string[]][]
@@ -443,6 +460,10 @@ export class ParsedArgs {
   readonly missingRequiredOptions: string[]
   readonly missingRequiredOperands: string[]
   readonly typedDests: string[]
+  // Every scalar value-flag occurrence the line carried, as [dest, raw
+  // value] in scan order; see ParsedArgsInit above for why the bag is
+  // not enough on its own.
+  readonly valueOccurrences: [string, string][]
   // The old-style cluster letter whose argument ran off the end of the
   // line (`tar xzf` with no archive). Its own report because GNU tar
   // words it differently and exits differently from every getopt refusal
@@ -471,6 +492,7 @@ export class ParsedArgs {
     this.missingRequiredOptions = init.missingRequiredOptions ?? []
     this.missingRequiredOperands = init.missingRequiredOperands ?? []
     this.typedDests = init.typedDests ?? []
+    this.valueOccurrences = init.valueOccurrences ?? []
     this.oldOptionNeedsValue = init.oldOptionNeedsValue ?? null
   }
 
@@ -513,6 +535,18 @@ export function specFlagNames(spec: CommandSpec): ReadonlySet<string> {
 }
 
 export type FlagValue = string | boolean | number | string[]
+
+/**
+ * The one key in a flag bag that is not an option's dest: the parser's
+ * per-occurrence record of the scalar value flags the line carried,
+ * flattened to [dest, value, dest, value, ...] the way a `pair` option's
+ * list is. `parseToKwargs` writes it, and only when the bag lost
+ * something (one dest typed twice); `FlagView.valueOccurrences` is the
+ * one reader. The leading dashes make it unspellable as a dest —
+ * `flagKwargName` strips them off every real one — so no option can ever
+ * collide with it. Mirrors Python's `VALUE_OCCURRENCES_KEY`.
+ */
+export const VALUE_OCCURRENCES_KEY = '--value-occurrences'
 
 /**
  * Typed read-only view over raw flag kwargs.
@@ -560,6 +594,45 @@ export class FlagView {
   typedOrder(...names: string[]): string[] {
     const wanted = new Set(names.map((n) => this.key(n)))
     return Object.keys(this.flags).filter((k) => wanted.has(k))
+  }
+
+  /**
+   * The named options' occurrences, in the order the line typed them.
+   *
+   * `typedOrder` can only answer out of the bag, which keeps one value
+   * per scalar option — the LAST occurrence of a repeated one. GNU
+   * validates each value the moment getopt hands it over, so a command
+   * that has to answer for the leftmost bad value (`nl -w abc -w 3`
+   * refuses `abc`) needs the occurrences the bag threw away. The parser
+   * records every scalar value-flag occurrence as it scans, and
+   * `parseToKwargs` carries that record in the bag under
+   * `VALUE_OCCURRENCES_KEY` — but only when the bag actually lost
+   * something, i.e. when one dest was typed twice. When it is absent the
+   * bag IS the record: every dest occurred once, so its bag position is
+   * that occurrence and `typedOrder` reproduces the line exactly.
+   *
+   * Values are raw argv text: a PATH-typed option's value is the word as
+   * typed, not the resolved path, and the bare boolean form of an
+   * optional-value flag carries no value and so does not appear.
+   * Mirrors Python's `FlagView.value_occurrences`.
+   */
+  valueOccurrences(...names: string[]): [string, string][] {
+    const wanted = new Set(names.map((n) => this.key(n)))
+    const packed = this.flags[VALUE_OCCURRENCES_KEY]
+    if (Array.isArray(packed)) {
+      const pairs: [string, string][] = []
+      for (let i = 0; i + 1 < packed.length; i += 2) {
+        const dest = packed[i] ?? ''
+        if (wanted.has(dest)) pairs.push([dest, packed[i + 1] ?? ''])
+      }
+      return pairs
+    }
+    const recorded: [string, string][] = []
+    for (const dest of this.typedOrder(...names)) {
+      const value = this.flags[dest]
+      if (typeof value === 'string') recorded.push([dest, value])
+    }
+    return recorded
   }
 
   asBool(name: string): boolean {

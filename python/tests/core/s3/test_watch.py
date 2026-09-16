@@ -37,13 +37,13 @@ def test_walk_yields_files_with_etag_fingerprints():
     assert set(files) == {"/s3/data/a.txt", "/s3/data/b.txt"}
     assert files["/s3/data/a.txt"].size == 5
     # The ETag leads the composite, which is what keeps two files of
-    # equal size apart: the mock's LastModified is a constant, so mtime
-    # and size alone would collide across them. The mock's ETag is the
+    # equal size apart: the mock's LastModified is a constant, so the
+    # size alone would collide across them. The mock's ETag is the
     # content md5, so both values are deterministic.
     assert (files["/s3/data/a.txt"].fingerprint ==
-            "2c1743a391305fbf367df8e4f069f9f9|2026-03-31T00:00:00Z|5")
+            "2c1743a391305fbf367df8e4f069f9f9|5")
     assert (files["/s3/data/b.txt"].fingerprint ==
-            "987bcab01b929eb2c07877b224215c92|2026-03-31T00:00:00Z|4")
+            "987bcab01b929eb2c07877b224215c92|4")
     assert (files["/s3/data/a.txt"].fingerprint
             != files["/s3/data/b.txt"].fingerprint)
 

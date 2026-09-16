@@ -158,6 +158,39 @@ def test_has_search_shaping_flags(flags, expected):
     assert grep_pushdown.has_search_shaping_flags(flags) is expected
 
 
+def test_has_search_shaping_flags_reads_a_count_dest_as_a_number():
+    """A count dest arrives as a number as readily as a numeric string.
+
+    ``fl.as_int`` sees both. TypeScript tested ``typeof flags[name] ===
+    'string'`` and so missed the number, which let an unsafe push-down
+    through on one host only (issue #1089 item 11a).
+    """
+    assert grep_pushdown.has_search_shaping_flags({"m": "3"}) is True
+    assert grep_pushdown.has_search_shaping_flags({"m": 3}) is True
+    assert grep_pushdown.has_search_shaping_flags({"A": 2}) is True
+    assert grep_pushdown.has_search_shaping_flags({"B": 2}) is True
+    assert grep_pushdown.has_search_shaping_flags({"C": 2}) is True
+
+
+def test_has_search_shaping_flags_splits_list_and_str_filters():
+    """The repeatable filters read as lists, the single-valued ones as str.
+
+    An empty list and a bare boolean both mean "not supplied"; the flat
+    ``flags[name] is not None`` shape TypeScript had called each of them
+    supplied and deferred.
+    """
+    assert grep_pushdown.has_search_shaping_flags({"include":
+                                                   ["*.py"]}) is True
+    assert grep_pushdown.has_search_shaping_flags({"exclude":
+                                                   ["*.log"]}) is True
+    assert grep_pushdown.has_search_shaping_flags(
+        {"exclude_dir": ["node_modules"]}) is True
+    assert grep_pushdown.has_search_shaping_flags({"include": []}) is False
+    assert grep_pushdown.has_search_shaping_flags({"type": "py"}) is True
+    assert grep_pushdown.has_search_shaping_flags({"glob": "*.py"}) is True
+    assert grep_pushdown.has_search_shaping_flags({"glob": True}) is False
+
+
 def test_search_pushdown_ok_plain_literal():
     assert grep_pushdown.search_pushdown_ok({}, "ada") is True
     assert grep_pushdown.search_pushdown_ok({"i": True}, "ada") is True

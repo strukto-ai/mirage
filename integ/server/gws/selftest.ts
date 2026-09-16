@@ -113,6 +113,11 @@ function field(rows: JsonValue | undefined, name: string): string[] {
   return arr(rows).map((row) => String(obj(row)[name] ?? ''))
 }
 
+/** Each listed event's rendered `start.dateTime`, the zone check's subject. */
+function startsOf(body: JsonValue): string[] {
+  return arr(obj(body).items).map((row) => String(obj(obj(row).start)?.dateTime ?? ''))
+}
+
 async function api(
   url: string,
   tenant: string,
@@ -268,20 +273,71 @@ function compatibilityDirect(): void {
     st.sheets.get(file.id)!.tabs[1]!.cells.get('0,0') ?? '',
     'new value',
   )
-  for (const [timeZone, dateTime, expected] of [
-    ['Etc/GMT+12', '2026-09-25T20:59:00', '2026-09-25T20:59:00-12:00'],
-    ['America/Los_Angeles', '2026-07-01T10:00:00', '2026-07-01T10:00:00-07:00'],
-    ['America/Los_Angeles', '2026-01-01T10:00:00', '2026-01-01T10:00:00-08:00'],
-    ['Asia/Kolkata', '2026-07-01T10:00:00.123', '2026-07-01T10:00:00.123+05:30'],
+  // Every row is what the live API answered on 2026-09-15: the offset is
+  // the CALENDAR's, never the slot's, an already-offset value is re-rendered
+  // rather than echoed, fractional seconds are dropped, and a slot with no
+  // timeZone of its own is given the calendar's.
+  for (const [calendarTz, slot, expected] of [
+    // The issue's own payload: -12:00 in the slot, +08:00 on the wire.
+    [
+      'Asia/Hong_Kong',
+      { timeZone: 'Etc/GMT+12', dateTime: '2026-09-25T20:59:00' },
+      { timeZone: 'Etc/GMT+12', dateTime: '2026-09-26T16:59:00+08:00' },
+    ],
+    [
+      'America/Los_Angeles',
+      { timeZone: 'Etc/GMT+12', dateTime: '2026-09-25T20:59:00' },
+      { timeZone: 'Etc/GMT+12', dateTime: '2026-09-26T01:59:00-07:00' },
+    ],
+    // DST is the calendar's, since the calendar is what renders.
+    [
+      'America/Los_Angeles',
+      { timeZone: 'America/Los_Angeles', dateTime: '2026-01-01T10:00:00' },
+      { timeZone: 'America/Los_Angeles', dateTime: '2026-01-01T10:00:00-08:00' },
+    ],
+    // An offset-bearing value is normalized too, not echoed.
+    [
+      'America/Los_Angeles',
+      { timeZone: 'Etc/GMT+12', dateTime: '2026-09-26T08:59:00Z' },
+      { timeZone: 'Etc/GMT+12', dateTime: '2026-09-26T01:59:00-07:00' },
+    ],
+    // No timeZone in the request: the calendar's fills it in.
+    [
+      'America/Los_Angeles',
+      { dateTime: '2026-09-25T20:59:00+09:00' },
+      // Key order is the spread's: a slot that named no zone gains one last.
+      { dateTime: '2026-09-25T04:59:00-07:00', timeZone: 'America/Los_Angeles' },
+    ],
+    // Fractional seconds are dropped, and a half-hour zone still renders.
+    [
+      'Asia/Kolkata',
+      { timeZone: 'Asia/Kolkata', dateTime: '2026-07-01T10:00:00.123' },
+      { timeZone: 'Asia/Kolkata', dateTime: '2026-07-01T10:00:00+05:30' },
+    ],
+    // A zone whose historical offset carries SECONDS still renders a
+    // valid RFC3339 offset. Europe/Paris ran at +00:09:21 until 1911,
+    // which Intl reports as 9.35 minutes, and the raw value rendered
+    // `+00:9.35` -- not a timestamp, and unparseable by every client.
+    [
+      'Europe/Paris',
+      { timeZone: 'Europe/Paris', dateTime: '1900-01-01T00:00:00Z' },
+      { timeZone: 'Europe/Paris', dateTime: '1900-01-01T00:09:00+00:09' },
+    ],
   ] as const) {
-    const input = { timeZone, dateTime }
-    const result = formatEventTime(input)
-    eq('direct Calendar serializes a zoned instant', result.dateTime ?? '', expected ?? '')
-    eq('direct Calendar preserves instant', slotMs(result, 'UTC'), slotMs(input, 'UTC'))
+    const result = formatEventTime(slot, calendarTz)
+    eq('direct Calendar renders in the calendar zone', { ...result }, { ...expected })
+    // To the SECOND, not the millisecond: Google drops the fraction, so a
+    // rendering that kept it would be the divergence. Everything above the
+    // fraction must survive, which is what a re-render could get wrong.
+    eq(
+      'direct Calendar preserves the instant to the second',
+      Math.floor((slotMs(result, calendarTz) ?? 0) / 1000),
+      Math.floor((slotMs(slot, calendarTz) ?? 0) / 1000),
+    )
   }
   eq(
     'direct Calendar leaves all-day values alone',
-    { ...formatEventTime({ date: '2026-07-01' }) },
+    { ...formatEventTime({ date: '2026-07-01' }, 'Asia/Hong_Kong') },
     { date: '2026-07-01' },
   )
 }
@@ -371,7 +427,10 @@ async function compatibilityHttp(at: string): Promise<void> {
   }
   const created = await post(events, 't1', body)
   const eventId = String(obj(created.body).id)
-  const expected = { dateTime: '2026-09-25T20:59:00-12:00', timeZone: 'Etc/GMT+12' }
+  // The seeded calendar is Asia/Hong_Kong, and the live API renders in the
+  // CALENDAR's zone: 20:59 at UTC-12 is 08:59Z, which is 16:59 at +08:00.
+  // The slot's own Etc/GMT+12 rides along as the event's declared zone.
+  const expected = { dateTime: '2026-09-26T16:59:00+08:00', timeZone: 'Etc/GMT+12' }
   eq('HTTP Calendar insert returns an offset', obj(created.body).start ?? null, expected)
   const fetched = await api(`${events}/${eventId}`, 't1')
   eq('HTTP Calendar get returns the same offset', obj(fetched.body).start ?? null, expected)
@@ -449,6 +508,92 @@ async function compatibilityHttp(at: string): Promise<void> {
       method === 'PUT' ? 'confirmed' : 'cancelled',
     )
   }
+  // Every wording below was read off the live API on 2026-09-15, because
+  // each one is a distinct message and guessing them makes the fake teach
+  // a caller to handle an error Google never sends.
+  for (const [label, start, end, message] of [
+    [
+      'a dateTime with neither offset nor zone',
+      { dateTime: '2026-09-25T20:59:00' },
+      { dateTime: '2026-09-25T21:59:00' },
+      'Missing time zone definition for start time.',
+    ],
+    [
+      'an unreadable dateTime',
+      { dateTime: 'not-a-time', timeZone: 'UTC' },
+      { dateTime: '2026-09-25T21:59:00Z' },
+      'Bad Request',
+    ],
+    [
+      'a date the calendar does not have',
+      { dateTime: '2026-02-30T20:59:00Z' },
+      { dateTime: '2026-02-30T21:59:00Z' },
+      'Bad Request',
+    ],
+    [
+      'an end before its start',
+      { dateTime: '2026-09-25T21:59:00Z' },
+      { dateTime: '2026-09-25T20:59:00Z' },
+      'The specified time range is empty.',
+    ],
+    [
+      'an all-day end before its start',
+      { date: '2026-09-26' },
+      { date: '2026-09-25' },
+      'The specified time range is empty.',
+    ],
+  ] as const) {
+    const refused = await post(events, 't1', { summary: label, start, end })
+    eq(`HTTP Calendar refuses ${label}`, refused.status, 400)
+    eq(
+      `HTTP Calendar names why it refused ${label}`,
+      obj(obj(refused.body).error).message ?? null,
+      message,
+    )
+  }
+  // Equal ends are accepted, timed and all-day alike: the rule is `<`.
+  for (const [label, slot] of [
+    ['timed', { dateTime: '2026-09-25T10:00:00Z' }],
+    ['all-day', { date: '2026-09-25' }],
+  ] as const) {
+    const flat = await post(events, 't1', {
+      summary: `zero length ${label}`,
+      start: slot,
+      end: slot,
+    })
+    eq(`HTTP Calendar accepts a zero-length ${label} event`, flat.status, 200)
+  }
+  // A request that names no zone is answered with the calendar's.
+  const bare = await post(events, 't1', {
+    summary: 'zoneless request',
+    start: { dateTime: '2026-09-25T20:59:00+09:00' },
+    end: { dateTime: '2026-09-25T21:59:00+09:00' },
+  })
+  eq('HTTP Calendar fills timeZone from the calendar', obj(bare.body).start ?? null, {
+    dateTime: '2026-09-25T19:59:00+08:00',
+    timeZone: 'Asia/Hong_Kong',
+  })
+  // events.list renders in the zone its `timeZone` parameter asks for,
+  // which is also the zone it reports. Rendering in the calendar's while
+  // reporting the asked-for one hands a caller times it cannot group by
+  // the local date it was told to read them in.
+  const inUtc = await api(`${events}?timeZone=UTC&q=zoneless request`, 't1')
+  eq(
+    'HTTP Calendar list reports the zone it was asked for',
+    obj(inUtc.body).timeZone ?? null,
+    'UTC',
+  )
+  eq('HTTP Calendar list renders its items in that zone', startsOf(inUtc.body), [
+    '2026-09-25T11:59:00+00:00',
+  ])
+  const perCal = await api(`${events}?q=zoneless request`, 't1')
+  eq('and falls back to the calendar zone when none was asked for', startsOf(perCal.body), [
+    '2026-09-25T19:59:00+08:00',
+  ])
+  // Rendering in a zone means handing it to Intl, which throws for one
+  // it cannot resolve; the door refuses rather than crashing the read.
+  const badZone = await api(`${events}?timeZone=Not/AZone`, 't1')
+  eq('HTTP Calendar list refuses a zone it cannot resolve', badZone.status, 400)
 }
 
 async function main(): Promise<void> {
@@ -493,6 +638,23 @@ async function main(): Promise<void> {
     check('extras.calendars that is not a list is a 400', badExtras === 400, String(badExtras))
     const unknown = await reset(at, { tenants: ['t1'], extras: { workspace: 'x' } })
     check('an unknown extras key is a 400', unknown === 400, String(unknown))
+    // Every timed event renders in its calendar's zone, so a zone Intl
+    // cannot resolve would throw a RangeError out of a later read. Both
+    // doors that set one refuse it here instead.
+    const badDefault = await reset(at, {
+      tenants: ['t1'],
+      extras: { calendarTimeZone: 'Not/AZone' },
+    })
+    check('a calendarTimeZone that is not a zone is a 400', badDefault === 400, String(badDefault))
+    const badCalZone = await reset(at, {
+      tenants: ['t1'],
+      extras: { calendars: [{ id: 'z@example.com', summary: 'z', timeZone: 'Not/AZone' }] },
+    })
+    check(
+      'a seeded calendar zone that is not a zone is a 400',
+      badCalZone === 400,
+      String(badCalZone),
+    )
 
     // ---- the clock is pinned and PERSISTED, which is what makes it resume
     check('reseed', (await reset(at, seed)) === 200)
@@ -660,19 +822,23 @@ async function main(): Promise<void> {
       'a string that is not a date is a 400',
       { dateTime: 'not-a-date' },
       { dateTime: 'not-a-date' },
-      'Invalid format: "not-a-date"',
+      // A value the parser cannot read at all earns a bare `Bad Request`:
+      // Google names neither the field nor the value.
+      'Bad Request',
     )
     await refused(
       'a day February does not have is a 400',
       { dateTime: '2026-02-30T10:00:00Z' },
       { dateTime: '2026-02-30T11:00:00Z' },
-      'Invalid format',
+      'Bad Request',
     )
     await refused(
       'an offset-free time with no zone is a 400',
       { dateTime: '2026-02-03T10:00:00' },
       { dateTime: '2026-02-03T11:00:00' },
-      'Invalid format',
+      // A readable wall clock with nothing to resolve it by is its own
+      // refusal, distinct from an unreadable value.
+      'Missing time zone definition for start time.',
     )
     await refused(
       'a zone IANA does not know is a 400',
@@ -684,13 +850,13 @@ async function main(): Promise<void> {
       'an all-day date not spelled yyyy-mm-dd is a 400',
       { date: '2026-2-3' },
       { date: '2026-02-04' },
-      'Invalid format',
+      'Bad Request',
     )
     await refused(
       'an all-day date the calendar does not have is a 400',
       { date: '2026-02-30' },
       { date: '2026-03-01' },
-      'Invalid format',
+      'Bad Request',
     )
     await refused(
       'a slot naming both date and dateTime is a 400',
@@ -707,8 +873,11 @@ async function main(): Promise<void> {
     })
     check('a patch to a malformed time is a 400', patched.status === 400, String(patched.status))
     const kept = await api(`${events}/${id}`, 't1')
+    // The stored instant is untouched; the rendering is the calendar's, as
+    // it is on every read (10:00Z is 18:00 in Asia/Hong_Kong).
     eq('and the stored event is unchanged', obj(kept.body).start ?? null, {
-      dateTime: '2026-02-03T10:00:00Z',
+      dateTime: '2026-02-03T18:00:00+08:00',
+      timeZone: 'Asia/Hong_Kong',
     })
 
     const window = await api(

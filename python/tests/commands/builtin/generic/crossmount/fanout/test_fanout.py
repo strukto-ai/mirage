@@ -145,5 +145,11 @@ def test_run_fanout_rejects_invalid_wc_total_before_running_operands():
                    {"total": "bogus"}, rs))
     assert body is None
     assert io.exit_code == 1
-    assert io.stderr == b"wc: invalid argument 'bogus' for '--total'\n"
+    # GNU's whole ARGMATCH refusal, candidate list and hint included
+    # (measured: `wc --total=bogus f`, coreutils 9.4, exit 1).
+    assert io.stderr == (b"wc: invalid argument 'bogus' for '--total'\n"
+                         b"Valid arguments are:\n"
+                         b"  - 'auto'\n  - 'always'\n"
+                         b"  - 'only'\n  - 'never'\n"
+                         b"Try 'wc --help' for more information.\n")
     assert rs.calls == []

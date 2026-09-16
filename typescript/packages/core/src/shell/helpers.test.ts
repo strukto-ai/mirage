@@ -21,6 +21,7 @@ import type { ShellParser } from './parse/index.ts'
 import type { TSNodeLike } from './types.ts'
 import {
   braceExpands,
+  byteOffset,
   getCommandAssignments,
   getCommandName,
   getDeclarationAssignments,
@@ -576,5 +577,22 @@ describe('heredocTail', () => {
     expect(takeContinuation(redirects).map(([op]) => op)).toEqual(['||', '&&'])
     expect(first(redirects).continuation).toEqual([])
     expect(takeContinuation(redirects)).toEqual([])
+  })
+})
+
+describe('byteOffset', () => {
+  it('counts the bytes before an index', () => {
+    expect(byteOffset('cat é x', 4)).toBe(4)
+    expect(byteOffset('cat é x', 5)).toBe(6)
+    expect(byteOffset('cat é x', 7)).toBe(8)
+    expect(byteOffset('', 0)).toBe(0)
+  })
+
+  it('counts a byte sentinel as one byte', () => {
+    // grep decodes a line so an invalid byte survives -a; each sentinel
+    // stands for exactly one byte, which TextEncoder alone would widen to
+    // the three bytes of U+FFFD.
+    expect(byteOffset('a\udcffb', 2)).toBe(2)
+    expect(byteOffset('a\udcffb', 3)).toBe(3)
   })
 })

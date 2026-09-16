@@ -128,8 +128,7 @@ function collectRegistrations(modules: ModuleBag[]): Record<string, RegisteredCo
     for (const [key, value] of Object.entries(mod)) {
       if (!key.endsWith('_COMMANDS') || !Array.isArray(value)) continue
       for (const rc of value as RegisteredCommand[]) {
-        if (!out[rc.name]) out[rc.name] = []
-        out[rc.name].push(rc)
+        ;(out[rc.name] ??= []).push(rc)
       }
     }
   }
@@ -161,7 +160,7 @@ function byResource(rcs: RegisteredCommand[]): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(out).map(([key, entry]) => [
       key,
-      { ...entry, filetypes: [...entry.filetypes].sort() },
+      { ...entry, filetypes: [...entry.filetypes].sort(compareCodePoints) },
     ]),
   )
 }
@@ -169,10 +168,10 @@ function byResource(rcs: RegisteredCommand[]): Record<string, unknown> {
 function metaFor(rcs: RegisteredCommand[]): Record<string, unknown> {
   const resources = [
     ...new Set(rcs.map((r) => r.resource).filter((r): r is string => r !== null)),
-  ].sort()
+  ].sort(compareCodePoints)
   const filetypes = [
     ...new Set(rcs.map((r) => r.filetype).filter((f): f is string => f !== null)),
-  ].sort()
+  ].sort(compareCodePoints)
   return {
     by_resource: byResource(rcs),
     filetypes,
@@ -247,7 +246,7 @@ function specFields(spec: CommandSpec): Record<string, unknown> {
   return {
     description: spec.description,
     epilog: spec.epilog,
-    ignore_tokens: [...spec.ignoreTokens].sort(),
+    ignore_tokens: [...spec.ignoreTokens].sort(compareCodePoints),
     old_option_style: spec.oldOptionStyle,
     operand_base: spec.operandBase,
     options: spec.options.map(serializeOption),
@@ -263,13 +262,35 @@ function serializeSpec(spec: CommandSpec, rcs: RegisteredCommand[]): Record<stri
   }
 }
 
+// Codepoint compare, not `localeCompare` and not the default comparator:
+// python's `sorted` and `json.dumps(sort_keys=True)` order by code point,
+// so `scripts/gen_specs.py` and this generator must use the same rule or
+// the two spec trees a human diffs carry ordering noise on top of real
+// drift. `localeCompare` with no locale argument also reads the runtime's
+// ICU data, which makes pre-commit's Spec drift step machine-dependent.
+// Inlined rather than imported from `@struktoai/mirage-core/utils/sort`
+// because a script runs before any package is built.
+function compareCodePoints(a: string, b: string): number {
+  if (a === b) return 0
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    const aPoint = a.codePointAt(i) ?? 0
+    const bPoint = b.codePointAt(j) ?? 0
+    if (aPoint !== bPoint) return aPoint - bPoint
+    i += aPoint > 0xffff ? 2 : 1
+    j += bPoint > 0xffff ? 2 : 1
+  }
+  return a.length - i - (b.length - j)
+}
+
 function sortedStringify(value: unknown): string {
   return JSON.stringify(
     value,
     (_k, v) => {
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         return Object.fromEntries(
-          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)),
+          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => compareCodePoints(a, b)),
         )
       }
       return v
@@ -305,8 +326,8 @@ function emitResources(
     for (const rc of rcs) if (rc.resource !== null) commandResources.add(rc.resource)
   }
   const payload = {
-    registry: [...knownResources].sort(),
-    command_resources: [...commandResources].sort(),
+    registry: [...knownResources].sort(compareCodePoints),
+    command_resources: [...commandResources].sort(compareCodePoints),
     capabilities,
     command_io: commandIo,
     configs,
@@ -326,7 +347,7 @@ function capabilitiesFor(
   const classes = collectClasses(PACKAGES, pkgs)
   const names = registryClasses(resolve(PACKAGES, variantPkg, 'src', 'resource', 'registry.ts'))
   const out: Record<string, Capabilities | null> = {}
-  for (const [resource, className] of [...names].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [resource, className] of [...names].sort(([a], [b]) => compareCodePoints(a, b))) {
     out[resource] = className === null ? null : capabilitiesOf(className, classes)
   }
   return out
@@ -345,14 +366,17 @@ function emitVariant(
   const registry = collectRegistrations(modules)
   const outDir = resolve(SPEC_ROOT, name, 'general')
   mkdirSync(outDir, { recursive: true })
-  const cmdNames = Object.keys(SPECS).sort()
-  for (const cmd of cmdNames) {
-    const spec = SPECS[cmd]
+  // Entries, not keys: a key read back through `SPECS[cmd]` is
+  // `CommandSpec | undefined` under `noUncheckedIndexedAccess`, and the only
+  // ways to spend that are a cast or a skip that would emit fewer specs than
+  // it reported. Pairing the two removes the possibility instead.
+  const entries = Object.entries(SPECS).sort(([a], [b]) => compareCodePoints(a, b))
+  for (const [cmd, spec] of entries) {
     const rcs = registry[cmd] ?? []
     const payload = serializeSpec(spec, rcs)
     writeFileSync(resolve(outDir, `${cmd}.json`), sortedStringify(payload) + '\n')
   }
-  console.log(`emitted ${cmdNames.length} specs to ${outDir}`)
+  console.log(`emitted ${entries.length} specs to ${outDir}`)
   emitResources(
     name,
     knownResources,

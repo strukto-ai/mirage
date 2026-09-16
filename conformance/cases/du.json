@@ -42,6 +42,27 @@
         "stdout_text": "20\t/data/sub\n",
         "stderr_text": ""
       }
+    },
+    {
+      "id": "du_max_depth_quotes_a_multibyte_word",
+      "cmd": "du --max-depth='1é' /data/sub",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "du: invalid maximum depth '1\\303\\251'\nTry 'du --help' for more information.\n"
+      }
     }
   ]
 }

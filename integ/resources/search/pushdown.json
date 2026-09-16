@@ -83,6 +83,62 @@
         "stdout": "wombat runs fast\nthe wombat sleeps\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "search_include_filter_defers_to_scan",
+      "seq": 540007,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "grep -rlw --include='*.txt' wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt\n/search/beta.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_exclude_filter_defers_to_scan",
+      "seq": 540008,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "grep -rlw --exclude='beta.txt' wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_max_count_defers_to_scan",
+      "seq": 540009,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "grep -rw -m 1 wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt:wombat runs fast\n/search/beta.txt:the wombat sleeps\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "search_rg_glob_filter_defers_to_scan",
+      "seq": 540010,
+      "targets": [
+        "box",
+        "dropbox"
+      ],
+      "command": "rg -lw --glob '*.txt' wombat /search",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/alpha.txt\n/search/beta.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }

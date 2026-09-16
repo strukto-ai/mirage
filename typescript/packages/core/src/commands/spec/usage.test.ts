@@ -18,10 +18,14 @@ import {
   extraOperandError,
   invalidFloatError,
   invalidIntError,
+  argmatchError,
+  argmatchLine,
+  argmatchValidBlock,
   invalidArgumentError,
   missingRequiredError,
   missingValueError,
   oldOptionError,
+  unexpectedValueError,
   unknownOptionError,
   readFailExitCode,
   readFailExitCodeFromLine,
@@ -112,6 +116,61 @@ describe('invalidArgumentError', () => {
         "Try 'tee --help' for more information.\n",
     )
     expect(code).toBe(1)
+  })
+
+  // Measured on GNU coreutils 9.4 under `LC_ALL=C LANG=C TZ=UTC` with a raw
+  // `bytes` argv (ground truth QS.1 and QS.3a). Mirrors test_usage.py.
+  it('escapes the word through gnulib quote()', () => {
+    const [msg, code] = invalidArgumentError('tee', '--output-error', 'xé', ['warn'])
+    expect(new TextDecoder().decode(msg)).toBe(
+      "tee: invalid argument 'x\\303\\251' for '--output-error'\n" +
+        "Valid arguments are:\n  - 'warn'\n" +
+        "Try 'tee --help' for more information.\n",
+    )
+    expect(code).toBe(1)
+  })
+
+  // gnulib's argmatch matches on a prefix and `''` is a prefix of every
+  // candidate, so the empty word comes back AMBIGUOUS. Measured the same way
+  // at `tail --follow=`, `sort --check=`, `wc --total=`,
+  // `uniq --all-repeated=`, `uniq --group=`, `ls --format=`,
+  // `ls -l --time-style=` and `cp --update=`.
+  it('words an empty value as ambiguous, not invalid', () => {
+    const [msg, code] = invalidArgumentError('tee', '--output-error', '', ['warn'])
+    expect(new TextDecoder().decode(msg).split('\n')[0]).toBe(
+      "tee: ambiguous argument '' for '--output-error'",
+    )
+    expect(code).toBe(1)
+  })
+})
+
+describe('argmatchLine and argmatchValidBlock', () => {
+  it('words both kinds and quotes the slot', () => {
+    expect(argmatchLine('ls', 'time style', 'x')).toBe("ls: invalid argument 'x' for 'time style'")
+    expect(argmatchLine('ls', 'time style', '')).toBe("ls: ambiguous argument '' for 'time style'")
+  })
+
+  // GNU `sort --check=x` prints `  - 'quiet', 'silent'` on ONE line:
+  // `argmatch_valid` starts a new row only when the VALUE changes.
+  it('joins aliases of one value on one row', () => {
+    expect(argmatchValidBlock([['quiet', 'silent'], ['diagnose-first']])).toBe(
+      "Valid arguments are:\n  - 'quiet', 'silent'\n  - 'diagnose-first'",
+    )
+  })
+})
+
+describe('argmatchError', () => {
+  it('carries the block and the code it was given', () => {
+    const err = argmatchError('sort', '--check', 'x', [['quiet', 'silent'], ['diagnose-first']], 1)
+    expect(err.message).toBe(
+      "sort: invalid argument 'x' for '--check'\n" +
+        "Valid arguments are:\n  - 'quiet', 'silent'\n  - 'diagnose-first'\n" +
+        "Try 'sort --help' for more information.",
+    )
+    // sort's other usage errors are 2; gnulib's `argmatch_die` always calls
+    // `usage (EXIT_FAILURE)`, so this one is 1.
+    expect(err.exitCode).toBe(1)
+    expect(usageExitCode('sort')).toBe(2)
   })
 })
 
@@ -264,5 +323,86 @@ describe('curl wording', () => {
       `curl: option --max-time: expected a proper numerical parameter\n${hint}`,
     )
     expect(code).toBe(2)
+  })
+})
+
+// GNU getopt_long refuses a value on a BOOLEAN long option with its own
+// message, which is not the unrecognized-option one: it names the option and
+// drops the value, where the unrecognized message quotes the whole token.
+// Measured on GNU grep 3.11 and coreutils 9.4 (new ground-truth section W):
+// `grep --byte-offset=2`, `nl --help=2`, `cut --complement=2`, `sed --debug=2`.
+// The per-tool usage block GNU prints between the message and the hint is
+// omitted here, as it is for every other refusal in this module.
+describe('unexpectedValueError', () => {
+  it('names the option without the value', () => {
+    const [msg, code] = unexpectedValueError('grep', '--byte-offset=2')
+    expect(new TextDecoder().decode(msg)).toBe(
+      "grep: option '--byte-offset' doesn't allow an argument\n" +
+        "Try 'grep --help' for more information.\n",
+    )
+    expect(code).toBe(2)
+  })
+
+  // coreutils exit 1 where grep and sort exit 2.
+  it.each<[string, number]>([
+    ['nl', 1],
+    ['cut', 1],
+    ['wc', 1],
+    ['sort', 2],
+  ])('carries %s exit code', (name, expected) => {
+    const [msg, code] = unexpectedValueError(name, '--bogus-bool=2')
+    expect(
+      new TextDecoder()
+        .decode(msg)
+        .startsWith(`${name}: option '--bogus-bool' doesn't allow an argument\n`),
+    ).toBe(true)
+    expect(code).toBe(expected)
+  })
+
+  // An empty value is still a value, and a second `=` is part of it.
+  it.each(['--byte-offset=', '--byte-offset=2=3'])('names only the option for %s', (token) => {
+    const [msg] = unexpectedValueError('grep', token)
+    expect(
+      new TextDecoder()
+        .decode(msg)
+        .startsWith("grep: option '--byte-offset' doesn't allow an argument\n"),
+    ).toBe(true)
+  })
+
+  // curl, python, jq and find answer this as an unknown option, each measured:
+  // `curl --silent=2` is `option --silent=2: is unknown`, `python3
+  // --version=2` is `unknown option --version=2`, and `jq --tab=2` is jq's own
+  // unknown-option line. Routing them through the getopt_long wording would put
+  // GNU's words in a program that does not use GNU's parser.
+  it('keeps the unknown wording for a program that is not getopt_long', () => {
+    const dec = new TextDecoder()
+    const [curl, curlCode] = unexpectedValueError('curl', '--silent=2')
+    expect(dec.decode(curl).startsWith('curl: option --silent=2: is unknown\n')).toBe(true)
+    expect(curlCode).toBe(2)
+    const [jq] = unexpectedValueError('jq', '--tab=2')
+    expect(dec.decode(jq).startsWith("jq: unrecognized option '--tab=2'\n")).toBe(true)
+    const [py] = unexpectedValueError('python3', '--version=2')
+    expect(dec.decode(py).startsWith('unknown option --version=2\n')).toBe(true)
+    const [find] = unexpectedValueError('find', '--help=2')
+    expect(dec.decode(find)).toBe("find: unknown predicate `--help=2'\n")
+  })
+})
+
+// getopt prints `argv[optind]` with a plain `%s`, never quote(). Every
+// coreutils clause that names a *value* runs it through gnulib's `quote()`
+// (an `é` comes back as `\303\251`), but the unrecognized-option clause is
+// getopt's own and carries the token's bytes as typed. Measured under
+// `LC_ALL=C` with a raw `bytes` argv on coreutils 9.4: `cut --zzz=é`
+// reports `'--zzz=é'` with the two UTF-8 bytes intact, and
+// `wc --zzz=$'\001'` carries the raw 0x01. Same for nl, expand, shuf,
+// tail, split, du, sort, uniq, ls and cp. This asymmetry is deliberate; do
+// not route this clause through quote(). Mirrors test_usage.py.
+describe('unknownOptionError leaves the token unescaped', () => {
+  it.each([
+    ['cut', '--zzz=é'],
+    ['wc', '--zzz=\x01'],
+  ])('keeps %s’s token as typed', (cmd, token) => {
+    const [msg] = unknownOptionError(cmd, token)
+    expect(td.decode(msg).startsWith(`${cmd}: unrecognized option '${token}'\n`)).toBe(true)
   })
 })

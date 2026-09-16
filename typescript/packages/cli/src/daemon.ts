@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { existsSync, readFileSync } from 'node:fs'
-import { pidFilePath } from '@struktoai/mirage-server'
+import { pidFilePath } from '@struktoai/mirage-server/paths'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge } from './output.ts'

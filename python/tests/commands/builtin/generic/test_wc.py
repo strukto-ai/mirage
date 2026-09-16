@@ -1,7 +1,9 @@
 import pytest
 
 from mirage.commands.builtin.generic.wc import (WCCounts, format_multi,
-                                                format_wc_lines, wc)
+                                                format_wc_lines, parse_flags,
+                                                wc)
+from mirage.commands.errors import UsageError
 from mirage.types import PathSpec
 
 
@@ -325,3 +327,52 @@ async def test_format_multi_accepts_async_iterator_read():
     out, err = await format_multi(paths, read=_async_byte_read, lines=True)
     assert out == b"1 /a.txt\n"
     assert err == b""
+
+
+# GNU's ARGMATCH refusal names the refused word through gnulib's quote(),
+# so a byte outside 0x20-0x7e comes back escaped. Rows measured against
+# GNU coreutils 9.4 under `LC_ALL=C` with a raw `bytes` argv
+# (`wc --total=<w>`). Mirrored in wc.test.ts.
+@pytest.mark.parametrize("value,escaped", [
+    ("xé", r"x\303\251"),
+    ("x\r", r"x\r"),
+    ("x\x01", r"x\001"),
+    ("x\x7f", r"x\177"),
+    ("x'", r"x\'"),
+    ("x\\", r"x\\"),
+])
+def test_total_refusal_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_flags({"total": value})
+    assert str(exc.value).startswith(
+        f"wc: invalid argument '{escaped}' for '--total'\n")
+
+
+def test_total_refusal_carries_gnus_candidate_block_and_exit_1():
+    """Measured, coreutils 9.4: `wc --total=x f` lists all four modes."""
+    with pytest.raises(UsageError) as exc:
+        parse_flags({"total": "x"})
+    assert str(exc.value) == ("wc: invalid argument 'x' for '--total'\n"
+                              "Valid arguments are:\n"
+                              "  - 'auto'\n  - 'always'\n"
+                              "  - 'only'\n  - 'never'\n"
+                              "Try 'wc --help' for more information.")
+    assert exc.value.exit_code == 1
+
+
+def test_an_empty_total_is_ambiguous_not_the_default():
+    """`wc --total=` is `ambiguous argument ''`, exit 1 (measured).
+
+    python used to read the empty word as the `auto` default and exit 0
+    through an `or "auto"` fallback, which was also the one py/ts split
+    at this slot -- TypeScript refused it.
+    """
+    with pytest.raises(UsageError) as exc:
+        parse_flags({"total": ""})
+    assert str(
+        exc.value).startswith("wc: ambiguous argument '' for '--total'\n")
+    assert exc.value.exit_code == 1
+
+
+def test_an_absent_total_is_still_auto():
+    assert parse_flags({}).total == "auto"

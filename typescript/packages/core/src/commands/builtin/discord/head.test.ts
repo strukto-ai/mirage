@@ -75,7 +75,7 @@ describe('discord head', () => {
           ),
         }),
       ],
-      { n: '2' },
+      { lines: '2' },
       { index: idx, transport },
     )
     const lines = out.split('\n').filter((s) => s !== '')

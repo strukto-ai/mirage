@@ -16,6 +16,7 @@ import json
 import pathlib
 import sys
 import unicodedata
+from collections.abc import Callable
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -75,7 +76,7 @@ def is_wide(cp: int) -> bool:
     return unicodedata.east_asian_width(chr(cp)) in {"W", "F"}
 
 
-def ranges_of(predicate) -> list[list[int]]:
+def ranges_of(predicate: Callable[[int], bool]) -> list[list[int]]:
     out: list[list[int]] = []
     start: int | None = None
     for cp in range(0x110000):

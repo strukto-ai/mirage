@@ -17,9 +17,13 @@ from collections.abc import AsyncIterator, Callable
 
 from mirage.commands.builtin.constants import BINARY_EXTENSIONS
 from mirage.commands.builtin.grep_context import grep_context_lines
+from mirage.commands.builtin.grep_offsets import (decode_line, encode_line,
+                                                  line_offsets, match_offset,
+                                                  prefix_of, printable)
 from mirage.commands.builtin.grep_pattern import compile_pattern
 from mirage.commands.builtin.grep_select import (NO_FILTERS, WalkFilters,
                                                  dir_admitted, file_admitted)
+from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.types import (AsyncReadBytes, AsyncReaddir,
                                                  AsyncStat)
 from mirage.commands.resolve import get_extension
@@ -39,29 +43,94 @@ def grep_lines(
     files_only: bool,
     only_matching: bool,
     max_count: int | None,
+    io: IOResult | None = None,
+    byte_offsets: bool = False,
 ) -> list[str]:
+    """Grep one already-read input, returning the lines to print.
+
+    Args:
+        path (str): the operand's path, which -l answers with.
+        data (list[str]): the input's lines, without terminators.
+        compiled (re.Pattern[str]): the compiled pattern.
+        invert (bool): -v, select the lines that do not match.
+        line_numbers (bool): -n, prefix each printed line with its
+            number.
+        count_only (bool): -c, answer with the number of selected lines.
+        files_only (bool): -l, answer with the path when anything was
+            selected.
+        only_matching (bool): -o, print the matched text rather than the
+            line.
+        max_count (int | None): -m, stop after this many selected lines;
+            zero selects none at all, as GNU's does.
+        io (IOResult | None): when given, receives exit status 0 as soon
+            as a line is selected. The twin of ``grep_stream``'s own
+            ``io``, and needed for the same reason: selection cannot be
+            read off the returned list under -o, because GNU prints
+            nothing for a zero-width match and still counts the line, so
+            a caller deriving the status from an empty list reports 1
+            where GNU says 0.
+        byte_offsets (bool): -b, prefix each printed line with the byte
+            offset of its own start, or of the match itself under -o.
+            The offsets are derived from the lines because this scan is
+            handed text rather than bytes, which is exact only for text
+            that came through ``decode_line``.
+
+    Returns:
+        list[str]: the lines to print, the count under -c, or the path
+            under -l.
+    """
+    if max_count == 0:
+        # GNU selects no line at all and the whole command goes quiet:
+        # `grep -m0 -c a f` prints NOTHING, not `0`, and exits 1. An empty
+        # list is what -c has to answer with, because `grep_recursive`
+        # renders `<file>:<count>` from whatever comes back and GNU prints
+        # no per-file zeros under -m0 either. Read before the loop rather
+        # than after a line is printed, because `count >= 0` is already
+        # true and the bottom check would let the first selected line out
+        # first. `grep_input` takes the same early return.
+        return []
     results: list[str] = []
     count = 0
+    offsets = line_offsets(data) if byte_offsets else []
     for i, line in enumerate(data, 1):
+        start = offsets[i - 1] if byte_offsets else 0
         m = compiled.search(line)
         matched = bool(m) != invert
         if not matched:
             continue
         count += 1
+        if io is not None:
+            io.exit_code = 0
         if not count_only and not files_only:
-            if only_matching and m and not invert:
-                text = m.group(0)
+            if only_matching:
+                # GNU -o prints every match on the line, one per line, and
+                # prints nothing at all for an empty match nor for an
+                # inverted selection, which has no match to print
+                # (`grep -ov abc` is zero bytes and exit 0 where GNU's own
+                # -c still says 1). The line is still selected, so `count`
+                # is already incremented above and -c, -l and the exit
+                # status see it.
+                if not invert:
+                    for found in compiled.finditer(line):
+                        text = found.group(0)
+                        if not text:
+                            continue
+                        results.append(
+                            prefix_of(
+                                i if line_numbers else None,
+                                match_offset(start, line, found.start(
+                                )) if byte_offsets else None) + text)
             else:
-                text = line
-            prefix = f"{i}:{text}" if line_numbers else text
-            results.append(prefix)
+                results.append(
+                    prefix_of(i if line_numbers else None,
+                              start if byte_offsets else None) + line)
         if max_count is not None and count >= max_count:
             break
     if count_only:
         return [str(count)]
     if files_only:
         return [path] if count > 0 else []
-    return results
+    return [printable(r) for r in results]
 
 
 def _grep_count_value(results: list[str]) -> int:
@@ -167,12 +236,44 @@ async def grep_stream(
     count_only: bool = False,
     after_context: int = 0,
     before_context: int = 0,
+    io: IOResult | None = None,
+    byte_offsets: bool = False,
 ) -> AsyncIterator[bytes]:
+    """Stream grep's output for one input.
+
+    Args:
+        source (AsyncIterator[bytes]): the input's bytes.
+        pat (re.Pattern[str]): the compiled pattern.
+        invert (bool): -v, select the lines that do not match.
+        line_numbers (bool): -n, prefix each printed line with its
+            number.
+        only_matching (bool): -o, print the matched text rather than the
+            line.
+        max_count (int | None): -m, stop after this many selected lines.
+        count_only (bool): -c, print the number of selected lines.
+        after_context (int): -A, trailing context lines.
+        before_context (int): -B, leading context lines.
+        io (IOResult | None): when given, receives exit status 0 as soon
+            as a line is selected. Selection cannot be read off the
+            output for -o, because GNU prints nothing for a zero-width
+            match and still counts the line, so a caller that derives
+            the status from an empty stream reports 1 where GNU says 0.
+        byte_offsets (bool): -b, prefix each printed line with the byte
+            offset of its own start, or of the match itself under -o.
+    """
+    if max_count == 0:
+        # GNU selects no line at all, context and all, and prints nothing
+        # for it: `grep -m0 -c a f` is zero bytes and exit 1, not `0`.
+        # Read before anything else because `match_count >= 0` is already
+        # true, so the per-line check below would let the first selected
+        # line out first. `grep_input` and `grep_lines` take the same
+        # early return.
+        return
     has_context = after_context > 0 or before_context > 0
     if has_context and not count_only and not only_matching:
         all_lines: list[str] = []
         async for raw_line in AsyncLineIterator(source):
-            all_lines.append(raw_line.decode(errors="replace"))
+            all_lines.append(decode_line(raw_line))
         for chunk in grep_context_lines(
                 all_lines,
                 pat,
@@ -181,39 +282,60 @@ async def grep_stream(
                 max_count,
                 after_context,
                 before_context,
+                byte_offsets,
         ):
+            if io is not None:
+                io.exit_code = 0
             yield chunk
         return
     match_count = 0
     line_num = 0
+    # GNU counts bytes from the start of the input, the terminator the
+    # iterator strips included; the byte past a final unterminated line is
+    # never read.
+    byte_pos = 0
     async for raw_line in AsyncLineIterator(source):
         line_num += 1
-        line = raw_line.decode(errors="replace")
+        line_start = byte_pos
+        byte_pos += len(raw_line) + 1
+        line = decode_line(raw_line)
         hit = bool(pat.search(line))
         if invert:
             hit = not hit
         if not hit:
             continue
-        if only_matching and not invert:
-            for m in pat.finditer(line):
-                match_count += 1
-                if not count_only:
-                    yield m.group().encode() + b"\n"
-                if max_count and match_count >= max_count:
-                    if count_only:
-                        yield str(match_count).encode() + b"\n"
-                    return
-        else:
-            match_count += 1
-            if not count_only:
-                if line_numbers:
-                    yield f"{line_num}:{line}\n".encode()
-                else:
-                    yield raw_line + b"\n"
-            if max_count and match_count >= max_count:
-                if count_only:
-                    yield str(match_count).encode() + b"\n"
-                return
+        # The count is per selected LINE, never per match, which is what
+        # makes `grep -oc '[0-9]*'` on `ab` answer 1 the way GNU does:
+        # the empty match selects the line even though -o prints nothing
+        # for it. -m counts selected lines for the same reason.
+        match_count += 1
+        if io is not None:
+            io.exit_code = 0
+        if not count_only:
+            if only_matching:
+                # Nothing is printed for an inverted selection, which has
+                # no match to print: `grep -ov abc` is zero bytes where
+                # GNU's own -c still says 1.
+                if not invert:
+                    for m in pat.finditer(line):
+                        text = m.group()
+                        if not text:
+                            continue
+                        fields = prefix_of(
+                            line_num if line_numbers else None,
+                            match_offset(line_start, line, m.start())
+                            if byte_offsets else None)
+                        yield encode_line(f"{fields}{text}\n")
+            elif line_numbers or byte_offsets:
+                fields = prefix_of(line_num if line_numbers else None,
+                                   line_start if byte_offsets else None)
+                yield encode_line(f"{fields}{line}\n")
+            else:
+                yield raw_line + b"\n"
+        if max_count is not None and match_count >= max_count:
+            if count_only:
+                yield str(match_count).encode() + b"\n"
+            return
     if count_only:
         yield str(match_count).encode() + b"\n"
 
@@ -233,6 +355,7 @@ async def grep_recursive(
     warnings: list[str] | None = None,
     read_stream_fn: Callable[[str], AsyncIterator[bytes]] | None = None,
     filters: WalkFilters = NO_FILTERS,
+    byte_offsets: bool = False,
 ) -> list[str]:
     results: list[str] = []
     try:
@@ -266,6 +389,7 @@ async def grep_recursive(
                 warnings,
                 read_stream_fn,
                 filters,
+                byte_offsets,
             ))
             continue
         if s.type is not FileType.FILE:
@@ -288,6 +412,7 @@ async def grep_recursive(
                         only_matching=only_matching,
                         max_count=max_count,
                         count_only=count_only,
+                        byte_offsets=byte_offsets,
                 ):
                     file_results.append(
                         chunk.decode(errors="replace").rstrip("\n"))
@@ -306,8 +431,7 @@ async def grep_recursive(
                 continue
         else:
             try:
-                data = (await read_bytes_fn(entry)).decode(
-                    errors="replace").splitlines()
+                data = split_lines(decode_line(await read_bytes_fn(entry)))
                 file_results = grep_lines(
                     entry,
                     data,
@@ -318,6 +442,7 @@ async def grep_recursive(
                     files_only,
                     only_matching,
                     max_count,
+                    byte_offsets=byte_offsets,
                 )
                 if count_only:
                     if file_results:
@@ -428,6 +553,7 @@ async def grep_files_only(
     warnings: list[str] | None,
     read_stream_fn: Callable[[str], AsyncIterator[bytes]] | None = None,
     filters: WalkFilters = NO_FILTERS,
+    byte_offsets: bool = False,
 ) -> list[str]:
     compiled = compile_pattern(pattern, ignore_case, fixed_string, whole_word,
                                basic)
@@ -464,6 +590,7 @@ async def grep_files_only(
                 warnings,
                 read_stream_fn,
                 filters,
+                byte_offsets,
             )
 
     # GNU names a directory operand and moves on without descending into
@@ -483,7 +610,11 @@ async def grep_files_only(
         if warnings is not None:
             warnings.append(_operand_error(path, exc))
         return []
-    text_lines = data.decode(errors="replace").splitlines()
+    text_lines = split_lines(decode_line(data))
+    if max_count == 0:
+        # GNU selects no line, so -l names nothing and -c prints nothing
+        # rather than a zero.
+        return []
     count = 0
     for line in text_lines:
         if bool(compiled.search(line)) != invert:

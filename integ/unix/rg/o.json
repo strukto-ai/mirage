@@ -32,6 +32,675 @@
       "flags": [
         "o"
       ]
+    },
+    {
+      "id": "rg_o_every_match_on_the_line",
+      "seq": 500420,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a1b2c\\n' | rg -o '[0-9]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_o_empty_match_prints_nothing",
+      "seq": 500421,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | rg -o '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_o_empty_pattern_prints_nothing",
+      "seq": 500422,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | rg -o ''",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_o_start_anchor_prints_nothing",
+      "seq": 500423,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | rg -o '^'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_o_end_anchor_prints_nothing",
+      "seq": 500424,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | rg -o '$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_o_empty_matches_dropped_around_a_real_one",
+      "seq": 500425,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a1b\\n' | rg -o '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_o_nonempty_runs_kept_in_order",
+      "seq": 500426,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '1a22b\\n' | rg -o '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n22\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_o_star_keeps_only_the_nonempty_match",
+      "seq": 500427,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | rg -o 'b*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_oc_still_counts_the_selected_line",
+      "seq": 500428,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | rg -oc '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "c"
+      ]
+    },
+    {
+      "id": "rg_o_empty_match_on_every_line_prints_nothing",
+      "seq": 500429,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' | rg -o '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_o_directory_prints_every_match",
+      "seq": 500430,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgo1 && printf 'a1b2c\\n' > /data/rgo1/x.txt && rg -o '[0-9]' /data/rgo1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rgo1/x.txt:1\n/data/rgo1/x.txt:2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_on_directory_numbers_every_match",
+      "seq": 500431,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgo6 && printf 'a1b2c\\n' > /data/rgo6/x.txt && rg -on '[0-9]' /data/rgo6",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rgo6/x.txt:1:1\n/data/rgo6/x.txt:1:2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "n"
+      ]
+    },
+    {
+      "id": "rg_oi_upper_directory_drops_the_label",
+      "seq": 500432,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgo7 && printf 'a1b2c\\n' > /data/rgo7/x.txt && rg -oI '[0-9]' /data/rgo7",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "I"
+      ]
+    },
+    {
+      "id": "rg_o_two_operands_empty_match_still_exits_0",
+      "seq": 500433,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgo3 && printf 'ab\\n' > /data/rgo3/p.txt && printf 'cd\\n' > /data/rgo3/q.txt && rg -o '[0-9]*' /data/rgo3/p.txt /data/rgo3/q.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_oh_upper_empty_match_still_exits_0",
+      "seq": 500434,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgo4 && printf 'ab\\n' > /data/rgo4/z.txt && rg -oH '[0-9]*' /data/rgo4/z.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "H"
+      ]
+    },
+    {
+      "id": "rg_ob_offset_is_the_match",
+      "seq": 500435,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -ob abc /data/rgb.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0:abc\n7:abc\n11:abc\n15:abc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "b"
+      ]
+    },
+    {
+      "id": "rg_ob_empty_matches_dropped_around_a_real_one",
+      "seq": 500436,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a1b\\n' | rg -ob '[0-9]*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "b"
+      ]
+    },
+    {
+      "id": "rg_o_directory_empty_match_still_exits_0",
+      "seq": 500437,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgo5 && printf 'ab\\n' > /data/rgo5/z.txt && rg -o '[0-9]*' /data/rgo5",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o"
+      ]
+    },
+    {
+      "id": "rg_ov_prints_nothing",
+      "seq": 612120,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'abc\\ndef\\n' > /data/rov.txt; rg -ov abc /data/rov.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "v"
+      ]
+    },
+    {
+      "id": "rg_ovc_still_counts_the_selected_line",
+      "seq": 612121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'abc\\ndef\\n' > /data/rov.txt; rg -ovc abc /data/rov.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "o",
+        "v",
+        "c"
+      ]
     }
   ]
 }

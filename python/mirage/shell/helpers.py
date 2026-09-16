@@ -37,13 +37,19 @@ def byte_offset(text: str, index: int) -> int:
 
     tree-sitter places a node by the bytes of the UTF-8 source, so an
     index counted in code points reads one place too early for every
-    multibyte character before it.
+    multibyte character before it. ``grep -ob`` reads the same answer
+    for the same reason.
+
+    Bytes that are not valid UTF-8 ride as surrogate escapes and each
+    stand for one byte, which is what makes the count exact. That is a
+    requirement on the caller, not a hope: grep's family decodes every
+    line through ``grep_offsets.decode_line`` for it.
 
     Args:
         text (str): the text the index is into.
         index (int): a code-point index into it.
     """
-    return len(text[:index].encode())
+    return len(text[:index].encode("utf-8", errors="surrogateescape"))
 
 
 def get_command_name(node: TSNodeLike) -> str:

@@ -62,6 +62,30 @@
         "stdout": "",
         "stderr": "numfmt: rejecting suffix in input: '1K' (consider using --from)\n"
       }
+    },
+    {
+      "id": "numfmt_invalid_suffix_quotes_the_field",
+      "seq": 960025,
+      "targets": ["ram", "disk"],
+      "command": "numfmt '1é'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "numfmt: invalid suffix in input: '1\\303\\251'\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "numfmt_rejecting_suffix_quotes_the_field",
+      "seq": 960026,
+      "targets": ["ram", "disk"],
+      "command": "numfmt '1Ké'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "numfmt: rejecting suffix in input: '1K\\303\\251' (consider using --from)\n"
+      },
+      "flags": []
     }
   ]
 }

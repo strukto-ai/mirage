@@ -32,13 +32,17 @@ class FakeDispatch:
                  links: dict[str, str] | None = None,
                  stat_mode: int | None = None,
                  stat_modified: str | None = None,
-                 devices: set[str] | None = None) -> None:
+                 devices: set[str] | None = None,
+                 refuse_readdir: bool = False) -> None:
         self.files = files
         self.supports_append = supports_append
         self.links = dict(links or {})
         self.stat_mode = stat_mode
         self.stat_modified = stat_modified
         self.devices = set(devices or ())
+        # A backend that serves stat but will not list, which is what a
+        # deny rule on readdir alone leaves behind.
+        self.refuse_readdir = refuse_readdir
         self.writes: list[tuple[str, bytes]] = []
         self.appends: list[tuple[str, bytes]] = []
         self.created: list[str] = []
@@ -69,6 +73,8 @@ class FakeDispatch:
                                 modified=self.stat_modified), None
             raise FileNotFoundError(virtual)
         if op == "readdir":
+            if self.refuse_readdir:
+                raise PermissionError(errno.EACCES, "denied", virtual)
             # Full virtual paths, the door's own shape.
             prefix = virtual.rstrip("/") + "/"
             names = set()
@@ -189,6 +195,26 @@ def test_monty_reports_a_character_device_without_reading_it():
                     "print(p.exists(), p.is_file(), oct(p.stat().st_mode))")))
     assert result.exit_code == 0, result.stderr
     assert result.stdout == b"True False 0o20666\n"
+
+
+def test_monty_predicates_answer_from_the_row_not_a_listing():
+    # A backend may serve a stat for a path it refuses to list, and the
+    # row is the better answer anyway: it says what the path IS, where
+    # a listing only says whether it opens. The door asks stat first
+    # and keeps the listing for the one path with no row of its own, a
+    # directory a nested mount only implies. Pinned here because the
+    # TypeScript twin asked the listing first and reported a served
+    # stat as a refusal.
+    dispatch = FakeDispatch({"/s3/d/f.txt": b"hi"}, refuse_readdir=True)
+    runtime = MontyRuntime()
+    runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
+    result = asyncio.run(
+        runtime.run(
+            RunArgs(code="from pathlib import Path\n"
+                    "p = Path('/s3/d/f.txt')\n"
+                    "print(p.exists(), p.is_file(), p.is_dir())")))
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == b"True True False\n"
 
 
 def test_monty_missing_virtual_file():

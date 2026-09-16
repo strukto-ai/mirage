@@ -36,6 +36,80 @@
       "flags": [
         "w"
       ]
+    },
+    {
+      "id": "grep_w_word_boundary_is_ascii",
+      "seq": 612030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\303\\251ab\\n' > /data/gw1.txt; grep -w ab /data/gw1.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "éab\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "grep_w_word_boundary_is_ascii_after_the_word",
+      "seq": 612031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\303\\251\\n' > /data/gw2.txt; grep -w a /data/gw2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "aé\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
     }
   ]
 }

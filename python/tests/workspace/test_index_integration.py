@@ -81,10 +81,22 @@ def test_ram_glob_populates_index():
     assert listing.status == LookupStatus.EXPIRED
 
 
-def test_ram_glob_second_call_uses_index():
+def test_ram_cat_of_a_literal_path_stores_no_listing():
+    """A literal path asks for no directory listing, so nothing is indexed.
+
+    Renamed from ``test_ram_glob_second_call_uses_index``, which asserted
+    nothing and could not have: the RAM resource's ``index_ttl`` is 0, so
+    an index hit is unreachable for it by construction, and ``cat`` on a
+    literal path never populates a listing in the first place (the glob
+    sibling above is what populates, and it reads back EXPIRED). This
+    pins what the pair of runs actually establishes.
+    """
     ws, prov = _ram_ws()
-    _run(ws.execute("cat /data/sub/a.txt"))
-    _run(ws.execute("cat /data/sub/a.txt"))
+    first = _run(ws.execute("cat /data/sub/a.txt"))
+    second = _run(ws.execute("cat /data/sub/a.txt"))
+    assert (first.exit_code, second.exit_code) == (0, 0)
+    listing = _run(prov.index.list_dir("/data/sub"))
+    assert listing.status == LookupStatus.NOT_FOUND
 
 
 def test_ram_glob_pattern_works():

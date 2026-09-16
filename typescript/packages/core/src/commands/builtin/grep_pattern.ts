@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { breToRegExp } from '../../utils/bre.ts'
+import { BreError, translateBre } from './utils/bre.ts'
+import { UsageError } from '../errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
-import { type FlagValue } from '../spec/types.ts'
+import { FlagView, type FlagValue } from '../spec/types.ts'
 
 export const NEVER_MATCH = '(?!)'
 
@@ -31,11 +32,13 @@ function escapeRegex(s: string): string {
 // list, or null when neither was supplied.
 export function patternArg(
   texts: readonly string[],
-  flags: Record<string, FlagValue>,
+  bag: Record<string, FlagValue>,
 ): string | null {
-  const e = flags.e
-  if (Array.isArray(e) && e.length > 0) return e.join('\n')
-  if (typeof e === 'string') return e
+  // Spec-less, as the shared push-down helpers are: `-e` and `-f` are
+  // declared by the grep, rg and zgrep specs alike, and this helper is
+  // reached from all three.
+  const e = new FlagView(bag).asList('e')
+  if (e.length > 0) return e.join('\n')
   if (texts.length > 0 && texts[0] !== undefined) return texts[0]
   return null
 }
@@ -53,20 +56,24 @@ export interface PatternResolution {
 export async function resolvePattern(
   name: string,
   texts: readonly string[],
-  flags: Record<string, FlagValue>,
+  bag: Record<string, FlagValue>,
   paths: readonly PathSpec[],
   mountPrefix: string | null | undefined,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<PatternResolution> {
-  let pattern = patternArg(texts, flags)
+  let pattern = patternArg(texts, bag)
   let neverMatch = false
-  if (Array.isArray(flags.f)) {
+  // `raw` rather than `asList`, mirroring Python's `flags.raw("f")`: an
+  // empty -f list still means "-f was supplied", which is what turns on the
+  // NEVER_MATCH sentinel below.
+  const patternFiles = new FlagView(bag).raw('f')
+  if (Array.isArray(patternFiles)) {
     const first = paths[0]
     const prefix =
       (first === undefined ? undefined : mountPrefixOf(first.virtual, first.resourcePath)) ??
       mountPrefix ??
       ''
-    for (const filePath of flags.f) {
+    for (const filePath of patternFiles) {
       const patternSpec = PathSpec.fromStrPath(filePath, mountKey(filePath, prefix))
       let fileData: Uint8Array
       try {
@@ -99,10 +106,29 @@ export function mergePatternList(
   return parts.join('\n')
 }
 
+// One basic expression as grep reads it, or grep's refusal. The shared
+// translator that `expr` and `nl` compile their patterns with, asked for
+// grep's dialect: the two GNU dialects agree on every construct measured
+// except an inverted range, which grep refuses (`grep '[z-a]'` is `Invalid
+// range end`) where the other two read it as an empty set.
+//
+// A refusal is glibc's `regerror` string verbatim, which is what GNU prints,
+// and exits 2 as grep does rather than letting the host engine's own wording
+// out (`Invalid regular expression: /(/: Unterminated group` was what
+// `grep '\('` used to say).
+export function breSource(part: string): string {
+  try {
+    return translateBre(part, true)[0]
+  } catch (err) {
+    if (err instanceof BreError) throw new UsageError(`grep: ${err.message}`)
+    throw err
+  }
+}
+
 // One pattern's regex source, in the syntax it was written in.
 function sourceOf(part: string, fixedString: boolean, basic: boolean): string {
   if (fixedString) return escapeRegex(part)
-  return basic ? breToRegExp(part) : part
+  return basic ? breSource(part) : part
 }
 
 // Build a regex source string from a POSIX pattern list. `basic` says the

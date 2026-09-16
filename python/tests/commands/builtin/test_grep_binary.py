@@ -7,6 +7,7 @@ from mirage.commands.builtin.generic.grep import parse_flags
 from mirage.commands.builtin.grep_binary import PROBE_BLOCK_BYTES, grep_input
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.commands.spec.types import FlagView
 from mirage.io.types import IOResult, materialize
 
@@ -305,22 +306,68 @@ async def test_zero_width_only_matching_still_notices_a_nul(
     assert (out, io.stderr or b"", io.exit_code) == (b"", stderr, 0)
 
 
+# -m0 selects no line and the whole command goes quiet, -c included.
+# Measured on GNU grep 3.11: `grep -m0 a f`, `grep -m0 -c a f`,
+# `grep -m0 -v a f`, `grep -m0 -l a f`, `grep -m0 -o a f`,
+# `grep -m0 -A1 a f` and `grep -m0 -c a f g` are all zero bytes and exit 1,
+# across the `-m0`, `-m 0` and `--max-count=0` spellings. -c printing a bare
+# `0` here would be wrong twice over: GNU prints nothing, and a GENUINE zero
+# still prints `0` (`grep -c a g` is `0\n`, exit 1), so the two cases have to
+# stay distinguishable.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("flags, expected", [({
-    "m": 0
-}, b""), ({
-    "m": 0,
-    "c": True
-}, b"0\n")])
-async def test_max_count_zero_closes_the_unread_source(flags, expected):
+@pytest.mark.parametrize("flags", [
+    {
+        "m": 0
+    },
+    {
+        "m": 0,
+        "c": True
+    },
+    {
+        "m": 0,
+        "v": True
+    },
+    {
+        "m": 0,
+        "l": True
+    },
+    {
+        "m": 0,
+        "o": True
+    },
+    {
+        "m": 0,
+        "A": "1"
+    },
+    {
+        "m": 0,
+        "c": True,
+        "n": True,
+        "b": True
+    },
+])
+async def test_max_count_zero_prints_nothing_and_closes_the_unread_source(
+        flags):
     source = _OpenSource()
     f = parse_flags(FlagView(flags, spec=SPECS["grep"]), False)
     io = IOResult()
     out = await materialize(
         grep_input(source, re.compile("needle"), f, "/remote/rows.jsonl",
                    False, io))
-    assert (out, io.exit_code) == (expected, 1)
+    assert (out, io.exit_code) == (b"", 1)
     assert source.closed
+
+
+@pytest.mark.asyncio
+async def test_a_genuine_zero_count_still_prints_zero():
+    # The mirror of the -m0 rows above: without -m0, `grep -c` on a file
+    # holding no match prints `0` and exits 1 (GNU grep 3.11).
+    f = parse_flags(FlagView({"c": True}, spec=SPECS["grep"]), False)
+    io = IOResult(exit_code=1)
+    out = await materialize(
+        grep_input(_lines(b"a\nb\n"), re.compile("needle"), f, "/data/z",
+                   False, io))
+    assert (out, io.exit_code) == (b"0\n", 1)
 
 
 class _OpenSource:
@@ -337,3 +384,233 @@ class _OpenSource:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+# The byte layout of every fixture below is section Q1 of the GNU truth
+# file, measured against GNU grep 3.11.
+_F1 = b"abc\ndefabc\nabc abc\n"
+_F3 = b"one\ntwo abc\nthree\nfour abc\nfive\n"
+_F4 = b"a\nb\nHIT\nc\nd\ne\nf\nHIT\ng\n"
+_F5 = "café abc\nxéy abc\n".encode()
+_F6 = b"no-newline-abc"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data, flags, show, expected, code",
+    [
+        # Without -o the number is the offset of the LINE's first byte: line
+        # two prints 4, not the 7 its match sits at.
+        (_F1, {
+            "byte_offset": True
+        }, False, b"0:abc\n4:defabc\n11:abc abc\n", 0),
+        # With -o it is the offset of the match, and a line with two matches
+        # prints both.
+        (_F1, {
+            "byte_offset": True,
+            "o": True
+        }, False, b"0:abc\n7:abc\n11:abc\n15:abc\n", 0),
+        # Field order is FILENAME, LINE NUMBER, BYTE OFFSET, fixed by the
+        # renderer rather than by the order the flags were given in.
+        (_F1, {
+            "byte_offset": True,
+            "n": True
+        }, False, b"1:0:abc\n2:4:defabc\n3:11:abc abc\n", 0),
+        (_F1, {
+            "byte_offset": True,
+            "H": True
+        }, True, b"f:0:abc\nf:4:defabc\nf:11:abc abc\n", 0),
+        (_F1, {
+            "byte_offset": True,
+            "n": True,
+            "H": True,
+            "o": True
+        }, True, b"f:1:0:abc\nf:2:7:abc\nf:3:11:abc\nf:3:15:abc\n", 0),
+        # -b does not reach a count, a file list or -q.
+        (_F1, {
+            "byte_offset": True,
+            "c": True
+        }, False, b"3\n", 0),
+        (_F3, {
+            "byte_offset": True,
+            "c": True
+        }, False, b"2\n", 0),
+        (_F1, {
+            "byte_offset": True,
+            "c": True,
+            "H": True
+        }, True, b"f:3\n", 0),
+        (_F1, {
+            "byte_offset": True,
+            "args_l": True
+        }, False, b"f\n", 0),
+        (_F1, {
+            "byte_offset": True,
+            "q": True
+        }, False, b"", 0),
+        # -v prints the line-start offsets of the lines it did not select.
+        (_F3, {
+            "byte_offset": True,
+            "v": True
+        }, False, b"0:one\n12:three\n27:five\n", 0),
+        (_F1, {
+            "byte_offset": True,
+            "v": True
+        }, False, b"", 1),
+        (_F3, {
+            "byte_offset": True,
+            "m": "1"
+        }, False, b"4:two abc\n", 0),
+        # A missing final newline does not shift an offset, and must not be
+        # counted twice.
+        (_F6, {
+            "byte_offset": True
+        }, False, b"0:no-newline-abc\n", 0),
+        (_F6, {
+            "byte_offset": True,
+            "o": True
+        }, False, b"11:abc\n", 0),
+    ])
+async def test_byte_offset_is_the_line_start_or_the_match(
+        data, flags, show, expected, code):
+    f = parse_flags(FlagView(flags, spec=SPECS["grep"]), False)
+    io = IOResult(exit_code=1)
+    out = await materialize(
+        grep_input(_lines(data), re.compile("abc"), f, "f", show, io))
+    assert (out, io.exit_code) == (expected, code)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data, pattern, flags, show, expected",
+    [
+        (_F3, "abc", {
+            "byte_offset": True,
+            "A": "1"
+        }, False, b"4:two abc\n12-three\n18:four abc\n27-five\n"),
+        (_F3, "abc", {
+            "byte_offset": True,
+            "B": "1"
+        }, False, b"0-one\n4:two abc\n12-three\n18:four abc\n"),
+        (_F3, "abc", {
+            "byte_offset": True,
+            "C": "1"
+        }, False, b"0-one\n4:two abc\n12-three\n18:four abc\n27-five\n"),
+        (_F3, "three", {
+            "byte_offset": True,
+            "A": "1"
+        }, False, b"12:three\n18-four abc\n"),
+        # Every field on a context line takes `-`, the separator being chosen
+        # once per line rather than per field.
+        (_F3, "abc", {
+            "byte_offset": True,
+            "n": True,
+            "C": "1"
+        }, False,
+         b"1-0-one\n2:4:two abc\n3-12-three\n4:18:four abc\n5-27-five\n"),
+        (_F3, "abc", {
+            "byte_offset": True,
+            "n": True,
+            "H": True,
+            "C": "1"
+        }, True, b"f-1-0-one\nf:2:4:two abc\nf-3-12-three\n"
+         b"f:4:18:four abc\nf-5-27-five\n"),
+        # The group separator is a bare `--` with no prefix fields at all.
+        (_F4, "HIT", {
+            "byte_offset": True,
+            "n": True,
+            "C": "1"
+        }, False, b"2-2-b\n3:4:HIT\n4-8-c\n--\n7-14-f\n8:16:HIT\n9-20-g\n"),
+        # -o beats -C entirely: only matches, no context and no separator.
+        (_F3, "abc", {
+            "byte_offset": True,
+            "o": True,
+            "C": "1"
+        }, False, b"8:abc\n23:abc\n"),
+    ])
+async def test_byte_offset_on_a_context_line_uses_the_dash_separator(
+        data, pattern, flags, show, expected):
+    f = parse_flags(FlagView(flags, spec=SPECS["grep"]), False)
+    io = IOResult(exit_code=1)
+    out = await materialize(
+        grep_input(_lines(data), re.compile(pattern), f, "f", show, io))
+    assert (out, io.exit_code) == (expected, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data, pattern, flags, expected",
+    [
+        # An empty match prints nothing under -ob, exactly as under -o, and
+        # the line is still selected.
+        (b"ab\n", "[0-9]*", {
+            "byte_offset": True,
+            "o": True
+        }, b""),
+        (b"ab\n", "", {
+            "byte_offset": True,
+            "o": True
+        }, b""),
+        (b"a1b\n", "[0-9]*", {
+            "byte_offset": True,
+            "o": True
+        }, b"1:1\n"),
+        (b"a1b\nc2d\n", "[0-9]*", {
+            "byte_offset": True,
+            "o": True
+        }, b"1:1\n5:2\n"),
+        (b"ab\ncd\n", "[0-9]*", {
+            "byte_offset": True
+        }, b"0:ab\n3:cd\n"),
+    ])
+async def test_empty_matches_under_ob_behave_as_under_o(
+        data, pattern, flags, expected):
+    f = parse_flags(FlagView(flags, spec=SPECS["grep"]), False)
+    io = IOResult(exit_code=1)
+    out = await materialize(
+        grep_input(_lines(data), re.compile(pattern), f, "f", False, io))
+    assert (out, io.exit_code) == (expected, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags, expected",
+    [
+        # `caf` + U+00E9 (two bytes) + a space is six bytes, so the match sits
+        # at byte 6 and not at character index 5; line two starts at 10 and
+        # its match is at 15, not 13. GNU reports the same numbers under C and
+        # C.utf8.
+        ({
+            "byte_offset": True,
+            "o": True
+        }, b"6:abc\n15:abc\n"),
+        ({
+            "byte_offset": True,
+            "o": True,
+            "n": True
+        }, b"1:6:abc\n2:15:abc\n"),
+        ({
+            "byte_offset": True
+        }, b"0:caf\xc3\xa9 abc\n10:x\xc3\xa9y abc\n"),
+    ])
+async def test_offsets_count_bytes_not_characters(flags, expected):
+    f = parse_flags(FlagView(flags, spec=SPECS["grep"]), False)
+    io = IOResult(exit_code=1)
+    out = await materialize(
+        grep_input(_lines(_F5), re.compile("abc"), f, "f", False, io))
+    assert (out, io.exit_code) == (expected, 0)
+
+
+@pytest.mark.parametrize("argv, expected", [
+    (["-b", "abc", "f"], True),
+    (["--byte-offset", "abc", "f"], True),
+    (["-bn", "abc", "f"], True),
+    (["abc", "f"], False),
+])
+def test_byte_offset_reaches_the_generic_from_either_spelling(argv, expected):
+    # The dest of -b/--byte-offset is `byte_offset`, so a query for the
+    # short spelling would read as absent without the parser complaining.
+    parsed = parse_command(SPECS["grep"], argv, "/")
+    bag = parse_to_kwargs(parsed)
+    f = parse_flags(FlagView(bag, spec=SPECS["grep"]), False)
+    assert f.byte_offsets is expected

@@ -67,6 +67,210 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "rg_files_only_missing_operand",
+      "seq": 612150,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -l hello /data/nosuch.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_files_only_missing_among_files",
+      "seq": 612151,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -l hello /data/a.txt /data/nosuch.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/a.txt\n",
+        "stderr": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_context_missing_among_files",
+      "seq": 612152,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -A1 hello /data/a.txt /data/nosuch.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/a.txt:hello\n",
+        "stderr": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_type_missing_among_files",
+      "seq": 612153,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg --type txt hello /data/a.txt /data/nosuch.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/a.txt:hello\n",
+        "stderr": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_count_missing_among_files",
+      "seq": 612154,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg -c hello /data/a.txt /data/nosuch.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/a.txt:1\n",
+        "stderr": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "rg_lines_missing_among_files",
+      "seq": 612155,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg hello /data/a.txt /data/nosuch.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "/data/a.txt:hello\n",
+        "stderr": "rg: /data/nosuch.txt: No such file or directory\n"
+      }
     }
   ]
 }

@@ -14,7 +14,7 @@
 
 import re
 
-from mirage.commands.errors import UsageError
+from mirage.commands.spec.usage import argmatch_error
 from mirage.types import PathSpec, ReaddirFn
 from mirage.utils.key_prefix import rekey
 
@@ -29,6 +29,10 @@ BACKUP_CONTROLS = {
     "numbered": "numbered",
     "t": "numbered",
 }
+# The same controls as ARGMATCH candidates, aliases of one value on one
+# line, which is how gnulib's `argmatch_valid` prints `backup_args`.
+BACKUP_ARGS = (("none", "off"), ("simple", "never"), ("existing", "nil"),
+               ("numbered", "t"))
 
 _NUMBERED_SUFFIX = re.compile(r"^\.~([0-9]+)~$")
 
@@ -56,17 +60,17 @@ def backup_control(cmd_name: str, value: str | bool | None,
     enabled = value is not None and value is not False
     if not enabled and suffix is None:
         return None
-    if isinstance(value, str):
+    # An EMPTY control is the default, not a refusal: gnulib's
+    # `xget_version` only calls argmatch when `version && *version`, so
+    # `cp --backup=` is `cp --backup` (measured on coreutils 9.4: exit 0,
+    # and it writes the `existing` backup). This is the one argmatch-shaped
+    # slot in the repo where the empty word is neither invalid nor
+    # ambiguous.
+    if isinstance(value, str) and value != "":
         control = BACKUP_CONTROLS.get(value)
         if control is None:
-            raise UsageError(
-                f"{cmd_name}: invalid argument '{value}' for 'backup type'\n"
-                "Valid arguments are:\n"
-                "  - 'none', 'off'\n"
-                "  - 'simple', 'never'\n"
-                "  - 'existing', 'nil'\n"
-                "  - 'numbered', 't'\n"
-                f"Try '{cmd_name} --help' for more information.", 1)
+            raise argmatch_error(cmd_name, "backup type", value, BACKUP_ARGS,
+                                 1)
         return control
     return "existing"
 

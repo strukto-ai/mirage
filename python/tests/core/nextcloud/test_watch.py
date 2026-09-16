@@ -22,11 +22,14 @@ async def test_walk_yields_files_and_dirs(make_acc):
 
 @pytest.mark.asyncio
 async def test_walk_detector_carries_the_etag_in_the_composite(make_acc):
+    # The etag leads but does not stand alone. Nextcloud's own etag
+    # comes off an mtime with one-second granularity, so two writes in
+    # one second share it; the size beside it is what catches the
+    # update the etag cannot express.
     acc = make_acc({"data/a.txt": b"x"})
     walk = NextcloudWalk(acc)
     entries = {e.virtual: e async for e in walk(_root())}
-    assert entries["/data/a.txt"].fingerprint == (
-        "etag-data/a.txt|2026-01-01T00:00:00+00:00|1")
+    assert entries["/data/a.txt"].fingerprint == "etag-data/a.txt|1"
 
 
 @pytest.mark.asyncio

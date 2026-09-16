@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  // A glob, never a list of filenames. `integ/tsconfig.check.json` records
+  // what a list costs: a new file is simply absent from it, so it typechecks
+  // clean by never being read and `tsc -p` reports success over code it has
+  // not looked at -- the same shape as the dead rule this directory's lint
+  // coverage came from (issue #1089 item 20b).
+  "include": ["**/*.ts"]
+}

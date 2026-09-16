@@ -17,6 +17,7 @@ import type { BridgeDispatchFn } from '../../types.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { RuntimeVFS } from '../../vfs.ts'
 import { MirageOSAccess } from './index.ts'
+import type { GuestStat } from './stat.ts'
 import { MontyVFS } from './vfs.ts'
 import { PrefixResolver } from '../../resolver.ts'
 
@@ -31,7 +32,18 @@ class FakeHandle {
   ) {}
 }
 
-const BITS = { NOT_HANDLED, MontyFileHandle: FakeHandle }
+// Stands in for the binding's ClassInstance wrapper, which carries a
+// host object into the guest as a class instance rather than a dict.
+// The fake keeps the wrapped object reachable so a test can read the
+// stat fields the real wrapper would send.
+class FakeClassInstance {
+  constructor(
+    readonly instance: object,
+    readonly options?: { name?: string; eagerAttrs?: readonly string[] | 'all' },
+  ) {}
+}
+
+const BITS = { NOT_HANDLED, MontyFileHandle: FakeHandle, ClassInstance: FakeClassInstance }
 
 function accessOn(
   dispatch: BridgeDispatchFn,
@@ -57,9 +69,32 @@ function accessOn(
 // The door builds each row from a name plus one stat, so a double
 // standing in for the bridge answers both; a name it did not list stats
 // as a missing path.
-function listing(names: string[], dirs: string[] = []): Mock<BridgeDispatchFn> {
+function listing(
+  names: string[],
+  dirs: string[] = [],
+  links: string[] = [],
+): Mock<BridgeDispatchFn> {
   return vi.fn<BridgeDispatchFn>((op, path) => {
-    if (op === 'readdir') return Promise.resolve(names)
+    // A real backend answers a target or refuses with EINVAL for a
+    // path that is not a link; undefined is neither.
+    if (op === 'readlink') {
+      if (!links.includes(path)) {
+        return Promise.reject(
+          Object.assign(new Error(`not a symbolic link: ${path}`), { code: 'EINVAL' }),
+        )
+      }
+      return Promise.resolve(path + '.target')
+    }
+    if (op === 'readdir') {
+      // A real mount refuses to list a path it does not have, and the
+      // door asks with a trailing slash. Answering every path would
+      // make any probe built on a listing read as "yes, a directory".
+      const under = names.filter((n) => n.startsWith(path))
+      if (under.length === 0 && !dirs.includes(path.replace(/\/$/, ''))) {
+        return Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' }))
+      }
+      return Promise.resolve(under)
+    }
     if (op === 'stat' && names.includes(path)) {
       return Promise.resolve(
         new FileStat({
@@ -73,7 +108,23 @@ function listing(names: string[], dirs: string[] = []): Mock<BridgeDispatchFn> {
   })
 }
 
-const noop = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
+// A backend that answers nothing: every op is refused with EACCES,
+// which is not an absence and must not read as one.
+function refusing(): Mock<BridgeDispatchFn> {
+  return vi.fn<BridgeDispatchFn>((_op, path) =>
+    Promise.reject(Object.assign(new Error(`denied: ${path}`), { code: 'EACCES' })),
+  )
+}
+
+// A bridge with nothing behind it. A listing still has to REFUSE
+// rather than answer undefined: the real dispatcher returns an array
+// or rejects with a coded error, and a door that reads a broken answer
+// as an empty directory would hide the break.
+const noop = vi.fn<BridgeDispatchFn>((op, path) =>
+  op === 'readdir'
+    ? Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' }))
+    : Promise.resolve(undefined),
+)
 
 describe('MirageOSAccess environment', () => {
   it('answers os.getenv from the run environment, with the caller default on a miss', () => {
@@ -172,7 +223,11 @@ describe('MirageOSAccess scratch paths', () => {
   })
 
   it('answers is_symlink false for a scratch path, whose tree holds no links', async () => {
-    const access = accessOn(vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined)))
+    const access = accessOn(
+      vi.fn<BridgeDispatchFn>((_op, path) =>
+        Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' })),
+      ),
+    )
     expect(await access.handle('Path.is_symlink', ['/tmp/l'])).toBe(false)
   })
 })
@@ -180,14 +235,6 @@ describe('MirageOSAccess scratch paths', () => {
 describe('MirageOSAccess declining', () => {
   it('declines an operation it does not implement', () => {
     expect(accessOn(noop).handle('Path.chmod', ['/ram/x'])).toBe(NOT_HANDLED)
-  })
-
-  it('declines Path.stat, which the JS binding cannot carry to the guest', () => {
-    // Probed on 0.0.21: a stat answer arrives as a guest dict (or
-    // list), so st.st_size raises AttributeError; python's binding
-    // takes a real StatResult. Upstream gap, not a policy choice.
-    expect(accessOn(noop).handle('Path.stat', ['/ram/x'])).toBe(NOT_HANDLED)
-    expect(accessOn(noop).handle('Path.stat', ['/tmp/x'])).toBe(NOT_HANDLED)
   })
 
   it('a rename whose destination leaves the workspace raises EXDEV', () => {
@@ -200,6 +247,154 @@ describe('MirageOSAccess declining', () => {
 
   it('accepts a path object as well as a string', () => {
     expect(accessOn(noop).handle('Path.mkdir', [{ path: '/ram/d' }], {})).not.toBe(NOT_HANDLED)
+  })
+})
+
+describe('MirageOSAccess stat', () => {
+  it("answers a mounted path from the mount's own row", async () => {
+    const access = accessOn(listing(['/ram/x'], []))
+    const wrapped = (await access.handle('Path.stat', ['/ram/x'])) as FakeClassInstance
+    expect(wrapped).toBeInstanceOf(FakeClassInstance)
+    expect(wrapped.options?.name).toBe('stat_result')
+    const st = wrapped.instance as GuestStat
+    expect(st.st_size).toBe(1)
+    expect(st.st_mode & 0o170000).toBe(0o100000)
+    expect(st.st_nlink).toBe(1)
+  })
+
+  it('reports a mounted directory the way monty does, 4096 bytes and two links', async () => {
+    const access = accessOn(listing(['/ram/d'], ['/ram/d']))
+    const wrapped = (await access.handle('Path.stat', ['/ram/d'])) as FakeClassInstance
+    const st = wrapped.instance as GuestStat
+    expect(st.st_size).toBe(4096)
+    expect(st.st_mode & 0o170000).toBe(0o40000)
+    expect(st.st_nlink).toBe(2)
+  })
+
+  it('falls back to the scratch tree for a path no mount holds', () => {
+    const access = accessOn(noop)
+    access.handle('Path.mkdir', ['/tmp'], {})
+    access.handle('Path.write_text', ['/tmp/x', 'hello'])
+    const st = (access.handle('Path.stat', ['/tmp/x']) as FakeClassInstance).instance as GuestStat
+    expect(st.st_size).toBe(5)
+    expect(st.st_mode).toBe(0o100644)
+  })
+
+  it('raises the guest FileNotFoundError when neither half has the path', async () => {
+    const access = accessOn(listing([]))
+    await expect(Promise.resolve(access.handle('Path.stat', ['/ram/nope']))).rejects.toThrow(
+      "[Errno 2] No such file or directory: '/ram/nope'",
+    )
+  })
+
+  it('stats a directory the workspace lists although no mount claims it', async () => {
+    // Only /parent/child is mounted, so /parent is served by neither
+    // the mount view nor the scratch tree, yet exists and is_dir both
+    // answer True for it through the listing. A stat that read only
+    // the tree reported it missing, which python does not.
+    const access = accessOn(listing(['/parent/child']), {}, ['/parent/child'])
+    expect(await access.handle('Path.is_dir', ['/parent'])).toBe(true)
+    const wrapped = (await access.handle('Path.stat', ['/parent'])) as FakeClassInstance
+    const st = wrapped.instance as GuestStat
+    expect(st.st_mode & 0o170000).toBe(0o40000)
+    expect(st.st_nlink).toBe(2)
+  })
+
+  it('raises a refused listing rather than reporting the path absent', async () => {
+    // A backend that will not answer has said nothing about whether
+    // the path is there, so every predicate built on the listing has
+    // to carry the refusal out. Reading it as "not a directory" turned
+    // an authorization or transport failure into a missing file, which
+    // is the one answer a guest cannot tell from the truth.
+    const access = accessOn(refusing(), {}, ['/parent/child'])
+    await expect(Promise.resolve(access.handle('Path.stat', ['/parent']))).rejects.toThrow(
+      '[Errno 13] Permission denied',
+    )
+    await expect(Promise.resolve(access.handle('Path.is_dir', ['/parent']))).rejects.toThrow(
+      '[Errno 13] Permission denied',
+    )
+    await expect(Promise.resolve(access.handle('Path.exists', ['/parent']))).rejects.toThrow(
+      '[Errno 13] Permission denied',
+    )
+  })
+
+  it('raises a refused listing under a mount too, on the same rule', async () => {
+    const access = accessOn(refusing())
+    await expect(Promise.resolve(access.handle('Path.is_dir', ['/ram/x']))).rejects.toThrow(
+      '[Errno 13] Permission denied',
+    )
+    await expect(Promise.resolve(access.handle('Path.exists', ['/ram/x']))).rejects.toThrow(
+      '[Errno 13] Permission denied',
+    )
+    await expect(Promise.resolve(access.handle('Path.iterdir', ['/ram/x']))).rejects.toThrow(
+      '[Errno 13] Permission denied',
+    )
+  })
+
+  it('answers the predicates from the row when the mount will not list', async () => {
+    // A backend may serve a stat for a path it refuses to list, and
+    // the row is the better answer anyway: it says what the path IS,
+    // where a listing only says whether it opens. Asking the listing
+    // first turned a served stat into a refusal for is_dir and into a
+    // miss for is_file, neither of which the python door reports.
+    const statOnly = vi.fn<BridgeDispatchFn>((op, path) => {
+      if (op === 'stat' && (path === '/ram/d' || path === '/ram/d/f.txt')) {
+        return Promise.resolve(
+          new FileStat({
+            name: path,
+            size: 3,
+            type: path === '/ram/d' ? FileType.DIRECTORY : FileType.FILE,
+          }),
+        )
+      }
+      return Promise.reject(Object.assign(new Error(`denied: ${path}`), { code: 'EACCES' }))
+    })
+    const access = accessOn(statOnly)
+    await expect(Promise.resolve(access.handle('Path.is_dir', ['/ram/d']))).resolves.toBe(true)
+    await expect(Promise.resolve(access.handle('Path.is_file', ['/ram/d']))).resolves.toBe(false)
+    await expect(Promise.resolve(access.handle('Path.exists', ['/ram/d']))).resolves.toBe(true)
+    await expect(Promise.resolve(access.handle('Path.is_file', ['/ram/d/f.txt']))).resolves.toBe(
+      true,
+    )
+    await expect(Promise.resolve(access.handle('Path.is_dir', ['/ram/d/f.txt']))).resolves.toBe(
+      false,
+    )
+    expect(statOnly.mock.calls.filter(([op]) => op === 'readdir')).toHaveLength(0)
+  })
+
+  it('forgets a cached ancestor absence when mkdir brings the ancestor into being', async () => {
+    // A stat that missed is remembered, and `mkdir(parents=True)` then
+    // makes the ancestor real. Forgetting only the leaf left the
+    // ancestor cached as missing, so a later stat of it skipped the
+    // mount's row and answered from the scratch tree instead: the
+    // tree's own mode and the run's own stamp, not the backend's.
+    const made = new Set<string>()
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
+      const bare = path.replace(/\/$/, '')
+      if (op === 'mkdir') {
+        for (let s = bare.length; s > 0; s = bare.lastIndexOf('/', s - 1)) {
+          made.add(bare.slice(0, s))
+        }
+        return Promise.resolve(null)
+      }
+      if (op === 'stat' && made.has(bare)) {
+        return Promise.resolve(
+          new FileStat({
+            name: bare,
+            type: FileType.DIRECTORY,
+            mode: 0o750,
+            modified: '2026-07-15T00:00:00Z',
+          }),
+        )
+      }
+      return Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' }))
+    })
+    const access = accessOn(dispatch)
+    await Promise.resolve(access.handle('Path.stat', ['/ram/a'])).catch(() => null)
+    await Promise.resolve(access.handle('Path.mkdir', ['/ram/a/b'], { parents: true }))
+    const row = (await Promise.resolve(access.handle('Path.stat', ['/ram/a']))) as FakeClassInstance
+    expect((row.instance as GuestStat).st_mode).toBe(0o40750)
+    expect((row.instance as GuestStat).st_mtime).toBe(1784073600)
   })
 })
 
@@ -381,10 +576,22 @@ describe('MirageOSAccess path operations', () => {
 
   // Monty's own tree holds no links, so declining this verb answered
   // False for a link the shell made.
-  it('answers is_symlink from the parent listing mark', async () => {
-    const dispatch = listing(['/ram/d/l', '/ram/d/f'])
+  it('answers is_symlink from the name plane, through readlink', async () => {
+    const dispatch = listing(['/ram/d/l', '/ram/d/f'], [], ['/ram/d/l'])
     const access = accessOn(dispatch, {}, ['/ram'], ['l'])
     expect(await access.handle('Path.is_symlink', ['/ram/d/l'])).toBe(true)
     expect(await access.handle('Path.is_symlink', ['/ram/d/f'])).toBe(false)
+  })
+
+  it('still sees a dangling link after the guest asked exists() first', async () => {
+    // `exists()` stats, the stat follows the link and misses, and the
+    // path is remembered as absent. Reading the mark off the parent
+    // listing went through that cache, so `is_symlink()` answered
+    // False for a link plainly there. python asks readlink, which
+    // never consulted the cache, so only this host diverged.
+    const dispatch = listing([], [], ['/ram/d/dangling'])
+    const access = accessOn(dispatch, {}, ['/ram'], ['dangling'])
+    expect(await access.handle('Path.exists', ['/ram/d/dangling'])).toBe(false)
+    expect(await access.handle('Path.is_symlink', ['/ram/d/dangling'])).toBe(true)
   })
 })

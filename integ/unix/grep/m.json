@@ -36,6 +36,309 @@
       "flags": [
         "m"
       ]
+    },
+    {
+      "id": "grep_m_zero_selects_nothing",
+      "seq": 612010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/gm0.txt; grep -m 0 a /data/gm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m"
+      ]
+    },
+    {
+      "id": "grep_m_zero_selects_nothing_under_invert",
+      "seq": 612011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/gm0.txt; grep -m 0 -v zzz /data/gm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "v"
+      ]
+    },
+    {
+      "id": "grep_m_zero_names_no_file",
+      "seq": 612012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/gm0.txt; grep -m 0 -l a /data/gm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "l"
+      ]
+    },
+    {
+      "id": "grep_m_zero_prints_no_count",
+      "seq": 612013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/gm0.txt; grep -m 0 -c a /data/gm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "c"
+      ]
+    },
+    {
+      "id": "grep_m_zero_prints_no_per_file_counts",
+      "seq": 612014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/gm0.txt; printf 'zzz\\n' > /data/gm0z.txt; grep -m 0 -c a /data/gm0.txt /data/gm0z.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "c"
+      ]
+    },
+    {
+      "id": "grep_m_zero_prints_no_context",
+      "seq": 612015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nab\\nb\\n' > /data/gm0.txt; grep -m 0 -A1 a /data/gm0.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "A"
+      ]
+    },
+    {
+      "id": "grep_m_zero_recursive_prints_no_counts",
+      "seq": 612016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/gm0d && printf 'a\\nab\\n' > /data/gm0d/x.txt && grep -m 0 -rc a /data/gm0d",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "m",
+        "r",
+        "c"
+      ]
+    },
+    {
+      "id": "grep_a_genuine_zero_count_still_prints",
+      "seq": 612017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'zzz\\n' > /data/gm0z.txt; grep -c a /data/gm0z.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
     }
   ]
 }

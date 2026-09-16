@@ -1,0 +1,720 @@
+{
+  "cases": [
+    {
+      "id": "cut_f_trailing_garbage_quotes_remainder",
+      "seq": 601500,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f 2-3x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid field value 'x'\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_nonnumeric_quotes_whole_arg",
+      "seq": 601501,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid field value 'abc'\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_c_nonnumeric_position_wording",
+      "seq": 601502,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -c abc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid byte/character position 'abc'\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_f_zero_is_numbered_from_1",
+      "seq": 601503,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f 0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_decreasing_range",
+      "seq": 601504,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f 3-1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid decreasing range\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_empty_spec",
+      "seq": 601505,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f ''",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_list_member_trailing_garbage",
+      "seq": 601506,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f 1,2x",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid field value 'x'\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_trailing_space_is_numbered_from_1",
+      "seq": 601507,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f '2 '",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_triple_range",
+      "seq": 601508,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f '1-2-3'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid field range\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_open_ended_range_valid",
+      "seq": 601509,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f 2-",
+      "expect": {
+        "exit": 0,
+        "stdout": "b,c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_open_left_range_valid",
+      "seq": 601510,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f -2",
+      "expect": {
+        "exit": 0,
+        "stdout": "a,b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_c_open_ended_range_valid",
+      "seq": 601511,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -c 2-",
+      "expect": {
+        "exit": 0,
+        "stdout": ",b,c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_c_triple_range_says_byte_or_character",
+      "seq": 601512,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -c '1-2-3'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid byte or character range\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_b_triple_range_shares_the_char_wording",
+      "seq": 601513,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -b '1-2-3'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid byte or character range\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "b"
+      ]
+    },
+    {
+      "id": "cut_c_zero_is_numbered_from_1",
+      "seq": 601514,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -c 0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: byte/character positions are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_c_decreasing_range_shares_the_field_wording",
+      "seq": 601515,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc\\n' | cut -c '3-1'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: invalid decreasing range\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "cut_f_trailing_comma_is_numbered_from_1",
+      "seq": 601516,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f '1,'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_leading_comma_is_numbered_from_1",
+      "seq": 601517,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f ',1'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    },
+    {
+      "id": "cut_f_doubled_comma_is_numbered_from_1",
+      "seq": 601518,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a,b,c\\n' | cut -d, -f '1,,2'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
+    }
+  ]
+}

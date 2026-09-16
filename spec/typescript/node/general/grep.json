@@ -315,6 +315,11 @@
       "type": "bool"
     },
     {
+      "long": "--byte-offset",
+      "short": "-b",
+      "type": "bool"
+    },
+    {
       "short": "-c",
       "type": "bool"
     },

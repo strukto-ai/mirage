@@ -8,6 +8,7 @@ from mirage.commands.builtin.utils.formatting import human_size
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagView
 from mirage.context import (hidden_paths_intersect, path_allowed,
@@ -126,7 +127,8 @@ def parse_flags(*,
         depth = parse_depth(max_depth)
         if depth is None:
             raise UsageError(
-                f"du: invalid maximum depth '{max_depth}'\n{USAGE_HINT}", 1)
+                f"du: invalid maximum depth '{quote_text(max_depth)}'\n"
+                f"{USAGE_HINT}", 1)
     if s and a:
         raise UsageError(
             f"du: cannot both summarize and show all entries\n{USAGE_HINT}", 1)

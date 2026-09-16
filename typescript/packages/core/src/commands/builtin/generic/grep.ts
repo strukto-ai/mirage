@@ -110,6 +110,7 @@ export function parseFlags(fl: FlagView): FlagSet {
     ignoreCase: fl.asBool('i'),
     invert: fl.asBool('v'),
     lineNumbers: fl.asBool('n'),
+    byteOffsets: fl.asBool('byte_offset'),
     countOnly: fl.asBool('c'),
     filesOnly: fl.asBool('args_l'),
     wholeWord: fl.asBool('w'),

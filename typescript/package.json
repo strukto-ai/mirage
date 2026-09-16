@@ -6,7 +6,10 @@
   "scripts": {
     "build": "pnpm -r --filter './packages/*' build",
     "test": "pnpm -r --filter './packages/*' test",
-    "typecheck": "pnpm -r --filter './packages/*' typecheck",
+    "test:leg:core": "pnpm -r --fail-if-no-match --filter @struktoai/mirage-core run test",
+    "test:leg:cli": "pnpm -r --fail-if-no-match --filter @struktoai/mirage-cli run test",
+    "test:leg:rest": "pnpm -r --fail-if-no-match --filter @struktoai/mirage-node --filter @struktoai/mirage-agents --filter @struktoai/mirage-server --filter @struktoai/mirage-browser --filter @struktoai/mirage-dsh --filter @struktoai/mirage-opencode run test",
+    "typecheck": "pnpm -r --filter './packages/*' --filter './scripts' typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -16,6 +19,9 @@
     "mirage": "node packages/cli/dist/bin/mirage.js"
   },
   "pnpm": {
+    "requiredScripts": [
+      "test"
+    ],
     "overrides": {
       "shell-quote@<1.9.0": ">=1.9.0 <2",
       "esbuild@<0.28.1": ">=0.28.1",

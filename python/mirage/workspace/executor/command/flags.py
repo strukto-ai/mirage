@@ -21,7 +21,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import (  # yapf: disable
     ambiguous_option_error, invalid_argument_error, invalid_float_error,
     invalid_int_error, missing_required_error, missing_value_error,
-    old_option_error, unknown_option_error)
+    old_option_error, unexpected_value_error, unknown_option_error)
 from mirage.types import PathSpec
 from mirage.workspace.executor.command.types import ParsedCommand
 
@@ -241,6 +241,11 @@ def option_error(cmd_name: str,
         token, candidates = parsed.ambiguous_options[0]
         return ambiguous_option_error(cmd_name, token, candidates)
     if parsed.invalid_options:
+        # Two reports share invalid_options and the tag tells them apart:
+        # a boolean long handed a value is not an unrecognized option,
+        # and getopt_long words it differently (`grep --byte-offset=2`).
+        if parsed.option_error_kinds[:1] == ["unexpected_value"]:
+            return unexpected_value_error(cmd_name, parsed.invalid_options[0])
         return unknown_option_error(cmd_name, parsed.invalid_options[0])
     if parsed.ambiguous_options:
         token, candidates = parsed.ambiguous_options[0]

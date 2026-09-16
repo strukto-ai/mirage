@@ -63,9 +63,6 @@
   "runtime/python/monty": {
    "typescript_only": {
     "tree": "The guest's scratch filesystem for unmounted paths. Python needs no twin: its binding hands monty an OSAccess subclass whose base class (pydantic_monty.os_access) already carries this tree, while the JS binding is a bare callback with no tree behind it, so the TypeScript side implements the same semantics itself (message spellings pinned to the python binding's)."
-   },
-   "python_only": {
-    "stat": "Converts VFS metadata to the Python binding’s StatResult. The JavaScript binding cannot represent both stat attributes and tuple fields, so its adapter declines stat."
    }
   },
   "runtime/js/quickjs": {

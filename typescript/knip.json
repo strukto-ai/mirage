@@ -3,7 +3,10 @@
   "ignoreBinaries": ["diskutil", "fusermount", "smolvm", "sandlock"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts"]
+      "entry": []
+    },
+    "scripts": {
+      "entry": ["*.ts"]
     },
     "packages/node": {
       "ignoreDependencies": [

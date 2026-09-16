@@ -15,10 +15,11 @@
 import asyncio
 import datetime as dt
 import os
+from typing import Any
 
 from bson import Binary, Decimal128, Int64, ObjectId, Regex, Timestamp
 from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 DB_NAME = "mirage_test"
 
@@ -76,8 +77,8 @@ BSON_TYPE_DOCS = [
 ]
 
 
-def _heterogeneous_doc(i: int) -> dict:
-    doc: dict = {"_id": ObjectId(), "i": i, "title": f"item-{i}"}
+def _heterogeneous_doc(i: int) -> dict[str, Any]:
+    doc: dict[str, Any] = {"_id": ObjectId(), "i": i, "title": f"item-{i}"}
     if i % 3 == 0:
         doc["category"] = "alpha"
     if i % 5 == 0:
@@ -91,7 +92,7 @@ def _heterogeneous_doc(i: int) -> dict:
     return doc
 
 
-def _embedding_doc(i: int, dim: int) -> dict:
+def _embedding_doc(i: int, dim: int) -> dict[str, Any]:
     base = (i % 17) / 17.0
     vector = [round(base + (j % 13) / 1000.0, 6) for j in range(dim)]
     return {
@@ -102,7 +103,7 @@ def _embedding_doc(i: int, dim: int) -> dict:
     }
 
 
-def _text_doc(i: int) -> dict:
+def _text_doc(i: int) -> dict[str, Any]:
     topics = [
         "mongodb streaming", "vector database", "filesystem mount",
         "agent search", "BSON encoding"
@@ -120,7 +121,7 @@ def _text_doc(i: int) -> dict:
     }
 
 
-def _view_source_doc(i: int) -> dict:
+def _view_source_doc(i: int) -> dict[str, Any]:
     return {
         "_id": ObjectId(),
         "year": 2000 + (i % 25),
@@ -130,24 +131,26 @@ def _view_source_doc(i: int) -> dict:
     }
 
 
-async def seed_bson_types(db) -> int:
+async def seed_bson_types(db: AsyncIOMotorDatabase) -> int:
     await db.bson_types.insert_many(BSON_TYPE_DOCS)
     return len(BSON_TYPE_DOCS)
 
 
-async def seed_heterogeneous(db, n: int = 500) -> int:
+async def seed_heterogeneous(db: AsyncIOMotorDatabase, n: int = 500) -> int:
     docs = [_heterogeneous_doc(i) for i in range(n)]
     await db.heterogeneous.insert_many(docs)
     return len(docs)
 
 
-async def seed_embeddings(db, n: int = 100, dim: int = 1024) -> int:
+async def seed_embeddings(db: AsyncIOMotorDatabase,
+                          n: int = 100,
+                          dim: int = 1024) -> int:
     docs = [_embedding_doc(i, dim) for i in range(n)]
     await db.embeddings.insert_many(docs)
     return len(docs)
 
 
-async def seed_with_validator(db) -> int:
+async def seed_with_validator(db: AsyncIOMotorDatabase) -> int:
     await db.create_collection(
         "with_validator",
         validator={
@@ -176,7 +179,7 @@ async def seed_with_validator(db) -> int:
     return len(docs)
 
 
-async def seed_text_indexed(db, n: int = 200) -> int:
+async def seed_text_indexed(db: AsyncIOMotorDatabase, n: int = 200) -> int:
     docs = [_text_doc(i) for i in range(n)]
     await db.text_indexed.insert_many(docs)
     await db.text_indexed.create_index([("title", "text"), ("body", "text")],
@@ -184,7 +187,8 @@ async def seed_text_indexed(db, n: int = 200) -> int:
     return len(docs)
 
 
-async def seed_view_source_and_view(db, n: int = 100) -> int:
+async def seed_view_source_and_view(db: AsyncIOMotorDatabase,
+                                    n: int = 100) -> int:
     docs = [_view_source_doc(i) for i in range(n)]
     await db.view_source.insert_many(docs)
     await db.command({
@@ -213,7 +217,7 @@ async def seed_view_source_and_view(db, n: int = 100) -> int:
     return len(docs)
 
 
-async def seed_streaming_large(db, n: int = 5000) -> int:
+async def seed_streaming_large(db: AsyncIOMotorDatabase, n: int = 5000) -> int:
     batch_size = 1000
     total = 0
     for start in range(0, n, batch_size):

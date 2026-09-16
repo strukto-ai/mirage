@@ -157,6 +157,18 @@ describe('date -d expressions', () => {
     expect(stderr).toBe("date: invalid date 'not a date'\n")
     expect(code).toBe(1)
   })
+
+  // GNU ACCEPTS an empty (or blank) `-d`, exit 0, at today 00:00:00:
+  // gnulib's parse-datetime sees no component at all and falls through to
+  // "a date with no time". Measured on coreutils 9.4 under
+  // `LC_ALL=C TZ=UTC`. mirage used to answer `date: invalid date ''` and
+  // exit 1. Mirrors test_date.py.
+  it.each(['', '   '])('reads %j as today at midnight', async (d) => {
+    const [out, stderr, code] = await runDateIo(['+%H:%M:%S'], { d, u: true })
+    expect([out, stderr, code]).toEqual(['00:00:00\n', '', 0])
+    const day = await runDate(['+%Y-%m-%d'], { d, u: true })
+    expect(day).toBe(await runDate(['+%Y-%m-%d'], { u: true }))
+  })
 })
 
 async function runDateEnv(
@@ -339,4 +351,36 @@ it('renders the implicit host zone in explicit and default formats', async () =>
       expect(implicit[0].trim()).not.toBe('')
     }
   }
+})
+
+// `date -d` names the refused expression through gnulib's quote(), so a
+// byte outside 0x20-0x7e comes back escaped rather than interpolated raw.
+// Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw
+// `bytes` argv (`date -d x<B>`). Mirrors test_date.py.
+async function runDateStderr(d: string): Promise<[string, number]> {
+  const resource = new RAMResource()
+  const cmd = GENERAL_DATE[0]
+  if (cmd === undefined) throw new Error('date not registered')
+  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+    stdin: null,
+    flags: { d },
+    filetypeFns: null,
+    cwd: '/',
+  })
+  if (result === null) throw new Error('date returned no result')
+  const [, io] = result
+  return [DEC.decode(io.stderr as Uint8Array), io.exitCode]
+}
+
+describe('date quotes the expression it refuses', () => {
+  it.each([
+    ['xé', 'x\\303\\251'],
+    ['x\r', 'x\\r'],
+    ['x\x01', 'x\\001'],
+    ['x\x7f', 'x\\177'],
+    ["x'", "x\\'"],
+    ['x\\', 'x\\\\'],
+  ])('escapes %j in the invalid-date clause', async (value, escaped) => {
+    expect(await runDateStderr(value)).toEqual([`date: invalid date '${escaped}'\n`, 1])
+  })
 })

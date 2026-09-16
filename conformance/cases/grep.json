@@ -2374,6 +2374,1109 @@
         "stdout_text": "",
         "stderr_text": ""
       }
+    },
+    {
+      "id": "grep_o_empty_match_prints_nothing",
+      "cmd": "grep -o '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_o_empty_pattern_prints_nothing",
+      "cmd": "grep -o ''",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_o_start_anchor_prints_nothing",
+      "cmd": "grep -o '^'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_o_end_anchor_prints_nothing",
+      "cmd": "grep -o '$'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_o_empty_matches_dropped_around_a_real_one",
+      "cmd": "grep -o '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a1b\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_o_every_match_on_the_line",
+      "cmd": "grep -o '[0-9]'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a1b2c\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_oc_still_counts_the_selected_line",
+      "cmd": "grep -oc '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_c_counts_a_line_matched_only_emptily",
+      "cmd": "grep -c '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_o_empty_match_on_every_line_prints_nothing",
+      "cmd": "grep -o '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a\nb\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_without_o_prints_the_whole_line",
+      "cmd": "grep '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "ab\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_o_star_keeps_only_the_nonempty_match",
+      "cmd": "grep -o 'b*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "abc\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_o_nonempty_runs_kept_in_order",
+      "cmd": "grep -o '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "1a22b\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n22\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_on_line_prefix_on_the_single_entry",
+      "cmd": "grep -on '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a1b\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ob_byte_offset_on_the_single_entry",
+      "cmd": "grep -ob '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a1b\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_offset_is_the_line_start",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -b abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:abc\n4:defabc\n11:abc abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_byte_offset_long_flag_is_the_same",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep --byte-offset abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:abc\n4:defabc\n11:abc abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ob_offset_is_the_match",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -ob abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:abc\n7:abc\n11:abc\n15:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bo_flag_order_is_irrelevant",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -bo abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:abc\n7:abc\n11:abc\n15:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bn_field_order_is_line_then_byte",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -bn abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:0:abc\n2:4:defabc\n3:11:abc abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_nb_field_order_does_not_follow_the_flags",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -nb abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:0:abc\n2:4:defabc\n3:11:abc abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bnh_upper_orders_filename_line_then_byte",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -bnH -o abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/qb.txt:1:0:abc\n/data/qb.txt:2:7:abc\n/data/qb.txt:3:11:abc\n/data/qb.txt:3:15:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bc_count_carries_no_offset",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -bc abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bl_file_list_carries_no_offset",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -bl abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/qb.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bq_prints_nothing",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -bq abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bv_prints_the_unselected_line_starts",
+      "cmd": "printf 'one\\ntwo abc\\nthree\\nfour abc\\nfive\\n' > /data/qb3.txt; grep -bv abc /data/qb3.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:one\n12:three\n27:five\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bv_selects_nothing_when_every_line_matches",
+      "cmd": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/qb.txt; grep -bv abc /data/qb.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_after_context_line_takes_the_dash",
+      "cmd": "printf 'one\\ntwo abc\\nthree\\nfour abc\\nfive\\n' > /data/qb3.txt; grep -b -A1 abc /data/qb3.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4:two abc\n12-three\n18:four abc\n27-five\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bn_context_uses_dashes_for_every_field",
+      "cmd": "printf 'one\\ntwo abc\\nthree\\nfour abc\\nfive\\n' > /data/qb3.txt; grep -bn -C1 abc /data/qb3.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1-0-one\n2:4:two abc\n3-12-three\n4:18:four abc\n5-27-five\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bn_context_group_separator_has_no_fields",
+      "cmd": "printf 'a\\nb\\nHIT\\nc\\nd\\ne\\nf\\nHIT\\ng\\n' > /data/qb4.txt; grep -bn -C1 HIT /data/qb4.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2-2-b\n3:4:HIT\n4-8-c\n--\n7-14-f\n8:16:HIT\n9-20-g\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bo_suppresses_context_entirely",
+      "cmd": "printf 'one\\ntwo abc\\nthree\\nfour abc\\nfive\\n' > /data/qb3.txt; grep -bo -C1 abc /data/qb3.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "8:abc\n23:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ob_counts_bytes_not_characters",
+      "cmd": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/qb5.txt; grep -ob abc /data/qb5.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "6:abc\n15:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_counts_bytes_not_characters_without_o",
+      "cmd": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/qb5.txt; grep -b abc /data/qb5.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:caf\u00e9 abc\n10:x\u00e9y abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_missing_final_newline_is_not_double_counted",
+      "cmd": "printf 'no-newline-abc' > /data/qb6.txt; grep -b abc /data/qb6.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:no-newline-abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ob_missing_final_newline_is_not_double_counted",
+      "cmd": "printf 'no-newline-abc' > /data/qb6.txt; grep -ob abc /data/qb6.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "11:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ob_empty_match_prints_nothing",
+      "cmd": "grep -ob '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ob_empty_pattern_prints_nothing",
+      "cmd": "grep -ob ''",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ob_empty_matches_dropped_around_a_real_one",
+      "cmd": "grep -ob '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a1b\nc2d\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:1\n5:2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_without_o_prints_whole_lines",
+      "cmd": "grep -b '[0-9]*'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "ab\ncd\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:ab\n3:cd\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_posix_class_is_expanded",
+      "cmd": "grep '[[:alpha:]]'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "abc\n123\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_word_escape_is_ascii",
+      "cmd": "grep '\\w\\+'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "abc\n---\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_space_escape_matches_blank",
+      "cmd": "grep '\\s'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "a b\nab\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_word_start_escape_anchors_a_word",
+      "cmd": "grep '\\<alpha'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "alpha\nxalpha\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "alpha\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_interval_with_no_low_bound_is_zero",
+      "cmd": "grep 'a\\{,3\\}b'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "b\nc\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "b\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_plus_with_nothing_to_repeat_is_literal",
+      "cmd": "grep '\\+'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "+\nx\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "+\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_interval_with_nothing_to_repeat_is_literal",
+      "cmd": "grep '\\{1\\}'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "{1}\nx\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "{1}\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_collating_element_is_a_legal_range_end",
+      "cmd": "grep '[[.a.]-z]'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "m\n1\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "m\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bre_unmatched_open_group_is_fatal",
+      "cmd": "grep '\\('",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Unmatched ( or \\(\n"
+      }
+    },
+    {
+      "id": "grep_bre_bad_interval_body_is_fatal",
+      "cmd": "grep 'a\\{x\\}'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Invalid content of \\{\\}\n"
+      }
+    },
+    {
+      "id": "grep_bre_inverted_range_is_fatal",
+      "cmd": "grep '[z-a]'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Invalid range end\n"
+      }
+    },
+    {
+      "id": "grep_bre_second_range_end_is_fatal",
+      "cmd": "grep '[a-c-e]'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Invalid range end\n"
+      }
+    },
+    {
+      "id": "grep_bre_unknown_character_class_is_fatal",
+      "cmd": "grep '[[:bogus:]]'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Invalid character class name\n"
+      }
+    },
+    {
+      "id": "grep_bre_backreference_without_a_group_is_fatal",
+      "cmd": "grep '\\1'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Invalid back reference\n"
+      }
+    },
+    {
+      "id": "grep_bre_bare_open_bracket_is_fatal",
+      "cmd": "grep '['",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Invalid regular expression\n"
+      }
+    },
+    {
+      "id": "grep_bre_unterminated_bracket_is_fatal",
+      "cmd": "grep '[a'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Unmatched [, [^, [:, [., or [=\n"
+      }
+    },
+    {
+      "id": "grep_bre_interval_past_dup_max_is_fatal",
+      "cmd": "grep 'a\\{32768\\}'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Regular expression too big\n"
+      }
+    },
+    {
+      "id": "grep_bre_trailing_backslash_is_fatal",
+      "cmd": "grep '\\'",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "x\n",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "grep: Trailing backslash\n"
+      }
+    },
+    {
+      "id": "grep_b_counts_bytes_not_characters",
+      "cmd": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/cb5.txt; grep -b abc /data/cb5.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "0:caf\u00e9 abc\n10:x\u00e9y abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bo_counts_bytes_not_characters",
+      "cmd": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/cb5.txt; grep -bo abc /data/cb5.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "6:abc\n15:abc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_counts_an_invalid_byte_as_one",
+      "cmd": "printf '\\377\\na\\n' > /data/cbinv.bin; grep -b a /data/cbinv.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2:a\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_bo_counts_an_invalid_byte_as_one",
+      "cmd": "printf '\\377a\\n' > /data/cbinv2.bin; grep -bo a /data/cbinv2.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1:a\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_line_ends_only_at_a_newline",
+      "cmd": "printf 'a\\r\\nb\\r\\n' > /data/cbcrlf.txt; grep -b b /data/cbcrlf.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3:b\r\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_m_zero_selects_nothing",
+      "cmd": "grep -m 0 hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_m_zero_names_no_file",
+      "cmd": "grep -m 0 -l hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_m_zero_selects_nothing_under_invert",
+      "cmd": "grep -m 0 -v zqxjv /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_m_zero_prints_no_context",
+      "cmd": "grep -m 0 -A1 hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ov_prints_nothing",
+      "cmd": "grep -ov hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ovc_still_counts_the_selected_lines",
+      "cmd": "grep -ovc hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ovl_still_names_the_file",
+      "cmd": "grep -ovl hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "/data/a.txt\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ov_on_stdin_prints_nothing",
+      "cmd": "grep -ov abc",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "stdin_text": "abc\ndef\n",
+      "expect": {
+        "exit": 0,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_w_word_boundary_is_ascii",
+      "cmd": "printf '\\303\\251ab\\n' > /data/cw1.txt; grep -w ab /data/cw1.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "\u00e9ab\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_w_word_boundary_is_ascii_after_the_word",
+      "cmd": "printf 'a\\303\\251\\n' > /data/cw2.txt; grep -w a /data/cw2.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\u00e9\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_i_case_folding_is_ascii_kelvin",
+      "cmd": "printf '\\342\\204\\252\\n' > /data/ci1.txt; grep -i k /data/ci1.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_i_case_folding_is_ascii_long_s",
+      "cmd": "printf '\\305\\277\\n' > /data/ci2.txt; grep -i s /data/ci2.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_m_zero_prints_no_count",
+      "cmd": "grep -m 0 -c hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_m_zero_prints_no_per_file_counts",
+      "cmd": "grep -m 0 -c hello /data/a.txt /data/b.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_m_zero_prints_no_context_count",
+      "cmd": "grep -m 0 -B1 -c hello /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_m_zero_recursive_prints_no_counts",
+      "cmd": "grep -m 0 -rc nested /data/sub",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_a_genuine_zero_count_still_prints",
+      "cmd": "grep -c zqxjv /data/a.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_after_context_counts_an_invalid_byte_as_one",
+      "cmd": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/ccx.bin; grep -b -A1 abc /data/ccx.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "6:two abc\n14-three\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_ab_before_context_prints_the_raw_byte",
+      "cmd": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/ccx.bin; grep -a -b -B1 abc /data/ccx.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "NC3/CjY6dHdvIGFiYwo=",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_abn_context_gets_every_field_right",
+      "cmd": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/ccx.bin; grep -a -bn -A1 -B1 abc /data/ccx.bin",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "Mi00Lf8KMzo2OnR3byBhYmMKNC0xNC10aHJlZQo=",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "grep_b_context_separator_carries_no_fields",
+      "cmd": "printf 'one\\ntwo abc\\nthree\\nfour\\nfive abc\\nsix\\n' > /data/ccx.txt; grep -b -A1 abc /data/ccx.txt",
+      "matrix": {
+        "python": ["ram", "disk", "redis"],
+        "typescript": ["ram", "disk", "redis"]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4:two abc\n12-three\n--\n23:five abc\n32-six\n",
+        "stderr_text": ""
+      }
     }
   ]
 }

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { UsageError } from '../errors.ts'
+import { quoteText } from '../quote.ts'
 import { gnuStrerror } from '../../utils/errors.ts'
 import {
   OLD_OPTION_EXIT,
@@ -174,6 +175,45 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
   return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
 }
 
+// The programs that do NOT parse with getopt_long, and so answer an option
+// they will not take by naming the whole typed token as unknown rather than by
+// naming the option. Each one is measured: `curl --silent=2` is
+// `curl: option --silent=2: is unknown`, `python3 --version=2` is
+// `unknown option --version=2`, `jq --tab=2` is `jq: Unknown option --tab=2`,
+// and find reads the word as a predicate. Every other command here is a GNU
+// tool whose getopt_long words the refusal the other way, so the set is the
+// exception list and not the rule.
+const NOT_GETOPT_LONG = new Set<string>(['curl', 'jq', CommandName.FIND, ...PYTHON_NAMES])
+
+/**
+ * getopt_long refusal for a BOOLEAN long option handed a value.
+ *
+ * `grep --byte-offset=2` is not an unrecognized option -- getopt_long
+ * recognized it perfectly well and refused the `=2`, so the message names the
+ * option and drops the value, where the unrecognized-option message quotes the
+ * whole token including it. It also names the CANONICAL spelling, not the one
+ * that was typed: `grep --byte=2` answers for `--byte-offset`. Shape pinned
+ * against GNU grep 3.11 and coreutils 9.4 (`grep --byte-offset=2`,
+ * `grep --line-buffered=2`, `nl --help=2`, `cut --complement=2`,
+ * `sed --debug=2`), all exit 2 for grep and sort and 1 for the coreutils.
+ *
+ * GNU's per-tool usage dump is deliberately omitted, exactly as
+ * unknownOptionError omits it; grep and sed print theirs between the message
+ * and the hint, coreutils print none at all.
+ *
+ * `token` is the option's canonical long spelling and the value that was typed
+ * on it ('--byte-offset=2'). It is carried whole because the programs in
+ * NOT_GETOPT_LONG quote the value along with the option and getopt_long drops
+ * it.
+ */
+export function unexpectedValueError(cmdName: string, token: string): [Uint8Array, number] {
+  if (NOT_GETOPT_LONG.has(cmdName)) return unknownOptionError(cmdName, token)
+  const option = token.split('=', 1)[0] ?? token
+  const line = `${cmdName}: option '${option}' doesn't allow an argument\n`
+  const hint = `Try '${cmdName} --help' for more information.\n`
+  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+}
+
 /**
  * getopt_long refusal for an abbreviated long matching several options.
  *
@@ -267,24 +307,95 @@ export function oldOptionError(cmdName: string, letter: string): [Uint8Array, nu
   return [new TextEncoder().encode(line + hint), OLD_OPTION_EXIT]
 }
 
+// One ARGMATCH candidate: a bare name, or a group of spellings that
+// gnulib's argmatch maps to the SAME value. The group is not cosmetic --
+// `argmatch_valid` starts a new `  - ` line only when the value changes and
+// joins the aliases of one value with `, `, which is why GNU answers
+// `sort --check=x` with `  - 'quiet', 'silent'` on one line and
+// `  - 'diagnose-first'` on the next.
+//
+// `ArgmatchChoices` in usage.py is the twin.
+type ArgmatchChoices = readonly (string | readonly string[])[]
+
+/**
+ * The first line of a gnulib ARGMATCH refusal, without its newline.
+ *
+ * Two wordings, and the empty word picks the second: gnulib's `argmatch`
+ * matches on a prefix, so `''` is a prefix of every candidate and comes
+ * back ambiguous rather than invalid. Measured on coreutils 9.4 at every
+ * argmatch slot in the repo (`tail --follow=`, `sort --check=`,
+ * `wc --total=`, `uniq --all-repeated=`, `uniq --group=`, `ls --format=`,
+ * `ls -l --time-style=`, `cp --update=`, `tee --output-error=`), all of
+ * which answer `ambiguous argument ''`. `du --max-depth=` is NOT argmatch
+ * and says `invalid maximum depth ''`, which is why that one is worded in
+ * du.
+ *
+ * The word is rendered through `quoteText`, gnulib's own `quote()`:
+ * `tee --output-error=xé` is `invalid argument 'x\303\251'`. Callers must
+ * therefore pass the value as typed and never pre-escape it.
+ *
+ * `argmatch_line` in usage.py is the twin.
+ */
+export function argmatchLine(cmdName: string, option: string, value: string): string {
+  const kind = value === '' ? 'ambiguous' : 'invalid'
+  return `${cmdName}: ${kind} argument '${quoteText(value)}' for '${option}'`
+}
+
+/** gnulib's `Valid arguments are:` block, without a trailing newline. */
+export function argmatchValidBlock(choices: ArgmatchChoices): string {
+  const rows = choices.map((choice) => {
+    const group = typeof choice === 'string' ? [choice] : choice
+    return '  - ' + group.map((c) => `'${c}'`).join(', ')
+  })
+  return 'Valid arguments are:\n' + rows.join('\n')
+}
+
 /**
  * GNU ARGMATCH refusal for a value outside a declared choices set.
  *
  * Shape pinned against real GNU (`tee --output-error=bogus`): the
  * offending value, the option's canonical long spelling, then every valid
- * argument in declaration order, one per line.
+ * argument in declaration order, aliases of one value on one line, then
+ * the `Try '--help'` hint.
+ *
+ * `exitCode` undefined takes the command's own usage code, which is 1 for
+ * every command that reaches this renderer through the executor. ls and
+ * sort pass 1 explicitly: gnulib's `argmatch_die` always calls
+ * `usage (EXIT_FAILURE)`, so their argmatch refusals are 1 even though
+ * their other usage errors are 2.
  */
 export function invalidArgumentError(
   cmdName: string,
   option: string,
   value: string,
-  choices: readonly string[],
+  choices: ArgmatchChoices,
+  exitCode?: number,
 ): [Uint8Array, number] {
-  const valid = choices.map((c) => `  - '${c}'`).join('\n')
-  const line =
-    `${cmdName}: invalid argument '${value}' for '${option}'\n` + `Valid arguments are:\n${valid}\n`
+  const line = `${argmatchLine(cmdName, option, value)}\n${argmatchValidBlock(choices)}\n`
   const hint = `Try '${cmdName} --help' for more information.\n`
-  return [new TextEncoder().encode(line + hint), usageExitCode(cmdName)]
+  const code = exitCode ?? usageExitCode(cmdName)
+  return [new TextEncoder().encode(line + hint), code]
+}
+
+/**
+ * `invalidArgumentError` as the error a command throws.
+ *
+ * The commands that validate an ARGMATCH value themselves (`sort`, `wc`,
+ * `uniq`, `ls`, `cp`, `tail`) hold the value long after the parser is done
+ * with it, so they render through the same function the executor does
+ * rather than wording a second copy.
+ *
+ * `argmatch_error` in usage.py is the twin.
+ */
+export function argmatchError(
+  cmdName: string,
+  option: string,
+  value: string,
+  choices: ArgmatchChoices,
+  exitCode?: number,
+): UsageError {
+  const [message, code] = invalidArgumentError(cmdName, option, value, choices, exitCode)
+  return new UsageError(new TextDecoder().decode(message).replace(/\n+$/, ''), code)
 }
 
 /**

@@ -669,3 +669,23 @@ describe('toVirtual', () => {
     expect(toVirtual([['/dir/a.txt', 1]], spec('/dir', 'dir'))).toEqual([['/dir/a.txt', 1]])
   })
 })
+
+// GNU names the refused depth through gnulib's quote(), so a byte outside
+// 0x20-0x7e comes back escaped rather than interpolated raw. Every row
+// measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw `bytes`
+// argv (`du --max-depth=<w>`). Mirrors test_du.py.
+describe('du quotes the depth it names', () => {
+  it.each([
+    ['1é', '1\\303\\251'],
+    ['1\r', '1\\r'],
+    ['1\x01', '1\\001'],
+    ['1\x7f', '1\\177'],
+    ["1'", "1\\'"],
+    ['1\\', '1\\\\'],
+    ['', ''],
+  ])('escapes %j in the invalid-maximum-depth clause', (value, escaped) => {
+    expect(() => parseFlags(opts({ max_depth: value }))).toThrow(
+      `du: invalid maximum depth '${escaped}'`,
+    )
+  })
+})

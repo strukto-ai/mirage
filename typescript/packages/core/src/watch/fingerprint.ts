@@ -15,21 +15,34 @@
 /**
  * Mirage's default content fingerprint from listing metadata.
  *
- * Composite of all three inputs, so a change in any one of them moves the
- * fingerprint. The backend's native version (ETag/rev, the same value
- * backends put in `FileStat.fingerprint`) is not a sufficient validator on
- * its own: a backend can report current content under an unchanged ETag.
- * Measured on Nextcloud, twice and with no local memcache configured -- a
- * file overwritten from 4 bytes to 11 was listed with size=11 and an ETag
- * byte-identical to the one before the write, and the listing matched a
- * direct backend stat exactly, so it was not stale. Returning the ETag alone
- * therefore lost the update outright; folding `modified` and `size` in
- * alongside it means a lazy validator costs nothing rather than hiding a
- * write.
+ * The size always, joined to the backend's native version (ETag/rev, the
+ * same value backends put in `FileStat.fingerprint`) when the listing
+ * carries one and to the last-modified stamp when it does not.
  *
- * Note that the checkpoint format changes with this composite, so the first
- * pull against a persisted checkpoint written by an earlier version reports
- * every file as an UPDATE once.
+ * The size rides along with the ETag because a native version is not a
+ * sufficient validator on its own: a backend can report current content
+ * under an unchanged ETag. Measured on Nextcloud 30 from two directions --
+ * with and without a local memcache configured -- a file overwritten from 4
+ * bytes to 11 was listed with size=11 and an ETag byte-identical to the one
+ * before the write, matching a direct backend stat exactly, so the listing
+ * was not stale. Its ETag is derived from an mtime with one-second
+ * granularity: unchanged in 6 of 6 rewrites 0s apart, 4 of 6 at 0.3s, 0 of 6
+ * at 1.1s. Returning the ETag alone threw away the size that had changed,
+ * and the update was lost outright -- intermittently, since whether two
+ * writes land in one second is a matter of how fast the machine is.
+ *
+ * The stamp stays OUT of the ETag branch, and that is not an oversight. A
+ * content-addressed version (S3's single-part ETag, Dropbox's content_hash)
+ * is deliberately unchanged when a file is rewritten with identical bytes,
+ * while the stamp moves: folding it in would report that idempotent rewrite
+ * as an UPDATE. It also buys nothing for the case above, because a stamp
+ * coarse enough to give two writes one ETag is coarse enough to give them
+ * one stamp -- both sides of the probe read the same second. So the stamp
+ * serves only as the substitute version for a listing that has none.
+ *
+ * Note that the checkpoint format changes with the size, so the first pull
+ * against a persisted checkpoint written by an earlier version reports every
+ * file on an etag-bearing backend as an UPDATE once.
  *
  * Distinct from `cache/file/utils`'s `defaultFingerprintAsync`, which hashes
  * the content bytes themselves. `None` stands in for an absent size so the
@@ -40,5 +53,7 @@ export function statFingerprint(
   modified: string | null,
   size: number | null,
 ): string {
-  return `${etag ?? ''}|${modified ?? ''}|${size === null ? 'None' : String(size)}`
+  const bytes = size === null ? 'None' : String(size)
+  if (etag !== null && etag !== '') return `${etag}|${bytes}`
+  return `${modified ?? ''}|${bytes}`
 }

@@ -27,14 +27,14 @@ export interface TeeFlags {
   stopOnError: boolean
 }
 
-export function parseFlags(flags: Record<string, FlagValue>): TeeFlags {
+export function parseFlags(bag: Record<string, FlagValue>): TeeFlags {
   // --output-error values are validated declaratively: the spec's
   // choices= makes the parser report any other value and the executor
   // refuse with GNU's ARGMATCH shape before tee runs. Only the exit/warn
   // axis is observable here: the -nopipe half distinguishes a pipe sink
   // from a file sink, and every operand tee writes is a file. A bare
   // --output-error means warn (GNU 9.7).
-  const fl = new FlagView(flags, specOf('tee'))
+  const fl = new FlagView(bag, specOf('tee'))
   const mode = fl.asStr('output_error')
   return {
     append: fl.asBool('append'),

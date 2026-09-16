@@ -15,8 +15,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   normalizeCounts,
+  numberFlagError,
   parseByteCount,
   parseCounts,
+  parseSeconds,
   tailBytes,
   type TailCounts,
 } from './tail_counts.ts'
@@ -117,5 +119,100 @@ describe('tailBytes', () => {
 
   it('lets -c win over -n, as GNU does', () => {
     expect(run('abcdefghij', '2', '3')).toBe('hij')
+  })
+})
+
+// Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw
+// `bytes` argv (`head -c <w>`, `tail -n <w>`): both clauses name the word
+// through gnulib's quote(), so the value is escaped rather than
+// interpolated raw. Mirrors test_tail_counts.py.
+const QUOTED_COUNTS: [string, string][] = [
+  ['1é', '1\\303\\251'],
+  ['1\r', '1\\r'],
+  ['1\x01', '1\\001'],
+  ['1\x7f', '1\\177'],
+  ["1'", "1\\'"],
+  ['1\\', '1\\\\'],
+  ['', ''],
+  // python's \d also matches Arabic-Indic digits; GNU's C-locale parser
+  // rejects them and names the word one octal escape per byte.
+  ['١٢', '\\331\\241\\331\\242'],
+]
+
+describe('the count clauses quote the word they name', () => {
+  it.each(QUOTED_COUNTS)('escapes %j in the line-count clause', (value, escaped) => {
+    expect(numberFlagError('tail', value, null)).toBe(
+      `tail: invalid number of lines: '${escaped}'\n`,
+    )
+  })
+
+  it.each(QUOTED_COUNTS)('escapes %j in the byte-count clause', (value, escaped) => {
+    expect(numberFlagError('head', null, value)).toBe(
+      `head: invalid number of bytes: '${escaped}'\n`,
+    )
+  })
+})
+
+// `parseSeconds` is C `strtod` as `xstrtod` reads it. Every row below is a
+// measured GNU coreutils 9.4 answer for `tail -s <v> f` under `LC_ALL=C`
+// with a raw `bytes` argv: a number means the grammar took the value,
+// null means it refused. Mirrors test_tail_counts.py.
+describe('parseSeconds', () => {
+  it.each([
+    [' 1', 1],
+    ['\r1', 1],
+    ['\t1', 1],
+    ['+1', 1],
+    ['-1', -1],
+    ['.5', 0.5],
+    ['1.', 1],
+    ['1e2', 100],
+    ['+.5e1', 5],
+    ['00', 0],
+    ['5', 5],
+    ['0x10', 16],
+    ['0x1p4', 16],
+    ['0x.8p1', 1],
+    ['0x10.8', 16.5],
+  ])('reads %j as %d', (value, expected) => {
+    expect(parseSeconds(value)).toBe(expected)
+  })
+
+  // GNU ACCEPTS `tail -s inf`: `0 <= inf` holds. `Number()` reads
+  // `Infinity` but not strtod's `inf`/`infinity`, which is why this needs
+  // its own branch.
+  it.each(['inf', 'infinity', 'INF'])('reads %j as Infinity', (value) => {
+    expect(parseSeconds(value)).toBe(Infinity)
+  })
+
+  it('reads -inf as -Infinity, leaving the range to the caller', () => {
+    expect(parseSeconds('-inf')).toBe(-Infinity)
+  })
+
+  // glibc's strtod reads `nan` and `nan(chars)`; GNU then refuses it
+  // because `0 <= nan` is false, which is the caller's half of the test.
+  it.each(['nan', 'NAN', 'nan(x)', '-nan'])('reads %j as NaN', (value) => {
+    expect(Number.isNaN(parseSeconds(value))).toBe(true)
+  })
+
+  // `xstrtod` demands the WHOLE string; trailing whitespace is not
+  // strtod's, which is why `Number()` and `float()` were both too lenient.
+  it.each([
+    '1\r',
+    '1 ',
+    '1\t',
+    '',
+    '1_0',
+    '1x',
+    '0x',
+    '1e',
+    '1e+',
+    '1,5',
+    '.',
+    '1.5.5',
+    '0xp1',
+    'inf inity',
+  ])('refuses %j for the leftover', (value) => {
+    expect(parseSeconds(value)).toBeNull()
   })
 })

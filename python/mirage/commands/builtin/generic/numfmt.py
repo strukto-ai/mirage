@@ -4,6 +4,7 @@ from decimal import ROUND_HALF_EVEN, ROUND_UP, Context, Decimal
 from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.errors import UsageError
+from mirage.commands.quote import quote_text
 from mirage.io.types import ByteSource, IOResult
 
 _SUFFIX_ORDER = ("", "K", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q")
@@ -52,9 +53,31 @@ def _suffix_error(value: str, junk: str) -> UsageError:
         junk (str): the unusable tail, or "" for the whole-field shape.
     """
     if not junk:
-        return UsageError(f"numfmt: invalid suffix in input: '{value}'", 2)
-    return UsageError(f"numfmt: invalid suffix in input '{value}': '{junk}'",
-                      2)
+        return UsageError(
+            f"numfmt: invalid suffix in input: '{quote_text(value)}'", 2)
+    return UsageError(
+        f"numfmt: invalid suffix in input '{quote_text(value)}': "
+        f"'{quote_text(junk)}'", 2)
+
+
+def _missing_i_error(value: str) -> UsageError:
+    """GNU's ``--from=iec-i`` complaint that the ``i`` is absent, exit 2.
+
+    The ``i`` test sits OUTSIDE the suffix branch in GNU's
+    ``simple_strtod_human``, so it answers for every field whose unit
+    letter is not followed by an ``i`` -- a field with no unit at all
+    included. Measured on coreutils 9.4: ``1``, ``1.5``, ``1K``, ``1Kx``,
+    ``1KB`` and ``1KII`` all get this clause, while ``1Kii`` and ``1KiB``
+    consume the ``i`` and report their leftover as an invalid suffix
+    instead, and ``1i`` never reaches it because ``i`` is not a unit
+    letter.
+
+    Args:
+        value (str): the whole input field, as typed.
+    """
+    return UsageError(
+        f"numfmt: missing 'i' suffix in input: '{quote_text(value)}' "
+        "(e.g Ki/Mi/Gi)", 2)
 
 
 def _scale_of(value: str, suffix: str, from_mode: str) -> tuple[int, int]:
@@ -64,7 +87,9 @@ def _scale_of(value: str, suffix: str, from_mode: str) -> tuple[int, int]:
     letter, iec-i requires the trailing 'i', and auto takes either and lets
     the 'i' pick base 1024. Nothing may follow (pinned against coreutils
     9.7), which is why `1KiB` is refused everywhere -- it used to be read
-    as a kilobyte in both languages.
+    as a kilobyte in both languages. Under iec-i a tail that does not
+    START with the 'i' is the missing-'i' clause rather than an invalid
+    suffix: `1Ké` and `1Kx` both name the whole field (coreutils 9.4).
 
     Args:
         value (str): the whole input field, for the error messages.
@@ -76,12 +101,8 @@ def _scale_of(value: str, suffix: str, from_mode: str) -> tuple[int, int]:
         raise _suffix_error(value, "")
     tail = suffix[1:]
     if from_mode == "iec-i":
-        if not tail:
-            raise UsageError(
-                f"numfmt: missing 'i' suffix in input: '{value}' "
-                "(e.g Ki/Mi/Gi)", 2)
-        if tail[0] != "i":
-            raise _suffix_error(value, tail)
+        if tail[:1] != "i":
+            raise _missing_i_error(value)
         if tail[1:]:
             raise _suffix_error(value, tail[1:])
         return 1024, exponent
@@ -117,17 +138,19 @@ def _parse_number(value: str, from_mode: str) -> tuple[Decimal, int]:
     match = _NUMBER_RE.fullmatch(value)
     if match is None or (match.group(2).startswith(".")
                          and "." not in match.group(1)):
-        raise UsageError(f"numfmt: invalid number: '{value}'", 2)
+        raise UsageError(f"numfmt: invalid number: '{quote_text(value)}'", 2)
     digits, suffix = match.group(1), match.group(2)
     number = Decimal(digits)
     _, _, fraction = digits.partition(".")
     if not suffix:
+        if from_mode == "iec-i":
+            raise _missing_i_error(value)
         return number, len(fraction)
     if suffix[0] not in _UNIT_EXPONENTS:
         raise _suffix_error(value, "")
     if from_mode == "none":
         raise UsageError(
-            f"numfmt: rejecting suffix in input: '{value}' "
+            f"numfmt: rejecting suffix in input: '{quote_text(value)}' "
             "(consider using --from)", 2)
     base, exponent = _scale_of(value, suffix, from_mode)
     ctx = _context_for(value)

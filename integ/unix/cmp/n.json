@@ -135,6 +135,40 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "cmp_n_leaves_a_multibyte_value_unescaped",
+      "seq": 601147,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cmp -n '1é' /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "cmp: invalid --bytes value '1é'\ncmp: Try 'cmp --help' for more information.\n"
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

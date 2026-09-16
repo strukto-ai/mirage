@@ -31,7 +31,7 @@ describe('SSH watch checkpoints', () => {
       })
       const hook = buildDeltaHook(accessor)
       const root = PathSpec.fromStrPath('/ssh', '')
-      const checkpoint = JSON.stringify({ '/ssh/a.txt': `|${stamp}|5` })
+      const checkpoint = JSON.stringify({ '/ssh/a.txt': `${stamp}|5` })
       const unchanged = await hook.pull(root, checkpoint)
       expect(unchanged.changes).toEqual([])
       expect(unchanged.checkpoint).toBe(checkpoint)

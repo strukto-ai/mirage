@@ -28,6 +28,7 @@ import {
 import { UsageError } from '../../errors.ts'
 import { gnuStrerror, isFsError } from '../../../utils/errors.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 import { FlagView } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
@@ -127,7 +128,7 @@ export function requestLines(
 export function responseLines(resp: HttpResponse): string[] {
   const lines = [`HTTP/1.1 ${String(resp.status)} ${resp.reason}`]
   const sorted = resp.headers.map(([k, v]): [string, string] => [k.toLowerCase(), v])
-  sorted.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  sorted.sort(([a], [b]) => compareCodePoints(a, b))
   for (const [k, v] of sorted) lines.push(`${k}: ${v}`)
   return lines
 }

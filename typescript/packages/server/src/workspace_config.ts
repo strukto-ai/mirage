@@ -17,8 +17,7 @@ import { dirname, resolve } from 'node:path'
 import type { Limit } from '@struktoai/mirage-core/types'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
-import { Workspace } from '@struktoai/mirage-node'
-import { configToWorkspaceArgs, loadWorkspaceConfigFile } from '@struktoai/mirage-node'
+import type { Workspace } from '@struktoai/mirage-node'
 
 export const WORKSPACE_CONFIG_CANDIDATES = [
   '.mirage/workspace.yaml',
@@ -69,6 +68,8 @@ export function resolveWorkspaceConfig(
 }
 
 export async function buildWorkspaceFromConfig(configPath: string): Promise<Workspace> {
+  const { Workspace, configToWorkspaceArgs, loadWorkspaceConfigFile } =
+    await import('@struktoai/mirage-node')
   const config = loadWorkspaceConfigFile(configPath)
   const args = await configToWorkspaceArgs(config)
   const resources: Record<string, MountSpec> = {}

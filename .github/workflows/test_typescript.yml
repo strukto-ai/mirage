@@ -7,10 +7,17 @@ permissions:
   push:
     branches: [main]
     paths:
+      # Keep in lockstep with the `changes` filter below. .gitignore is
+      # here for knip, which builds its file set through it (root `dist/`
+      # is why knip does not see built output).
       - typescript/**
       - examples/typescript/**
       - integ/**
       - conformance/**
+      # Pre-commit skips knip and integ-typecheck, so a hook definition
+      # changing there has to reach this workflow to be checked at all.
+      - .pre-commit-config.yaml
+      - .gitignore
       - .github/workflows/test_typescript.yml
       - .github/actions/setup-node-pnpm/action.yml
   pull_request:
@@ -34,23 +41,45 @@ jobs:
         id: filter
         with:
           filters: |
+            # Keep in lockstep with `push.paths` above.
             hit:
               - 'typescript/**'
               - 'examples/typescript/**'
               - 'integ/**'
               - 'conformance/**'
+              - '.pre-commit-config.yaml'
+              - '.gitignore'
               - '.github/workflows/test_typescript.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
 
   test:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: TypeScript (Node ${{ matrix.node-version }})
+    name: TypeScript ${{ matrix.leg }} (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
+      # Load-bearing now, where it was decorative on a single-value matrix:
+      # it is the only thing stopping one failing leg from cancelling the
+      # other two, and the gate's *cancelled* arm would red the run while
+      # destroying both survivors' output.
       fail-fast: false
       matrix:
         node-version: ["24"]
+        # Three legs balanced against measured per-package vitest time. The
+        # one hard constraint is pnpm's topological sort, which applies to
+        # whatever subset --filter selects, so a leg costs its longest
+        # dependency chain rather than its sum: cli depends on agents, core,
+        # node and server and therefore shares a leg with none of them, while
+        # node -> server -> opencode is free because its tail is cheap.
+        # The selections themselves live in typescript/package.json as
+        # `test:leg:*`, so one command reproduces a leg locally; this list and
+        # those scripts are held in step by scripts/ci_test_legs/check.py.
+        leg: [core, cli, rest]
+        include:
+          - leg: cli
+            typecheck: true
+          - leg: rest
+            examples: true
     services:
       redis:
         image: redis:7
@@ -61,6 +90,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+
+    # Job level, not step level: 27 test files across core and node skip
+    # themselves when REDIS_URL is unset -- mostly `describe.skipIf(...)`, but
+    # node/src/conformance.test.ts spells it `? it.skip : it`, so grepping for
+    # skipIf alone undercounts. A leg that does not carry this variable skips
+    # those files and still reports green, which is how a split silently drops
+    # coverage. One declaration cannot drift between legs the way three could.
+    env:
+      REDIS_URL: redis://localhost:6379/0
 
     steps:
       - uses: actions/checkout@v7
@@ -78,6 +116,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build TypeScript packages
+        id: build
         working-directory: typescript
         run: pnpm -r build
 
@@ -85,20 +124,26 @@ jobs:
       # fakes import Prisma clients generated into the gitignored
       # integ/generated/. Without this every one of those imports is TS2307 and
       # the types they carry degrade to implicit any, which reads as dozens of
-      # unrelated errors in files nobody touched.
+      # unrelated errors in files nobody touched. That makes this the
+      # typechecking leg's step and nobody else's: no example consumes the
+      # generated clients, since all 25 truth files spell their command
+      # `pnpm -C examples/typescript exec tsx ...`.
       - name: Generate integ Prisma clients
+        if: matrix.typecheck
         working-directory: integ
         run: pnpm run prisma:clients
 
+      # --no-bail: this is now the only place integ's own
+      # `tsc -p tsconfig.check.json` runs, and a bailing recursive run
+      # aborts in packages/core before ever reaching ../integ.
       - name: Typecheck
+        if: matrix.typecheck
         working-directory: typescript
-        run: pnpm -r typecheck
+        run: pnpm -r --no-bail typecheck
 
       - name: Run TypeScript tests
         working-directory: typescript
-        env:
-          REDIS_URL: redis://localhost:6379/0
-        run: pnpm test
+        run: pnpm run test:leg:${{ matrix.leg }}
 
       # Each truth file owns the command it was captured against, so this
       # list is paths only and cannot drift from what is asserted. The
@@ -106,8 +151,7 @@ jobs:
       # so one stale truth file reports every other one in the same run
       # instead of hiding the examples listed below it.
       - name: Examples (output checked against integ/ truth files)
-        env:
-          REDIS_URL: redis://localhost:6379/0
+        if: matrix.examples
         run: |
           bad=0
           run() {
@@ -139,6 +183,16 @@ jobs:
           run integ/truth/typescript/redis_browser.json
           run integ/truth/version_branching.json
           exit $bad
+
+      # Moved from Pre-commit, which went diff-scoped: knip reads the
+      # whole graph, so a changed-files list cannot make it cheaper.
+      # Last and `!cancelled()` so it and the tests cannot hide each
+      # other, but gated on the build -- without node_modules knip fails
+      # on unresolved entries, which points at the wrong step.
+      - name: Dead code (knip)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: typescript
+        run: pnpm exec knip
 
   python-fs:
     needs: changes

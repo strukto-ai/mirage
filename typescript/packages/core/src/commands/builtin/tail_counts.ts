@@ -13,10 +13,54 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { sizeSuffixes } from './utils/size_suffix.ts'
+import { quoteText } from '../quote.ts'
 
 const BYTE_UNITS: Readonly<Record<string, number>> = {
   '': 1,
   ...sizeSuffixes('bkKMGTPEZYRQ'),
+}
+
+// C `strtod` as `xstrtod` uses it, anchored at both ends because `xstrtod`
+// refuses any leftover: optional LEADING whitespace (isspace, so CR and
+// TAB count), a sign, then a decimal number, a C99 hex number,
+// `inf`/`infinity` or `nan`, case-insensitively. Trailing whitespace is
+// NOT part of it, which is the whole reason this exists -- JavaScript's
+// `Number()` and python's `float()` both strip it, so both hosts accepted
+// `tail -s $'1\r'` where GNU answers `invalid number of seconds: '1\r'`
+// (measured, coreutils 9.4).
+const STRTOD_RE =
+  /^[ \t\n\v\f\r]*[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?|inf(?:inity)?|nan(?:\([0-9A-Za-z_]*\))?)$/i
+const NAN_RE = /^[ \t\n\v\f\r]*[+-]?nan/i
+const INF_RE = /^[ \t\n\v\f\r]*([+-]?)inf/i
+const HEX_RE = /^([+-]?)0[xX]([0-9a-fA-F]*)(?:\.([0-9a-fA-F]*))?(?:[pP]([+-]?[0-9]+))?$/
+
+// `tail -s`'s value, exactly as C `strtod` reads it, or null.
+//
+// GNU refuses the value when `xstrtod` does not consume all of it or when
+// `0 <= s` is false, so the grammar and the range are two separate
+// answers: `inf` is ACCEPTED (`0 <= inf`) while `nan` is refused
+// (`0 <= nan` is false), and both were measured on coreutils 9.4. This
+// returns the number the grammar names and leaves the range test to the
+// caller, which is where GNU puts it too.
+//
+// `parse_seconds` in tail_counts.py is the twin.
+export function parseSeconds(raw: string): number | null {
+  if (!STRTOD_RE.test(raw)) return null
+  if (NAN_RE.test(raw)) return Number.NaN
+  // `Number()` reads `Infinity` but not strtod's `inf`/`infinity`.
+  const inf = INF_RE.exec(raw)
+  if (inf !== null) return inf[1] === '-' ? -Infinity : Infinity
+  const text = raw.replace(/^[ \t\n\v\f\r]+/, '')
+  const hex = HEX_RE.exec(text)
+  if (hex === null) return Number(text)
+  // `Number()` reads `0x10` but no hex FLOAT, so a fraction or a `p`
+  // exponent is assembled by hand: digits * 16**-places * 2**exp.
+  const sign = hex[1] === '-' ? -1 : 1
+  const whole = hex[2] ?? ''
+  const fraction = hex[3] ?? ''
+  const exponent = hex[4] === undefined ? 0 : Number(hex[4])
+  const mantissa = parseInt(whole + fraction || '0', 16)
+  return sign * mantissa * Math.pow(16, -fraction.length) * Math.pow(2, exponent)
 }
 
 export function parseByteCount(raw: string): number {
@@ -98,13 +142,13 @@ export function numberFlagError(
   cRaw: string | null,
 ): string | null {
   if (nRaw !== null && !/^[+-]?\d+$/.test(nRaw)) {
-    return `${cmd}: invalid number of lines: '${nRaw}'\n`
+    return `${cmd}: invalid number of lines: '${quoteText(nRaw)}'\n`
   }
   if (cRaw !== null) {
     try {
       parseByteCount(cRaw)
     } catch {
-      return `${cmd}: invalid number of bytes: '${cRaw}'\n`
+      return `${cmd}: invalid number of bytes: '${quoteText(cRaw)}'\n`
     }
   }
   return null

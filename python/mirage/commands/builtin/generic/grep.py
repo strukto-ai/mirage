@@ -115,6 +115,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         ignore_case=fl.as_bool("i"),
         invert=fl.as_bool("v"),
         line_numbers=fl.as_bool("n"),
+        byte_offsets=fl.as_bool("byte_offset"),
         count_only=fl.as_bool("c"),
         files_only=fl.as_bool("args_l"),
         whole_word=fl.as_bool("w"),

@@ -1,0 +1,1986 @@
+{
+  "command": "expr",
+  "cases": [
+    {
+      "id": "expr_div_truncates_pos",
+      "cmd": "expr 10 / 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_div_neg_dividend_truncates",
+      "cmd": "expr -10 / 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "-3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_div_neg_divisor_truncates",
+      "cmd": "expr 10 / -3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "-3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_div_both_neg_truncates",
+      "cmd": "expr -10 / -3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_mod_neg_dividend",
+      "cmd": "expr -10 % 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "-1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_mod_neg_divisor",
+      "cmd": "expr 10 % -3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_div_by_zero",
+      "cmd": "expr 1 / 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: division by zero\n"
+      }
+    },
+    {
+      "id": "expr_mod_by_zero",
+      "cmd": "expr 1 % 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: division by zero\n"
+      }
+    },
+    {
+      "id": "expr_zero_result_exits_1",
+      "cmd": "expr -1 / 2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_zero_result_exits_1_neg_divisor",
+      "cmd": "expr 1 / -2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_rejects_plus_prefixed_operand",
+      "cmd": "expr +5 + 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: non-integer argument\n"
+      }
+    },
+    {
+      "id": "expr_rejects_surrounding_whitespace",
+      "cmd": "expr ' 5 ' + 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: non-integer argument\n"
+      }
+    },
+    {
+      "id": "expr_rejects_underscore_separator",
+      "cmd": "expr '1_0' + 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: non-integer argument\n"
+      }
+    },
+    {
+      "id": "expr_accepts_leading_zero_as_decimal",
+      "cmd": "expr 05 + 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "6\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_chains_three_terms",
+      "cmd": "expr 1 + 2 + 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "6\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_multiply_binds_tighter_than_add",
+      "cmd": "expr 2 + 3 '*' 4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "14\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_modulo_shares_the_multiply_level",
+      "cmd": "expr 10 '%' 4 '*' 2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_negative_literal_is_not_unary_minus",
+      "cmd": "expr -5 + 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "-2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_parens_group_before_multiply",
+      "cmd": "expr '(' 2 + 3 ')' '*' 4",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "20\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_parens_are_a_length_argument",
+      "cmd": "expr length '(' abc ')'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_and_binds_tighter_than_or",
+      "cmd": "expr 2 '|' 0 '&' 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_or_short_circuits",
+      "cmd": "expr 1 '|' 1 '/' 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_and_short_circuits",
+      "cmd": "expr 0 '&' 1 '/' 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_or_answers_the_right_operand",
+      "cmd": "expr 0 '|' 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_and_answers_the_left_operand",
+      "cmd": "expr 2 '&' 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_plus_quotes_a_keyword",
+      "cmd": "expr + length",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "length\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_plus_quotes_an_operator",
+      "cmd": "expr + +",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "+\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_plus_composes_with_arithmetic",
+      "cmd": "expr 1 + + 2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_length_keyword",
+      "cmd": "expr length abcde",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "5\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_substr_is_one_based",
+      "cmd": "expr substr abcde 2 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "bcd\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_substr_clamps_an_over_long_length",
+      "cmd": "expr substr abcde 2 99",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "bcde\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_substr_out_of_range_is_empty",
+      "cmd": "expr substr abcde 0 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_substr_non_numeric_position_is_empty",
+      "cmd": "expr substr abc x 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_index_is_a_character_set",
+      "cmd": "expr index abcde ec",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_index_not_found_is_zero",
+      "cmd": "expr index abcde xyz",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_match_returns_group_one",
+      "cmd": "expr match abcdef 'a\\(bc\\)'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "bc\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_colon_returns_the_match_length",
+      "cmd": "expr abcdef ':' abc",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_is_anchored_at_the_start",
+      "cmd": "expr abc ':' b",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_backslash_plus_quantifies",
+      "cmd": "expr abc ':' '[[:alpha:]]\\+'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_bare_plus_is_literal",
+      "cmd": "expr 'a+b' ':' 'a+b'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_backslash_pipe_alternates",
+      "cmd": "expr abc ':' 'a\\|b'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_bare_pipe_is_literal",
+      "cmd": "expr abc ':' 'a|b'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_interval_quantifies",
+      "cmd": "expr aab ':' 'a\\{2\\}'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_bare_braces_are_literal",
+      "cmd": "expr aab ':' 'a{2}'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_leading_star_is_literal",
+      "cmd": "expr '*a' ':' '*a'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_word_escape_is_ascii",
+      "cmd": "expr abc ':' '\\w\\+'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "3\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_backreference",
+      "cmd": "expr aab ':' '\\(a\\)\\1'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "a\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_unmatched_group_is_empty",
+      "cmd": "expr abc ':' 'a\\(x\\)\\?'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_bre_compile_error_is_fatal",
+      "cmd": "expr abc ':' '\\('",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: Unmatched ( or \\(\n"
+      }
+    },
+    {
+      "id": "expr_compare_is_numeric_for_two_integers",
+      "cmd": "expr 10 '>' 9",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_compare_falls_back_to_strings",
+      "cmd": "expr 10 '>' 9a",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_compare_rejects_a_leading_plus_numerically",
+      "cmd": "expr '+1' '=' 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_equals_equals_is_a_synonym",
+      "cmd": "expr 1 '==' 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_missing_operand",
+      "cmd": "expr",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: missing operand\nTry 'expr --help' for more information.\n"
+      }
+    },
+    {
+      "id": "expr_syntax_error_missing_argument",
+      "cmd": "expr 1 +",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: missing argument after '+'\n"
+      }
+    },
+    {
+      "id": "expr_syntax_error_unexpected_argument",
+      "cmd": "expr 1 2 3",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument '2'\n"
+      }
+    },
+    {
+      "id": "expr_syntax_error_expecting_close_paren",
+      "cmd": "expr '(' 1 + 2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: expecting ')' after '2'\n"
+      }
+    },
+    {
+      "id": "expr_syntax_error_unexpected_close_paren",
+      "cmd": "expr '(' ')'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected ')'\n"
+      }
+    },
+    {
+      "id": "expr_length_counts_bytes_not_characters",
+      "cmd": "expr length éé",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_length_counts_a_multibyte_run",
+      "cmd": "expr length 日本語",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "9\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_index_searches_a_set_of_bytes",
+      "cmd": "expr index ä é",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_index_position_counts_bytes",
+      "cmd": "expr index abcéde é",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_substr_splits_a_character",
+      "cmd": "expr substr éé 2 2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "qcMK",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_substr_takes_one_byte_of_a_character",
+      "cmd": "expr substr éé 1 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "wwo=",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_substr_end_is_a_byte_offset",
+      "cmd": "expr substr éé 5 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_colon_match_length_is_bytes",
+      "cmd": "expr é ':' '.'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_colon_dot_dot_spans_one_character",
+      "cmd": "expr é ':' '..'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_colon_group_captures_one_byte",
+      "cmd": "expr é ':' '\\(.\\)'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_base64": "wwo=",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_colon_class_is_ascii_in_the_c_locale",
+      "cmd": "expr é ':' '[[:alpha:]]*'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_compares_an_operand_past_every_float",
+      "cmd": "expr 2 '<' 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_compares_an_operand_past_every_float_the_other_way",
+      "cmd": "expr 2 '>' 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_adds_an_operand_past_every_float",
+      "cmd": "expr 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 + 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_never_prints_exponential_notation",
+      "cmd": "expr 1000000000000 '*' 1000000000000",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "1000000000000000000000000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_product_of_two_int32_maxima_is_exact",
+      "cmd": "expr 2147483647 '*' 2147483647",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "4611686014132420609\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_refuses_an_operand_with_a_trailing_newline",
+      "cmd": "expr $'12\\n' + 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: non-integer argument\n"
+      }
+    },
+    {
+      "id": "expr_trailing_newline_operand_compares_as_a_string",
+      "cmd": "expr $'12\\n' '=' 12",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "0\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_quote_doubles_a_backslash",
+      "cmd": "expr a '\\(' 2",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument '\\\\('\n"
+      }
+    },
+    {
+      "id": "expr_quote_doubles_a_backslash_in_the_paren_clause",
+      "cmd": "expr '(' '\\('",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: expecting ')' after '\\\\('\n"
+      }
+    },
+    {
+      "id": "expr_quote_renders_a_multibyte_word_in_octal",
+      "cmd": "expr '(' é",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: expecting ')' after '\\303\\251'\n"
+      }
+    },
+    {
+      "id": "expr_quote_renders_a_tab_as_a_named_escape",
+      "cmd": "expr '(' $'a\\tb'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: expecting ')' after 'a\\tb'\n"
+      }
+    },
+    {
+      "id": "expr_unclosed_paren_names_a_word_standing_there",
+      "cmd": "expr '(' 1 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: expecting ')' instead of '1'\n"
+      }
+    },
+    {
+      "id": "expr_unclosed_paren_instead_of_names_that_word_not_the_prior",
+      "cmd": "expr '(' 1 2 ')'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: expecting ')' instead of '2'\n"
+      }
+    },
+    {
+      "id": "expr_unclosed_paren_after_when_the_line_ran_out",
+      "cmd": "expr '(' 1",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: expecting ')' after '1'\n"
+      }
+    },
+    {
+      "id": "expr_missing_argument_outranks_an_unclosed_paren",
+      "cmd": "expr '(' 1 +",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: missing argument after '+'\n"
+      }
+    },
+    {
+      "id": "expr_adds_an_operand_past_the_cpython_digit_cap",
+      "cmd": "expr 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 + 0",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_modulo_of_an_operand_past_the_cpython_digit_cap",
+      "cmd": "expr 100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 '%' 7",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "2\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_renders_a_result_past_the_cpython_digit_cap",
+      "cmd": "expr 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999 '*' 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 0,
+        "stdout_text": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999980000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001\n",
+        "stderr_text": ""
+      }
+    },
+    {
+      "id": "expr_quotes_a_two_byte_char_as_octal",
+      "cmd": "expr 1 'é'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument '\\303\\251'\n"
+      }
+    },
+    {
+      "id": "expr_quotes_an_emoji_as_four_octal_escapes",
+      "cmd": "expr 1 '😀'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument '\\360\\237\\230\\200'\n"
+      }
+    },
+    {
+      "id": "expr_escapes_a_backslash_in_the_word",
+      "cmd": "expr 1 'a\\b'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument 'a\\\\b'\n"
+      }
+    },
+    {
+      "id": "expr_escapes_a_single_quote_in_the_word",
+      "cmd": "expr 1 \"a'b\"",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument 'a\\'b'\n"
+      }
+    },
+    {
+      "id": "expr_escapes_a_control_byte_in_octal",
+      "cmd": "expr 1 $'a\\001b'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument 'a\\001b'\n"
+      }
+    },
+    {
+      "id": "expr_escapes_a_newline_in_the_word",
+      "cmd": "expr 1 $'a\\nb'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument 'a\\nb'\n"
+      }
+    },
+    {
+      "id": "expr_leaves_a_double_quote_alone",
+      "cmd": "expr 1 'a\"b'",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "stdin_text": "",
+      "expect": {
+        "exit": 2,
+        "stdout_text": "",
+        "stderr_text": "expr: syntax error: unexpected argument 'a\"b'\n"
+      }
+    }
+  ]
+}

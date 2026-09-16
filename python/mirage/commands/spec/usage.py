@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.errors import UsageError
+from mirage.commands.quote import quote_text
 from mirage.commands.spec.constants import (OLD_OPTION_EXIT, OPERAND_EXIT,
                                             PYTHON_NAMES, PYTHON_USAGE,
                                             READ_FAIL_EXIT,
@@ -198,6 +199,49 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     return (line + hint).encode(), usage_exit_code(cmd_name)
 
 
+# The programs that do NOT parse with getopt_long, and so answer an
+# option they will not take by naming the whole typed token as unknown
+# rather than by naming the option. Each one is measured: `curl
+# --silent=2` is `curl: option --silent=2: is unknown`, `python3
+# --version=2` is `unknown option --version=2`, `jq --tab=2` is `jq:
+# Unknown option --tab=2`, and find reads the word as a predicate. Every
+# other command here is a GNU tool whose getopt_long words the refusal
+# the other way, so the set is the exception list and not the rule.
+_NOT_GETOPT_LONG = frozenset({"curl", "jq", CommandName.FIND, *PYTHON_NAMES})
+
+
+def unexpected_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
+    """getopt_long refusal for a BOOLEAN long option handed a value.
+
+    `grep --byte-offset=2` is not an unrecognized option -- getopt_long
+    recognized it perfectly well and refused the `=2`, so the message
+    names the option and drops the value, where the unrecognized-option
+    message quotes the whole token including it. It also names the
+    CANONICAL spelling, not the one that was typed: `grep --byte=2`
+    answers for `--byte-offset`. Shape pinned against GNU grep 3.11 and
+    coreutils 9.4 (`grep --byte-offset=2`, `grep --line-buffered=2`, `nl
+    --help=2`, `cut --complement=2`, `sed --debug=2`), all exit 2 for
+    grep and sort and 1 for the coreutils.
+
+    GNU's per-tool usage dump is deliberately omitted, exactly as
+    unknown_option_error omits it; grep and sed print theirs between the
+    message and the hint, coreutils print none at all.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        token (str): the option's canonical long spelling and the value
+            that was typed on it ('--byte-offset=2'). Carried whole
+            because the programs in _NOT_GETOPT_LONG quote the value
+            along with the option and getopt_long drops it.
+    """
+    if cmd_name in _NOT_GETOPT_LONG:
+        return unknown_option_error(cmd_name, token)
+    option = token.split("=", 1)[0]
+    line = f"{cmd_name}: option '{option}' doesn't allow an argument\n"
+    hint = f"Try '{cmd_name} --help' for more information.\n"
+    return (line + hint).encode(), usage_exit_code(cmd_name)
+
+
 def ambiguous_option_error(cmd_name: str, token: str,
                            candidates: tuple[str, ...]) -> tuple[bytes, int]:
     """getopt_long refusal for an abbreviated long matching several options.
@@ -306,25 +350,114 @@ def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
     return (line + hint).encode(), OLD_OPTION_EXIT
 
 
-def invalid_argument_error(cmd_name: str, option: str, value: str,
-                           choices: tuple[str, ...]) -> tuple[bytes, int]:
+# One ARGMATCH candidate: a bare name, or a group of spellings that
+# gnulib's argmatch maps to the SAME value. The group is not cosmetic --
+# `argmatch_valid` starts a new `  - ` line only when the value changes
+# and joins the aliases of one value with `, `, which is why GNU answers
+# `sort --check=x` with `  - 'quiet', 'silent'` on one line and
+# `  - 'diagnose-first'` on the next.
+ArgmatchChoices = tuple[str | tuple[str, ...], ...]
+
+
+def argmatch_line(cmd_name: str, option: str, value: str) -> str:
+    r"""The first line of a gnulib ARGMATCH refusal, without newline.
+
+    Two wordings, and the empty word picks the second: gnulib's
+    ``argmatch`` matches on a prefix, so ``""`` is a prefix of every
+    candidate and comes back ambiguous rather than invalid. Measured on
+    coreutils 9.4 at every argmatch slot in the repo (``tail --follow=``,
+    ``sort --check=``, ``wc --total=``, ``uniq --all-repeated=``,
+    ``uniq --group=``, ``ls --format=``, ``ls -l --time-style=``,
+    ``cp --update=``, ``tee --output-error=``), all of which answer
+    ``ambiguous argument ''``. ``du --max-depth=`` is NOT argmatch and
+    says ``invalid maximum depth ''``, which is why that one is worded
+    in du.
+
+    The word is rendered through ``quote_text``, gnulib's own
+    ``quote()``: ``tee --output-error=xé`` is
+    ``invalid argument 'x\303\251'``. Callers must therefore pass the
+    value as typed and never pre-escape it.
+
+    Args:
+        cmd_name (str): command name for the message.
+        option (str): the slot GNU names -- a canonical dashed spelling
+            ('--output-error') or a prose name ('backup type',
+            'time style'), quoted either way.
+        value (str): the rejected value, as typed.
+    """
+    kind = "ambiguous" if value == "" else "invalid"
+    return (f"{cmd_name}: {kind} argument '{quote_text(value)}' "
+            f"for '{option}'")
+
+
+def argmatch_valid_block(choices: ArgmatchChoices) -> str:
+    """gnulib's ``Valid arguments are:`` block, without a trailing newline.
+
+    Args:
+        choices (ArgmatchChoices): the candidates in declaration order,
+            aliases of one value grouped into a tuple.
+    """
+    rows = []
+    for choice in choices:
+        group = (choice, ) if isinstance(choice, str) else choice
+        rows.append("  - " + ", ".join(f"'{c}'" for c in group))
+    return "Valid arguments are:\n" + "\n".join(rows)
+
+
+def invalid_argument_error(cmd_name: str,
+                           option: str,
+                           value: str,
+                           choices: ArgmatchChoices,
+                           exit_code: int | None = None) -> tuple[bytes, int]:
     """GNU ARGMATCH refusal for a value outside a declared choices set.
 
     Shape pinned against real GNU (``tee --output-error=bogus``): the
     offending value, the option's canonical long spelling, then every
-    valid argument in declaration order, one per line.
+    valid argument in declaration order, aliases of one value on one
+    line, then the ``Try '--help'`` hint.
 
     Args:
         cmd_name (str): command name for the message and exit code.
         option (str): canonical dashed spelling ('--output-error').
-        value (str): the rejected value.
-        choices (tuple[str, ...]): allowed values in declaration order.
+        value (str): the rejected value, as typed; the renderer
+            escapes it.
+        choices (ArgmatchChoices): allowed values in declaration order.
+        exit_code (int | None): the code to answer with. None takes the
+            command's own usage code, which is 1 for every command in
+            the repo that reaches this renderer through the executor.
+            ls and sort pass 1 explicitly: gnulib's ``argmatch_die``
+            always calls ``usage (EXIT_FAILURE)``, so their argmatch
+            refusals are 1 even though their other usage errors are 2.
     """
-    valid = "\n".join(f"  - '{c}'" for c in choices)
-    line = (f"{cmd_name}: invalid argument '{value}' for '{option}'\n"
-            f"Valid arguments are:\n{valid}\n")
+    line = (f"{argmatch_line(cmd_name, option, value)}\n"
+            f"{argmatch_valid_block(choices)}\n")
     hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    code = usage_exit_code(cmd_name) if exit_code is None else exit_code
+    return (line + hint).encode(), code
+
+
+def argmatch_error(cmd_name: str,
+                   option: str,
+                   value: str,
+                   choices: ArgmatchChoices,
+                   exit_code: int | None = None) -> UsageError:
+    """:func:`invalid_argument_error` as the exception a command raises.
+
+    The commands that validate an ARGMATCH value themselves (``sort``,
+    ``wc``, ``uniq``, ``ls``, ``cp``, ``tail``) hold the value long
+    after the parser is done with it, so they render through the same
+    function the executor does rather than wording a second copy.
+
+    Args:
+        cmd_name (str): command name for the message and exit code.
+        option (str): the slot GNU names.
+        value (str): the rejected value, as typed.
+        choices (ArgmatchChoices): allowed values in declaration order.
+        exit_code (int | None): as in :func:`invalid_argument_error`.
+    """
+    message, code = invalid_argument_error(cmd_name, option, value, choices,
+                                           exit_code)
+    return UsageError(message.decode().rstrip("\n"), code)
 
 
 def missing_required_error(cmd_name: str, option: str) -> tuple[bytes, int]:

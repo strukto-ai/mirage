@@ -1,6 +1,5 @@
 import asyncio
 import inspect
-import math
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Mapping
 from dataclasses import dataclass
@@ -8,19 +7,23 @@ from typing import Any, Callable
 
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.tail_counts import (TailCounts, number_flag_error,
-                                                 parse_counts)
+                                                 parse_counts, parse_seconds)
 from mirage.commands.builtin.utils.operands import operands_io, split_readable
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import CommandOpts
+from mirage.commands.errors import UsageError
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import FlagValue, FlagView
-from mirage.commands.spec.usage import usage_hint
+from mirage.commands.spec.usage import argmatch_error
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.errors import FS_ERRORS, fs_error_line, fs_strerror
 from mirage.utils.stream import ensure_stream
 
 DEFAULT_SLEEP_INTERVAL = 1.0
+# GNU's `follow_mode_string`, in declaration order.
+FOLLOW_ARGS = ("descriptor", "name")
 # A bound byte-window reader, called as ``read_range(path, offset=, size=)``.
 ReadRangeFn = Callable[..., Awaitable[bytes]]
 
@@ -65,12 +68,8 @@ def _follow_flags(fl: FlagView) -> tuple[bool, bool, bool]:
         fl (FlagView): the tail flag view.
     """
     raw = fl.raw("follow")
-    if isinstance(raw, str) and raw not in ("name", "descriptor"):
-        raise ValueError(f"tail: invalid argument '{raw}' for '--follow'\n"
-                         "Valid arguments are:\n"
-                         "  - 'descriptor'\n"
-                         "  - 'name'\n"
-                         f"{usage_hint('tail')}\n")
+    if isinstance(raw, str) and raw not in FOLLOW_ARGS:
+        raise argmatch_error("tail", "--follow", raw, FOLLOW_ARGS)
     # -F is --follow=name --retry. The mode is whichever of -f/--follow
     # and -F came last, GNU's own order (`-F --follow=descriptor` follows
     # the descriptor), while -F's --retry half stays on either way.
@@ -94,12 +93,13 @@ def _interval_flag(fl: FlagView) -> float:
     raw = fl.as_str("sleep_interval")
     if raw is None:
         return DEFAULT_SLEEP_INTERVAL
-    try:
-        seconds = float(raw)
-    except ValueError:
-        seconds = math.nan
-    if not math.isfinite(seconds) or seconds < 0:
-        raise ValueError(f"tail: invalid number of seconds: '{raw}'\n")
+    seconds = parse_seconds(raw)
+    # GNU's own two-part test, `xstrtod(...) && 0 <= s`: the grammar
+    # first, then the range. `0 <= nan` is false, so NaN is refused,
+    # while `inf` passes both and is ACCEPTED (measured, coreutils 9.4).
+    if seconds is None or not 0 <= seconds:
+        raise ValueError(
+            f"tail: invalid number of seconds: '{quote_text(raw)}'\n")
     return seconds
 
 
@@ -588,6 +588,9 @@ async def tail_generic(
     """
     try:
         parsed = parse_flags(opts.flags)
+    except UsageError as exc:
+        return None, IOResult(exit_code=exc.exit_code,
+                              stderr=f"{exc}\n".encode())
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=str(exc).encode())
     counts = parsed.counts

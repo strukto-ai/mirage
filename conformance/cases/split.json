@@ -1,0 +1,152 @@
+{
+  "command": "split",
+  "cases": [
+    {
+      "id": "split_numeric_suffixes_quotes_its_start_value",
+      "cmd": "split --numeric-suffixes='xé' /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "split: 'x\\303\\251': invalid start value for numerical suffix\nTry 'split --help' for more information.\n"
+      }
+    },
+    {
+      "id": "split_hex_suffixes_quotes_its_start_value",
+      "cmd": "split --hex-suffixes='xé' /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "split: 'x\\303\\251': invalid start value for hexadecimal suffix\nTry 'split --help' for more information.\n"
+      }
+    },
+    {
+      "id": "split_n_names_a_bad_middle_component_and_its_tail",
+      "cmd": "split -n 'l/xé/4' /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "split: invalid number of chunks: 'x\\303\\251/4'\n"
+      }
+    },
+    {
+      "id": "split_n_names_only_the_last_component",
+      "cmd": "split -n 'l/2/xé' /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "split: invalid number of chunks: 'x\\303\\251'\n"
+      }
+    },
+    {
+      "id": "split_n_without_a_kind_prefix_names_the_whole_spec",
+      "cmd": "split -n x/3 /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "split: invalid number of chunks: 'x/3'\n"
+      }
+    },
+    {
+      "id": "split_n_strips_only_one_kind_prefix",
+      "cmd": "split -n r/l/4 /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "split: invalid number of chunks: 'l/4'\n"
+      }
+    },
+    {
+      "id": "split_n_names_the_tail_of_a_three_slash_spec",
+      "cmd": "split -n 1/2/3/4 /data/a.txt",
+      "matrix": {
+        "python": [
+          "ram",
+          "disk",
+          "redis"
+        ],
+        "typescript": [
+          "ram",
+          "disk",
+          "redis"
+        ]
+      },
+      "expect": {
+        "exit": 1,
+        "stdout_text": "",
+        "stderr_text": "split: invalid number of chunks: '2/3/4'\n"
+      }
+    }
+  ]
+}

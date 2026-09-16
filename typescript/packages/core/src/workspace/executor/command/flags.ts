@@ -21,6 +21,7 @@ import {
   missingRequiredError,
   missingValueError,
   oldOptionError,
+  unexpectedValueError,
   unknownOptionError,
 } from '../../../commands/spec/usage.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
@@ -200,6 +201,12 @@ export function optionError(cmdName: string, parsed: ParsedCommand): [Uint8Array
     return ambiguousOptionError(cmdName, ...ambiguousFirst)
   }
   if (parsed.invalidOptions.length > 0) {
+    // Two reports share invalidOptions and the tag tells them apart: a
+    // boolean long handed a value is not an unrecognized option, and
+    // getopt_long words it differently (`grep --byte-offset=2`).
+    if (parsed.optionErrorKinds[0] === 'unexpected_value') {
+      return unexpectedValueError(cmdName, parsed.invalidOptions[0] ?? '')
+    }
     return unknownOptionError(cmdName, parsed.invalidOptions[0] ?? '')
   }
   if (ambiguousFirst !== undefined) return ambiguousOptionError(cmdName, ...ambiguousFirst)

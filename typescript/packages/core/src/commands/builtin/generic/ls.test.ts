@@ -895,3 +895,94 @@ describe('lsGeneric columns and time styles', () => {
     expect((caught as UsageError).exitCode).toBe(code)
   })
 })
+
+// ls's argument clauses name the refused word through gnulib's quote(), so
+// a byte outside 0x20-0x7e comes back escaped rather than interpolated raw.
+// Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw
+// `bytes` argv (`ls --sort=<w>`, `--time=<w>`, `--hyperlink=<w>`,
+// `-l --time-style=<w>`, and `--format=<w>`, which mirage has no option for
+// but which renders through the same clause). Mirrors test_ls.py.
+describe('ls quotes the word its argument clauses name', () => {
+  const words: [string, string][] = [
+    ['xé', 'x\\303\\251'],
+    ['x\r', 'x\\r'],
+    ['x\x01', 'x\\001'],
+    ['x\x7f', 'x\\177'],
+    ["x'", "x\\'"],
+    ['x\\', 'x\\\\'],
+  ]
+  const clauses: [string, string][] = [
+    ['sort', "'--sort'"],
+    ['time', "'--time'"],
+    ['hyperlink', "'--hyperlink'"],
+    ['time_style', "'time style'"],
+  ]
+  for (const [dest, option] of clauses) {
+    it.each(words)(`escapes %j for ${dest}`, (value, escaped) => {
+      let message = ''
+      try {
+        parseFlags(new FlagView({ [dest]: value }, specOf('ls')))
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error)
+      }
+      expect(message.startsWith(`ls: invalid argument '${escaped}' for ${option}\n`)).toBe(true)
+    })
+  }
+
+  // An EMPTY ARGMATCH value is `ambiguous`, not `invalid`: gnulib's
+  // argmatch matches on a prefix and `''` is a prefix of every candidate.
+  // Measured on coreutils 9.4 -- `ls --sort=`, `--time=` and
+  // `--hyperlink=` are exit 1, `ls -l --time-style=` is exit 2.
+  it.each([
+    ['sort', "'--sort'", 1],
+    ['time', "'--time'", 1],
+    ['hyperlink', "'--hyperlink'", 1],
+    ['time_style', "'time style'", 2],
+  ])('words an empty %s as ambiguous', (dest, option, code) => {
+    let caught: unknown = null
+    try {
+      parseFlags(new FlagView({ [dest]: '' }, specOf('ls')))
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(UsageError)
+    expect(
+      (caught as UsageError).message.startsWith(`ls: ambiguous argument '' for ${option}\n`),
+    ).toBe(true)
+    expect((caught as UsageError).exitCode).toBe(code)
+  })
+
+  // GNU's own `sort_args`: `none time size extension version width`, in
+  // that order and with no `name` -- `ls --sort=name` is a refusal on
+  // coreutils 9.4, not name order.
+  it('lists GNU sort_args and refuses name', () => {
+    let caught: unknown = null
+    try {
+      parseFlags(new FlagView({ sort: 'name' }, specOf('ls')))
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(UsageError)
+    expect((caught as UsageError).message).toBe(
+      "ls: invalid argument 'name' for '--sort'\n" +
+        "Valid arguments are:\n  - 'none'\n  - 'time'\n  - 'size'\n" +
+        "  - 'extension'\n  - 'version'\n  - 'width'\n" +
+        "Try 'ls --help' for more information.",
+    )
+    expect((caught as UsageError).exitCode).toBe(1)
+  })
+
+  // `--block-size` is quoted but NOT escaped, which is GNU's own split:
+  // `ls --block-size=1é` reports the two UTF-8 bytes intact, so this
+  // clause must not be routed through quote() even though its neighbours
+  // above are.
+  it.each([['1é'], ['1\x01']])('leaves %j raw for --block-size', (value) => {
+    let message = ''
+    try {
+      parseFlags(new FlagView({ block_size: value, human_readable: true }, specOf('ls')))
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    expect(message.includes(value)).toBe(true)
+  })
+})

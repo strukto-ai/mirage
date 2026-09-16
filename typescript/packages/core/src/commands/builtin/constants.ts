@@ -84,11 +84,20 @@ export const OD_SIZE_UNITS = sizeSuffixes('bkKmMGTPE')
 // Q/R/Y/Z are in GNU od's suffix set but always overflow uintmax, so they
 // report as too-large rather than as unknown suffixes.
 export const OD_OVERFLOW_UNITS = sizeSuffixes('QRYZ')
+
+// The bytes C `isspace` accepts, which every gnulib scanner skips before
+// the sign. Spelled out rather than written `\s`: JavaScript's `\s` also
+// matches every Unicode space and python's matches 0x1c-0x1f, and GNU
+// refuses both, so a shorthand would accept more than the C library does.
+export const C_SPACE = '[ \\t\\n\\v\\f\\r]*'
+
 // strtoumax base 0: after the whitespace and sign above, 0x… is hex, a leading
 // 0 is octal, else decimal; the unconsumed remainder is the suffix. The sign
 // stays outside group 1 so the radix is picked from the digits alone
 // (`-N +0x10` is hex, `-N +010` is octal).
-export const XSTRTOUMAX_PATTERN = /^[ \t\n\v\f\r]*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$/
+export const XSTRTOUMAX_PATTERN = new RegExp(
+  `^${C_SPACE}\\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$`,
+)
 
 // GNU cmp (diffutils 3.10) shares od's grammar above but not its letter set:
 // no b/c/w, lowercase only up to k, and its gnulib predates Q/R, so `0Q`
@@ -102,7 +111,7 @@ export const CMP_SIZE_UNITS = sizeSuffixes('kKMGTPEZY')
 // hex and octal spellings are invalid numbers.
 export const SPLIT_BYTE_UNITS = sizeSuffixes('bkKmMEGPQRTYZ')
 export const SPLIT_BYTE_SUFFIXES = Object.keys(SPLIT_BYTE_UNITS).sort((a, b) => b.length - a.length)
-export const SPLIT_COUNT_PATTERN = /^[ \t\n\v\f\r]*\+?[0-9]+$/
+export const SPLIT_COUNT_PATTERN = new RegExp(`^${C_SPACE}\\+?[0-9]+$`)
 // Suffix start values are the exception to the grammar above: coreutils 9.7
 // rejects both `--numeric-suffixes=+5` and `=" 5"`, so they keep the strict
 // digits-only form.

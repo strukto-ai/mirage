@@ -196,3 +196,23 @@ async def test_verbose_eof_reports_the_byte_without_the_line():
 @pytest.mark.asyncio
 async def test_a_limit_inside_the_common_prefix_reports_no_difference():
     assert await _run(b"abcdef", b"abcXef", limit=2) == ("", "", 0)
+
+
+@pytest.mark.parametrize("value", ["1é", "1\x01", "1\r", "1'", "1\\"])
+def test_parse_count_leaves_the_value_unescaped(value):
+    """`cmp -n` quotes the value but does NOT escape it.
+
+    diffutils is not coreutils: it interpolates the bytes with a plain
+    `%s` inside the quotes rather than passing them through gnulib's
+    `quote()`, so a control byte, a backslash and a single quote all
+    reach stderr as themselves. Measured against GNU diffutils' cmp
+    under `LC_ALL=C` with a raw `bytes` argv: `cmp -n 1é` reports
+    `invalid --bytes value '1é'` and `cmp -n "1'"` reports
+    `'1''`, where the coreutils clauses next door would say
+    `'1\\303\\251'` and `'1\\''`. This asymmetry is deliberate; do not
+    "fix" it by routing this clause through quote().
+    """
+    with pytest.raises(UsageError) as exc:
+        parse_count(value, "--bytes")
+    assert str(exc.value) == (f"cmp: invalid --bytes value '{value}'\n"
+                              "cmp: Try 'cmp --help' for more information.")

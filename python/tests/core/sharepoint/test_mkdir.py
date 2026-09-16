@@ -1,5 +1,6 @@
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.client import GraphError
@@ -54,6 +55,7 @@ async def test_mkdir_tolerates_existing_item():
                 "message": "x"
             }})
         await mkdir(_accessor(), _spec("new"))
+        assert len(m.requests[("POST", URL(_DRIVE + "/root/children"))]) == 1
 
 
 @pytest.mark.asyncio

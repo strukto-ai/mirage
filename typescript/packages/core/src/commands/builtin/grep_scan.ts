@@ -19,8 +19,17 @@ import { type FileStat, FileType } from '../../types.ts'
 import { getExtension } from '../resolve.ts'
 import { BINARY_EXTENSIONS } from './constants.ts'
 import { grepContextLines } from './grep_context.ts'
+import {
+  decodeLine,
+  encodeLine,
+  lineOffsets,
+  matchOffset,
+  prefixOf,
+  printable,
+} from './grep_offsets.ts'
 import { compilePattern } from './grep_pattern.ts'
 import { NO_FILTERS, type WalkFilters, dirAdmitted, fileAdmitted } from './grep_select.ts'
+import { splitLines } from './utils/lines.ts'
 import type { AsyncReadBytesFn, AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
 
 const DEC = new TextDecoder()
@@ -32,6 +41,18 @@ export interface GrepLinesOptions {
   filesOnly: boolean
   onlyMatching: boolean
   maxCount: number | null
+  // -b: prefix each printed line with the byte offset of its own start, or of
+  // the match itself under -o. Derived from the lines because this scan is
+  // handed text rather than bytes, which is exact only for text that came
+  // through `decodeLine`.
+  byteOffsets?: boolean
+  // Given an IOResult, receives exit status 0 as soon as a line is selected.
+  // The twin of `grepStream`'s own `io`, and needed for the same reason:
+  // selection cannot be read off the returned list under -o, because GNU
+  // prints nothing for a zero-width match and still counts the line, so a
+  // caller deriving the status from an empty list reports 1 where GNU says 0.
+  // Mirrors the `io` parameter of python's `grep_lines`.
+  io?: IOResult
 }
 
 export function grepLines(
@@ -40,8 +61,21 @@ export function grepLines(
   compiled: RegExp,
   opts: GrepLinesOptions,
 ): string[] {
+  if (opts.maxCount === 0) {
+    // GNU selects no line at all and the whole command goes quiet:
+    // `grep -m0 -c a f` prints NOTHING, not `0`, and exits 1. An empty list
+    // is what -c has to answer with, because `grepRecursive` renders
+    // `<file>:<count>` from whatever comes back and GNU prints no per-file
+    // zeros under -m0 either. Read before the loop rather than after a line
+    // is printed, because `count >= 0` is already true and the bottom check
+    // would let the first selected line out first. `grepInput` takes the
+    // same early return.
+    return []
+  }
   const results: string[] = []
   let count = 0
+  const byteOffsets = opts.byteOffsets === true
+  const offsets = byteOffsets ? lineOffsets(data) : []
   const reGlobal = opts.onlyMatching
     ? new RegExp(
         compiled.source,
@@ -50,27 +84,47 @@ export function grepLines(
     : null
   for (let i = 0; i < data.length; i++) {
     const line = data[i] ?? ''
+    const start = byteOffsets ? (offsets[i] ?? 0) : 0
     const found = compiled.test(line)
     const matched = opts.invert ? !found : found
     if (!matched) continue
     count += 1
+    if (opts.io !== undefined) opts.io.exitCode = 0
     if (!opts.countOnly && !opts.filesOnly) {
-      let text: string
-      if (opts.onlyMatching && !opts.invert && reGlobal !== null) {
-        reGlobal.lastIndex = 0
-        const m = reGlobal.exec(line)
-        text = m !== null ? m[0] : line
+      if (opts.onlyMatching) {
+        // GNU -o prints every match on the line, one per line, and prints
+        // nothing at all for an empty match nor for an inverted selection,
+        // which has no match to print (`grep -ov abc` is zero bytes and exit
+        // 0 where GNU's own -c still says 1). The line still counts as
+        // selected, which is what -c, -l and the exit status read.
+        if (!opts.invert && reGlobal !== null) {
+          reGlobal.lastIndex = 0
+          for (;;) {
+            const m = reGlobal.exec(line)
+            if (m === null) break
+            // A global regex that matched the empty string leaves lastIndex
+            // where it was, so exec would keep returning it.
+            if (m[0] === '') {
+              reGlobal.lastIndex += 1
+              continue
+            }
+            const fields = prefixOf(
+              opts.lineNumbers ? i + 1 : null,
+              byteOffsets ? matchOffset(start, line, m.index) : null,
+            )
+            results.push(fields + m[0])
+          }
+        }
       } else {
-        text = line
+        const fields = prefixOf(opts.lineNumbers ? i + 1 : null, byteOffsets ? start : null)
+        results.push(fields + line)
       }
-      const prefix = opts.lineNumbers ? `${String(i + 1)}:${text}` : text
-      results.push(prefix)
     }
     if (opts.maxCount !== null && count >= opts.maxCount) break
   }
   if (opts.countOnly) return [String(count)]
   if (opts.filesOnly) return count > 0 ? [path] : []
-  return results
+  return results.map(printable)
 }
 
 // Whether any `path:count` record has a nonzero count.
@@ -112,6 +166,16 @@ export interface GrepStreamOptions {
   countOnly: boolean
   afterContext: number
   beforeContext: number
+  // -b: prefix each printed line with the byte offset of its own start, or of
+  // the match itself under -o.
+  byteOffsets?: boolean
+  // The exit status follows the selected LINES, not the printed bytes: under
+  // -o a line whose only match is empty prints nothing and still exits 0, so
+  // a caller cannot derive the status from an empty stream. Given an
+  // IOResult, the generator reports selection on it the way grepInput does
+  // (1 to start, 0 as soon as a line is selected); left out, the caller
+  // keeps whatever it decides for itself.
+  io?: IOResult
 }
 
 export async function* grepStream(
@@ -120,12 +184,21 @@ export async function* grepStream(
   opts: GrepStreamOptions,
 ): AsyncIterable<Uint8Array> {
   const enc = new TextEncoder()
-  const dec = new TextDecoder('utf-8', { fatal: false })
+  if (opts.maxCount === 0) {
+    // GNU selects no line at all, context and all, and prints nothing for
+    // it: `grep -m0 -c a f` is zero bytes and exit 1, not `0`. Read before
+    // anything else because `matchCount >= 0` is already true, so the
+    // per-line check below would let the first selected line out first.
+    // `grepInput` and `grepLines` take the same early return.
+    if (opts.io !== undefined) opts.io.exitCode = 1
+    return
+  }
   const hasContext = opts.afterContext > 0 || opts.beforeContext > 0
   if (hasContext && !opts.countOnly && !opts.onlyMatching) {
     const allLines: string[] = []
     const iter = new AsyncLineIterator(source)
-    for await (const raw of iter) allLines.push(dec.decode(raw))
+    for await (const raw of iter) allLines.push(decodeLine(raw))
+    let printed = false
     for (const chunk of grepContextLines(
       allLines,
       pat,
@@ -134,50 +207,79 @@ export async function* grepStream(
       opts.maxCount,
       opts.afterContext,
       opts.beforeContext,
+      opts.byteOffsets === true,
     )) {
+      printed = true
       yield chunk
     }
+    // Context lines only ever accompany a selected line, so here emptiness
+    // and selection are the same fact.
+    if (opts.io !== undefined) opts.io.exitCode = printed ? 0 : 1
     return
   }
+  if (opts.io !== undefined) opts.io.exitCode = 1
   let matchCount = 0
   let lineNum = 0
+  const byteOffsets = opts.byteOffsets === true
+  // GNU counts bytes from the start of the input, the terminator the iterator
+  // strips included; the byte past a final unterminated line is never read.
+  let bytePos = 0
   const reGlobal = opts.onlyMatching
     ? new RegExp(pat.source, pat.flags.includes('g') ? pat.flags : pat.flags + 'g')
     : null
   const iter = new AsyncLineIterator(source)
   for await (const rawLine of iter) {
     lineNum += 1
-    const line = dec.decode(rawLine)
+    const lineStart = bytePos
+    bytePos += rawLine.byteLength + 1
+    const line = decodeLine(rawLine)
     const found = pat.test(line)
     const hit = opts.invert ? !found : found
     if (!hit) continue
-    if (opts.onlyMatching && !opts.invert && reGlobal !== null) {
-      reGlobal.lastIndex = 0
-      for (;;) {
-        const m = reGlobal.exec(line)
-        if (m === null) break
-        matchCount += 1
-        if (!opts.countOnly) yield enc.encode(m[0] + '\n')
-        if (opts.maxCount !== null && matchCount >= opts.maxCount) {
-          if (opts.countOnly) yield enc.encode(String(matchCount) + '\n')
-          return
+    if (opts.io !== undefined) opts.io.exitCode = 0
+    // The count is per selected LINE, never per match, which is what makes
+    // `grep -oc '[0-9]*'` on `ab` answer 1 the way GNU does: the empty match
+    // selects the line even though -o prints nothing for it. -m counts
+    // selected lines for the same reason.
+    matchCount += 1
+    if (!opts.countOnly) {
+      if (opts.onlyMatching) {
+        // GNU -o prints every match on the line, one per line, and prints
+        // nothing at all for an empty match nor for an inverted selection,
+        // which has no match to print (`grep -ov abc` is zero bytes where
+        // GNU's own -c still says 1).
+        if (!opts.invert && reGlobal !== null) {
+          reGlobal.lastIndex = 0
+          for (;;) {
+            const m = reGlobal.exec(line)
+            if (m === null) break
+            // A global regex that matched the empty string leaves lastIndex
+            // where it was, so exec would keep returning it and this
+            // generator would never finish.
+            if (m[0] === '') {
+              reGlobal.lastIndex += 1
+              continue
+            }
+            const fields = prefixOf(
+              opts.lineNumbers ? lineNum : null,
+              byteOffsets ? matchOffset(lineStart, line, m.index) : null,
+            )
+            yield encodeLine(fields + m[0] + '\n')
+          }
         }
+      } else if (opts.lineNumbers || byteOffsets) {
+        const fields = prefixOf(opts.lineNumbers ? lineNum : null, byteOffsets ? lineStart : null)
+        yield encodeLine(`${fields}${line}\n`)
+      } else {
+        const out = new Uint8Array(rawLine.byteLength + 1)
+        out.set(rawLine, 0)
+        out[rawLine.byteLength] = 0x0a
+        yield out
       }
-    } else {
-      matchCount += 1
-      if (!opts.countOnly) {
-        if (opts.lineNumbers) yield enc.encode(`${String(lineNum)}:${line}\n`)
-        else {
-          const out = new Uint8Array(rawLine.byteLength + 1)
-          out.set(rawLine, 0)
-          out[rawLine.byteLength] = 0x0a
-          yield out
-        }
-      }
-      if (opts.maxCount !== null && matchCount >= opts.maxCount) {
-        if (opts.countOnly) yield enc.encode(String(matchCount) + '\n')
-        return
-      }
+    }
+    if (opts.maxCount !== null && matchCount >= opts.maxCount) {
+      if (opts.countOnly) yield enc.encode(String(matchCount) + '\n')
+      return
     }
   }
   if (opts.countOnly) yield enc.encode(String(matchCount) + '\n')
@@ -195,6 +297,7 @@ export interface GrepFilesOnlyOptions {
   wholeWord: boolean
   basic: boolean
   filters?: WalkFilters
+  byteOffsets?: boolean
 }
 
 export async function grepRecursive(
@@ -214,6 +317,7 @@ export async function grepRecursive(
     filesOnly,
     onlyMatching: opts.onlyMatching,
     maxCount: opts.maxCount,
+    byteOffsets: opts.byteOffsets === true,
   }
   const results: string[] = []
   let entries: string[]
@@ -257,10 +361,7 @@ export async function grepRecursive(
     if (!fileAdmitted(entry, filters)) continue
     if (!filters.text && BINARY_EXTENSIONS.has(getExtension(entry) ?? '')) continue
     try {
-      const lines = new TextDecoder('utf-8', { fatal: false })
-        .decode(await readBytesFn(entry))
-        .split('\n')
-      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+      const lines = splitLines(decodeLine(await readBytesFn(entry)))
       const fileResults = grepLines(entry, lines, compiled, lineOpts)
       if (opts.countOnly) {
         if (fileResults.length > 0) results.push(`${entry}:${fileResults[0] ?? ''}`)
@@ -370,9 +471,12 @@ export async function grepFilesOnly(
     if (warnings !== null) warnings.push(operandError(path, err))
     return []
   }
-  const text = new TextDecoder('utf-8', { fatal: false }).decode(data)
-  const lines = text.split('\n')
-  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  const lines = splitLines(decodeLine(data))
+  if (opts.maxCount === 0) {
+    // GNU selects no line, so -l names nothing and -c prints nothing rather
+    // than a zero.
+    return []
+  }
   let count = 0
   for (const line of lines) {
     const found = compiled.test(line)

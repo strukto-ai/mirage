@@ -20,6 +20,7 @@ import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
+import { quoteText } from '../../quote.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 import { UsageError } from '../../errors.ts'
@@ -34,44 +35,50 @@ import {
 } from '../constants.ts'
 
 const ENC = new TextEncoder()
+const CHUNK_KIND_PREFIXES = ['l/', 'r/'] as const
 
 function parseBytesValue(value: string): number {
   const suffix = SPLIT_BYTE_SUFFIXES.find((u) => value.endsWith(u))
   const digits = suffix === undefined ? value : value.slice(0, -suffix.length)
   if (!SPLIT_COUNT_PATTERN.test(digits) || Number.parseInt(digits, 10) === 0) {
-    throw new UsageError(`split: invalid number of bytes: '${value}'`, 1)
+    throw new UsageError(`split: invalid number of bytes: '${quoteText(value)}'`, 1)
   }
   return Number.parseInt(digits, 10) * (suffix === undefined ? 1 : (SPLIT_BYTE_UNITS[suffix] ?? 1))
 }
 
 function parseLinesValue(value: string): number {
   if (!SPLIT_COUNT_PATTERN.test(value) || Number.parseInt(value, 10) === 0) {
-    throw new UsageError(`split: invalid number of lines: '${value}'`, 1)
+    throw new UsageError(`split: invalid number of lines: '${quoteText(value)}'`, 1)
   }
   return Number.parseInt(value, 10)
 }
 
-// A malformed head (the l/r kind letter or the K component) quotes the
-// whole spec; a malformed trailing N quotes only N (GNU).
+// GNU strips ONE leading `l/` or `r/` and then cuts what is left at its
+// FIRST slash into K and N: a K it cannot parse names the whole remainder,
+// and every other refusal names N, which is the rest of the spec however
+// many slashes that still holds. Measured on coreutils 9.4: `l/xé/4` names
+// `xé/4`, `2/3/4` and `l/2/3/4` name `3/4`, `l//4` names `/4`, `r/l/4`
+// names `l/4`, and `+l/2` and `x/3` name themselves because neither
+// carries a kind prefix. mirage used to name the whole spec for every
+// malformed head and credited that to 9.7; 9.4 disagrees, and so does the
+// accepted set -- a third component is N's problem, not a head component.
 function parseChunksValue(value: string): number {
-  const parts = value.split('/')
-  if (
-    parts
-      .slice(0, -1)
-      .some((part) => part !== 'l' && part !== 'r' && !SPLIT_COUNT_PATTERN.test(part))
-  ) {
-    throw new UsageError(`split: invalid number of chunks: '${value}'`, 1)
+  const prefix = CHUNK_KIND_PREFIXES.find((p) => value.startsWith(p))
+  const spec = prefix === undefined ? value : value.slice(prefix.length)
+  const slash = spec.indexOf('/')
+  if (slash >= 0 && !SPLIT_COUNT_PATTERN.test(spec.slice(0, slash))) {
+    throw new UsageError(`split: invalid number of chunks: '${quoteText(spec)}'`, 1)
   }
-  const tail = parts.at(-1) ?? value
-  if (!SPLIT_COUNT_PATTERN.test(tail) || Number.parseInt(tail, 10) === 0) {
-    throw new UsageError(`split: invalid number of chunks: '${tail}'`, 1)
+  const count = slash >= 0 ? spec.slice(slash + 1) : spec
+  if (!SPLIT_COUNT_PATTERN.test(count) || Number.parseInt(count, 10) === 0) {
+    throw new UsageError(`split: invalid number of chunks: '${quoteText(count)}'`, 1)
   }
-  return Number.parseInt(tail, 10)
+  return Number.parseInt(count, 10)
 }
 
 function parseSuffixLength(value: string): number {
   if (!SPLIT_COUNT_PATTERN.test(value)) {
-    throw new UsageError(`split: invalid suffix length: '${value}'`, 1)
+    throw new UsageError(`split: invalid suffix length: '${quoteText(value)}'`, 1)
   }
   // xstrtoumax overflow: past 2**64 - 1 GNU refuses the width at parse
   // time (byte and line counts saturate instead — a count bigger than the
@@ -79,18 +86,23 @@ function parseSuffixLength(value: string): number {
   // built into a file name).
   if (BigInt(value.trim().replace(/^\+/, '')) > UINTMAX) {
     throw new UsageError(
-      `split: invalid suffix length: '${value}': Value too large for defined data type`,
+      `split: invalid suffix length: '${quoteText(value)}': ` +
+        'Value too large for defined data type',
       1,
     )
   }
   return Number.parseInt(value, 10)
 }
 
+// The refused value is named through gnulib's quote() like every other word
+// split reports, and it comes FIRST in this clause where the four count
+// clauses put it last (measured on coreutils 9.4:
+// `split: 'x\303\251': invalid start value for numerical suffix`).
 function parseSuffixStart(value: string, hexMode: boolean, suffixLen: number): number {
   if (!(hexMode ? SPLIT_HEX_DIGITS : SPLIT_DIGITS).test(value)) {
     const kind = hexMode ? 'hexadecimal' : 'numerical'
     throw new UsageError(
-      `split: '${value}': invalid start value for ${kind} suffix${SPLIT_TRY_HELP}`,
+      `split: '${quoteText(value)}': invalid start value for ${kind} suffix${SPLIT_TRY_HELP}`,
       1,
     )
   }

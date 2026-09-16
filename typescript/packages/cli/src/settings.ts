@@ -15,17 +15,16 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { defaultTokenFile, readTokenFile } from '@struktoai/mirage-server/auth/storage'
 import {
   ALLOWED_KEYS,
   DaemonConfigError,
-  DEFAULT_ALLOWED_HOSTS,
   NUMERIC_KEYS,
-  defaultTokenFile,
-  mirageHome,
   parseDaemonTable,
   readDaemonTable,
-  readTokenFile,
-} from '@struktoai/mirage-server'
+} from '@struktoai/mirage-server/daemon_config'
+import { DEFAULT_ALLOWED_HOSTS } from '@struktoai/mirage-server/host_validation_constants'
+import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
 

@@ -67,5 +67,9 @@ describe('buildWorkspaceFromConfig', () => {
 
     expect(await workspace.fs.readFileText('/hello.txt')).toBe('hello')
     await workspace.close()
-  })
+
+    // 30s, not vitest's 5s default: `buildWorkspaceFromConfig` loads the
+    // mirage-node barrel through `await import()`, so that ~4.5s of module
+    // load is charged to this test body instead of the file's import phase.
+  }, 30_000)
 })

@@ -134,7 +134,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cp: invalid argument 'bogus' for '--update'\nValid arguments are:\n  - 'all'\n  - 'none'\n  - 'none-fail'\n  - 'older'\nTry 'cp --help' for more information.\n"
+        "stderr": "cp: invalid argument 'bogus' for '--update'\nValid arguments are:\n  - 'all'\n  - 'none'\n  - 'older'\nTry 'cp --help' for more information.\n"
       },
       "flags": [
         "update"

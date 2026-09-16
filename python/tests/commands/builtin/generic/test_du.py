@@ -876,3 +876,24 @@ async def test_du_names_a_directory_the_walk_could_not_open():
         b"du: cannot access 'gone': No such file or directory\n"
         b"du: cannot read directory 't/sealed': Permission denied\n")
     assert out.exit_code == 1
+
+
+# GNU names the refused depth through gnulib's quote(), so a byte outside
+# 0x20-0x7e comes back escaped rather than interpolated raw. Rows measured
+# against GNU coreutils 9.4 under `LC_ALL=C` with a raw `bytes` argv
+# (`du --max-depth=<w>`). Mirrored in du.test.ts.
+@pytest.mark.parametrize("value,escaped", [
+    ("1é", r"1\303\251"),
+    ("1\r", r"1\r"),
+    ("1\x01", r"1\001"),
+    ("1\x7f", r"1\177"),
+    ("1'", r"1\'"),
+    ("1\\", r"1\\"),
+    ("", ""),
+])
+def test_max_depth_refusal_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_flags(s=False, a=False, h=False, c=False, max_depth=value)
+    assert str(
+        exc.value).startswith(f"du: invalid maximum depth '{escaped}'\n")
+    assert exc.value.exit_code == 1

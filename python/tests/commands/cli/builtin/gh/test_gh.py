@@ -523,3 +523,35 @@ async def test_view_renders_text_not_the_rest_object():
     out, _io = await view(_inv(["integ/x"]))
     assert await materialize(
         out) == b"name:\tinteg/x\ndescription:\thi\n--\nbody\n"
+
+
+@pytest.mark.asyncio
+async def test_api_renders_non_ascii_as_raw_utf8():
+    # `json_out` (accessor.py) used to default to ensure_ascii, so
+    # `Café` reached stdout as `"Café"` where `JSON.stringify`
+    # emits the raw UTF-8 bytes.
+    RESPONSES.append(ApiResponse({"name": "Café", "city": "東京"}, 200, {}))
+    out, _io = await api(_inv(["x"]))
+    printed = (await materialize(out)).decode()
+    assert '"Café"' in printed
+    assert '"東京"' in printed
+    assert "\\u" not in printed
+
+
+@pytest.mark.asyncio
+async def test_api_renders_non_ascii_across_pages_as_raw_utf8():
+    # The multi-page render has its own json.dumps, so it needed the
+    # same fix as the single-page one.
+    RESPONSES.extend([
+        ApiResponse([{
+            "name": "Café"
+        }], 200, {"link": '<http://fake/items?page=2>; rel="next"'}),
+        ApiResponse([{
+            "name": "東京"
+        }], 200, {}),
+    ])
+    out, _io = await api(_inv(["items"], {"paginate": True}))
+    printed = (await materialize(out)).decode()
+    assert '"Café"' in printed
+    assert '"東京"' in printed
+    assert "\\u" not in printed

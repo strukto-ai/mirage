@@ -194,7 +194,6 @@ class MirageShellProcess implements ShellProcess {
 
   private readonly controller: AbortController
   private readonly console: JobConsole
-  private readonly budget: number
   private readonly spill: SpillSink | null
   private readonly sandboxInfo: ShellSandboxInfo | undefined
   private readonly consumed: Promise<void>
@@ -214,7 +213,6 @@ class MirageShellProcess implements ShellProcess {
   ) {
     this.controller = controller
     this.console = console_
-    this.budget = budget
     this.pending = new TailBuffer(budget)
     this.spill = spill
     this.sandboxInfo = sandboxInfo

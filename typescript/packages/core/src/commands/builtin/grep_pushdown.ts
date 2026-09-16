@@ -15,8 +15,8 @@
 import type { PathSpec } from '../../types.ts'
 import { PatternType } from './constants.ts'
 import { hasUnresolvedGlob } from './utils/operands.ts'
-import { breToRegExp } from '../../utils/bre.ts'
-import { type FlagValue } from '../spec/types.ts'
+import { breSource } from './grep_pattern.ts'
+import { FlagView, type FlagValue } from '../spec/types.ts'
 
 // Classify a grep pattern for API push-down decisions.
 export function classifyPattern(pattern: string, fixedString: boolean): PatternType {
@@ -126,7 +126,7 @@ export function extractRequiredLiteral(pattern: string): string | null {
 export function searchQuery(pattern: string, fixedString: boolean, basic = false): string | null {
   if (pattern.includes('\n')) return null
   if (isLiteralPattern(pattern, fixedString)) return pattern
-  return extractRequiredLiteral(basic ? breToRegExp(pattern) : pattern)
+  return extractRequiredLiteral(basic ? breSource(pattern) : pattern)
 }
 
 // Whether the pattern is searched verbatim, with no regex extraction.
@@ -143,6 +143,7 @@ export function isLiteralPattern(pattern: string, fixedString: boolean): boolean
 const PUSHDOWN_SHAPING_BOOL = [
   'v',
   'n',
+  'byte_offset',
   'c',
   'args_l',
   'w',
@@ -154,18 +155,17 @@ const PUSHDOWN_SHAPING_BOOL = [
   'text',
 ] as const
 const PUSHDOWN_SHAPING_INT = ['m', 'A', 'B', 'C'] as const
-const PUSHDOWN_FILTER = [
-  'type',
-  'glob',
-  'include',
-  'exclude',
-  'exclude_dir',
-  'binary_files',
-] as const
+// Split the way Python's `_PUSHDOWN_FILTER_STR` / `_PUSHDOWN_FILTER_LIST`
+// are, because the two halves are tested differently: a repeatable option
+// arrives as a list and an empty list means "not supplied", while a
+// single-valued one arrives as a string. One flat list tested with
+// `!== undefined` answered differently from Python for both.
+const PUSHDOWN_FILTER_STR = ['type', 'glob', 'binary_files'] as const
+const PUSHDOWN_FILTER_LIST = ['include', 'exclude', 'exclude_dir'] as const
 
 // True when a flag alters the match set or output shape of grep/rg. A search
 // push-down prints each matching record as one whole line, so it cannot honor
-// -v/-n/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), nor rg's
+// -v/-n/-b/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), nor rg's
 // file-filtering --glob/--type; the wrapper must defer to the generic scan
 // when any is present.
 //
@@ -178,14 +178,18 @@ const PUSHDOWN_FILTER = [
 // honors whatever that local scan implements. Everything left out of the list
 // still defers, which is what keeps the exemption honest.
 export function hasSearchShapingFlags(
-  flags: Record<string, FlagValue>,
+  bag: Record<string, FlagValue>,
   honored: readonly string[] = [],
 ): boolean {
+  // Spec-less on purpose, as Python's `FlagView(flags)` is: the shared key
+  // set has to work for both the grep and the rg spec, and rg simply never
+  // sets the grep-only keys.
+  const fl = new FlagView(bag)
   const gated = (name: string): boolean => !honored.includes(name)
-  if (PUSHDOWN_SHAPING_BOOL.some((name) => gated(name) && flags[name] === true)) return true
-  if (PUSHDOWN_SHAPING_INT.some((name) => gated(name) && typeof flags[name] === 'string'))
-    return true
-  return PUSHDOWN_FILTER.some((name) => gated(name) && flags[name] !== undefined)
+  if (PUSHDOWN_SHAPING_BOOL.some((name) => gated(name) && fl.asBool(name))) return true
+  if (PUSHDOWN_SHAPING_INT.some((name) => gated(name) && fl.asInt(name) !== undefined)) return true
+  if (PUSHDOWN_FILTER_LIST.some((name) => gated(name) && fl.asList(name).length > 0)) return true
+  return PUSHDOWN_FILTER_STR.some((name) => gated(name) && fl.asStr(name) !== undefined)
 }
 
 // True when a literal-substring push-down (LIKE/ILIKE) faithfully reproduces
@@ -193,9 +197,9 @@ export function hasSearchShapingFlags(
 // list (-F with multiple -e) is a set of independent alternatives LIKE cannot
 // express, so it stays on the generic path. Backends that push a real regex
 // down (mongodb) gate on hasSearchShapingFlags alone instead.
-export function searchPushdownOk(flags: Record<string, FlagValue>, pattern: string): boolean {
+export function searchPushdownOk(bag: Record<string, FlagValue>, pattern: string): boolean {
   if (pattern.includes('\n')) return false
-  return isLiteralPattern(pattern, flags.F === true) && !hasSearchShapingFlags(flags)
+  return isLiteralPattern(pattern, new FlagView(bag).asBool('F')) && !hasSearchShapingFlags(bag)
 }
 
 // The one operand a search push-down may answer for, or null. A push-down
@@ -221,12 +225,12 @@ export function loneOperand(paths: PathSpec[]): PathSpec | null {
 // with several -e) is a set of independent alternatives it cannot express.
 export function pushdownOperand(
   paths: PathSpec[],
-  flags: Record<string, FlagValue>,
+  bag: Record<string, FlagValue>,
   pattern: string | null,
   honored: readonly string[] = [],
 ): PathSpec | null {
   if (pattern === null || pattern.includes('\n')) return null
-  if (hasSearchShapingFlags(flags, honored)) return null
+  if (hasSearchShapingFlags(bag, honored)) return null
   return loneOperand(paths)
 }
 
@@ -236,10 +240,10 @@ export function pushdownOperand(
 // only a verbatim pattern may push down.
 export function literalPushdownOperand(
   paths: PathSpec[],
-  flags: Record<string, FlagValue>,
+  bag: Record<string, FlagValue>,
   pattern: string | null,
 ): PathSpec | null {
-  if (pattern === null || !searchPushdownOk(flags, pattern)) return null
+  if (pattern === null || !searchPushdownOk(bag, pattern)) return null
   return loneOperand(paths)
 }
 

@@ -22,8 +22,14 @@ import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { type PathSpec, ResourceName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { formatRecords } from '../utils/output.ts'
-import { formatWcLines, wcGeneric, type WcRow } from '../generic/wc.ts'
+import {
+  formatCountRows,
+  parseFlags as parseWcFlags,
+  wcGeneric,
+  type WcRow,
+} from '../generic/wc.ts'
+
+const ENC = new TextEncoder()
 
 const resolveGlob = resolveGlobOf(POSTGRES_IO)
 
@@ -41,14 +47,17 @@ async function wcCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const f = opts.flags
+  const parsed = parseWcFlags(opts.flags)
+  if (typeof parsed === 'string') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  }
   const resolved =
     paths.length > 0 ? await resolveGlob(accessor, paths, opts.index ?? undefined) : []
   // Line counts on tables/views come from a server-side COUNT(*) instead of
   // reading every row. -l only (default prints words and bytes too, which
   // needs the content).
   const countOnly =
-    f.args_l === true && f.w !== true && f.c !== true && f.m !== true && f.L !== true
+    parsed.lines && !parsed.words && !parsed.bytes && !parsed.chars && !parsed.maxLineLength
   if (countOnly && resolved.length > 0 && resolved.every((p) => rowsScope(p) !== null)) {
     const rows: WcRow[] = []
     let total = 0
@@ -56,11 +65,10 @@ async function wcCommand(
       const scope = rowsScope(p)
       if (scope === null) continue
       const count = await countRows(accessor, scope.schema, scope.entity)
-      rows.push({ values: [count], label: p.virtual })
+      rows.push({ values: [count], label: p.rawPath })
       total += count
     }
-    if (resolved.length > 1) rows.push({ values: [total], label: 'total' })
-    const out: ByteSource = formatRecords(formatWcLines(rows))
+    const out: ByteSource | null = formatCountRows(rows, [total], resolved.length, parsed.total)
     return [out, new IOResult()]
   }
   return wcGeneric(resolved, texts, opts, (p) => readStream(accessor, p, opts.index ?? undefined))

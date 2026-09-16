@@ -73,6 +73,43 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "tail_n_quotes_a_multibyte_word",
+      "seq": 960021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -n '1é' /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: invalid number of lines: '1\\303\\251'\n"
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

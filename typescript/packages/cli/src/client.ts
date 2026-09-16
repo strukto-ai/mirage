@@ -16,14 +16,10 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, openSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
-import {
-  AuthMode,
-  defaultTokenFile,
-  ensureTokenFile,
-  mirageHome,
-  readDaemonTable,
-  validateDaemonTable,
-} from '@struktoai/mirage-server'
+import { AuthMode } from '@struktoai/mirage-server/auth/config'
+import { defaultTokenFile, ensureTokenFile } from '@struktoai/mirage-server/auth/storage'
+import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/daemon_config'
+import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
 import type { DaemonSettings } from './settings.ts'

@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { UsageError } from '../../errors.ts'
 import { PathSpec, type ReaddirFn } from '../../../types.ts'
 import { rekey } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { argmatchError } from '../../spec/usage.ts'
 
 // GNU version-control names (each canonical control has a legacy alias).
 const BACKUP_CONTROLS: Readonly<Record<string, string>> = Object.freeze({
@@ -28,6 +28,15 @@ const BACKUP_CONTROLS: Readonly<Record<string, string>> = Object.freeze({
   numbered: 'numbered',
   t: 'numbered',
 })
+
+// The same controls as ARGMATCH candidates, aliases of one value on one
+// line, which is how gnulib's `argmatch_valid` prints `backup_args`.
+const BACKUP_ARGS: readonly (readonly string[])[] = [
+  ['none', 'off'],
+  ['simple', 'never'],
+  ['existing', 'nil'],
+  ['numbered', 't'],
+]
 
 const NUMBERED_SUFFIX = /^\.~(\d+)~$/
 
@@ -45,19 +54,16 @@ export function backupControl(
 ): string | null {
   const enabled = value !== undefined && value !== false
   if (!enabled && suffix === null) return null
-  if (typeof value === 'string') {
+  // An EMPTY control is the default, not a refusal: gnulib's
+  // `xget_version` only calls argmatch when `version && *version`, so
+  // `cp --backup=` is `cp --backup` (measured on coreutils 9.4: exit 0,
+  // and it writes the `existing` backup). This is the one argmatch-shaped
+  // slot in the repo where the empty word is neither invalid nor
+  // ambiguous.
+  if (typeof value === 'string' && value !== '') {
     const control = BACKUP_CONTROLS[value]
     if (control === undefined) {
-      throw new UsageError(
-        `${cmdName}: invalid argument '${value}' for 'backup type'\n` +
-          'Valid arguments are:\n' +
-          "  - 'none', 'off'\n" +
-          "  - 'simple', 'never'\n" +
-          "  - 'existing', 'nil'\n" +
-          "  - 'numbered', 't'\n" +
-          `Try '${cmdName} --help' for more information.`,
-        1,
-      )
+      throw argmatchError(cmdName, 'backup type', value, BACKUP_ARGS, 1)
     }
     return control
   }

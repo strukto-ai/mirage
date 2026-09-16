@@ -14,6 +14,9 @@
 
 import re
 
+from mirage.commands.builtin.grep_offsets import (encode_line, line_offsets,
+                                                  prefix_of)
+
 _SEPARATOR = b"--\n"
 
 
@@ -25,8 +28,37 @@ def grep_context_lines(
     max_count: int | None,
     after_context: int,
     before_context: int,
+    byte_offsets: bool = False,
 ) -> list[bytes]:
+    """Render selected lines with their context, GNU's separators included.
+
+    Args:
+        lines (list[str]): the whole input, terminators stripped.
+        pat (re.Pattern[str]): the compiled pattern.
+        invert (bool): -v, select the lines that do not match.
+        line_numbers (bool): -n, prefix each line with its number.
+        max_count (int | None): -m, stop after this many selected lines.
+        after_context (int): -A, trailing context lines.
+        before_context (int): -B, leading context lines.
+        byte_offsets (bool): -b, prefix each line with the byte offset of
+            its own start. A context line renders it with ``-`` like
+            every other field, and the ``--`` group separator carries no
+            fields at all. The offsets are derived from the lines because
+            this renderer is handed text rather than bytes, which is
+            exact only for text that came through ``decode_line`` -- so
+            that is what a caller must hand over. The rendered line is
+            put back with ``encode_line``, so a byte that is not valid
+            UTF-8 prints as GNU prints it rather than as U+FFFD.
+    """
+    if max_count == 0:
+        # GNU selects no line at all under -m0, context and all, so there
+        # is nothing to group and nothing to print. Read before the scan
+        # because `len(match_indices) >= 0` is already true, so the check
+        # below would keep the first selected line. `grep_input` and both
+        # scans in `grep_scan` take the same early return.
+        return []
     total = len(lines)
+    offsets = line_offsets(lines) if byte_offsets else []
     match_indices: list[int] = []
     for idx, line in enumerate(lines):
         hit = bool(pat.search(line))
@@ -34,7 +66,7 @@ def grep_context_lines(
             hit = not hit
         if hit:
             match_indices.append(idx)
-            if max_count and len(match_indices) >= max_count:
+            if max_count is not None and len(match_indices) >= max_count:
                 break
 
     if not match_indices:
@@ -70,9 +102,8 @@ def grep_context_lines(
             result.append(_SEPARATOR)
         for ln in group:
             line = lines[ln]
-            if line_numbers:
-                sep = ":" if ln in match_set else "-"
-                result.append(f"{ln + 1}{sep}{line}\n".encode())
-            else:
-                result.append(f"{line}\n".encode())
+            fields = prefix_of(ln + 1 if line_numbers else None,
+                               offsets[ln] if byte_offsets else None, ln
+                               in match_set)
+            result.append(encode_line(f"{fields}{line}\n"))
     return result

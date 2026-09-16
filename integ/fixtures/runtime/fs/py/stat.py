@@ -3,8 +3,7 @@ from pathlib import Path
 
 root = os.getenv('MIRAGE_TEST_ROOT', '/data')
 file = os.stat(root + '/seed.txt')
-assert file.st_size == file[6]
-assert file.st_mode == file[0]
+assert file.st_nlink == 1
 assert Path(root + '/seed.txt').stat().st_size == file.st_size
 assert Path(root + '/seed.txt').is_file()
 assert Path(root + '/sub').is_dir()

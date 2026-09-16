@@ -15,7 +15,14 @@
 import { describe, expect, it } from 'vitest'
 import { specOf } from './builtins.ts'
 import { parseCommand, parseToKwargs } from './parser.ts'
-import { CommandSpec, Operand, Option, ParsedArgs } from './types.ts'
+import {
+  CommandSpec,
+  FlagView,
+  Operand,
+  Option,
+  ParsedArgs,
+  VALUE_OCCURRENCES_KEY,
+} from './types.ts'
 
 describe('parseCommand — bool short flags', () => {
   const spec = new CommandSpec({
@@ -473,6 +480,94 @@ describe('parseToKwargs', () => {
   it('maps -1 to args_1 (numeric flag, not a valid JS identifier)', () => {
     const parsed = new ParsedArgs({ flags: { '-1': true }, args: [] })
     expect(parseToKwargs(parsed)).toEqual({ args_1: true })
+  })
+})
+
+// The per-occurrence record beside the bag. It exists because last-wins
+// throws a value away, and GNU validates every value as getopt hands it
+// over, so a command refusing the leftmost bad one (nl) needs the value the
+// bag dropped.
+describe('parseCommand — value occurrences', () => {
+  it('records every scalar occurrence in scan order', () => {
+    const parsed = parseCommand(specOf('nl'), ['-w', 'abc', '-v', 'xyz', '-w', '3'], '/')
+    expect(parsed.valueOccurrences).toEqual([
+      ['--number-width', 'abc'],
+      ['--starting-line-number', 'xyz'],
+      ['--number-width', '3'],
+    ])
+    // The bag is untouched: still one value per dest, still last-wins.
+    expect(parsed.flags['--number-width']).toBe('3')
+  })
+
+  it('folds both spellings of one option onto one dest', () => {
+    const parsed = parseCommand(specOf('nl'), ['--number-width=abc', '-w', '3'], '/')
+    expect(parsed.valueOccurrences).toEqual([
+      ['--number-width', 'abc'],
+      ['--number-width', '3'],
+    ])
+  })
+
+  it('skips an accumulating option, whose own list is the record', () => {
+    const parsed = parseCommand(specOf('grep'), ['-e', 'foo', '-e', 'bar', '/a.txt'], '/')
+    expect(parsed.valueOccurrences).toEqual([])
+    expect(parsed.flags['-e']).toEqual(['foo', 'bar'])
+  })
+
+  it('skips boolean flags', () => {
+    const parsed = parseCommand(specOf('grep'), ['-i', '-v', 'pat'], '/')
+    expect(parsed.valueOccurrences).toEqual([])
+  })
+
+  // Every command parses through this machinery, so an unconditional extra
+  // key would land in every handler's flag bag. A line that typed each
+  // scalar option once has lost nothing: the bag is already the record, in
+  // scan order.
+  it('leaves the kwargs bag unchanged when no scalar option repeats', () => {
+    const parsed = parseCommand(specOf('nl'), ['-w', '3', '-v', '5'], '/')
+    expect(parseToKwargs(parsed)).toEqual({ number_width: '3', starting_line_number: '5' })
+  })
+
+  it('carries the record in the kwargs bag once a scalar repeats', () => {
+    const parsed = parseCommand(specOf('nl'), ['-w', 'abc', '-w', '3'], '/')
+    expect(parseToKwargs(parsed)).toEqual({
+      number_width: '3',
+      [VALUE_OCCURRENCES_KEY]: ['number_width', 'abc', 'number_width', '3'],
+    })
+  })
+
+  it('reads the record back as typed pairs', () => {
+    const parsed = parseCommand(specOf('nl'), ['-w', 'abc', '-v', 'xyz', '-w', '3'], '/')
+    const fl = new FlagView(parseToKwargs(parsed), specOf('nl'))
+    expect(fl.valueOccurrences('number_width', 'starting_line_number')).toEqual([
+      ['number_width', 'abc'],
+      ['starting_line_number', 'xyz'],
+      ['number_width', '3'],
+    ])
+    // Names the caller did not ask about are dropped, positions kept.
+    expect(fl.valueOccurrences('starting_line_number')).toEqual([['starting_line_number', 'xyz']])
+  })
+
+  it('falls back to the bag when nothing repeated', () => {
+    const parsed = parseCommand(specOf('nl'), ['-v', 'xyz', '-w', 'abc'], '/')
+    const kwargs = parseToKwargs(parsed)
+    expect(VALUE_OCCURRENCES_KEY in kwargs).toBe(false)
+    const fl = new FlagView(kwargs, specOf('nl'))
+    expect(fl.valueOccurrences('number_width', 'starting_line_number')).toEqual([
+      ['starting_line_number', 'xyz'],
+      ['number_width', 'abc'],
+    ])
+  })
+
+  it('leaves another option family alone when a repeat arrives', () => {
+    const parsed = parseCommand(
+      specOf('grep'),
+      ['-e', 'a', '-e', 'b', '-m', '1', '-m', '2', 'x'],
+      '/',
+    )
+    const kwargs = parseToKwargs(parsed)
+    expect(kwargs.e).toEqual(['a', 'b'])
+    expect(kwargs.m).toBe('2')
+    expect(kwargs[VALUE_OCCURRENCES_KEY]).toEqual(['m', '1', 'm', '2'])
   })
 })
 
@@ -1160,5 +1255,53 @@ describe('parseCommand — remainder (argparse nargs=REMAINDER)', () => {
     expect(p.flags['--module']).toBe(true)
     expect(p.flags['-e']).toBe('CODE')
     expect(p.texts()).toEqual(['a'])
+  })
+})
+
+// A boolean long handed a value is reported as its own kind, not as an
+// unrecognized option: getopt_long recognized the option and refused the value.
+// The entry carries the CANONICAL spelling plus the typed value, because GNU
+// names the canonical one even for an abbreviation.
+describe('a boolean long handed a value', () => {
+  it.each<[string[], string]>([
+    [['--byte-offset=2', 'x'], '--byte-offset=2'],
+    // Measured: `grep --byte=2` answers for `--byte-offset`.
+    [['--byte=2', 'x'], '--byte-offset=2'],
+    [['--line-buffered=', 'x'], '--line-buffered='],
+  ])('reports %j as its own kind', (argv, token) => {
+    const parsed = parseCommand(specOf('grep'), argv, '/')
+    expect(parsed.invalidOptions).toEqual([token])
+    expect(parsed.optionErrorKinds).toEqual(['unexpected_value'])
+  })
+
+  // The control: the two reports must not collapse into one. `grep --bogus=2`
+  // is `unrecognized option '--bogus=2'` with the value quoted, which is a
+  // different GNU message.
+  it('leaves an undeclared long unrecognized', () => {
+    const parsed = parseCommand(specOf('grep'), ['--bogus=2', 'x'], '/')
+    expect(parsed.invalidOptions).toEqual(['--bogus=2'])
+    expect(parsed.optionErrorKinds).toEqual(['invalid'])
+  })
+
+  // A control: only a BOOLEAN long refuses `=value`.
+  it('leaves a value long alone', () => {
+    const parsed = parseCommand(specOf('nl'), ['--number-width=3'], '/')
+    expect(parsed.invalidOptions).toEqual([])
+    expect(parsed.optionErrorKinds).toEqual([])
+  })
+
+  // GNU stops at the first offending token, so order decides.
+  it.each<[string[], string[]]>([
+    [
+      ['--bogus', '--byte-offset=2'],
+      ['invalid', 'unexpected_value'],
+    ],
+    [
+      ['--byte-offset=2', '--bogus'],
+      ['unexpected_value', 'invalid'],
+    ],
+  ])('keeps scan order for %j', (argv, kinds) => {
+    const parsed = parseCommand(specOf('grep'), [...argv, 'x'], '/')
+    expect(parsed.optionErrorKinds).toEqual(kinds)
   })
 })

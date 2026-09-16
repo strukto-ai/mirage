@@ -1,6 +1,7 @@
 import pytest
 
-from mirage.commands.builtin.generic.tail import tail
+from mirage.commands.builtin.generic.tail import parse_flags, tail
+from mirage.commands.errors import UsageError
 
 
 async def _drain(gen):
@@ -282,3 +283,113 @@ async def test_tail_from_byte_passes_later_chunks_through_untouched():
 
     chunks = [c async for c in tail(src(), from_byte=3)]
     assert chunks == [b"c", b"defgh", b"ij"]
+
+
+# Both of tail's own flag refusals name the refused word through gnulib's
+# quote(), so a byte outside 0x20-0x7e comes back escaped rather than
+# interpolated raw. Every row measured against GNU coreutils 9.4 under
+# `LC_ALL=C` with a raw `bytes` argv (`tail --follow=<w>`, `tail -s <w>`).
+# Mirrored in tail.test.ts.
+QUOTED_WORDS = [
+    ("xé", r"x\303\251"),
+    ("x\r", r"x\r"),
+    ("x\x01", r"x\001"),
+    ("x\x7f", r"x\177"),
+    ("x'", r"x\'"),
+    ("x\\", r"x\\"),
+]
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_WORDS)
+def test_follow_refusal_quotes_the_word(value, escaped):
+    with pytest.raises(UsageError) as exc:
+        parse_flags({"follow": value})
+    assert str(
+        exc.value) == (f"tail: invalid argument '{escaped}' for '--follow'\n"
+                       "Valid arguments are:\n"
+                       "  - 'descriptor'\n"
+                       "  - 'name'\n"
+                       "Try 'tail --help' for more information.")
+    assert exc.value.exit_code == 1
+
+
+def test_an_empty_follow_is_ambiguous():
+    """`tail --follow=` is `ambiguous argument ''`, exit 1 (measured)."""
+    with pytest.raises(UsageError) as exc:
+        parse_flags({"follow": ""})
+    assert str(
+        exc.value).startswith("tail: ambiguous argument '' for '--follow'\n")
+    assert exc.value.exit_code == 1
+
+
+@pytest.mark.parametrize("value,escaped", QUOTED_WORDS)
+def test_sleep_interval_refusal_quotes_the_word(value, escaped):
+    with pytest.raises(ValueError) as exc:
+        parse_flags({"sleep_interval": f"1{value}"})
+    assert str(
+        exc.value) == (f"tail: invalid number of seconds: '1{escaped}'\n")
+
+
+def test_sleep_interval_refusal_quotes_an_empty_word():
+    with pytest.raises(ValueError) as exc:
+        parse_flags({"sleep_interval": ""})
+    assert str(exc.value) == "tail: invalid number of seconds: ''\n"
+
+
+# `-s` is `xstrtod` plus `0 <= s`, and the two halves answer separately.
+# Every row measured on GNU coreutils 9.4 with a raw `bytes` argv
+# (`tail -s <v> f`). Mirrored in tail.test.ts.
+@pytest.mark.parametrize("value", [
+    " 1",
+    "\r1",
+    "\t1",
+    "+1",
+    ".5",
+    "1.",
+    "1e2",
+    "+.5e1",
+    "0x10",
+    "0x1p4",
+    "0x.8p1",
+    "0x10.8",
+    "inf",
+    "infinity",
+    "INF",
+    "00",
+])
+def test_sleep_interval_accepts_every_strtod_spelling(value):
+    """strtod takes LEADING whitespace, hex floats and `inf` (exit 0)."""
+    assert parse_flags({"sleep_interval": value}).interval >= 0
+
+
+@pytest.mark.parametrize("value", [
+    "1\r",
+    "1 ",
+    "1\t",
+    "",
+    "1_0",
+    "1x",
+    "0x",
+    "1e",
+    "1e+",
+    "1,5",
+    ".",
+    "1.5.5",
+    "0xp1",
+    "inf inity",
+    "-1",
+    "nan",
+    "NAN",
+    "nan(x)",
+])
+def test_sleep_interval_refuses_what_gnu_refuses(value):
+    """TRAILING whitespace is not strtod's, and `0 <= nan` is false.
+
+    `tail -s $'1\r'` was accepted by both hosts before this, because
+    python's `float()` and JavaScript's `Number()` both strip trailing
+    whitespace where `xstrtod` demands the whole string be consumed.
+    `nan` parses and is then refused by GNU's own `0 <= s`, while `inf`
+    passes both.
+    """
+    with pytest.raises(ValueError):
+        parse_flags({"sleep_interval": value})

@@ -95,3 +95,30 @@ describe('NEVER_MATCH', () => {
     expect(pat.test('anything')).toBe(false)
   })
 })
+
+describe('ASCII semantics for word boundaries and case folding', () => {
+  // Every row measured against GNU grep 3.11 under LC_ALL=C, which is the
+  // locale mirage renders in: `grep -w ab` on `éab` and `grep -w a` on `aé`
+  // both select the line, while `grep -i k` on U+212A and `grep -i s` on
+  // U+017F select nothing. A non-`u` RegExp already answers GNU's way; the
+  // python twin needs `re.ASCII` to, and this pins the pair together.
+  it.each([
+    ['ab', 'éab', false, true, true],
+    ['a', 'aé', false, true, true],
+    ['k', 'K', true, false, false],
+    ['s', 'ſ', true, false, false],
+    ['ab', 'xab', false, true, false],
+    ['k', 'K', true, false, true],
+  ])('%j on %j', (pattern, subject, ignoreCase, wholeWord, selected) => {
+    const pat = compilePattern(pattern, ignoreCase, false, wholeWord, true)
+    expect(pat.test(subject)).toBe(selected)
+  })
+
+  it('keeps the word class ASCII in an extended expression', () => {
+    // -E takes the same compile, so `\w` must not grow a Unicode meaning
+    // there either.
+    const pat = compilePattern('\\w', false, false, false, false)
+    expect(pat.test('é')).toBe(false)
+    expect(pat.test('a')).toBe(true)
+  })
+})

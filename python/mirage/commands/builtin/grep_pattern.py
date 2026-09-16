@@ -15,11 +15,11 @@
 import re
 from collections.abc import Awaitable, Callable, Sequence
 
+from mirage.commands.builtin.utils.bre import BreError, translate_bre
 from mirage.commands.builtin.utils.wrap import call_read_bytes
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import FlagView
 from mirage.types import PathSpec
-from mirage.utils.bre import bre_to_python
 from mirage.utils.key_prefix import mount_prefix_of
 
 NEVER_MATCH = r"(?!)"
@@ -111,6 +111,35 @@ def merge_pattern_list(
     return "\n".join(parts)
 
 
+def bre_source(part: str) -> str:
+    """One basic expression as grep reads it, or grep's refusal.
+
+    The shared translator that `expr` and `nl` compile their patterns
+    with, asked for grep's dialect: the two GNU dialects agree on every
+    construct measured except an inverted range, which grep refuses
+    (`grep '[z-a]'` is `Invalid range end`) where the other two read it
+    as an empty set.
+
+    A refusal is glibc's `regerror` string verbatim, which is what GNU
+    prints, and exits 2 as grep does rather than letting the host
+    engine's own wording out (`missing ), unterminated subpattern at
+    position 0` was what `grep '\\('` used to say).
+
+    Args:
+        part (str): a single basic expression from the pattern list.
+
+    Returns:
+        str: the host regex source for that expression.
+
+    Raises:
+        UsageError: the pattern is one glibc's compiler would refuse.
+    """
+    try:
+        return translate_bre(part, True)[0]
+    except BreError as exc:
+        raise UsageError(f"grep: {exc}") from exc
+
+
 def _source_of(part: str, fixed_string: bool, basic: bool) -> str:
     """One pattern's regex source, in the syntax it was written in.
 
@@ -122,7 +151,7 @@ def _source_of(part: str, fixed_string: bool, basic: bool) -> str:
     """
     if fixed_string:
         return re.escape(part)
-    return bre_to_python(part) if basic else part
+    return bre_source(part) if basic else part
 
 
 def build_pattern_str(
@@ -178,6 +207,13 @@ def compile_pattern(
         whole_word (bool): True if -w flag is set.
         basic (bool): True for a basic regular expression.
     """
-    flags = re.IGNORECASE if ignore_case else 0
+    # `re.ASCII` because GNU's word boundary and its case folding are the
+    # ASCII ones under `LC_ALL=C` while python's defaults are Unicode, and
+    # because a non-`u` RegExp is ASCII for both, so the TypeScript twin
+    # was already answering GNU's way. Without it `grep -w ab` matched
+    # `éab`, `grep -w a` matched `aé`, and `grep -i k` and
+    # `grep -i s` matched U+212A and U+017F. `compile_bre` in
+    # `utils/bre.py` already passes it; this was grep's own gap.
+    flags = re.ASCII | (re.IGNORECASE if ignore_case else 0)
     return re.compile(
         build_pattern_str(pattern, fixed_string, whole_word, basic), flags)

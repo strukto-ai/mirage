@@ -31,7 +31,7 @@ import { resolveGlobOf, type CommandIO } from './adapter.ts'
 
 export type QualifyFn = (
   paths: PathSpec[],
-  flags: Record<string, FlagValue>,
+  bag: Record<string, FlagValue>,
   pattern: string | null,
 ) => PathSpec | null
 

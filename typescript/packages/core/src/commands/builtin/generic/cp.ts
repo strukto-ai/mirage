@@ -28,7 +28,7 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
-import { extraOperandError } from '../../spec/usage.ts'
+import { argmatchError, extraOperandError } from '../../spec/usage.ts'
 import type { FlagView } from '../../spec/types.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
 import { backupControl, backupTarget } from '../utils/backup.ts'
@@ -48,6 +48,13 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 const ENC = new TextEncoder()
 
 const UPDATE_MODES = ['all', 'none', 'none-fail', 'older'] as const
+// What GNU 9.4 lists back for `--update=x`, which is what every
+// expectation in this change is measured against. `none-fail` is a 9.5
+// addition; mirage accepts it (cp implements its `not replacing` refusal
+// and mv's --exchange conflict names it), so the accepted set is 9.5's
+// while the list printed is 9.4's. Move it into this tuple the day the
+// rest of the repo is re-pinned to 9.5.
+const UPDATE_ARGS = ['all', 'none', 'older'] as const
 
 export interface CpFlags {
   recursive: boolean
@@ -110,16 +117,7 @@ export function updateMode(cmdName: string, fl: FlagView): string | null {
     return value
   }
   const shown = typeof value === 'string' ? value : ''
-  throw new UsageError(
-    `${cmdName}: invalid argument '${shown}' for '--update'\n` +
-      'Valid arguments are:\n' +
-      "  - 'all'\n" +
-      "  - 'none'\n" +
-      "  - 'none-fail'\n" +
-      "  - 'older'\n" +
-      `Try '${cmdName} --help' for more information.`,
-    1,
-  )
+  throw argmatchError(cmdName, '--update', shown, UPDATE_ARGS, 1)
 }
 
 // The --suffix value, an empty one reading as absent: GNU 9.7

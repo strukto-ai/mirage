@@ -35,7 +35,7 @@ def emit(obj: Any, human: Callable[[Any], str] | None = None) -> None:
     if human is not None and sys.stdout.isatty():
         typer.echo(human(obj))
         return
-    typer.echo(json.dumps(obj, indent=2, default=str))
+    typer.echo(json.dumps(obj, indent=2, default=str, ensure_ascii=False))
 
 
 def fail(message: str, exit_code: int = 1) -> NoReturn:

@@ -43,7 +43,7 @@ function createEvent(ctx: GwsCtx): Reply {
   if (cal === null) return NOT_FOUND
   if (!writable(cal)) return googleError(403, NEED_WRITER, 'PERMISSION_DENIED')
   const body = asObj(ctx.json())
-  const times = readEventTimes(body)
+  const times = readEventTimes(body, cal.timeZone)
   if (isReply(times)) return times
   const ev = makeEvent(ctx.db, body, times)
   eventsOf(ctx.db, cal.id).set(ev.id, ev)
@@ -66,7 +66,7 @@ function patchEvent(ctx: GwsCtx, replace = false): Reply {
   if (isReply(found)) return found
   if (!writable(found.cal)) return googleError(403, NEED_WRITER, 'PERMISSION_DENIED')
   const body = asObj(ctx.json())
-  const times = readEventTimes(body, replace ? undefined : found.ev)
+  const times = readEventTimes(body, found.cal.timeZone, replace ? undefined : found.ev)
   if (isReply(times)) return times
   const status = body.status === undefined ? (replace ? 'confirmed' : found.ev.status) : body.status
   if (status !== 'confirmed' && status !== 'tentative' && status !== 'cancelled') {

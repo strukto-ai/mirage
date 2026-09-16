@@ -882,6 +882,13 @@ def test_byte_offset_counts_the_bytes_before_an_index():
     assert byte_offset("", 0) == 0
 
 
+def test_byte_offset_counts_a_surrogate_escape_as_one_byte():
+    # grep decodes a line with surrogateescape so an invalid byte survives
+    # -a; each escape stands for exactly one byte.
+    assert byte_offset("a\udcffb", 2) == 2
+    assert byte_offset("a\udcffb", 3) == 3
+
+
 def _heredoc_redirect(cmd: str):
     return next(c for c in _first(cmd).named_children
                 if c.type == NT.HEREDOC_REDIRECT)

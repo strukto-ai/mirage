@@ -197,6 +197,116 @@
         "stdout": "/data/bmiss.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "grep_bre_posix_class_is_expanded_not_passed_through",
+      "seq": 500318,
+      "targets": ["ram", "disk"],
+      "command": "printf 'abc\\n123\\n' > /data/bre.txt && grep '[[:alpha:]]' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_word_escape_is_the_ascii_set",
+      "seq": 500319,
+      "targets": ["ram", "disk"],
+      "command": "printf 'abc\\n---\\n' > /data/bre.txt && grep '\\w\\+' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "abc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_plus_with_nothing_to_repeat_is_literal",
+      "seq": 500320,
+      "targets": ["ram", "disk"],
+      "command": "printf '+\\nx\\n' > /data/bre.txt && grep '\\+' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "+\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_interval_with_nothing_to_repeat_is_literal",
+      "seq": 500321,
+      "targets": ["ram", "disk"],
+      "command": "printf '{1}\\nx\\n' > /data/bre.txt && grep '\\{1\\}' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "{1}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_interval_with_no_low_bound_is_zero",
+      "seq": 500322,
+      "targets": ["ram", "disk"],
+      "command": "printf 'b\\nc\\n' > /data/bre.txt && grep 'a\\{,3\\}b' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_collating_element_is_a_legal_range_end",
+      "seq": 500323,
+      "targets": ["ram", "disk"],
+      "command": "printf 'm\\n1\\n' > /data/bre.txt && grep '[[.a.]-z]' /data/bre.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "m\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "grep_bre_unmatched_open_group_is_glibcs_wording",
+      "seq": 500324,
+      "targets": ["ram", "disk"],
+      "command": "printf 'x\\n' > /data/bre.txt && grep '\\(' /data/bre.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: Unmatched ( or \\(\n"
+      }
+    },
+    {
+      "id": "grep_bre_inverted_range_is_refused",
+      "seq": 500325,
+      "targets": ["ram", "disk"],
+      "command": "printf 'x\\n' > /data/bre.txt && grep '[z-a]' /data/bre.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: Invalid range end\n"
+      }
+    },
+    {
+      "id": "grep_bre_backreference_without_a_group_is_refused",
+      "seq": 500326,
+      "targets": ["ram", "disk"],
+      "command": "printf 'x\\n' > /data/bre.txt && grep '\\1' /data/bre.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: Invalid back reference\n"
+      }
+    },
+    {
+      "id": "grep_bre_unknown_character_class_is_refused",
+      "seq": 500327,
+      "targets": ["ram", "disk"],
+      "command": "printf 'x\\n' > /data/bre.txt && grep '[[:bogus:]]' /data/bre.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: Invalid character class name\n"
+      }
     }
   ]
 }

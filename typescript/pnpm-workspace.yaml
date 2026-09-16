@@ -1,5 +1,13 @@
 packages:
   - packages/*
+  # A member for one reason: `pnpm -r typecheck` reaches a member and does not
+  # reach the workspace root, and `scripts/` is production code -- it generates
+  # `spec/`, which pre-commit's Spec drift step and check_spec_parity.py both
+  # read. A root-level `typecheck:scripts` would have been a gate no CI command
+  # runs, which is the defect issue #1089 exists to remove. It declares no
+  # dependencies of its own: the root package owns the directory and already
+  # declares every one they import.
+  - scripts
   - examples/*
   - ../examples/typescript
   - ../examples/typescript/browser

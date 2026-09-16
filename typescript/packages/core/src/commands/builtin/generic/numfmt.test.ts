@@ -123,10 +123,60 @@ describe('numfmt --from suffixes', () => {
     await expect(run(value, { from })).rejects.toThrow(new UsageError(message, 2))
   })
 
-  it('demands the i under --from=iec-i', async () => {
-    await expect(run('1K', { from: 'iec-i' })).rejects.toThrow(
-      new UsageError("numfmt: missing 'i' suffix in input: '1K' (e.g Ki/Mi/Gi)", 2),
+  // GNU tests for the 'i' OUTSIDE the suffix branch of
+  // simple_strtod_human, so this clause answers for every field whose unit
+  // letter is not followed by one -- a field with no unit at all included.
+  // Measured on coreutils 9.4; mirage used to reach it only with a bare
+  // unit and called `1Kx` and `1Ké` invalid suffixes, and it accepted a
+  // bare number outright. Mirrored in test_numfmt.py.
+  it.each([
+    ['1', '1'],
+    ['1.5', '1.5'],
+    ['0', '0'],
+    ['1000', '1000'],
+    ['1K', '1K'],
+    ['1Ké', '1K\\303\\251'],
+    ['1Kx', '1Kx'],
+    ['1KB', '1KB'],
+    ['1KI', '1KI'],
+    ['1KII', '1KII'],
+    ['1M', '1M'],
+  ])('demands the i under --from=iec-i for %j', async (value, named) => {
+    await expect(run(value, { from: 'iec-i' })).rejects.toThrow(
+      new UsageError(`numfmt: missing 'i' suffix in input: '${named}' (e.g Ki/Mi/Gi)`, 2),
     )
+  })
+
+  // The other side of that branch: once the 'i' is consumed the field
+  // reports its remainder like any other mode, and a first character that
+  // is not a unit letter never reaches the 'i' test at all.
+  it.each([
+    ['1Kii', "numfmt: invalid suffix in input '1Kii': 'i'"],
+    ['1KiB', "numfmt: invalid suffix in input '1KiB': 'B'"],
+    ['1i', "numfmt: invalid suffix in input: '1i'"],
+    ['1iK', "numfmt: invalid suffix in input: '1iK'"],
+    ['1iB', "numfmt: invalid suffix in input: '1iB'"],
+    ['x', "numfmt: invalid number: 'x'"],
+    ['', "numfmt: invalid number: ''"],
+  ])('names the leftover past the i for %j', async (value, message) => {
+    await expect(run(value, { from: 'iec-i' })).rejects.toThrow(new UsageError(message, 2))
+  })
+
+  it('names the leftover past the i for a multibyte tail', async () => {
+    await expect(run('1Kié', { from: 'iec-i' })).rejects.toThrow(
+      new UsageError("numfmt: invalid suffix in input '1Ki\\303\\251': '\\303\\251'", 2),
+    )
+  })
+
+  // The clause is an INPUT one: --to=iec-i renders a bare number happily,
+  // so the demand above must not leak onto the output mode.
+  it.each([
+    ['1000', '1000'],
+    ['1024', '1.0Ki'],
+    ['2048', '2.0Ki'],
+    ['0', '0'],
+  ])('renders %s under --to=iec-i with no missing-i clause', async (value, expected) => {
+    expect(await run(value, { to: 'iec-i' })).toBe(expected)
   })
 
   it.each([['1K'], ['1k'], ['1Ki'], ['1KiB'], ['1Kx'], ['1.5K']])(
@@ -148,6 +198,46 @@ describe('numfmt --from suffixes', () => {
   ])('reports %s as an invalid number', async (value, from) => {
     await expect(run(value, { from })).rejects.toThrow(
       new UsageError(`numfmt: invalid number: '${value}'`, 2),
+    )
+  })
+})
+
+// Every numfmt clause that names a field names it through gnulib's quote(),
+// so a byte outside 0x20-0x7e comes back escaped rather than interpolated
+// raw. Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a
+// raw `bytes` argv (`numfmt <w>`, `numfmt --from=si <w>`). Mirrors
+// test_numfmt.py.
+const QUOTED_FIELDS: [string, string][] = [
+  ['é', '\\303\\251'],
+  ['\r', '\\r'],
+  ['\x01', '\\001'],
+  ['\x7f', '\\177'],
+  ["'", "\\'"],
+  ['\\', '\\\\'],
+]
+
+describe('numfmt quotes the field it names', () => {
+  it.each(QUOTED_FIELDS)('escapes %j in the unusable-character clause', async (tail, esc) => {
+    await expect(run(`1${tail}`, { from: 'si' })).rejects.toThrow(
+      new UsageError(`numfmt: invalid suffix in input: '1${esc}'`, 2),
+    )
+  })
+
+  it.each(QUOTED_FIELDS)('escapes %j in both words of the junk clause', async (tail, esc) => {
+    await expect(run(`1K${tail}`, { from: 'si' })).rejects.toThrow(
+      new UsageError(`numfmt: invalid suffix in input '1K${esc}': '${esc}'`, 2),
+    )
+  })
+
+  it.each(QUOTED_FIELDS)('escapes %j in the invalid-number clause', async (tail, esc) => {
+    await expect(run(`x${tail}`)).rejects.toThrow(
+      new UsageError(`numfmt: invalid number: 'x${esc}'`, 2),
+    )
+  })
+
+  it.each(QUOTED_FIELDS)('escapes %j in the rejecting-suffix clause', async (tail, esc) => {
+    await expect(run(`1K${tail}`)).rejects.toThrow(
+      new UsageError(`numfmt: rejecting suffix in input: '1K${esc}' (consider using --from)`, 2),
     )
   })
 })
