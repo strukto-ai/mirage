@@ -17,7 +17,6 @@ import { constants as osConstants } from 'node:os'
 import { describe, expect, it } from 'vitest'
 import {
   classifyErrno,
-  classifyError,
   EACCES,
   EEXIST,
   EINVAL,
@@ -75,18 +74,6 @@ describe('classifyErrno', () => {
   })
 })
 
-describe('classifyError', () => {
-  it('negates the errno for fuse-native callbacks', () => {
-    expect(classifyError(new Error('no such file'))).toBe(-ENOENT)
-    expect(classifyError(new Error('directory not empty'))).toBe(-ENOTEMPTY)
-  })
-
-  it('stays in sync with classifyErrno', () => {
-    const err = new Error('permission denied')
-    expect(classifyError(err)).toBe(-classifyErrno(err))
-  })
-})
-
 describe('the shared vocabulary', () => {
   // The stamps below are what CycleError and CrossMountError carry
   // (pinned by core's errors/classify.test.ts); the adapter's contract
@@ -114,5 +101,15 @@ describe('the shared vocabulary', () => {
     // adapter reads the host's own numbering for the same passthrough.
     const err = Object.assign(new Error('x'), { code: 'ENAMETOOLONG' })
     expect(classifyErrno(err)).toBe(osConstants.errno.ENAMETOOLONG)
+  })
+})
+
+// The negation itself lives in the fuse adapter now, since it is that
+// binding's calling convention; what stays this module's job is the
+// classification the adapter negates.
+describe('classifyErrno as the fuse adapter negates it', () => {
+  it('classifies the errno the negation is applied to', () => {
+    expect(classifyErrno(new Error('no such file'))).toBe(ENOENT)
+    expect(classifyErrno(new Error('directory not empty'))).toBe(ENOTEMPTY)
   })
 })

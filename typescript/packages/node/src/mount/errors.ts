@@ -10,6 +10,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { constants as osConstants } from 'node:os'
@@ -69,7 +81,7 @@ const MESSAGE_ERRNO: [string[], number][] = [
 /**
  * Map a mirage-native error onto a positive POSIX errno.
  *
- * Mirrors Python's `mirage.fuse.errors.classify_error` so both languages
+ * Mirrors Python's `mirage.mount.errors.classify_error` so both languages
  * report the same errno for the same backend failure. The naming lives in
  * core's `classify` (shared with the wasi shim and the monty encoders);
  * this adapter only renders the condition in host numbers. A stamped code
@@ -91,11 +103,6 @@ export function classifyErrno(err: unknown): number {
     if (needles.some((n) => msg.includes(n))) return errno
   }
   return EIO
-}
-
-/** Same classification, negated for `@zkochan/fuse-native` callbacks. */
-export function classifyError(err: unknown): number {
-  return -classifyErrno(err)
 }
 
 /**

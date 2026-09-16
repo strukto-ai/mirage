@@ -1,0 +1,141 @@
+---
+title: NFS
+icon: network-wired
+description: Set up NFS mounts for MIRAGE in Node.
+---
+
+## Prerequisites
+
+- Node 20.10+
+- A kernel NFS client — macOS and Linux both ship one; see the
+  [support matrix](/home/setup/nfs)
+- A Rust toolchain, while the addon is built from source
+
+## Install the addon
+
+The server ships as a separate native addon, so importing MIRAGE never
+requires it:
+
+```bash
+npm install @struktoai/mirage-nfs-node
+```
+
+Working inside this repo, build it from source instead and point the loader
+at the result:
+
+```bash
+cd typescript/packages/mirage-nfs && pnpm run build:addon
+```
+
+That runs `cargo build --release` and copies the platform's cdylib to
+`mirage_nfs_node.node`, which the package's `main` points at. To use a build
+somewhere else, set `MIRAGE_NFS_ADDON` to its absolute path; it overrides
+the package.
+
+## Verify
+
+```ts
+import { Mount, MountBackend, MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new Mount(new RAMResource(), { backend: MountBackend.NFS }) },
+  { mode: MountMode.WRITE },
+)
+await ws.execute('echo hello > /data/hello.txt')
+await ws.nfsReady()
+console.log('mountpoints:', ws.nfsMountpoints)
+await ws.close()
+```
+
+On macOS this needs no privileges at all. On Linux `mount` does, so run the
+process with them.
+
+## The API
+
+| Call | What it does |
+| --- | --- |
+| `await ws.nfsReady()` | Await the mounts the constructor kicked off, nfs ones included. `execute` and `close` await it for you. |
+| `ws.nfsMountpoints` | `{prefix: path}` of the live nfs mounts. `fuseMountpoints` never lists them. |
+| `await ws.addNfsMount(prefix, mountpoint?, config?)` | Export one more prefix. Returns the mountpoint. |
+| `await ws.removeNfsMount(prefix)` | Unmount one prefix; the server stays up for the others. |
+| `await ws.close()` | Unmount everything, flush buffered writes, stop the server, in that order. |
+
+One server backs every *unscoped* prefix of a workspace, so a second mount costs a
+kernel mount rather than a second server. `config` is therefore honored by
+the mount that *starts* the server and ignored afterwards. A session-scoped
+mount is the exception and gets its own server; see below.
+
+```ts
+import { NFSConfig } from '@struktoai/mirage-node'
+
+await ws.addNfsMount('/data', undefined, new NFSConfig({ port: 0 }))
+```
+
+`host` defaults to `127.0.0.1`, `port` to `20490` (one port for both the
+MOUNT and NFS programs, so no portmapper), `idleFlushSeconds` to `5`, and
+`maxBufferedBytes` to 16 MiB. An NFSv3 export has no authentication of its
+own, so moving `host` off loopback publishes the workspace.
+
+The mount resilience knobs default the same way python's do: `soft` to
+`true`, `timeo` to `50` (tenths of a second), `retrans` to `3`, and
+`deadTimeout` to `60` seconds (macOS only, `0` disables). A hard mount —
+`soft: false` — blocks every I/O forever when the server stops answering,
+and the server is this process's event loop, so only choose it where
+something else can force the unmount.
+
+## Two rules this process has to follow
+
+<Warning>
+  **Never touch your own mountpoint synchronously.** The NFS server is
+  served by this process's event loop, so `readFileSync`/`statSync` on the
+  mountpoint deadlocks the loop that must answer the request — the same trap
+  the [FUSE mounts](/typescript/setup/fuse) carry. Read it from a child
+  process:
+
+```ts
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const run = promisify(execFile)
+const { stdout } = await run('cat', [`${mountpoint}/hello.txt`])
+```
+</Warning>
+
+<Note>
+  **`close()` lets the process exit.** It unmounts, flushes what is still
+  buffered, and stops the server, and the addon releases the event loop
+  with it — no final `process.exit(0)` needed. Before the addon's idle
+  flusher learned to stop, it held the loop for the process's lifetime and
+  a clean run hung; if you are pinned to an older build, that is the
+  symptom.
+</Note>
+
+## Writes are buffered
+
+The server library never hands the adapter a COMMIT, so writes are buffered
+per open handle and land in the resource on the idle flush or at close. The
+sweep runs every `idleFlushSeconds` and flushes handles idle that long, so
+the worst case is two windows (~10s at the default). Reads through the mount
+never wait — the adapter merges the buffer — while MIRAGE's own command
+surface sees the bytes after the flush.
+`examples/typescript/nfs/nfs.ts` demonstrates exactly that, along with both
+mounts of one server.
+
+## Session-scoped mounts
+
+Pass a session id and every op served through that mountpoint runs under
+that session's mount grants, exactly as a shell command in it would:
+
+```typescript
+ws.createSession('agent', { mounts: { '/data': 'read' } })
+const point = await ws.addNfsMount('/data', undefined, undefined, 'agent')
+```
+
+It costs a second server rather than a second mount, because one server
+serves one delegate. Every scoped prefix of the same session shares that
+session's server, and its last unmount stops it; the unscoped server
+outlives its mounts, since it is the workspace's own. Mixing the two on one
+server is refused rather than silently served under the wrong grants.
+
+Python supports the same backend with the same guards
+([details](/python/setup/nfs)).

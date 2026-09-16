@@ -1,0 +1,161 @@
+---
+title: NFS
+icon: network-wired
+description: Set up NFS mounts for MIRAGE in Python.
+---
+
+## Prerequisites
+
+- Python 3.12+ (the extension's floor; MIRAGE itself needs 3.11+)
+- A kernel NFS client — macOS and Linux both ship one; see the
+  [support matrix](/home/setup/nfs)
+- A Rust toolchain, while the wheel is built from source
+
+## Install the extension
+
+The server ships as a separate wheel, `mirage-nfs`, so importing MIRAGE
+never requires it:
+
+```bash
+pip install ./python/mirage-nfs
+```
+
+`uv` works the same way:
+
+```bash
+uv pip install ./python/mirage-nfs
+```
+
+A mount that asks for the backend without the wheel installed fails with an
+error naming the install command, not an `ImportError` from inside the
+mount call.
+
+## Verify
+
+```python
+import asyncio
+
+from mirage import Mount, MountBackend, MountMode, Workspace
+from mirage.resource.ram import RAMResource
+
+
+async def main() -> None:
+    ws = Workspace(
+        {"/data": Mount(RAMResource(), mode=MountMode.WRITE,
+                        backend=MountBackend.NFS)},
+        mode=MountMode.WRITE)
+    try:
+        await ws.execute("echo hello > /data/hello.txt")
+        await ws.nfs_ready()
+        print("mountpoints:", ws.nfs_mountpoints)
+    finally:
+        await ws.close()
+
+
+asyncio.run(main())
+```
+
+On macOS this needs no privileges at all. On Linux `mount` does, so run the
+process with them.
+
+<Note>
+  **A declared nfs mount comes up on the first `await`, not in the
+  constructor.** The server is served by the caller's event loop and the
+  constructor has none, so `Workspace(...)` records the declaration and
+  `execute` (or an explicit `nfs_ready`) mounts it. FUSE differs here: it
+  runs on a daemon thread, so it is live when the constructor returns.
+</Note>
+
+## The API
+
+| Call | What it does |
+| --- | --- |
+| `await ws.nfs_ready()` | Mount every `backend=nfs` declaration. Idempotent; `execute` awaits it for you. |
+| `ws.nfs_mountpoints` | `{prefix: path}` of the live nfs mounts. `fuse_mountpoints` never lists them. |
+| `await ws.add_nfs_mount(prefix, mountpoint=None, config=None)` | Export one more prefix. Returns the mountpoint. |
+| `await ws.remove_nfs_mount(prefix)` | Unmount one prefix; the server stays up for the others. |
+| `await ws.close()` | Unmount everything, flush buffered writes, stop the server, in that order. |
+
+One server backs every *unscoped* prefix of a workspace, so a second mount costs a
+kernel mount rather than a second server. `config` is therefore honored by
+the mount that *starts* the server and ignored afterwards. A session-scoped
+mount is the exception and gets its own server; see below.
+
+The synchronous FUSE routes refuse this backend rather than mis-serving it:
+`ws.add_fuse_mount(prefix, backend="nfs")` and `ws.remove_fuse_mount` on an
+nfs prefix both raise, naming the async call to use instead.
+
+## In YAML
+
+```yaml
+mode: WRITE
+mounts:
+  /data:
+    resource: ram
+    backend: nfs
+    mountpoint: /tmp/data-nfs   # optional; omit for a temp directory
+```
+
+## Server knobs
+
+```python
+from mirage.nfs.config import NFSConfig
+
+await ws.add_nfs_mount("/data", config=NFSConfig(port=0))
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `host` | `127.0.0.1` | Address the server binds. An NFSv3 export has no authentication of its own, so loopback is the default and anything else publishes the workspace. |
+| `port` | `20490` | One TCP port serving both the MOUNT and NFS programs, so no portmapper is needed. `0` asks the OS for a free one. |
+| `idle_flush_seconds` | `5.0` | How long a handle's buffered writes may sit before the adapter flushes them. |
+| `max_buffered_bytes` | `16 MiB` | Per-handle ceiling that forces an early flush. |
+| `soft` | `True` | Mount soft rather than the kernel's default, hard. A hard mount blocks every I/O forever when the server stops answering, and the server is this process. |
+| `timeo` | `50` | Initial retransmit timeout, in **tenths of a second**. |
+| `retrans` | `3` | Retransmits before a soft mount gives up, so a stalled call fails after about `timeo * retrans` tenths of a second. |
+| `dead_timeout` | `60` | Seconds a mount may stay unresponsive before the kernel forcibly unmounts it. macOS only; `0` disables it. |
+
+## Reading the mountpoint from your own process
+
+<Warning>
+  **Never stat or read your own mountpoint inline.** The server runs on this
+  event loop, so `open(mountpoint + "/f")` blocks the loop that has to
+  answer the read. Go through a subprocess (or `asyncio.to_thread`):
+
+```python
+proc = await asyncio.create_subprocess_exec(
+    "cat", f"{mountpoint}/hello.txt",
+    stdout=asyncio.subprocess.PIPE)
+out, _ = await proc.communicate()
+```
+</Warning>
+
+## Writes are buffered
+
+The server library never hands the adapter a COMMIT, so writes are buffered
+per open handle and land in the resource on the idle flush or at close. The
+sweep runs every `idle_flush_seconds` and flushes handles idle that long, so
+the worst case is two windows (~10s at the default).
+Reads through the mount see them immediately (the adapter merges the
+buffer); MIRAGE's own command surface sees them after the flush.
+`examples/python/nfs/nfs.py` demonstrates exactly that, along with both
+mounts of one server.
+
+## Session-scoped mounts
+
+Pass `session_id` and every op served through that mountpoint runs under
+that session's mount grants, exactly as a shell command in it would:
+
+```python
+ws.create_session("agent", mounts={"/data": "read"})
+point = await ws.add_nfs_mount("/data", session_id="agent")
+```
+
+It costs a second server rather than a second mount, because one server
+serves one delegate. Every scoped prefix of the same session shares that
+session's server, and its last unmount stops it; the unscoped server
+outlives its mounts, since it is the workspace's own. Mixing the two on one
+server is refused rather than silently served under the wrong grants.
+
+TypeScript supports the same backend with the same guards
+([details](/typescript/setup/nfs)).

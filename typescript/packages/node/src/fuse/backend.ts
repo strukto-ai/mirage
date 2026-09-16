@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { posix } from 'node:path'
-import { sizesAlwaysKnown } from '@struktoai/mirage-core/resource/base'
-import { KERNEL_BACKENDS, MountBackend, MountMode } from '@struktoai/mirage-core/types'
+import { MountBackend, MountMode } from '@struktoai/mirage-core/types'
+import { requireKernelBackend, resolveBackend, unsizedMounts } from '../mount/backend.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
@@ -24,37 +24,6 @@ import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/works
  * discovered at run time (github.com/strukto-ai/mirage#82).
  */
 export const FSKIT_MOUNT_ROOT = '/Volumes'
-
-/**
- * Coerce a user-supplied backend name into a MountBackend.
- *
- * Missing means vfs, everywhere: an absent `backend` in YAML, `undefined`
- * here, and the `MountSpecOptions` default all resolve to the same thing.
- * Callers that need a kernel mount say so explicitly rather than relying on
- * this function to reinterpret an absent value.
- */
-export function resolveBackend(value?: string | null): MountBackend {
-  if (value === undefined || value === null || value === '') return MountBackend.VFS
-  const lowered = value.toLowerCase() as MountBackend
-  if (!Object.values(MountBackend).includes(lowered)) {
-    throw new Error(
-      `unknown mount backend ${JSON.stringify(value)}; expected one of: ${Object.values(
-        MountBackend,
-      ).join(', ')}`,
-    )
-  }
-  return lowered
-}
-
-/** Reject a backend that registers nothing with the kernel. */
-export function requireKernelBackend(backend: MountBackend): void {
-  if (!KERNEL_BACKENDS.includes(backend)) {
-    throw new Error(
-      `backend ${JSON.stringify(backend)} does not register a mountpoint; it is served inside ` +
-        "mirage's own filesystem, so there is nothing to mount",
-    )
-  }
-}
 
 /**
  * Reject a backend the current platform cannot serve.
@@ -83,21 +52,6 @@ export function checkMountpoint(backend: MountBackend, mountpoint: string): void
       `the fskit mount backend only mounts under ${FSKIT_MOUNT_ROOT}; got ${JSON.stringify(mountpoint)}`,
     )
   }
-}
-
-/**
- * Mounts under `rootPrefix` whose files cannot be sized without reading
- * them. Mirrors Python's `Ops.unsized_mounts`.
- */
-export function unsizedMounts(ws: Workspace, rootPrefix = ''): [string, string][] {
-  const root = rstripSlash(rootPrefix)
-  const found: [string, string][] = []
-  for (const m of ws.mounts()) {
-    const bare = rstripSlash(m.prefix)
-    if (root !== '' && bare !== root && !m.prefix.startsWith(root + '/')) continue
-    if (!sizesAlwaysKnown(m.resource)) found.push([m.prefix, m.resource.kind])
-  }
-  return found
 }
 
 /**
