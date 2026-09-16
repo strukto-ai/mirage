@@ -1,0 +1,760 @@
+{
+  "cases": [
+    {
+      "id": "ram_document_sessions_and_asks",
+      "target": {
+        "id": "snap-ram",
+        "hosts": ["python", "typescript-node"],
+        "mounts": [
+          {
+            "path": "/work",
+            "resource": "ram",
+            "backend": "ram"
+          },
+          {
+            "path": "/vault",
+            "resource": "ram",
+            "backend": "ram"
+          }
+        ],
+        "profiles": {
+          "default": {
+            "commands": {
+              "allow": ["echo", "cat", "ls", "rm", "mv", "touch", "export", "mkdir"]
+            }
+          },
+          "crew": {
+            "env": {
+              "SLACK_TOKEN": "xoxb-secret",
+              "ROLE": "crew"
+            },
+            "vars": {
+              "hide": ["SLACK_TOKEN"]
+            },
+            "paths": {
+              "hide": ["/vault"],
+              "show": {
+                "/vault/public": "r"
+              },
+              "reasons": [
+                {
+                  "patterns": ["/vault"],
+                  "reason": "operator sealed it"
+                }
+              ]
+            },
+            "commands": {
+              "allow": ["echo", "cat", "ls", "rm", "mv", "touch", "export", "mkdir"],
+              "deny": ["rm"],
+              "ask": [
+                {
+                  "reason": "moves files",
+                  "commands": ["mv"]
+                }
+              ]
+            }
+          }
+        },
+        "sessions": {
+          "agent": "crew"
+        }
+      },
+      "seed": [
+        {
+          "op": "exec",
+          "command": "mkdir -p /vault/public"
+        },
+        {
+          "op": "write",
+          "path": "/work/kept.txt",
+          "data": "kept\n"
+        },
+        {
+          "op": "write",
+          "path": "/vault/secret.txt",
+          "data": "sealed\n"
+        },
+        {
+          "op": "write",
+          "path": "/vault/public/open.txt",
+          "data": "open\n"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "mv /work/kept.txt /work/moved.txt"
+        },
+        {
+          "op": "answer",
+          "mode": "allow_session"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "mv /work/kept.txt /work/moved.txt"
+        }
+      ],
+      "verify": [
+        {
+          "op": "sessions"
+        },
+        {
+          "op": "profile_of",
+          "session": "agent"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "echo tok=[$SLACK_TOKEN] role=$ROLE"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "rm /work/moved.txt",
+          "expect": {
+            "exit": 126
+          }
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "cat /vault/public/open.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "cat /vault/secret.txt"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "ls /work"
+        },
+        {
+          "op": "exec",
+          "command": "cat /work/moved.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "hides",
+          "session": "agent"
+        },
+        {
+          "op": "decisions",
+          "session": "agent"
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false
+      }
+    },
+    {
+      "id": "ram_env_template_and_managed_pointer",
+      "target": {
+        "id": "snap-ram-env",
+        "hosts": ["python", "typescript-node"],
+        "mounts": [
+          {
+            "path": "/work",
+            "resource": "ram",
+            "backend": "ram"
+          }
+        ],
+        "env": {
+          "APP_NAME": "mirage-snap"
+        }
+      },
+      "seed": [
+        {
+          "op": "write",
+          "path": "/work/f.txt",
+          "data": "hi\n"
+        }
+      ],
+      "verify": [
+        {
+          "op": "exec",
+          "command": "echo app=$APP_NAME"
+        },
+        {
+          "op": "env"
+        },
+        {
+          "op": "absent",
+          "literals": ["xoxb-secret"]
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false
+      }
+    },
+    {
+      "id": "ram_coded_policy_is_named_not_carried",
+      "target": {
+        "id": "snap-ram-policy",
+        "hosts": ["python", "typescript-node"],
+        "mounts": [
+          {
+            "path": "/work",
+            "resource": "ram",
+            "backend": "ram"
+          }
+        ]
+      },
+      "policies": [
+        {
+          "id": "gate",
+          "commands": ["rm"],
+          "paths": ["/work/sealed.txt"],
+          "reason": "coded gate"
+        }
+      ],
+      "seed": [
+        {
+          "op": "write",
+          "path": "/work/f.txt",
+          "data": "hi\n"
+        },
+        {
+          "op": "write",
+          "path": "/work/sealed.txt",
+          "data": "sealed\n"
+        }
+      ],
+      "verify": [
+        {
+          "op": "policies"
+        },
+        {
+          "op": "exec",
+          "command": "rm /work/f.txt",
+          "expect": {
+            "exit": 126
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /work/f.txt",
+          "expect": {
+            "exit": 0
+          }
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false,
+        "policies": true
+      }
+    },
+    {
+      "id": "ram_profile_policy_script_per_host_runtime",
+      "target": {
+        "id": "snap-ram-script",
+        "hosts": ["python", "typescript-node"],
+        "mounts": [
+          {
+            "path": "/work",
+            "resource": "ram",
+            "backend": "ram"
+          }
+        ],
+        "profiles": {
+          "guard": "@script"
+        },
+        "profile": "guard"
+      },
+      "script": {
+        "python": {
+          "source": "def pre_command(ctx):\n    if ctx['command']['name'] == 'rm':\n        return {'deny': 'script says no'}\n    return None\n",
+          "language": "python",
+          "runtime": "monty"
+        },
+        "typescript": {
+          "source": "def pre_command(ctx):\n    if ctx['command']['name'] == 'rm':\n        return {'deny': 'script says no'}\n    return None\n",
+          "language": "python",
+          "runtime": "pyodide"
+        }
+      },
+      "seed": [
+        {
+          "op": "write",
+          "path": "/work/f.txt",
+          "data": "hi\n"
+        }
+      ],
+      "verify": [
+        {
+          "op": "exec",
+          "command": "rm /work/f.txt",
+          "expect": {
+            "exit": 126,
+            "refusal": "script says no"
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /work/f.txt",
+          "expect": {
+            "exit": 0
+          }
+        }
+      ],
+      "load": {
+        "profiles": true,
+        "runtimes": true
+      }
+    },
+    {
+      "id": "ram_script_cli_per_host_runtime",
+      "target": {
+        "id": "snap-ram-cli",
+        "hosts": ["python", "typescript-node"],
+        "mounts": [
+          {
+            "path": "/work",
+            "resource": "ram",
+            "backend": "ram"
+          }
+        ]
+      },
+      "script_cli": {
+        "name": "tally",
+        "python": {
+          "source": "try:\n    _args = argv\nexcept NameError:\n    import sys\n    _args = sys.argv\nprint('tally', ' '.join(_args[1:]))\n",
+          "language": "python",
+          "runtime": "monty"
+        },
+        "typescript": {
+          "source": "try:\n    _args = argv\nexcept NameError:\n    import sys\n    _args = sys.argv\nprint('tally', ' '.join(_args[1:]))\n",
+          "language": "python",
+          "runtime": "pyodide"
+        }
+      },
+      "seed": [
+        {
+          "op": "write",
+          "path": "/work/f.txt",
+          "data": "hi\n"
+        }
+      ],
+      "verify": [
+        {
+          "op": "clis"
+        },
+        {
+          "op": "exec",
+          "command": "tally one two",
+          "expect": {
+            "exit": 0,
+            "stdout_contains": "tally one two"
+          }
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": true
+      }
+    },
+    {
+      "id": "git_repo_on_ram_and_the_git_cli",
+      "target": {
+        "id": "snap-git",
+        "hosts": ["python", "typescript-node"],
+        "mounts": [
+          {
+            "path": "/repo",
+            "resource": "ram",
+            "backend": "ram",
+            "fixture": "git"
+          }
+        ],
+        "clis": ["git"]
+      },
+      "verify": [
+        {
+          "op": "clis"
+        },
+        {
+          "op": "exec",
+          "command": "git -C /repo log --oneline",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "exec",
+          "command": "git -C /repo status --short",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /repo/docs/readme.md",
+          "expect": {
+            "exit": 0
+          }
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false
+      }
+    },
+    {
+      "id": "redis_content_under_a_narrowed_session",
+      "target": {
+        "id": "snap-redis",
+        "hosts": ["python", "typescript-node"],
+        "service": "redis",
+        "mounts": [
+          {
+            "path": "/data",
+            "resource": "redis",
+            "backend": "redis"
+          }
+        ],
+        "sessions": {
+          "agent": {
+            "paths": {
+              "hide": ["/data/vault"]
+            },
+            "commands": {
+              "deny": ["rm"]
+            }
+          }
+        }
+      },
+      "seed": [
+        {
+          "op": "exec",
+          "command": "mkdir -p /data/vault"
+        },
+        {
+          "op": "write",
+          "path": "/data/kept.txt",
+          "data": "redis kept\n"
+        },
+        {
+          "op": "write",
+          "path": "/data/vault/secret.txt",
+          "data": "redis sealed\n"
+        }
+      ],
+      "verify": [
+        {
+          "op": "exec",
+          "command": "cat /data/kept.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "redis kept\n"
+          }
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "cat /data/vault/secret.txt"
+        },
+        {
+          "op": "exec",
+          "session": "agent",
+          "command": "rm /data/kept.txt",
+          "expect": {
+            "exit": 126
+          }
+        },
+        {
+          "op": "hides",
+          "session": "agent"
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false
+      }
+    },
+    {
+      "id": "s3_bucket_reads_under_strict_drift",
+      "target": {
+        "id": "snap-s3",
+        "hosts": ["python", "typescript-node"],
+        "service": "s3",
+        "mounts": [
+          {
+            "path": "/data",
+            "resource": "s3",
+            "backend": "s3",
+            "bucket": "data",
+            "fixture": "files/v1"
+          }
+        ]
+      },
+      "verify": [
+        {
+          "op": "exec",
+          "command": "ls /data",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/a.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "fingerprints"
+        },
+        {
+          "op": "absent",
+          "literals": ["${AWS_SECRET_ACCESS_KEY}"]
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false
+      }
+    },
+    {
+      "id": "slack_live_only_mount_and_its_cli",
+      "target": {
+        "id": "snap-slack",
+        "hosts": ["python", "typescript-node"],
+        "service": "slack",
+        "facet": "chat",
+        "mounts": [
+          {
+            "path": "/slack",
+            "resource": "slack",
+            "backend": "slack"
+          }
+        ],
+        "clis": ["slack"]
+      },
+      "verify": [
+        {
+          "op": "clis"
+        },
+        {
+          "op": "live_only"
+        },
+        {
+          "op": "exec",
+          "command": "ls /slack",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "exec",
+          "command": "slack list-members --query priya",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "absent",
+          "literals": ["xoxb-", "xoxp-"]
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false
+      }
+    },
+    {
+      "id": "gmail_live_only_mount_and_the_gws_cli",
+      "target": {
+        "id": "snap-gmail",
+        "hosts": ["python", "typescript-node"],
+        "service": "gws",
+        "facet": "email",
+        "epoch": "2026-02-01T00:00:00Z",
+        "mail": "gmail/v1",
+        "mounts": [
+          {
+            "path": "/mail",
+            "resource": "gmail",
+            "backend": "gmail"
+          },
+          {
+            "path": "/scratch",
+            "resource": "ram",
+            "backend": "ram"
+          }
+        ],
+        "clis": ["gws"]
+      },
+      "verify": [
+        {
+          "op": "clis"
+        },
+        {
+          "op": "live_only"
+        },
+        {
+          "op": "exec",
+          "command": "ls /mail",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "absent",
+          "literals": ["gws-integ-token"]
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false
+      }
+    },
+    {
+      "id": "gdrive_folder_files_and_the_gws_cli",
+      "target": {
+        "id": "snap-gdrive",
+        "hosts": ["python", "typescript-node"],
+        "service": "gws",
+        "epoch": "2026-02-01T00:00:00Z",
+        "mounts": [
+          {
+            "path": "/data",
+            "resource": "gdrive",
+            "backend": "gdrive",
+            "root": "data",
+            "fixture": "files/v1"
+          }
+        ],
+        "clis": ["gws"]
+      },
+      "verify": [
+        {
+          "op": "clis"
+        },
+        {
+          "op": "exec",
+          "command": "ls /data",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/a.txt",
+          "expect": {
+            "exit": 0
+          }
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false,
+        "drift": "off"
+      }
+    },
+    {
+      "id": "email_mount_and_the_himalaya_cli",
+      "target": {
+        "id": "snap-email",
+        "hosts": ["python", "typescript-node"],
+        "service": "email",
+        "facet": "email",
+        "mail": "email/v1",
+        "mounts": [
+          {
+            "path": "/mail",
+            "resource": "email",
+            "backend": "email"
+          },
+          {
+            "path": "/scratch",
+            "resource": "ram",
+            "backend": "ram"
+          }
+        ],
+        "clis": ["himalaya"]
+      },
+      "verify": [
+        {
+          "op": "clis"
+        },
+        {
+          "op": "live_only"
+        },
+        {
+          "op": "exec",
+          "command": "ls /mail",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "exec",
+          "command": "himalaya --help | head -1",
+          "expect": {
+            "exit": 0
+          }
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false
+      }
+    },
+    {
+      "id": "github_mount_and_the_gh_cli",
+      "target": {
+        "id": "snap-github",
+        "hosts": ["python", "typescript-node"],
+        "service": "github",
+        "mounts": [
+          {
+            "path": "/repo",
+            "resource": "github",
+            "backend": "github",
+            "repo": "integ/repo-v1",
+            "mode": "read"
+          }
+        ],
+        "clis": ["gh"]
+      },
+      "verify": [
+        {
+          "op": "clis"
+        },
+        {
+          "op": "exec",
+          "command": "ls /repo",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "exec",
+          "command": "gh repo view",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "op": "absent",
+          "literals": ["ghp-integ"]
+        }
+      ],
+      "load": {
+        "profiles": false,
+        "runtimes": false,
+        "drift": "off"
+      }
+    }
+  ]
+}

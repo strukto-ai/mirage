@@ -121,6 +121,30 @@ def test_a_refused_config_value_is_not_in_the_error():
     assert caught.value.__cause__ is None
 
 
+# The method returns a validated model, so a model is a value the
+# registry itself produces -- and a host that reinstalls what it has
+# hands one straight back (the loader's `clis=` overrides). Iterating a
+# model yields (name, value) pairs, so the unknown-key check answered
+# `TypeError: sequence item 0: expected str instance, tuple found`,
+# naming neither the CLI nor the config. Found by the cross-language
+# snapshot battery, whose reader passes an install's own config.
+def test_a_validated_model_reinstalls_as_itself():
+    reg = CLIRegistry()
+    validated = reg.install("prog", tree(TokenConfig), {"token": "x"}).config
+    assert isinstance(validated, TokenConfig)
+    again = CLIRegistry().install("prog", tree(TokenConfig), validated)
+    assert again.config is validated
+
+
+def test_a_model_of_another_class_is_refused_by_name():
+    reg = CLIRegistry()
+    wrong = PortConfig(host="h", port=1)
+    with pytest.raises(ValueError,
+                       match="CLI 'prog': config is a PortConfig, "
+                       "expected TokenConfig or a mapping"):
+        reg.install("prog", tree(TokenConfig), wrong)
+
+
 def test_config_without_model_is_refused():
     reg = CLIRegistry()
     with pytest.raises(ValueError, match="declares no config_model"):

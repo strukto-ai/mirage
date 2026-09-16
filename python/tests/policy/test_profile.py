@@ -32,13 +32,16 @@ from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult, ScriptSource
-from mirage.types import HiddenPaths, HiddenVars, MountMode, ShowEntry
+from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
+                          ShownPaths)
+from mirage.utils.hidden import classify_shows, shown_mode
 from mirage.workspace import Workspace
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.session.state import seed_var
 
 from mirage.policy.profile import (  # isort: skip
-    CommandsBlock, MountCommandsBlock, PathsBlock, ProfileMount, VarsBlock)
+    CommandsBlock, MountCommandsBlock, PathsBlock, ProfileMount, VarsBlock,
+    profile_from_dict, profile_to_dict)
 
 
 def test_profile_from_dict_regroups_paths_and_vars():
@@ -2101,3 +2104,242 @@ def test_the_old_script_and_runtime_keys_are_told_where_they_went():
         })
     with pytest.raises(ValidationError, match="now one policy block"):
         SessionProfile.model_validate({"runtime": "monty"})
+
+
+# One document over every block kind, spelled loosely, and the one
+# document the codec writes for it; `profile.test.ts` asserts the same
+# two literals, so the two writers cannot drift.
+CODEC_DOCUMENT = {
+    "cwd": "/scratch",
+    "env": {
+        "PAGER": "cat"
+    },
+    "mounts": {
+        "/repo": "r",
+        "scratch/": {
+            "mode": "rwx",
+            "commands": {
+                "deny": ["git push"],
+                "ask": [{
+                    "reason": "careful",
+                    "commands": {
+                        "rm": ["/scratch/keep/*"]
+                    }
+                }],
+            },
+            "paths": {
+                "hide": [
+                    "/scratch/.env", {
+                        "patterns": ["/scratch/sealed/*"],
+                        "reason": "sealed"
+                    }
+                ],
+                "show": {
+                    "/scratch/sealed/public": "r",
+                    "/scratch/sealed/docs": None,
+                },
+            },
+        },
+    },
+    "paths": {
+        "hide": ["*.pem"],
+        "show": ["/repo/docs"]
+    },
+    "vars": {
+        "hide": ["AWS_*", "SLACK_TOKEN"]
+    },
+    "commands": {
+        "allow": ["ls", "cat", "git *"],
+        "deny": [
+            "rm", {
+                "reason": "no pushes",
+                "commands": ["git push"]
+            }, {
+                "reason": "sealed",
+                "paths": ["/repo/secrets"]
+            }
+        ],
+        "ask": [{
+            "commands": {
+                "mv": ["/repo/*"]
+            }
+        }],
+    },
+    "policy": {
+        "script": {
+            "source": "def pre_command(ctx):\n    return None\n",
+            "language": "python",
+            "module": False,
+        },
+        "runtime": "monty",
+    },
+}
+
+CODEC_WRITTEN = {
+    "cwd": "/scratch",
+    "env": {
+        "PAGER": "cat"
+    },
+    "mounts": {
+        "/repo": {
+            "mode": "read"
+        },
+        "/scratch": {
+            "mode": "exec",
+            "commands": {
+                "ask": [{
+                    "reason": "careful",
+                    "commands": {
+                        "rm": ["/scratch/keep/*"]
+                    }
+                }],
+                "deny": ["git push"],
+            },
+            "paths": {
+                "hide": ["/scratch/.env", "/scratch/sealed/*"],
+                "show": {
+                    "/scratch/sealed/public": "read",
+                    "/scratch/sealed/docs": None,
+                },
+                "reasons": [{
+                    "patterns": ["/scratch/sealed/*"],
+                    "reason": "sealed"
+                }],
+            },
+        },
+    },
+    "paths": {
+        "hide": ["*.pem"],
+        "show": {
+            "/repo/docs": None
+        }
+    },
+    "vars": {
+        "hide": ["AWS_*", "SLACK_TOKEN"]
+    },
+    "commands": {
+        "ask": [{
+            "reason": DEFAULT_ASK_REASON,
+            "commands": {
+                "mv": ["/repo/*"]
+            }
+        }],
+        "deny": [
+            "rm", {
+                "reason": "no pushes",
+                "commands": ["git push"]
+            }, {
+                "reason": "sealed",
+                "paths": ["/repo/secrets"]
+            }
+        ],
+        "allow": ["ls", "cat", "git *"],
+    },
+    "policy": {
+        "script": {
+            "source": "def pre_command(ctx):\n    return None\n",
+            "language": "python",
+            "module": False,
+        },
+        "runtime": "monty",
+    },
+}
+
+
+def test_profile_to_dict_writes_the_document_grammar():
+    profile = profile_from_dict(CODEC_DOCUMENT)
+    written = profile_to_dict(profile)
+    assert written == CODEC_WRITTEN
+    assert profile_from_dict(written) == profile
+    assert profile_to_dict(profile_from_dict(written)) == written
+
+
+@pytest.mark.parametrize("doc", [
+    {},
+    {
+        "commands": {
+            "allow": []
+        }
+    },
+    {
+        "vars": {
+            "hide": []
+        },
+        "paths": {},
+        "mounts": {},
+        "env": {},
+        "commands": {}
+    },
+])
+def test_profile_to_dict_keeps_a_stated_but_empty_block(doc):
+    # None and empty are two different documents: an empty allow list
+    # installs nothing, an absent one installs everything.
+    profile = profile_from_dict(doc)
+    assert profile_from_dict(profile_to_dict(profile)) == profile
+
+
+def test_profile_to_dict_spells_what_only_a_typed_caller_can_build():
+    # Several commands beside paths have only the mapping form to travel
+    # in, and read back as one rule per command.
+    both = SessionProfile(commands=CommandsBlock(
+        deny=(CommandRule(reason="r", commands=("rm",
+                                                "mv"), paths=("/x", )), )))
+    back = profile_from_dict(profile_to_dict(both))
+    assert back.commands is not None
+    assert back.commands.deny == (
+        CommandRule(reason="r", commands=("rm", ), paths=("/x", )),
+        CommandRule(reason="r", commands=("mv", ), paths=("/x", )),
+    )
+    # A rule naming neither is every command, which the grammar spells
+    # as the wildcard.
+    every = SessionProfile(commands=CommandsBlock(ask=(CommandRule(
+        reason="all"), )))
+    assert profile_to_dict(every) == {
+        "commands": {
+            "ask": [{
+                "reason": "all",
+                "commands": ["*"]
+            }]
+        }
+    }
+    # A mount stamp belongs to a compiled rule, never to a document.
+    stamped = SessionProfile(commands=CommandsBlock(
+        deny=(CommandRule(reason="r", commands=("rm", ), mount="/repo"), )))
+    with pytest.raises(ValueError, match="carries no mount"):
+        profile_to_dict(stamped)
+
+
+# The document keys a show by path, so two entries for one path have one
+# slot -- and the last one written is not the one that governs.
+# `shown_mode` takes the weaker of two entries at a depth, failing
+# toward refusal, so serializing the last handed the subtree back
+# executable after a reload while the source session was read-only.
+def test_a_duplicate_show_path_serializes_its_weakest_mode():
+    block = PathsBlock.model_construct(hide=("/vault", ),
+                                       show=(ShowEntry(path="/vault/public",
+                                                       mode=MountMode.READ),
+                                             ShowEntry(path="/vault/public",
+                                                       mode=MountMode.EXEC)),
+                                       reasons=())
+    profile = SessionProfile.model_construct(paths=block)
+    doc = profile_to_dict(profile)
+    assert doc["paths"]["show"] == {"/vault/public": "read"}
+    # What is in force before the round trip is what comes back.
+    assert shown_mode(ShownPaths(entries=block.show),
+                      "/vault/public/f") == (2, MountMode.READ)
+    assert shown_mode(classify_shows(profile_from_dict(doc).paths.show),
+                      "/vault/public/f") == (2, MountMode.READ)
+
+
+# A list-form entry states visibility only and answers no mode
+# question, so a stated mode beside it takes the slot rather than being
+# erased by it.
+def test_a_list_form_duplicate_does_not_erase_a_stated_mode():
+    for pair in ((None, MountMode.READ), (MountMode.READ, None)):
+        block = PathsBlock.model_construct(
+            hide=("/vault", ),
+            show=tuple(
+                ShowEntry(path="/vault/public", mode=mode) for mode in pair),
+            reasons=())
+        doc = profile_to_dict(SessionProfile.model_construct(paths=block))
+        assert doc["paths"]["show"] == {"/vault/public": "read"}

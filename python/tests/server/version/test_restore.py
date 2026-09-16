@@ -44,25 +44,57 @@ async def _two_file_history(ws, store):
     return v1
 
 
+# A checkout used to re-apply a version's grants like any other state,
+# so a session the host had narrowed since the commit woke wider than the
+# host left it. A restored table now lands under the live session and
+# never wider than it: the version's restrictions join the live ones,
+# and `set_session_profile` is the host's reset.
 @pytest.mark.asyncio
-async def test_restore_whole_world_restores_grants(tmp_path):
+async def test_restore_whole_world_never_widens_a_live_session(tmp_path):
     ws = _ws()
     store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
-    session = ws.create_session("narrow", mounts={"/m": "write"})
+    ws.create_session("narrow", mounts={"/m": "write"})
     await ws.execute("echo one > /m/a.txt")
     await ws.flush_sessions()
     v1 = await commit(store, ws, "main", "v1")
-    session.mount_modes = {**session.mount_modes, "/m": MountMode.READ}
+    await ws.set_session_profile("narrow", {"mounts": {"/m": "read"}})
     await ws.execute("echo two > /m/a.txt")
     await ws.flush_sessions()
 
     report = await restore(store, ws, v1)
 
     assert await _cat(ws, "/m/a.txt") == "one\n"
-    assert ws.get_session("narrow").mount_modes["/m"] == MountMode.WRITE
+    assert ws.get_session("narrow").mount_modes["/m"] == MountMode.READ
     assert report["categories"] == [
         "files", "history", "namespace", "sessions"
     ]
+    refused = await ws.execute("echo three > /m/a.txt", session_id="narrow")
+    assert refused.exit_code != 0
+    await ws.set_session_profile("narrow", {"mounts": {"/m": "write"}})
+    assert (await ws.execute("echo three > /m/a.txt",
+                             session_id="narrow")).exit_code == 0
+    assert await _cat(ws, "/m/a.txt") == "three\n"
+
+
+# The version's own narrowing does land: a session narrower at the commit
+# than it is live comes back narrower.
+@pytest.mark.asyncio
+async def test_restore_whole_world_lands_a_versions_restrictions(tmp_path):
+    ws = _ws()
+    store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
+    ws.create_session("narrow", mounts={"/m": "read"})
+    await ws.flush_sessions()
+    v1 = await commit(store, ws, "main", "v1")
+    await ws.set_session_profile("narrow", {"mounts": {"/m": "write"}})
+    assert (await ws.execute("echo two > /m/a.txt",
+                             session_id="narrow")).exit_code == 0
+    await ws.flush_sessions()
+
+    await restore(store, ws, v1)
+
+    assert ws.get_session("narrow").mount_modes["/m"] == MountMode.READ
+    assert (await ws.execute("echo three > /m/a.txt",
+                             session_id="narrow")).exit_code != 0
 
 
 @pytest.mark.asyncio

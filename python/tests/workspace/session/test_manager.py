@@ -810,6 +810,21 @@ async def test_session_close_waits_for_profile_persistence(
             await closing
 
 
+def test_manager_discard_forgets_a_candidate_and_frees_its_id():
+    mgr = SessionManager("default")
+    mgr.create("candidate")
+    mgr.discard("candidate")
+    with pytest.raises(KeyError):
+        mgr.get("candidate")
+    with pytest.raises(KeyError):
+        mgr.lock_for("candidate")
+    assert mgr.create("candidate").session_id == "candidate"
+    with pytest.raises(ValueError, match="Cannot discard"):
+        mgr.discard("default")
+    with pytest.raises(KeyError):
+        mgr.discard("nonexistent")
+
+
 class _StallableStore(RAMSessionStore):
 
     def __init__(self) -> None:

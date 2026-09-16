@@ -48,10 +48,12 @@ class CLIRegistry:
     def __init__(self) -> None:
         self._installs: dict[str, CLIInstall] = {}
 
-    def install(self,
-                name: str,
-                spec: CLISpec,
-                config: dict[str, JsonValue] | None = None) -> CLIInstall:
+    def install(
+            self,
+            name: str,
+            spec: CLISpec,
+            config: BaseModel | dict[str, JsonValue]
+        | None = None) -> CLIInstall:
         """Install a CLI under a head word.
 
         Args:
@@ -60,8 +62,10 @@ class CLIRegistry:
                 shell builtin, or a general command (a runtime capture
                 of the same name is fine: the policy steers per line).
             spec (CLISpec): the program tree.
-            config (dict[str, JsonValue] | None): installation config,
-                validated through the spec's ``config_model``.
+            config (BaseModel | dict[str, JsonValue] | None):
+                installation config, validated through the spec's
+                ``config_model``; a model of that class reinstalls
+                as-is, which is how a host passes back what it has.
         """
         if not name or any(ch.isspace() for ch in name):
             raise ValueError(f"CLI name {name!r} must be a single word")
@@ -83,14 +87,22 @@ class CLIRegistry:
         return install
 
     def _validate_config(
-        self, name: str, spec: CLISpec, config: dict[str, JsonValue] | None
+        self, name: str, spec: CLISpec,
+        config: BaseModel | dict[str, JsonValue] | None
     ) -> BaseModel | dict[str, JsonValue] | None:
         """Validate an installation config against the spec's model.
+
+        A model of the spec's own class passes through: this is what
+        the method returns, so it has to be what it takes -- iterating
+        a model yields ``(name, value)`` pairs, and the unknown-key
+        check below reported that as a TypeError naming neither the CLI
+        nor the config.
 
         Args:
             name (str): installed head word, for error attribution.
             spec (CLISpec): the program tree carrying ``config_model``.
-            config (dict[str, JsonValue] | None): raw config mapping.
+            config (BaseModel | dict[str, JsonValue] | None): the raw
+                config mapping, or a validated model to reinstall.
         """
         if spec.script is not None:
             # A script spec has no config_model: the mapping passes
@@ -102,6 +114,16 @@ class CLIRegistry:
                                  f"{spec.name!r} declares no config_model")
             return None
         model = spec.config_model
+        if isinstance(config, model):
+            # A config this registry itself produced, handed back. A
+            # host that reinstalls what it has does exactly that (the
+            # loader's `clis=` overrides), and re-validating it would
+            # mean dumping a model whose secret fields render as stars.
+            return config
+        if isinstance(config, BaseModel):
+            raise ValueError(f"CLI {name!r}: config is a "
+                             f"{type(config).__name__}, expected "
+                             f"{model.__name__} or a mapping")
         # Unknown keys fail loud (a typo'd YAML key must not be
         # silently ignored) unless the model itself opts into extras.
         if model.model_config.get("extra") != "allow":

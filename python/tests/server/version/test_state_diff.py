@@ -21,6 +21,7 @@ from mirage.server.version.api import commit
 from mirage.server.version.backend import LocalBackend
 from mirage.server.version.state_diff import state_diff
 from mirage.server.version.store import VersionStore
+from mirage.types import HiddenPaths
 from mirage.workspace.session.state import seed_var
 
 
@@ -86,6 +87,71 @@ async def test_state_diff_reports_grant_changes_with_direction(tmp_path):
     backward_grants = backward["sessions"]["modified"]["narrow"]["mount_modes"]
     assert forward_grants["modified"]["/m"] == {"from": "write", "to": "read"}
     assert backward_grants["modified"]["/m"] == {"from": "read", "to": "write"}
+
+
+# A restore lands the whole session table, so a version that differs
+# only in a field the diff never named read as unmodified right up to
+# the checkout that changed the session's access rules.
+@pytest.mark.asyncio
+async def test_state_diff_reports_a_field_beyond_env_grants_and_cwd(tmp_path):
+    ws = _ws()
+    store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
+    session = ws.create_session("narrow", mounts={"/m": "write"})
+    await ws.flush_sessions()
+    v1 = await commit(store, ws, "main", "v1")
+    session.hidden_paths = HiddenPaths(paths=("/m/secret", ))
+    await ws.flush_sessions()
+    v2 = await commit(store, ws, "main", "v2")
+
+    diff = await state_diff(store, v1, v2)
+    assert "narrow" in diff["sessions"]["modified"]
+    assert "hidden_paths" in diff["sessions"]["modified"]["narrow"]
+
+
+@pytest.mark.asyncio
+async def test_state_diff_reports_every_restored_session_field(tmp_path):
+    # A checkout lands the whole table (hides, rules, standing
+    # decisions, the profile name), so a diff reading only env, grants
+    # and cwd called a session unmodified right before a checkout
+    # changed what it may do.
+    ws = _ws()
+    store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
+    ws.create_session("narrow",
+                      permissions={
+                          "commands": {
+                              "deny": [{
+                                  "reason": "sealed",
+                                  "commands": {
+                                      "cat": ["/m/vault/*"]
+                                  }
+                              }]
+                          },
+                          "paths": {
+                              "hide": ["/m/secret"]
+                          },
+                      })
+    await ws.flush_sessions()
+    v1 = await commit(store, ws, "main", "v1")
+    await ws.set_session_profile("narrow",
+                                 {"paths": {
+                                     "hide": ["/m/secret", "/m/keys"]
+                                 }})
+    await ws.flush_sessions()
+    v2 = await commit(store, ws, "main", "v2")
+
+    delta = (await state_diff(store, v1, v2))["sessions"]["modified"]["narrow"]
+
+    # A dict-shaped field reports which of its keys moved.
+    moved = delta["hidden_paths"]["modified"]["paths"]
+    assert moved["from"] == ["/m/secret"]
+    assert sorted(moved["to"]) == ["/m/keys", "/m/secret"]
+    # The later table carries no rules block at all, so every key of
+    # the earlier one reads as deleted.
+    gone = delta["commands"]["deleted"]
+    assert [r["reason"] for r in gone["deny"]] == ["sealed"]
+    # Bookkeeping is not a change: the generation moved with every
+    # flush and the id keys the tables.
+    assert not {"generation", "created_at", "session_id"} & delta.keys()
 
 
 @pytest.mark.asyncio
