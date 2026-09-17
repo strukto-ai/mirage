@@ -170,9 +170,8 @@ export const FLOAT_VALUE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
 
 // Commands whose `Try '--help'` hint line is prefixed with the command
 // name (GNU diffutils style: `diff: Try 'diff --help' ...`), on every
-// refusal that carries the hint. Read through `usage.Program`, so the
-// prefix follows the builtin's grammar and not the spelling (see
-// USAGE_EXIT).
+// refusal that carries the hint. Read only for the builtin's own grammar,
+// so the prefix follows the grammar and not the spelling (see USAGE_EXIT).
 export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set(['diff', 'cmp'])
 
 // An old-style cluster letter left without its argument exits 2, not
@@ -199,10 +198,9 @@ export const OPERAND_EXIT: Readonly<Record<string, number>> = Object.freeze({
 // (plus ripgrep and jq upstream docs). Everything else exits 1.
 //
 // This table, USAGE_HINT_PREFIX and PYTHON_NAMES (and the curl and find
-// voices worded in usage.ts) each describe one real program, and every one
-// is read through `usage.Program`, which consults them only for the
-// builtin's own grammar: the executor's refusal door builds the record from
-// the parse's `builtin` bit (`isBuiltinGrammar`), so a mount's own `grep`
+// voices worded in usage.ts) each describe one real program, so usage.ts
+// reads them only when the line was parsed against the builtin's own
+// grammar (the parse's `builtin` bit, `isBuiltinGrammar`): a mount's own `grep`
 // exits 1 in the generic voice rather than inheriting grep's 2 from a
 // spelling collision. The tables that stay keyed on the name alone are the
 // ones read where no spec exists yet, and say so.
@@ -274,9 +272,9 @@ export const READ_FAIL_EXIT_ISDIR: Readonly<Record<string, number>> = Object.fre
 
 // The interpreter commands answer option errors in CPython's words, not
 // GNU's: python3 is not a GNU tool, and its refusal names the
-// source-selecting options a reader needs. Read through `usage.Program`, so
-// a mount's own `python3` is refused in GNU's words like any other custom
-// command (see USAGE_EXIT).
+// source-selecting options a reader needs. Read only for the builtin's own
+// grammar, so a mount's own `python3` is refused in GNU's words like any
+// other custom command (see USAGE_EXIT).
 export const PYTHON_NAMES: ReadonlySet<string> = new Set(['python', 'python3'])
 
 // Pinned on CPython 3.12.13, including two quirks worth keeping: the

@@ -18,14 +18,10 @@ from collections.abc import Mapping
 from mirage.commands.spec import (CommandSpec, flag_kwarg_name, parse_command,
                                   parse_to_kwargs)
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import (Program,  # yapf: disable
-                                        ambiguous_option_error,
-                                        invalid_argument_error,
-                                        invalid_float_error, invalid_int_error,
-                                        missing_required_error,
-                                        missing_value_error, old_option_error,
-                                        unexpected_value_error,
-                                        unknown_option_error)
+from mirage.commands.spec.usage import (  # yapf: disable
+    ambiguous_option_error, invalid_argument_error, invalid_float_error,
+    invalid_int_error, missing_required_error, missing_value_error,
+    old_option_error, unexpected_value_error, unknown_option_error)
 from mirage.types import PathSpec
 from mirage.workspace.executor.command.types import ParsedCommand
 
@@ -236,25 +232,27 @@ def option_error(cmd_name: str,
                  parsed: ParsedCommand) -> tuple[bytes, int] | None:
     """GNU-shaped refusal for option errors the parser reported.
 
-    The one door a refusal for an untrusted name comes through, so the
-    program is settled here from the parse's ``builtin`` bit and every
-    renderer below reads it: a registered command that borrowed a
-    builtin's name is worded and exited as any other custom command.
-    The builtin find is exempt: its expression tokens are validated by
-    parse_find_expression, which raises the GNU predicate error itself.
+    The parse's ``builtin`` bit says whether the line was read against
+    the builtin's own grammar; every renderer takes it, so a registered
+    command that borrowed a builtin's name is worded and exited like any
+    other custom command. The builtin find is exempt: its expression
+    tokens are validated by parse_find_expression, which raises the GNU
+    predicate error itself.
 
     Args:
         cmd_name (str): command name for message shape and exit code.
         parsed (ParsedCommand): parse result carrying the reports.
     """
-    program = Program(cmd_name, parsed.builtin)
-    if program.is_builtin("find"):
+    builtin = parsed.builtin
+    if builtin and cmd_name == "find":
         return None
     # An old-style cluster short of an argument outranks every scan error
     # below: tar counts the cluster's needs before argp validates a
     # letter, so `tar Qf` and `tar fQ` both name f, not Q.
     if parsed.old_option_needs_value is not None:
-        return old_option_error(program, parsed.old_option_needs_value)
+        return old_option_error(cmd_name,
+                                parsed.old_option_needs_value,
+                                builtin=builtin)
     # The first refusal on the line, whichever check made it: GNU stops
     # at the first offending token, so `grep --c --bogus` reports the
     # ambiguity, the reversed line reports --bogus, and `numfmt
@@ -267,32 +265,50 @@ def option_error(cmd_name: str,
     for kind in parsed.option_error_kinds:
         if kind == "ambiguous":
             token, candidates = parsed.ambiguous_options[0]
-            return ambiguous_option_error(program, token, candidates)
+            return ambiguous_option_error(cmd_name,
+                                          token,
+                                          candidates,
+                                          builtin=builtin)
         if kind == "unexpected_value":
-            return unexpected_value_error(program, parsed.invalid_options[0])
+            return unexpected_value_error(cmd_name,
+                                          parsed.invalid_options[0],
+                                          builtin=builtin)
         if kind == "invalid":
-            return unknown_option_error(program, parsed.invalid_options[0])
+            return unknown_option_error(cmd_name,
+                                        parsed.invalid_options[0],
+                                        builtin=builtin)
         if kind == "needs_value":
-            return missing_value_error(program, parsed.needs_value_options[0])
+            return missing_value_error(cmd_name,
+                                       parsed.needs_value_options[0],
+                                       builtin=builtin)
         if kind == "int":
             option, value = parsed.invalid_int_options[0]
-            return invalid_int_error(program, option, value)
+            return invalid_int_error(cmd_name, option, value, builtin=builtin)
         if kind == "float":
             option, value = parsed.invalid_float_options[0]
-            return invalid_float_error(program, option, value)
+            return invalid_float_error(cmd_name,
+                                       option,
+                                       value,
+                                       builtin=builtin)
         if kind == "value":
             option, value, choices = parsed.invalid_value_options[0]
-            return invalid_argument_error(program, option, value, choices)
+            return invalid_argument_error(cmd_name,
+                                          option,
+                                          value,
+                                          choices,
+                                          builtin=builtin)
         # gnulib's other wording for the same refusal, reached only by an
         # ARGMATCH table: the value is a prefix of two candidates or more.
         if kind == "ambiguous_value":
             option, value, choices = parsed.ambiguous_value_options[0]
-            return invalid_argument_error(program,
+            return invalid_argument_error(cmd_name,
                                           option,
                                           value,
                                           choices,
-                                          kind="ambiguous")
+                                          kind="ambiguous",
+                                          builtin=builtin)
     if parsed.missing_required_options:
-        return missing_required_error(program,
-                                      parsed.missing_required_options[0])
+        return missing_required_error(cmd_name,
+                                      parsed.missing_required_options[0],
+                                      builtin=builtin)
     return None

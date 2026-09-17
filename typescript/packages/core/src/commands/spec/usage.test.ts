@@ -30,8 +30,6 @@ import {
   readFailExitCode,
   readFailExitCodeFromLine,
   usageExitCode,
-  usageHint,
-  Program,
 } from './usage.ts'
 import { argmatch } from './argmatch.ts'
 
@@ -49,7 +47,7 @@ describe('usageExitCode', () => {
 
 describe('unknownOptionError', () => {
   it('long options report the full token', () => {
-    const [msg, code] = unknownOptionError(new Program('cat'), '--bogus=x')
+    const [msg, code] = unknownOptionError('cat', '--bogus=x')
     expect(td.decode(msg)).toBe(
       "cat: unrecognized option '--bogus=x'\nTry 'cat --help' for more information.\n",
     )
@@ -57,7 +55,7 @@ describe('unknownOptionError', () => {
   })
 
   it('short options report the char', () => {
-    const [msg, code] = unknownOptionError(new Program('grep'), 'Y')
+    const [msg, code] = unknownOptionError('grep', 'Y')
     expect(td.decode(msg)).toBe(
       "grep: invalid option -- 'Y'\nTry 'grep --help' for more information.\n",
     )
@@ -65,7 +63,7 @@ describe('unknownOptionError', () => {
   })
 
   it('find uses predicate wording', () => {
-    const [msg, code] = unknownOptionError(new Program('find'), '--bogus')
+    const [msg, code] = unknownOptionError('find', '--bogus')
     expect(td.decode(msg)).toBe("find: unknown predicate `--bogus'\n")
     expect(code).toBe(1)
   })
@@ -73,10 +71,10 @@ describe('unknownOptionError', () => {
 
 describe('missingValueError', () => {
   it('short and long shapes', () => {
-    const [shortMsg, shortCode] = missingValueError(new Program('grep'), 'm')
+    const [shortMsg, shortCode] = missingValueError('grep', 'm')
     expect(td.decode(shortMsg)).toContain("grep: option requires an argument -- 'm'\n")
     expect(shortCode).toBe(2)
-    const [longMsg, longCode] = missingValueError(new Program('du'), '--max-depth')
+    const [longMsg, longCode] = missingValueError('du', '--max-depth')
     expect(td.decode(longMsg)).toContain("du: option '--max-depth' requires an argument\n")
     expect(longCode).toBe(1)
   })
@@ -106,7 +104,7 @@ describe('extraOperandError', () => {
 
 describe('invalidArgumentError', () => {
   it('matches the GNU ARGMATCH shape and tee exit 1', () => {
-    const [msg, code] = invalidArgumentError(new Program('tee'), '--output-error', 'bogus', [
+    const [msg, code] = invalidArgumentError('tee', '--output-error', 'bogus', [
       'warn',
       'warn-nopipe',
       'exit',
@@ -124,7 +122,7 @@ describe('invalidArgumentError', () => {
   // Measured on GNU coreutils 9.4 under `LC_ALL=C LANG=C TZ=UTC` with a raw
   // `bytes` argv (ground truth QS.1 and QS.3a). Mirrors test_usage.py.
   it('escapes the word through gnulib quote()', () => {
-    const [msg, code] = invalidArgumentError(new Program('tee'), '--output-error', 'xé', ['warn'])
+    const [msg, code] = invalidArgumentError('tee', '--output-error', 'xé', ['warn'])
     expect(new TextDecoder().decode(msg)).toBe(
       "tee: invalid argument 'x\\303\\251' for '--output-error'\n" +
         "Valid arguments are:\n  - 'warn'\n" +
@@ -144,14 +142,7 @@ describe('invalidArgumentError', () => {
     const refusal = argmatch('', choices)
     expect(refusal).toEqual({ matched: false, kind: 'ambiguous' })
     const kind = refusal.matched ? 'invalid' : refusal.kind
-    const [msg, code] = invalidArgumentError(
-      new Program('tee'),
-      '--output-error',
-      '',
-      choices,
-      undefined,
-      kind,
-    )
+    const [msg, code] = invalidArgumentError('tee', '--output-error', '', choices, undefined, kind)
     expect(new TextDecoder().decode(msg).split('\n')[0]).toBe(
       "tee: ambiguous argument '' for '--output-error'",
     )
@@ -168,14 +159,14 @@ describe('invalidArgumentError', () => {
       ['ctime', 'status'],
     ]
     const [amb, ambCode] = invalidArgumentError(
-      new Program('du'),
+      'du',
       '--time',
       'a',
       choices,
       undefined,
       'ambiguous',
     )
-    const [inv, invCode] = invalidArgumentError(new Program('du'), '--time', 'zzz', choices)
+    const [inv, invCode] = invalidArgumentError('du', '--time', 'zzz', choices)
     const ambText = new TextDecoder().decode(amb)
     const invText = new TextDecoder().decode(inv)
     expect(ambText.split('\n')[0]).toBe("du: ambiguous argument 'a' for '--time'")
@@ -244,7 +235,7 @@ describe('argmatchError', () => {
 
 describe('missingRequiredError', () => {
   it('names the canonical spelling', () => {
-    const [msg, code] = missingRequiredError(new Program('mycmd'), '--out')
+    const [msg, code] = missingRequiredError('mycmd', '--out')
     expect(new TextDecoder().decode(msg)).toBe(
       "mycmd: option '--out' is required\nTry 'mycmd --help' for more information.\n",
     )
@@ -254,11 +245,7 @@ describe('missingRequiredError', () => {
 
 describe('ambiguousOptionError', () => {
   it('matches the GNU shape', () => {
-    const [msg, code] = ambiguousOptionError(new Program('grep'), '--c', [
-      '--context',
-      '--color',
-      '--count',
-    ])
+    const [msg, code] = ambiguousOptionError('grep', '--c', ['--context', '--color', '--count'])
     expect(new TextDecoder().decode(msg)).toBe(
       "grep: option '--c' is ambiguous; possibilities: '--context' '--color' '--count'\n" +
         "Try 'grep --help' for more information.\n",
@@ -269,7 +256,7 @@ describe('ambiguousOptionError', () => {
 
 describe('invalidIntError', () => {
   it('mirrors argparse wording', () => {
-    const [msg, code] = invalidIntError(new Program('mycli'), '--port', 'abc')
+    const [msg, code] = invalidIntError('mycli', '--port', 'abc')
     expect(new TextDecoder().decode(msg)).toBe(
       "mycli: invalid int value: 'abc' for '--port'\n" +
         "Try 'mycli --help' for more information.\n",
@@ -280,7 +267,7 @@ describe('invalidIntError', () => {
 
 describe('invalidFloatError', () => {
   it('mirrors argparse wording', () => {
-    const [msg, code] = invalidFloatError(new Program('mycli'), '--ratio', '5x')
+    const [msg, code] = invalidFloatError('mycli', '--ratio', '5x')
     expect(new TextDecoder().decode(msg)).toBe(
       "mycli: invalid float value: '5x' for '--ratio'\n" +
         "Try 'mycli --help' for more information.\n",
@@ -291,7 +278,7 @@ describe('invalidFloatError', () => {
 
 describe('oldOptionError', () => {
   it("matches GNU tar's wording", () => {
-    const [msg, code] = oldOptionError(new Program('tar'), 'f')
+    const [msg, code] = oldOptionError('tar', 'f')
     expect(td.decode(msg)).toBe(
       "tar: Old option 'f' requires an argument.\n" + "Try 'tar --help' for more information.\n",
     )
@@ -374,23 +361,23 @@ describe('curl wording', () => {
 
   it('reports an unknown option in curl words, a cluster letter dashed', () => {
     // Pinned on curl 8.14.1 (debian:stable-slim).
-    const [long, code] = unknownOptionError(new Program('curl'), '--bogus')
+    const [long, code] = unknownOptionError('curl', '--bogus')
     expect(dec.decode(long)).toBe(`curl: option --bogus: is unknown\n${hint}`)
     expect(code).toBe(2)
-    const [short] = unknownOptionError(new Program('curl'), 'Y')
+    const [short] = unknownOptionError('curl', 'Y')
     expect(dec.decode(short)).toBe(`curl: option -Y: is unknown\n${hint}`)
   })
 
   it('reports a missing parameter in curl words', () => {
-    const [short, code] = missingValueError(new Program('curl'), 'm')
+    const [short, code] = missingValueError('curl', 'm')
     expect(dec.decode(short)).toBe(`curl: option -m: requires parameter\n${hint}`)
     expect(code).toBe(2)
-    const [long] = missingValueError(new Program('curl'), '--max-time')
+    const [long] = missingValueError('curl', '--max-time')
     expect(dec.decode(long)).toBe(`curl: option --max-time: requires parameter\n${hint}`)
   })
 
   it('reports a bad number in curl words', () => {
-    const [line, code] = invalidFloatError(new Program('curl'), '--max-time', 'abc')
+    const [line, code] = invalidFloatError('curl', '--max-time', 'abc')
     expect(dec.decode(line)).toBe(
       `curl: option --max-time: expected a proper numerical parameter\n${hint}`,
     )
@@ -407,7 +394,7 @@ describe('curl wording', () => {
 // omitted here, as it is for every other refusal in this module.
 describe('unexpectedValueError', () => {
   it('names the option without the value', () => {
-    const [msg, code] = unexpectedValueError(new Program('grep'), '--byte-offset=2')
+    const [msg, code] = unexpectedValueError('grep', '--byte-offset=2')
     expect(new TextDecoder().decode(msg)).toBe(
       "grep: option '--byte-offset' doesn't allow an argument\n" +
         "Try 'grep --help' for more information.\n",
@@ -422,7 +409,7 @@ describe('unexpectedValueError', () => {
     ['wc', 1],
     ['sort', 2],
   ])('carries %s exit code', (name, expected) => {
-    const [msg, code] = unexpectedValueError(new Program(name), '--bogus-bool=2')
+    const [msg, code] = unexpectedValueError(name, '--bogus-bool=2')
     expect(
       new TextDecoder()
         .decode(msg)
@@ -433,7 +420,7 @@ describe('unexpectedValueError', () => {
 
   // An empty value is still a value, and a second `=` is part of it.
   it.each(['--byte-offset=', '--byte-offset=2=3'])('names only the option for %s', (token) => {
-    const [msg] = unexpectedValueError(new Program('grep'), token)
+    const [msg] = unexpectedValueError('grep', token)
     expect(
       new TextDecoder()
         .decode(msg)
@@ -448,14 +435,14 @@ describe('unexpectedValueError', () => {
   // GNU's words in a program that does not use GNU's parser.
   it('keeps the unknown wording for a program that is not getopt_long', () => {
     const dec = new TextDecoder()
-    const [curl, curlCode] = unexpectedValueError(new Program('curl'), '--silent=2')
+    const [curl, curlCode] = unexpectedValueError('curl', '--silent=2')
     expect(dec.decode(curl).startsWith('curl: option --silent=2: is unknown\n')).toBe(true)
     expect(curlCode).toBe(2)
-    const [jq] = unexpectedValueError(new Program('jq'), '--tab=2')
+    const [jq] = unexpectedValueError('jq', '--tab=2')
     expect(dec.decode(jq).startsWith("jq: unrecognized option '--tab=2'\n")).toBe(true)
-    const [py] = unexpectedValueError(new Program('python3'), '--version=2')
+    const [py] = unexpectedValueError('python3', '--version=2')
     expect(dec.decode(py).startsWith('unknown option --version=2\n')).toBe(true)
-    const [find] = unexpectedValueError(new Program('find'), '--help=2')
+    const [find] = unexpectedValueError('find', '--help=2')
     expect(dec.decode(find)).toBe("find: unknown predicate `--help=2'\n")
   })
 })
@@ -474,99 +461,88 @@ describe('unknownOptionError leaves the token unescaped', () => {
     ['cut', '--zzz=é'],
     ['wc', '--zzz=\x01'],
   ])('keeps %s’s token as typed', (cmd, token) => {
-    const [msg] = unknownOptionError(new Program(cmd), token)
+    const [msg] = unknownOptionError(cmd, token)
     expect(td.decode(msg).startsWith(`${cmd}: unrecognized option '${token}'\n`)).toBe(true)
   })
 })
 
 // A name is not an identity: a mount may register its own command under a
-// builtin's name, and the measured per-program rules (USAGE_EXIT,
-// USAGE_HINT_PREFIX, PYTHON_NAMES, the curl and find voices) describe one
-// real program each. `Program` is the one door those rules are read
-// through, keyed on the parse's builtin bit rather than on the spelling.
-describe('Program', () => {
-  it('a borrowed name exits 1 like any custom command', () => {
-    expect(new Program('grep').usageExit).toBe(2)
-    expect(new Program('grep', false).usageExit).toBe(1)
-    expect(new Program('tar', false).usageExit).toBe(1)
-    const [msg, code] = unknownOptionError(new Program('grep', false), '--bogus')
+// builtin's name, and USAGE_EXIT, USAGE_HINT_PREFIX, PYTHON_NAMES and the
+// curl and find voices each describe one real program. Every renderer reads
+// them only for the builtin's own grammar, which is the parse's `builtin`
+// bit, so a borrowed name answers as any custom command does.
+describe('a borrowed builtin name', () => {
+  it('exits 1 like any custom command', () => {
+    expect(usageExitCode('grep')).toBe(2)
+    expect(usageExitCode('grep', false)).toBe(1)
+    const [msg, code] = unknownOptionError('grep', '--bogus', false)
     expect(td.decode(msg)).toBe(
       "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\n",
     )
     expect(code).toBe(1)
+    // OLD_OPTION_EXIT is tar's own fatal error, not the borrower's.
+    expect(oldOptionError('tar', 'f', false)[1]).toBe(1)
   })
 
-  it('a borrowed name gets the bare hint line', () => {
-    expect(new Program('diff').hint).toBe("diff: Try 'diff --help' for more information.")
-    expect(new Program('diff', false).hint).toBe("Try 'diff --help' for more information.")
-    const [msg, code] = missingRequiredError(new Program('cmp', false), '--out')
+  it('gets the bare hint line', () => {
+    const [msg, code] = missingRequiredError('cmp', '--out', false)
     expect(td.decode(msg)).toBe(
       "cmp: option '--out' is required\nTry 'cmp --help' for more information.\n",
     )
     expect(code).toBe(1)
   })
 
-  it('a borrowed interpreter name answers in GNU words', () => {
+  it('answers in GNU words for an interpreter name', () => {
     for (const name of ['python', 'python3']) {
-      const borrowed = new Program(name, false)
-      const [unknown, unknownCode] = unknownOptionError(borrowed, '--bogus')
+      const [unknown, unknownCode] = unknownOptionError(name, '--bogus', false)
       expect(td.decode(unknown)).toBe(
         `${name}: unrecognized option '--bogus'\nTry '${name} --help' for more information.\n`,
       )
       expect(unknownCode).toBe(1)
-      const [missing] = missingValueError(borrowed, 'c')
+      const [missing] = missingValueError(name, 'c', false)
       expect(td.decode(missing)).toBe(
         `${name}: option requires an argument -- 'c'\nTry '${name} --help' for more information.\n`,
       )
-      const [unexpected] = unexpectedValueError(borrowed, '--verbose=2')
+      const [unexpected] = unexpectedValueError(name, '--verbose=2', false)
       expect(td.decode(unexpected)).toBe(
         `${name}: option '--verbose' doesn't allow an argument\nTry '${name} --help' for more information.\n`,
       )
     }
   })
 
-  it('a borrowed curl or find name answers in GNU words', () => {
-    const curl = new Program('curl', false)
-    expect(td.decode(unknownOptionError(curl, '--bogus')[0])).toMatch(
+  it('answers in GNU words for curl and find', () => {
+    expect(td.decode(unknownOptionError('curl', '--bogus', false)[0])).toMatch(
       /^curl: unrecognized option '--bogus'\n/,
     )
-    expect(td.decode(missingValueError(curl, '--max-time')[0])).toMatch(
+    expect(td.decode(missingValueError('curl', '--max-time', false)[0])).toMatch(
       /^curl: option '--max-time' requires an argument\n/,
     )
-    expect(td.decode(invalidFloatError(curl, '--max-time', 'abc')[0])).toMatch(
+    expect(td.decode(invalidFloatError('curl', '--max-time', 'abc', false)[0])).toMatch(
       /^curl: invalid float value: 'abc' for '--max-time'\n/,
     )
-    expect(td.decode(unknownOptionError(new Program('find', false), '--bogus')[0])).toMatch(
+    expect(td.decode(unknownOptionError('find', '--bogus', false)[0])).toMatch(
       /^find: unrecognized option '--bogus'\n/,
     )
   })
+})
 
-  // The builtin keeps its own voice through the same door, in both forms
-  // a caller reaches it by: the record and the name-keyed convenience.
-  it('the builtin keeps its voice through Program', () => {
-    expect(new Program('grep').isBuiltin('grep', 'rg')).toBe(true)
-    expect(new Program('grep', false).isBuiltin('grep')).toBe(false)
-    expect(new Program('mycmd').isBuiltin('grep')).toBe(false)
-    expect(usageExitCode('grep')).toBe(new Program('grep').usageExit)
-    expect(usageHint('diff')).toBe(new Program('diff').hint)
-  })
-
-  // diffutils routes every option refusal through error(), not only the
-  // extra-operand one (pinned on debian:stable-slim, diffutils 3.10:
-  // `diff --bogus a b`, `cmp -m`, `diff --help=x a b` all carry the prefix
-  // on the hint line and exit 2).
-  it('diff and cmp prefix the hint on every option refusal', () => {
-    const [unknown, unknownCode] = unknownOptionError(new Program('diff'), '--bogus')
+// diffutils routes every option refusal through error(), not only the
+// extra-operand one (pinned on debian:stable-slim, diffutils 3.10: `diff
+// --bogus a b`, `cmp -m`, `diff --help=x a b` all carry the prefix on the
+// hint line and exit 2).
+describe('diff and cmp', () => {
+  it('prefix the hint on every option refusal', () => {
+    const [unknown, unknownCode] = unknownOptionError('diff', '--bogus')
     expect(td.decode(unknown)).toBe(
       "diff: unrecognized option '--bogus'\ndiff: Try 'diff --help' for more information.\n",
     )
     expect(unknownCode).toBe(2)
-    const [short, shortCode] = unknownOptionError(new Program('cmp'), 'm')
+    const [short, shortCode] = unknownOptionError('cmp', 'm')
     expect(td.decode(short)).toBe(
       "cmp: invalid option -- 'm'\ncmp: Try 'cmp --help' for more information.\n",
     )
     expect(shortCode).toBe(2)
-    const [value, valueCode] = unexpectedValueError(new Program('diff'), '--help=x')
+    const [value, valueCode] = unexpectedValueError('diff', '--help=x')
     expect(td.decode(value)).toBe(
       "diff: option '--help' doesn't allow an argument\ndiff: Try 'diff --help' for more information.\n",
     )

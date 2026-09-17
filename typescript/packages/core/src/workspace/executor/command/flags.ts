@@ -14,7 +14,6 @@
 
 import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
 import {
-  Program,
   ambiguousOptionError,
   invalidArgumentError,
   invalidFloatError,
@@ -190,22 +189,21 @@ export function parseFlags(
   }
 }
 
-// GNU-shaped refusal for option errors the parser reported. The one door a
-// refusal for an untrusted name comes through, so the program is settled
-// here from the parse's `builtin` bit and every renderer below reads it: a
-// registered command that borrowed a builtin's name is worded and exited as
-// any other custom command. The builtin find is exempt: its expression
-// tokens are validated by parseFindExpression, which raises the GNU
-// predicate error itself. Takes the whole ParsedCommand, mirroring Python's
-// `option_error(cmd_name, parsed)`.
+// GNU-shaped refusal for option errors the parser reported. The parse's
+// `builtin` bit says whether the line was read against the builtin's own
+// grammar; every renderer takes it, so a registered command that borrowed a
+// builtin's name is worded and exited like any other custom command. The
+// builtin find is exempt: its expression tokens are validated by
+// parseFindExpression, which raises the GNU predicate error itself. Takes
+// the whole ParsedCommand, mirroring Python's `option_error(cmd_name, parsed)`.
 export function optionError(cmdName: string, parsed: ParsedCommand): [Uint8Array, number] | null {
-  const program = new Program(cmdName, parsed.builtin)
-  if (program.isBuiltin('find')) return null
+  const { builtin } = parsed
+  if (builtin && cmdName === 'find') return null
   // An old-style cluster short of an argument outranks every scan error
   // below: tar counts the cluster's needs before argp validates a letter,
   // so `tar Qf` and `tar fQ` both name f, not Q.
   if (parsed.oldOptionNeedsValue !== null) {
-    return oldOptionError(program, parsed.oldOptionNeedsValue)
+    return oldOptionError(cmdName, parsed.oldOptionNeedsValue, builtin)
   }
   // The first refusal on the line, whichever check made it: GNU stops at
   // the first offending token, so `grep --c --bogus` reports the
@@ -219,34 +217,44 @@ export function optionError(cmdName: string, parsed: ParsedCommand): [Uint8Array
   for (const kind of parsed.optionErrorKinds) {
     if (kind === 'ambiguous') {
       const ambiguous = parsed.ambiguousOptions[0]
-      if (ambiguous !== undefined) return ambiguousOptionError(program, ...ambiguous)
+      if (ambiguous !== undefined) return ambiguousOptionError(cmdName, ...ambiguous, builtin)
     } else if (kind === 'unexpected_value') {
-      return unexpectedValueError(program, parsed.invalidOptions[0] ?? '')
+      return unexpectedValueError(cmdName, parsed.invalidOptions[0] ?? '', builtin)
     } else if (kind === 'invalid') {
-      return unknownOptionError(program, parsed.invalidOptions[0] ?? '')
+      return unknownOptionError(cmdName, parsed.invalidOptions[0] ?? '', builtin)
     } else if (kind === 'needs_value') {
-      return missingValueError(program, parsed.needsValueOptions[0] ?? '')
+      return missingValueError(cmdName, parsed.needsValueOptions[0] ?? '', builtin)
     } else if (kind === 'int') {
       const badInt = parsed.invalidIntOptions[0]
-      if (badInt !== undefined) return invalidIntError(program, ...badInt)
+      if (badInt !== undefined) return invalidIntError(cmdName, ...badInt, builtin)
     } else if (kind === 'float') {
       const badFloat = parsed.invalidFloatOptions[0]
-      if (badFloat !== undefined) return invalidFloatError(program, ...badFloat)
+      if (badFloat !== undefined) return invalidFloatError(cmdName, ...badFloat, builtin)
     } else if (kind === 'value') {
       const badValue = parsed.invalidValueOptions[0]
-      if (badValue !== undefined) return invalidArgumentError(program, ...badValue)
+      if (badValue !== undefined) {
+        return invalidArgumentError(cmdName, ...badValue, undefined, 'invalid', builtin)
+      }
     } else if (kind === 'ambiguous_value') {
       // gnulib's other wording for the same refusal, reached only by an
       // ARGMATCH table: the value is a prefix of two candidates or more.
       const badValue = parsed.ambiguousValueOptions[0]
       if (badValue !== undefined) {
         const [option, value, choices] = badValue
-        return invalidArgumentError(program, option, value, choices, undefined, 'ambiguous')
+        return invalidArgumentError(
+          cmdName,
+          option,
+          value,
+          choices,
+          undefined,
+          'ambiguous',
+          builtin,
+        )
       }
     }
   }
   if (parsed.missingRequiredOptions.length > 0) {
-    return missingRequiredError(program, parsed.missingRequiredOptions[0] ?? '')
+    return missingRequiredError(cmdName, parsed.missingRequiredOptions[0] ?? '', builtin)
   }
   return null
 }

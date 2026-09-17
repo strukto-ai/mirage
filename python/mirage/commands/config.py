@@ -386,9 +386,7 @@ def standard_request(name: str, spec: CommandSpec | None,
     # The one the scan reaches first decides; no two options share a
     # word, so the positions cannot tie.
     index, dest = min(found)
-    # The parser's answer, not a second derivation: the scan already
-    # settled whose grammar these words were read against.
-    builtin = whole.builtin
+    builtin = is_builtin_grammar(name, spec)
     if builtin and name in STANDARD_BEFORE_SCAN:
         return _standard_output(name, spec, dest)
     # Everything ahead of the option has to scan cleanly: a refusal

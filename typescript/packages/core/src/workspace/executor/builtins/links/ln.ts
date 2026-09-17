@@ -20,11 +20,11 @@ import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import { type ParsedArgs } from '../../../../commands/spec/parser.ts'
 import {
-  Program,
   ambiguousOptionError,
   missingValueError,
   unexpectedValueError,
   unknownOptionError,
+  usageHint,
 } from '../../../../commands/spec/usage.ts'
 import { type ByteSource, materialize } from '../../../../io/types.ts'
 import { type FileStat, FileType, PathSpec, wordText } from '../../../../types.ts'
@@ -48,7 +48,6 @@ import { posixRelative } from './links.ts'
 import { pathReaddir, resolvePathStat } from './probe.ts'
 import type { Result } from '../types.ts'
 
-const PROGRAM = new Program('ln')
 const TARGET_DIR_LONG = '--target-directory'
 const SUFFIX_LONG = '--suffix'
 const VALUED_SHORTS = 'tS'
@@ -105,24 +104,24 @@ export function optionRefusal(parsed: ParsedArgs): [string, number] | null {
   const dec = new TextDecoder()
   const ambiguousFirst = parsed.ambiguousOptions[0]
   if (parsed.optionErrorKinds[0] === 'ambiguous' && ambiguousFirst !== undefined) {
-    const [msg, code] = ambiguousOptionError(PROGRAM, ...ambiguousFirst)
+    const [msg, code] = ambiguousOptionError('ln', ...ambiguousFirst)
     return [dec.decode(msg), code]
   }
   const invalid = parsed.invalidOptions[0]
   if (invalid !== undefined) {
     const [msg, code] =
       parsed.optionErrorKinds[0] === 'unexpected_value'
-        ? unexpectedValueError(PROGRAM, invalid)
-        : unknownOptionError(PROGRAM, invalid)
+        ? unexpectedValueError('ln', invalid)
+        : unknownOptionError('ln', invalid)
     return [dec.decode(msg), code]
   }
   if (ambiguousFirst !== undefined) {
-    const [msg, code] = ambiguousOptionError(PROGRAM, ...ambiguousFirst)
+    const [msg, code] = ambiguousOptionError('ln', ...ambiguousFirst)
     return [dec.decode(msg), code]
   }
   const needsValue = parsed.needsValueOptions[0]
   if (needsValue !== undefined) {
-    const [msg, code] = missingValueError(PROGRAM, needsValue)
+    const [msg, code] = missingValueError('ln', needsValue)
     return [dec.decode(msg), code]
   }
   return null
@@ -272,7 +271,7 @@ export async function planLinks(
   targetTyped: string | null,
   flags: LnFlags,
 ): Promise<[LinkPlan[], string | null]> {
-  const hint = `${PROGRAM.hint}\n`
+  const hint = `${usageHint('ln')}\n`
   if (targetDir !== null) {
     const typed = targetTyped ?? targetDir
     const [resolved, stat] = await dirAt(
@@ -572,7 +571,7 @@ export async function handleLn(
     throw err
   }
   const [operands, targetTyped] = operandWords(args)
-  if (operands.length === 0) return fail('ln', `ln: missing file operand\n${PROGRAM.hint}\n`)
+  if (operands.length === 0) return fail('ln', `ln: missing file operand\n${usageHint('ln')}\n`)
   // GNU's order: the operand count first, then -r, then the -T/-t clash.
   if (flags.relative && !flags.symbolic) {
     return fail('ln', 'ln: cannot do --relative without --symbolic\n')

@@ -383,9 +383,7 @@ export function standardRequest(
   // The one the scan reaches first decides; no two options share a word, so
   // the positions cannot tie.
   const first = found.reduce((a, b) => (a.index <= b.index ? a : b))
-  // The parser's answer, not a second derivation: the scan already settled
-  // whose grammar these words were read against.
-  const builtin = whole.builtin
+  const builtin = isBuiltinGrammar(name, spec)
   if (builtin && STANDARD_BEFORE_SCAN.has(name)) return standardOutput(name, spec, first.dest)
   // Everything ahead of the option has to scan cleanly: a refusal among those
   // words is what GNU reports instead of the answer.

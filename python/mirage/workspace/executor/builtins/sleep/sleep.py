@@ -19,9 +19,9 @@ from mirage.commands.config import help_page, version_line
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.constants import NUMERIC_SHORT
-from mirage.commands.spec.usage import (Program, ambiguous_option_error,
+from mirage.commands.spec.usage import (ambiguous_option_error,
                                         unexpected_value_error,
-                                        unknown_option_error)
+                                        unknown_option_error, usage_hint)
 from mirage.io import IOResult
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
@@ -34,7 +34,6 @@ from mirage.workspace.types import ExecutionNode
 # The only two options coreutils sleep declares, through gnulib's
 # `parse_gnu_standard_options_only`. They share no prefix, so an
 # abbreviation of either resolves and neither can ever be ambiguous.
-PROGRAM = Program("sleep")
 _STANDARD_OPTIONS = ("--help", "--version")
 
 
@@ -164,14 +163,14 @@ async def handle_sleep(
             # getopt_long quotes the WHOLE token here where the
             # doesn't-allow-an-argument refusal quotes the canonical
             # spelling.
-            message, code = ambiguous_option_error(PROGRAM, bad_option,
+            message, code = ambiguous_option_error("sleep", bad_option,
                                                    matches)
         elif not matches:
-            message, code = unknown_option_error(PROGRAM, bad_option)
+            message, code = unknown_option_error("sleep", bad_option)
         elif not eq:
             return _standard_response(matches[0])
         else:
-            message, code = unexpected_value_error(PROGRAM, matches[0])
+            message, code = unexpected_value_error("sleep", matches[0])
         return None, IOResult(exit_code=code,
                               stderr=message), ExecutionNode(command="sleep",
                                                              exit_code=code)
@@ -179,7 +178,7 @@ async def handle_sleep(
         # Missing operand is the same `usage (EXIT_FAILURE)` refusal the
         # invalid-interval one is, so it carries the same Try-help line
         # (measured on 9.4: `sleep` is two lines, not one).
-        err = (f"sleep: missing operand\n{PROGRAM.hint}\n").encode()
+        err = (f"sleep: missing operand\n{usage_hint('sleep')}\n").encode()
         return None, IOResult(exit_code=1,
                               stderr=err), ExecutionNode(command="sleep",
                                                          exit_code=1)
@@ -215,7 +214,7 @@ async def handle_sleep(
         # `quote()` like every other coreutils operand diagnostic
         # (measured on 9.4: `sleep -- <e-acute>` names `'\303\251'`).
         err = ("".join(f"sleep: invalid time interval '{quote_text(raw)}'\n"
-                       for raw in bad) + f"{PROGRAM.hint}\n").encode()
+                       for raw in bad) + f"{usage_hint('sleep')}\n").encode()
         return None, IOResult(exit_code=1,
                               stderr=err), ExecutionNode(command="sleep",
                                                          exit_code=1)

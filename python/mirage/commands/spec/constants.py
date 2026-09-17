@@ -168,10 +168,9 @@ FLOAT_VALUE = re.compile(
 # with CommandName still hit.
 #
 # This table, USAGE_HINT_PREFIX and PYTHON_NAMES (and the curl and find
-# voices worded in usage.py) each describe one real program, and every
-# one is read through `usage.Program`, which consults them only for the
-# builtin's own grammar: the executor's refusal door builds the record
-# from the parse's `builtin` bit (`is_builtin_grammar`), so a mount's
+# voices worded in usage.py) each describe one real program, so usage.py
+# reads them only when the line was parsed against the builtin's own
+# grammar (the parse's `builtin` bit, `is_builtin_grammar`): a mount's
 # own `grep` exits 1 in the generic voice rather than inheriting grep's
 # 2 from a spelling collision. The tables that stay keyed on the name
 # alone are the ones read where no spec exists yet, and say so below.
@@ -259,9 +258,9 @@ OPERAND_EXIT = {
 # The interpreter commands answer option errors in CPython's words, not
 # GNU's: python3 is not a GNU tool, and its refusal names the
 # source-selecting options a reader needs. Plain strings for the same
-# no-cycle reason as USAGE_EXIT above. Read through `usage.Program`, so
-# a mount's own `python3` is refused in GNU's words like any other
-# custom command (see USAGE_EXIT).
+# no-cycle reason as USAGE_EXIT above. Read only for the builtin's own
+# grammar, so a mount's own `python3` is refused in GNU's words like any
+# other custom command (see USAGE_EXIT).
 PYTHON_NAMES = frozenset({"python", "python3"})
 
 # Pinned on CPython 3.12.13, including two quirks worth keeping: the
@@ -278,8 +277,8 @@ OLD_OPTION_EXIT = 2
 
 # Commands whose `Try '--help'` hint line is prefixed with the command
 # name (GNU diffutils style: `diff: Try 'diff --help' ...`), on every
-# refusal that carries the hint. Read through `usage.Program`, so the
-# prefix follows the builtin's grammar and not the spelling (see
+# refusal that carries the hint. Read only for the builtin's own
+# grammar, so the prefix follows the grammar and not the spelling (see
 # USAGE_EXIT).
 USAGE_HINT_PREFIX = frozenset({"diff", "cmp"})
 
