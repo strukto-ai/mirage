@@ -15,6 +15,7 @@
 from dataclasses import replace
 
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.builtin_specs import registered_spec
 from mirage.commands.spec.types import CommandSpec, Operand, Option
 from mirage.workspace.executor.command.flags import (option_error, parse_flags,
                                                      synthesize_path_spec)
@@ -223,3 +224,46 @@ def test_the_two_argmatch_refusals_differ_only_in_the_first_line():
     assert ambiguous is not None and invalid is not None
     assert ambiguous[0].split(b"\n", 1)[1] == invalid[0].split(b"\n", 1)[1]
     assert ambiguous[1] == invalid[1] == 1
+
+
+# The parser settles whose grammar a line was read against and the door
+# reads that bit, never the spelling: a mount may register its own
+# command under a builtin's name (nothing refuses it), and the measured
+# per-program tables describe one real program each.
+BORROWED = CommandSpec(options=(Option(long="--mode", type="str"), ),
+                       rest=Operand(type="str"))
+
+
+def test_parse_flags_carries_the_parsers_builtin_bit():
+    assert parse_flags(["x"], registered_spec("grep", SPECS["grep"]), "grep",
+                       "/").builtin
+    assert parse_flags(["x"], SPECS["grep"], "grep", "/").builtin
+    assert not parse_flags(["x"], BORROWED, "grep", "/").builtin
+    assert not parse_flags(["x"], None, "grep", "/").builtin
+
+
+def test_a_borrowed_name_is_refused_like_any_custom_command():
+    for name in ("grep", "diff", "python3", "curl", "tar"):
+        refusal = option_error(
+            name, parse_flags(["--bogus", "x"], BORROWED, name, "/"))
+        assert refusal == (
+            f"{name}: unrecognized option '--bogus'\n"
+            f"Try '{name} --help' for more information.\n".encode(), 1), name
+    refusal = option_error("grep",
+                           parse_flags(["x"], SPECS["grep"], "grep", "/"))
+    assert refusal is None
+    refusal = option_error(
+        "grep", parse_flags(["--bogus", "x"], SPECS["grep"], "grep", "/"))
+    assert refusal is not None and refusal[1] == 2
+
+
+# The find exemption is the builtin's: its expression is validated by
+# parse_find_expression. A borrowed `find` has no such parser, so its
+# undeclared option is refused rather than silently dropped.
+def test_a_borrowed_find_is_not_exempt_from_option_refusal():
+    parsed = parse_flags(["--bogus", "x"], BORROWED, "find", "/")
+    refusal = option_error("find", parsed)
+    assert refusal is not None
+    assert refusal[0].startswith(b"find: unrecognized option '--bogus'\n")
+    builtin = parse_flags(["-name", "x"], SPECS["find"], "find", "/")
+    assert option_error("find", builtin) is None

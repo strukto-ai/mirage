@@ -1,10 +1,16 @@
 from mirage.commands.spec.argmatch import ArgmatchRefusal, argmatch
-from mirage.commands.spec.usage import (  # yapf: disable
-    ambiguous_option_error, argmatch_error, argmatch_line,
-    argmatch_valid_block, extra_operand_error, invalid_argument_error,
-    invalid_float_error, invalid_int_error, missing_required_error,
-    missing_value_error, old_option_error, read_fail_exit, read_fail_exit_line,
-    unexpected_value_error, unknown_option_error, usage_exit_code)
+from mirage.commands.spec.usage import (Program,  # yapf: disable
+                                        ambiguous_option_error, argmatch_error,
+                                        argmatch_line, argmatch_valid_block,
+                                        extra_operand_error,
+                                        invalid_argument_error,
+                                        invalid_float_error, invalid_int_error,
+                                        missing_required_error,
+                                        missing_value_error, old_option_error,
+                                        read_fail_exit, read_fail_exit_line,
+                                        unexpected_value_error,
+                                        unknown_option_error, usage_exit_code,
+                                        usage_hint)
 
 
 def test_exit_codes_match_gnu():
@@ -16,30 +22,30 @@ def test_exit_codes_match_gnu():
 
 
 def test_unknown_long_option_reports_full_token():
-    msg, code = unknown_option_error("cat", "--bogus=x")
+    msg, code = unknown_option_error(Program("cat"), "--bogus=x")
     assert msg == (b"cat: unrecognized option '--bogus=x'\n"
                    b"Try 'cat --help' for more information.\n")
     assert code == 1
 
 
 def test_unknown_short_option_reports_char():
-    msg, code = unknown_option_error("grep", "Y")
+    msg, code = unknown_option_error(Program("grep"), "Y")
     assert msg == (b"grep: invalid option -- 'Y'\n"
                    b"Try 'grep --help' for more information.\n")
     assert code == 2
 
 
 def test_find_uses_predicate_wording():
-    msg, code = unknown_option_error("find", "--bogus")
+    msg, code = unknown_option_error(Program("find"), "--bogus")
     assert msg == b"find: unknown predicate `--bogus'\n"
     assert code == 1
 
 
 def test_missing_value_short_and_long():
-    msg, code = missing_value_error("grep", "m")
+    msg, code = missing_value_error(Program("grep"), "m")
     assert msg.startswith(b"grep: option requires an argument -- 'm'\n")
     assert code == 2
-    msg, code = missing_value_error("du", "--max-depth")
+    msg, code = missing_value_error(Program("du"), "--max-depth")
     assert msg.startswith(b"du: option '--max-depth' requires an argument\n")
     assert code == 1
 
@@ -66,7 +72,7 @@ def test_extra_operand_mktemp_says_too_many_templates():
 
 def test_invalid_argument_matches_gnu_argmatch_shape():
     stderr, code = invalid_argument_error(
-        "tee", "--output-error", "bogus",
+        Program("tee"), "--output-error", "bogus",
         ("warn", "warn-nopipe", "exit", "exit-nopipe"))
     assert stderr == (b"tee: invalid argument 'bogus' for '--output-error'\n"
                       b"Valid arguments are:\n"
@@ -77,14 +83,14 @@ def test_invalid_argument_matches_gnu_argmatch_shape():
 
 
 def test_missing_required_names_the_canonical_spelling():
-    stderr, code = missing_required_error("mycmd", "--out")
+    stderr, code = missing_required_error(Program("mycmd"), "--out")
     assert stderr == (b"mycmd: option '--out' is required\n"
                       b"Try 'mycmd --help' for more information.\n")
     assert code == 1
 
 
 def test_ambiguous_option_matches_gnu_shape():
-    out, code = ambiguous_option_error("grep", "--c",
+    out, code = ambiguous_option_error(Program("grep"), "--c",
                                        ("--context", "--color", "--count"))
     assert out == (b"grep: option '--c' is ambiguous; possibilities: "
                    b"'--context' '--color' '--count'\n"
@@ -93,21 +99,21 @@ def test_ambiguous_option_matches_gnu_shape():
 
 
 def test_invalid_int_mirrors_argparse_wording():
-    out, code = invalid_int_error("mycli", "--port", "abc")
+    out, code = invalid_int_error(Program("mycli"), "--port", "abc")
     assert out == (b"mycli: invalid int value: 'abc' for '--port'\n"
                    b"Try 'mycli --help' for more information.\n")
     assert code == 1
 
 
 def test_invalid_float_mirrors_argparse_wording():
-    out, code = invalid_float_error("mycli", "--ratio", "5x")
+    out, code = invalid_float_error(Program("mycli"), "--ratio", "5x")
     assert out == (b"mycli: invalid float value: '5x' for '--ratio'\n"
                    b"Try 'mycli --help' for more information.\n")
     assert code == 1
 
 
 def test_old_option_error_matches_gnu_tar_wording():
-    out, code = old_option_error("tar", "f")
+    out, code = old_option_error(Program("tar"), "f")
     assert out == (b"tar: Old option 'f' requires an argument.\n"
                    b"Try 'tar --help' for more information.\n")
     # tar's own fatal error, not argp's 64.
@@ -184,27 +190,28 @@ def test_curl_unknown_option_uses_curl_wording():
     # curl's own help hint. A cluster letter is reported dashed.
     hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
     assert unknown_option_error(
-        "curl",
+        Program("curl"),
         "--bogus") == (("curl: option --bogus: is unknown\n" + hint).encode(),
                        2)
-    assert unknown_option_error(
-        "curl", "Y") == (("curl: option -Y: is unknown\n" + hint).encode(), 2)
+    assert unknown_option_error(Program("curl"),
+                                "Y") == (("curl: option -Y: is unknown\n" +
+                                          hint).encode(), 2)
 
 
 def test_curl_missing_value_uses_curl_wording():
     hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
     assert missing_value_error(
-        "curl",
+        Program("curl"),
         "m") == (("curl: option -m: requires parameter\n" + hint).encode(), 2)
     assert missing_value_error(
-        "curl",
+        Program("curl"),
         "--max-time") == (("curl: option --max-time: requires parameter\n" +
                            hint).encode(), 2)
 
 
 def test_curl_bad_number_uses_curl_wording():
     hint = "curl: try 'curl --help' or 'curl --manual' for more information\n"
-    assert invalid_float_error("curl", "--max-time", "abc") == (
+    assert invalid_float_error(Program("curl"), "--max-time", "abc") == (
         ("curl: option --max-time: expected a proper numerical parameter\n" +
          hint).encode(), 2)
 
@@ -218,7 +225,7 @@ def test_curl_bad_number_uses_curl_wording():
 # and the hint is omitted here, as it is for every other refusal in this
 # module.
 def test_boolean_long_with_a_value_names_the_option_without_it():
-    msg, code = unexpected_value_error("grep", "--byte-offset=2")
+    msg, code = unexpected_value_error(Program("grep"), "--byte-offset=2")
     assert msg == (b"grep: option '--byte-offset' doesn't allow an argument\n"
                    b"Try 'grep --help' for more information.\n")
     assert code == 2
@@ -227,7 +234,7 @@ def test_boolean_long_with_a_value_names_the_option_without_it():
 def test_boolean_long_with_a_value_carries_the_commands_exit_code():
     """coreutils exit 1 where grep and sort exit 2."""
     for name, expected in (("nl", 1), ("cut", 1), ("wc", 1), ("sort", 2)):
-        msg, code = unexpected_value_error(name, "--bogus-bool=2")
+        msg, code = unexpected_value_error(Program(name), "--bogus-bool=2")
         assert msg.startswith(
             f"{name}: option '--bogus-bool' doesn't allow an argument\n".
             encode())
@@ -236,14 +243,14 @@ def test_boolean_long_with_a_value_carries_the_commands_exit_code():
 
 def test_boolean_long_with_an_empty_value_still_refuses():
     """`grep --byte-offset=` is the same refusal: the `=` is enough."""
-    msg, _ = unexpected_value_error("grep", "--byte-offset=")
+    msg, _ = unexpected_value_error(Program("grep"), "--byte-offset=")
     assert msg.startswith(
         b"grep: option '--byte-offset' doesn't allow an argument\n")
 
 
 def test_boolean_long_with_two_equals_names_only_the_option():
     """Measured: `grep --byte-offset=2=3` still names `--byte-offset`."""
-    msg, _ = unexpected_value_error("grep", "--byte-offset=2=3")
+    msg, _ = unexpected_value_error(Program("grep"), "--byte-offset=2=3")
     assert msg.startswith(
         b"grep: option '--byte-offset' doesn't allow an argument\n")
 
@@ -257,14 +264,14 @@ def test_a_program_that_is_not_getopt_long_keeps_its_unknown_wording():
     the getopt_long wording would put GNU's words in a program that does
     not use GNU's parser.
     """
-    msg, code = unexpected_value_error("curl", "--silent=2")
+    msg, code = unexpected_value_error(Program("curl"), "--silent=2")
     assert msg.startswith(b"curl: option --silent=2: is unknown\n")
     assert code == 2
-    msg, _ = unexpected_value_error("jq", "--tab=2")
+    msg, _ = unexpected_value_error(Program("jq"), "--tab=2")
     assert msg.startswith(b"jq: unrecognized option '--tab=2'\n")
-    msg, _ = unexpected_value_error("python3", "--version=2")
+    msg, _ = unexpected_value_error(Program("python3"), "--version=2")
     assert msg.startswith(b"unknown option --version=2\n")
-    msg, _ = unexpected_value_error("find", "--help=2")
+    msg, _ = unexpected_value_error(Program("find"), "--help=2")
     assert msg == b"find: unknown predicate `--help=2'\n"
 
 
@@ -280,9 +287,9 @@ def test_unknown_option_leaves_the_token_unescaped():
     nl, expand, shuf, tail, split, du, sort, uniq, ls and cp. This
     asymmetry is deliberate; do not route this clause through quote().
     """
-    msg, _ = unknown_option_error("cut", "--zzz=é")
+    msg, _ = unknown_option_error(Program("cut"), "--zzz=é")
     assert msg.startswith("cut: unrecognized option '--zzz=é'\n".encode())
-    msg, _ = unknown_option_error("wc", "--zzz=\x01")
+    msg, _ = unknown_option_error(Program("wc"), "--zzz=\x01")
     assert msg.startswith(b"wc: unrecognized option '--zzz=\x01'\n")
 
 
@@ -298,7 +305,7 @@ def test_invalid_argument_escapes_the_word_through_quote():
     bytes and nothing above 0x7f is printable in the C locale.
     """
     stderr, code = invalid_argument_error(
-        "tee", "--output-error", "xé",
+        Program("tee"), "--output-error", "xé",
         ("warn", "warn-nopipe", "exit", "exit-nopipe"))
     assert stderr.startswith(
         rb"tee: invalid argument 'x\303\251' for '--output-error'"
@@ -320,7 +327,7 @@ def test_an_empty_argmatch_value_is_ambiguous_not_invalid():
     choices = ("warn", "warn-nopipe", "exit", "exit-nopipe")
     refusal = argmatch("", choices)
     assert refusal == ArgmatchRefusal("ambiguous")
-    stderr, code = invalid_argument_error("tee",
+    stderr, code = invalid_argument_error(Program("tee"),
                                           "--output-error",
                                           "",
                                           choices,
@@ -354,12 +361,13 @@ def test_argmatch_line_words_the_kind_the_caller_matched():
 # `ls -l --time-style=l` vs `=zzz` all agree byte for byte below line 1.
 def test_ambiguous_and_invalid_differ_only_in_the_first_line():
     choices = (("atime", "access", "use"), ("ctime", "status"))
-    ambiguous, amb_code = invalid_argument_error("du",
+    ambiguous, amb_code = invalid_argument_error(Program("du"),
                                                  "--time",
                                                  "a",
                                                  choices,
                                                  kind="ambiguous")
-    invalid, inv_code = invalid_argument_error("du", "--time", "zzz", choices)
+    invalid, inv_code = invalid_argument_error(Program("du"), "--time", "zzz",
+                                               choices)
     assert ambiguous.split(
         b"\n", 1)[0] == (b"du: ambiguous argument 'a' for '--time'")
     assert invalid.split(b"\n",
@@ -407,3 +415,89 @@ def test_argmatch_error_carries_the_block_and_the_given_code():
     # calls `usage (EXIT_FAILURE)`, so this one is 1.
     assert err.exit_code == 1
     assert usage_exit_code("sort") == 2
+
+
+# A name is not an identity: a mount may register its own command under
+# a builtin's name, and the measured per-program rules (USAGE_EXIT,
+# USAGE_HINT_PREFIX, PYTHON_NAMES, the curl and find voices) describe one
+# real program each. `Program` is the one door those rules are read
+# through, keyed on the parse's builtin bit rather than on the spelling.
+def test_a_borrowed_name_exits_1_like_any_custom_command():
+    assert Program("grep").usage_exit == 2
+    assert Program("grep", builtin=False).usage_exit == 1
+    assert Program("tar", builtin=False).usage_exit == 1
+    msg, code = unknown_option_error(Program("grep", builtin=False), "--bogus")
+    assert msg == (b"grep: unrecognized option '--bogus'\n"
+                   b"Try 'grep --help' for more information.\n")
+    assert code == 1
+
+
+def test_a_borrowed_name_gets_the_bare_hint_line():
+    assert Program(
+        "diff").hint == "diff: Try 'diff --help' for more information."
+    assert Program(
+        "diff",
+        builtin=False).hint == ("Try 'diff --help' for more information.")
+    msg, code = missing_required_error(Program("cmp", builtin=False), "--out")
+    assert msg == (b"cmp: option '--out' is required\n"
+                   b"Try 'cmp --help' for more information.\n")
+    assert code == 1
+
+
+def test_a_borrowed_interpreter_name_answers_in_gnu_words():
+    for name in ("python", "python3"):
+        borrowed = Program(name, builtin=False)
+        assert unknown_option_error(borrowed, "--bogus") == (
+            f"{name}: unrecognized option '--bogus'\n"
+            f"Try '{name} --help' for more information.\n".encode(), 1)
+        assert missing_value_error(
+            borrowed,
+            "c") == (f"{name}: option requires an argument -- 'c'\n"
+                     f"Try '{name} --help' for more information.\n".encode(),
+                     1)
+        assert unexpected_value_error(borrowed, "--verbose=2") == (
+            f"{name}: option '--verbose' doesn't allow an argument\n"
+            f"Try '{name} --help' for more information.\n".encode(), 1)
+
+
+def test_a_borrowed_curl_or_find_name_answers_in_gnu_words():
+    curl = Program("curl", builtin=False)
+    assert unknown_option_error(
+        curl,
+        "--bogus")[0].startswith(b"curl: unrecognized option '--bogus'\n")
+    assert missing_value_error(curl, "--max-time")[0].startswith(
+        b"curl: option '--max-time' requires an argument\n")
+    assert invalid_float_error(curl, "--max-time", "abc")[0].startswith(
+        b"curl: invalid float value: 'abc' for '--max-time'\n")
+    assert unknown_option_error(
+        Program("find", builtin=False),
+        "--bogus")[0].startswith(b"find: unrecognized option '--bogus'\n")
+
+
+# The builtin keeps its own voice through the same door, in both forms
+# a caller reaches it by: the record and the name-keyed convenience.
+def test_the_builtin_keeps_its_voice_through_program():
+    assert Program("grep").is_builtin("grep", "rg")
+    assert not Program("grep", builtin=False).is_builtin("grep")
+    assert not Program("mycmd").is_builtin("grep")
+    assert usage_exit_code("grep") == Program("grep").usage_exit == 2
+    assert usage_hint("diff") == Program("diff").hint
+
+
+# diffutils routes every option refusal through error(), not only the
+# extra-operand one (pinned on debian:stable-slim, diffutils 3.10:
+# `diff --bogus a b`, `cmp -m`, `diff --help=x a b` all carry the prefix
+# on the hint line and exit 2).
+def test_diff_and_cmp_prefix_the_hint_on_every_option_refusal():
+    assert unknown_option_error(
+        Program("diff"),
+        "--bogus") == (b"diff: unrecognized option '--bogus'\n"
+                       b"diff: Try 'diff --help' for more information.\n", 2)
+    assert unknown_option_error(
+        Program("cmp"),
+        "m") == (b"cmp: invalid option -- 'm'\n"
+                 b"cmp: Try 'cmp --help' for more information.\n", 2)
+    assert unexpected_value_error(
+        Program("diff"),
+        "--help=x") == (b"diff: option '--help' doesn't allow an argument\n"
+                        b"diff: Try 'diff --help' for more information.\n", 2)

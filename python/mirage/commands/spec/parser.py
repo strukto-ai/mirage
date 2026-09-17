@@ -153,6 +153,12 @@ class ParsedArgs:
     # cluster's argument needs before argp ever validates a letter, so
     # `tar Qf` and `tar fQ` both name f, not Q.
     old_option_needs_value: str | None = None
+    # Whether the spec this line was read against is the builtin's own
+    # grammar (``is_builtin_grammar``). What the executor's refusal door
+    # keys the measured per-program tables on, so a registered command
+    # that borrowed a builtin's name answers in the generic voice.
+    # False when nobody vouched for it, which is the safe direction.
+    builtin: bool = False
 
     def paths(self) -> list[str]:
         return [v for v, k in self.args if k == "path"]
@@ -504,6 +510,12 @@ def parse_command(
     option_error_kinds: list[str] = []
     refusals = _Refusals(kinds=option_error_kinds)
     needs_value_options: list[str] = []
+    # Whether this is the builtin's own grammar rather than a registered
+    # command that borrowed its name. Settled here, once, because the
+    # parser is the one reader holding both the name and the spec; it
+    # leaves on the parse result so the executor's refusal door reads
+    # the answer instead of re-deriving it from the spelling.
+    builtin = is_builtin_grammar(cmd_name, spec)
     # Who owns a dashed word the spec does not declare. The caller
     # already answered that by which reader it called.
     if unknown_is_operand:
@@ -534,7 +546,6 @@ def parse_command(
         # command under a builtin's name (nothing refuses it), and the
         # sole-argument rule turns such a spec's declared `--mode=x`
         # into an operand its handler then never sees.
-        builtin = is_builtin_grammar(cmd_name, spec)
         no_long_option_parser = builtin and cmd_name in NO_LONG_OPTIONS
         # gnulib's parse_long_options reads argv[1] only when it is the
         # whole line, so outside that one-argument window the program
@@ -958,6 +969,7 @@ def parse_command(
         missing_required_operands=missing_required_operands,
         typed_dests=typed_dests,
         old_option_needs_value=old.needs_value if old is not None else None,
+        builtin=builtin,
     )
 
 

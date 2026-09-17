@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import dataclass
+
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec.argmatch import ArgmatchChoices, ArgmatchKind
@@ -24,13 +26,64 @@ from mirage.commands.spec.types import CommandName
 from mirage.utils.errors import fs_strerror
 
 
+@dataclass(frozen=True, slots=True)
+class Program:
+    """Whose refusal a renderer is wording.
+
+    ``name`` is what the message says. ``builtin`` is whether the
+    measured per-program tables (USAGE_EXIT, USAGE_HINT_PREFIX,
+    PYTHON_NAMES, the curl and find voices) apply to it, which is only
+    so when the line was parsed against that builtin's own grammar. A
+    name is not an identity: a mount may register its own ``grep`` and
+    nothing refuses it, so the executor's door reads the bit off the
+    parse (``ParsedCommand.builtin``, the parser's ``is_builtin_grammar``
+    answer) rather than trusting the spelling. A command rendering in
+    its own voice (``sleep``, ``ln``, the generics) constructs the
+    default, which is the builtin. Mirrors ``Program`` in usage.ts.
+
+    Args:
+        name (str): the command name as invoked.
+        builtin (bool): whether ``name`` is running the builtin's
+            grammar rather than borrowing its name.
+    """
+
+    name: str
+    builtin: bool = True
+
+    def is_builtin(self, *names: str) -> bool:
+        """Whether this is one of the named builtins, by grammar not name.
+
+        Args:
+            names (str): builtin names a measured rule applies to.
+        """
+        return self.builtin and self.name in names
+
+    @property
+    def usage_exit(self) -> int:
+        """GNU usage-error exit code; 1 for anything but a builtin."""
+        return USAGE_EXIT.get(self.name, 1) if self.builtin else 1
+
+    @property
+    def hint(self) -> str:
+        """The ``Try '<cmd> --help'`` line as this program prints it.
+
+        coreutils writes the hint bare; diffutils routes it through
+        ``error()``, so ``cmp`` and ``diff`` carry the command prefix
+        on the hint line too (pinned on diffutils 3.10: every option
+        refusal, not only ``extra operand``).
+        """
+        prefix = f"{self.name}: " if self.is_builtin(
+            *USAGE_HINT_PREFIX) else ""
+        return f"{prefix}Try '{self.name} --help' for more information."
+
+
 def usage_exit_code(cmd_name: str) -> int:
-    """GNU usage-error exit code for a command.
+    """GNU usage-error exit code for a builtin, by name.
 
     Args:
         cmd_name (str): command name.
     """
-    return USAGE_EXIT.get(cmd_name, 1)
+    return Program(cmd_name).usage_exit
 
 
 def operand_exit_code(cmd_name: str) -> int:
@@ -163,7 +216,7 @@ def curl_option_error(line: str) -> tuple[bytes, int]:
     return (line + hint).encode(), usage_exit_code("curl")
 
 
-def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
+def unknown_option_error(program: Program, token: str) -> tuple[bytes, int]:
     """GNU-shaped error for an option the spec does not declare.
 
     Shapes pinned against real GNU: long options report the full token
@@ -174,30 +227,30 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     registered command serves `--help`.
 
     Args:
-        cmd_name (str): command name for the message and exit code.
+        program (Program): whose refusal this is.
         token (str): offending token ('--bogus') or cluster char ('Y').
     """
-    if cmd_name == "curl":
+    name = program.name
+    if program.is_builtin("curl"):
         dashed = token if token.startswith("-") else f"-{token}"
         return curl_option_error(f"curl: option {dashed}: is unknown\n")
-    if cmd_name == CommandName.FIND:
+    if program.is_builtin(CommandName.FIND):
         dashed = token if token.startswith("-") else f"-{token}"
         line = f"find: unknown predicate `{dashed}'\n"
-        return line.encode(), usage_exit_code(cmd_name)
-    if cmd_name in PYTHON_NAMES:
+        return line.encode(), program.usage_exit
+    if program.is_builtin(*PYTHON_NAMES):
         # CPython's own two shapes, which do not match each other: the
         # short form capitalizes and takes a colon, the long form does
         # neither. Both pinned on 3.12.13.
         if token.startswith("--"):
-            return python_option_error(cmd_name, f"unknown option {token}\n")
+            return python_option_error(name, f"unknown option {token}\n")
         dashed = token if token.startswith("-") else f"-{token}"
-        return python_option_error(cmd_name, f"Unknown option: {dashed}\n")
+        return python_option_error(name, f"Unknown option: {dashed}\n")
     if token.startswith("--"):
-        line = f"{cmd_name}: unrecognized option '{token}'\n"
+        line = f"{name}: unrecognized option '{token}'\n"
     else:
-        line = f"{cmd_name}: invalid option -- '{token}'\n"
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+        line = f"{name}: invalid option -- '{token}'\n"
+    return f"{line}{program.hint}\n".encode(), program.usage_exit
 
 
 # The programs that do NOT parse with getopt_long, and so answer an
@@ -211,7 +264,7 @@ def unknown_option_error(cmd_name: str, token: str) -> tuple[bytes, int]:
 _NOT_GETOPT_LONG = frozenset({"curl", "jq", CommandName.FIND, *PYTHON_NAMES})
 
 
-def unexpected_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
+def unexpected_value_error(program: Program, token: str) -> tuple[bytes, int]:
     """getopt_long refusal for a BOOLEAN long option handed a value.
 
     `grep --byte-offset=2` is not an unrecognized option -- getopt_long
@@ -229,21 +282,20 @@ def unexpected_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
     message and the hint, coreutils print none at all.
 
     Args:
-        cmd_name (str): command name for the message and exit code.
+        program (Program): whose refusal this is.
         token (str): the option's canonical long spelling and the value
             that was typed on it ('--byte-offset=2'). Carried whole
             because the programs in _NOT_GETOPT_LONG quote the value
             along with the option and getopt_long drops it.
     """
-    if cmd_name in _NOT_GETOPT_LONG:
-        return unknown_option_error(cmd_name, token)
+    if program.is_builtin(*_NOT_GETOPT_LONG):
+        return unknown_option_error(program, token)
     option = token.split("=", 1)[0]
-    line = f"{cmd_name}: option '{option}' doesn't allow an argument\n"
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    line = f"{program.name}: option '{option}' doesn't allow an argument\n"
+    return f"{line}{program.hint}\n".encode(), program.usage_exit
 
 
-def ambiguous_option_error(cmd_name: str, token: str,
+def ambiguous_option_error(program: Program, token: str,
                            candidates: tuple[str, ...]) -> tuple[bytes, int]:
     """getopt_long refusal for an abbreviated long matching several options.
 
@@ -253,19 +305,18 @@ def ambiguous_option_error(cmd_name: str, token: str,
     unknown_option_error.
 
     Args:
-        cmd_name (str): command name for the message and exit code.
+        program (Program): whose refusal this is.
         token (str): the typed abbreviated spelling ('--c').
         candidates (tuple[str, ...]): matching declared spellings in
             declaration order.
     """
     listed = " ".join(f"'{c}'" for c in candidates)
-    line = (f"{cmd_name}: option '{token}' is ambiguous; "
+    line = (f"{program.name}: option '{token}' is ambiguous; "
             f"possibilities: {listed}\n")
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    return f"{line}{program.hint}\n".encode(), program.usage_exit
 
 
-def invalid_int_error(cmd_name: str, option: str,
+def invalid_int_error(program: Program, option: str,
                       value: str) -> tuple[bytes, int]:
     """Refusal for a non-integer value on an int-typed option.
 
@@ -275,16 +326,15 @@ def invalid_int_error(cmd_name: str, option: str,
     the way invalid_argument_error does.
 
     Args:
-        cmd_name (str): command name for the message and exit code.
+        program (Program): whose refusal this is.
         option (str): canonical dashed spelling ('--port').
         value (str): the rejected value.
     """
-    line = f"{cmd_name}: invalid int value: '{value}' for '{option}'\n"
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    line = f"{program.name}: invalid int value: '{value}' for '{option}'\n"
+    return f"{line}{program.hint}\n".encode(), program.usage_exit
 
 
-def invalid_float_error(cmd_name: str, option: str,
+def invalid_float_error(program: Program, option: str,
                         value: str) -> tuple[bytes, int]:
     """Refusal for a non-number value on a float-typed option.
 
@@ -292,42 +342,42 @@ def invalid_float_error(cmd_name: str, option: str,
     invalid_int_error mirrors the int wording.
 
     Args:
-        cmd_name (str): command name for the message and exit code.
+        program (Program): whose refusal this is.
         option (str): canonical dashed spelling ('--timeout').
         value (str): the rejected value.
     """
-    if cmd_name == "curl":
+    if program.is_builtin("curl"):
         return curl_option_error(
             f"curl: option {option}: expected a proper numerical parameter\n")
-    line = f"{cmd_name}: invalid float value: '{value}' for '{option}'\n"
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    line = (f"{program.name}: invalid float value: '{value}' "
+            f"for '{option}'\n")
+    return f"{line}{program.hint}\n".encode(), program.usage_exit
 
 
-def missing_value_error(cmd_name: str, token: str) -> tuple[bytes, int]:
+def missing_value_error(program: Program, token: str) -> tuple[bytes, int]:
     """GNU-shaped error for a declared value flag with no argument left.
 
     Args:
-        cmd_name (str): command name for the message and exit code.
+        program (Program): whose refusal this is.
         token (str): long token ('--max-depth') or short char ('m').
     """
-    if cmd_name in PYTHON_NAMES:
+    name = program.name
+    if program.is_builtin(*PYTHON_NAMES):
         dashed = token if token.startswith("-") else f"-{token}"
         return python_option_error(
-            cmd_name, f"Argument expected for the {dashed} option\n")
-    if cmd_name == "curl":
+            name, f"Argument expected for the {dashed} option\n")
+    if program.is_builtin("curl"):
         dashed = token if token.startswith("-") else f"-{token}"
         return curl_option_error(
             f"curl: option {dashed}: requires parameter\n")
     if token.startswith("--"):
-        line = f"{cmd_name}: option '{token}' requires an argument\n"
+        line = f"{name}: option '{token}' requires an argument\n"
     else:
-        line = f"{cmd_name}: option requires an argument -- '{token}'\n"
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+        line = f"{name}: option requires an argument -- '{token}'\n"
+    return f"{line}{program.hint}\n".encode(), program.usage_exit
 
 
-def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
+def old_option_error(program: Program, letter: str) -> tuple[bytes, int]:
     """GNU tar refusal for an old-style cluster letter with no argument.
 
     First line and exit pinned against GNU tar 1.35 (``tar xzf`` with
@@ -343,12 +393,11 @@ def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
     way, so tar's two refusals stay consistent with each other.
 
     Args:
-        cmd_name (str): command name for the message.
+        program (Program): whose refusal this is.
         letter (str): the cluster letter whose argument ran out.
     """
-    line = f"{cmd_name}: Old option '{letter}' requires an argument.\n"
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), OLD_OPTION_EXIT
+    line = f"{program.name}: Old option '{letter}' requires an argument.\n"
+    return f"{line}{program.hint}\n".encode(), OLD_OPTION_EXIT
 
 
 def argmatch_line(cmd_name: str,
@@ -407,7 +456,7 @@ def argmatch_valid_block(choices: ArgmatchChoices) -> str:
 
 
 def invalid_argument_error(
-        cmd_name: str,
+        program: Program,
         option: str,
         value: str,
         choices: ArgmatchChoices,
@@ -421,7 +470,7 @@ def invalid_argument_error(
     line, then the ``Try '--help'`` hint.
 
     Args:
-        cmd_name (str): command name for the message and exit code.
+        program (Program): whose refusal this is.
         option (str): canonical dashed spelling ('--output-error').
         value (str): the rejected value, as typed; the renderer
             escapes it.
@@ -439,11 +488,10 @@ def invalid_argument_error(
             ``--color``, ``--format``, ``--total``, ``--sort`` and
             ``time style``, which is why one renderer words both.
     """
-    line = (f"{argmatch_line(cmd_name, option, value, kind)}\n"
+    line = (f"{argmatch_line(program.name, option, value, kind)}\n"
             f"{argmatch_valid_block(choices)}\n")
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    code = usage_exit_code(cmd_name) if exit_code is None else exit_code
-    return (line + hint).encode(), code
+    code = program.usage_exit if exit_code is None else exit_code
+    return f"{line}{program.hint}\n".encode(), code
 
 
 def argmatch_error(cmd_name: str,
@@ -467,12 +515,12 @@ def argmatch_error(cmd_name: str,
         exit_code (int | None): as in :func:`invalid_argument_error`.
         kind (ArgmatchKind): as in :func:`invalid_argument_error`.
     """
-    message, code = invalid_argument_error(cmd_name, option, value, choices,
-                                           exit_code, kind)
+    message, code = invalid_argument_error(Program(cmd_name), option, value,
+                                           choices, exit_code, kind)
     return UsageError(message.decode().rstrip("\n"), code)
 
 
-def missing_required_error(cmd_name: str, option: str) -> tuple[bytes, int]:
+def missing_required_error(program: Program, option: str) -> tuple[bytes, int]:
     """Refusal for a declared required option absent from the line.
 
     No GNU tool declares required options through getopt, so there is no
@@ -480,26 +528,20 @@ def missing_required_error(cmd_name: str, option: str) -> tuple[bytes, int]:
     (click reports the same condition as "Missing option").
 
     Args:
-        cmd_name (str): command name for the message and exit code.
+        program (Program): whose refusal this is.
         option (str): canonical dashed spelling ('--output').
     """
-    line = f"{cmd_name}: option '{option}' is required\n"
-    hint = f"Try '{cmd_name} --help' for more information.\n"
-    return (line + hint).encode(), usage_exit_code(cmd_name)
+    line = f"{program.name}: option '{option}' is required\n"
+    return f"{line}{program.hint}\n".encode(), program.usage_exit
 
 
 def usage_hint(cmd_name: str) -> str:
-    """The ``Try '<cmd> --help'`` line as that command prints it.
-
-    coreutils writes the hint bare; diffutils routes it through
-    ``error()``, so ``cmp`` and ``diff`` carry the command prefix on the
-    hint line too.
+    """The ``Try '<cmd> --help'`` line as the builtin ``cmd_name`` prints it.
 
     Args:
         cmd_name (str): the command whose hint line is wanted.
     """
-    prefix = f"{cmd_name}: " if cmd_name in USAGE_HINT_PREFIX else ""
-    return f"{prefix}Try '{cmd_name} --help' for more information."
+    return Program(cmd_name).hint
 
 
 def extra_operand_error(cmd_name: str, operand: str) -> UsageError:

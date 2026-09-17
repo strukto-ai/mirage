@@ -68,3 +68,8 @@ class ParsedCommand(NamedTuple):
     # and not list because a NamedTuple default is one shared object.
     missing_required_operands: Sequence[str] = ()
     typed_dests: Sequence[str] = ()
+    # Whether the line was read against the builtin's own grammar rather
+    # than a registered command's that borrowed its name: the parser's
+    # answer, carried so `option_error` words the refusal for the right
+    # program. False when no spec was parsed.
+    builtin: bool = False

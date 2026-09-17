@@ -23,10 +23,10 @@ from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import ParsedArgs, parse_to_kwargs
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import (ambiguous_option_error,
+from mirage.commands.spec.usage import (Program, ambiguous_option_error,
                                         missing_value_error,
                                         unexpected_value_error,
-                                        unknown_option_error, usage_hint)
+                                        unknown_option_error)
 from mirage.context import path_allowed
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
@@ -41,6 +41,7 @@ from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import Session
 
+PROGRAM = Program("ln")
 _TARGET_DIR_LONG = "--target-directory"
 _SUFFIX_LONG = "--suffix"
 _VALUED_SHORTS = "tS"
@@ -133,20 +134,22 @@ def option_refusal(parsed: ParsedArgs) -> tuple[str, int] | None:
             and parsed.option_error_kinds[0] == "ambiguous"
             and parsed.ambiguous_options):
         token, candidates = parsed.ambiguous_options[0]
-        msg, code = ambiguous_option_error("ln", token, candidates)
+        msg, code = ambiguous_option_error(PROGRAM, token, candidates)
         return msg.decode(), code
     if parsed.invalid_options:
         if parsed.option_error_kinds[:1] == ["unexpected_value"]:
-            msg, code = unexpected_value_error("ln", parsed.invalid_options[0])
+            msg, code = unexpected_value_error(PROGRAM,
+                                               parsed.invalid_options[0])
         else:
-            msg, code = unknown_option_error("ln", parsed.invalid_options[0])
+            msg, code = unknown_option_error(PROGRAM,
+                                             parsed.invalid_options[0])
         return msg.decode(), code
     if parsed.ambiguous_options:
         token, candidates = parsed.ambiguous_options[0]
-        msg, code = ambiguous_option_error("ln", token, candidates)
+        msg, code = ambiguous_option_error(PROGRAM, token, candidates)
         return msg.decode(), code
     if parsed.needs_value_options:
-        msg, code = missing_value_error("ln", parsed.needs_value_options[0])
+        msg, code = missing_value_error(PROGRAM, parsed.needs_value_options[0])
         return msg.decode(), code
     return None
 
@@ -324,7 +327,7 @@ async def plan_links(
     Returns:
         tuple: the plans, or an empty list with the refusal to print.
     """
-    hint = usage_hint("ln") + "\n"
+    hint = PROGRAM.hint + "\n"
     if target_dir is not None:
         typed = target_typed if target_typed is not None else target_dir
         resolved, stat = await _dir_at(namespace, dispatch,
@@ -606,7 +609,7 @@ async def handle_ln(
         return fail("ln", f"{exc}\n", exc.exit_code)
     operands, target_typed = operand_words(args)
     if not operands:
-        return fail("ln", f"ln: missing file operand\n{usage_hint('ln')}\n")
+        return fail("ln", f"ln: missing file operand\n{PROGRAM.hint}\n")
     # GNU's order: the operand count first, then -r, then the -T/-t clash.
     if flags.relative and not flags.symbolic:
         return fail("ln", "ln: cannot do --relative without --symbolic\n")
