@@ -31,7 +31,7 @@ from mirage.agents.langchain._convert import (io_to_execute_response,
                                               io_to_grep_matches)
 from mirage.bridge.sync import run_async_from_sync
 from mirage.io.types import IOResult
-from mirage.workspace.workspace import Workspace
+from mirage.workspace.workspace import Session, Workspace
 
 T = TypeVar("T")
 
@@ -109,9 +109,10 @@ async def _command_error(
 class LangchainWorkspace(SandboxBackendProtocol):
     """Deep Agents backend backed by a Mirage Workspace.
 
-    File operations (read, write, edit, ls, upload, download) go through the
-    Ops layer directly. Shell operations (execute, grep, glob) go through
-    Workspace.shell() for pipe and flag support.
+    File operations (read, write, edit, ls, upload, download) go through
+    the op door. Shell operations (execute, grep, glob) go through the
+    shell door for pipe and flag support. Both doors are taken from
+    ``_doors``, so both answer as the same session.
     """
 
     def __init__(
@@ -123,6 +124,19 @@ class LangchainWorkspace(SandboxBackendProtocol):
         self._ws = workspace
         self._id = sandbox_id
         self._session_id = session_id
+
+    @property
+    def _doors(self) -> Session | Workspace:
+        """The doors this backend answers through.
+
+        A session when one was named, the workspace otherwise. Both
+        carry ``shell`` and ``vfs``, so binding here is what keeps the
+        two doors answering alike: a profile that hides a path hides it
+        from the shell and from the read tool, or from neither.
+        """
+        if self._session_id is None:
+            return self._ws
+        return Session(self._ws, self._session_id)
 
     def _run(self, coro: Awaitable[T]) -> T:
         return run_async_from_sync(coro)
@@ -187,7 +201,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
                     file_path: str,
                     offset: int = 0,
                     limit: int = 2000) -> ReadResult:
-        ops = self._ws.vfs
+        ops = self._doors.vfs
         try:
             data = await ops.read(file_path)
         except (FileNotFoundError, ValueError) as exc:
@@ -200,7 +214,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         return self._run(self.awrite(file_path, content))
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
-        ops = self._ws.vfs
+        ops = self._doors.vfs
         try:
             await ops.stat(file_path)
             return WriteResult(
@@ -236,7 +250,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        ops = self._ws.vfs
+        ops = self._doors.vfs
         try:
             data = await ops.read(file_path)
         except (FileNotFoundError, ValueError):
@@ -330,7 +344,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     async def aupload_files(
             self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        ops = self._ws.vfs
+        ops = self._doors.vfs
         results: list[FileUploadResponse] = []
         for path, data in files:
             parent = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
@@ -348,7 +362,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     async def adownload_files(self,
                               paths: list[str]) -> list[FileDownloadResponse]:
-        ops = self._ws.vfs
+        ops = self._doors.vfs
         results: list[FileDownloadResponse] = []
         for path in paths:
             try:

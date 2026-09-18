@@ -244,3 +244,45 @@ async def test_als_names_the_reason_beside_a_refusal():
     result = await LangchainWorkspace(ws).als("/")
     assert result.entries is None
     assert result.error == "ls: Permission denied\npolicy denied: no lists"
+
+
+@pytest.mark.asyncio
+async def test_a_hidden_path_is_hidden_on_the_op_door_too():
+    """A confined backend answers the same on both of its doors.
+
+    The shell door is handed the session on every line. The op door has
+    to be handed it too, or a profile that hides a path hides it from
+    `cat` and not from the read tool, which is the door an agent
+    reaches for first.
+    """
+    ws = Workspace(
+        {"/repo/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"reviewer": {
+            "paths": {
+                "hide": ["/repo/secrets"]
+            }
+        }})
+    await ws.shell("mkdir -p /repo/secrets")
+    await ws.shell("echo PRIVATE > /repo/secrets/key.pem")
+    await ws.session("reviewer", profile="reviewer")
+
+    backend = LangchainWorkspace(ws, session_id="reviewer")
+
+    shell = await backend.aexecute("cat /repo/secrets/key.pem")
+    assert shell.exit_code == 1
+    assert "No such file" in shell.output
+
+    read = await backend.aread("/repo/secrets/key.pem")
+    assert read.file_data is None
+    assert read.error is not None
+
+
+@pytest.mark.asyncio
+async def test_the_host_door_still_sees_everything(workspace):
+    """No session named means the host, which is not a confinement."""
+    await workspace.shell("echo PRIVATE > /key.pem")
+    backend = LangchainWorkspace(workspace)
+    read = await backend.aread("/key.pem")
+    assert read.file_data is not None
+    assert "PRIVATE" in read.file_data["content"]
