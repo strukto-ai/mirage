@@ -75,6 +75,80 @@
       ]
     },
     {
+      "id": "sort_check_invalid_argument",
+      "seq": 610209,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort --check=x /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sort: invalid argument 'x' for '--check'\nValid arguments are:\n  - 'quiet', 'silent'\n  - 'diagnose-first'\nTry 'sort --help' for more information.\n"
+      },
+      "flags": [
+        "check"
+      ]
+    },
+    {
+      "id": "sort_check_quiet_word",
+      "seq": 610210,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sort --check=quiet /data/sorted_a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "flags": [
+        "check"
+      ]
+    },
+    {
       "id": "sort_check_prefix_resolves_silent",
       "seq": 991013,
       "targets": [

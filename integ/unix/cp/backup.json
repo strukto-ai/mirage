@@ -320,6 +320,41 @@
       ]
     },
     {
+      "id": "cp_backup_empty_control_is_the_bare_backup",
+      "seq": 613096,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/cpb8 && printf 'S\\n' > /data/cpb8/s.txt && printf 'D\\n' > /data/cpb8/d.txt && cp --backup= /data/cpb8/s.txt /data/cpb8/d.txt && cat /data/cpb8/d.txt /data/cpb8/d.txt~",
+      "expect": {
+        "exit": 0,
+        "stdout": "S\nD\n",
+        "stderr": ""
+      },
+      "flags": [
+        "backup"
+      ]
+    },
+    {
       "id": "cp_backup_prefix_spanning_four_values_is_ambiguous",
       "seq": 991024,
       "targets": [

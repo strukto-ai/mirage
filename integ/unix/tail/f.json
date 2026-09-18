@@ -298,6 +298,156 @@
       ]
     },
     {
+      "id": "tail_sleep_interval_empty_is_refused",
+      "seq": 960027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -s '' /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: invalid number of seconds: ''\n"
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "tail_sleep_interval_refuses_a_carriage_return",
+      "seq": 960028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -s $'1\\r' /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tail: invalid number of seconds: '1\\r'\n"
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "tail_sleep_interval_accepts_inf",
+      "seq": 960029,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -n 1 -s inf /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "baz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "s"
+      ]
+    },
+    {
+      "id": "tail_sleep_interval_accepts_hex",
+      "seq": 960032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -n 1 -s 0x10 /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "baz\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n",
+        "s"
+      ]
+    },
+    {
       "id": "tail_follow_empty_value_is_ambiguous",
       "seq": 991030,
       "targets": [

@@ -130,6 +130,70 @@
       ]
     },
     {
+      "id": "tee_output_error_quotes_a_multibyte_word",
+      "seq": 610211,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hi' | tee --output-error=xé /data/pt_oe2.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tee: invalid argument 'x\\303\\251' for '--output-error'\nValid arguments are:\n  - 'warn'\n  - 'warn-nopipe'\n  - 'exit'\n  - 'exit-nopipe'\nTry 'tee --help' for more information.\n"
+      },
+      "flags": [
+        "output-error"
+      ]
+    },
+    {
+      "id": "tee_output_error_empty_is_ambiguous",
+      "seq": 610212,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hi' | tee --output-error= /data/pt_oe3.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tee: ambiguous argument '' for '--output-error'\nValid arguments are:\n  - 'warn'\n  - 'warn-nopipe'\n  - 'exit'\n  - 'exit-nopipe'\nTry 'tee --help' for more information.\n"
+      },
+      "flags": [
+        "output-error"
+      ]
+    },
+    {
       "id": "tee_output_error_prefix_spanning_two_values_is_ambiguous",
       "seq": 991026,
       "targets": [

@@ -26,6 +26,13 @@ import { splitLines } from '../utils/lines.ts'
 
 const ENC = new TextEncoder()
 
+// zgrep's hint takes the backtick form rather than the
+// `Try '... --help' for more information.` line usageHint builds, so it
+// is a constant here rather than a call. A host zgrep prefixes a script
+// line number and an interpreter path; both are dropped, since they
+// name a file mirage does not have.
+const ZGREP_NO_PATTERN = "zgrep: missing pattern; try `zgrep --help' for help"
+
 function anyLineSelected(data: Uint8Array, pattern: RegExp, invert: boolean): boolean {
   for (const line of splitLines(decodeLine(data))) {
     let hit = pattern.test(line)
@@ -122,7 +129,7 @@ export async function zgrepGeneric(
       null,
       new IOResult({
         exitCode: 2,
-        stderr: ENC.encode('zgrep: usage: zgrep [flags] pattern [path]\n'),
+        stderr: ENC.encode(`${ZGREP_NO_PATTERN}\n`),
       }),
     ]
   }
