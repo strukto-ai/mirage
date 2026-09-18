@@ -166,6 +166,14 @@ FLOAT_VALUE = re.compile(
 # imports this module for flag_kwarg_name, so importing the enum here
 # would be a cycle; StrEnum members hash as their values, so lookups
 # with CommandName still hit.
+#
+# This table, USAGE_HINT_PREFIX and PYTHON_NAMES (and the curl and find
+# voices worded in usage.py) each describe one real program, so usage.py
+# reads them only when the line was parsed against the builtin's own
+# grammar (the parse's `builtin` bit, `is_builtin_grammar`): a mount's
+# own `grep` exits 1 in the generic voice rather than inheriting grep's
+# 2 from a spelling collision. The tables that stay keyed on the name
+# alone are the ones read where no spec exists yet, and say so below.
 USAGE_EXIT = {
     "grep": 2,
     "egrep": 2,
@@ -191,6 +199,16 @@ USAGE_EXIT = {
 # debian:stable-slim (coreutils 9.7, GNU sed 4.9, gzip 1.13, jq 1.7,
 # binutils 2.44, util-linux 2.41.5, bsdmainutils 12.1.8, xxd from
 # vim-common). Plain strings for the same no-cycle reason as USAGE_EXIT.
+#
+# Deliberately keyed on the name alone, unlike USAGE_EXIT. It only picks
+# an exit code, it is reached only when a handler raises the very errno
+# the builtin would, and three of its eight readers (the lazy-stream
+# drains in executor/statement.py, executor/redirect.py and
+# node/program.py) know the command only as `ExecutionNode.command`,
+# a string, long after the spec was in hand. Gating the five that could
+# know would make one borrowed `sort` answer 1 eagerly and 2 lazily, a
+# split GNU does not have, and closing it means a new field on the
+# execution record for an exit code.
 READ_FAIL_EXIT = {
     "sort": 2,
     "awk": 2,
@@ -228,6 +246,11 @@ READ_FAIL_EXIT_ISDIR = {
 # code, since tar reports an operand it cannot open and exits 2 (GNU
 # tar 1.35, `Exiting with failure status due to previous errors`).
 # Plain strings for the same no-cycle reason as USAGE_EXIT.
+#
+# Keyed on the name alone because the admission gate reads it before
+# `resolve_mount` has chosen a mount, so no spec exists there yet (the
+# same reason the router's link tables in workspace/lookup/constants.py
+# are name-keyed), and it only picks an exit code.
 OPERAND_EXIT = {
     "tar": 2,
 }
@@ -235,7 +258,9 @@ OPERAND_EXIT = {
 # The interpreter commands answer option errors in CPython's words, not
 # GNU's: python3 is not a GNU tool, and its refusal names the
 # source-selecting options a reader needs. Plain strings for the same
-# no-cycle reason as USAGE_EXIT above.
+# no-cycle reason as USAGE_EXIT above. Read only for the builtin's own
+# grammar, so a mount's own `python3` is refused in GNU's words like any
+# other custom command (see USAGE_EXIT).
 PYTHON_NAMES = frozenset({"python", "python3"})
 
 # Pinned on CPython 3.12.13, including two quirks worth keeping: the
@@ -251,7 +276,10 @@ PYTHON_USAGE = ("usage: {name} [option] ... [-c cmd | -m mod | file | -] "
 OLD_OPTION_EXIT = 2
 
 # Commands whose `Try '--help'` hint line is prefixed with the command
-# name (GNU diffutils style: `diff: Try 'diff --help' ...`).
+# name (GNU diffutils style: `diff: Try 'diff --help' ...`), on every
+# refusal that carries the hint. Read only for the builtin's own
+# grammar, so the prefix follows the grammar and not the spelling (see
+# USAGE_EXIT).
 USAGE_HINT_PREFIX = frozenset({"diff", "cmp"})
 
 

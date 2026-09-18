@@ -1297,3 +1297,19 @@ def test_the_two_reports_keep_scan_order(argv, kinds):
     """GNU stops at the first offending token, so order decides."""
     parsed = parse_command(SPECS["grep"], [*argv, "x"], "/")
     assert parsed.option_error_kinds == kinds
+
+
+# The parse result says whose grammar it read the line against, so a
+# consumer downstream (the executor's refusal door) never re-derives it
+# from the spelling. Both forms of the builtin's grammar count; a spec
+# that only borrowed the name does not, and neither does a CLI node.
+def test_parsed_args_carry_the_builtin_bit():
+    assert parse_command(SPECS["grep"], ["x"], "/", "grep").builtin
+    assert parse_command(registered_spec("grep", SPECS["grep"]), ["x"], "/",
+                         "grep").builtin
+    borrowed = CommandSpec(options=(Option(long="--mode", type="str"), ),
+                           rest=Operand(type="str"))
+    assert not parse_command(borrowed, ["x"], "/", "grep").builtin
+    assert not parse_command(
+        borrowed, ["x"], "/", "grep", unknown_is_operand=True).builtin
+    assert not parse_command(SPECS["grep"], ["x"], "/", "").builtin

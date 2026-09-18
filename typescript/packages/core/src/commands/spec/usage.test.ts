@@ -465,3 +465,87 @@ describe('unknownOptionError leaves the token unescaped', () => {
     expect(td.decode(msg).startsWith(`${cmd}: unrecognized option '${token}'\n`)).toBe(true)
   })
 })
+
+// A name is not an identity: a mount may register its own command under a
+// builtin's name, and USAGE_EXIT, USAGE_HINT_PREFIX, PYTHON_NAMES and the
+// curl and find voices each describe one real program. Every renderer reads
+// them only for the builtin's own grammar, which is the parse's `builtin`
+// bit, so a borrowed name answers as any custom command does.
+describe('a borrowed builtin name', () => {
+  it('exits 1 like any custom command', () => {
+    expect(usageExitCode('grep')).toBe(2)
+    expect(usageExitCode('grep', false)).toBe(1)
+    const [msg, code] = unknownOptionError('grep', '--bogus', false)
+    expect(td.decode(msg)).toBe(
+      "grep: unrecognized option '--bogus'\nTry 'grep --help' for more information.\n",
+    )
+    expect(code).toBe(1)
+    // OLD_OPTION_EXIT is tar's own fatal error, not the borrower's.
+    expect(oldOptionError('tar', 'f', false)[1]).toBe(1)
+  })
+
+  it('gets the bare hint line', () => {
+    const [msg, code] = missingRequiredError('cmp', '--out', false)
+    expect(td.decode(msg)).toBe(
+      "cmp: option '--out' is required\nTry 'cmp --help' for more information.\n",
+    )
+    expect(code).toBe(1)
+  })
+
+  it('answers in GNU words for an interpreter name', () => {
+    for (const name of ['python', 'python3']) {
+      const [unknown, unknownCode] = unknownOptionError(name, '--bogus', false)
+      expect(td.decode(unknown)).toBe(
+        `${name}: unrecognized option '--bogus'\nTry '${name} --help' for more information.\n`,
+      )
+      expect(unknownCode).toBe(1)
+      const [missing] = missingValueError(name, 'c', false)
+      expect(td.decode(missing)).toBe(
+        `${name}: option requires an argument -- 'c'\nTry '${name} --help' for more information.\n`,
+      )
+      const [unexpected] = unexpectedValueError(name, '--verbose=2', false)
+      expect(td.decode(unexpected)).toBe(
+        `${name}: option '--verbose' doesn't allow an argument\nTry '${name} --help' for more information.\n`,
+      )
+    }
+  })
+
+  it('answers in GNU words for curl and find', () => {
+    expect(td.decode(unknownOptionError('curl', '--bogus', false)[0])).toMatch(
+      /^curl: unrecognized option '--bogus'\n/,
+    )
+    expect(td.decode(missingValueError('curl', '--max-time', false)[0])).toMatch(
+      /^curl: option '--max-time' requires an argument\n/,
+    )
+    expect(td.decode(invalidFloatError('curl', '--max-time', 'abc', false)[0])).toMatch(
+      /^curl: invalid float value: 'abc' for '--max-time'\n/,
+    )
+    expect(td.decode(unknownOptionError('find', '--bogus', false)[0])).toMatch(
+      /^find: unrecognized option '--bogus'\n/,
+    )
+  })
+})
+
+// diffutils routes every option refusal through error(), not only the
+// extra-operand one (pinned on debian:stable-slim, diffutils 3.10: `diff
+// --bogus a b`, `cmp -m`, `diff --help=x a b` all carry the prefix on the
+// hint line and exit 2).
+describe('diff and cmp', () => {
+  it('prefix the hint on every option refusal', () => {
+    const [unknown, unknownCode] = unknownOptionError('diff', '--bogus')
+    expect(td.decode(unknown)).toBe(
+      "diff: unrecognized option '--bogus'\ndiff: Try 'diff --help' for more information.\n",
+    )
+    expect(unknownCode).toBe(2)
+    const [short, shortCode] = unknownOptionError('cmp', 'm')
+    expect(td.decode(short)).toBe(
+      "cmp: invalid option -- 'm'\ncmp: Try 'cmp --help' for more information.\n",
+    )
+    expect(shortCode).toBe(2)
+    const [value, valueCode] = unexpectedValueError('diff', '--help=x')
+    expect(td.decode(value)).toBe(
+      "diff: option '--help' doesn't allow an argument\ndiff: Try 'diff --help' for more information.\n",
+    )
+    expect(valueCode).toBe(2)
+  })
+})

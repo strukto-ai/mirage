@@ -407,3 +407,74 @@ def test_argmatch_error_carries_the_block_and_the_given_code():
     # calls `usage (EXIT_FAILURE)`, so this one is 1.
     assert err.exit_code == 1
     assert usage_exit_code("sort") == 2
+
+
+# A name is not an identity: a mount may register its own command under
+# a builtin's name, and USAGE_EXIT, USAGE_HINT_PREFIX, PYTHON_NAMES and
+# the curl and find voices each describe one real program. Every
+# renderer reads them only for the builtin's own grammar, which is the
+# parse's `builtin` bit, so a borrowed name answers as any custom
+# command does.
+def test_a_borrowed_name_exits_1_like_any_custom_command():
+    assert usage_exit_code("grep") == 2
+    assert usage_exit_code("grep", builtin=False) == 1
+    msg, code = unknown_option_error("grep", "--bogus", builtin=False)
+    assert msg == (b"grep: unrecognized option '--bogus'\n"
+                   b"Try 'grep --help' for more information.\n")
+    assert code == 1
+    # OLD_OPTION_EXIT is tar's own fatal error, not the borrower's.
+    assert old_option_error("tar", "f", builtin=False)[1] == 1
+
+
+def test_a_borrowed_name_gets_the_bare_hint_line():
+    msg, code = missing_required_error("cmp", "--out", builtin=False)
+    assert msg == (b"cmp: option '--out' is required\n"
+                   b"Try 'cmp --help' for more information.\n")
+    assert code == 1
+
+
+def test_a_borrowed_interpreter_name_answers_in_gnu_words():
+    for name in ("python", "python3"):
+        assert unknown_option_error(name, "--bogus", builtin=False) == (
+            f"{name}: unrecognized option '--bogus'\n"
+            f"Try '{name} --help' for more information.\n".encode(), 1)
+        assert missing_value_error(name, "c", builtin=False) == (
+            f"{name}: option requires an argument -- 'c'\n"
+            f"Try '{name} --help' for more information.\n".encode(), 1)
+        assert unexpected_value_error(name, "--verbose=2", builtin=False) == (
+            f"{name}: option '--verbose' doesn't allow an argument\n"
+            f"Try '{name} --help' for more information.\n".encode(), 1)
+
+
+def test_a_borrowed_curl_or_find_name_answers_in_gnu_words():
+    assert unknown_option_error(
+        "curl", "--bogus",
+        builtin=False)[0].startswith(b"curl: unrecognized option '--bogus'\n")
+    assert missing_value_error(
+        "curl", "--max-time", builtin=False)[0].startswith(
+            b"curl: option '--max-time' requires an argument\n")
+    assert invalid_float_error("curl", "--max-time", "abc",
+                               builtin=False)[0].startswith(
+                                   b"curl: invalid float value: 'abc' "
+                                   b"for '--max-time'\n")
+    assert unknown_option_error(
+        "find", "--bogus",
+        builtin=False)[0].startswith(b"find: unrecognized option '--bogus'\n")
+
+
+# diffutils routes every option refusal through error(), not only the
+# extra-operand one (pinned on debian:stable-slim, diffutils 3.10:
+# `diff --bogus a b`, `cmp -m`, `diff --help=x a b` all carry the prefix
+# on the hint line and exit 2).
+def test_diff_and_cmp_prefix_the_hint_on_every_option_refusal():
+    assert unknown_option_error(
+        "diff",
+        "--bogus") == (b"diff: unrecognized option '--bogus'\n"
+                       b"diff: Try 'diff --help' for more information.\n", 2)
+    assert unknown_option_error(
+        "cmp", "m") == (b"cmp: invalid option -- 'm'\n"
+                        b"cmp: Try 'cmp --help' for more information.\n", 2)
+    assert unexpected_value_error(
+        "diff",
+        "--help=x") == (b"diff: option '--help' doesn't allow an argument\n"
+                        b"diff: Try 'diff --help' for more information.\n", 2)

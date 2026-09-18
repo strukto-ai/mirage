@@ -168,10 +168,10 @@ export const ARGMATCH_CHOICE_OPTIONS: ReadonlySet<string> = new Set([
 export const INT_VALUE = /^[+-]?\d+$/
 export const FLOAT_VALUE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
 
-// GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
-// (plus ripgrep and jq upstream docs). Everything else exits 1.
 // Commands whose `Try '--help'` hint line is prefixed with the command
-// name (GNU diffutils style: `diff: Try 'diff --help' ...`).
+// name (GNU diffutils style: `diff: Try 'diff --help' ...`), on every
+// refusal that carries the hint. Read only for the builtin's own grammar,
+// so the prefix follows the grammar and not the spelling (see USAGE_EXIT).
 export const USAGE_HINT_PREFIX: ReadonlySet<string> = new Set(['diff', 'cmp'])
 
 // An old-style cluster letter left without its argument exits 2, not
@@ -185,10 +185,25 @@ export const OLD_OPTION_EXIT = 2
 // report an operand they cannot act on and exit 1, and tar's own fatal
 // code, since tar reports an operand it cannot open and exits 2 (GNU tar
 // 1.35, `Exiting with failure status due to previous errors`).
+//
+// Keyed on the name alone because the admission gate reads it before
+// `resolveMount` has chosen a mount, so no spec exists there yet (the same
+// reason the router's link tables in workspace/lookup/constants.ts are
+// name-keyed), and it only picks an exit code.
 export const OPERAND_EXIT: Readonly<Record<string, number>> = Object.freeze({
   tar: 2,
 })
 
+// GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
+// (plus ripgrep and jq upstream docs). Everything else exits 1.
+//
+// This table, USAGE_HINT_PREFIX and PYTHON_NAMES (and the curl and find
+// voices worded in usage.ts) each describe one real program, so usage.ts
+// reads them only when the line was parsed against the builtin's own
+// grammar (the parse's `builtin` bit, `isBuiltinGrammar`): a mount's own `grep`
+// exits 1 in the generic voice rather than inheriting grep's 2 from a
+// spelling collision. The tables that stay keyed on the name alone are the
+// ones read where no spec exists yet, and say so.
 export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
   grep: 2,
   egrep: 2,
@@ -215,6 +230,15 @@ export const USAGE_EXIT: Readonly<Record<string, number>> = Object.freeze({
 // binutils 2.44, util-linux 2.41.5, bsdmainutils 12.1.8, xxd from
 // vim-common). The python twin is READ_FAIL_EXIT in
 // commands/spec/constants.py.
+//
+// Deliberately keyed on the name alone, unlike USAGE_EXIT. It only picks an
+// exit code, it is reached only when a handler throws the very errno the
+// builtin would, and three of its eight readers (the lazy-stream drains in
+// executor/statement.ts, executor/redirect.ts and node/program.ts) know the
+// command only as `ExecutionNode.command`, a string, long after the spec was
+// in hand. Gating the five that could know would make one borrowed `sort`
+// answer 1 eagerly and 2 lazily, a split GNU does not have, and closing it
+// means a new field on the execution record for an exit code.
 export const READ_FAIL_EXIT: Readonly<Record<string, number>> = Object.freeze({
   sort: 2,
   awk: 2,
@@ -248,7 +272,9 @@ export const READ_FAIL_EXIT_ISDIR: Readonly<Record<string, number>> = Object.fre
 
 // The interpreter commands answer option errors in CPython's words, not
 // GNU's: python3 is not a GNU tool, and its refusal names the
-// source-selecting options a reader needs.
+// source-selecting options a reader needs. Read only for the builtin's own
+// grammar, so a mount's own `python3` is refused in GNU's words like any
+// other custom command (see USAGE_EXIT).
 export const PYTHON_NAMES: ReadonlySet<string> = new Set(['python', 'python3'])
 
 // Pinned on CPython 3.12.13, including two quirks worth keeping: the
