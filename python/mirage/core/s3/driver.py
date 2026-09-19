@@ -108,6 +108,30 @@ async def _list_subtree(conn: S3Conn, stem: str) -> AsyncIterator[TreeEntry]:
                             if obj.get("LastModified") else "")
 
 
+def _etag_of(resp: dict[str, Any]) -> str:
+    """Quote-stripped ETag from a head or put response, "" when absent.
+
+    Returned as a possibly-empty str rather than ``str | None`` because
+    ``_head`` needs both spellings: ``fingerprint`` drops an empty one
+    while ``extra`` carries it verbatim, and a helper that folded "" to
+    None would change ``FileStat.extra``'s shape.
+
+    Args:
+        resp (dict[str, Any]): the head_object or put_object response.
+    """
+    return str(resp.get("ETag") or "").strip('"')
+
+
+def _version_of(resp: dict[str, Any]) -> str | None:
+    """VersionId from a head or put response, None when unversioned.
+
+    Args:
+        resp (dict[str, Any]): the head_object or put_object response.
+    """
+    vid = resp.get("VersionId")
+    return None if vid in (None, "", "null") else str(vid)
+
+
 async def _head(conn: S3Conn, key: str) -> ObjectMeta | None:
     try:
         resp = await conn.client.head_object(Bucket=conn.config.bucket,
@@ -116,14 +140,11 @@ async def _head(conn: S3Conn, key: str) -> ObjectMeta | None:
         if is_not_found(exc):
             return None
         raise
-    etag_raw = resp.get("ETag", "").strip('"')
-    vid_raw = resp.get("VersionId")
-    if vid_raw == "null":
-        vid_raw = None
+    etag_raw = _etag_of(resp)
     return ObjectMeta(size=resp["ContentLength"],
                       modified=to_iso_z(resp["LastModified"]),
                       fingerprint=etag_raw or None,
-                      revision=vid_raw or None,
+                      revision=_version_of(resp),
                       extra={"etag": etag_raw})
 
 
@@ -139,8 +160,15 @@ async def _get(conn: S3Conn, key: str) -> bytes | None:
     return data
 
 
-async def _put(conn: S3Conn, key: str, data: bytes) -> None:
-    await conn.client.put_object(Bucket=conn.config.bucket, Key=key, Body=data)
+async def _put(conn: S3Conn, key: str, data: bytes) -> ObjectMeta | None:
+    # The ETag is read through the same helper _head uses, so the token a
+    # write stamps and the token a later stat reports are one spelling.
+    resp = await conn.client.put_object(Bucket=conn.config.bucket,
+                                        Key=key,
+                                        Body=data)
+    return ObjectMeta(size=len(data),
+                      fingerprint=_etag_of(resp) or None,
+                      revision=_version_of(resp))
 
 
 async def _delete_file(conn: S3Conn, key: str) -> None:

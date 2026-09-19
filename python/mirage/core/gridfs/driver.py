@@ -237,11 +237,15 @@ async def _get(conn: GridFSAccessor, key: str) -> bytes | None:
     return data
 
 
-async def _put(conn: GridFSAccessor, key: str, data: bytes) -> None:
+async def _put(conn: GridFSAccessor, key: str,
+               data: bytes) -> ObjectMeta | None:
     # Uploads a new revision; older revisions stay in fs.files, so reads
     # pinned to an old revision _id keep working (GridFS-native
-    # versioning).
-    await bucket(conn).upload_from_stream(key, data)
+    # versioning). The new _id wins both keys of LATEST_SORT, so it is
+    # what _head answers next, spelled the same way.
+    oid = await bucket(conn).upload_from_stream(key, data)
+    revision = str(oid)
+    return ObjectMeta(size=len(data), fingerprint=revision, revision=revision)
 
 
 async def _delete_file(conn: GridFSAccessor, key: str) -> None:

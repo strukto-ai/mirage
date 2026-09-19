@@ -18,21 +18,35 @@ import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import type { MkdirFn, ObjectStoreDriver, PathFn, TruncateFn, WriteFn } from './driver.ts'
+import type {
+  MkdirFn,
+  ObjectMeta,
+  ObjectStoreDriver,
+  PathFn,
+  TruncateFn,
+  WriteFn,
+} from './driver.ts'
 
 // Put one object, translating a missing container to ENOENT. The driver
 // primitives speak keys, so a store error for a missing repository or
 // bucket names the backend key, and only the factory holds the PathSpec
 // the message has to carry.
+//
+// Callers stamp `meta.fingerprint` on the op record and deliberately
+// leave `meta.revision` off it. Nothing reads a write record's revision
+// today -- captureFingerprints still filters to reads -- but once it
+// does, an entry carrying one is pinned by installFingerprints instead
+// of drift-checked, and on a versioned store that pin would name the
+// revision preceding this write.
 async function put<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
   conn: C,
   key: string,
   data: Uint8Array,
   path: PathSpec,
-): Promise<void> {
+): Promise<ObjectMeta | null> {
   try {
-    await driver.put(conn, key, data)
+    return await driver.put(conn, key, data)
   } catch (err) {
     if (driver.isNotFound(err)) throw enoent(path)
     throw err
@@ -45,12 +59,15 @@ export function makeWriteBytes<A extends Accessor, C>(driver: ObjectStoreDriver<
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
+    let meta: ObjectMeta | null
     try {
-      await put(driver, conn, key, data, path)
+      meta = await put(driver, conn, key, data, path)
     } finally {
       await close()
     }
-    record('write', path.virtual, driver.vfs, data.byteLength, timer)
+    record('write', path.virtual, driver.vfs, data.byteLength, timer, {
+      fingerprint: meta?.fingerprint ?? null,
+    })
     await invalidateAfterWrite(path)
     // A put materializes every missing level of the key at once, so the
     // listings above the immediate parent gained entries too.
@@ -64,12 +81,15 @@ export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
+    let meta: ObjectMeta | null
     try {
-      await put(driver, conn, key, new Uint8Array(0), path)
+      meta = await put(driver, conn, key, new Uint8Array(0), path)
     } finally {
       await close()
     }
-    record('create', path.virtual, driver.vfs, 0, timer)
+    record('create', path.virtual, driver.vfs, 0, timer, {
+      fingerprint: meta?.fingerprint ?? null,
+    })
     await invalidateAfterWrite(path)
     // An empty put materializes missing parents exactly like write.
     await invalidateAncestors(path)
@@ -84,16 +104,19 @@ export function makeTruncate<A extends Accessor, C>(
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
     const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
+    let meta: ObjectMeta | null
     try {
       const data = (await driver.get(conn, key)) ?? new Uint8Array(0)
       const result = new Uint8Array(length)
       result.set(data.subarray(0, Math.min(data.byteLength, length)), 0)
       // Remaining bytes are already zero-filled (Uint8Array default).
-      await put(driver, conn, key, result, path)
+      meta = await put(driver, conn, key, result, path)
     } finally {
       await close()
     }
-    record('truncate', path.virtual, driver.vfs, 0, timer)
+    record('truncate', path.virtual, driver.vfs, 0, timer, {
+      fingerprint: meta?.fingerprint ?? null,
+    })
     await invalidateAfterWrite(path)
     // Truncating a missing key creates it, parents included.
     await invalidateAncestors(path)

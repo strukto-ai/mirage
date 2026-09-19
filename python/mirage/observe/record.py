@@ -14,6 +14,24 @@
 
 from dataclasses import dataclass, field
 
+# Ops whose record carries a token describing the bytes it moved, split
+# by direction: the file cache stores bytes from either `IOResult.reads`
+# or `IOResult.writes` and must ask about the side it took, since one
+# line can carry both for a path.
+#
+# `create` and `truncate` stamp a token on their own record too, but
+# neither ever hands bytes to the cache: no command builder can ask for
+# a create (`Operation` has no member for it) and truncate's command
+# returns an empty IOResult, so no created or truncated path is ever
+# listed in `IOResult.cache`. A script runtime can still issue either
+# through `RuntimeVFS`, and those ops bubble into the enclosing line's
+# records, which is exactly why admitting them here could only pair one
+# op's token with another op's bytes.
+# "append" is absent because no object store implements it and the
+# backends that record one stamp no token.
+READ_FINGERPRINT_OPS = frozenset({"read"})
+WRITE_FINGERPRINT_OPS = frozenset({"write"})
+
 
 @dataclass
 class OpRecord:
@@ -26,12 +44,12 @@ class OpRecord:
         bytes (int): Bytes transferred (0 for metadata ops).
         timestamp (int): UTC epoch milliseconds.
         duration_ms (int): Wall-clock duration.
-        fingerprint (str | None): For read ops on a backend that supports
-            snapshot+replay, the content-derived identifier the backend
-            returned (e.g. S3 ``ETag``, md5). Used to detect drift at
-            replay time. Captured at read time so the snapshot reflects
-            what the agent actually saw. None for writes, metadata ops,
-            and backends without snapshot support.
+        fingerprint (str | None): On a read, and on an object store's
+            write, create and truncate, the content-derived identifier
+            the backend returned (e.g. S3 ``ETag``, md5). Used to detect
+            drift at replay time. Captured as the op completes, so it
+            describes the bytes that op moved. None for metadata ops and
+            backends that return no token.
         revision (str | None): For read ops on a backend that exposes
             stable revision handles (S3 ``VersionId``, Drive
             ``revisionId``, Git commit SHA), the value the backend

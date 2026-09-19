@@ -14,6 +14,24 @@
 
 import { VFSName } from '../types.ts'
 
+// Ops whose record carries a token describing the bytes it moved, split
+// by direction: the file cache stores bytes from either `IOResult.reads`
+// or `IOResult.writes` and must ask about the side it took, since one
+// line can carry both for a path.
+//
+// `create` and `truncate` stamp a token on their own record too, but
+// neither ever hands bytes to the cache: no command builder can ask for
+// a create (`Operation` has no member for it) and truncate's command
+// returns an empty IOResult, so no created or truncated path is ever
+// listed in `IOResult.cache`. A script runtime can still issue either
+// through `RuntimeVFS`, and those ops bubble into the enclosing line's
+// records, which is exactly why admitting them here could only pair one
+// op's token with another op's bytes.
+// 'append' is absent because no object store implements it and the
+// backends that record one stamp no token.
+export const READ_FINGERPRINT_OPS: ReadonlySet<string> = new Set(['read'])
+export const WRITE_FINGERPRINT_OPS: ReadonlySet<string> = new Set(['write'])
+
 export interface OpRecordInit {
   op: string
   path: string
@@ -22,10 +40,10 @@ export interface OpRecordInit {
   timestamp: number
   durationMs: number
   /**
-   * Content-derived identifier the backend returned for this read (ETag,
-   * md5). Captured at read time so the snapshot reflects what the agent
-   * actually saw. Null for writes, metadata ops, and backends without
-   * snapshot support.
+   * On a read, and on an object store's write, create and truncate, the
+   * content-derived identifier the backend returned (ETag, md5).
+   * Captured as the op completes, so it describes the bytes that op
+   * moved. Null for metadata ops and backends that return no token.
    */
   fingerprint?: string | null
   /**

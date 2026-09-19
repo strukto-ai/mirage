@@ -15,6 +15,7 @@
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -25,6 +26,23 @@ from mirage.core.object_store.driver import (ChildEntry, FindHints, ObjectMeta,
 from mirage.types import PathSpec
 
 MODIFIED = "2026-01-01T00:00:00Z"
+
+
+def fake_meta(key: str, data: bytes) -> ObjectMeta:
+    """The token fields the fake store reports for one key.
+
+    Shared by ``head`` and ``put`` so the two cannot answer different
+    tokens for the same object. ``head`` adds ``modified`` on top; a put
+    response carries no mtime, so ``put`` returns this as it stands.
+
+    Args:
+        key (str): the backend key.
+        data (bytes): the object's bytes.
+    """
+    return ObjectMeta(size=len(data),
+                      fingerprint=f"fp-{key}",
+                      revision=f"rev-{key}",
+                      extra={"etag": f"fp-{key}"})
 
 
 class FakeAccessor(Accessor):
@@ -96,18 +114,15 @@ def make_driver(
     async def head(conn: FakeStore, key: str) -> ObjectMeta | None:
         if key not in conn.objects:
             return None
-        return ObjectMeta(size=len(conn.objects[key]),
-                          modified=MODIFIED,
-                          fingerprint=f"fp-{key}",
-                          revision=f"rev-{key}",
-                          extra={"etag": f"fp-{key}"})
+        return replace(fake_meta(key, conn.objects[key]), modified=MODIFIED)
 
     async def get(conn: FakeStore, key: str) -> bytes | None:
         return conn.objects.get(key)
 
-    async def put(conn: FakeStore, key: str, data: bytes) -> None:
+    async def put(conn: FakeStore, key: str, data: bytes) -> ObjectMeta | None:
         conn.objects[key] = data
         conn.puts.append((key, data))
+        return fake_meta(key, data)
 
     async def delete_file(conn: FakeStore, key: str) -> None:
         conn.objects.pop(key, None)

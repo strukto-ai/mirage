@@ -30,6 +30,19 @@ import type {
 
 export const MODIFIED = '2026-01-01T00:00:00Z'
 
+// The token fields the fake store reports for one key, shared by `head`
+// and `put` so the two cannot answer different tokens for the same
+// object. `head` adds `modified` on top; a put response carries no
+// mtime, so `put` returns this as it stands.
+function fakeMeta(key: string, data: Uint8Array): ObjectMeta {
+  return {
+    size: data.byteLength,
+    fingerprint: `fp-${key}`,
+    revision: `rev-${key}`,
+    extra: { etag: `fp-${key}` },
+  }
+}
+
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
@@ -138,23 +151,17 @@ export function makeDriver(
   function head(conn: FakeStore, key: string): Promise<ObjectMeta | null> {
     const data = conn.objects.get(key)
     if (data === undefined) return Promise.resolve(null)
-    return Promise.resolve({
-      size: data.byteLength,
-      modified: MODIFIED,
-      fingerprint: `fp-${key}`,
-      revision: `rev-${key}`,
-      extra: { etag: `fp-${key}` },
-    })
+    return Promise.resolve({ ...fakeMeta(key, data), modified: MODIFIED })
   }
 
   function get(conn: FakeStore, key: string): Promise<Uint8Array | null> {
     return Promise.resolve(conn.objects.get(key) ?? null)
   }
 
-  function put(conn: FakeStore, key: string, data: Uint8Array): Promise<void> {
+  function put(conn: FakeStore, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
     conn.objects.set(key, data)
     conn.puts.push([key, data])
-    return Promise.resolve()
+    return Promise.resolve(fakeMeta(key, data))
   }
 
   function deleteFile(conn: FakeStore, key: string): Promise<void> {

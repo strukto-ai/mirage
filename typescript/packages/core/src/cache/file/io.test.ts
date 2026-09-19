@@ -87,16 +87,20 @@ describe('cache population via applyIo', () => {
   })
 })
 
-function readRecord(path: string, fingerprint: string | null): OpRecord {
+function opRecord(op: string, path: string, fingerprint: string | null, nbytes = 0): OpRecord {
   return new OpRecord({
-    op: 'read',
+    op,
     path,
     source: 's3',
-    bytes: 0,
+    bytes: nbytes,
     timestamp: 0,
     durationMs: 0,
     fingerprint,
   })
+}
+
+function readRecord(path: string, fingerprint: string | null): OpRecord {
+  return opRecord('read', path, fingerprint)
 }
 
 describe('backend fingerprint threading', () => {
@@ -322,5 +326,103 @@ describe('maxDrainBytes (cancellable cache drain)', () => {
     await sleep(50)
     expect(await cache.get('/a.txt')).not.toBeNull()
     expect(await cache.get('/b.txt')).not.toBeNull()
+  })
+})
+
+describe('the token describes the bytes stored', () => {
+  it('stamps a write token on written bytes', async () => {
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({ writes: { '/s3/f.txt': ENC.encode('new') }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [opRecord('write', '/s3/f.txt', 'etag-put-2', 3)])
+    expect(await cache.isFresh('/s3/f.txt', 'etag-put-2')).toBe(true)
+  })
+
+  it('read bytes take the read token, not the write', async () => {
+    // A line that reads and writes one path caches the read's bytes --
+    // applyIo prefers io.reads -- so the entry must carry the read's
+    // token. Stamping the write's would make isFresh call stale bytes
+    // fresh for as long as the entry lives.
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({
+      reads: { '/s3/f.txt': ENC.encode('old') },
+      writes: { '/s3/f.txt': ENC.encode('new') },
+      cache: ['/s3/f.txt'],
+    })
+    await applyIo(cache, io, undefined, [
+      opRecord('read', '/s3/f.txt', 'etag-old-2', 3),
+      opRecord('write', '/s3/f.txt', 'etag-new-2', 3),
+    ])
+    expect(DEC.decode((await cache.get('/s3/f.txt')) ?? undefined)).toBe('old')
+    expect(await cache.isFresh('/s3/f.txt', 'etag-old-2')).toBe(true)
+    expect(await cache.isFresh('/s3/f.txt', 'etag-new-2')).toBe(false)
+  })
+
+  it('written bytes ignore an earlier read token', async () => {
+    // sed -i lists the path in writes only, but emits its own pre-edit
+    // read record; the entry must carry the post-edit write token.
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({ writes: { '/s3/f.txt': ENC.encode('new') }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [
+      opRecord('read', '/s3/f.txt', 'etag-old-2', 3),
+      opRecord('write', '/s3/f.txt', 'etag-new-2', 3),
+    ])
+    expect(await cache.isFresh('/s3/f.txt', 'etag-new-2')).toBe(true)
+    expect(await cache.isFresh('/s3/f.txt', 'etag-old-2')).toBe(false)
+  })
+
+  it('a streamed read takes the read token', async () => {
+    const cache = new RAMFileCacheStore()
+    const stream = makeStream('old')
+    expect(DEC.decode(await stream.drain())).toBe('old')
+    const io = new IOResult({
+      reads: { '/s3/f.txt': stream },
+      writes: { '/s3/f.txt': ENC.encode('new') },
+      cache: ['/s3/f.txt'],
+    })
+    await applyIo(cache, io, undefined, [
+      opRecord('read', '/s3/f.txt', 'etag-old-2', 3),
+      opRecord('write', '/s3/f.txt', 'etag-new-2', 3),
+    ])
+    expect(await cache.isFresh('/s3/f.txt', 'etag-old-2')).toBe(true)
+  })
+
+  it('drops a write token of a different length', async () => {
+    // `cp` overwrites IOResult.writes with an empty eviction marker while
+    // the path stays in `cache` and the earlier `tee`'s record stays the
+    // last one, so the token would land on bytes it does not describe. A
+    // length disagreement is the proof it does not, and the entry falls
+    // back to the content default rather than reading as fresh forever.
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({ writes: { '/s3/f.txt': new Uint8Array(0) }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [opRecord('write', '/s3/f.txt', 'etag-tee-2', 2)])
+    expect((await cache.get('/s3/f.txt'))?.byteLength).toBe(0)
+    expect(await cache.isFresh('/s3/f.txt', 'etag-tee-2')).toBe(false)
+  })
+
+  it.each(['create', 'truncate'])('ignores %s, which never supplies bytes', async (op) => {
+    // Both stamp a token on their own record but never hand bytes to the
+    // cache, so pairing one with another op's bytes is the mispairing
+    // WRITE_FINGERPRINT_OPS exists to refuse.
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({ writes: { '/s3/f.txt': ENC.encode('new') }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [opRecord(op, '/s3/f.txt', 'etag-other-2', 3)])
+    expect(await cache.isFresh('/s3/f.txt', 'etag-other-2')).toBe(false)
+  })
+
+  it('an op in neither direction is never a token', async () => {
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({ reads: { '/s3/f.txt': ENC.encode('x') }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [opRecord('readdir', '/s3/f.txt', 'etag-2', 1)])
+    expect(await cache.isFresh('/s3/f.txt', 'etag-2')).toBe(false)
+  })
+
+  it('does not size-check a read', async () => {
+    // A read record's byte count tracks what was consumed, which a
+    // partially drained stream makes smaller than the bytes cached, so
+    // the identity rule is the write direction's alone.
+    const cache = new RAMFileCacheStore()
+    const io = new IOResult({ reads: { '/s3/f.txt': ENC.encode('abcdef') }, cache: ['/s3/f.txt'] })
+    await applyIo(cache, io, undefined, [opRecord('read', '/s3/f.txt', 'etag-2', 1)])
+    expect(await cache.isFresh('/s3/f.txt', 'etag-2')).toBe(true)
   })
 })

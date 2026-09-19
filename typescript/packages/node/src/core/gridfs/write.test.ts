@@ -25,6 +25,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
 import * as clientMod from './client.ts'
+import { DRIVER } from './driver.ts'
 import { write } from './write.ts'
 
 class FakeManager {
@@ -54,6 +55,9 @@ function fakeBucket(keys: string[]): unknown {
       keys.push(key)
       const handlers: Record<string, () => void> = {}
       return {
+        // The new revision's _id, which put reports as the object's
+        // token the way a real GridFSBucketWriteStream does.
+        id: `oid-${String(keys.length)}`,
         on: (event: string, handler: () => void) => {
           handlers[event] = handler
         },
@@ -95,5 +99,22 @@ describe('gridfs core write', () => {
   it('invalidates only itself at the mount root', async () => {
     const { manager } = await runWrite('/c.txt')
     expect(manager.writes).toEqual(['/c.txt'])
+  })
+})
+
+describe('gridfs put token', () => {
+  it('reports the new revision as the object token', async () => {
+    // gridfs spells a token as the uploaded revision's _id, the same
+    // string `head` answers for the latest revision.
+    const keys: string[] = []
+    vi.mocked(clientMod.bucket).mockResolvedValue(fakeBucket(keys) as never)
+    const accessor = new GridFSAccessor({
+      uri: 'mongodb://localhost:27017',
+      database: 'db',
+    } as GridFSConfig)
+    const meta = await DRIVER.put(accessor, 'a/b.txt', new TextEncoder().encode('hi'))
+    expect(meta?.fingerprint).toBe('oid-1')
+    expect(meta?.revision).toBe('oid-1')
+    expect(meta?.size).toBe(2)
   })
 })

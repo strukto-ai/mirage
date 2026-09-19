@@ -165,14 +165,38 @@ function mockBody(data: Uint8Array): MockBody {
 
 export interface S3Mock {
   store: S3MockStore
+  /** How many times each command has been sent since the last reset. */
+  calls: Map<string, number>
   reset(): void
   restore(): void
 }
 
-export function installS3Mock(store: S3MockStore = new S3MockStore()): S3Mock {
+/**
+ * Options for {@link installS3Mock}.
+ *
+ * `etagSuffix` mirrors the python mock's `MultiBucketS3Client.etag_suffix`:
+ * a non-empty value makes every ETag differ from md5(content), the way a
+ * multipart or SSE-KMS upload's does, so a test can tell a backend token
+ * apart from the cache's md5 default.
+ */
+export interface S3MockOptions {
+  etagSuffix?: string
+}
+
+export function installS3Mock(
+  store: S3MockStore = new S3MockStore(),
+  options: S3MockOptions = {},
+): S3Mock {
   const mock = mockClient(S3Client)
+  const suffix = options.etagSuffix ?? ''
+  const calls = new Map<string, number>()
+  const count = (name: string): void => {
+    calls.set(name, (calls.get(name) ?? 0) + 1)
+  }
+  const etag = (data: Uint8Array): string => `"${md5Hex(data)}${suffix}"`
 
   mock.on(GetObjectCommand).callsFake((input: { Bucket: string; Key: string; Range?: string }) => {
+    count('GetObject')
     const data = store.get(input.Bucket, input.Key)
     if (data === undefined) throw notFound()
     const sliced = sliceRange(data, input.Range)
@@ -180,12 +204,13 @@ export function installS3Mock(store: S3MockStore = new S3MockStore()): S3Mock {
   })
 
   mock.on(HeadObjectCommand).callsFake((input: { Bucket: string; Key: string }) => {
+    count('HeadObject')
     const data = store.get(input.Bucket, input.Key)
     if (data === undefined) throw notFound()
     return Promise.resolve({
       ContentLength: data.byteLength,
       LastModified: LAST_MODIFIED,
-      ETag: `"${md5Hex(data)}"`,
+      ETag: etag(data),
     })
   })
 
@@ -212,8 +237,9 @@ export function installS3Mock(store: S3MockStore = new S3MockStore()): S3Mock {
       if (raw instanceof Uint8Array) body = raw
       else if (typeof raw === 'string') body = new TextEncoder().encode(raw)
       else body = new Uint8Array()
+      count('PutObject')
       store.set(input.Bucket, input.Key, body)
-      return Promise.resolve({ ETag: `"${md5Hex(body)}"` })
+      return Promise.resolve({ ETag: etag(body) })
     })
 
   mock.on(DeleteObjectCommand).callsFake((input: { Bucket: string; Key: string }) => {
@@ -242,14 +268,16 @@ export function installS3Mock(store: S3MockStore = new S3MockStore()): S3Mock {
       store.copy(srcBucket, srcKey, input.Bucket, input.Key)
       return Promise.resolve({
         CopyObjectResult: {
-          ETag: `"${md5Hex(store.get(input.Bucket, input.Key) ?? new Uint8Array())}"`,
+          ETag: etag(store.get(input.Bucket, input.Key) ?? new Uint8Array()),
         },
       })
     })
 
   return {
     store,
+    calls,
     reset: () => {
+      calls.clear()
       mock.reset()
     },
     restore: () => {

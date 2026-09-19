@@ -192,11 +192,19 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
   /** Full object bytes, null when absent. */
   get: (conn: C, key: string) => Promise<Uint8Array | null>
   /**
-   * Write one object. A store error meaning the container is absent
+   * Write one object, returning what the store's write response said
+   * about it, or null when the store's write API reports nothing at all
+   * (opendal). The meta is partial: `size` is the bytes written and
+   * `fingerprint` is the store's token, spelled exactly as `head` spells
+   * it so the two can be compared; `modified` is absent, because no
+   * store's write response carries one. A store that answers without a
+   * token gives a meta whose `fingerprint` is null; callers read only
+   * that field, so they cannot tell it from null and do not need to.
+   * A store error meaning the container is absent
    * (`isNotFound`) propagates, and the write factory restates it as
    * ENOENT on the path.
    */
-  put: (conn: C, key: string, data: Uint8Array) => Promise<void>
+  put: (conn: C, key: string, data: Uint8Array) => Promise<ObjectMeta | null>
   /**
    * Delete one key (every revision on a versioned store); silent on a
    * missing key.

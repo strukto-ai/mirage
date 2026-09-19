@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.cache.context import invalidate_after_write, invalidate_ancestors
-from mirage.core.object_store.driver import (A, C, MkdirFn, ObjectStoreDriver,
-                                             PathFn, TruncateFn, WriteFn)
+from mirage.core.object_store.driver import (A, C, MkdirFn, ObjectMeta,
+                                             ObjectStoreDriver, PathFn,
+                                             TruncateFn, WriteFn)
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
@@ -22,12 +23,19 @@ from mirage.utils.errors import enoent
 
 
 async def _put(driver: ObjectStoreDriver[A, C], conn: C, key: str, data: bytes,
-               path_spec: PathSpec) -> None:
+               path_spec: PathSpec) -> ObjectMeta | None:
     """Put one object, translating a missing container to ENOENT.
 
     The driver primitives speak keys, so a store error for a missing
     repository or bucket names the backend key, and only the factory
     holds the PathSpec the message has to carry.
+
+    Callers stamp ``meta.fingerprint`` on the op record and deliberately
+    leave ``meta.revision`` off it. Nothing reads a write record's
+    revision today -- ``capture_fingerprints`` still filters to reads --
+    but once it does, an entry carrying one is pinned by
+    ``install_fingerprints`` instead of drift-checked, and on a versioned
+    store that pin would name the revision preceding this write.
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
@@ -35,9 +43,13 @@ async def _put(driver: ObjectStoreDriver[A, C], conn: C, key: str, data: bytes,
         key (str): the prefix-applied object key.
         data (bytes): the object body.
         path_spec (PathSpec): the operand, for the error's virtual path.
+
+    Returns:
+        ObjectMeta | None: what the store's write response said about the
+        object, None when it reports nothing.
     """
     try:
-        await driver.put(conn, key, data)
+        return await driver.put(conn, key, data)
     except Exception as exc:
         if driver.is_not_found(exc):
             raise enoent(path_spec) from exc
@@ -57,8 +69,13 @@ def make_write_bytes(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
         key = kp.apply(driver.key_prefix_of(accessor), path)
         timer = start_op()
         async with driver.connect(accessor) as conn:
-            await _put(driver, conn, key, data, path_spec)
-        record("write", path, driver.vfs, len(data), timer)
+            meta = await _put(driver, conn, key, data, path_spec)
+        record("write",
+               path,
+               driver.vfs,
+               len(data),
+               timer,
+               fingerprint=meta.fingerprint if meta else None)
         await invalidate_after_write(path_spec)
         # A put materializes every missing level of the key at once, so
         # the listings above the immediate parent gained entries too.
@@ -79,8 +96,13 @@ def make_create(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
         key = kp.apply(driver.key_prefix_of(accessor), path)
         timer = start_op()
         async with driver.connect(accessor) as conn:
-            await _put(driver, conn, key, b"", path_spec)
-        record("create", path, driver.vfs, 0, timer)
+            meta = await _put(driver, conn, key, b"", path_spec)
+        record("create",
+               path,
+               driver.vfs,
+               0,
+               timer,
+               fingerprint=meta.fingerprint if meta else None)
         await invalidate_after_write(path_spec)
         # An empty put materializes missing parents exactly like write.
         await invalidate_ancestors(path_spec)
@@ -104,8 +126,13 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
             if data is None:
                 data = b""
             result = data[:length].ljust(length, b"\0")
-            await _put(driver, conn, key, result, path_spec)
-        record("truncate", path, driver.vfs, 0, timer)
+            meta = await _put(driver, conn, key, result, path_spec)
+        record("truncate",
+               path,
+               driver.vfs,
+               0,
+               timer,
+               fingerprint=meta.fingerprint if meta else None)
         await invalidate_after_write(path_spec)
         # Truncating a missing key creates it, parents included.
         await invalidate_ancestors(path_spec)

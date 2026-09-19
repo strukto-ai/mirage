@@ -133,6 +133,20 @@ async function* listSubtree(conn: S3Conn, stem: string): AsyncIterable<TreeEntry
   }
 }
 
+// Quote-stripped ETag from a head or put response, '' when absent.
+// Returned as a possibly-empty string rather than `string | null`
+// because `head` needs both spellings: `fingerprint` drops an empty one
+// while `extra` omits the key entirely.
+function etagOf(resp: { ETag?: string }): string {
+  return resp.ETag?.replace(/^"|"$/g, '') ?? ''
+}
+
+// VersionId from a head or put response, null when unversioned.
+function versionOf(resp: { VersionId?: string }): string | null {
+  const revision = resp.VersionId ?? null
+  return revision === 'null' ? null : revision
+}
+
 async function head(conn: S3Conn, key: string): Promise<ObjectMeta | null> {
   let resp: { ContentLength?: number; LastModified?: Date; ETag?: string; VersionId?: string }
   try {
@@ -143,14 +157,12 @@ async function head(conn: S3Conn, key: string): Promise<ObjectMeta | null> {
     if (isNotFoundError(err)) return null
     throw err
   }
-  const etag = resp.ETag?.replace(/^"|"$/g, '') ?? ''
-  let revision = resp.VersionId ?? null
-  if (revision === 'null') revision = null
+  const etag = etagOf(resp)
   return {
     size: resp.ContentLength ?? null,
     modified: resp.LastModified === undefined ? null : toIsoZ(resp.LastModified),
     fingerprint: etag !== '' ? etag : null,
-    revision,
+    revision: versionOf(resp),
     extra: etag !== '' ? { etag } : {},
   }
 }
@@ -168,10 +180,18 @@ async function get(conn: S3Conn, key: string): Promise<Uint8Array | null> {
   return streamToBuffer(resp.Body)
 }
 
-async function put(conn: S3Conn, key: string, data: Uint8Array): Promise<void> {
-  await conn.send(
+async function put(conn: S3Conn, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
+  // The ETag is read through the same helper `head` uses, so the token a
+  // write stamps and the token a later stat reports are one spelling.
+  const resp = (await conn.send(
     new conn.mod.PutObjectCommand({ Bucket: conn.config.bucket, Key: key, Body: data }),
-  )
+  )) as { ETag?: string; VersionId?: string }
+  const etag = etagOf(resp)
+  return {
+    size: data.byteLength,
+    fingerprint: etag !== '' ? etag : null,
+    revision: versionOf(resp),
+  }
 }
 
 async function deleteFile(conn: S3Conn, key: string): Promise<void> {

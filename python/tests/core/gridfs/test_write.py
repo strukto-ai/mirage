@@ -43,8 +43,11 @@ class _FakeBucket:
     def __init__(self, uploads: list[tuple[str, bytes]]) -> None:
         self._uploads = uploads
 
-    async def upload_from_stream(self, key: str, data: bytes) -> None:
+    async def upload_from_stream(self, key: str, data: bytes) -> str:
         self._uploads.append((key, data))
+        # pymongo answers the new revision's ObjectId; _put spells it as
+        # the object's token, so the fake has to answer one too.
+        return f"oid-{len(self._uploads)}"
 
 
 async def _write(monkeypatch, mount_path: str) -> tuple[_FakeManager, list]:
@@ -77,3 +80,20 @@ def test_write_invalidates_every_ancestor_listing(monkeypatch):
 def test_write_at_mount_root_invalidates_only_itself(monkeypatch):
     manager, _ = asyncio.run(_write(monkeypatch, "/c.txt"))
     assert manager.writes == ["/c.txt"]
+
+
+def test_write_reports_the_new_revision_as_the_object_token(monkeypatch):
+    """gridfs spells a token as the uploaded revision's _id, the same
+    string ``_head`` answers for the latest revision."""
+    uploads: list[tuple[str, bytes]] = []
+    monkeypatch.setattr(gridfs_driver, "bucket",
+                        lambda accessor: _FakeBucket(uploads))
+    meta = asyncio.run(
+        gridfs_driver.DRIVER.put(
+            GridFSAccessor(
+                GridFSConfig(uri="mongodb://localhost:27017", database="db")),
+            "a/b.txt", b"hi"))
+    assert meta is not None
+    assert meta.fingerprint == "oid-1"
+    assert meta.revision == "oid-1"
+    assert meta.size == 2

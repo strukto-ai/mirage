@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import hashlib
 
 from mirage.accessor.s3 import S3Accessor, S3Config
 from mirage.cache.context import push_cache_manager
@@ -49,8 +50,9 @@ class _FakeClient:
     async def __aexit__(self, *exc: object) -> bool:
         return False
 
-    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:
+    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> dict:
         self._puts.append((Key, Body))
+        return {"ETag": f'"{hashlib.md5(Body).hexdigest()}"'}
 
 
 class _FakeSession:
