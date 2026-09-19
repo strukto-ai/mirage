@@ -25,8 +25,7 @@ import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { GRIDFS_COMMANDS } from '../../commands/builtin/gridfs/index.ts'
 import { SCOPE_ERROR } from '../../core/gridfs/constants.ts'
 import { copy as copyCore } from '../../core/gridfs/copy.ts'
-import { create as createCore } from '../../core/gridfs/create.ts'
-import { size as duSizeCore, entries as duEntriesCore } from '../../core/gridfs/du/index.ts'
+import { size as duSizeCore } from '../../core/gridfs/du/index.ts'
 import { exists as existsCore } from '../../core/gridfs/exists.ts'
 import { find as findCore } from '../../core/gridfs/find.ts'
 import { mkdir as mkdirCore } from '../../core/gridfs/mkdir.ts'
@@ -36,7 +35,7 @@ import { rename as renameCore } from '../../core/gridfs/rename.ts'
 import { rmR as rmRCore } from '../../core/gridfs/rm.ts'
 import { rmdir as rmdirCore } from '../../core/gridfs/rmdir.ts'
 import { stat as statCore } from '../../core/gridfs/stat.ts'
-import { rangeRead as rangeReadCore, stream as streamCore } from '../../core/gridfs/stream.ts'
+import { stream as streamCore } from '../../core/gridfs/stream.ts'
 import { truncate as truncateCore } from '../../core/gridfs/truncate.ts'
 import { unlink as unlinkCore } from '../../core/gridfs/unlink.ts'
 import { write as writeCore } from '../../core/gridfs/write.ts'
@@ -54,7 +53,7 @@ export interface GridFSVFSState {
 }
 
 export class GridFSVFS extends BaseVFS {
-  readonly kind: string = VFSName.GRIDFS
+  readonly name: string = VFSName.GRIDFS
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = true
   // byte store: stat() sizes every file from metadata
@@ -63,27 +62,6 @@ export class GridFSVFS extends BaseVFS {
   override readonly prompt: string = GRIDFS_PROMPT
   readonly config: GridFSConfig
   override readonly accessor: GridFSAccessor
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCore,
-    write: writeCore,
-    readdir: readdirCore,
-    stat: statCore,
-    unlink: unlinkCore,
-    rmdir: rmdirCore,
-    copy: copyCore,
-    rename: renameCore,
-    mkdir: mkdirCore,
-    read_stream: streamCore,
-    range_read: rangeReadCore,
-    rm_recursive: rmRCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    create: createCore,
-    truncate: truncateCore,
-    exists: existsCore,
-    find_flat: findCore,
-  }
-
   constructor(config: GridFSConfig) {
     super()
     const normalized = normalizeKeyPrefix(config.keyPrefix)
@@ -96,11 +74,6 @@ export class GridFSVFS extends BaseVFS {
     this.config = cfg
     this.accessor = new GridFSAccessor(this.config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override async close(): Promise<void> {
     await this.accessor.close()
     await super.close()
@@ -214,7 +187,7 @@ export class GridFSVFS extends BaseVFS {
 
   override getState(): Promise<GridFSVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactConfig(this.config),
     })
   }

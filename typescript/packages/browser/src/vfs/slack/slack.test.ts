@@ -42,7 +42,7 @@ describe('SlackVFS (browser)', () => {
 
   it('constructs with proxyUrl and exposes expected fields', () => {
     const r = new SlackVFS({ proxyUrl: '/api/slack' })
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ proxyUrl: '/api/slack' })
@@ -138,7 +138,7 @@ describe('redactSlackConfig (browser)', () => {
 describe('browser registry: slack', () => {
   it('builds slack VFS with proxyUrl', async () => {
     const r = await buildVfs('slack', { proxyUrl: '/api/slack' })
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r).toBeInstanceOf(SlackVFS)
   })
 
@@ -148,7 +148,7 @@ describe('browser registry: slack', () => {
       proxyUrl: '/api/slack',
       getHeaders: headers,
     })) as SlackVFS
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r.config.proxyUrl).toBe('/api/slack')
     expect(r.config.getHeaders).toBe(headers)
   })

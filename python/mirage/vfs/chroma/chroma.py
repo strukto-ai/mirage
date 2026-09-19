@@ -30,10 +30,10 @@ class ChromaVFS(BaseVFS):
     # Every file is sized exactly, by one chunk scan per directory the
     # caller stats; the path tree's own size is the producer's source
     # number and never becomes the reported byte length.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops = _CHROMA_OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = False
+    prompt: str = PROMPT
+    supports_snapshot: bool = False
 
     def __init__(self, config: ChromaConfig) -> None:
         super().__init__()

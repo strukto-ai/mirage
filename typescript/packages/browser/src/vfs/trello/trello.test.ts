@@ -39,7 +39,7 @@ describe('TrelloVFS (browser)', () => {
 
   it('constructs with apiKey/apiToken and exposes expected fields', () => {
     const r = new TrelloVFS({ apiKey: 'k', apiToken: 't' })
-    expect(r.kind).toBe(VFSName.TRELLO)
+    expect(r.name).toBe(VFSName.TRELLO)
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ apiKey: 'k', apiToken: 't' })
@@ -175,7 +175,7 @@ describe('redactTrelloConfig (browser)', () => {
 describe('browser registry: trello', () => {
   it('builds trello VFS with apiKey/apiToken', async () => {
     const r = await buildVfs('trello', { apiKey: 'k', apiToken: 't' })
-    expect(r.kind).toBe(VFSName.TRELLO)
+    expect(r.name).toBe(VFSName.TRELLO)
     expect(r).toBeInstanceOf(TrelloVFS)
   })
 

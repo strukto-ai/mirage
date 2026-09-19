@@ -41,7 +41,7 @@ export interface GmailVFSState {
 }
 
 export class GmailVFS extends BaseVFS {
-  readonly kind: string = VFSName.GMAIL
+  readonly name: string = VFSName.GMAIL
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: .gmail.json is rendered at
   // readdir from the full message the listing already fetched, and
@@ -59,11 +59,6 @@ export class GmailVFS extends BaseVFS {
     const tm = new TokenManager(config)
     this.accessor = new GmailAccessor({ tokenManager: tm })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return GMAIL_COMMANDS
   }
@@ -104,7 +99,7 @@ export class GmailVFS extends BaseVFS {
 
   override getState(): Promise<GmailVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGmailConfig(this.config),
     })
   }

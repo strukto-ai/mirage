@@ -41,7 +41,7 @@ export interface GSlidesVFSState {
 }
 
 export class GSlidesVFS extends BaseVFS {
-  readonly kind: string = VFSName.GSLIDES
+  readonly name: string = VFSName.GSLIDES
   override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = GSLIDES_PROMPT
@@ -55,11 +55,6 @@ export class GSlidesVFS extends BaseVFS {
     const tm = new TokenManager(config)
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return GSLIDES_COMMANDS
   }
@@ -100,7 +95,7 @@ export class GSlidesVFS extends BaseVFS {
 
   override getState(): Promise<GSlidesVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGSlidesConfig(this.config),
     })
   }

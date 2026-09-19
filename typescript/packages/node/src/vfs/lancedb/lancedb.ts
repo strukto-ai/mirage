@@ -48,7 +48,7 @@ export interface LanceDBVFSState {
 }
 
 export class LanceDBVFS extends BaseVFS {
-  readonly kind: string = VFSName.LANCEDB
+  readonly name: string = VFSName.LANCEDB
   override readonly cachesReads: boolean
   // readdir seeds exact card sizes from the widened select and stat falls
   // back to rendering the row itself, so sizes are exact either way.
@@ -70,7 +70,7 @@ export class LanceDBVFS extends BaseVFS {
 
   override getState(): LanceDBVFSState {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactLanceDBConfig(this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
@@ -86,11 +86,6 @@ export class LanceDBVFS extends BaseVFS {
   override loadState(_state: LanceDBVFSState): Promise<void> {
     return Promise.resolve()
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override async close(): Promise<void> {
     await this.store.close()
     await super.close()

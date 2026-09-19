@@ -18,7 +18,7 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
-import { type VFSStateBase, vfsRefOf } from '../../vfs/base.ts'
+import type { VFSStateBase } from '../../vfs/base.ts'
 import { z } from 'zod'
 
 import { narrow } from '../session/resolve.ts'
@@ -95,8 +95,8 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
       prefix: m.prefix,
       mode: m.mode,
       consistency: ConsistencyPolicy.LAZY,
-      vfs_class: m.vfs.kind,
-      vfs_ref: vfsRefOf(m.vfs),
+      vfs_class: m.vfs.name,
+      vfs_ref: m.vfs.vfsRef,
       vfs_state: state,
     })
   }
@@ -351,7 +351,7 @@ export function restoresAsFreshRAM(entry: MountSnapshot): boolean {
  * or a code reference, which is how a mount declared as
  * `./wiki.mjs:WikiVFS` comes back), else the VFS's `type`, the
  * one locator a VFS constructed in code leaves. The ref comes first
- * because `type` is the class's `kind` and a subclass inherits it: an
+ * because `type` is the class's `name` and a subclass inherits it: an
  * alias registered over a builtin reports the builtin's type and rebuilt
  * as the builtin while the type was consulted first. A recorded ref this
  * registry cannot resolve is not a reason to fall back to that guess: the

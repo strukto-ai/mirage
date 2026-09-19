@@ -19,8 +19,7 @@ import type { RegisteredCommand } from '../../commands/config.ts'
 import { appendBytes } from '../../core/redis/append.ts'
 import { SCOPE_ERROR } from '../../core/redis/constants.ts'
 import { copy as copyCore } from '../../core/redis/copy.ts'
-import { create as createCore } from '../../core/redis/create.ts'
-import { size as duSizeCore, entries as duEntriesCore } from '../../core/redis/du/index.ts'
+import { size as duSizeCore } from '../../core/redis/du/index.ts'
 import { exists as existsCore } from '../../core/redis/exists.ts'
 import { find as findCore, type FindOptions as RedisFindOptions } from '../../core/redis/find.ts'
 import { mkdir as mkdirCore } from '../../core/redis/mkdir.ts'
@@ -71,7 +70,7 @@ export interface RedisVFSState {
  * once, because none of it depends on the transport.
  */
 export class RedisResourceBase extends BaseVFS {
-  readonly kind: string = VFSName.REDIS
+  readonly name: string = VFSName.REDIS
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
@@ -79,28 +78,6 @@ export class RedisResourceBase extends BaseVFS {
   override readonly prompt: string = REDIS_PROMPT
   readonly store: RedisStoreLike
   override readonly accessor: RedisAccessor
-
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCore,
-    write: writeCore,
-    readdir: readdirCore,
-    stat: statCore,
-    unlink: unlinkCore,
-    rmdir: rmdirCore,
-    copy: copyCore,
-    rename: renameCore,
-    mkdir: mkdirCore,
-    read_stream: streamCore,
-    rm_recursive: rmRCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    create: createCore,
-    truncate: truncateCore,
-    exists: existsCore,
-    find_flat: findCore,
-    append: appendBytes,
-  }
-
   constructor(store: RedisStoreLike) {
     super()
     this.store = store
@@ -120,14 +97,9 @@ export class RedisResourceBase extends BaseVFS {
   // prefixes collapse onto one key.
   override storageId(): string {
     const prefix = stripSlash(this.keyPrefix)
-    const base = `${this.kind}:${this.url}`
+    const base = `${this.name}:${this.url}`
     return prefix === '' ? base : `${base}/${prefix}`
   }
-
-  open(): Promise<void> {
-    return this.store.open()
-  }
-
   override async close(): Promise<void> {
     await this.store.close()
     await super.close()
@@ -230,7 +202,7 @@ export class RedisResourceBase extends BaseVFS {
     }
     const dirs = [...(await this.store.listDirs())].sort(compareCodePoints)
     return {
-      type: this.kind,
+      type: this.name,
       config: {
         url: REDACTED_SECRET,
         keyPrefix: this.keyPrefix,

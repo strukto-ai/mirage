@@ -40,12 +40,9 @@ export class FakeSlackTransport implements SlackTransport {
 }
 
 class FakeSlackVFS extends BaseVFS implements SlackResourceLike {
-  readonly kind = 'slack'
+  readonly name = 'slack'
   constructor(override readonly accessor: SlackAccessor) {
     super()
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
   }
 }
 

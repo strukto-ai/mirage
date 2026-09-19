@@ -38,10 +38,10 @@ class NextcloudVFS(BaseVFS):
     caches_reads: bool = True
     # WebDAV PROPFIND carries getcontentlength for every file; readdir
     # backfills any lister-omitted size with one stat per affected file.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops: dict[str, Any] = _NEXTCLOUD_OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = True
 
     def __init__(self, config: NextcloudConfig) -> None:
         super().__init__()

@@ -42,7 +42,7 @@ describe('SlackVFS (node)', () => {
 
   it('constructs with token and exposes expected fields', () => {
     const r = new SlackVFS({ token: 'xoxb-test' })
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ token: 'xoxb-test' })
@@ -149,7 +149,7 @@ describe('normalizeSlackConfig', () => {
 describe('node registry: slack', () => {
   it('builds slack VFS with token (camelCase)', async () => {
     const r = await buildVfs('slack', { token: 'xoxb-x' })
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r).toBeInstanceOf(SlackVFS)
   })
 
@@ -158,7 +158,7 @@ describe('node registry: slack', () => {
       token: 'xoxb-x',
       search_token: 'xoxp-y',
     })) as SlackVFS
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r.config).toEqual({ token: 'xoxb-x', searchToken: 'xoxp-y' })
   })
 })

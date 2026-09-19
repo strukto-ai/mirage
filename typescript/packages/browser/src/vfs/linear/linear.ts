@@ -38,7 +38,7 @@ export interface LinearVFSState {
 }
 
 export class LinearVFS extends BaseVFS {
-  readonly kind: string = VFSName.LINEAR
+  readonly name: string = VFSName.LINEAR
   override readonly cachesReads: boolean = true
   // Every file is sized at its parent's readdir from the listing payload
   // (comments.jsonl via one bounded comments call), so stat always reports
@@ -59,11 +59,6 @@ export class LinearVFS extends BaseVFS {
     if (config.teamIds !== undefined) accessorOpts.teamIds = config.teamIds
     this.accessor = new LinearAccessor(new HttpLinearTransport(transportOpts), accessorOpts)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return LINEAR_COMMANDS
   }
@@ -104,7 +99,7 @@ export class LinearVFS extends BaseVFS {
 
   override getState(): Promise<LinearVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactLinearConfig(this.config),
     })
   }

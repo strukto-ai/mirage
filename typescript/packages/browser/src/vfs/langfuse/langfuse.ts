@@ -37,7 +37,7 @@ export interface LangfuseVFSState {
 }
 
 export class LangfuseVFS extends BaseVFS {
-  readonly kind: string = VFSName.LANGFUSE
+  readonly name: string = VFSName.LANGFUSE
   override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 600
   override readonly prompt: string = LANGFUSE_PROMPT
@@ -68,11 +68,6 @@ export class LangfuseVFS extends BaseVFS {
     }
     this.accessor = new LangfuseAccessor(new HttpLangfuseTransport(transportOpts), accessorConfig)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return LANGFUSE_COMMANDS
   }
@@ -113,7 +108,7 @@ export class LangfuseVFS extends BaseVFS {
 
   override getState(): Promise<LangfuseVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactLangfuseConfig(this.config),
     })
   }

@@ -55,12 +55,9 @@ export class FakeDiscordTransport implements DiscordTransport {
 }
 
 class FakeDiscordVFS extends BaseVFS implements DiscordResourceLike {
-  readonly kind = 'discord'
+  readonly name = 'discord'
   constructor(override readonly accessor: DiscordAccessor) {
     super()
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
   }
 }
 

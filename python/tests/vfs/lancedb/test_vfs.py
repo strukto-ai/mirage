@@ -37,7 +37,7 @@ def test_vfs_remote_uri_caches_reads():
 
 def test_vfs_registers_ops():
     res = _vfs()
-    assert {"read", "readdir", "stat"} <= {o.name for o in res.ops_list()}
+    assert {"read", "readdir", "stat"} <= {o.name for o in res.ops()}
 
 
 def test_vfs_registers_commands():

@@ -37,8 +37,8 @@ class GoogleDriveVFS(BaseVFS):
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = True
 
     def __init__(self, config: GoogleDriveConfig) -> None:
         super().__init__()

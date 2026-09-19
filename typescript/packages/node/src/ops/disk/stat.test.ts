@@ -24,10 +24,9 @@ let root: string
 let cleanup: () => void
 let res: DiskVFS
 
-beforeEach(async () => {
+beforeEach(() => {
   ;({ root, cleanup } = tmpRoot('mirage-disk-stat-op-'))
   res = new DiskVFS({ root })
-  await res.open()
 })
 afterEach(() => {
   cleanup()

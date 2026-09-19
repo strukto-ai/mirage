@@ -39,7 +39,7 @@ function call(
 
 describe('RAMVFS.kind / ops()', () => {
   it('is VFSName.RAM', () => {
-    expect(new RAMVFS().kind).toBe(VFSName.RAM)
+    expect(new RAMVFS().name).toBe(VFSName.RAM)
   })
 
   it('exposes RAM ops covering the full RAM op surface', () => {
@@ -322,8 +322,8 @@ describe('RAMVFS through Workspace', () => {
 
     const payload = new TextEncoder().encode('mirage')
     const acc = resolvedRes as unknown as Accessor
-    await registry.call('write', resolvedRes.kind, acc, resolvedPath, [payload])
-    const read = await registry.call('read', resolvedRes.kind, acc, resolvedPath)
+    await registry.call('write', resolvedRes.name, acc, resolvedPath, [payload])
+    const read = await registry.call('read', resolvedRes.name, acc, resolvedPath)
     void mode
     expect(read).toEqual(payload)
     await ws.close()

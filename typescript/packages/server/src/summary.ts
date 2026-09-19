@@ -79,7 +79,7 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
   const mounts = userMounts(ws)
   const mountSummaries: MountSummary[] = mounts.map((m) => ({
     prefix: m.prefix,
-    vfs: m.vfs.kind,
+    vfs: m.vfs.name,
     mode: m.mode,
     description: describeVfs(m.vfs),
   }))

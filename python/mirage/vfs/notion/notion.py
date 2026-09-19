@@ -39,8 +39,8 @@ class NotionVFS(BaseVFS):
     name: str = VFSName.NOTION
     caches_reads: bool = True
     _ops: dict[str, Any] = _NOTION_OPS
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: NotionConfig) -> None:
         super().__init__()

@@ -22,7 +22,7 @@ export async function entries(
   accessor: OPFSAccessor,
   p: PathSpec,
 ): Promise<[entries: [string, number][], total: number]> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const virtual = norm(p.mountPath)
   const entries: [string, number][] = []
   try {

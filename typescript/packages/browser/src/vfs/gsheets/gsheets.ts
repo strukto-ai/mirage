@@ -41,7 +41,7 @@ export interface GSheetsVFSState {
 }
 
 export class GSheetsVFS extends BaseVFS {
-  readonly kind: string = VFSName.GSHEETS
+  readonly name: string = VFSName.GSHEETS
   override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = GSHEETS_PROMPT
@@ -55,11 +55,6 @@ export class GSheetsVFS extends BaseVFS {
     const tm = new TokenManager(config)
     this.accessor = new GSheetsAccessor({ tokenManager: tm })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return GSHEETS_COMMANDS
   }
@@ -100,7 +95,7 @@ export class GSheetsVFS extends BaseVFS {
 
   override getState(): Promise<GSheetsVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGSheetsConfig(this.config),
     })
   }

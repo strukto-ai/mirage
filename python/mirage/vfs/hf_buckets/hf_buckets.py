@@ -66,10 +66,10 @@ class HfBucketsVFS(BaseVFS):
     # The Hub tree API reports each file's exact byte size (the LFS
     # object size for LFS files); readdir backfills any lister-omitted
     # size with one stat.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops: dict[str, Any] = _OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = True
 
     def __init__(self, config: HfBucketsConfig) -> None:
         super().__init__()

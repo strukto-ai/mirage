@@ -20,11 +20,10 @@ import { OPFSVFS } from './opfs.ts'
 let res: OPFSVFS
 let restoreNav: () => void
 
-beforeEach(async () => {
+beforeEach(() => {
   const root = makeMockRoot()
   restoreNav = installFakeNavigator(() => root)
   res = new OPFSVFS()
-  await res.open()
 })
 
 afterEach(() => {
@@ -33,7 +32,7 @@ afterEach(() => {
 
 describe('OPFSVFS — identity', () => {
   it('has kind, prompt, defaults', () => {
-    expect(res.kind).toBe(VFSName.OPFS)
+    expect(res.name).toBe(VFSName.OPFS)
     expect(typeof res.prompt).toBe('string')
     expect(res.rootName).toBe('')
   })
@@ -118,13 +117,6 @@ describe('OPFSVFS — fs methods', () => {
   })
 })
 
-describe('OPFSVFS — requireHandle', () => {
-  it('throws after close()', async () => {
-    await res.close()
-    expect(() => res.requireHandle()).toThrow(/not open/)
-  })
-})
-
 describe('OPFSVFS — getState / loadState round-trip', () => {
   it('snapshots files and dirs', async () => {
     await res.writeFile(spec('/a'), new TextEncoder().encode('A'))
@@ -138,7 +130,6 @@ describe('OPFSVFS — getState / loadState round-trip', () => {
     restoreNav()
     restoreNav = installFakeNavigator(() => root2)
     const res2 = new OPFSVFS()
-    await res2.open()
     await res2.loadState(state)
     expect(new TextDecoder().decode(await res2.readFile(spec('/a')))).toBe('A')
     expect(new TextDecoder().decode(await res2.readFile(spec('/d/b')))).toBe('B')

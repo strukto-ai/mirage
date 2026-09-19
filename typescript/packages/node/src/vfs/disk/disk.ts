@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdirSync } from 'node:fs'
 import {
   chmod,
   mkdir,
@@ -34,8 +35,7 @@ import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
 import { appendBytes as appendCore } from '../../core/disk/append.ts'
 import { SCOPE_ERROR } from '../../core/disk/constants.ts'
 import { copy as copyCore } from '../../core/disk/copy.ts'
-import { create as createCore } from '../../core/disk/create.ts'
-import { size as duSizeCore, entries as duEntriesCore } from '../../core/disk/du/index.ts'
+import { size as duSizeCore } from '../../core/disk/du/index.ts'
 import { exists as existsCore } from '../../core/disk/exists.ts'
 import { find as findCore, type FindOptions as DiskFindOptions } from '../../core/disk/find.ts'
 import { mkdir as mkdirCore } from '../../core/disk/mkdir.ts'
@@ -80,7 +80,7 @@ async function walkFiles(root: string, current: string, out: string[]): Promise<
 }
 
 export class DiskVFS extends BaseVFS {
-  readonly kind = VFSName.DISK
+  readonly name = VFSName.DISK
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
@@ -88,43 +88,18 @@ export class DiskVFS extends BaseVFS {
   override readonly prompt = DISK_PROMPT
   readonly root: string
   override readonly accessor: DiskAccessor
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCoreFn,
-    write: writeCore,
-    readdir: readdirCore,
-    stat: statCore,
-    unlink: unlinkCore,
-    rmdir: rmdirCore,
-    copy: copyCore,
-    rename: renameCore,
-    mkdir: mkdirCore,
-    read_stream: streamCore,
-    rm_recursive: rmRCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    create: createCore,
-    truncate: truncateCore,
-    exists: existsCore,
-    find_flat: findCore,
-    append: appendCore,
-  }
-
   constructor(options: DiskVFSOptions) {
     super()
     this.root = path.resolve(options.root)
+    mkdirSync(this.root, { recursive: true })
     this.accessor = new DiskAccessor(this.root)
   }
 
   // The resolved root is the storage: two DiskVFS instances built on the same
   // directory are one store, however they were spelled.
   override storageId(): string {
-    return `${this.kind}:${this.root}`
+    return `${this.name}:${this.root}`
   }
-
-  async open(): Promise<void> {
-    await mkdir(this.root, { recursive: true })
-  }
-
   // A real filesystem reports real numbers (QUOTA). GNU df: used counts
   // reserved blocks (blocks - bfree), available excludes them (bavail).
   override async statfs(): Promise<CapacityResult> {
@@ -250,7 +225,7 @@ export class DiskVFS extends BaseVFS {
       modes[rel] = (await fsStat(full)).mode & 0o7777
     }
     return {
-      type: this.kind,
+      type: this.name,
       files,
       modes,
     }

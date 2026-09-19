@@ -14,7 +14,6 @@
 
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { BaseVFS } from '../../../vfs/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
@@ -54,7 +53,6 @@ export interface RunOnMountCtx {
   session: SessionState
   dispatch: DispatchFn
   namespace?: Namespace
-  ensureOpen?: (vfs: BaseVFS) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
   signal?: AbortSignal
@@ -228,8 +226,7 @@ export async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { registry, session, dispatch, namespace, ensureOpen, runtimeBindings, routingDecision } =
-    ctx
+  const { registry, session, dispatch, namespace, runtimeBindings, routingDecision } = ctx
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
   if (mount === null) {
@@ -251,10 +248,6 @@ export async function runOnMount(
 
   let flags = flagKwargs
   if (cmdName === 'find') flags = scalarFindFlags(flags)
-
-  if (ensureOpen !== undefined) {
-    await ensureOpen(mount.vfs)
-  }
 
   // resolveMount may redirect a warm remote read to the cache mount, which
   // does not carry the origin mount's per-command limits. Resolve the
@@ -292,9 +285,9 @@ export async function runOnMount(
   if (denial !== null) return [null, denial]
 
   const signal = mergeSignals(ctx.signal, session.abortSignal)
-  // A leaf that resumes here after the caller aborted (ensureOpen took
-  // longer than the grace) must not reach a mount handler: eager write
-  // handlers do not read the signal, and a cancelled `rm` must not run.
+  // A leaf that resumes here after the caller aborted must not reach a
+  // mount handler: eager write handlers do not read the signal, and a
+  // cancelled `rm` must not run.
   if (signal?.aborted === true) throw makeAbortError(signal)
   try {
     const [initialStdout, io] = await mount.executeCmd(cmdName, paths, texts, flags, {

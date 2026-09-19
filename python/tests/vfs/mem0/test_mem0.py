@@ -10,7 +10,7 @@ def test_vfs_basic():
     res = Mem0VFS(cfg)
     assert res.name == VFSName.MEM0
     assert res.caches_reads is True
-    assert res.SUPPORTS_SNAPSHOT is False
+    assert res.supports_snapshot is False
 
 
 def test_get_state_redacts_api_key():
@@ -27,4 +27,4 @@ def test_vfs_uses_generic_read_only_surface():
     commands = {command.name for command in res.commands()}
     assert {"cat", "find", "grep", "jq", "ls", "rg", "search",
             "stat"} <= commands
-    assert {op.name for op in res.ops_list()} == {"read", "readdir", "stat"}
+    assert {op.name for op in res.ops()} == {"read", "readdir", "stat"}

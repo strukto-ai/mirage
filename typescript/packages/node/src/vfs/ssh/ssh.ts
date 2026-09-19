@@ -24,8 +24,7 @@ import { SSHAccessor } from '../../accessor/ssh.ts'
 import { SSH_COMMANDS } from '../../commands/builtin/ssh/index.ts'
 import { appendBytes as appendCore } from '../../core/ssh/append.ts'
 import { copy as copyCore } from '../../core/ssh/copy.ts'
-import { create as createCore } from '../../core/ssh/create.ts'
-import { size as duSizeCore, entries as duEntriesCore } from '../../core/ssh/du/index.ts'
+import { size as duSizeCore } from '../../core/ssh/du/index.ts'
 import { exists as existsCore } from '../../core/ssh/exists.ts'
 import { find as findCore, type FindOptions as SshFindOptions } from '../../core/ssh/find.ts'
 import { mkdir as mkdirCore } from '../../core/ssh/mkdir.ts'
@@ -36,7 +35,7 @@ import { rename as renameCore } from '../../core/ssh/rename.ts'
 import { rmR as rmRCore } from '../../core/ssh/rm.ts'
 import { rmdir as rmdirCore } from '../../core/ssh/rmdir.ts'
 import { stat as statCore } from '../../core/ssh/stat.ts'
-import { rangeRead as rangeReadCore, stream as streamCore } from '../../core/ssh/stream.ts'
+import { stream as streamCore } from '../../core/ssh/stream.ts'
 import { truncate as truncateCore } from '../../core/ssh/truncate.ts'
 import { unlink as unlinkCore } from '../../core/ssh/unlink.ts'
 import { writeBytes as writeCore } from '../../core/ssh/write.ts'
@@ -54,7 +53,7 @@ export interface SSHVFSState {
 }
 
 export class SSHVFS extends BaseVFS {
-  readonly kind = VFSName.SSH
+  readonly name = VFSName.SSH
   override readonly cachesReads: boolean = true
   // SFTP stat/readdir report the remote inode's exact byte size for every
   // file; reads are the same raw bytes.
@@ -63,38 +62,11 @@ export class SSHVFS extends BaseVFS {
   override readonly prompt = SSH_PROMPT
   readonly config: SSHConfig
   override readonly accessor: SSHAccessor
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCoreFn,
-    write: writeCore,
-    readdir: readdirCore,
-    stat: statCore,
-    unlink: unlinkCore,
-    rmdir: rmdirCore,
-    copy: copyCore,
-    rename: renameCore,
-    mkdir: mkdirCore,
-    read_stream: streamCore,
-    range_read: rangeReadCore,
-    rm_recursive: rmRCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    create: createCore,
-    truncate: truncateCore,
-    exists: existsCore,
-    find_flat: findCore,
-    append: appendCore,
-  }
-
   constructor(config: SSHConfig) {
     super()
     this.config = config
     this.accessor = new SSHAccessor(config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override async close(): Promise<void> {
     await this.accessor.close()
     await super.close()
@@ -196,7 +168,7 @@ export class SSHVFS extends BaseVFS {
   // eslint-disable-next-line @typescript-eslint/require-await
   override async getState(): Promise<SSHVFSState> {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactSshConfig(this.config),
     }
   }

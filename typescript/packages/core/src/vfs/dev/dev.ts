@@ -27,13 +27,6 @@ export class DevVFS extends RAMVFS {
   override readonly store: RAMStore = new DevStore() as unknown as RAMStore
   override readonly accessor: RAMAccessor = new RAMAccessor(this.store)
 
-  constructor() {
-    super()
-    this.opsMap.read_bytes = read
-    this.opsMap.read_stream = stream
-    this.opsMap.stat = stat
-  }
-
   override ops(): readonly RegisteredOp[] {
     return DEV_OPS
   }

@@ -246,7 +246,7 @@ Set `caches_reads=True` only for stable, read-mostly content. Implement `get_sta
 
 ## 6. Snapshot Support
 
-Leave `SUPPORTS_SNAPSHOT=False` unless the complete drift contract is implemented:
+Leave `supports_snapshot=False` unless the complete drift contract is implemented:
 
 1. `stat()` returns a stable `FileStat.fingerprint`.
 1. Every read record includes the fingerprint that produced those bytes.

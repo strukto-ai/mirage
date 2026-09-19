@@ -33,10 +33,7 @@ import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
 
 class StubVFS extends BaseVFS {
-  readonly kind = 'ram'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+  readonly name = 'ram'
   override close(): Promise<void> {
     return Promise.resolve()
   }

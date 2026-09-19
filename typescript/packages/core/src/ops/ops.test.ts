@@ -43,7 +43,7 @@ function mkFailingStat(err: unknown): Workspace {
   const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, ops })
   ops.register({
     name: 'stat',
-    vfs: vfs.kind,
+    vfs: vfs.name,
     filetype: null,
     fn: () => {
       throw err
@@ -354,7 +354,7 @@ describe('Ops is one door with the dispatcher', () => {
     ops.registerVfs(vfs)
     ops.register({
       name: 'read',
-      vfs: vfs.kind,
+      vfs: vfs.name,
       filetype: '.gdoc.json',
       write: false,
       fn: () => Promise.resolve(new TextEncoder().encode('rendered')),
@@ -456,7 +456,7 @@ describe('Ops accounting survives the delegation', () => {
     // already moved them; dropping the record loses the whole transfer
     // rather than just truncating it. Mirrors Python's test_policies.py.
     const vfs = new RAMVFS()
-    Object.assign(vfs, { kind: 's3' })
+    Object.assign(vfs, { name: 's3' })
     const ops = new OpsRegistry()
     for (const op of vfs.ops()) ops.register({ ...op, vfs: 's3' })
     const ws = new Workspace(
@@ -479,7 +479,7 @@ describe('Ops accounting survives the delegation', () => {
     // completion, so the record does not depend on what kind of
     // exception followed. Mirrors Python's test_policies.py.
     const vfs = new RAMVFS()
-    Object.assign(vfs, { kind: 's3' })
+    Object.assign(vfs, { name: 's3' })
     const ops = new OpsRegistry()
     for (const op of vfs.ops()) ops.register({ ...op, vfs: 's3' })
     const ws = new Workspace(
@@ -727,7 +727,7 @@ describe('Ops.readlink', () => {
     // stat silenced is what proves the listing is the channel read.
     ops.register({
       name: 'stat',
-      vfs: vfs.kind,
+      vfs: vfs.name,
       filetype: null,
       fn: () => {
         throw enoent('/data/d')
@@ -736,7 +736,7 @@ describe('Ops.readlink', () => {
     })
     ops.register({
       name: 'readdir',
-      vfs: vfs.kind,
+      vfs: vfs.name,
       filetype: null,
       fn: async (accessor, path, args, kwargs) => {
         const entries = (await realReaddir(accessor, path, args, kwargs)) as string[]

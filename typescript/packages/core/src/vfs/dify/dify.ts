@@ -45,7 +45,7 @@ export interface DifyVFSState {
 }
 
 export class DifyVFS extends BaseVFS {
-  readonly kind: string = VFSName.DIFY
+  readonly name: string = VFSName.DIFY
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = false
   override readonly prompt: string = DIFY_PROMPT
@@ -61,7 +61,7 @@ export class DifyVFS extends BaseVFS {
 
   override getState(): DifyVFSState {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactDifyConfig(this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
@@ -77,11 +77,6 @@ export class DifyVFS extends BaseVFS {
   override loadState(_state: DifyVFSState): Promise<void> {
     return Promise.resolve()
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override ops(): readonly RegisteredOp[] {
     return DIFY_OPS
   }

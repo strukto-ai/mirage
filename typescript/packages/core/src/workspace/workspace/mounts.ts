@@ -90,8 +90,6 @@ export function prepareAddedMount(
 export interface UnmountDeps {
   registry: MountRegistry
   opsRegistry: OpsRegistry
-  opened: Set<BaseVFS>
-  openOrder: BaseVFS[]
   sharedMounts: Set<BaseVFS>
   isShuttingDown: () => boolean
 }
@@ -132,10 +130,10 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   const vfs = entry.vfs
   const remaining = deps.registry.allMounts()
   const stillMounted = remaining.some((m) => m.vfs === vfs)
-  const kindStillMounted = remaining.some((m) => m.vfs.kind === vfs.kind)
-  deps.opsRegistry.unregisterVfs(kindStillMounted ? vfs : vfs.kind)
+  const kindStillMounted = remaining.some((m) => m.vfs.name === vfs.name)
+  deps.opsRegistry.unregisterVfs(kindStillMounted ? vfs : vfs.name)
   for (const survivor of remaining) {
-    if (survivor.vfs.kind === vfs.kind) {
+    if (survivor.vfs.name === vfs.name) {
       deps.opsRegistry.registerVfs(survivor.vfs, false)
     }
   }
@@ -154,9 +152,6 @@ async function closeVfs(deps: UnmountDeps, entry: MountEntry): Promise<void> {
   const vfs = entry.vfs
   const shared = deps.sharedMounts.has(vfs)
   if (!shared) await entry.activity.wait()
-  const idx = deps.openOrder.indexOf(vfs)
-  if (idx !== -1) deps.openOrder.splice(idx, 1)
-  deps.opened.delete(vfs)
   if (shared) return
   deps.registry.retiredMounts.add(vfs)
   await vfs.close()

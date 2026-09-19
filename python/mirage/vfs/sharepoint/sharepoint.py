@@ -61,14 +61,14 @@ class SharePointVFS(BaseVFS):
     # Graph drive items carry an exact content-length size and the site
     # and drive levels are plain directories; unlike onedrive there is
     # no aggregate-size root item.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops: dict[str, Any] = _SHAREPOINT_OPS
     # An API-backed tree that changes rarely; a day-long index spares the
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = True
 
     def __init__(self, config: SharePointConfig) -> None:
         super().__init__()

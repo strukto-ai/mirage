@@ -23,7 +23,7 @@ async def test_dify_vfs_is_registered_and_redacts_api_key():
 
     assert vfs.name == VFSName.DIFY
     assert vfs.caches_reads is True
-    assert vfs.SUPPORTS_SNAPSHOT is False
+    assert vfs.supports_snapshot is False
     assert vfs.config.base_url == "https://api.dify.ai/v1"
     assert vfs.config.slug_metadata_name == "slug"
     assert vfs.config.max_concurrency == 10
@@ -93,7 +93,7 @@ async def test_dify_vfs_registers_expected_commands_and_ops():
     )
 
     commands = {item.name for item in vfs.commands()}
-    ops = {item.name for item in vfs.ops_list()}
+    ops = {item.name for item in vfs.ops()}
 
     assert {"cat", "ls", "grep", "find", "head", "tail",
             "wc"}.issubset(commands)

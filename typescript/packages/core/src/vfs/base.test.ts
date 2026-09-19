@@ -20,11 +20,8 @@ import { BaseVFS } from './base.ts'
 import { vfsStateRequiresOverride } from './secrets.ts'
 
 class Probe extends BaseVFS {
-  readonly kind = 'probe'
+  readonly name = 'probe'
   override readonly indexTtl: number = 123
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
 }
 
 describe('BaseVFS index', () => {

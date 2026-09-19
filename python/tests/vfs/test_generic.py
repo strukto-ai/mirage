@@ -161,20 +161,20 @@ def test_get_state():
 
 def test_declaration_flags_forwarded():
     vfs = make_vfs(sizes_always_known=True, supports_snapshot=True)
-    assert vfs.SIZES_ALWAYS_KNOWN is True
-    assert vfs.SUPPORTS_SNAPSHOT is True
+    assert vfs.sizes_always_known is True
+    assert vfs.supports_snapshot is True
 
 
 def test_declaration_flags_default_off():
     vfs = make_vfs()
-    assert vfs.SIZES_ALWAYS_KNOWN is False
-    assert vfs.SUPPORTS_SNAPSHOT is False
+    assert vfs.sizes_always_known is False
+    assert vfs.supports_snapshot is False
 
 
 def test_prompts_set():
     vfs = make_vfs(prompt="wiki files", write_prompt="writable")
-    assert vfs.PROMPT == "wiki files"
-    assert vfs.WRITE_PROMPT == "writable"
+    assert vfs.prompt == "wiki files"
+    assert vfs.write_prompt == "writable"
 
 
 @pytest.mark.asyncio
@@ -219,13 +219,13 @@ async def test_workspace_execution_end_to_end():
 
 def test_auto_ops_derived_from_table():
     vfs = make_vfs()
-    names = {(ro.name, ro.write) for ro in vfs.ops_list()}
+    names = {(ro.name, ro.write) for ro in vfs.ops()}
     assert names == {("read", False), ("readdir", False), ("stat", False)}
 
 
 def test_auto_ops_disabled():
     vfs = make_vfs(auto_ops=False)
-    assert vfs.ops_list() == []
+    assert vfs.ops() == []
 
 
 def test_user_ops_shadow_derived():
@@ -236,7 +236,7 @@ def test_user_ops_shadow_derived():
 
     custom = RegisteredOp(name="read", vfs="wiki", filetype=None, fn=my_read)
     vfs = make_vfs(ops=[custom])
-    reads = [ro for ro in vfs.ops_list() if ro.name == "read"]
+    reads = [ro for ro in vfs.ops() if ro.name == "read"]
     assert len(reads) == 1
     assert reads[0].fn is my_read
 

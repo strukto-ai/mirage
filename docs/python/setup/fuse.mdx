@@ -157,7 +157,7 @@ create with ENOSYS after the file already landed.
   **Size-unknown files read as empty.** There is no `direct_io`, so reads
   stop at the size `stat` reported; a file that stats 0 pre-open reads as
   empty with exit code 0. Mirage warns at mount time, naming the degraded
-  mounts (`SIZES_ALWAYS_KNOWN`). Byte stores (ram, disk, redis, s3,
+  mounts (`sizes_always_known`). Byte stores (ram, disk, redis, s3,
   gridfs) and Linear (size push-down) qualify; for the rest, use
   `MountBackend.FUSE` or scope the fskit mount to a sized subtree.
 </Warning>

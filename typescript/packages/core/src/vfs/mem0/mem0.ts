@@ -20,7 +20,7 @@ export interface Mem0VFSState {
 }
 
 export class Mem0VFS extends BaseVFS {
-  readonly kind: string = VFSName.MEM0
+  readonly name: string = VFSName.MEM0
   override readonly cachesReads: boolean = true
   // readdir and stat store the rendered JSON's byte length and read
   // serves those same bytes, so sizes are exact by construction.
@@ -36,11 +36,6 @@ export class Mem0VFS extends BaseVFS {
     this.config = config
     this.accessor = new Mem0Accessor(config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return MEM0_COMMANDS
   }
@@ -67,7 +62,7 @@ export class Mem0VFS extends BaseVFS {
 
   override getState(): Mem0VFSState {
     const config: Mem0ConfigRedacted = redactMem0Config(this.config)
-    return { type: this.kind, config }
+    return { type: this.name, config }
   }
 
   override loadState(_state: Mem0VFSState): Promise<void> {

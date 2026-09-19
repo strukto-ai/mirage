@@ -17,8 +17,7 @@ import { RAM_COMMANDS } from '../../commands/builtin/ram/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
 import { appendBytes as appendCore } from '../../core/ram/append.ts'
 import { copy as copyCore } from '../../core/ram/copy.ts'
-import { create as createCore } from '../../core/ram/create.ts'
-import { size as duSizeCore, entries as duEntriesCore } from '../../core/ram/du/index.ts'
+import { size as duSizeCore } from '../../core/ram/du/index.ts'
 import { exists as existsCore } from '../../core/ram/exists.ts'
 import { find as findCore, type FindOptions as RAMFindOptions } from '../../core/ram/find.ts'
 import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
@@ -53,7 +52,7 @@ export interface RAMVFSState {
 }
 
 export class RAMVFS extends BaseVFS {
-  readonly kind = VFSName.RAM
+  readonly name = VFSName.RAM
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
@@ -61,31 +60,6 @@ export class RAMVFS extends BaseVFS {
   readonly store = new RAMStore()
   override readonly accessor = new RAMAccessor(this.store)
   override readonly prompt = RAM_PROMPT
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCore,
-    write: writeCore,
-    readdir: readdirCore,
-    stat: statCore,
-    unlink: unlinkCore,
-    rmdir: rmdirCore,
-    copy: copyCore,
-    rename: renameCore,
-    mkdir: mkdirCore,
-    read_stream: streamCore,
-    rm_recursive: rmRCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    create: createCore,
-    truncate: truncateCore,
-    exists: existsCore,
-    find_flat: findCore,
-    append: appendCore,
-  }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override ops(): readonly RegisteredOp[] {
     return RAM_OPS
   }
@@ -183,7 +157,7 @@ export class RAMVFS extends BaseVFS {
     const attrs: Record<string, RAMAttrs> = {}
     for (const [k, v] of this.store.attrs) attrs[k] = { ...v }
     return {
-      type: this.kind,
+      type: this.name,
       files,
       dirs: [...this.store.dirs],
       modified,

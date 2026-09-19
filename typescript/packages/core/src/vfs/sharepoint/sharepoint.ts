@@ -24,7 +24,7 @@ export interface SharePointVFSState {
 }
 
 export class SharePointVFS extends BaseVFS {
-  readonly kind: string = VFSName.SHAREPOINT
+  readonly name: string = VFSName.SHAREPOINT
   override readonly cachesReads: boolean = true
   // Graph drive items carry an exact content-length size and the site
   // and drive levels are plain directories; unlike onedrive there is
@@ -41,11 +41,6 @@ export class SharePointVFS extends BaseVFS {
     this.config = config
     this.accessor = new SharePointAccessor(config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return SHAREPOINT_COMMANDS
   }
@@ -76,7 +71,7 @@ export class SharePointVFS extends BaseVFS {
 
   override getState(): SharePointVFSState {
     const config: SharePointConfigRedacted = redactSharePointConfig(this.config)
-    return { type: this.kind, config }
+    return { type: this.name, config }
   }
 
   override loadState(_state: SharePointVFSState): Promise<void> {

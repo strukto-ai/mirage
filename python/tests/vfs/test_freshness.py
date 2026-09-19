@@ -17,8 +17,8 @@ from mirage.vfs.ram import RAMVFS
 
 
 def test_base_vfs_does_not_claim_snapshot_support():
-    assert BaseVFS.SUPPORTS_SNAPSHOT is False
+    assert BaseVFS.supports_snapshot is False
 
 
 def test_memory_vfs_does_not_claim_snapshot_support():
-    assert RAMVFS.SUPPORTS_SNAPSHOT is False
+    assert RAMVFS.supports_snapshot is False

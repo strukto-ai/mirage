@@ -20,7 +20,6 @@ import { errorSummary } from '@struktoai/mirage-core/secrets/summary'
 import type { RedisVFSOptions } from './redis/redis.ts'
 import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { recordVfsRef } from '@struktoai/mirage-core/vfs/base'
 
 /**
  * Construct a VFS by registry name in the browser runtime.
@@ -306,6 +305,6 @@ export async function buildVfs(
     if (err instanceof z.ZodError) throw new Error(`${name}: ${errorSummary(err)}`)
     throw err
   }
-  recordVfsRef(built, name)
+  built.vfsRef = name
   return built
 }

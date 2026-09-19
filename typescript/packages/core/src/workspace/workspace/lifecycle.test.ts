@@ -334,46 +334,6 @@ it('workspace close waits for VFS retirements before closing stores', async () =
   }
 })
 
-it('unmount drains an admitted VFS open before closing it', async () => {
-  const vfs = new RAMVFS()
-  const ws = new Workspace({ '/data': vfs }, { shellParser: parser })
-  let entered = (): void => undefined
-  let resume = (): void => undefined
-  const started = new Promise<void>((resolve) => {
-    entered = resolve
-  })
-  const release = new Promise<void>((resolve) => {
-    resume = resolve
-  })
-  let closed = false
-  vi.spyOn(vfs, 'open').mockImplementation(async () => {
-    entered()
-    await release
-  })
-  vi.spyOn(vfs, 'close').mockImplementation(() => {
-    closed = true
-    return Promise.resolve()
-  })
-  const reading = ws.dispatch('read', '/data/file').catch((error: unknown) => error)
-  let removing: Promise<void> | undefined
-  try {
-    await started
-    removing = ws.unmount('/data')
-    await vi.waitFor(() => {
-      expect(ws.registry.tryMountForPrefix('/data')).toBeNull()
-    })
-    expect(closed).toBe(false)
-    resume()
-    await removing
-    expect(closed).toBe(true)
-    expect(await reading).toMatchObject({ code: 'EBUSY' })
-  } finally {
-    resume()
-    await Promise.allSettled([reading, ...(removing === undefined ? [] : [removing])])
-    await ws.close()
-  }
-})
-
 it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (kind) => {
   const vfs = new RAMVFS()
   const ws = new Workspace({ '/data': vfs })

@@ -39,7 +39,7 @@ export interface BoxVFSState {
 }
 
 export class BoxVFS extends BaseVFS {
-  readonly kind: string = VFSName.BOX
+  readonly name: string = VFSName.BOX
   override readonly cachesReads: boolean = true
   // Box item listings carry an exact byte `size` for every file (0
   // included); sizeless weblinks are filtered out of listings.
@@ -63,11 +63,6 @@ export class BoxVFS extends BaseVFS {
       ...(config.contentSearch !== undefined ? { contentSearch: config.contentSearch } : {}),
     })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return BOX_COMMANDS
   }
@@ -112,7 +107,7 @@ export class BoxVFS extends BaseVFS {
 
   override getState(): Promise<BoxVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactBoxConfig(this.config),
     })
   }

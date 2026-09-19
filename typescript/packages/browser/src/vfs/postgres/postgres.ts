@@ -53,7 +53,7 @@ export interface PostgresVFSState {
 }
 
 export class PostgresVFS extends BaseVFS {
-  readonly kind: string = VFSName.POSTGRES
+  readonly name: string = VFSName.POSTGRES
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
   override readonly prompt: string
@@ -73,7 +73,7 @@ export class PostgresVFS extends BaseVFS {
 
   override getState(): PostgresVFSState {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactPostgresConfig(this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
@@ -89,11 +89,6 @@ export class PostgresVFS extends BaseVFS {
   override loadState(_state: PostgresVFSState): Promise<void> {
     return Promise.resolve()
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override async close(): Promise<void> {
     await this.driver.close()
     await super.close()

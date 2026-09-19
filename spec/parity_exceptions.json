@@ -60,7 +60,7 @@
   },
   "vfs_capabilities": {
     "github": {
-      "supports_snapshot": "TypeScript records the blob SHA as a snapshot fingerprint; python stamps the same SHA in core/github/stat.py but does not declare SUPPORTS_SNAPSHOT, so no drift check fires. Left to the snapshot redesign (#721) rather than flipped here, because turning it on changes what a python snapshot records."
+      "supports_snapshot": "TypeScript records the blob SHA as a snapshot fingerprint; python stamps the same SHA in core/github/stat.py but does not declare supports_snapshot, so no drift check fires. Left to the snapshot redesign (#721) rather than flipped here, because turning it on changes what a python snapshot records."
     },
     "lancedb": {
       "caches_reads": "TypeScript computes it per mount from the URI scheme (remote tables cache, local ones do not); python has no such branch and never caches. A value, not a table, so there is nothing to single-source."

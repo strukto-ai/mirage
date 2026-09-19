@@ -75,14 +75,14 @@ class OneDriveVFS(BaseVFS):
     # Graph driveItems carry an exact byte `size` for every file in both
     # listings and item gets; folders (including the root) report None
     # with the aggregate storage number in extra.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops: dict[str, Any] = _ONEDRIVE_OPS
     # An API-backed tree that changes rarely; a day-long index spares the
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = True
 
     def __init__(self, config: OneDriveConfig) -> None:
         super().__init__()

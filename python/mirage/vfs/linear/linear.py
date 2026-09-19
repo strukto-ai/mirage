@@ -41,10 +41,10 @@ class LinearVFS(BaseVFS):
     # Every file is sized at its parent's readdir from the listing payload
     # (comments.jsonl via one bounded comments call), so stat always reports
     # the rendered byte length and fskit mounts serve exact reads.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops: dict[str, Any] = _LINEAR_OPS
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: LinearConfig) -> None:
         super().__init__()

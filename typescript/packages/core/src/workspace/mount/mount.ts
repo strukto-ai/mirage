@@ -369,7 +369,7 @@ export class MountEntry {
    * mount, throw.
    */
   registerFns(items: readonly (RegisteredCommand | RegisteredOp)[]): void {
-    const kind = this.vfs.kind
+    const kind = this.vfs.name
     interface Group<T> {
       toRegister: T[]
       attempted: Set<string>
@@ -660,7 +660,7 @@ export class MountEntry {
       const filetype = getExtension(path)
       const levels = this.resolveCascade(opName, filetype, this.ops, this.generalOps)
       if (levels.length === 0) {
-        throw enotsup(this.vfs.kind, opName, path)
+        throw enotsup(this.vfs.name, opName, path)
       }
       // Per path, not per mount: a show entry can hold one subtree below
       // `w` on a writable mount, or one writable region on a read mount.

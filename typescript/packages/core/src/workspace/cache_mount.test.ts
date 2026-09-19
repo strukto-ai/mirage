@@ -15,7 +15,6 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { cachesReads } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser } from '../shell/parse/index.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../types.ts'
@@ -38,7 +37,7 @@ describe('cache is a hidden store, not a mount', () => {
       const root = ws.registry.rootMount
       expect(root).not.toBeNull()
       expect(root?.vfs).not.toBe(ws.cache)
-      expect(cachesReads(root?.vfs ?? new RAMVFS())).toBe(false)
+      expect((root?.vfs ?? new RAMVFS()).cachesReads).toBe(false)
       expect(root?.prefix).toBe('/')
       expect(ws.registry.allMounts()).toContain(root)
     } finally {

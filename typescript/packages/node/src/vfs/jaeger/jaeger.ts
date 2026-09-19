@@ -37,7 +37,7 @@ export interface JaegerVFSState {
 }
 
 export class JaegerVFS extends BaseVFS {
-  readonly kind: string = VFSName.JAEGER
+  readonly name: string = VFSName.JAEGER
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: a trace is rendered at readdir
   // from the search payload the listing already fetched, and operations.json
@@ -70,11 +70,6 @@ export class JaegerVFS extends BaseVFS {
     }
     this.accessor = new JaegerAccessor(new HttpJaegerTransport(transportOpts), accessorConfig)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return JAEGER_COMMANDS
   }
@@ -115,7 +110,7 @@ export class JaegerVFS extends BaseVFS {
 
   override getState(): Promise<JaegerVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactJaegerConfig(this.config),
     })
   }

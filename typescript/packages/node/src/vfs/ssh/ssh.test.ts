@@ -45,7 +45,7 @@ beforeEach(() => {
 describe('SSHVFS — identity', () => {
   it('exposes kind = ssh and cachesReads = true', () => {
     const res = makeVfs(state)
-    expect(res.kind).toBe(VFSName.SSH)
+    expect(res.name).toBe(VFSName.SSH)
     expect(res.cachesReads).toBe(true)
   })
 

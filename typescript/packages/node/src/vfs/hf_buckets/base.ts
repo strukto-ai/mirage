@@ -23,15 +23,14 @@ import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix
 import type { HfAccessor } from '../../accessor/hf.ts'
 import { HF_COMMANDS } from '../../commands/builtin/hf/index.ts'
 import { SCOPE_ERROR } from '../../core/hf/constants.ts'
-import { create as createCore } from '../../core/hf/create.ts'
-import { size as duSizeCore, entries as duEntriesCore } from '../../core/hf/du/index.ts'
+import { size as duSizeCore } from '../../core/hf/du/index.ts'
 import { exists as existsCore } from '../../core/hf/exists.ts'
 import { find as findCore } from '../../core/hf/find.ts'
 import { mkdir as mkdirCore } from '../../core/hf/mkdir.ts'
 import { read as readCore } from '../../core/hf/read.ts'
 import { readdir as readdirCore } from '../../core/hf/readdir.ts'
 import { stat as statCore } from '../../core/hf/stat.ts'
-import { rangeRead as rangeReadCore, stream as streamCore } from '../../core/hf/stream.ts'
+import { stream as streamCore } from '../../core/hf/stream.ts'
 import { unlink as unlinkCore } from '../../core/hf/unlink.ts'
 import { write as writeCore } from '../../core/hf/write.ts'
 import { HF_OPS } from '../../ops/hf/index.ts'
@@ -55,26 +54,6 @@ export abstract class HfVFS extends BaseVFS {
   // size with one stat.
   override readonly sizesAlwaysKnown: boolean = true
   override readonly supportsSnapshot: boolean = true
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCore,
-    readdir: readdirCore,
-    stat: statCore,
-    read_stream: streamCore,
-    range_read: rangeReadCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    exists: existsCore,
-    find_flat: findCore,
-    write: writeCore,
-    create: createCore,
-    unlink: unlinkCore,
-    mkdir: mkdirCore,
-  }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return HF_COMMANDS
   }

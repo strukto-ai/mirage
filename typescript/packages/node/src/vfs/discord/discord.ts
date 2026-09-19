@@ -41,7 +41,7 @@ export interface DiscordVFSState {
 }
 
 export class DiscordVFS extends BaseVFS {
-  readonly kind: string = VFSName.DISCORD
+  readonly name: string = VFSName.DISCORD
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and members/*.json
   // are rendered at readdir from payloads the listing already fetched, and
@@ -58,11 +58,6 @@ export class DiscordVFS extends BaseVFS {
     this.config = config
     this.accessor = new DiscordAccessor(new NodeDiscordTransport(config.token, config.baseUrl))
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return DISCORD_COMMANDS
   }
@@ -103,7 +98,7 @@ export class DiscordVFS extends BaseVFS {
 
   override getState(): Promise<DiscordVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactDiscordConfig(this.config),
     })
   }

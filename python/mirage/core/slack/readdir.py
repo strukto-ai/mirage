@@ -223,7 +223,7 @@ async def _day_listing(accessor: SlackAccessor, channel_id: str,
             # Tombstoned (deleted) and access-restricted file payloads carry
             # an id but no download URL and no byte size; read() ENOENTs on
             # them, so listing them would both surface phantom files and
-            # break the SIZES_ALWAYS_KNOWN contract.
+            # break the sizes_always_known contract.
             if (not fmeta.get("id") or not fmeta.get("url_private_download")
                     or fmeta.get("size") is None):
                 continue

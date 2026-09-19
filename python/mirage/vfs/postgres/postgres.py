@@ -33,7 +33,7 @@ class PostgresVFS(BaseVFS):
     # A live store: every readdir must hit the backend, so the index is
     # not reused across commands. Mirrors the TypeScript VFS.
     index_ttl: float = 0
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: PostgresConfig) -> None:
         super().__init__()

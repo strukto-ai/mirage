@@ -106,7 +106,7 @@ class S3AliasVFS(S3VFS):
     A provider is an :class:`S3VFS` reached through a provider-shaped
     config, so all it owns is that config and the redacted state built
     from it; the conversion itself lives on :class:`S3AliasConfig`. A
-    subclass declares only its ``PROMPT`` and narrows the config type.
+    subclass declares only its ``prompt`` and narrows the config type.
 
     Mirrors the TypeScript ``S3AliasVFS`` in
     ``packages/{node,browser}/src/vfs/s3_alias.ts``, which also has to

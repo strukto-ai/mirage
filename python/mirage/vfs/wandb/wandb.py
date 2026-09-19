@@ -15,7 +15,7 @@ from mirage.vfs.wandb.prompt import PROMPT
 
 class WandbVFS(BaseVFS):
     name: str = VFSName.WANDB
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
     _ops: dict[str, Any] = {
         "read_bytes": read,
         "readdir": readdir,

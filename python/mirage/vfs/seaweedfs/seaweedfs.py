@@ -19,7 +19,7 @@ from mirage.vfs.seaweedfs.prompt import PROMPT
 
 class SeaweedFSVFS(S3AliasVFS):
 
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: SeaweedFSConfig) -> None:
         super().__init__(config)

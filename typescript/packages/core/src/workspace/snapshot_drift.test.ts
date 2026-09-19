@@ -71,7 +71,7 @@ class FakeRemoteAccessor extends Accessor {
 }
 
 class FakeRemoteVFS extends BaseVFS {
-  readonly kind = 'fake-remote'
+  readonly name = 'fake-remote'
   override readonly cachesReads = true
   override readonly supportsSnapshot = true
   override readonly accessor: FakeRemoteAccessor
@@ -79,10 +79,6 @@ class FakeRemoteVFS extends BaseVFS {
   constructor(accessor: FakeRemoteAccessor) {
     super()
     this.accessor = accessor
-  }
-
-  open(): Promise<void> {
-    return Promise.resolve()
   }
   override close(): Promise<void> {
     return Promise.resolve()
@@ -108,7 +104,7 @@ class FakeRemoteVFS extends BaseVFS {
   }
 
   override getState(): { type: string; config: { token: string } } {
-    return { type: this.kind, config: { token: '<REDACTED>' } }
+    return { type: this.name, config: { token: '<REDACTED>' } }
   }
 }
 
@@ -547,10 +543,7 @@ it.each(
     })
     let closed = false
     class AsyncStateVFS extends BaseVFS {
-      readonly kind = 'ram'
-      open(): Promise<void> {
-        return Promise.resolve()
-      }
+      readonly name = 'ram'
       override async getState(): Promise<{ type: string }> {
         enter()
         await release

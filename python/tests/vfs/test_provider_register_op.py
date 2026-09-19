@@ -25,7 +25,7 @@ def test_vfs_register_op():
 
     vfs = BaseVFS()
     vfs.register_op(read_custom)
-    ops = vfs.ops_list()
+    ops = vfs.ops()
     assert len(ops) == 1
     assert isinstance(ops[0], RegisteredOp)
     assert ops[0].name == "read"
@@ -34,12 +34,12 @@ def test_vfs_register_op():
 
 def test_vfs_register_op_empty():
     vfs = BaseVFS()
-    assert vfs.ops_list() == []
+    assert vfs.ops() == []
 
 
 def test_ram_vfs_registers_ops():
     vfs = RAMVFS()
-    ops = vfs.ops_list()
+    ops = vfs.ops()
     assert len(ops) > 0
     names = {ro.name for ro in ops}
     assert "read" in names

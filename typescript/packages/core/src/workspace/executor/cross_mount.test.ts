@@ -22,10 +22,7 @@ import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
 
 class Stub extends BaseVFS {
-  readonly kind = 'stub'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+  readonly name = 'stub'
   override close(): Promise<void> {
     return Promise.resolve()
   }

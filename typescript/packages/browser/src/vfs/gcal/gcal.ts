@@ -41,7 +41,7 @@ export interface GCalVFSState {
 }
 
 export class GCalVFS extends BaseVFS {
-  readonly kind: string = VFSName.GCAL
+  readonly name: string = VFSName.GCAL
   override readonly cachesReads: boolean = true
   // Shorter than the other Google mounts: a calendar is edited by other
   // people and a day-long index would keep serving a schedule that has
@@ -58,11 +58,6 @@ export class GCalVFS extends BaseVFS {
     const tm = new TokenManager(config)
     this.accessor = new GCalAccessor({ tokenManager: tm, config })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return GCAL_COMMANDS
   }
@@ -103,7 +98,7 @@ export class GCalVFS extends BaseVFS {
 
   override getState(): Promise<GCalVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGCalConfig(this.config),
     })
   }

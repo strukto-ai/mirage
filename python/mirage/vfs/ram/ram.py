@@ -73,10 +73,10 @@ class RAMVFS(BaseVFS):
     accessor: RAMAccessor
     name: str = VFSName.RAM
     # byte store: stat() sizes every file from metadata
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     index_ttl: float = 0
     _ops: dict[str, Any] = _RAM_OPS
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self) -> None:
         super().__init__()

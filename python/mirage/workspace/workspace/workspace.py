@@ -797,7 +797,7 @@ class Workspace:
               exposes one — e.g. S3 ``VersionId``).
 
         NOT captured:
-            * Live state of mounts with ``SUPPORTS_SNAPSHOT=False``
+            * Live state of mounts with ``supports_snapshot=False``
               (Gmail, Slack, Linear, etc.). Load logs a warning naming
               them.
             * Files the agent never touched.
@@ -807,7 +807,7 @@ class Workspace:
               source.
 
         Async because fingerprint capture stats each touched path on a
-        ``SUPPORTS_SNAPSHOT`` mount.
+        ``supports_snapshot`` mount.
 
         Args:
             target: filesystem path OR a writable file-like object.

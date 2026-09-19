@@ -17,7 +17,6 @@ import { DATABRICKS_VOLUME_COMMANDS } from '@struktoai/mirage-core/commands/buil
 import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { copy as databricksVolumeCopy } from '@struktoai/mirage-core/core/databricks_volume/copy'
-import { create as databricksVolumeCreate } from '@struktoai/mirage-core/core/databricks_volume/create'
 import { exists as databricksVolumeExists } from '@struktoai/mirage-core/core/databricks_volume/exists'
 import { mkdir as databricksVolumeMkdir } from '@struktoai/mirage-core/core/databricks_volume/mkdir'
 import { readBytes as databricksVolumeRead } from '@struktoai/mirage-core/core/databricks_volume/read'
@@ -26,10 +25,7 @@ import { rename as databricksVolumeRename } from '@struktoai/mirage-core/core/da
 import { rmRecursive as databricksVolumeRmRecursive } from '@struktoai/mirage-core/core/databricks_volume/rm'
 import { rmdir as databricksVolumeRmdir } from '@struktoai/mirage-core/core/databricks_volume/rmdir'
 import { stat as databricksVolumeStat } from '@struktoai/mirage-core/core/databricks_volume/stat'
-import {
-  rangeRead as databricksVolumeRangeRead,
-  readStream as databricksVolumeReadStream,
-} from '@struktoai/mirage-core/core/databricks_volume/stream'
+import { readStream as databricksVolumeReadStream } from '@struktoai/mirage-core/core/databricks_volume/stream'
 import { unlink as databricksVolumeUnlink } from '@struktoai/mirage-core/core/databricks_volume/unlink'
 import { writeBytes as databricksVolumeWrite } from '@struktoai/mirage-core/core/databricks_volume/write'
 import { walkFind } from '@struktoai/mirage-core/core/generic/find'
@@ -74,7 +70,7 @@ async function resolveAuth(config: DatabricksVolumeConfig): Promise<[string, str
 }
 
 export class DatabricksVolumeVFS extends BaseVFS {
-  readonly kind: string = VFSName.DATABRICKS_VOLUME
+  readonly name: string = VFSName.DATABRICKS_VOLUME
   override readonly cachesReads: boolean = true
   // The Files API lists DirectoryEntry.file_size and stat HEADs report
   // Content-Length, both the exact byte count the download returns;
@@ -84,23 +80,6 @@ export class DatabricksVolumeVFS extends BaseVFS {
   override readonly prompt: string = DATABRICKS_VOLUME_PROMPT
   readonly config: DatabricksVolumeConfig
   override readonly accessor: DatabricksVolumeAccessor
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: databricksVolumeRead,
-    write: databricksVolumeWrite,
-    readdir: databricksVolumeReaddir,
-    stat: databricksVolumeStat,
-    read_stream: databricksVolumeReadStream,
-    range_read: databricksVolumeRangeRead,
-    exists: databricksVolumeExists,
-    create: databricksVolumeCreate,
-    unlink: databricksVolumeUnlink,
-    mkdir: databricksVolumeMkdir,
-    rmdir: databricksVolumeRmdir,
-    copy: databricksVolumeCopy,
-    rename: databricksVolumeRename,
-    rm_recursive: databricksVolumeRmRecursive,
-  }
-
   private constructor(config: DatabricksVolumeConfig, accessor: DatabricksVolumeAccessor) {
     super()
     this.config = config
@@ -112,11 +91,6 @@ export class DatabricksVolumeVFS extends BaseVFS {
     const accessor = new DatabricksVolumeAccessor(config, host, token)
     return new DatabricksVolumeVFS(config, accessor)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return DATABRICKS_VOLUME_COMMANDS
   }
@@ -223,7 +197,7 @@ export class DatabricksVolumeVFS extends BaseVFS {
 
   override getState(): Promise<DatabricksVolumeVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactDatabricksVolumeConfig(this.config),
     })
   }

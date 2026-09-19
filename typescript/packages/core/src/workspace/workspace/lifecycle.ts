@@ -27,8 +27,6 @@ export interface CloseDeps {
   closers: (() => Promise<void>)[]
   jobTable: JobTable
   registry: MountRegistry
-  opened: Set<BaseVFS>
-  openOrder: BaseVFS[]
   sharedMounts: Set<BaseVFS>
 }
 
@@ -97,7 +95,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       // Mirrors the try/finally pairing in Python's `close_async`.
       await deps.cache.close()
     }
-    const toClose = new Set<BaseVFS>(deps.openOrder)
+    const toClose = new Set<BaseVFS>()
     for (const mount of deps.registry.allMounts()) {
       toClose.add(mount.vfs)
     }
@@ -107,8 +105,6 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       if (deps.sharedMounts.has(r)) continue
       await r.close()
     }
-    deps.opened.clear()
-    deps.openOrder.length = 0
   } catch (err) {
     failures.push(err)
   }

@@ -602,7 +602,6 @@ describe('traversal cancellation', () => {
             undefined,
             undefined,
             undefined,
-            undefined,
             null,
             source === 'caller' ? controller.signal : undefined,
           ),

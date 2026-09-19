@@ -39,10 +39,10 @@ class Mem0VFS(BaseVFS):
     caches_reads: bool = True
     # readdir and stat store the rendered JSON's byte length and read
     # serves those same bytes, so sizes are exact by construction.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops = _MEM0_OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = False
+    prompt: str = PROMPT
+    supports_snapshot: bool = False
 
     def __init__(self, config: Mem0Config) -> None:
         super().__init__()

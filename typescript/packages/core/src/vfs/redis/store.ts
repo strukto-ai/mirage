@@ -36,8 +36,6 @@ export interface RedisRestore {
 export interface RedisStoreLike {
   readonly url: string
   readonly keyPrefix: string
-  /** Connect if the transport needs to, and make sure `/` is a directory. */
-  open(): Promise<void>
   getFile(path: string): Promise<Uint8Array | null>
   /** A byte window, or null when the file is absent; a null `size` reads to the end. */
   getFileRange(path: string, offset: number, size: number | null): Promise<Uint8Array | null>

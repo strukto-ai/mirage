@@ -111,7 +111,7 @@ export interface GenericVFSOptions<A extends Accessor = Accessor> {
  * protocols.
  */
 export class GenericVFS<A extends Accessor = Accessor> extends BaseVFS {
-  readonly kind: string
+  readonly name: string
   override readonly accessor: A
   readonly io: CommandIO<A>
   override readonly prompt: string
@@ -144,7 +144,7 @@ export class GenericVFS<A extends Accessor = Accessor> extends BaseVFS {
   constructor(options: GenericVFSOptions<A>) {
     super()
     if (options.name === '') throw new Error('GenericVFS requires a non-empty name')
-    this.kind = options.name
+    this.name = options.name
     this.accessor = options.accessor
     this.io = options.io
     this.prompt = options.prompt ?? ''
@@ -194,11 +194,6 @@ export class GenericVFS<A extends Accessor = Accessor> extends BaseVFS {
     if (du !== undefined) this.du = (p) => du.size(this.accessor, p, this.index)
     if (find !== undefined) this.find = (p, o) => find(this.accessor, p, o ?? {})
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   // The base cannot know a subclass's constructor, so by default a
   // GenericVFS cannot be rebuilt from its state and says so: both
   // loaders then require the mount to be handed back live (`load`'s
@@ -211,7 +206,7 @@ export class GenericVFS<A extends Accessor = Accessor> extends BaseVFS {
   // instead: that content is the backend's, and a snapshot only pins
   // what it observed.
   override getState(): VFSStateBase {
-    return { type: this.kind, needs_override: true }
+    return { type: this.name, needs_override: true }
   }
 
   override commands(): readonly RegisteredCommand[] {

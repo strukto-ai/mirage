@@ -33,11 +33,11 @@ class LanceDBVFS(BaseVFS):
     name: str = VFSName.LANCEDB
     # readdir seeds exact card sizes from the widened select and stat falls
     # back to rendering the row itself, so sizes are exact either way.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     # A live store: every readdir must hit the backend, so the index is
     # not reused across commands. Mirrors the TypeScript VFS.
     index_ttl: float = 0
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: LanceDBConfig) -> None:
         super().__init__()

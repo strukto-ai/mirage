@@ -66,9 +66,9 @@ class DatabricksVolumeVFS(BaseVFS):
     # The Files API lists DirectoryEntry.file_size and stat HEADs report
     # Content-Length, both the exact byte count the download returns;
     # readdir backfills any lister-omitted size with one HEAD.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops: dict[str, Any] = _DATABRICKS_VOLUME_OPS
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(
         self,

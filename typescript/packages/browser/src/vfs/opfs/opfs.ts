@@ -101,7 +101,7 @@ async function splitAndCreate(
 }
 
 export class OPFSVFS extends BaseVFS {
-  readonly kind = VFSName.OPFS
+  readonly name = VFSName.OPFS
   // OPFS is a real filesystem: getFile().size is the exact byte count a
   // read returns.
   override readonly sizesAlwaysKnown: boolean = true
@@ -116,11 +116,6 @@ export class OPFSVFS extends BaseVFS {
     this.rootName = options.root ?? ''
     this.accessor = new OPFSAccessor(this)
   }
-
-  open(): Promise<void> {
-    return this.ensureOpen().then(() => undefined)
-  }
-
   override async close(): Promise<void> {
     this.rootHandle = null
     this.openPromise = null
@@ -129,10 +124,10 @@ export class OPFSVFS extends BaseVFS {
 
   /**
    * Lazily resolve to a usable root handle. Memoizes `navigator.storage`
-   * traversal so the VFS self-initializes on first method call without
-   * relying on an external orchestrator.
+   * traversal so the VFS self-initializes on the first op, the way the
+   * node redis store connects on its first command.
    */
-  private ensureOpen(): Promise<FileSystemDirectoryHandle> {
+  root(): Promise<FileSystemDirectoryHandle> {
     if (this.rootHandle !== null) return Promise.resolve(this.rootHandle)
     this.openPromise ??= (async () => {
       const origin = await navigator.storage.getDirectory()
@@ -147,13 +142,6 @@ export class OPFSVFS extends BaseVFS {
     return this.openPromise
   }
 
-  requireHandle(): FileSystemDirectoryHandle {
-    if (this.rootHandle === null) {
-      throw new Error('OPFSVFS is not open — call open() first')
-    }
-    return this.rootHandle
-  }
-
   override ops(): readonly RegisteredOp[] {
     return OPFS_OPS
   }
@@ -163,106 +151,106 @@ export class OPFSVFS extends BaseVFS {
   }
 
   override async *streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
-    await this.ensureOpen()
+    await this.root()
     yield* streamCore(this.accessor, p)
   }
 
   override async readFile(p: PathSpec): Promise<Uint8Array> {
-    await this.ensureOpen()
+    await this.root()
     return readCoreFn(this.accessor, p)
   }
 
   override async writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return writeCore(this.accessor, p, data)
   }
 
   override async appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return appendCore(this.accessor, p, data)
   }
 
   override async readdir(p: PathSpec): Promise<string[]> {
-    await this.ensureOpen()
+    await this.root()
     return readdirCore(this.accessor, p)
   }
 
   override async stat(p: PathSpec): Promise<FileStat> {
-    await this.ensureOpen()
+    await this.root()
     return statCore(this.accessor, p)
   }
 
   override async exists(p: PathSpec): Promise<boolean> {
-    await this.ensureOpen()
+    await this.root()
     return existsCore(this.accessor, p)
   }
 
   override async mkdir(p: PathSpec, options?: { recursive?: boolean }): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return mkdirCore(this.accessor, p, options?.recursive === true)
   }
 
   override async rmdir(p: PathSpec): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return rmdirCore(this.accessor, p)
   }
 
   override async unlink(p: PathSpec): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return unlinkCore(this.accessor, p)
   }
 
   override async rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return renameCore(this.accessor, src, dst)
   }
 
   override async truncate(p: PathSpec, length: number): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return truncateCore(this.accessor, p, length)
   }
 
   override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return copyCore(this.accessor, src, dst)
   }
 
   override async rmR(p: PathSpec): Promise<void> {
-    await this.ensureOpen()
+    await this.root()
     return rmRCore(this.accessor, p)
   }
 
   override async du(p: PathSpec): Promise<number> {
-    await this.ensureOpen()
+    await this.root()
     return duSizeCore(this.accessor, p)
   }
 
   override async find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    await this.ensureOpen()
+    await this.root()
     return findCore(this.accessor, p, options as OPFSFindOptions)
   }
 
   override async glob(paths: readonly PathSpec[]): Promise<PathSpec[]> {
-    await this.ensureOpen()
+    await this.root()
     return globCore(this.accessor, paths)
   }
 
   override async getState(): Promise<OPFSVFSState> {
-    const handle = await this.ensureOpen()
+    const handle = await this.root()
     const files: Record<string, Uint8Array> = {}
     await walkFiles(handle, '', files)
     const dirs: string[] = []
     await walkDirs(handle, '', dirs)
     dirs.sort(compareCodePoints)
     return {
-      type: this.kind,
+      type: this.name,
       files,
       dirs,
     }
   }
 
   override async loadState(state: OPFSVFSState): Promise<void> {
-    const handle = await this.ensureOpen()
+    const handle = await this.root()
     for (const dir of state.dirs) {
       const rel = lstripSlash(dir)
       if (rel === '') continue

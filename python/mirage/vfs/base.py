@@ -44,11 +44,10 @@ class BaseVFS:
     # for an instance constructed in code. A snapshot records it beside
     # the class path so the loader can rebuild the mount through the
     # same door yaml used, which is the only door that knows a class
-    # loaded from a script file. TypeScript keeps the same fact in a
-    # table beside its ``VFS`` interface (``vfsRefOf``).
+    # loaded from a script file. Mirrors TypeScript ``BaseVFS.vfsRef``.
     vfs_ref: str | None = None
-    PROMPT: str = ""
-    WRITE_PROMPT: str = ""
+    prompt: str = ""
+    write_prompt: str = ""
 
     index_ttl: float = 600
 
@@ -59,7 +58,7 @@ class BaseVFS:
     # When False (the default), reads are treated as live-only at replay
     # time: no fingerprint is recorded at snapshot, no drift check fires
     # at load. See docs/home/snapshot.mdx for the contract.
-    SUPPORTS_SNAPSHOT: bool = False
+    supports_snapshot: bool = False
 
     # Whether stat() can size every regular file without fetching its
     # content, i.e. FileStat.size is None only for directories. True for
@@ -75,7 +74,7 @@ class BaseVFS:
     # The mount-time check (fuse/backend.py check_sizes) names such
     # mounts in a warning rather than refusing; see
     # docs/python/setup/fuse.mdx.
-    SIZES_ALWAYS_KNOWN: bool = False
+    sizes_always_known: bool = False
 
     def __init__(
         self,
@@ -159,7 +158,7 @@ class BaseVFS:
         for ro in fn._registered_ops:
             self._ops_list.append(ro)
 
-    def ops_list(self) -> list[RegisteredOp]:
+    def ops(self) -> list[RegisteredOp]:
         return self._ops_list
 
     def register(self, fn: Any) -> None:
@@ -183,7 +182,7 @@ class BaseVFS:
         deliberate. The protocol only ever answered "does this VFS
         have one", which a None default answers with no ``isinstance``,
         no import, and no second place to keep in step. TypeScript has
-        always done it this way (``deltaHook?()`` on ``VFS``).
+        always done it this way (``deltaHook?()`` on ``BaseVFS``).
         """
         return None
 

@@ -134,7 +134,7 @@ class DevVFS(BaseVFS):
     accessor: RAMAccessor
     name: str = VFSName.RAM
     # Device metadata is synthetic and needs no content fetch.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
 
     def __init__(self) -> None:
         super().__init__()

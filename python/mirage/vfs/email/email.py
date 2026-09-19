@@ -33,13 +33,13 @@ class EmailVFS(BaseVFS):
     # Every listed file carries an exact size: .email.json is rendered at
     # readdir from the full BODY.PEEK[] the listing already fetches, and an
     # attachment's size is its decoded payload length.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     # An API-backed tree that changes rarely; a day-long index spares the
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: EmailConfig) -> None:
         super().__init__()

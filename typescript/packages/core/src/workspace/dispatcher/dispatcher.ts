@@ -43,7 +43,7 @@ import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../utils/errors.ts'
-import { cachesReads, type BaseVFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { ConsistencyPolicy, FileStat, FileType, MountMode, PathSpec, VFSName } from '../../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
@@ -334,7 +334,7 @@ export class Dispatcher {
     if (opName === 'rename' && dstArg instanceof PathSpec) {
       await preOpsGate(this.policies, opName, dstArg, true, mountPrefix, sessionId(), issuer)
     }
-    const caches = cachesReads(vfs)
+    const caches = vfs.cachesReads
     // The file cache is keyed on the path alone, and what a command put
     // there is the rendered read. A raw read asks for a different value
     // under the same key, so it must not be served from that cache;
@@ -1024,7 +1024,7 @@ export class Dispatcher {
   private managerFor(mount: MountEntry): CacheManager {
     return (
       mount.cacheManager ??
-      new CacheManager(this.cache, mount.vfs.index, mount.prefix, cachesReads(mount.vfs))
+      new CacheManager(this.cache, mount.vfs.index, mount.prefix, mount.vfs.cachesReads)
     )
   }
 
@@ -1068,7 +1068,7 @@ export class Dispatcher {
   isCacheablePath = (path: string): boolean => {
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return false
-    return !mount.retiring && cachesReads(mount.vfs)
+    return !mount.retiring && mount.vfs.cachesReads
   }
 
   /** Bind deferred command results to the mounts that produced them. */
@@ -1080,7 +1080,7 @@ export class Dispatcher {
       const prefix = ownerPrefix(mounts.keys(), path)
       const original = prefix === null ? null : mounts.get(prefix)
       const mount = this.namespace.tryMountFor(path)
-      return mount !== null && original === mount && !mount.retiring && cachesReads(mount.vfs)
+      return mount !== null && original === mount && !mount.retiring && mount.vfs.cachesReads
     }
   }
 

@@ -41,13 +41,8 @@ import { Workspace } from './workspace/workspace.ts'
 import { expandOperands } from './executor/builtins/shared.ts'
 
 class MockVFS extends BaseVFS {
-  readonly kind = 'mock'
-  opens = 0
+  readonly name = 'mock'
   closes = 0
-  open(): Promise<void> {
-    this.opens++
-    return Promise.resolve()
-  }
   override close(): Promise<void> {
     this.closes++
     return Promise.resolve()
@@ -286,32 +281,7 @@ describe('Workspace lifecycle', () => {
     },
   )
 
-  it('does not open mounts at construction time', () => {
-    const ram = new MockVFS()
-    new Workspace({ '/data': ram })
-    expect(ram.opens).toBe(0)
-  })
-
-  it('opens a VFS lazily on first resolve', async () => {
-    const ram = new MockVFS()
-    const ws = new Workspace({ '/data': ram })
-    expect(ram.opens).toBe(0)
-    await ws.resolve('/data/x')
-    expect(ram.opens).toBe(1)
-    await ws.close()
-  })
-
-  it('opens each VFS exactly once across multiple resolves', async () => {
-    const ram = new MockVFS()
-    const ws = new Workspace({ '/data': ram })
-    await ws.resolve('/data/a')
-    await ws.resolve('/data/b')
-    await ws.resolve('/data/c')
-    expect(ram.opens).toBe(1)
-    await ws.close()
-  })
-
-  it('close() calls close() on every opened VFS', async () => {
+  it('close() calls close() on every mounted VFS', async () => {
     const a = new MockVFS()
     const b = new MockVFS()
     const ws = new Workspace({ '/a': a, '/b': b })
@@ -449,14 +419,11 @@ describe('Workspace dynamic mount index', () => {
 
 describe('Workspace custom cache option', () => {
   class StubCache extends BaseVFS implements FileCache {
-    readonly kind = VFSName.RAM
+    readonly name = VFSName.RAM
     readonly store = new Map<string, Uint8Array>()
     getCalls = 0
     setCalls = 0
     maxDrainBytes: number | null = null
-    open(): Promise<void> {
-      return Promise.resolve()
-    }
     override close(): Promise<void> {
       return Promise.resolve()
     }
@@ -735,18 +702,17 @@ describe('Workspace.unmount', () => {
     await ws.close()
   })
 
-  it('closes the VFS exactly once when it was opened by the workspace', async () => {
+  it('closes the VFS exactly once when it was resolved through the workspace', async () => {
     const r = new MockVFS()
     const ws = new Workspace({ '/x': r })
     await ws.resolve('/x/y')
-    expect(r.opens).toBe(1)
     await ws.unmount('/x')
     expect(r.closes).toBe(1)
     await ws.close()
     expect(r.closes).toBe(1)
   })
 
-  it('closes an owned VFS even when it was never explicitly opened', async () => {
+  it('closes an owned VFS even when it was never resolved', async () => {
     const r = new MockVFS()
     const ws = new Workspace({ '/x': r })
     await ws.unmount('/x')

@@ -45,7 +45,7 @@ export interface QdrantVFSState {
 }
 
 export class QdrantVFS extends BaseVFS {
-  readonly kind: string = VFSName.QDRANT
+  readonly name: string = VFSName.QDRANT
   // readdir seeds exact rendered sizes from the scroll payloads and stat
   // falls back to rendering the row itself, so sizes are exact either way.
   override readonly sizesAlwaysKnown: boolean = true
@@ -63,7 +63,7 @@ export class QdrantVFS extends BaseVFS {
 
   override getState(): QdrantVFSState {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactQdrantConfig(this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
@@ -79,11 +79,6 @@ export class QdrantVFS extends BaseVFS {
   override loadState(_state: QdrantVFSState): Promise<void> {
     return Promise.resolve()
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override ops(): readonly RegisteredOp[] {
     return QDRANT_OPS
   }

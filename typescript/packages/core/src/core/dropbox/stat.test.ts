@@ -305,7 +305,7 @@ describe('dropbox stat', () => {
   })
 
   it('serves a size for every listed file that matches its read length', async () => {
-    // The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat serves
+    // The fskit invariant behind sizes_always_known: the size stat serves
     // from the listing must equal the byte length a read delivers, 0-byte
     // files included. Listings go through the transport seam; the content
     // channel (dropboxDownload) does not, so it keeps its own seam.

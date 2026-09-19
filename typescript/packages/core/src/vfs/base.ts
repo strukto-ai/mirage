@@ -68,40 +68,16 @@ export interface VFSStateBase {
   needs_override?: boolean
 }
 
-// The `vfs:` value the registry built an instance from: a name
-// (`s3`, `wiki`) or a code reference (`./wiki.mjs:WikiVFS`). Python
-// keeps this on `BaseVFS.vfs_ref`; here the fact lives in a table
-// beside the class, keyed by instance. A snapshot records it so the
-// loader can rebuild the mount through the same door config used, which
-// is the only door that knows a class loaded from a script file.
-const VFS_REFS = new WeakMap<object, string>()
-
-export function recordVfsRef(vfs: BaseVFS, ref: string): void {
-  VFS_REFS.set(vfs, ref)
-}
-
-export function vfsRefOf(vfs: BaseVFS): string | null {
-  return VFS_REFS.get(vfs) ?? null
-}
-
-export function cachesReads(vfs: BaseVFS): boolean {
-  return vfs.cachesReads
-}
-
-export function sizesAlwaysKnown(vfs: BaseVFS): boolean {
-  return vfs.sizesAlwaysKnown
-}
-
 /**
  * The driver contract, in one class as Python's `BaseVFS` is: what a
- * mount must supply (`kind`, `open`), what every mount gets by default
+ * mount must supply (`name`), what every mount gets by default
  * (index, identity, capacity, snapshot state, `close`), and the
  * native verbs a driver may add. A verb a driver leaves undeclared is
  * served through its op table instead, so every one of them is
  * optional here.
  */
 export abstract class BaseVFS {
-  abstract readonly kind: string
+  abstract readonly name: string
   declare readonly prompt?: string
   declare readonly writePrompt?: string
   readonly indexTtl: number = 600
@@ -136,11 +112,17 @@ export abstract class BaseVFS {
    * make size-unknown files read correctly anyway. FSKit has no direct_io
    * equivalent, so a mount there is driven entirely by the reported size
    * and a false VFS would serve silent empty files. Mirrors Python's
-   * `BaseVFS.SIZES_ALWAYS_KNOWN`.
+   * `BaseVFS.sizes_always_known`.
    */
   readonly sizesAlwaysKnown: boolean = false
   declare readonly accessor?: Accessor
-  declare readonly opsMap?: Record<string, unknown>
+  // The `vfs:` value the registry built this instance from: a name
+  // (`s3`, `wiki`) or a code reference (`./wiki.mjs:WikiVFS`), null for
+  // one constructed in code. A snapshot records it so the loader can
+  // rebuild the mount through the same door config used, which is the
+  // only door that knows a class loaded from a script file. Mirrors
+  // Python `BaseVFS.vfs_ref`.
+  vfsRef: string | null = null
   protected _index?: IndexCacheStore
   // JS has no object-identity primitive, so the default storageId hands
   // each instance a serial number the first time it is asked.
@@ -148,7 +130,6 @@ export abstract class BaseVFS {
   #storageSeq?: number
   #closed = false
 
-  abstract open(): Promise<void>
   ops?(): readonly RegisteredOp[]
   commands?(): readonly RegisteredCommand[]
 
@@ -229,7 +210,7 @@ export abstract class BaseVFS {
    * optional. Mirrors Python `BaseVFS.get_state`.
    */
   getState(): VFSStateBase | Promise<VFSStateBase> {
-    return { type: this.kind }
+    return { type: this.name }
   }
 
   /**

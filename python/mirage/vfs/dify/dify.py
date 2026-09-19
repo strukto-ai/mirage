@@ -28,8 +28,8 @@ class DifyVFS(BaseVFS):
     name: str = VFSName.DIFY
     caches_reads: bool = True
     _ops: dict[str, Any] = _DIFY_OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = False
+    prompt: str = PROMPT
+    supports_snapshot: bool = False
 
     def __init__(self, config: DifyConfig) -> None:
         super().__init__()

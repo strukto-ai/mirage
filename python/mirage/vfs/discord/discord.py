@@ -33,9 +33,9 @@ class DiscordVFS(BaseVFS):
     # Every listed file carries an exact size: chat.jsonl and members/*.json
     # are rendered at readdir from payloads the listing already fetched, and
     # attachments carry Discord's CDN byte count.
-    SIZES_ALWAYS_KNOWN: bool = True
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: DiscordConfig) -> None:
         super().__init__()

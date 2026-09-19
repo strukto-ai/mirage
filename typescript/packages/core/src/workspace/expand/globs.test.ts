@@ -21,10 +21,7 @@ import { MountRegistry } from '../mount/registry.ts'
 import { resolveGlobs, type ResourceWithGlob } from './globs.ts'
 
 class PlainVFS extends BaseVFS {
-  readonly kind = 'plain'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+  readonly name = 'plain'
   override close(): Promise<void> {
     return Promise.resolve()
   }
@@ -34,10 +31,7 @@ class PlainVFS extends BaseVFS {
 // back as the spec it was handed. `glob` is a public hook, so the shape
 // resolveGlobs sends is not a contract it can rely on.
 class EchoGlobVFS extends BaseVFS implements ResourceWithGlob {
-  readonly kind = 'echo'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+  readonly name = 'echo'
   override close(): Promise<void> {
     return Promise.resolve()
   }
@@ -49,11 +43,8 @@ class EchoGlobVFS extends BaseVFS implements ResourceWithGlob {
 // A VFS whose stat answers only once its mount was readied, the way a
 // mount nothing has touched yet behaves.
 class LazyDirVFS extends BaseVFS {
-  readonly kind = 'lazy'
+  readonly name = 'lazy'
   ready = false
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
   override close(): Promise<void> {
     return Promise.resolve()
   }
@@ -77,12 +68,9 @@ function linkTo(target: string): NamespaceLinks {
 }
 
 class GlobVFS extends BaseVFS implements ResourceWithGlob {
-  readonly kind = 'glob'
+  readonly name = 'glob'
   constructor(private readonly results: PathSpec[]) {
     super()
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
   }
   override close(): Promise<void> {
     return Promise.resolve()

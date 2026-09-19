@@ -19,7 +19,7 @@ import type { WorkspaceRuntime } from '../../runtime/table.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
-import { cachesReads, type BaseVFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { Decisions, MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.ts'
 import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
@@ -130,7 +130,7 @@ export class MountRegistry {
       this.cacheStore,
       m.vfs.index,
       m.prefix,
-      cachesReads(m.vfs),
+      m.vfs.cachesReads,
       (path) => !m.retiring && this.tryMountFor(path) === m,
     )
   }
@@ -307,7 +307,7 @@ export class MountRegistry {
   opsMounts(): OpsMountInfo[] {
     return this.mountList.map((m) => ({
       prefix: m.prefix,
-      resourceType: m.vfs.kind,
+      resourceType: m.vfs.name,
       mode: m.mode,
     }))
   }
@@ -315,7 +315,7 @@ export class MountRegistry {
   findVfsByName(vfsName: string | null): BaseVFS | null {
     if (vfsName === null) return null
     for (const m of this.mountList) {
-      if (m.vfs.kind === vfsName) return m.vfs
+      if (m.vfs.name === vfsName) return m.vfs
     }
     return null
   }
@@ -324,7 +324,7 @@ export class MountRegistry {
     if (path === null) return null
     try {
       const [vfs] = this.resolve(path)
-      return vfs.kind
+      return vfs.name
     } catch (err) {
       if (isNoMount(err)) return null
       throw err
@@ -464,7 +464,7 @@ export class MountRegistry {
     const mountPath = pathScopes.length > 0 ? (pathScopes[0]?.virtual ?? cwd) : cwd
     let mount = this.tryMountFor(mountPath)
     if (mount !== null && mount.resolveCommand(cmdName) == null && pathScopes.length > 0) {
-      throw new MountCommandUnsupported(cmdName, mount.vfs.kind, pathScopes[0]?.rawPath ?? cwd)
+      throw new MountCommandUnsupported(cmdName, mount.vfs.name, pathScopes[0]?.rawPath ?? cwd)
     }
     if (mount?.resolveCommand(cmdName) == null) {
       mount = this.mountForCommand(cmdName)
@@ -480,7 +480,7 @@ export class MountRegistry {
     if (
       this.reconciler !== null &&
       pathScopes.length > 0 &&
-      cachesReads(mount.vfs) &&
+      mount.vfs.cachesReads &&
       baseCmd?.write !== true &&
       this.consistency === ConsistencyPolicy.ALWAYS
     ) {

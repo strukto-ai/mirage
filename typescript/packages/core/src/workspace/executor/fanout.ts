@@ -15,7 +15,6 @@
 import { pathAllowed } from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
 import { FileType, PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
@@ -345,7 +344,6 @@ export async function fanOutTraversal(
   cwd: string,
   cmdStr: string,
   stdin: ByteSource | null,
-  ensureOpen: ((vfs: BaseVFS) => Promise<void>) | undefined,
   // The name plane's facts, offered whole to every sub-run. The mount
   // boundaries, because a rollup total cannot be repaired by line
   // filtering: du must exclude a shadowed subtree while it is
@@ -450,12 +448,9 @@ export async function fanOutTraversal(
         }),
       ]
     }
-    // Errors propagate, mirroring python: a mount that cannot open or
-    // whose command raises is a real failure, never a silently missing
-    // slice of the aggregate. Unserved commands return 127 (below).
-    if (ensureOpen !== undefined) {
-      await ensureOpen(mount.vfs)
-    }
+    // Errors propagate, mirroring python: a mount whose command raises
+    // is a real failure, never a silently missing slice of the
+    // aggregate. Unserved commands return 127 (below).
     // The child-mount names and the dispatcher-backed start-point stat.
     // A start point only the namespace serves (a nested mount's
     // ancestor) has no backend listing, so without them the primary run
@@ -603,7 +598,6 @@ export function runWithFanout(
   registry: MountRegistry,
   cwd: string,
   ns: NamespaceView | undefined,
-  ensureOpen: ((vfs: BaseVFS) => Promise<void>) | undefined,
   statPath: StatPath | null = null,
   signal?: AbortSignal,
 ): RunSingle {
@@ -631,7 +625,6 @@ export function runWithFanout(
       cwd,
       cmdName,
       stdin,
-      ensureOpen,
       ns,
       statPath,
       signal,

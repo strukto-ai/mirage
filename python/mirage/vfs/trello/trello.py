@@ -30,8 +30,8 @@ class TrelloVFS(BaseVFS):
     accessor: TrelloAccessor
     name: str = VFSName.TRELLO
     caches_reads: bool = True
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: TrelloConfig) -> None:
         super().__init__()

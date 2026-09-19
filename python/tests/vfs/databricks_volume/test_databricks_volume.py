@@ -281,7 +281,7 @@ def test_vfs_state_redacts_token():
 
 def test_vfs_registers_ops():
     vfs = make_vfs(FakeFiles())
-    op_names = {op.name for op in vfs.ops_list()}
+    op_names = {op.name for op in vfs.ops()}
     assert {"read", "readdir", "stat", "write", "create", "unlink"} <= op_names
     assert vfs.name == "databricks_volume"
     assert vfs.caches_reads is True

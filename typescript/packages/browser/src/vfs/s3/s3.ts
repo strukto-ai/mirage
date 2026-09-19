@@ -19,10 +19,7 @@ import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { SCOPE_ERROR as S3_SCOPE_ERROR } from '@struktoai/mirage-core/core/s3/constants'
 import { copy as copyCore } from '@struktoai/mirage-core/core/s3/copy'
 import { create as createCore } from '@struktoai/mirage-core/core/s3/create'
-import {
-  entries as duEntriesCore,
-  size as duSizeCore,
-} from '@struktoai/mirage-core/core/s3/du/index'
+import { size as duSizeCore } from '@struktoai/mirage-core/core/s3/du/index'
 import { exists as existsCore } from '@struktoai/mirage-core/core/s3/exists'
 import { find as findCore } from '@struktoai/mirage-core/core/s3/find'
 import { mkdir as mkdirCore } from '@struktoai/mirage-core/core/s3/mkdir'
@@ -66,7 +63,7 @@ export interface S3VFSState {
 
 export class S3VFS extends BaseVFS {
   override readonly supportsSnapshot: boolean = true
-  readonly kind: string = VFSName.S3
+  readonly name: string = VFSName.S3
   override readonly cachesReads: boolean = true
   // A HEAD carries ContentLength, so a size is always knowable without
   // fetching. Every sibling browser VFS says so; s3 was the one that
@@ -88,13 +85,8 @@ export class S3VFS extends BaseVFS {
   // unlinks the source. Node has always declared it; the shared helper keeps
   // the two runtimes from computing different identities for one bucket.
   override storageId(): string {
-    return s3StorageId(this.kind, this.config)
+    return s3StorageId(this.name, this.config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return S3_COMMANDS.toArray()
   }
@@ -203,19 +195,13 @@ export class S3VFS extends BaseVFS {
 
   override getState(): Promise<S3VFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactConfig(this.config),
     })
   }
 
   override loadState(_state: S3VFSState): Promise<void> {
     return Promise.resolve()
-  }
-
-  // Ignored — duEntries is not yet on the `BaseVFS` contract, but keeping
-  // it around matches the node-side S3VFS.opsMap hook for completeness.
-  _duEntries(p: PathSpec): Promise<[[string, number][], number]> {
-    return duEntriesCore(this.accessor, p)
   }
 
   _rangeRead(p: PathSpec, offset: number, size: number): Promise<Uint8Array> {

@@ -29,7 +29,7 @@ describe('RedisVFS over the Upstash REST api', () => {
   let vfs: RedisVFS
   let ws: Workspace
 
-  beforeEach(async () => {
+  beforeEach(() => {
     fake = createFakeUpstash()
     vfs = new RedisVFS({
       url: fake.url,
@@ -37,7 +37,6 @@ describe('RedisVFS over the Upstash REST api', () => {
       keyPrefix: 'mirage:fs:',
       fetchImpl: fake.fetch,
     })
-    await vfs.open()
     ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
   })
 
@@ -46,7 +45,7 @@ describe('RedisVFS over the Upstash REST api', () => {
   })
 
   it('is the redis kind, keyed by url and prefix', () => {
-    expect(vfs.kind).toBe('redis')
+    expect(vfs.name).toBe('redis')
     expect(vfs.storageId()).toBe(`redis:${fake.url}/mirage:fs:`)
     expect(vfs.store).toBeInstanceOf(UpstashRedisStore)
   })

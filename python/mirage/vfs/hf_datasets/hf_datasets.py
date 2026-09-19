@@ -22,7 +22,7 @@ class HfDatasetsVFS(HfHubVFS[HfDatasetsAccessor]):
 
     ACCESSOR = HfDatasetsAccessor
     name: str = VFSName.HF_DATASETS
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: HfDatasetsConfig) -> None:
         super().__init__(config)

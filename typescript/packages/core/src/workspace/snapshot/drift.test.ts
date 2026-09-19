@@ -33,12 +33,9 @@ interface RegistryLike {
 }
 
 class SnapshotVFS extends BaseVFS {
-  readonly kind = 's3'
+  readonly name = 's3'
   constructor(override readonly supportsSnapshot: boolean) {
     super()
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
   }
 }
 

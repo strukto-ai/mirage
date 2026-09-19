@@ -19,7 +19,6 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { errorSummary } from '@struktoai/mirage-core/secrets/summary'
 import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { recordVfsRef } from '@struktoai/mirage-core/vfs/base'
 import { loadAttr } from './loader.ts'
 
 /**
@@ -327,13 +326,12 @@ export function register(name: string, factory: VFSFactory): void {
   CUSTOM[name] = factory
 }
 
-// Every member `VFS` declares non-optionally, which is the whole set a
-// mount reaches for whatever the backend is: `open`/`close` on the
+// The members a mount reaches for whatever the backend is: `close` on the
 // lifecycle, `getState`/`loadState` on save and load. Checking a subset only
 // moves the failure later and into a frame the author never wrote, which is
-// the very thing this guard exists to prevent: `open`/`close` alone accepted
-// a class whose missing `getState` crashed `Workspace.save()` instead.
-const VFS_METHODS = ['open', 'close', 'getState', 'loadState'] as const
+// the very thing this guard exists to prevent: `close` alone accepted a
+// class whose missing `getState` crashed `Workspace.save()` instead.
+const VFS_METHODS = ['close', 'getState', 'loadState'] as const
 
 /**
  * The reason a loaded export cannot serve as a VFS, or null when it
@@ -347,19 +345,19 @@ const VFS_METHODS = ['open', 'close', 'getState', 'loadState'] as const
  * `isinstance(built, BaseVFS)` instead. The contract differs because the
  * languages do: python's mount door already refuses a non-subclass
  * (`workspace/workspace/mounts.py::check_vfs`), so a structural check
- * there would accept what a later door rejects. `VFS` here is an
- * interface, erased at runtime, so there is no subclass to test and nothing
- * downstream can ask for more than the members. Both guards end at the same
- * place: the name a VFS is keyed by must not be empty.
+ * there would accept what a later door rejects. A script file here may
+ * load its own copy of the package, so `instanceof` would refuse a class
+ * that extends `BaseVFS` in every sense but module identity. Both guards
+ * end at the same place: the name a VFS is keyed by must not be empty.
  */
 function vfsDefect(value: unknown): string | null {
   if (value === null || typeof value !== 'object') return `built a ${typeof value}`
   const node = value as Record<string, unknown>
   const missing = VFS_METHODS.filter((name) => typeof node[name] !== 'function')
   if (missing.length > 0) return `is missing ${missing.join(', ')}`
-  // A VFS is keyed by `kind`: it is how a command or op registered for
+  // A VFS is keyed by `name`: it is how a command or op registered for
   // this backend is found, so an empty one silently registers nothing.
-  if (typeof node.kind !== 'string' || node.kind === '') return 'has no kind'
+  if (typeof node.name !== 'string' || node.name === '') return 'has no name'
   return null
 }
 
@@ -432,6 +430,6 @@ export async function buildVfs(
   if (built === null) {
     throw new Error(`unknown VFS ${JSON.stringify(name)}; known: ${knownVfsNames().join(', ')}`)
   }
-  recordVfsRef(built, name)
+  built.vfsRef = name
   return built
 }

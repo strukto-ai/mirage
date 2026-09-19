@@ -73,11 +73,11 @@ class S3VFS(BaseVFS):
     accessor: S3Accessor
     name: str = VFSName.S3
     # byte store: stat() sizes every file from metadata
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _S3_OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = True
 
     def __init__(self, config: S3Config) -> None:
         super().__init__()

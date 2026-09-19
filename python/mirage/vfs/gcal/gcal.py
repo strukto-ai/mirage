@@ -37,8 +37,8 @@ class GCalVFS(BaseVFS):
     # people and a day-long index would keep serving a schedule that has
     # already moved.
     index_ttl: float = 300
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: GCalConfig) -> None:
         super().__init__()

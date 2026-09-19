@@ -11,8 +11,7 @@ import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { NEXTCLOUD_COMMANDS } from '../../commands/builtin/nextcloud/index.ts'
 import { SCOPE_ERROR } from '../../core/nextcloud/constants.ts'
 import { copy as copyCore } from '../../core/nextcloud/copy.ts'
-import { create as createCore } from '../../core/nextcloud/create.ts'
-import { size as duSizeCore, entries as duEntriesCore } from '../../core/nextcloud/du/index.ts'
+import { size as duSizeCore } from '../../core/nextcloud/du/index.ts'
 import { exists as existsCore } from '../../core/nextcloud/exists.ts'
 import { find as findCore } from '../../core/nextcloud/find.ts'
 import { mkdir as mkdirCore } from '../../core/nextcloud/mkdir.ts'
@@ -22,7 +21,7 @@ import { rename as renameCore } from '../../core/nextcloud/rename.ts'
 import { rmR as rmRCore } from '../../core/nextcloud/rm.ts'
 import { rmdir as rmdirCore } from '../../core/nextcloud/rmdir.ts'
 import { stat as statCore } from '../../core/nextcloud/stat.ts'
-import { rangeRead as rangeReadCore, stream as streamCore } from '../../core/nextcloud/stream.ts'
+import { stream as streamCore } from '../../core/nextcloud/stream.ts'
 import { truncate as truncateCore } from '../../core/nextcloud/truncate.ts'
 import { unlink as unlinkCore } from '../../core/nextcloud/unlink.ts'
 import { write as writeCore } from '../../core/nextcloud/write.ts'
@@ -43,7 +42,7 @@ export interface NextcloudVFSState {
 }
 
 export class NextcloudVFS extends BaseVFS {
-  readonly kind = VFSName.NEXTCLOUD
+  readonly name = VFSName.NEXTCLOUD
   override readonly cachesReads = true
   // WebDAV PROPFIND carries getcontentlength for every file; readdir
   // backfills any lister-omitted size with one stat per affected file.
@@ -51,36 +50,10 @@ export class NextcloudVFS extends BaseVFS {
   override readonly supportsSnapshot = true
   override readonly prompt = NEXTCLOUD_PROMPT
   override readonly accessor: NextcloudAccessor
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCore,
-    write: writeCore,
-    readdir: readdirCore,
-    stat: statCore,
-    unlink: unlinkCore,
-    rmdir: rmdirCore,
-    copy: copyCore,
-    rename: renameCore,
-    mkdir: mkdirCore,
-    read_stream: streamCore,
-    range_read: rangeReadCore,
-    rm_recursive: rmRCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    create: createCore,
-    truncate: truncateCore,
-    exists: existsCore,
-    find_flat: findCore,
-  }
-
   constructor(readonly config: NextcloudConfig) {
     super()
     this.accessor = new NextcloudAccessor(config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return NEXTCLOUD_COMMANDS
   }
@@ -185,7 +158,7 @@ export class NextcloudVFS extends BaseVFS {
   }
 
   override getState(): Promise<NextcloudVFSState> {
-    return Promise.resolve({ type: this.kind, config: redactNextcloudConfig(this.config) })
+    return Promise.resolve({ type: this.name, config: redactNextcloudConfig(this.config) })
   }
 
   override loadState(_state: NextcloudVFSState): Promise<void> {

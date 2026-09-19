@@ -57,7 +57,7 @@ class HfHubVFS(BaseVFS, Generic[A]):
 
     Models, datasets and spaces are one API and one tree; they differ only
     in the `repo_type` their accessor sends and the prompt they carry. A
-    subclass therefore declares `name`, `PROMPT` and the accessor class,
+    subclass therefore declares `name`, `prompt` and the accessor class,
     and nothing else. Keeping the behaviour here rather than copying it
     three times is what the TypeScript side already does.
     """
@@ -68,7 +68,7 @@ class HfHubVFS(BaseVFS, Generic[A]):
     # The Hub tree reports every file's exact byte size, and for an LFS
     # file that is the object's own size rather than the pointer's, so
     # no read can be short.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     # The index is not a cache in front of a listing, it IS the listing:
     # one recursive fetch seeds it whole. A long TTL therefore spares the
     # Hub a full re-walk rather than risking a stale row. Written as a
@@ -76,7 +76,7 @@ class HfHubVFS(BaseVFS, Generic[A]):
     # this off the source, and an imported name reads as unresolvable.
     index_ttl: float = 86_400
     _ops: dict[str, Any] = _OPS
-    SUPPORTS_SNAPSHOT: bool = True
+    supports_snapshot: bool = True
 
     def __init__(self, config: Any) -> None:
         super().__init__()

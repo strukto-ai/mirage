@@ -202,11 +202,11 @@ class GenericVFS(BaseVFS):
         self.name = name
         self.accessor = accessor
         self.io = io
-        self.PROMPT = prompt
-        self.WRITE_PROMPT = write_prompt
+        self.prompt = prompt
+        self.write_prompt = write_prompt
         self.caches_reads = caches_reads
-        self.SIZES_ALWAYS_KNOWN = sizes_always_known
-        self.SUPPORTS_SNAPSHOT = supports_snapshot
+        self.sizes_always_known = sizes_always_known
+        self.supports_snapshot = supports_snapshot
         self._resolve = io.resolve_glob
         self._ops = direct_ops(io, lambda: self.index)
         for fn in make_generic_commands(

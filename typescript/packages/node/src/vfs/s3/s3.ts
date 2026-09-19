@@ -18,11 +18,7 @@ import { S3_COMMANDS } from '@struktoai/mirage-core/commands/builtin/s3/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { SCOPE_ERROR as S3_SCOPE_ERROR } from '@struktoai/mirage-core/core/s3/constants'
 import { copy as copyCore } from '@struktoai/mirage-core/core/s3/copy'
-import { create as createCore } from '@struktoai/mirage-core/core/s3/create'
-import {
-  entries as duEntriesCore,
-  size as duSizeCore,
-} from '@struktoai/mirage-core/core/s3/du/index'
+import { size as duSizeCore } from '@struktoai/mirage-core/core/s3/du/index'
 import { exists as existsCore } from '@struktoai/mirage-core/core/s3/exists'
 import { find as findCore } from '@struktoai/mirage-core/core/s3/find'
 import { mkdir as mkdirCore } from '@struktoai/mirage-core/core/s3/mkdir'
@@ -32,10 +28,7 @@ import { rename as renameCore } from '@struktoai/mirage-core/core/s3/rename'
 import { rmR as rmRCore } from '@struktoai/mirage-core/core/s3/rm'
 import { rmdir as rmdirCore } from '@struktoai/mirage-core/core/s3/rmdir'
 import { stat as statCore } from '@struktoai/mirage-core/core/s3/stat'
-import {
-  rangeRead as rangeReadCore,
-  stream as streamCore,
-} from '@struktoai/mirage-core/core/s3/stream'
+import { stream as streamCore } from '@struktoai/mirage-core/core/s3/stream'
 import { truncate as truncateCore } from '@struktoai/mirage-core/core/s3/truncate'
 import { unlink as unlinkCore } from '@struktoai/mirage-core/core/s3/unlink'
 import { write as writeCore } from '@struktoai/mirage-core/core/s3/write'
@@ -68,7 +61,7 @@ export interface S3VFSState {
 }
 
 export class S3VFS extends BaseVFS {
-  readonly kind: string = VFSName.S3
+  readonly name: string = VFSName.S3
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = true
   // byte store: stat() sizes every file from metadata
@@ -77,27 +70,6 @@ export class S3VFS extends BaseVFS {
   override readonly prompt: string = S3_PROMPT
   readonly config: S3Config
   override readonly accessor: S3Accessor
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCore,
-    write: writeCore,
-    readdir: readdirCore,
-    stat: statCore,
-    unlink: unlinkCore,
-    rmdir: rmdirCore,
-    copy: copyCore,
-    rename: renameCore,
-    mkdir: mkdirCore,
-    read_stream: streamCore,
-    range_read: rangeReadCore,
-    rm_recursive: rmRCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    create: createCore,
-    truncate: truncateCore,
-    exists: existsCore,
-    find_flat: findCore,
-  }
-
   constructor(config: S3Config) {
     super()
     const normalized = normalizeKeyPrefix(config.keyPrefix)
@@ -118,13 +90,8 @@ export class S3VFS extends BaseVFS {
   }
 
   override storageId(): string {
-    return s3StorageId(this.kind, this.config)
+    return s3StorageId(this.name, this.config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return S3_COMMANDS.toArray()
   }
@@ -233,7 +200,7 @@ export class S3VFS extends BaseVFS {
 
   override getState(): Promise<S3VFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactConfig(this.config),
     })
   }

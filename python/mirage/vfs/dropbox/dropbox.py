@@ -57,9 +57,9 @@ class DropboxVFS(BaseVFS):
     # list_folder carries an exact byte `size` for every file (0 included).
     # Paper docs 409 on raw download, a loud error, never a silent empty
     # read.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops: dict[str, Any] = _DROPBOX_OPS
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: DropboxConfig) -> None:
         super().__init__()

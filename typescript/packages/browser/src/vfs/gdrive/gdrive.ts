@@ -43,7 +43,7 @@ export interface GDriveVFSState {
 }
 
 export class GDriveVFS extends BaseVFS {
-  readonly kind: string = VFSName.GDRIVE
+  readonly name: string = VFSName.GDRIVE
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = true
   override readonly indexTtl: number = 86_400
@@ -57,11 +57,6 @@ export class GDriveVFS extends BaseVFS {
     const tm = new TokenManager(config)
     this.accessor = new GDriveAccessor({ tokenManager: tm })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return GDRIVE_COMMANDS
   }
@@ -106,7 +101,7 @@ export class GDriveVFS extends BaseVFS {
 
   override getState(): Promise<GDriveVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGDriveConfig(this.config),
     })
   }

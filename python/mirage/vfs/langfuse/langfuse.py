@@ -30,7 +30,7 @@ class LangfuseVFS(BaseVFS):
     accessor: LangfuseAccessor
     name: str = VFSName.LANGFUSE
     caches_reads: bool = True
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: LangfuseConfig) -> None:
         super().__init__()

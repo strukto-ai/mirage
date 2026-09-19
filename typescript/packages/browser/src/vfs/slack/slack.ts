@@ -37,7 +37,7 @@ export interface SlackVFSState {
 }
 
 export class SlackVFS extends BaseVFS {
-  readonly kind: string = VFSName.SLACK
+  readonly name: string = VFSName.SLACK
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and users/*.json
   // are rendered at readdir from payloads the listing already fetched
@@ -60,11 +60,6 @@ export class SlackVFS extends BaseVFS {
       }),
     )
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return SLACK_COMMANDS
   }
@@ -105,7 +100,7 @@ export class SlackVFS extends BaseVFS {
 
   override getState(): Promise<SlackVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactSlackConfig(this.config),
     })
   }

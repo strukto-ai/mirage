@@ -19,24 +19,18 @@ import { MountRegistry } from './registry.ts'
 import { makeStorageKey, vfsStorageId } from './storage.ts'
 
 class StoreVFS extends BaseVFS {
-  readonly kind = 'ram'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+  readonly name = 'ram'
 }
 
 // A VFS pinned by config, the way disk/s3/redis are: two instances
 // naming one target must compare equal.
 class RootedVFS extends BaseVFS {
-  readonly kind = 'disk'
+  readonly name = 'disk'
   constructor(readonly root: string) {
     super()
   }
   override storageId(): string {
-    return `${this.kind}:${this.root}`
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
+    return `${this.name}:${this.root}`
   }
 }
 

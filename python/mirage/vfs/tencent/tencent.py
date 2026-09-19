@@ -19,7 +19,7 @@ from mirage.vfs.tencent.prompt import PROMPT
 
 class TencentVFS(S3AliasVFS):
 
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: TencentConfig) -> None:
         super().__init__(config)

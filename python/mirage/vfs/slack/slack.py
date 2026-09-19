@@ -34,9 +34,9 @@ class SlackVFS(BaseVFS):
     # are rendered at readdir from payloads the listing already fetched
     # (users.list is payload-identical to users.info, verified live), and
     # file blobs carry Slack's upload byte count.
-    SIZES_ALWAYS_KNOWN: bool = True
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: SlackConfig) -> None:
         super().__init__()

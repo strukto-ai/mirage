@@ -36,12 +36,12 @@ class GitHubVFS(BaseVFS):
     # The git tree API reports the exact blob size for every file; the
     # blob read returns those same bytes, and submodule gitlinks (which
     # have no size and no blob) are excluded from the tree.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     # An API-backed tree that changes rarely; a day-long index spares the
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(
         self,

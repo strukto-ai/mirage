@@ -27,9 +27,8 @@ describe.skipIf(skip)('redis streaming commands on missing files', () => {
   let redis: RedisVFS
   let ws: Workspace
 
-  beforeEach(async () => {
+  beforeEach(() => {
     redis = new RedisVFS(REDIS_URL !== undefined ? { url: REDIS_URL, keyPrefix: `${RUN_ID}:` } : {})
-    await redis.open()
     ws = new Workspace({ '/redis': redis }, { mode: MountMode.WRITE })
   })
 

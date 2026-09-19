@@ -226,7 +226,7 @@ def _drop_path_from_cache(ws, path: str) -> None:
 
 
 def test_live_only_mount_does_not_block_snapshot(tmp_path, caplog):
-    """Workspaces with non-SUPPORTS_SNAPSHOT mounts (RAM here as a stand-
+    """Workspaces with non-supports_snapshot mounts (RAM here as a stand-
     in for Gmail/Slack/Linear) snapshot fine; no fingerprints are
     captured for those paths and the load layer logs an honest warning
     surfacing the live-only mount list.
@@ -351,7 +351,7 @@ async def test_snapshot_fingerprints_keep_read_mount_ownership(
 @pytest.mark.asyncio
 async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
     vfs = RAMVFS()
-    vfs.SUPPORTS_SNAPSHOT = True
+    vfs.supports_snapshot = True
     payload = b"old"
 
     @op("read", vfs="ram")
@@ -371,7 +371,7 @@ async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
             while ws._registry.try_mount_for_prefix("/data") is not None:
                 await asyncio.sleep(0)
         replacement = RAMVFS()
-        replacement.SUPPORTS_SNAPSHOT = True
+        replacement.supports_snapshot = True
         ws.add_mount("/data", replacement)
         async for chunk in stream:
             assert chunk == payload

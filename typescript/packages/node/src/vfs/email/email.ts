@@ -40,7 +40,7 @@ export interface EmailVFSState {
 }
 
 export class EmailVFS extends BaseVFS {
-  readonly kind: string = VFSName.EMAIL
+  readonly name: string = VFSName.EMAIL
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: .email.json is rendered at
   // readdir from the full message source the listing already fetches, and an
@@ -56,11 +56,6 @@ export class EmailVFS extends BaseVFS {
     this.config = config
     this.accessor = new EmailAccessor(config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override async close(): Promise<void> {
     await this.accessor.close()
     await super.close()
@@ -106,7 +101,7 @@ export class EmailVFS extends BaseVFS {
 
   override getState(): Promise<EmailVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactEmailConfig(this.config),
     })
   }

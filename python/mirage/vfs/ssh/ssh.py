@@ -76,12 +76,12 @@ class SSHVFS(BaseVFS):
     caches_reads: bool = True
     # SFTP stat/readdir report the remote inode's exact byte size for
     # every file; reads are the same raw bytes.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     _ops: dict[str, Any] = _SSH_OPS
     # A remote filesystem: short-lived index, long enough to spare a
     # re-walk inside one command pipeline. Mirrors the TypeScript VFS.
     index_ttl: float = 60
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: SSHConfig) -> None:
         super().__init__()

@@ -89,7 +89,7 @@ async def test_may_serve_cached_no_fingerprint_forces_reread():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.namespace.ensure_loaded()
     mount = ws.namespace.mount_for("/data/f.txt")
-    assert mount.vfs.SUPPORTS_SNAPSHOT is False
+    assert mount.vfs.supports_snapshot is False
     rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
     assert await rec.may_serve_cached(mount, "/data/f.txt") is False
 
@@ -179,7 +179,7 @@ async def test_unverified_probe_cannot_serve_cached_bytes(
     ws = Workspace({"/data": RAMVFS()})
     try:
         mount = ws.namespace.mount_for("/data/f.txt")
-        monkeypatch.setattr(mount.vfs, "SUPPORTS_SNAPSHOT", True)
+        monkeypatch.setattr(mount.vfs, "supports_snapshot", True)
         await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
 
         async def stat(*args, **kwargs):

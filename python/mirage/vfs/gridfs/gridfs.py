@@ -73,11 +73,11 @@ class GridFSVFS(BaseVFS):
     accessor: GridFSAccessor
     name: str = VFSName.GRIDFS
     # byte store: stat() sizes every file from metadata
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     caches_reads: bool = True
     _ops: dict[str, Any] = _GRIDFS_OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = True
 
     def __init__(self, config: GridFSConfig) -> None:
         super().__init__()

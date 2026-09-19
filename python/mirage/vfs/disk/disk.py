@@ -67,11 +67,11 @@ class DiskVFS(BaseVFS):
 
     name: str = VFSName.DISK
     # byte store: stat() sizes every file from metadata
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     accessor: DiskAccessor
     index_ttl: float = 60
     _ops: dict[str, Any] = _DISK_OPS
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, root: str) -> None:
         super().__init__()
@@ -79,8 +79,7 @@ class DiskVFS(BaseVFS):
         # The mount root is infrastructure, not a path component a caller
         # asked for, so it is created here rather than on demand by the
         # first write: writes must report ENOENT for a missing parent the
-        # way GNU does. Mirrors TypeScript, where DiskVFS.open() does
-        # the same `mkdir(root, {recursive: true})`.
+        # way GNU does. Mirrors TypeScript's DiskVFS constructor.
         self.root.mkdir(parents=True, exist_ok=True)
         self.accessor = DiskAccessor(self.root)
         for fn in DISK_COMMANDS:

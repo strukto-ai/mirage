@@ -41,7 +41,7 @@ export interface GDocsVFSState {
 }
 
 export class GDocsVFS extends BaseVFS {
-  readonly kind: string = VFSName.GDOCS
+  readonly name: string = VFSName.GDOCS
   override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = GDOCS_PROMPT
@@ -55,11 +55,6 @@ export class GDocsVFS extends BaseVFS {
     const tm = new TokenManager(config)
     this.accessor = new GDocsAccessor({ tokenManager: tm })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return GDOCS_COMMANDS
   }
@@ -100,7 +95,7 @@ export class GDocsVFS extends BaseVFS {
 
   override getState(): Promise<GDocsVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGDocsConfig(this.config),
     })
   }

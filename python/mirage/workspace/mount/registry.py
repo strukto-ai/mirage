@@ -192,7 +192,7 @@ class MountRegistry:
             m.register(cmd)
         for cmd in GENERAL_COMMANDS:
             m.register_general(cmd)
-        for ro in vfs.ops_list():
+        for ro in vfs.ops():
             m.register_op(ro)
         if self._file_cache is not None:
             self._attach_manager(m)
@@ -469,8 +469,8 @@ class MountRegistry:
                 accessor=m.vfs.accessor,
                 index=m.vfs.index,
                 mode=m.mode,
-                ops=m.vfs.ops_list(),
-                sizes_always_known=m.vfs.SIZES_ALWAYS_KNOWN,
+                ops=m.vfs.ops(),
+                sizes_always_known=m.vfs.sizes_always_known,
             ) for m in self._mounts
         ]
 

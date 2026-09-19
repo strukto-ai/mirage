@@ -26,11 +26,8 @@ import type { DispatchFn } from './cross_mount.ts'
 import { handleCommand } from './command.ts'
 
 class StubVFS extends BaseVFS {
-  constructor(readonly kind: string) {
+  constructor(readonly name: string) {
     super()
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
   }
   override close(): Promise<void> {
     return Promise.resolve()

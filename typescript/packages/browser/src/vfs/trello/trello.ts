@@ -37,7 +37,7 @@ export interface TrelloVFSState {
 }
 
 export class TrelloVFS extends BaseVFS {
-  readonly kind: string = VFSName.TRELLO
+  readonly name: string = VFSName.TRELLO
   override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 600
   override readonly prompt: string = TRELLO_PROMPT
@@ -58,11 +58,6 @@ export class TrelloVFS extends BaseVFS {
     if (config.boardIds !== undefined) accessorOpts.boardIds = config.boardIds
     this.accessor = new TrelloAccessor(new HttpTrelloTransport(transportOpts), accessorOpts)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return TRELLO_COMMANDS
   }
@@ -103,7 +98,7 @@ export class TrelloVFS extends BaseVFS {
 
   override getState(): Promise<TrelloVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactTrelloConfig(this.config),
     })
   }

@@ -54,7 +54,7 @@ export interface MongoDBVFSState {
 }
 
 export class MongoDBVFS extends BaseVFS {
-  readonly kind: string = VFSName.MONGODB
+  readonly name: string = VFSName.MONGODB
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
   override readonly prompt: string
@@ -74,7 +74,7 @@ export class MongoDBVFS extends BaseVFS {
 
   override getState(): MongoDBVFSState {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactMongoDBConfig(this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
@@ -90,11 +90,6 @@ export class MongoDBVFS extends BaseVFS {
   override loadState(_state: MongoDBVFSState): Promise<void> {
     return Promise.resolve()
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override async close(): Promise<void> {
     await this.store.close()
     await super.close()

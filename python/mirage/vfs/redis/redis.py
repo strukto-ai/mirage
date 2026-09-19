@@ -80,10 +80,10 @@ class RedisVFS(BaseVFS):
     accessor: RedisAccessor
     name: str = VFSName.REDIS
     # byte store: stat() sizes every file from metadata
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     index_ttl: float = 0
     _ops: dict[str, Any] = _REDIS_OPS
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(
         self,

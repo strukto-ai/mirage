@@ -20,10 +20,7 @@ import { MountRegistry } from '../mount/registry.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
 
 class StubVFS extends BaseVFS {
-  readonly kind = 'stub'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+  readonly name = 'stub'
   override close(): Promise<void> {
     return Promise.resolve()
   }

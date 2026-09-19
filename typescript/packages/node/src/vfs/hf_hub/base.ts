@@ -28,7 +28,7 @@ import { exists as existsCore } from '../../core/hf_hub/exists.ts'
 import { read as readCore } from '../../core/hf_hub/read.ts'
 import { readdir as readdirCore } from '../../core/hf_hub/readdir.ts'
 import { stat as statCore } from '../../core/hf_hub/stat.ts'
-import { rangeRead as rangeReadCore, stream as streamCore } from '../../core/hf_hub/stream.ts'
+import { stream as streamCore } from '../../core/hf_hub/stream.ts'
 import { buildDeltaHook } from '../../core/hf_hub/watch.ts'
 import { HF_HUB_OPS } from '../../ops/hf_hub/index.ts'
 
@@ -64,25 +64,6 @@ export abstract class HfHubVFS extends BaseVFS {
   // recursive fetch seeds it whole. A long TTL therefore spares the Hub a
   // full re-walk rather than risking a stale row.
   override readonly indexTtl: number = 86_400
-  // Read-only, for the reason spelled out in commands/builtin/hf_hub/io.ts:
-  // a Hub write is a commit, so it belongs to the `hf` CLI rather than to a
-  // POSIX write. This table is the second channel and has to agree with the
-  // first: it answers `dispatch('write', ...)` and the FUSE adapter, so
-  // leaving the mutations here would have kept every write path open except
-  // the shell one.
-  override readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCore,
-    readdir: readdirCore,
-    stat: statCore,
-    read_stream: streamCore,
-    range_read: rangeReadCore,
-    exists: existsCore,
-  }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return HF_HUB_COMMANDS
   }

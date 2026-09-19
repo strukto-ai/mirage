@@ -45,7 +45,7 @@ export interface ChromaVFSState {
 }
 
 export class ChromaVFS extends BaseVFS {
-  readonly kind: string = VFSName.CHROMA
+  readonly name: string = VFSName.CHROMA
   override readonly cachesReads: boolean = false
   override readonly supportsSnapshot: boolean = false
   // Every file is sized exactly, by one chunk scan per directory the caller
@@ -65,7 +65,7 @@ export class ChromaVFS extends BaseVFS {
 
   override getState(): ChromaVFSState {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactChromaConfig(this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
@@ -81,11 +81,6 @@ export class ChromaVFS extends BaseVFS {
   override loadState(_state: ChromaVFSState): Promise<void> {
     return Promise.resolve()
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override ops(): readonly RegisteredOp[] {
     return CHROMA_OPS
   }

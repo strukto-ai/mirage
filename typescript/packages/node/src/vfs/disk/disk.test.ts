@@ -23,10 +23,9 @@ let root: string
 let cleanup: () => void
 let res: DiskVFS
 
-beforeEach(async () => {
+beforeEach(() => {
   ;({ root, cleanup } = tmpRoot('mirage-diskvfs-'))
   res = new DiskVFS({ root })
-  await res.open()
 })
 
 afterEach(() => {
@@ -35,7 +34,7 @@ afterEach(() => {
 
 describe('DiskVFS — identity', () => {
   it('exposes kind, prompt, root', () => {
-    expect(res.kind).toBe(VFSName.DISK)
+    expect(res.name).toBe(VFSName.DISK)
     expect(typeof res.prompt).toBe('string')
     expect(res.root).toBe(root)
   })
@@ -174,7 +173,6 @@ describe('DiskVFS — getState / loadState round-trip', () => {
     const { root: root2, cleanup: c2 } = tmpRoot('mirage-diskvfs-load-')
     try {
       const res2 = new DiskVFS({ root: root2 })
-      await res2.open()
       await res2.loadState(state)
       expect(new TextDecoder().decode(await res2.readFile(spec('/a.txt')))).toBe('A')
       expect(new TextDecoder().decode(await res2.readFile(spec('/d/b.txt')))).toBe('B')
@@ -192,7 +190,6 @@ describe('DiskVFS — getState / loadState round-trip', () => {
     const { root: root2, cleanup: c2 } = tmpRoot('mirage-diskvfs-mode-')
     try {
       const res2 = new DiskVFS({ root: root2 })
-      await res2.open()
       await res2.loadState(state)
       expect(statSync(join(root2, 'f.txt')).mode & 0o777).toBe(0o640)
     } finally {

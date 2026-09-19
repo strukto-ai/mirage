@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Accessor } from '@struktoai/mirage-core/accessor/base'
 import type { CommandIO } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { streamFromBytes } from '@struktoai/mirage-core/commands/builtin/utils/wrap'
-import { vfsRefOf, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
+import type { VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { GenericVFS } from '@struktoai/mirage-core/vfs/generic'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import {
@@ -98,7 +98,7 @@ class Notes extends GenericVFS<NotesAccessor> {
   }
 
   override getState(): VFSStateBase & { pages: Record<string, string> } {
-    return { type: this.kind, pages: { ...this.notes.pages } }
+    return { type: this.name, pages: { ...this.notes.pages } }
   }
 
   override loadState(state: VFSStateBase): void {
@@ -152,8 +152,8 @@ describe('snapshot rebuild through the registry', () => {
   it('records the reference the registry built a VFS from', async () => {
     register('notes-test', () => Promise.resolve(new Notes()))
     const built = await buildVfs('notes-test')
-    expect(vfsRefOf(built)).toBe('notes-test')
-    expect(vfsRefOf(new Notes())).toBeNull()
+    expect(built.vfsRef).toBe('notes-test')
+    expect(new Notes().vfsRef).toBeNull()
     await built.close()
   })
 
@@ -173,7 +173,7 @@ describe('snapshot rebuild through the registry', () => {
     try {
       const seeded = restored.mounts().find((m) => m.prefix === '/s/')
       expect(seeded?.vfs).toBeInstanceOf(SeededRAM)
-      expect(seeded === undefined ? null : vfsRefOf(seeded.vfs)).toBe('seeded-test')
+      expect(seeded === undefined ? null : seeded.vfs.vfsRef).toBe('seeded-test')
       const out = await restored.shell('cat /s/a.txt')
       expect(out.stdoutText).toBe('one\n')
     } finally {

@@ -171,10 +171,10 @@ Import the command and op arrays at module scope and return them from `commands(
 
 ```ts
 export class MyVFS extends BaseVFS {
-  readonly kind: string = VFSName.MY_VFS
-  readonly cachesReads: boolean = true
-  readonly prompt: string = MY_PROMPT
-  readonly accessor: MyAccessor
+  readonly name: string = VFSName.MY_VFS
+  override readonly cachesReads: boolean = true
+  override readonly prompt: string = MY_PROMPT
+  override readonly accessor: MyAccessor
 
   constructor(config: MyConfig) {
     super()
@@ -182,15 +182,11 @@ export class MyVFS extends BaseVFS {
     this.accessor = new MyAccessor(this.config)
   }
 
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return MY_VFS_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return MY_VFS_COMMANDS
   }
 }

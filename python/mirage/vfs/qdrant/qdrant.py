@@ -31,9 +31,9 @@ class QdrantVFS(BaseVFS):
     name: str = VFSName.QDRANT
     # readdir seeds exact rendered sizes from the scroll payloads and stat
     # falls back to rendering the row itself, so sizes are exact either way.
-    SIZES_ALWAYS_KNOWN: bool = True
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = False
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = False
 
     def __init__(self, config: QdrantConfig) -> None:
         super().__init__()

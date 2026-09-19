@@ -39,7 +39,7 @@ export interface DropboxVFSState {
 }
 
 export class DropboxVFS extends BaseVFS {
-  readonly kind: string = VFSName.DROPBOX
+  readonly name: string = VFSName.DROPBOX
   override readonly cachesReads: boolean = true
   // list_folder carries an exact byte `size` for every file (0 included).
   // Paper docs 409 on raw download, a loud error, never a silent empty read.
@@ -59,11 +59,6 @@ export class DropboxVFS extends BaseVFS {
       ...(config.contentSearch !== undefined ? { contentSearch: config.contentSearch } : {}),
     })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return DROPBOX_COMMANDS
   }
@@ -108,7 +103,7 @@ export class DropboxVFS extends BaseVFS {
 
   override getState(): Promise<DropboxVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactDropboxConfig(this.config),
     })
   }

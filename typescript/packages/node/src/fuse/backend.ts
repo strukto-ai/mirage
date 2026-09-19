@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { posix } from 'node:path'
-import { sizesAlwaysKnown } from '@struktoai/mirage-core/vfs/base'
 import { KERNEL_BACKENDS, MountBackend, MountMode } from '@struktoai/mirage-core/types'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -95,7 +94,7 @@ export function unsizedMounts(ws: Workspace, rootPrefix = ''): [string, string][
   for (const m of ws.mounts()) {
     const bare = rstripSlash(m.prefix)
     if (root !== '' && bare !== root && !m.prefix.startsWith(root + '/')) continue
-    if (!sizesAlwaysKnown(m.vfs)) found.push([m.prefix, m.vfs.kind])
+    if (!m.vfs.sizesAlwaysKnown) found.push([m.prefix, m.vfs.name])
   }
   return found
 }
@@ -134,7 +133,7 @@ export function writableMounts(ws: Workspace, rootPrefix = ''): [string, string]
   for (const m of ws.mounts()) {
     const bare = rstripSlash(m.prefix)
     if (root !== '' && bare !== root && !m.prefix.startsWith(root + '/')) continue
-    if (m.mode !== MountMode.READ) found.push([m.prefix, m.vfs.kind])
+    if (m.mode !== MountMode.READ) found.push([m.prefix, m.vfs.name])
   }
   return found
 }

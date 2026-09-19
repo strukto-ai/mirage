@@ -23,7 +23,7 @@ def test_vfs_name():
     r = HfDatasetsVFS(HfDatasetsConfig(repo_id="org/dataset"))
     assert r.name == VFSName.HF_DATASETS
     assert r.caches_reads is True
-    assert r.SUPPORTS_SNAPSHOT is True
+    assert r.supports_snapshot is True
 
 
 def test_config_immutable():
@@ -34,7 +34,7 @@ def test_config_immutable():
 
 def test_vfs_registers_ops():
     r = HfDatasetsVFS(HfDatasetsConfig(repo_id="org/dataset"))
-    op_names = {o.name for o in r.ops_list()}
+    op_names = {o.name for o in r.ops()}
     assert {"read", "readdir", "stat"} <= op_names
 
 
@@ -47,7 +47,7 @@ def test_vfs_registers_no_mutation_ops():
     what keeps the two agreeing.
     """
     r = HfDatasetsVFS(HfDatasetsConfig(repo_id="org/dataset"))
-    op_names = {o.name for o in r.ops_list()}
+    op_names = {o.name for o in r.ops()}
     assert not {"write", "create", "unlink", "rm_r", "mkdir"} & op_names
 
 

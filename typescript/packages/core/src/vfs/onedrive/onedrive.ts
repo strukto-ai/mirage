@@ -24,7 +24,7 @@ export interface OneDriveVFSState {
 }
 
 export class OneDriveVFS extends BaseVFS {
-  readonly kind: string = VFSName.ONEDRIVE
+  readonly name: string = VFSName.ONEDRIVE
   override readonly cachesReads: boolean = true
   // Graph driveItems carry an exact byte `size` for every file in both
   // listings and item gets; folders (including the root) report null with
@@ -41,11 +41,6 @@ export class OneDriveVFS extends BaseVFS {
     this.config = config
     this.accessor = new OneDriveAccessor(config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return ONEDRIVE_COMMANDS
   }
@@ -76,7 +71,7 @@ export class OneDriveVFS extends BaseVFS {
 
   override getState(): OneDriveVFSState {
     const config: OneDriveConfigRedacted = redactOneDriveConfig(this.config)
-    return { type: this.kind, config }
+    return { type: this.name, config }
   }
 
   override loadState(_state: OneDriveVFSState): Promise<void> {

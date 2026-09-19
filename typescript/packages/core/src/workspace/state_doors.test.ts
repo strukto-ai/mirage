@@ -53,7 +53,7 @@ class DenyOp implements Policy {
   }
 }
 
-// Ops resolve by VFS kind in the workspace registry, so an
+// Ops resolve by VFS name in the workspace registry, so an
 // overlay-backend simulation blocks registration itself.
 class NoSetattrRegistry extends OpsRegistry {
   override register(ro: RegisteredOp): void {

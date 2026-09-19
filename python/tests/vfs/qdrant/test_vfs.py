@@ -13,12 +13,12 @@ def _vfs(**kw) -> QdrantVFS:
 def test_vfs_name_and_snapshot():
     res = _vfs()
     assert res.name == "qdrant"
-    assert res.SUPPORTS_SNAPSHOT is False
+    assert res.supports_snapshot is False
 
 
 def test_vfs_registers_ops():
     res = _vfs()
-    assert {"read", "readdir", "stat"} <= {o.name for o in res.ops_list()}
+    assert {"read", "readdir", "stat"} <= {o.name for o in res.ops()}
 
 
 def test_vfs_registers_commands():

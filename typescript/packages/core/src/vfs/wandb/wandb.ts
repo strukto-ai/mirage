@@ -23,7 +23,7 @@ export interface WandbVFSState {
 }
 
 export class WandbVFS extends BaseVFS {
-  readonly kind: string = VFSName.WANDB
+  readonly name: string = VFSName.WANDB
   override readonly indexTtl: number = 600
   override readonly prompt: string = WANDB_PROMPT
   readonly config: WandbConfig
@@ -34,11 +34,6 @@ export class WandbVFS extends BaseVFS {
     this.config = config
     this.accessor = new WandbAccessor(config)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return WANDB_COMMANDS
   }
@@ -79,7 +74,7 @@ export class WandbVFS extends BaseVFS {
 
   override getState(): Promise<WandbVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactWandbConfig(this.config),
     })
   }

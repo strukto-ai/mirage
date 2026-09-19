@@ -137,8 +137,6 @@ export class Workspace {
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
   private shellParserPromise: Promise<ShellParser> | null = null
-  private readonly opened = new Set<BaseVFS>()
-  private readonly openOrder: BaseVFS[] = []
   readonly jobTable: JobTable
   readonly agentId: string | null
   readonly cache: FileCache & BaseVFS
@@ -406,7 +404,7 @@ export class Workspace {
       this.namespace,
       (path) => {
         const mount = this.registry.tryMountFor(path)
-        return mount === null ? null : { prefix: mount.prefix, kind: mount.vfs.kind }
+        return mount === null ? null : { prefix: mount.prefix, kind: mount.vfs.name }
       },
       { bind: (sessionId, run) => this.bindSession(sessionId, run) },
     )
@@ -951,8 +949,6 @@ export class Workspace {
       {
         registry: this.registry,
         opsRegistry: this.opsRegistry,
-        opened: this.opened,
-        openOrder: this.openOrder,
         sharedMounts: this.sharedMounts,
         isShuttingDown: () => this.isShuttingDown(),
       },
@@ -1142,21 +1138,8 @@ export class Workspace {
       throw new Error('Workspace is closed')
     }
     const result = this.registry.resolve(path)
-    const [vfs] = result
     await this.registry.mountFor(path).ensureReady()
-    await this.ensureOpen(vfs)
     return result
-  }
-
-  private async ensureOpen(vfs: BaseVFS): Promise<void> {
-    if (this.opened.has(vfs)) return
-    const mount = this.registry.allMounts().find((m) => m.vfs === vfs && !m.retiring)
-    if (mount === undefined) throw new Error('VFS is no longer mounted')
-    await mount.use(async () => {
-      await vfs.open()
-      this.opened.add(vfs)
-      this.openOrder.push(vfs)
-    })
   }
 
   /**
@@ -1280,7 +1263,6 @@ export class Workspace {
       registerCloser: (fn) => {
         this.closers.push(fn)
       },
-      ensureOpen: (vfs) => this.ensureOpen(vfs),
       invalidateAllAfterRemote: () => this.invalidateAllAfterRemote(),
       provision: (cmd, opts) => this.provision(cmd, opts),
       execute: (cmd, opts) =>
@@ -1488,8 +1470,6 @@ export class Workspace {
         closers: this.closers,
         jobTable: this.jobTable,
         registry: this.registry,
-        opened: this.opened,
-        openOrder: this.openOrder,
         sharedMounts: this.sharedMounts,
       })
     } finally {

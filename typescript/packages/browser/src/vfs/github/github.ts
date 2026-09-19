@@ -52,7 +52,7 @@ export interface GitHubVFSState {
 }
 
 export class GitHubVFS extends BaseVFS {
-  readonly kind: string = VFSName.GITHUB
+  readonly name: string = VFSName.GITHUB
   override readonly cachesReads: boolean = true
   // The git tree API reports the exact blob size for every file; the
   // blob read returns those same bytes, and submodule gitlinks (which
@@ -95,11 +95,6 @@ export class GitHubVFS extends BaseVFS {
     const index = new RAMIndexCacheStore({ ttl: 86_400 })
     return new GitHubVFS(config, accessor, index)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override commands(): readonly RegisteredCommand[] {
     return GITHUB_COMMANDS
   }
@@ -144,7 +139,7 @@ export class GitHubVFS extends BaseVFS {
 
   override getState(): Promise<GitHubVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGitHubConfig(this.config),
       defaultBranch: this.accessor.defaultBranch,
       truncated: this.accessor.truncated,

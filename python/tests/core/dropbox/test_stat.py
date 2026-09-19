@@ -321,7 +321,7 @@ async def test_stat_enotdir_from_populate_propagates(dropbox_accessor, index):
 
 @pytest.mark.asyncio
 async def test_stat_size_matches_read_for_every_file(dropbox_accessor, index):
-    # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat serves
+    # The fskit invariant behind sizes_always_known: the size stat serves
     # from the listing must equal the byte length a read delivers, 0-byte
     # files included. Listings go through the transport seam; the content
     # channel (dropbox_download) does not pass through dropbox_rpc, so it

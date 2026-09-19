@@ -124,7 +124,7 @@ class DriftQueue:
 
 def capture_fingerprints(ws: "Workspace", ) -> list[dict[str, Any]]:
     """Walk session ops and emit one entry per distinct read on a
-    ``SUPPORTS_SNAPSHOT`` mount.
+    ``supports_snapshot`` mount.
 
     Pure aggregation over ``ws._ops.records``. Each read ``OpRecord``
     carries the ``fingerprint`` and/or ``revision`` the backend
@@ -132,7 +132,7 @@ def capture_fingerprints(ws: "Workspace", ) -> list[dict[str, Any]]:
     the GET response, not a fresh stat at snapshot time). This avoids
     the race where the upstream changes between read and snapshot.
 
-    Skips paths whose owning mount has ``SUPPORTS_SNAPSHOT=False``
+    Skips paths whose owning mount has ``supports_snapshot=False``
     (live-only backends like Gmail/Slack/Linear) and reads where the
     backend returned neither marker.
 
@@ -157,7 +157,7 @@ def capture_fingerprints(ws: "Workspace", ) -> list[dict[str, Any]]:
                              and rec.mount_id != mount.mount_id):
             continue
         seen.add(rec.path)
-        if not mount.vfs.SUPPORTS_SNAPSHOT:
+        if not mount.vfs.supports_snapshot:
             continue
         entry: dict[str, Any] = {
             FingerprintKey.PATH: rec.path,
@@ -227,7 +227,7 @@ def live_only_mount_prefixes(ws: "Workspace", ) -> list[str]:
             continue
         if ws._implicit_root and m.prefix == "/":
             continue
-        if not m.vfs.SUPPORTS_SNAPSHOT:
+        if not m.vfs.supports_snapshot:
             out.append(m.prefix)
     return out
 
@@ -255,7 +255,7 @@ async def check_drift(mount_for: TryMountFor,
     mount = mount_for(path)
     if mount is None or (mount_id is not None and mount.mount_id != mount_id):
         return
-    if not mount.vfs.SUPPORTS_SNAPSHOT:
+    if not mount.vfs.supports_snapshot:
         return
     # Resolve backend IDs afresh without consulting the restored index.
     try:

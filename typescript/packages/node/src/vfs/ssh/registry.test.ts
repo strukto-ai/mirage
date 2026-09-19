@@ -26,7 +26,7 @@ describe('SSH registry entry', () => {
       identity_file: '~/.ssh/id_ed25519',
       port: 22,
     })
-    expect(r.kind).toBe('ssh')
+    expect(r.name).toBe('ssh')
     await r.close()
   })
 })

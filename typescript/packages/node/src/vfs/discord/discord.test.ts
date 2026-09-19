@@ -49,7 +49,7 @@ describe('DiscordVFS (node)', () => {
 
   it('constructs with token and exposes expected fields', () => {
     const r = new DiscordVFS({ token: 'bot-test' })
-    expect(r.kind).toBe(VFSName.DISCORD)
+    expect(r.name).toBe(VFSName.DISCORD)
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ token: 'bot-test' })
@@ -162,7 +162,7 @@ describe('normalizeDiscordConfig', () => {
 describe('node registry: discord', () => {
   it('builds discord VFS with token', async () => {
     const r = await buildVfs('discord', { token: 'bot-x' })
-    expect(r.kind).toBe(VFSName.DISCORD)
+    expect(r.name).toBe(VFSName.DISCORD)
     expect(r).toBeInstanceOf(DiscordVFS)
   })
 })

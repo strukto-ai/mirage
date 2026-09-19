@@ -36,7 +36,7 @@ export const HISTORY_PREFIX = '/.bash_history'
  * storage of its own.
  */
 export class HistoryViewVFS extends BaseVFS {
-  readonly kind = VFSName.HISTORY
+  readonly name = VFSName.HISTORY
   override readonly cachesReads = false
   // The view renders from in-memory events, so stat() sizes it by
   // rendering: cheap, no network, and never null.
@@ -47,11 +47,6 @@ export class HistoryViewVFS extends BaseVFS {
     super()
     this.accessor = new HistoryAccessor(observer)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override ops(): readonly RegisteredOp[] {
     return HISTORY_OPS
   }

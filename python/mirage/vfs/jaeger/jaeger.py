@@ -35,8 +35,8 @@ class JaegerVFS(BaseVFS):
     # Every listed file carries an exact size: a trace is rendered at readdir
     # from the search payload the listing already fetched, and operations.json
     # is sized by one call per service directory the caller opens.
-    SIZES_ALWAYS_KNOWN: bool = True
-    PROMPT: str = PROMPT
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
 
     def __init__(self, config: JaegerConfig) -> None:
         super().__init__()

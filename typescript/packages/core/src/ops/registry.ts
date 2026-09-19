@@ -160,7 +160,7 @@ export class OpsRegistry {
     filetype: string | null = null,
   ): RegisteredOp | null {
     const owner = typeof vfs === 'object' ? vfs : null
-    const kind = typeof vfs === 'object' ? (vfs?.kind ?? null) : vfs
+    const kind = typeof vfs === 'object' ? (vfs?.name ?? null) : vfs
     return this.entry(keyFor(name, filetype, kind), owner)
   }
 
@@ -191,7 +191,7 @@ export class OpsRegistry {
   ): Promise<unknown> {
     const filetype = kwargs.filetype ?? null
     const owner = typeof vfsKind === 'string' ? null : vfsKind
-    const kind = typeof vfsKind === 'string' ? vfsKind : vfsKind.kind
+    const kind = typeof vfsKind === 'string' ? vfsKind : vfsKind.name
     const levels: OpFn[] = []
     if (filetype !== null) {
       const specific = this.entry(keyFor(name, filetype, kind), owner)

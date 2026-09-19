@@ -33,9 +33,8 @@ describe.skipIf(skip)('RedisVFS against a live Upstash database', () => {
   let vfs: RedisVFS
   let ws: Workspace
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vfs = new RedisVFS({ url: DB_URL ?? '', keyPrefix: prefix })
-    await vfs.open()
     ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
   })
 
