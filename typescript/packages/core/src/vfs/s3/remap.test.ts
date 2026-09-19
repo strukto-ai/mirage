@@ -27,12 +27,17 @@ describe('remapCommandsVfs', () => {
       spec: new CommandSpec(),
       vfs: VFSName.S3,
       fn: FN,
+      read: true,
     })
 
     const [remapped] = remapCommandsVfs([original], VFSName.R2)
 
     expect(remapped).not.toBe(original)
     expect(remapped?.vfs).toBe(VFSName.R2)
+    // Every S3-alias mount (r2, minio, oci, supabase) is built through this
+    // rebuild, so a field dropped here double-probes every warm read on them
+    // with nothing else going red.
+    expect(remapped?.read).toBe(true)
     expect(Object.isFrozen(remapped)).toBe(true)
     expect(() => ((remapped as unknown as { name: string }).name = 'tail')).toThrow()
   })

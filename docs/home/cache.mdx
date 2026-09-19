@@ -11,7 +11,11 @@ Every `Workspace` ships with a **two-layer cache** so repeated work against remo
 - **Index cache.** Listings and metadata. The first directory walk hits the API; subsequent ones serve from the index until the TTL expires.
 - **File cache.** Object bytes. The first read streams from origin; later pipelines read from cache.
 
-Under `ConsistencyPolicy.ALWAYS`, cached file bytes are checked against live backend metadata, bypassing the index. A changed fingerprint triggers a fresh read; a deleted file is evicted. If the backend cannot supply a fingerprint or its probe fails, the read must fetch current bytes or report an error. `LAZY` continues to trust cached bytes.
+Under `ConsistencyPolicy.ALWAYS`, cached file bytes are checked against live backend metadata, bypassing the index. A changed fingerprint triggers a fresh read; a deleted file is evicted. `LAZY` continues to trust cached bytes.
+
+The check happens wherever cached bytes are served, not only for the files a command names: a recursive walk, a glob and a cross-mount fan-out each revalidate every file they read. That costs one backend stat per file, which is the price of the guarantee.
+
+When the check cannot be made — the backend supplies no fingerprint, registers no `stat` at all, or the probe itself fails — the cached copy is dropped and the read fetches current bytes. Bytes that could not be verified are never served, but a transient probe failure does not fail the command either: the cold read that follows reports any real backend failure in the command's own voice, and one flaky stat during a recursive walk costs that file a refetch rather than ending the walk.
 
 A fresh directory listing proves a child absent only when that child is not listed. If a listed child's metadata has been evicted independently, object-store stat fetches it from the backend.
 

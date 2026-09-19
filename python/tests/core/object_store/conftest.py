@@ -199,6 +199,9 @@ class FakeManager:
     async def cached_bytes(self, path: PathSpec) -> Any:
         return None
 
+    async def cached_size(self, path: PathSpec) -> int | None:
+        return None
+
 
 @pytest.fixture
 def accessor() -> FakeAccessor:

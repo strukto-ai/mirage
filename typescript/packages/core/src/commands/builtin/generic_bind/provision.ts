@@ -18,8 +18,7 @@ import { isJsonlPath, isStreamableJsonlExpr } from '../../../core/jq/index.ts'
 import { Precision, ProvisionResult } from '../../../provision/types.ts'
 import { FileType, PathSpec } from '../../../types.ts'
 import { rekey } from '../../../utils/key_prefix.ts'
-import type { CommandOpts, ProvisionFn } from '../../config.ts'
-import { RegisteredCommand } from '../../config.ts'
+import type { CommandOpts, ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { BINARY_EXTENSIONS } from '../constants.ts'
 import { getExtension } from '../../resolve.ts'
 import { compileSpec } from '../../spec/compile.ts'
@@ -635,18 +634,10 @@ export function withDefaultProvisions<A extends Accessor>(
     if (c.filetype !== null || c.provisionFn !== null) return c
     const provision = defaultProvision(c.name, stat, resolveGlob, readdir)
     if (provision === null) return c
-    return new RegisteredCommand({
-      name: c.name,
-      spec: c.spec,
-      vfs: c.vfs,
-      filetype: c.filetype,
-      fn: c.fn,
-      provisionFn: provision as ProvisionFn,
-      aggregate: c.aggregate,
-      src: c.src,
-      dst: c.dst,
-      write: c.write,
-      limit: c.limit,
-    })
+    // withOverrides, not a field-by-field rebuild: this runs on every generic
+    // command that has no provision of its own, so a field left out here is
+    // silently dropped from the whole generic tier. Python's twin is
+    // `registered.with_overrides(provision=...)` over `dataclasses.replace`.
+    return c.withOverrides({ provision: provision as ProvisionFn })
   })
 }

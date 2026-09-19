@@ -41,9 +41,13 @@ function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
     if (result.size !== null) return result
     const manager = activeCacheManager()
     if (manager === null) return result
-    const cached = await manager.cachedBytes(path)
-    if (cached === null) return result
-    return result.with({ size: cached.length })
+    // cachedSize, not cachedBytes: this backfill runs only when the backend
+    // could not name a size, which is precisely the API mounts, so
+    // revalidating here would turn a stat into a backend stat. The length is
+    // read straight out of the cache, ungated.
+    const size = await manager.cachedSize(path)
+    if (size === null) return result
+    return result.with({ size })
   }
 }
 
@@ -248,6 +252,7 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
         provision,
         aggregate,
         write: b.write === true,
+        read: b.read === true,
       }),
     )
   }

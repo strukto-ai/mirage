@@ -129,6 +129,50 @@ class TestCommandDecorator:
         assert rc.write is True
 
 
+class TestRegisteredCommandRead:
+
+    def test_read_defaults_false(self):
+        rc = RegisteredCommand(
+            name="stat",
+            spec=CommandSpec(),
+            vfs="s3",
+            filetype=None,
+            fn=lambda: None,
+        )
+        assert rc.read is False
+
+    def test_read_flag_true(self):
+        rc = RegisteredCommand(
+            name="cat",
+            spec=CommandSpec(),
+            vfs="s3",
+            filetype=None,
+            fn=lambda: None,
+            read=True,
+        )
+        assert rc.read is True
+
+    def test_with_overrides_preserves_read(self):
+        rc = RegisteredCommand(
+            name="cat",
+            spec=CommandSpec(),
+            vfs="s3",
+            filetype=None,
+            fn=lambda: None,
+            read=True,
+        )
+        assert rc.with_overrides(fn=lambda: None).read is True
+
+    def test_decorator_passes_read_through(self):
+        spec = CommandSpec()
+
+        @command("cat", vfs="ram", spec=spec, read=True)
+        async def my_cat(backend, paths, *texts, **kw):
+            pass
+
+        assert my_cat._registered_commands[0].read is True
+
+
 class TestCommandDecoratorWrite:
 
     def test_write_flag_passed_through(self):

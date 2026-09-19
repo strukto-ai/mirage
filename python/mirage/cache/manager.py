@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from mirage.cache.file.io import mutation_lock
@@ -21,6 +21,18 @@ from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+async def _always_serve(_key: str) -> bool:
+    """Default read gate: trust the cache.
+
+    What a manager built outside a workspace answers, having no
+    reconciler to ask.
+
+    Args:
+        _key (str): Mount-absolute cache key, ignored.
+    """
+    return True
 
 
 class CacheManager:
@@ -36,12 +48,15 @@ class CacheManager:
     pipeline runs instead of after the whole command tree.
     """
 
-    def __init__(self,
-                 file_cache: FileCacheMixin | None,
-                 index: IndexCacheStore,
-                 prefix: str,
-                 caches_reads: bool,
-                 owns_path: Callable[[str], bool] = lambda _: True) -> None:
+    def __init__(
+        self,
+        file_cache: FileCacheMixin | None,
+        index: IndexCacheStore,
+        prefix: str,
+        caches_reads: bool,
+        owns_path: Callable[[str], bool] = lambda _: True,
+        may_serve_cached: Callable[[str], Awaitable[bool]] = _always_serve
+    ) -> None:
         """Args:
             file_cache (FileCacheMixin | None): Workspace file cache
                 store; entries are keyed by mount-absolute path.
@@ -51,13 +66,20 @@ class CacheManager:
             prefix (str): Mount prefix (e.g. "/data/").
             caches_reads (bool): Whether the VFS caches reads; the
                 file cache only holds paths for read-caching backends.
-            owns_path: whether this mount still owns a virtual cache key.
+            owns_path (Callable[[str], bool]): whether this mount still
+                owns a virtual cache key.
+            may_serve_cached (Callable[[str], Awaitable[bool]]): the read
+                gate, injected because this class holds no mount and no
+                dispatcher and ``mirage.cache.context`` documents that
+                dependency as one-way. Answers whether a warm entry may
+                still be served; the default trusts the cache.
         """
         self._file_cache = file_cache
         self._index = index
         self._prefix = prefix.rstrip("/")
         self._caches_reads = caches_reads
         self._owns_path = owns_path
+        self._may_serve_cached = may_serve_cached
 
     @asynccontextmanager
     async def mutation(self) -> AsyncIterator[None]:
@@ -124,26 +146,65 @@ class CacheManager:
         key = mount_key(path.virtual, self._prefix)
         return f"{self._prefix}/{key}" if key else self._prefix or "/"
 
-    async def cached_bytes(self, path: PathSpec) -> bytes | None:
-        """Return cached bytes for ``path`` if present, else None.
+    def _readable_cache(self, key: str) -> FileCacheMixin | None:
+        """The file cache this manager may read ``key`` from, if any.
 
-        Lookup only: never fetches from the backend. The single
-        read-cache check, called by the shared read-through wrappers
+        Args:
+            key (str): Mount-absolute cache key.
+        """
+        if not self._caches_reads or not self._owns_path(key):
+            return None
+        return self._file_cache
+
+    async def cached_bytes(self, path: PathSpec) -> bytes | None:
+        """Return cached bytes for ``path`` if present and still valid.
+
+        Never fetches content from the backend. The single read-cache
+        check, called by the shared read-through wrappers
         (``mirage.cache.read_through``) that every read command reads
         through, so warm reads are served from the file cache without the
         command knowing about it.
+
+        This is the second of the two doors that serve cached bytes, and
+        it is the one every shell read uses. It runs the same verdict
+        function as the dispatcher's door, so the two cannot answer
+        differently. ``exists`` comes first so a cold path costs no
+        backend stat; ``get`` comes after the gate so this door never
+        holds bytes a STALE verdict has just evicted (the dispatcher's
+        door reads its copy before asking, and slices whatever it got).
 
         Args:
             path (PathSpec): the path to look up.
         """
         key = self._cache_key(path)
-        if (not self._caches_reads or self._file_cache is None
-                or not self._owns_path(key)):
+        cache = self._readable_cache(key)
+        if cache is None:
             return None
-        if await self._file_cache.exists(key):
-            cached = await self._file_cache.get(key)
-            return cached if self._owns_path(key) else None
-        return None
+        if not await cache.exists(key):
+            return None
+        if not await self._may_serve_cached(key):
+            return None
+        cached = await cache.get(key)
+        return cached if self._owns_path(key) else None
+
+    async def cached_size(self, path: PathSpec) -> int | None:
+        """Return the cached render's byte length, without revalidating.
+
+        The size backfill a render-dependent backend cannot answer for
+        itself (``generic_bind.factory``) runs only where the backend
+        reported no size, which is exactly the API mounts, so gating it
+        would turn a stat into a backend stat. It answers a length rather
+        than content, so nothing can serve unverified bytes through it.
+
+        Args:
+            path (PathSpec): the path to look up.
+        """
+        key = self._cache_key(path)
+        cache = self._readable_cache(key)
+        if cache is None:
+            return None
+        cached = await cache.get(key)
+        return None if cached is None else len(cached)
 
     async def invalidate_after_write(self, path: PathSpec) -> None:
         """Invalidate caches after a write to ``path``.

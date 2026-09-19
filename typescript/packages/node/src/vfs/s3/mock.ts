@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mockClient } from 'aws-sdk-client-mock'
+import { mockClient, type AwsStub } from 'aws-sdk-client-mock'
 import {
   S3Client,
   GetObjectCommand,
@@ -167,6 +167,12 @@ export interface S3Mock {
   store: S3MockStore
   reset(): void
   restore(): void
+  // How many times one command has been sent, and a way to zero that count
+  // without disturbing the stubbed behaviour (`reset` drops the handlers
+  // too). A cost claim is asserted in HTTP verbs, which is what the python
+  // twin counts through its own session.
+  commandCalls(command: Parameters<AwsStub<never, never, never>['commandCalls']>[0]): number
+  resetCalls(): void
 }
 
 export function installS3Mock(store: S3MockStore = new S3MockStore()): S3Mock {
@@ -254,6 +260,10 @@ export function installS3Mock(store: S3MockStore = new S3MockStore()): S3Mock {
     },
     restore: () => {
       mock.restore()
+    },
+    commandCalls: (command) => mock.commandCalls(command).length,
+    resetCalls: () => {
+      mock.resetHistory()
     },
   }
 }

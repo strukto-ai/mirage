@@ -19,6 +19,7 @@ import { stat as githubStat } from '../core/github/stat.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ConsistencyPolicy, FileStat, FileType, PathSpec } from '../types.ts'
 import type { MountEntry } from './mount/mount.ts'
+import { enotsup } from '../utils/errors.ts'
 import { Reconciler } from './reconcile.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -88,12 +89,47 @@ describe('Reconciler', () => {
     await ws.close()
   })
 
-  it('mayServeCached forces a re-read for a live-only backend under ALWAYS', async () => {
-    const ws = new Workspace({ '/data': new RAMVFS() })
-    const mount = mountOf(ws, '/data/f.txt')
-    const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry, ConsistencyPolicy.ALWAYS)
-    expect(await rec.mayServeCached(mount, '/data/f.txt')).toBe(false)
-    await ws.close()
+  it('mayServeCached forces a re-read when the stat carries no fingerprint', async () => {
+    // The path exists and is cached, so the only reason to refuse is the
+    // verdict: RAM stats without a fingerprint, which is UNKNOWN, which
+    // evicts. This used to be answered by a supportsSnapshot short-circuit
+    // that never probed at all.
+    const ram = new RAMVFS()
+    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
+    const ws = new Workspace({ '/data': ram })
+    try {
+      const mount = mountOf(ws, '/data/f.txt')
+      await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
+      const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry, ConsistencyPolicy.ALWAYS)
+      expect(await rec.mayServeCached(mount, '/data/f.txt')).toBe(false)
+      expect(await ws.cache.exists('/data/f.txt')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('mayServeCached serves a fingerprinted live-only backend', async () => {
+    // supportsSnapshot is about whether a mount can be snapshotted, not
+    // about whether its stat carries a content token; box, dropbox, github,
+    // ssh and dify stamp one without setting the flag. Reading the flag here
+    // threw their verified entries away.
+    const ram = new RAMVFS()
+    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
+    const ws = new Workspace({ '/data': ram })
+    try {
+      const mount = mountOf(ws, '/data/f.txt')
+      expect(mount.vfs.supportsSnapshot).not.toBe(true)
+      vi.spyOn(ws.opsRegistry, 'call').mockImplementation(() =>
+        Promise.resolve(new FileStat({ name: 'f.txt', type: FileType.FILE, fingerprint: 'fp1' })),
+      )
+      await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
+      const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry, ConsistencyPolicy.ALWAYS)
+      expect(await rec.mayServeCached(mount, '/data/f.txt')).toBe(true)
+      expect(await ws.cache.exists('/data/f.txt')).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+      await ws.close()
+    }
   })
 
   it('reconcileRead GCs an orphaned overlay when the backend reports gone', async () => {
@@ -114,6 +150,79 @@ describe('Reconciler', () => {
     await rec.reconcileRead(mount, '/data/plain.txt')
     await ws.close()
   })
+
+  it('reconcileRead skips a cached path the gate will probe', async () => {
+    // The gate owns cached-byte freshness; this owns overlay GC. Probing
+    // here as well would stat twice for one warm read.
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    await ws.namespace.ensureLoaded()
+    const mount = mountOf(ws, '/data/f.txt')
+    const probed: string[] = []
+    vi.spyOn(ws.opsRegistry, 'call').mockImplementation((_op, _res, _acc, scope) => {
+      probed.push(scope.virtual)
+      return Promise.resolve(null)
+    })
+    try {
+      await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
+      const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry, ConsistencyPolicy.ALWAYS)
+
+      await rec.reconcileRead(mount, '/data/f.txt', true)
+      expect(probed).toEqual([])
+
+      await rec.reconcileRead(mount, '/data/f.txt', false)
+      expect(probed).toEqual(['/data/f.txt'])
+    } finally {
+      vi.restoreAllMocks()
+      await ws.close()
+    }
+  })
+
+  it('reconcileRead still probes an overlay the gate cannot see', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    await ws.namespace.ensureLoaded()
+    await ws.namespace.setAttrs('/data/gone.txt', { mode: 0o600 })
+    const mount = mountOf(ws, '/data/gone.txt')
+    const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry, ConsistencyPolicy.ALWAYS)
+    await rec.reconcileRead(mount, '/data/gone.txt', true)
+    expect(ws.namespace.metaFor('/data/gone.txt')).toBeNull()
+    await ws.close()
+  })
+
+  it.each(['no_stat_op', 'flaky'])(
+    'an unverifiable probe drops the entry (%s)',
+    async (failure) => {
+      // Both ways of failing to verify end at UNKNOWN -- drop the entry, read
+      // cold -- and that is the whole behavioural contract. What separates
+      // them is the log: a missing op is a permanent capability of the mount,
+      // so warning on every read would be noise, while a throwing stat is an
+      // anomaly worth surfacing. Asserting the log is what keeps the carve-out
+      // from being dead weight.
+      const ram = new RAMVFS()
+      await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
+      const ws = new Workspace({ '/data': ram })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      try {
+        const mount = mountOf(ws, '/data/f.txt')
+        vi.spyOn(ws.opsRegistry, 'call').mockImplementation(() =>
+          Promise.reject(
+            failure === 'no_stat_op'
+              ? enotsup('stubborn', 'stat', '/data/f.txt')
+              : new Error('backend stat unavailable'),
+          ),
+        )
+        await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), {
+          fingerprint: 'fp1',
+        })
+        const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry, ConsistencyPolicy.ALWAYS)
+        expect(await rec.mayServeCached(mount, '/data/f.txt')).toBe(false)
+        expect(await ws.cache.exists('/data/f.txt')).toBe(false)
+        expect(warn.mock.calls.length > 0).toBe(failure === 'flaky')
+      } finally {
+        vi.restoreAllMocks()
+        await ws.close()
+      }
+    },
+  )
 
   it('reconcileRead skips under LAZY', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() })
@@ -150,12 +259,20 @@ describe('unverified freshness probes', () => {
         const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry, ConsistencyPolicy.ALWAYS)
         await ws.cache.set(path, new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
         if (probe === 'failed') {
-          await expect(rec.mayServeCached(mount, path)).rejects.toThrow('probe unavailable')
+          // A probe that cannot run is "cannot verify", not a refusal: the
+          // entry is dropped and the caller reads cold, so one flaky stat
+          // costs a refetch rather than the whole command.
+          expect(await rec.mayServeCached(mount, path)).toBe(false)
+          expect(await ws.cache.exists(path)).toBe(false)
         } else {
           expect(await rec.mayServeCached(mount, path)).toBe(probe === 'fresh')
           expect(await ws.cache.exists(path)).toBe(probe === 'fresh')
         }
         await ws.cache.set(path, new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
+        // Routing-time reconcile drops what it could not verify and lets the
+        // command run: it serves no bytes itself, and raising from here would
+        // abort the whole line. The gate above is where a failed probe
+        // refuses.
         await rec.reconcileRead(mount, path)
         expect(await ws.cache.exists(path)).toBe(probe === 'fresh')
       } finally {

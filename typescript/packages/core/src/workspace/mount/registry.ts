@@ -29,12 +29,13 @@ import { MountEntry } from './mount.ts'
 import { ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
-// The one thing the registry needs from a reconciler. Depending on this local
+// What the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
 // `reconcile` imports the mount layer, not the other way round. The Reconciler
 // satisfies it structurally.
 interface ReadReconciler {
-  reconcileRead(mount: MountEntry, path: string): Promise<void>
+  reconcileRead(mount: MountEntry, path: string, cachedGated?: boolean): Promise<void>
+  mayServeCached(mount: MountEntry, path: string): Promise<boolean>
 }
 
 export const DEV_PREFIX = '/dev/'
@@ -125,6 +126,28 @@ export class MountRegistry {
     for (const m of this.mountList) this.attachManager(m)
   }
 
+  /**
+   * Run the shared read verdict for one mount's cached entry.
+   *
+   * The file cache's door and the dispatcher's door ask the same question,
+   * so they ask the same function; a second verdict rule here is what let
+   * the two drift apart in the first place. The reconciler is read at call
+   * time because `attachFileCache` runs before `setReconciler`, and a
+   * manager with none trusts its cache.
+   *
+   * A retiring mount answers false rather than probing, sending the caller
+   * to a cold read — where `ownsPath` already sends it today. Unlike
+   * python there is no EBUSY to catch: this side's probe calls the ops
+   * registry directly and never enters `mount.use()`, so the synchronous
+   * `retiring` check is the whole guard.
+   */
+  private async mayServeCached(m: MountEntry, key: string): Promise<boolean> {
+    const reconciler = this.reconciler
+    if (reconciler === null) return true
+    if (m.retiring) return false
+    return reconciler.mayServeCached(m, key)
+  }
+
   private attachManager(m: MountEntry): void {
     m.cacheManager = new CacheManager(
       this.cacheStore,
@@ -132,6 +155,7 @@ export class MountRegistry {
       m.prefix,
       cachesReads(m.vfs),
       (path) => !m.retiring && this.tryMountFor(path) === m,
+      (key) => this.mayServeCached(m, key),
     )
   }
 
@@ -484,8 +508,14 @@ export class MountRegistry {
       baseCmd?.write !== true &&
       this.consistency === ConsistencyPolicy.ALWAYS
     ) {
+      // A command whose byte reads go through the cache gate probes each
+      // operand there, so reconciling it here too would stat twice for one
+      // warm read. What the gate never sees is an orphaned overlay, which
+      // reconcileRead still collects. `=== true` is the safe spelling: an
+      // unresolved command reads as not-gated and keeps its probe.
+      const cachedGated = baseCmd?.read === true
       for (const scope of pathScopes) {
-        await this.reconciler.reconcileRead(mount, scope.virtual)
+        await this.reconciler.reconcileRead(mount, scope.virtual, cachedGated)
       }
     }
     return mount

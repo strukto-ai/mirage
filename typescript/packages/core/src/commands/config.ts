@@ -156,6 +156,7 @@ export interface RegisteredCommandInit {
   src?: string | null
   dst?: string | null
   write?: boolean
+  read?: boolean
   limit?: Limit | null
 }
 
@@ -175,6 +176,9 @@ export class RegisteredCommand {
   readonly src: string | null
   readonly dst: string | null
   readonly write: boolean
+  // Byte reads go through the read-through cache. Exact when true; false
+  // only means "not known to be gated".
+  readonly read: boolean
   readonly limit: Limit | null
 
   constructor(init: RegisteredCommandInit) {
@@ -188,6 +192,7 @@ export class RegisteredCommand {
     this.src = init.src ?? null
     this.dst = init.dst ?? null
     this.write = init.write ?? false
+    this.read = init.read ?? false
     this.limit = init.limit ?? null
     Object.freeze(this)
   }
@@ -205,6 +210,7 @@ export class RegisteredCommand {
       src: this.src,
       dst: this.dst,
       write: this.write,
+      read: this.read,
       limit: this.limit,
     })
   }
@@ -262,6 +268,7 @@ export interface CommandOptions<A extends Accessor = Accessor> {
   provision?: ProvisionFn<A> | null
   aggregate?: AggregateFn | null
   write?: boolean
+  read?: boolean
   limit?: Limit | null
 }
 
@@ -468,6 +475,7 @@ export function command<A extends Accessor = Accessor>(
         provisionFn: (options.provision ?? null) as ProvisionFn | null,
         aggregate: options.aggregate ?? null,
         write: options.write ?? false,
+        read: options.read ?? false,
         limit: options.limit ?? null,
       }),
   )

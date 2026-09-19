@@ -25,6 +25,9 @@ class _RecordingInvalidator:
     async def cached_bytes(self, path: PathSpec) -> bytes | None:
         return None
 
+    async def cached_size(self, path: PathSpec) -> int | None:
+        return None
+
 
 async def _record(accessor, path: PathSpec,
                   **kwargs: bool) -> _RecordingInvalidator:

@@ -21,6 +21,9 @@ import { IOResult } from '../../io/types.ts'
 import { BaseVFS, type VFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { isNoMount } from '../../utils/errors.ts'
+import { RAMFileCacheStore } from '../../cache/file/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import type { MountEntry } from './mount.ts'
 import { MountCommandUnsupported, MountRegistry } from './registry.ts'
 
 class StubVFS extends BaseVFS implements VFS {
@@ -443,5 +446,69 @@ describe('MountRegistry mount lookup contract', () => {
       thrown = err
     }
     expect(isNoMount(thrown)).toBe(true)
+  })
+})
+
+describe('MountRegistry read gate', () => {
+  // The closure the registry injects into each mount's CacheManager. Its
+  // job is to run the shared verdict, and to answer without probing in the
+  // two cases where probing is wrong.
+  class StubReconciler {
+    readonly asked: string[] = []
+    constructor(
+      private readonly answer: boolean,
+      private readonly rejects?: Error,
+    ) {}
+    reconcileRead(): Promise<void> {
+      return Promise.resolve()
+    }
+    mayServeCached(_mount: MountEntry, path: string): Promise<boolean> {
+      this.asked.push(path)
+      if (this.rejects !== undefined) return Promise.reject(this.rejects)
+      return Promise.resolve(this.answer)
+    }
+  }
+
+  function gated(reconciler?: StubReconciler) {
+    const registry = new MountRegistry({ data: new RAMVFS() }, MountMode.WRITE)
+    registry.attachFileCache(new RAMFileCacheStore())
+    const mount = registry.mountFor('/data/f.txt')
+    if (reconciler !== undefined) registry.setReconciler(reconciler)
+    return { registry, mount }
+  }
+
+  const gateOf = (registry: MountRegistry) =>
+    registry as unknown as { mayServeCached(m: MountEntry, k: string): Promise<boolean> }
+
+  it('trusts the cache with no reconciler wired', async () => {
+    // attachFileCache runs before setReconciler, so the closure reads the
+    // reconciler at call time and falls back to trusting the cache.
+    const { registry, mount } = gated()
+    expect(await gateOf(registry).mayServeCached(mount, '/data/f.txt')).toBe(true)
+  })
+
+  it('consults the reconciler', async () => {
+    const rec = new StubReconciler(true)
+    const { registry, mount } = gated(rec)
+    expect(await gateOf(registry).mayServeCached(mount, '/data/f.txt')).toBe(true)
+    expect(rec.asked).toEqual(['/data/f.txt'])
+  })
+
+  it('refuses a retiring mount without probing', async () => {
+    const rec = new StubReconciler(true)
+    const { registry, mount } = gated(rec)
+    mount.retiring = true
+    expect(await gateOf(registry).mayServeCached(mount, '/data/f.txt')).toBe(false)
+    expect(rec.asked).toEqual([])
+  })
+
+  it('propagates a probe failure rather than reading as serve-cold', async () => {
+    // The safety valve: swallowing here would turn every backend outage
+    // into a silent cache bypass.
+    const rec = new StubReconciler(true, new Error('backend down'))
+    const { registry, mount } = gated(rec)
+    await expect(gateOf(registry).mayServeCached(mount, '/data/f.txt')).rejects.toThrow(
+      'backend down',
+    )
   })
 })

@@ -37,6 +37,10 @@ class RecordingInvalidator implements CacheInvalidator {
   cachedBytes(): Promise<Uint8Array | null> {
     return Promise.resolve(null)
   }
+
+  cachedSize(): Promise<number | null> {
+    return Promise.resolve(null)
+  }
 }
 
 async function record(path: string, parents?: boolean): Promise<RecordingInvalidator> {

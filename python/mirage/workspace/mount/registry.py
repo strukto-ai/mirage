@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 from typing import Protocol
 from weakref import WeakValueDictionary
 
@@ -36,14 +37,21 @@ DEV_PREFIX = "/dev/"
 
 
 class ReadReconciler(Protocol):
-    """The one thing the registry needs from a reconciler.
+    """What the registry needs from a reconciler.
 
     Depending on this local interface (not the concrete ``Reconciler``)
     keeps the dependency pointing down: ``reconcile`` imports the mount
     layer, not the other way round. The Reconciler satisfies it structurally.
     """
 
-    async def reconcile_read(self, mount: MountEntry, path: str) -> None:
+    async def reconcile_read(self,
+                             mount: MountEntry,
+                             path: str,
+                             *,
+                             cached_gated: bool = False) -> None:
+        ...
+
+    async def may_serve_cached(self, mount: MountEntry, path: str) -> bool:
         ...
 
 
@@ -155,10 +163,46 @@ class MountRegistry:
         for m in self._mounts:
             self._attach_manager(m)
 
+    async def _may_serve_cached(self, m: MountEntry, key: str) -> bool:
+        """Run the shared read verdict for one mount's cached entry.
+
+        The file cache's door and the dispatcher's door ask the same
+        question, so they ask the same function; a second verdict rule here
+        is what let the two drift apart in the first place. The reconciler
+        is read at call time because ``attach_file_cache`` runs before
+        ``set_reconciler``, and a manager with none trusts its cache.
+
+        A retiring mount answers False rather than probing: ``execute_op``
+        raises EBUSY once teardown has started, and ``owns_path`` cannot
+        catch that on its own because it is read before several awaits.
+        False sends the caller to a cold read, which is exactly where
+        ``owns_path`` already sends it today.
+
+        Args:
+            m (MountEntry): the mount whose cache entry is in question.
+            key (str): mount-absolute cache key.
+        """
+        reconciler = self._reconciler
+        if reconciler is None:
+            return True
+        if m.retiring:
+            return False
+        try:
+            return await reconciler.may_serve_cached(m, key)
+        except OSError as exc:
+            if exc.errno != errno.EBUSY:
+                raise
+            return False
+
     def _attach_manager(self, m: MountEntry) -> None:
+
+        async def gate(key: str) -> bool:
+            return await self._may_serve_cached(m, key)
+
         m.cache_manager = CacheManager(
             self._file_cache, m.vfs.index, m.prefix, m.vfs.caches_reads,
-            lambda path: not m.retiring and self.try_mount_for(path) is m)
+            lambda path: not m.retiring and self.try_mount_for(path) is m,
+            gate)
 
     def check_vfs_available(self, vfs: BaseVFS) -> None:
         """A removed VFS instance cannot start a second lifecycle."""
@@ -444,8 +488,12 @@ class MountRegistry:
                 and resolved is not None and not resolved.write
                 and mount.vfs.caches_reads
                 and self._consistency == ConsistencyPolicy.ALWAYS):
+            # A gated command probes each operand at the gate, so probing
+            # here too would stat twice for one warm read. The orphaned
+            # overlay is the part the gate never sees.
             for scope in path_scopes:
-                await self._reconciler.reconcile_read(mount, scope.virtual)
+                await self._reconciler.reconcile_read(
+                    mount, scope.virtual, cached_gated=resolved.read)
 
         return mount
 

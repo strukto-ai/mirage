@@ -46,9 +46,12 @@ async def _cached_stat_result(manager, stat: Callable[...,
     result = await stat(accessor, path, *args, **kwargs)
     if (result is not None and getattr(result, "size", None) is None
             and manager is not None):
-        cached = await manager.cached_bytes(path)
-        if cached is not None:
-            result = result.model_copy(update={"size": len(cached)})
+        # cached_size, not cached_bytes: this runs only where the backend
+        # named no size -- the API mounts -- so gating it would turn a
+        # stat into a backend stat.
+        size = await manager.cached_size(path)
+        if size is not None:
+            result = result.model_copy(update={"size": size})
     return result
 
 
@@ -293,5 +296,6 @@ def make_generic_commands(
                     spec=SPECS[b.name],
                     provision=provision,
                     aggregate=agg,
-                    write=b.write)(bound))
+                    write=b.write,
+                    read=b.read)(bound))
     return commands

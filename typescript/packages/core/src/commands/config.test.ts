@@ -29,6 +29,7 @@ describe('RegisteredCommand', () => {
     })
     expect(rc.filetype).toBeNull()
     expect(rc.write).toBe(false)
+    expect(rc.read).toBe(false)
     expect(rc.provisionFn).toBeNull()
     expect(rc.aggregate).toBeNull()
     expect(rc.src).toBeNull()
@@ -119,5 +120,39 @@ describe('crossCommand()', () => {
     expect(rc.vfs).toBe('ram->disk')
     expect(rc.src).toBe('ram')
     expect(rc.dst).toBe('disk')
+  })
+})
+
+describe('RegisteredCommand.read', () => {
+  // Whether the command's byte reads go through the cache gate, which is what
+  // lets the mount registry skip its own pre-command reconcile.
+  const make = (read?: boolean) =>
+    new RegisteredCommand({
+      name: 'cat',
+      spec: STUB_SPEC,
+      vfs: 's3',
+      fn: STUB_FN,
+      ...(read === undefined ? {} : { read }),
+    })
+
+  it('is carried from the init', () => {
+    expect(make(true).read).toBe(true)
+  })
+
+  it('survives withOverrides', () => {
+    // withOverrides rebuilds field by field, so this is the assertion that
+    // catches a field silently dropping back to its default.
+    expect(make(true).withOverrides({ fn: STUB_FN }).read).toBe(true)
+  })
+
+  it('reaches the registration through command()', () => {
+    const [rc] = command({
+      name: 'cat',
+      vfs: 'ram',
+      spec: STUB_SPEC,
+      fn: STUB_FN,
+      read: true,
+    })
+    expect(rc?.read).toBe(true)
   })
 })
