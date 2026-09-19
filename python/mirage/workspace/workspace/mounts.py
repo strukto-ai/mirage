@@ -245,11 +245,7 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
 
 async def _close_vfs(entry: MountEntry) -> None:
     await entry.activity.wait()
-    close = getattr(entry.vfs, "close", None)
-    if callable(close):
-        result = close()
-        if inspect.isawaitable(result):
-            await result
+    await entry.vfs.close()
 
 
 def _release_vfs(registry: MountRegistry, identity: int,

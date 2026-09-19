@@ -17,6 +17,7 @@ from mirage.server.registry import WorkspaceEntry
 from mirage.server.schemas import (MountSummary, SessionSummary,
                                    WorkspaceBrief, WorkspaceDetail,
                                    WorkspaceInternals)
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
@@ -28,8 +29,8 @@ def _is_auto_prefix(prefix: str) -> bool:
     return prefix in _AUTO_PREFIXES
 
 
-def _mount_description(vfs) -> str:
-    raw = getattr(vfs, "PROMPT", "") or ""
+def _mount_description(vfs: BaseVFS) -> str:
+    raw = vfs.PROMPT
     if len(raw) <= _DESCRIPTION_MAX:
         return raw
     return raw[:_DESCRIPTION_MAX - 1].rstrip() + "\u2026"

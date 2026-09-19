@@ -22,20 +22,15 @@ from mirage.workspace.mount.registry import MountRegistry
 
 
 def vfs_storage_id(vfs: BaseVFS) -> str:
-    """Storage identity of a VFS, with a fallback for custom ones.
+    """Storage identity of a VFS.
 
-    ``BaseVFS`` supplies ``storage_id``, but a third-party VFS
-    may implement the protocol without inheriting it. Falling back to
-    object identity keeps such a VFS correct when it is mounted
-    twice, instead of reading as two separate stores.
+    ``BaseVFS.storage_id`` answers per instance by default, so one
+    object mounted at two prefixes keys as one store rather than two.
 
     Args:
         vfs (BaseVFS): The mounted VFS.
     """
-    fn = getattr(vfs, "storage_id", None)
-    if fn is None:
-        return f"vfs:{id(vfs):x}"
-    return fn()
+    return vfs.storage_id()
 
 
 def storage_key(registry: MountRegistry, path: PathSpec) -> str:

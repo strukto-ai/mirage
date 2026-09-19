@@ -18,9 +18,9 @@ import { stripMount } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
 
-// Python's twin keeps an object-identity fallback for a duck-typed VFS
-// that never inherited `storage_id`. Every TypeScript VFS extends
-// `BaseVFS`, whose per-instance serial is that fallback.
+// `BaseVFS.storageId` answers per instance by default, so one object
+// mounted at two prefixes keys as one store rather than two. Mirrors
+// Python's `vfs_storage_id`.
 export function vfsStorageId(vfs: BaseVFS): string {
   return vfs.storageId()
 }
