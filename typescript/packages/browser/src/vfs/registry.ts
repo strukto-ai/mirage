@@ -14,7 +14,7 @@
 
 import { resolveConfigSecrets } from '@struktoai/mirage-core/secrets/sources'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { errorSummary } from '@struktoai/mirage-core/secrets/summary'
 import type { RedisVFSOptions } from './redis/redis.ts'
@@ -35,7 +35,7 @@ import { recordVfsRef } from '@struktoai/mirage-core/vfs/base'
  * in JSON/YAML, browser configs are typically constructed
  * programmatically and passed in directly.
  */
-export type VFSFactory = (config: Record<string, unknown>) => Promise<VFS>
+export type VFSFactory = (config: Record<string, unknown>) => Promise<BaseVFS>
 
 const REGISTRY: Record<string, VFSFactory> = {
   ram: async (_config) => {
@@ -284,7 +284,7 @@ export async function buildVfs(
   name: string,
   config: Record<string, unknown> = {},
   sources?: Readonly<Record<string, ResolvedSource>>,
-): Promise<VFS> {
+): Promise<BaseVFS> {
   // A `{from, ref, key}` in the config is fetched here, before the
   // VFS's own schema parses, so every credential reaches its
   // client as the plain string it already reads. Python resolves one
@@ -295,7 +295,7 @@ export async function buildVfs(
   if (factory === undefined) {
     throw new Error(`unknown VFS ${JSON.stringify(name)}; known: ${knownVfsNames().join(', ')}`)
   }
-  let built: VFS
+  let built: BaseVFS
   try {
     built = await factory(resolved)
   } catch (err) {

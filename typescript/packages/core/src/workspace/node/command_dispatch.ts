@@ -25,7 +25,7 @@ import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch, mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
@@ -105,7 +105,7 @@ export async function executeCommand(
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  ensureOpen?: (vfs: VFS) => Promise<void>,
+  ensureOpen?: (vfs: BaseVFS) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signal?: AbortSignal,
@@ -318,7 +318,7 @@ async function runCommandBody(
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  ensureOpen?: (vfs: VFS) => Promise<void>,
+  ensureOpen?: (vfs: BaseVFS) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signalIn?: AbortSignal,
@@ -487,7 +487,7 @@ async function runArgv(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  ensureOpen?: (vfs: VFS) => Promise<void>,
+  ensureOpen?: (vfs: BaseVFS) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signal?: AbortSignal,
@@ -640,7 +640,7 @@ async function routeArgv(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  ensureOpen: ((vfs: VFS) => Promise<void>) | undefined,
+  ensureOpen: ((vfs: BaseVFS) => Promise<void>) | undefined,
   runtimeBindings: Record<string, Runtime> | undefined,
   routingDecision: RouteDecision | undefined,
   signal: AbortSignal | undefined,

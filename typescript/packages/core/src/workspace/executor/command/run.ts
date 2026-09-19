@@ -14,7 +14,7 @@
 
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { VFS } from '../../../vfs/base.ts'
+import type { BaseVFS } from '../../../vfs/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
@@ -54,7 +54,7 @@ export interface RunOnMountCtx {
   session: SessionState
   dispatch: DispatchFn
   namespace?: Namespace
-  ensureOpen?: (vfs: VFS) => Promise<void>
+  ensureOpen?: (vfs: BaseVFS) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
   signal?: AbortSignal
@@ -207,7 +207,7 @@ export async function dropMountCaches(registry: MountRegistry): Promise<void> {
     // that was never filled, so a backend whose index *is* its listing
     // (github seeds the whole tree once) cannot tell the drop from an empty
     // repository. Expiring keeps that distinction and the next read refetches.
-    await mount.index?.invalidate()
+    await mount.index.invalidate()
     await mount.cacheManager?.dropPrefix()
   }
 }

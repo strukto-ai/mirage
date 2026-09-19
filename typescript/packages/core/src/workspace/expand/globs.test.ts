@@ -14,13 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import type { NamespaceLinks } from '../../ops/config.ts'
-import { BaseVFS, type VFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { resolveGlobs, type ResourceWithGlob } from './globs.ts'
 
-class PlainVFS extends BaseVFS implements VFS {
+class PlainVFS extends BaseVFS {
   readonly kind = 'plain'
   open(): Promise<void> {
     return Promise.resolve()
@@ -41,14 +41,14 @@ class EchoGlobVFS extends BaseVFS implements ResourceWithGlob {
   override close(): Promise<void> {
     return Promise.resolve()
   }
-  glob(paths: readonly PathSpec[]): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[]): Promise<PathSpec[]> {
     return Promise.resolve([...paths])
   }
 }
 
 // A VFS whose stat answers only once its mount was readied, the way a
 // mount nothing has touched yet behaves.
-class LazyDirVFS extends BaseVFS implements VFS {
+class LazyDirVFS extends BaseVFS {
   readonly kind = 'lazy'
   ready = false
   open(): Promise<void> {
@@ -57,7 +57,7 @@ class LazyDirVFS extends BaseVFS implements VFS {
   override close(): Promise<void> {
     return Promise.resolve()
   }
-  stat(path: PathSpec): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     if (!this.ready) return Promise.reject(enoent(path))
     return Promise.resolve(
       new FileStat({ name: path.virtual.split('/').pop() ?? '', type: FileType.DIRECTORY }),
@@ -87,7 +87,7 @@ class GlobVFS extends BaseVFS implements ResourceWithGlob {
   override close(): Promise<void> {
     return Promise.resolve()
   }
-  glob(): Promise<PathSpec[]> {
+  override glob(): Promise<PathSpec[]> {
     return Promise.resolve(this.results)
   }
 }

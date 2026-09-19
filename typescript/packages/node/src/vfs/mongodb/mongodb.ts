@@ -23,7 +23,6 @@ import { stat as mongoStat } from '@struktoai/mirage-core/core/mongodb/stat'
 import { MONGODB_OPS } from '@struktoai/mirage-core/ops/mongodb/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import {
   redactMongoDBConfig,
   resolveMongoDBConfig,
@@ -54,14 +53,14 @@ export interface MongoDBVFSState {
   needs_override: true
 }
 
-export class MongoDBVFS extends BaseVFS implements VFS {
+export class MongoDBVFS extends BaseVFS {
   readonly kind: string = VFSName.MONGODB
-  readonly cachesReads: boolean = false
+  override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
-  readonly prompt: string
+  override readonly prompt: string
   readonly config: MongoDBConfigResolved
   readonly store: MongoDBStore
-  readonly accessor: MongoDBAccessor
+  override readonly accessor: MongoDBAccessor
 
   constructor(options: MongoDBVFSOptions | MongoDBConfig) {
     super()
@@ -101,27 +100,27 @@ export class MongoDBVFS extends BaseVFS implements VFS {
     await super.close()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return MONGODB_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return MONGODB_COMMANDS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return mongoRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return mongoReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return mongoStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

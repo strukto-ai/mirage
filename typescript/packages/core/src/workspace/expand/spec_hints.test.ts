@@ -14,12 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_SPECS, specOf } from '../../commands/spec/builtins.ts'
-import { BaseVFS, type VFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
 
-class StubVFS extends BaseVFS implements VFS {
+class StubVFS extends BaseVFS {
   readonly kind = 'stub'
   open(): Promise<void> {
     return Promise.resolve()

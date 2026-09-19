@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import type { Limit, MountBackend, MountMode } from '../../types.ts'
 
 export interface MountSpecOptions {
@@ -33,7 +33,7 @@ export interface MountSpecOptions {
 
 export class Mount {
   constructor(
-    readonly vfs: VFS,
+    readonly vfs: BaseVFS,
     readonly options: MountSpecOptions = {},
   ) {}
 }

@@ -14,7 +14,7 @@
 
 import { CacheEntry } from '../../cache/file/entry.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
@@ -238,7 +238,7 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
 
 export function buildMountArgs(
   state: WorkspaceStateDict,
-  overrides: Record<string, VFS> = {},
+  overrides: Record<string, BaseVFS> = {},
   cliOverrides: CLIOverrides = {},
 ): MountArgs {
   if (state.version < FORMAT_VERSION) {
@@ -247,7 +247,7 @@ export function buildMountArgs(
         `(loader expects v${String(FORMAT_VERSION)})`,
     )
   }
-  const normalized: Record<string, VFS> = {}
+  const normalized: Record<string, BaseVFS> = {}
   for (const [prefix, vfs] of Object.entries(overrides)) {
     normalized[normMountPrefix(prefix)] = vfs
   }
@@ -273,7 +273,7 @@ export function buildMountArgs(
         `factory (register) or pass a live instance.`,
     )
   }
-  const mountArgs: Record<string, [VFS, MountMode]> = {}
+  const mountArgs: Record<string, [BaseVFS, MountMode]> = {}
   for (const m of state.mounts) {
     if (!VALID_MODES.includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
@@ -316,7 +316,7 @@ export function buildMountArgs(
 }
 
 /** Builds the VFS a saved mount names, or null when it cannot. */
-export type SavedResourceBuilder = (entry: MountSnapshot) => Promise<VFS | null>
+export type SavedResourceBuilder = (entry: MountSnapshot) => Promise<BaseVFS | null>
 
 /**
  * The `vfs_ref` a saved mount was built from, or null: for one
@@ -385,10 +385,10 @@ export function savedVfsBuild(
  */
 export async function withRebuiltMounts(
   state: WorkspaceStateDict,
-  overrides: Record<string, VFS>,
+  overrides: Record<string, BaseVFS>,
   build: SavedResourceBuilder,
-): Promise<Record<string, VFS>> {
-  const merged: Record<string, VFS> = { ...overrides }
+): Promise<Record<string, BaseVFS>> {
+  const merged: Record<string, BaseVFS> = { ...overrides }
   const held = new Set(Object.keys(overrides).map(normMountPrefix))
   for (const m of state.mounts) {
     if (held.has(normMountPrefix(m.prefix))) continue

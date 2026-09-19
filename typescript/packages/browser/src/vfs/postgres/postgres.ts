@@ -23,7 +23,6 @@ import { stat as postgresStat } from '@struktoai/mirage-core/core/postgres/stat'
 import { POSTGRES_OPS } from '@struktoai/mirage-core/ops/postgres/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import {
   redactPostgresConfig,
   resolvePostgresConfig,
@@ -53,14 +52,14 @@ export interface PostgresVFSState {
   needs_override: true
 }
 
-export class PostgresVFS extends BaseVFS implements VFS {
+export class PostgresVFS extends BaseVFS {
   readonly kind: string = VFSName.POSTGRES
-  readonly cachesReads: boolean = false
+  override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
-  readonly prompt: string
+  override readonly prompt: string
   readonly config: PostgresConfigResolved
   readonly driver: PgDriver
-  readonly accessor: PostgresAccessor
+  override readonly accessor: PostgresAccessor
 
   constructor(options: PostgresVFSOptions | PostgresConfig) {
     super()
@@ -100,27 +99,27 @@ export class PostgresVFS extends BaseVFS implements VFS {
     await super.close()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return POSTGRES_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return POSTGRES_COMMANDS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return postgresRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return postgresReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return postgresStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

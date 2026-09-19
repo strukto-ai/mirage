@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
 import { normMountPrefix } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -44,7 +44,7 @@ function userMounts(ws: Workspace) {
  * prompt python leaves whole and could cut a surrogate pair in half, so this
  * measures and slices `Array.from` -- the same fix `sanitizeLabel` carries.
  */
-export function describeVfs(vfs: VFS): string {
+export function describeVfs(vfs: BaseVFS): string {
   const raw = vfs.prompt ?? ''
   const points = Array.from(raw)
   if (points.length <= DESCRIPTION_MAX) return raw

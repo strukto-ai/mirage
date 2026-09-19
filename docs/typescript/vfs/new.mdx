@@ -170,7 +170,7 @@ For a VFS-specific command:
 Import the command and op arrays at module scope and return them from `commands()` and `ops()`:
 
 ```ts
-export class MyVFS extends BaseVFS implements VFS {
+export class MyVFS extends BaseVFS {
   readonly kind: string = VFSName.MY_VFS
   readonly cachesReads: boolean = true
   readonly prompt: string = MY_PROMPT

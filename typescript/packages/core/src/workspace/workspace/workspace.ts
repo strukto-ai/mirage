@@ -21,7 +21,7 @@ import { IOResult } from '../../io/types.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { type OpKwargs, OpsRegistry } from '../../ops/registry.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
@@ -125,7 +125,7 @@ export class Workspace {
   private readonly wsId: string
   private readonly stateStoreInternal: WorkspaceStateStore
   private readonly ownsStateStore: boolean
-  private readonly sharedMounts = new Set<VFS>()
+  private readonly sharedMounts = new Set<BaseVFS>()
   private readonly meta: WorkspaceMeta
   /**
    * The op table every mount's ops are registered on. Not the op
@@ -137,11 +137,11 @@ export class Workspace {
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
   private shellParserPromise: Promise<ShellParser> | null = null
-  private readonly opened = new Set<VFS>()
-  private readonly openOrder: VFS[] = []
+  private readonly opened = new Set<BaseVFS>()
+  private readonly openOrder: BaseVFS[] = []
   readonly jobTable: JobTable
   readonly agentId: string | null
-  readonly cache: FileCache & VFS
+  readonly cache: FileCache & BaseVFS
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
@@ -197,7 +197,7 @@ export class Workspace {
     this.registry.setConsistency(consistency)
     if (options.index !== undefined) {
       for (const vfs of Object.values(normalized.bare)) {
-        vfs.setIndex?.(options.index)
+        vfs.setIndex(options.index)
       }
     }
     this.wsId = options.workspaceId ?? newWorkspaceId()
@@ -912,7 +912,7 @@ export class Workspace {
    * Add a mount to a running workspace. Registers the VFS's ops globally
    * on this workspace's OpsRegistry so dispatch can find them.
    */
-  addMount(prefix: string, vfs: VFS, mode: MountMode = MountMode.READ): MountEntry {
+  addMount(prefix: string, vfs: BaseVFS, mode: MountMode = MountMode.READ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     this.registry.checkVfsAvailable(vfs)
     const previous = this.registry.allMounts()
@@ -923,7 +923,7 @@ export class Workspace {
       this.registry.tryMountForPrefix(prefix) === null &&
       !this.registry.allMounts().some((mount) => mount.vfs === vfs)
     ) {
-      vfs.setIndex?.(this.indexConfig)
+      vfs.setIndex(this.indexConfig)
     }
     const m = this.registry.mount(prefix, vfs, mode)
     prepareAddedMount(this.registry, m, previous)
@@ -1132,12 +1132,12 @@ export class Workspace {
     return result
   }
 
-  async resolve(path: string): Promise<[VFS, PathSpec, MountMode]> {
+  async resolve(path: string): Promise<[BaseVFS, PathSpec, MountMode]> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.resolveInternal(path)
   }
 
-  private async resolveInternal(path: string): Promise<[VFS, PathSpec, MountMode]> {
+  private async resolveInternal(path: string): Promise<[BaseVFS, PathSpec, MountMode]> {
     if (this.closed) {
       throw new Error('Workspace is closed')
     }
@@ -1148,7 +1148,7 @@ export class Workspace {
     return result
   }
 
-  private async ensureOpen(vfs: VFS): Promise<void> {
+  private async ensureOpen(vfs: BaseVFS): Promise<void> {
     if (this.opened.has(vfs)) return
     const mount = this.registry.allMounts().find((m) => m.vfs === vfs && !m.retiring)
     if (mount === undefined) throw new Error('VFS is no longer mounted')
@@ -1365,7 +1365,7 @@ export class Workspace {
     this: T,
     source: string | Uint8Array,
     options: WorkspaceOptions = {},
-    overrides: Record<string, VFS> = {},
+    overrides: Record<string, BaseVFS> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const bytes = typeof source === 'string' ? readFileBytes(source) : source
@@ -1377,7 +1377,7 @@ export class Workspace {
     this: T,
     state: WorkspaceStateDict,
     options: WorkspaceOptions = {},
-    overrides: Record<string, VFS> = {},
+    overrides: Record<string, BaseVFS> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
@@ -1393,7 +1393,7 @@ export class Workspace {
    * `type` the way Python's loader does, instead of substituting an
    * empty RAMVFS.
    */
-  protected static buildSavedVfs(_entry: MountSnapshot): Promise<VFS | null> {
+  protected static buildSavedVfs(_entry: MountSnapshot): Promise<BaseVFS | null> {
     return Promise.resolve(null)
   }
 
@@ -1401,7 +1401,7 @@ export class Workspace {
     this: T,
     state: WorkspaceStateDict,
     options: WorkspaceOptions = {},
-    overrides: Record<string, VFS> = {},
+    overrides: Record<string, BaseVFS> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const rebuilt = await withRebuiltMounts(state, overrides, (m) => this.buildSavedVfs(m))
@@ -1443,7 +1443,7 @@ export class Workspace {
     opts.ops = options.ops ?? this.opsRegistry
     const parser = options.shellParser ?? this.shellParser
     if (parser !== null) opts.shellParser = parser
-    const overrides: Record<string, VFS> = {}
+    const overrides: Record<string, BaseVFS> = {}
     for (const mount of this.registry.allMounts()) {
       for (const snap of state.mounts) {
         if (snap.prefix === mount.prefix && vfsStateRequiresOverride(snap.vfs_state)) {

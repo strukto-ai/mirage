@@ -23,7 +23,6 @@ import { TokenManager } from '@struktoai/mirage-core/core/google/client'
 import { GDOCS_OPS } from '@struktoai/mirage-core/ops/gdocs/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { GDOCS_PROMPT, GDOCS_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/gdocs/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -41,14 +40,14 @@ export interface GDocsVFSState {
   config: GDocsConfigRedacted
 }
 
-export class GDocsVFS extends BaseVFS implements VFS {
+export class GDocsVFS extends BaseVFS {
   readonly kind: string = VFSName.GDOCS
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 86_400
-  readonly prompt: string = GDOCS_PROMPT
-  readonly writePrompt: string = GDOCS_WRITE_PROMPT
+  override readonly prompt: string = GDOCS_PROMPT
+  override readonly writePrompt: string = GDOCS_WRITE_PROMPT
   readonly config: GDocsConfig
-  readonly accessor: GDocsAccessor
+  override readonly accessor: GDocsAccessor
 
   constructor(config: GDocsConfig) {
     super()
@@ -61,27 +60,27 @@ export class GDocsVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return GDOCS_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return GDOCS_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return gdocsRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return gdocsReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return gdocsStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

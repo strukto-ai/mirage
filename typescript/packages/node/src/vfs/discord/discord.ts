@@ -28,7 +28,6 @@ import { stat as discordStat } from '@struktoai/mirage-core/core/discord/stat'
 import { DISCORD_OPS } from '@struktoai/mirage-core/ops/discord/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { DISCORD_PROMPT, DISCORD_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/discord/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -41,18 +40,18 @@ export interface DiscordVFSState {
   config: DiscordConfigRedacted
 }
 
-export class DiscordVFS extends BaseVFS implements VFS {
+export class DiscordVFS extends BaseVFS {
   readonly kind: string = VFSName.DISCORD
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and members/*.json
   // are rendered at readdir from payloads the listing already fetched, and
   // attachments carry Discord's CDN byte count.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
-  readonly prompt: string = DISCORD_PROMPT
-  readonly writePrompt: string = DISCORD_WRITE_PROMPT
+  override readonly prompt: string = DISCORD_PROMPT
+  override readonly writePrompt: string = DISCORD_WRITE_PROMPT
   readonly config: DiscordConfig
-  readonly accessor: DiscordAccessor
+  override readonly accessor: DiscordAccessor
 
   constructor(config: DiscordConfig) {
     super()
@@ -64,27 +63,27 @@ export class DiscordVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return DISCORD_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return DISCORD_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return discordRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return discordReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return discordStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

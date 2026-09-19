@@ -12,29 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { stripMount } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
 
-// Serial numbers for mounts that declare no storageId, keyed on the
-// object so one instance mounted at two prefixes gets one identity.
-// Browser VFS classes implement VFS directly instead of extending
-// BaseVFS, so they have no storageId; keying on the mount prefix
-// would hand one object two identities and let a self-move through.
-const OBJECT_IDS = new WeakMap<VFS, number>()
-let objectIdCounter = 0
-
-export function vfsStorageId(vfs: VFS): string {
-  const declared = vfs.storageId?.()
-  if (declared !== undefined) return declared
-  let serial = OBJECT_IDS.get(vfs)
-  if (serial === undefined) {
-    serial = ++objectIdCounter
-    OBJECT_IDS.set(vfs, serial)
-  }
-  return `vfs:${String(serial)}`
+// Python's twin keeps an object-identity fallback for a duck-typed VFS
+// that never inherited `storage_id`. Every TypeScript VFS extends
+// `BaseVFS`, whose per-instance serial is that fallback.
+export function vfsStorageId(vfs: BaseVFS): string {
+  return vfs.storageId()
 }
 
 /**

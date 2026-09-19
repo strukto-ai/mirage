@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { VFS } from '../vfs/base.ts'
+import type { BaseVFS } from '../vfs/base.ts'
 import type { PathSpec } from '../types.ts'
 import { enotsup, type MissingOpError } from '../utils/errors.ts'
 
@@ -82,8 +82,8 @@ export function op(name: string, options: OpOptions) {
 
 export class OpsRegistry {
   private readonly registered = new Map<string, RegisteredOp>()
-  private readonly owners = new Map<string, VFS>()
-  private readonly scoped = new WeakMap<VFS, Map<string, RegisteredOp>>()
+  private readonly owners = new Map<string, BaseVFS>()
+  private readonly scoped = new WeakMap<BaseVFS, Map<string, RegisteredOp>>()
 
   register(ro: RegisteredOp): void {
     const key = keyFor(ro.name, ro.filetype, ro.vfs)
@@ -91,7 +91,7 @@ export class OpsRegistry {
     this.owners.delete(key)
   }
 
-  unregisterVfs(vfsKind: string | VFS): void {
+  unregisterVfs(vfsKind: string | BaseVFS): void {
     for (const [key, ro] of this.registered) {
       if (typeof vfsKind === 'string' ? ro.vfs === vfsKind : this.owners.get(key) === vfsKind) {
         this.registered.delete(key)
@@ -100,7 +100,7 @@ export class OpsRegistry {
     }
   }
 
-  registerVfs(vfs: VFS, overwrite = true): void {
+  registerVfs(vfs: BaseVFS, overwrite = true): void {
     const entries = this.collectVfs(vfs)
     this.scoped.set(vfs, entries)
     for (const [key, ro] of entries) {
@@ -110,7 +110,7 @@ export class OpsRegistry {
     }
   }
 
-  private collectVfs(vfs: VFS): Map<string, RegisteredOp> {
+  private collectVfs(vfs: BaseVFS): Map<string, RegisteredOp> {
     const entries = new Map<string, RegisteredOp>()
     const chain: object[] = []
     let proto = Object.getPrototypeOf(vfs) as object | null
@@ -140,7 +140,7 @@ export class OpsRegistry {
     return entries
   }
 
-  private entry(key: string, vfs: VFS | null): RegisteredOp | null {
+  private entry(key: string, vfs: BaseVFS | null): RegisteredOp | null {
     const registered = this.registered.get(key)
     if (registered === undefined) return null
     // Explicit registry overrides and removals remain authoritative.
@@ -156,7 +156,7 @@ export class OpsRegistry {
 
   find(
     name: string,
-    vfs: string | VFS | null,
+    vfs: string | BaseVFS | null,
     filetype: string | null = null,
   ): RegisteredOp | null {
     const owner = typeof vfs === 'object' ? vfs : null
@@ -183,7 +183,7 @@ export class OpsRegistry {
 
   async call(
     name: string,
-    vfsKind: string | VFS,
+    vfsKind: string | BaseVFS,
     accessor: Accessor,
     path: PathSpec,
     args: readonly unknown[] = [],

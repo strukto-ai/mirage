@@ -42,7 +42,7 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { BaseVFS } from '../base.ts'
-import type { FindOptions, VFS } from '../base.ts'
+import type { FindOptions } from '../base.ts'
 import { REDACTED_SECRET } from '../secrets.ts'
 import { REDIS_PROMPT } from './prompt.ts'
 import type { RedisStoreLike } from './store.ts'
@@ -70,17 +70,17 @@ export interface RedisVFSState {
  * fetch. Everything a mount does, ops table and commands included, lives here
  * once, because none of it depends on the transport.
  */
-export class RedisResourceBase extends BaseVFS implements VFS {
+export class RedisResourceBase extends BaseVFS {
   readonly kind: string = VFSName.REDIS
-  readonly cachesReads: boolean = false
+  override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
-  readonly prompt: string = REDIS_PROMPT
+  override readonly prompt: string = REDIS_PROMPT
   readonly store: RedisStoreLike
-  readonly accessor: RedisAccessor
+  override readonly accessor: RedisAccessor
 
-  readonly opsMap: Record<string, unknown> = {
+  override readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,
     write: writeCore,
     readdir: readdirCore,
@@ -133,79 +133,79 @@ export class RedisResourceBase extends BaseVFS implements VFS {
     await super.close()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return REDIS_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return REDIS_COMMANDS
   }
 
-  streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
     return streamCore(this.accessor, p)
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return readCore(this.accessor, p)
   }
 
-  writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
     return writeCore(this.accessor, p, data)
   }
 
-  appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
     return appendBytes(this.accessor, p, data)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return readdirCore(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return statCore(this.accessor, p)
   }
 
-  exists(p: PathSpec): Promise<boolean> {
+  override exists(p: PathSpec): Promise<boolean> {
     return existsCore(this.accessor, p)
   }
 
-  mkdir(p: PathSpec, options?: { recursive?: boolean }): Promise<void> {
+  override mkdir(p: PathSpec, options?: { recursive?: boolean }): Promise<void> {
     return mkdirCore(this.accessor, p, options?.recursive === true)
   }
 
-  rmdir(p: PathSpec): Promise<void> {
+  override rmdir(p: PathSpec): Promise<void> {
     return rmdirCore(this.accessor, p)
   }
 
-  unlink(p: PathSpec): Promise<void> {
+  override unlink(p: PathSpec): Promise<void> {
     return unlinkCore(this.accessor, p)
   }
 
-  rename(src: PathSpec, dst: PathSpec): Promise<void> {
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
     return renameCore(this.accessor, src, dst)
   }
 
-  truncate(p: PathSpec, length: number): Promise<void> {
+  override truncate(p: PathSpec, length: number): Promise<void> {
     return truncateCore(this.accessor, p, length)
   }
 
-  copy(src: PathSpec, dst: PathSpec): Promise<void> {
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
     return copyCore(this.accessor, src, dst)
   }
 
-  rmR(p: PathSpec): Promise<void> {
+  override rmR(p: PathSpec): Promise<void> {
     return rmRCore(this.accessor, p)
   }
 
-  du(p: PathSpec): Promise<number> {
+  override du(p: PathSpec): Promise<number> {
     return duSizeCore(this.accessor, p)
   }
 
-  find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
+  override find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
     return findCore(this.accessor, p, options as RedisFindOptions)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
           mountPrefixOf(p.virtual, p.vfsPath)

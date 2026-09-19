@@ -18,12 +18,12 @@ import { CLISpec } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { BaseVFS, type VFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { isNoMount } from '../../utils/errors.ts'
 import { MountCommandUnsupported, MountRegistry } from './registry.ts'
 
-class StubVFS extends BaseVFS implements VFS {
+class StubVFS extends BaseVFS {
   readonly kind = 'stub'
   open(): Promise<void> {
     return Promise.resolve()
@@ -33,7 +33,7 @@ class StubVFS extends BaseVFS implements VFS {
   }
 }
 
-class RAMStubVFS extends BaseVFS implements VFS {
+class RAMStubVFS extends BaseVFS {
   readonly kind = 'ram'
   open(): Promise<void> {
     return Promise.resolve()
@@ -299,7 +299,7 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
   })
 })
 
-class LimitedVFS extends BaseVFS implements VFS {
+class LimitedVFS extends BaseVFS {
   readonly kind = 'limited'
   open(): Promise<void> {
     return Promise.resolve()

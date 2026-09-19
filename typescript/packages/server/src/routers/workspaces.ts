@@ -17,7 +17,7 @@ import { dirname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Limit } from '@struktoai/mirage-core/types'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { type WorkspaceRegistry } from '../registry.ts'
@@ -173,7 +173,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       } catch {
         return reply.status(400).send({ detail: `snapshot not found: ${path}` })
       }
-      let overrides: Record<string, VFS>
+      let overrides: Record<string, BaseVFS>
       try {
         // An override mount's credential may be a pointer at one of
         // these declarations; a container the constructor will reject

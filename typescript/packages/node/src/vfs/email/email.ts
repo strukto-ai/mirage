@@ -16,7 +16,6 @@ import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
@@ -40,17 +39,17 @@ export interface EmailVFSState {
   config: EmailConfigRedacted
 }
 
-export class EmailVFS extends BaseVFS implements VFS {
+export class EmailVFS extends BaseVFS {
   readonly kind: string = VFSName.EMAIL
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: .email.json is rendered at
   // readdir from the full message source the listing already fetches, and an
   // attachment's size is its decoded payload length.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 86_400
-  readonly prompt: string = EMAIL_PROMPT
+  override readonly prompt: string = EMAIL_PROMPT
   readonly config: EmailConfig
-  readonly accessor: EmailAccessor
+  override readonly accessor: EmailAccessor
 
   constructor(config: EmailConfig) {
     super()
@@ -67,27 +66,27 @@ export class EmailVFS extends BaseVFS implements VFS {
     await super.close()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return EMAIL_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return EMAIL_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return emailRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return emailReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return emailStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

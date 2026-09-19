@@ -22,7 +22,7 @@ import { stat as qdrantStat } from '../../core/qdrant/stat.ts'
 import { QDRANT_OPS } from '../../ops/qdrant/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName, type FileStat, type PathSpec } from '../../types.ts'
-import { BaseVFS, type VFS } from '../base.ts'
+import { BaseVFS } from '../base.ts'
 import {
   type QdrantConfigRedacted,
   redactQdrantConfig,
@@ -44,15 +44,15 @@ export interface QdrantVFSState {
   needs_override: true
 }
 
-export class QdrantVFS extends BaseVFS implements VFS {
+export class QdrantVFS extends BaseVFS {
   readonly kind: string = VFSName.QDRANT
   // readdir seeds exact rendered sizes from the scroll payloads and stat
   // falls back to rendering the row itself, so sizes are exact either way.
-  readonly sizesAlwaysKnown: boolean = true
-  readonly supportsSnapshot: boolean = false
-  readonly prompt: string = QDRANT_PROMPT
+  override readonly sizesAlwaysKnown: boolean = true
+  override readonly supportsSnapshot: boolean = false
+  override readonly prompt: string = QDRANT_PROMPT
   readonly config: QdrantConfigResolved
-  readonly accessor: QdrantAccessor
+  override readonly accessor: QdrantAccessor
 
   constructor(options: QdrantVFSOptions | QdrantConfig) {
     super()
@@ -84,27 +84,27 @@ export class QdrantVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return QDRANT_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return QDRANT_COMMANDS
   }
 
-  glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
     return resolveGlob(this.accessor, paths, this.index)
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return read(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return qdrantReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return qdrantStat(this.accessor, p, this.index)
   }
 }

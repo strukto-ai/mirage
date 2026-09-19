@@ -23,7 +23,6 @@ import { TokenManager } from '@struktoai/mirage-core/core/google/client'
 import { GCAL_OPS } from '@struktoai/mirage-core/ops/gcal/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { GCAL_PROMPT, GCAL_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/gcal/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -41,17 +40,17 @@ export interface GCalVFSState {
   config: GCalConfigRedacted
 }
 
-export class GCalVFS extends BaseVFS implements VFS {
+export class GCalVFS extends BaseVFS {
   readonly kind: string = VFSName.GCAL
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // Shorter than the other Google mounts: a calendar is edited by other
   // people and a day-long index would keep serving a schedule that has
   // already moved.
   override readonly indexTtl: number = 300
-  readonly prompt: string = GCAL_PROMPT
-  readonly writePrompt: string = GCAL_WRITE_PROMPT
+  override readonly prompt: string = GCAL_PROMPT
+  override readonly writePrompt: string = GCAL_WRITE_PROMPT
   readonly config: GCalConfig
-  readonly accessor: GCalAccessor
+  override readonly accessor: GCalAccessor
 
   constructor(config: GCalConfig) {
     super()
@@ -64,27 +63,27 @@ export class GCalVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return GCAL_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return GCAL_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return gcalRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return gcalReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return gcalStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

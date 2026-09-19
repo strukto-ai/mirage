@@ -28,11 +28,11 @@ import type { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { revisionFor } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import { BaseVFS, type VFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
 
-class StubVFS extends BaseVFS implements VFS {
+class StubVFS extends BaseVFS {
   readonly kind = 'ram'
   open(): Promise<void> {
     return Promise.resolve()
@@ -111,7 +111,7 @@ describe('Mount.executeCmd glob operands', () => {
   // here would destroy what the handler needs. Python's dispatcher never
   // expands either.
   class GlobbingVFS extends StubVFS {
-    glob(): Promise<PathSpec[]> {
+    override glob(): Promise<PathSpec[]> {
       return Promise.resolve([PathSpec.fromStrPath('/ram/a.txt', 'a.txt')])
     }
   }

@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Accessor } from '../accessor/base.ts'
 import { record, revisionFor, runWithRecording, startOp } from '../observe/context.ts'
 import { type OpKwargs, OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
-import { BaseVFS, type VFS } from '../vfs/base.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import { writeSnapshotTar } from './snapshot/tar_io.ts'
@@ -70,11 +70,11 @@ class FakeRemoteAccessor extends Accessor {
   }
 }
 
-class FakeRemoteVFS extends BaseVFS implements VFS {
+class FakeRemoteVFS extends BaseVFS {
   readonly kind = 'fake-remote'
-  readonly cachesReads = true
-  readonly supportsSnapshot = true
-  readonly accessor: FakeRemoteAccessor
+  override readonly cachesReads = true
+  override readonly supportsSnapshot = true
+  override readonly accessor: FakeRemoteAccessor
 
   constructor(accessor: FakeRemoteAccessor) {
     super()
@@ -88,7 +88,7 @@ class FakeRemoteVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     const entry = this.accessor.blobs.get(p.virtual)
     if (entry === undefined) {
       const err = new Error(`not found: ${p.virtual}`) as Error & { code: string }
@@ -261,7 +261,6 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
         { '/remote/': new FakeRemoteVFS(accessor) },
       )
       const index = loaded.namespace.mountFor('/remote/a.txt').index
-      if (index === undefined) throw new Error('missing index')
       await index.put(
         '/remote/a.txt',
         new IndexEntry({ id: 'a', name: 'a.txt', resourceType: 'file', size: 2 }),

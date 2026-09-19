@@ -9,7 +9,7 @@ import { MEM0_OPS } from '../../ops/mem0/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName, type FileStat, type PathSpec } from '../../types.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
-import { BaseVFS, type VFS } from '../base.ts'
+import { BaseVFS } from '../base.ts'
 import { MEM0_PROMPT } from './prompt.ts'
 
 const resolveGlob = makeResolveGlob(readdir)
@@ -19,15 +19,15 @@ export interface Mem0VFSState {
   config: Mem0ConfigRedacted
 }
 
-export class Mem0VFS extends BaseVFS implements VFS {
+export class Mem0VFS extends BaseVFS {
   readonly kind: string = VFSName.MEM0
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // readdir and stat store the rendered JSON's byte length and read
   // serves those same bytes, so sizes are exact by construction.
-  readonly sizesAlwaysKnown: boolean = true
-  readonly supportsSnapshot: boolean = false
-  readonly prompt: string = MEM0_PROMPT
-  readonly accessor: Mem0Accessor
+  override readonly sizesAlwaysKnown: boolean = true
+  override readonly supportsSnapshot: boolean = false
+  override readonly prompt: string = MEM0_PROMPT
+  override readonly accessor: Mem0Accessor
 
   private readonly config: Mem0Config
 
@@ -41,27 +41,27 @@ export class Mem0VFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return MEM0_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return MEM0_OPS
   }
 
-  glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
     return resolveGlob(this.accessor, paths, this.index)
   }
 
-  readFile(path: PathSpec): Promise<Uint8Array> {
+  override readFile(path: PathSpec): Promise<Uint8Array> {
     return read(this.accessor, path, this.index)
   }
 
-  readdir(path: PathSpec): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<string[]> {
     return readdir(this.accessor, path, this.index)
   }
 
-  stat(path: PathSpec): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return stat(this.accessor, path, this.index)
   }
 

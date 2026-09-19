@@ -24,7 +24,6 @@ import { buildDeltaHook } from '@struktoai/mirage-core/core/box/watch'
 import { BOX_OPS } from '@struktoai/mirage-core/ops/box/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { BOX_PROMPT } from '@struktoai/mirage-core/vfs/box/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -39,16 +38,16 @@ export interface BoxVFSState {
   config: BoxConfigRedacted
 }
 
-export class BoxVFS extends BaseVFS implements VFS {
+export class BoxVFS extends BaseVFS {
   readonly kind: string = VFSName.BOX
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // Box item listings carry an exact byte `size` for every file (0
   // included); sizeless weblinks are filtered out of listings.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 86_400
-  readonly prompt: string = BOX_PROMPT
+  override readonly prompt: string = BOX_PROMPT
   readonly config: BoxConfig
-  readonly accessor: BoxAccessor
+  override readonly accessor: BoxAccessor
 
   constructor(config: BoxConfig) {
     super()
@@ -69,27 +68,27 @@ export class BoxVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return BOX_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return BOX_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return boxRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return boxReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return boxStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
@@ -107,7 +106,7 @@ export class BoxVFS extends BaseVFS implements VFS {
     return boxResolveGlob(this.accessor, effective, this.index)
   }
 
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 

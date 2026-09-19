@@ -10,7 +10,6 @@ import { stat as wandbStat } from '../../core/wandb/stat.ts'
 import { WANDB_OPS } from '../../ops/wandb/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import { BaseVFS } from '../../vfs/base.ts'
-import type { VFS } from '../../vfs/base.ts'
 import { WANDB_PROMPT } from '../../vfs/wandb/prompt.ts'
 import { PathSpec, VFSName } from '../../types.ts'
 import type { FileStat } from '../../types.ts'
@@ -23,12 +22,12 @@ export interface WandbVFSState {
   config: WandbConfigRedacted
 }
 
-export class WandbVFS extends BaseVFS implements VFS {
+export class WandbVFS extends BaseVFS {
   readonly kind: string = VFSName.WANDB
   override readonly indexTtl: number = 600
-  readonly prompt: string = WANDB_PROMPT
+  override readonly prompt: string = WANDB_PROMPT
   readonly config: WandbConfig
-  readonly accessor: WandbAccessor
+  override readonly accessor: WandbAccessor
 
   constructor(config: WandbConfig) {
     super()
@@ -40,27 +39,27 @@ export class WandbVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return WANDB_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return WANDB_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return wandbRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return wandbReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return wandbStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

@@ -53,8 +53,8 @@ export interface FindOptions {
  *
  * This lived as a private interface in `workspace/snapshot/types.ts`,
  * where `VFSState` still widens it with each backend's own keys; it
- * moved here so the `VFS` contract and the snapshot format name one
- * shape rather than two identical ones. Python needs no such type —
+ * moved here so the `BaseVFS` contract and the snapshot format name
+ * one shape rather than two identical ones. Python needs no such type —
  * `get_state` is annotated `dict[str, Any]` — but a TS interface is not
  * assignable to `Record<string, unknown>` (no implicit index signature),
  * so the literal twin would reject every named `XVFSState`.
@@ -70,48 +70,62 @@ export interface VFSStateBase {
 
 // The `vfs:` value the registry built an instance from: a name
 // (`s3`, `wiki`) or a code reference (`./wiki.mjs:WikiVFS`). Python
-// keeps this on `BaseVFS.vfs_ref`; `VFS` is an interface
-// here, so the fact lives beside it. A snapshot records it so the loader
-// can rebuild the mount through the same door config used, which is the
-// only door that knows a class loaded from a script file.
+// keeps this on `BaseVFS.vfs_ref`; here the fact lives in a table
+// beside the class, keyed by instance. A snapshot records it so the
+// loader can rebuild the mount through the same door config used, which
+// is the only door that knows a class loaded from a script file.
 const VFS_REFS = new WeakMap<object, string>()
 
-export function recordVfsRef(vfs: VFS, ref: string): void {
+export function recordVfsRef(vfs: BaseVFS, ref: string): void {
   VFS_REFS.set(vfs, ref)
 }
 
-export function vfsRefOf(vfs: VFS): string | null {
+export function vfsRefOf(vfs: BaseVFS): string | null {
   return VFS_REFS.get(vfs) ?? null
 }
 
-export interface VFS {
-  /** Closed VFS instances cannot be mounted again. */
-  readonly isClosed?: boolean
-  readonly kind: string
-  readonly prompt?: string
-  readonly writePrompt?: string
-  readonly indexTtl?: number
+export function cachesReads(vfs: BaseVFS): boolean {
+  return vfs.cachesReads
+}
+
+export function sizesAlwaysKnown(vfs: BaseVFS): boolean {
+  return vfs.sizesAlwaysKnown
+}
+
+/**
+ * The driver contract, in one class as Python's `BaseVFS` is: what a
+ * mount must supply (`kind`, `open`), what every mount gets by default
+ * (index, identity, capacity, snapshot state, `close`), and the
+ * native verbs a driver may add. A verb a driver leaves undeclared is
+ * served through its op table instead, so every one of them is
+ * optional here.
+ */
+export abstract class BaseVFS {
+  abstract readonly kind: string
+  declare readonly prompt?: string
+  declare readonly writePrompt?: string
+  readonly indexTtl: number = 600
   /**
    * Whether reads of this VFS may be served from / written to the
-   * local file cache. Defaults to false. A network-backed VFS whose
-   * content is read-mostly (e.g. object storage) sets this to true so
-   * reads can be cached; a VFS whose content is live (e.g. a
-   * database collection) leaves it false so reads always hit the backend
-   * and live follows (`tail -f`) are not masked by a cached snapshot.
+   * local file cache. A network-backed VFS whose content is read-mostly
+   * (e.g. object storage) sets this to true so reads can be cached; a
+   * VFS whose content is live (e.g. a database collection) leaves it
+   * false so reads always hit the backend and live follows (`tail -f`)
+   * are not masked by a cached snapshot.
    */
-  readonly cachesReads?: boolean
+  readonly cachesReads: boolean = false
   /**
    * Whether this VFS carries enough version information for
    * snapshot+replay drift detection. When true, the VFS's
-   * {@link VFS.stat} must populate {@link FileStat.fingerprint}
+   * {@link BaseVFS.stat} must populate {@link FileStat.fingerprint}
    * (and optionally {@link FileStat.revision}) with stable per-path
    * markers. When false (the default), reads are treated as live-only
    * at replay time: no fingerprint is captured at snapshot, no drift
    * check fires at load.
    */
-  readonly supportsSnapshot?: boolean
+  readonly supportsSnapshot: boolean = false
   /**
-   * Whether {@link VFS.stat} can size every regular file without
+   * Whether {@link BaseVFS.stat} can size every regular file without
    * fetching its content, i.e. {@link FileStat.size} is null only for
    * directories. True for byte stores that keep a length in their
    * metadata (ram, disk, redis, s3, gridfs); false for mounts that
@@ -124,19 +138,17 @@ export interface VFS {
    * and a false VFS would serve silent empty files. Mirrors Python's
    * `BaseVFS.SIZES_ALWAYS_KNOWN`.
    */
-  readonly sizesAlwaysKnown?: boolean
-  readonly index?: IndexCacheStore
-  readonly accessor?: Accessor
-  readonly opsMap?: Record<string, unknown>
-  setIndex?(config?: IndexConfig): void
-  open(): Promise<void>
-  close(): Promise<void>
-  // Non-optional on purpose: `toStateDict` calls both on every mount, so an
-  // absent one is a `Workspace.save()` crash rather than a missing feature.
-  // BaseVFS supplies the bare `{type}` default, as Python's does; a
-  // VFS holding config overrides it to carry that config too.
-  getState(): VFSStateBase | Promise<VFSStateBase>
-  loadState(state: VFSStateBase): void | Promise<void>
+  readonly sizesAlwaysKnown: boolean = false
+  declare readonly accessor?: Accessor
+  declare readonly opsMap?: Record<string, unknown>
+  protected _index?: IndexCacheStore
+  // JS has no object-identity primitive, so the default storageId hands
+  // each instance a serial number the first time it is asked.
+  static #storageCounter = 0
+  #storageSeq?: number
+  #closed = false
+
+  abstract open(): Promise<void>
   ops?(): readonly RegisteredOp[]
   commands?(): readonly RegisteredCommand[]
 
@@ -157,38 +169,7 @@ export interface VFS {
   du?(path: PathSpec): Promise<number>
   find?(path: PathSpec, options?: FindOptions): Promise<string[]>
   glob?(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
-  // Capacity for df. Absent -> treated as UNKNOWN (rendered `-`). Implement
-  // only where a truthful number exists (a real filesystem, or a provider
-  // quota); never fabricate a total.
-  statfs?(): Promise<CapacityResult>
-  // Identity of the storage behind this VFS, so cp/mv can tell two
-  // prefixes over one store from two genuinely separate ones. Absent ->
-  // every mount is treated as its own storage, which only preserves the
-  // pre-existing behavior; see BaseVFS.storageId.
-  storageId?(): string
   deltaHook?(): DeltaHook
-}
-
-export function cachesReads(vfs: VFS): boolean {
-  return vfs.cachesReads === true
-}
-
-export function sizesAlwaysKnown(vfs: VFS): boolean {
-  return vfs.sizesAlwaysKnown === true
-}
-
-export abstract class BaseVFS {
-  // Named here rather than only on the VFS interface so the state
-  // defaults below can spell themselves, mirroring Python's
-  // `BaseVFS.name`.
-  abstract readonly kind: string
-  readonly indexTtl: number = 600
-  protected _index?: IndexCacheStore
-  // JS has no object-identity primitive, so the default storageId hands
-  // each instance a serial number the first time it is asked.
-  static #storageCounter = 0
-  #storageSeq?: number
-  #closed = false
 
   get index(): IndexCacheStore {
     let store = this._index
@@ -232,8 +213,9 @@ export abstract class BaseVFS {
     return `${this.constructor.name}:${String(this.#storageSeq)}`
   }
 
-  // Default df capacity: UNKNOWN (rendered `-`). Backends that can report
-  // truthfully — a real filesystem, or a provider quota — override this.
+  // Capacity for df. Default: UNKNOWN (rendered `-`). Implement only
+  // where a truthful number exists (a real filesystem, or a provider
+  // quota); never fabricate a total.
   statfs(): Promise<CapacityResult> {
     return Promise.resolve({ state: CapacityState.UNKNOWN })
   }
@@ -242,8 +224,9 @@ export abstract class BaseVFS {
    * The snapshot state of a VFS that holds nothing of its own: the
    * class name, so `Workspace.load` can rebuild it. Storage-backed
    * mounts override this to carry their bytes, config-backed ones to
-   * carry their (redacted) config. Mirrors Python
-   * `BaseVFS.get_state`.
+   * carry their (redacted) config. `toStateDict` calls this and
+   * {@link BaseVFS.loadState} on every mount, which is why neither is
+   * optional. Mirrors Python `BaseVFS.get_state`.
    */
   getState(): VFSStateBase | Promise<VFSStateBase> {
     return { type: this.kind }

@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { BaseVFS, type VFS } from '../../../vfs/base.ts'
+import { BaseVFS } from '../../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { MountRegistry } from '../../mount/registry.ts'
 import { classifyParts } from './parts.ts'
 
-class StubVFS extends BaseVFS implements VFS {
+class StubVFS extends BaseVFS {
   readonly kind = 'stub'
   open(): Promise<void> {
     return Promise.resolve()

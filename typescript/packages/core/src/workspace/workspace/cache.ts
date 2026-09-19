@@ -15,9 +15,9 @@
 import { CacheType, type CacheConfig, type RedisCacheConfig } from '../../cache/file/config.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 
-export type FileCacheStore = FileCache & VFS
+export type FileCacheStore = FileCache & BaseVFS
 export type FileCacheFactory = (config: RedisCacheConfig) => FileCacheStore
 
 const FACTORIES: Record<string, FileCacheFactory> = {}

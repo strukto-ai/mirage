@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileCache } from '../../cache/file/mixin.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
@@ -21,15 +21,15 @@ import type { WatchManager } from './watch.ts'
 
 export interface CloseDeps {
   watch: WatchManager
-  cache: FileCache & VFS
+  cache: FileCache & BaseVFS
   ownsStateStore: boolean
   stateStore: WorkspaceStateStore
   closers: (() => Promise<void>)[]
   jobTable: JobTable
   registry: MountRegistry
-  opened: Set<VFS>
-  openOrder: VFS[]
-  sharedMounts: Set<VFS>
+  opened: Set<BaseVFS>
+  openOrder: BaseVFS[]
+  sharedMounts: Set<BaseVFS>
 }
 
 /**
@@ -97,7 +97,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       // Mirrors the try/finally pairing in Python's `close_async`.
       await deps.cache.close()
     }
-    const toClose = new Set<VFS>(deps.openOrder)
+    const toClose = new Set<BaseVFS>(deps.openOrder)
     for (const mount of deps.registry.allMounts()) {
       toClose.add(mount.vfs)
     }

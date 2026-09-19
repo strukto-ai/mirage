@@ -16,7 +16,7 @@ import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import { NOOPAccessor } from '../accessor/base.ts'
 import type { FileCache } from '../cache/file/mixin.ts'
 import type { OpsRegistry } from '../ops/registry.ts'
-import type { VFS } from '../vfs/base.ts'
+import type { BaseVFS } from '../vfs/base.ts'
 import { ConsistencyPolicy, FileStat, PathSpec } from '../types.ts'
 import { enoent, isEnoent } from '../utils/errors.ts'
 import { mountKey } from '../utils/key_prefix.ts'
@@ -52,13 +52,13 @@ enum Verdict {
  * runtimes), so this is a thin coordinator holding references, not config.
  */
 export class Reconciler {
-  private readonly cache: FileCache & VFS
+  private readonly cache: FileCache & BaseVFS
   private readonly namespace: Namespace
   private readonly opsRegistry: OpsRegistry
   private readonly consistency: ConsistencyPolicy
 
   constructor(
-    cache: FileCache & VFS,
+    cache: FileCache & BaseVFS,
     namespace: Namespace,
     opsRegistry: OpsRegistry,
     consistency: ConsistencyPolicy,
@@ -93,7 +93,7 @@ export class Reconciler {
     } catch (err) {
       if (isEnoent(err)) {
         await this.onMissing(path)
-        await mount.index?.clear()
+        await mount.index.clear()
         return Verdict.GONE
       }
       throw err
@@ -101,12 +101,12 @@ export class Reconciler {
     const fp = remoteStat instanceof FileStat ? remoteStat.fingerprint : null
     if (fp === null) {
       await this.cache.remove(path)
-      await mount.index?.clear()
+      await mount.index.clear()
       return Verdict.UNKNOWN
     }
     if (!(await this.cache.isFresh(path, fp))) {
       await this.cache.remove(path)
-      await mount.index?.clear()
+      await mount.index.clear()
       return Verdict.STALE
     }
     return Verdict.FRESH
@@ -120,9 +120,9 @@ export class Reconciler {
   // fresh read also surfaces a remote delete via its own ENOENT).
   async mayServeCached(mount: MountEntry, path: string): Promise<boolean> {
     if (this.consistency !== ConsistencyPolicy.ALWAYS) return true
-    if (mount.vfs.supportsSnapshot !== true) {
+    if (!mount.vfs.supportsSnapshot) {
       await this.cache.remove(path)
-      await mount.index?.clear()
+      await mount.index.clear()
       return false
     }
     const verdict = await this.probe(mount, path)
@@ -145,7 +145,7 @@ export class Reconciler {
     } catch {
       // transient probe error: let the command read the backend directly
       await this.cache.remove(path)
-      await mount.index?.clear()
+      await mount.index.clear()
     }
   }
 

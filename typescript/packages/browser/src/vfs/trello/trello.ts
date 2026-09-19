@@ -23,7 +23,6 @@ import { stat as trelloStat } from '@struktoai/mirage-core/core/trello/stat'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { TRELLO_OPS } from '@struktoai/mirage-core/ops/trello/index'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { TRELLO_PROMPT, TRELLO_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/trello/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -37,14 +36,14 @@ export interface TrelloVFSState {
   config: TrelloConfigRedacted
 }
 
-export class TrelloVFS extends BaseVFS implements VFS {
+export class TrelloVFS extends BaseVFS {
   readonly kind: string = VFSName.TRELLO
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 600
-  readonly prompt: string = TRELLO_PROMPT
-  readonly writePrompt: string = TRELLO_WRITE_PROMPT
+  override readonly prompt: string = TRELLO_PROMPT
+  override readonly writePrompt: string = TRELLO_WRITE_PROMPT
   readonly config: TrelloConfig
-  readonly accessor: TrelloAccessor
+  override readonly accessor: TrelloAccessor
 
   constructor(config: TrelloConfig) {
     super()
@@ -64,27 +63,27 @@ export class TrelloVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return TRELLO_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return TRELLO_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return trelloRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return trelloReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return trelloStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

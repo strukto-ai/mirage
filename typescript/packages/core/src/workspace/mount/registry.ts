@@ -19,7 +19,7 @@ import type { WorkspaceRuntime } from '../../runtime/table.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
-import { cachesReads, type VFS } from '../../vfs/base.ts'
+import { cachesReads, type BaseVFS } from '../../vfs/base.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { Decisions, MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.ts'
 import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
@@ -65,8 +65,8 @@ export interface OpsMountInfo {
 
 export class MountRegistry {
   private readonly mountList: MountEntry[]
-  readonly retiringMounts = new Map<VFS, Promise<void>>()
-  readonly retiredMounts = new WeakSet<VFS>()
+  readonly retiringMounts = new Map<BaseVFS, Promise<void>>()
+  readonly retiredMounts = new WeakSet<BaseVFS>()
   private rootRef: MountEntry | null = null
   private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
   private cacheStore: FileCache | null = null
@@ -106,7 +106,7 @@ export class MountRegistry {
     await this.cacheStore?.clear()
     for (const mount of this.allMounts()) {
       if (mount.cacheManager !== null) await mount.cacheManager.clearIndex(mount.vfs.index)
-      else await mount.use(() => mount.vfs.index?.clear() ?? Promise.resolve())
+      else await mount.use(() => mount.vfs.index.clear())
     }
   }
 
@@ -128,7 +128,7 @@ export class MountRegistry {
   private attachManager(m: MountEntry): void {
     m.cacheManager = new CacheManager(
       this.cacheStore,
-      m.vfs.index ?? null,
+      m.vfs.index,
       m.prefix,
       cachesReads(m.vfs),
       (path) => !m.retiring && this.tryMountFor(path) === m,
@@ -136,7 +136,7 @@ export class MountRegistry {
   }
 
   constructor(
-    mounts: Record<string, VFS>,
+    mounts: Record<string, BaseVFS>,
     defaultMode: MountMode,
     modeOverrides: Record<string, MountMode> = {},
   ) {
@@ -153,7 +153,7 @@ export class MountRegistry {
       if (seen.has(prefix)) {
         throw new Error(`duplicate mount prefix: ${prefix}`)
       }
-      if (vfs.isClosed === true) throw new Error('VFS is closed; create a new VFS instance')
+      if (vfs.isClosed) throw new Error('VFS is closed; create a new VFS instance')
       seen.add(prefix)
       const mode = overrides[prefix] ?? defaultMode
       const entry = new MountEntry({ prefix, vfs, mode })
@@ -175,11 +175,11 @@ export class MountRegistry {
   }
 
   /** A removed VFS instance cannot start a second lifecycle. */
-  checkVfsAvailable(vfs: VFS): void {
+  checkVfsAvailable(vfs: BaseVFS): void {
     if (this.retiringMounts.has(vfs) || this.mountList.some((m) => m.vfs === vfs && m.retiring)) {
       throw new Error('VFS is being unmounted')
     }
-    if (vfs.isClosed === true || this.retiredMounts.has(vfs)) {
+    if (vfs.isClosed || this.retiredMounts.has(vfs)) {
       throw new Error('VFS is closed; create a new VFS instance')
     }
   }
@@ -191,7 +191,7 @@ export class MountRegistry {
    */
   mount(
     prefix: string,
-    vfs: VFS,
+    vfs: BaseVFS,
     mode: MountMode = MountMode.READ,
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
   ): MountEntry {
@@ -312,7 +312,7 @@ export class MountRegistry {
     }))
   }
 
-  findVfsByName(vfsName: string | null): VFS | null {
+  findVfsByName(vfsName: string | null): BaseVFS | null {
     if (vfsName === null) return null
     for (const m of this.mountList) {
       if (m.vfs.kind === vfsName) return m.vfs
@@ -354,7 +354,7 @@ export class MountRegistry {
     return this.cacheStore
   }
 
-  resolve(path: string): [VFS, PathSpec, MountMode] {
+  resolve(path: string): [BaseVFS, PathSpec, MountMode] {
     const m = this.mountFor(path)
     const hadTrailing = path.endsWith('/')
     const norm = `/${stripSlash(path)}`

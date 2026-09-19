@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -49,7 +49,7 @@ function s3Config(bucket: string): S3Config {
 
 interface MountState {
   kind: BackendKind
-  vfs: VFS
+  vfs: BaseVFS
   diskRoot: string | null
   s3Bucket: string | null
 }

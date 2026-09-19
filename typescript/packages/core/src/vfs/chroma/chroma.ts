@@ -22,7 +22,7 @@ import { stat as chromaStat } from '../../core/chroma/stat.ts'
 import { CHROMA_OPS } from '../../ops/chroma/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName, type FileStat, type PathSpec } from '../../types.ts'
-import { BaseVFS, type VFS } from '../base.ts'
+import { BaseVFS } from '../base.ts'
 import {
   type ChromaConfigRedacted,
   redactChromaConfig,
@@ -44,17 +44,17 @@ export interface ChromaVFSState {
   needs_override: true
 }
 
-export class ChromaVFS extends BaseVFS implements VFS {
+export class ChromaVFS extends BaseVFS {
   readonly kind: string = VFSName.CHROMA
-  readonly cachesReads: boolean = false
-  readonly supportsSnapshot: boolean = false
+  override readonly cachesReads: boolean = false
+  override readonly supportsSnapshot: boolean = false
   // Every file is sized exactly, by one chunk scan per directory the caller
   // stats; the path tree's own size is the producer's source number and
   // never becomes the reported byte length.
-  readonly sizesAlwaysKnown: boolean = true
-  readonly prompt: string = CHROMA_PROMPT
+  override readonly sizesAlwaysKnown: boolean = true
+  override readonly prompt: string = CHROMA_PROMPT
   readonly config: ChromaConfigResolved
-  readonly accessor: ChromaAccessor
+  override readonly accessor: ChromaAccessor
 
   constructor(options: ChromaVFSOptions | ChromaConfig) {
     super()
@@ -86,27 +86,27 @@ export class ChromaVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return CHROMA_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return CHROMA_COMMANDS
   }
 
-  glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
     return resolveGlob(this.accessor, paths, this.index)
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return readBytes(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return chromaReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return chromaStat(this.accessor, p, this.index)
   }
 }

@@ -24,7 +24,7 @@ import type { ProvisionFn, RegisteredCommand } from '../commands/config.ts'
 import { makeGenericOps } from '../ops/generic/factory.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
 import type { FileStat, PathSpec } from '../types.ts'
-import { BaseVFS, type FindOptions, type VFS, type VFSStateBase } from './base.ts'
+import { BaseVFS, type FindOptions, type VFSStateBase } from './base.ts'
 
 export interface GenericVFSOptions<A extends Accessor = Accessor> {
   /**
@@ -110,15 +110,15 @@ export interface GenericVFSOptions<A extends Accessor = Accessor> {
  * as `Any` for contravariance reasons documented on its own op
  * protocols.
  */
-export class GenericVFS<A extends Accessor = Accessor> extends BaseVFS implements VFS {
+export class GenericVFS<A extends Accessor = Accessor> extends BaseVFS {
   readonly kind: string
-  readonly accessor: A
+  override readonly accessor: A
   readonly io: CommandIO<A>
-  readonly prompt: string
-  readonly writePrompt: string
-  readonly cachesReads: boolean
-  readonly sizesAlwaysKnown: boolean
-  readonly supportsSnapshot: boolean
+  override readonly prompt: string
+  override readonly writePrompt: string
+  override readonly cachesReads: boolean
+  override readonly sizesAlwaysKnown: boolean
+  override readonly supportsSnapshot: boolean
   readonly #commands: readonly RegisteredCommand[]
   readonly #ops: readonly RegisteredOp[]
   readonly #glob: ResolveGlobOp<A>
@@ -214,15 +214,15 @@ export class GenericVFS<A extends Accessor = Accessor> extends BaseVFS implement
     return { type: this.kind, needs_override: true }
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return this.#commands
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return this.#ops
   }
 
-  glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
     return this.#glob(this.accessor, paths, this.index)
   }
 
@@ -232,19 +232,19 @@ export class GenericVFS<A extends Accessor = Accessor> extends BaseVFS implement
   // are installed per instance above. What stays banned either way is a
   // forwarder that throws for a field the backend never filled, which
   // would answer a feature probe with a lie.
-  readFile(path: PathSpec): Promise<Uint8Array> {
+  override readFile(path: PathSpec): Promise<Uint8Array> {
     return this.io.readBytes(this.accessor, path, this.index)
   }
 
-  readdir(path: PathSpec): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<string[]> {
     return this.io.readdir(this.accessor, path, this.index)
   }
 
-  stat(path: PathSpec): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return this.io.stat(this.accessor, path, this.index)
   }
 
-  streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
     return this.io.readStream(this.accessor, path, this.index)
   }
 }

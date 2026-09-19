@@ -43,7 +43,7 @@ import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../obs
 import { uuid7 } from '../../utils/ids.ts'
 import { VFSActivity } from './activity.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { type Limit, ConsistencyPolicy, FileType, MountMode, PathSpec } from '../../types.ts'
 import { ebusy, enotsup, erofsReadOnly } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -84,7 +84,7 @@ function crossKey(name: string, targetVfs: string): string {
 
 export interface MountInit {
   prefix: string
-  vfs: VFS
+  vfs: BaseVFS
   mode?: MountMode
   consistency?: ConsistencyPolicy
 }
@@ -92,7 +92,7 @@ export interface MountInit {
 export class MountEntry {
   readonly mountId = uuid7()
   readonly prefix: string
-  readonly vfs: VFS
+  readonly vfs: BaseVFS
   mode: MountMode
   readonly consistency: ConsistencyPolicy
   activity = new VFSActivity()
@@ -152,9 +152,9 @@ export class MountEntry {
   }
 
   /** Metadata access bound to this mount's ownership. */
-  get index(): IndexCacheStore | undefined {
+  get index(): IndexCacheStore {
     const index = this.vfs.index
-    return index === undefined ? undefined : (this.cacheManager?.scopeIndex(index) ?? index)
+    return this.cacheManager?.scopeIndex(index) ?? index
   }
 
   /** Finish deferred mount preparation before any backend or cache read. */
@@ -520,7 +520,7 @@ export class MountEntry {
         mountPrefix,
         command: cmdName,
         cwd: context.cwd ?? ROOT_CWD,
-        ...(this.index !== undefined ? { index: this.index } : {}),
+        index: this.index,
         ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
         ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
         ...(context.env !== undefined ? { env: context.env } : {}),
@@ -697,7 +697,7 @@ export class MountEntry {
       })
       const effectiveKwargs: OpKwargs = {
         ...kwargs,
-        ...(kwargs.index === undefined && this.index !== undefined ? { index: this.index } : {}),
+        ...(kwargs.index === undefined ? { index: this.index } : {}),
         ...(filetype !== null && kwargs.filetype === undefined ? { filetype } : {}),
       }
       const accessor = this.vfs.accessor ?? NOOP_ACCESSOR

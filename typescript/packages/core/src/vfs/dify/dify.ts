@@ -22,7 +22,7 @@ import { stat as difyStat } from '../../core/dify/stat.ts'
 import { DIFY_OPS } from '../../ops/dify/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import { VFSName, type FileStat, type PathSpec } from '../../types.ts'
-import { BaseVFS, type VFS } from '../base.ts'
+import { BaseVFS } from '../base.ts'
 import {
   type DifyConfigRedacted,
   redactDifyConfig,
@@ -44,13 +44,13 @@ export interface DifyVFSState {
   needs_override: true
 }
 
-export class DifyVFS extends BaseVFS implements VFS {
+export class DifyVFS extends BaseVFS {
   readonly kind: string = VFSName.DIFY
-  readonly cachesReads: boolean = true
-  readonly supportsSnapshot: boolean = false
-  readonly prompt: string = DIFY_PROMPT
+  override readonly cachesReads: boolean = true
+  override readonly supportsSnapshot: boolean = false
+  override readonly prompt: string = DIFY_PROMPT
   readonly config: DifyConfigResolved
-  readonly accessor: DifyAccessor
+  override readonly accessor: DifyAccessor
 
   constructor(options: DifyVFSOptions | DifyConfig) {
     super()
@@ -82,27 +82,27 @@ export class DifyVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return DIFY_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return DIFY_COMMANDS
   }
 
-  glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
     return resolveGlob(this.accessor, paths, this.index)
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return readBytes(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return difyReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return difyStat(this.accessor, p, this.index)
   }
 }

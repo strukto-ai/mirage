@@ -19,7 +19,7 @@ import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import {
@@ -96,7 +96,7 @@ export interface ExecuteEnv {
   router: Router
   secretSources(): Promise<Readonly<Record<string, ResolvedSource>>>
   registerCloser(fn: () => Promise<void>): void
-  ensureOpen(vfs: VFS): Promise<void>
+  ensureOpen(vfs: BaseVFS): Promise<void>
   invalidateAllAfterRemote(): Promise<void>
   provision(
     command: string,
@@ -383,7 +383,7 @@ async function runLine(
       registerCloser: (fn: () => Promise<void>) => {
         env.registerCloser(fn)
       },
-      ensureOpen: (vfs: VFS) => env.ensureOpen(vfs),
+      ensureOpen: (vfs: BaseVFS) => env.ensureOpen(vfs),
       runtimeBindings: env.runtimes.bindings,
       // Alias expansion rewrites the head word and reads the result as a
       // fresh line, so it needs the same parser the line reader used. The

@@ -23,7 +23,6 @@ import { stat as langfuseStat } from '@struktoai/mirage-core/core/langfuse/stat'
 import { LANGFUSE_OPS } from '@struktoai/mirage-core/ops/langfuse/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { LANGFUSE_PROMPT } from '@struktoai/mirage-core/vfs/langfuse/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -37,13 +36,13 @@ export interface LangfuseVFSState {
   config: LangfuseConfigRedacted
 }
 
-export class LangfuseVFS extends BaseVFS implements VFS {
+export class LangfuseVFS extends BaseVFS {
   readonly kind: string = VFSName.LANGFUSE
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 600
-  readonly prompt: string = LANGFUSE_PROMPT
+  override readonly prompt: string = LANGFUSE_PROMPT
   readonly config: LangfuseConfig
-  readonly accessor: LangfuseAccessor
+  override readonly accessor: LangfuseAccessor
 
   constructor(config: LangfuseConfig) {
     super()
@@ -74,27 +73,27 @@ export class LangfuseVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return LANGFUSE_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return LANGFUSE_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return langfuseRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return langfuseReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return langfuseStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

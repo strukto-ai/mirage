@@ -24,7 +24,6 @@ import { buildDeltaHook } from '@struktoai/mirage-core/core/dropbox/watch'
 import { DROPBOX_OPS } from '@struktoai/mirage-core/ops/dropbox/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { DROPBOX_PROMPT } from '@struktoai/mirage-core/vfs/dropbox/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -39,16 +38,16 @@ export interface DropboxVFSState {
   config: DropboxConfigRedacted
 }
 
-export class DropboxVFS extends BaseVFS implements VFS {
+export class DropboxVFS extends BaseVFS {
   readonly kind: string = VFSName.DROPBOX
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // list_folder carries an exact byte `size` for every file (0 included).
   // Paper docs 409 on raw download, a loud error, never a silent empty read.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 86_400
-  readonly prompt: string = DROPBOX_PROMPT
+  override readonly prompt: string = DROPBOX_PROMPT
   readonly config: DropboxConfig
-  readonly accessor: DropboxAccessor
+  override readonly accessor: DropboxAccessor
 
   constructor(config: DropboxConfig) {
     super()
@@ -65,27 +64,27 @@ export class DropboxVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return DROPBOX_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return DROPBOX_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return dropboxRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return dropboxReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return dropboxStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
@@ -103,7 +102,7 @@ export class DropboxVFS extends BaseVFS implements VFS {
     return dropboxResolveGlob(this.accessor, effective, this.index)
   }
 
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 

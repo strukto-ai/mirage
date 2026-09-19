@@ -14,7 +14,7 @@
 
 import { resolveConfigSecrets } from '@struktoai/mirage-core/secrets/sources'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { errorSummary } from '@struktoai/mirage-core/secrets/summary'
 import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
@@ -35,7 +35,7 @@ import { loadAttr } from './loader.ts'
  * by the Python `mirage.config` loader) to TS-idiomatic camelCase. So
  * the same YAML file works in both Python and TS.
  */
-export type VFSFactory = (config: Record<string, unknown>) => Promise<VFS>
+export type VFSFactory = (config: Record<string, unknown>) => Promise<BaseVFS>
 
 const REGISTRY: Record<string, VFSFactory> = {
   ram: async (_config) => {
@@ -372,7 +372,7 @@ function vfsDefect(value: unknown): string | null {
  * Python's does not: `build_vfs` is synchronous there, so an
  * out-of-tree Python class hydrates lazily instead.
  */
-async function buildFromRef(ref: string, config: Record<string, unknown>): Promise<VFS> {
+async function buildFromRef(ref: string, config: Record<string, unknown>): Promise<BaseVFS> {
   const exported = await loadAttr(ref)
   if (typeof exported !== 'function') {
     throw new Error(`VFS ref ${JSON.stringify(ref)} must name a class, got ${typeof exported}`)
@@ -386,7 +386,7 @@ async function buildFromRef(ref: string, config: Record<string, unknown>): Promi
   if (defect !== null) {
     throw new Error(`VFS ref ${JSON.stringify(ref)} ${defect}`)
   }
-  return built as VFS
+  return built as BaseVFS
 }
 
 /**
@@ -404,7 +404,7 @@ export async function buildVfs(
   name: string,
   config: Record<string, unknown> = {},
   sources?: Readonly<Record<string, ResolvedSource>>,
-): Promise<VFS> {
+): Promise<BaseVFS> {
   // A `{from, ref, key}` in the config is fetched here, before the
   // VFS's own schema parses, so every credential reaches its
   // client as the plain string it already reads. Python resolves one
@@ -413,7 +413,7 @@ export async function buildVfs(
   // does no I/O.
   const resolved = await resolveConfigSecrets(config, sources, `mounts.${name}.config`)
   const factory = REGISTRY[name] ?? CUSTOM[name]
-  let built: VFS | null
+  let built: BaseVFS | null
   try {
     built =
       factory !== undefined

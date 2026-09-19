@@ -25,7 +25,6 @@ import { stat as notionStat } from '@struktoai/mirage-core/core/notion/stat'
 import { NOTION_OPS } from '@struktoai/mirage-core/ops/notion/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { NOTION_PROMPT, NOTION_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/notion/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -38,14 +37,14 @@ export interface NotionVFSState {
   config: NotionConfigRedacted
 }
 
-export class NotionVFS extends BaseVFS implements VFS {
+export class NotionVFS extends BaseVFS {
   readonly kind: string = VFSName.NOTION
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 600
-  readonly prompt: string = NOTION_PROMPT
-  readonly writePrompt: string = NOTION_WRITE_PROMPT
+  override readonly prompt: string = NOTION_PROMPT
+  override readonly writePrompt: string = NOTION_WRITE_PROMPT
   readonly config: NotionConfig
-  readonly accessor: NotionAccessor
+  override readonly accessor: NotionAccessor
 
   constructor(config: NotionConfig) {
     super()
@@ -62,27 +61,27 @@ export class NotionVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return NOTION_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return NOTION_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return notionRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return notionReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return notionStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

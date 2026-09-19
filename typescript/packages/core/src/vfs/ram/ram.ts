@@ -38,7 +38,7 @@ import { RAMAccessor } from '../../accessor/ram.ts'
 import { RAM_OPS } from '../../ops/ram/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import { PathSpec, VFSName, type FileStat } from '../../types.ts'
-import { BaseVFS, type FindOptions, type VFS } from '../base.ts'
+import { BaseVFS, type FindOptions } from '../base.ts'
 import { RAM_PROMPT } from './prompt.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
 
@@ -52,16 +52,16 @@ export interface RAMVFSState {
   attrs?: Record<string, RAMAttrs>
 }
 
-export class RAMVFS extends BaseVFS implements VFS {
+export class RAMVFS extends BaseVFS {
   readonly kind = VFSName.RAM
-  readonly cachesReads: boolean = false
+  override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
   readonly store = new RAMStore()
-  readonly accessor = new RAMAccessor(this.store)
-  readonly prompt = RAM_PROMPT
-  readonly opsMap: Record<string, unknown> = {
+  override readonly accessor = new RAMAccessor(this.store)
+  override readonly prompt = RAM_PROMPT
+  override readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,
     write: writeCore,
     readdir: readdirCore,
@@ -86,79 +86,79 @@ export class RAMVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return RAM_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return RAM_COMMANDS
   }
 
-  streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
     return streamCore(this.accessor, path)
   }
 
-  readFile(path: PathSpec): Promise<Uint8Array> {
+  override readFile(path: PathSpec): Promise<Uint8Array> {
     return readCore(this.accessor, path)
   }
 
-  writeFile(path: PathSpec, data: Uint8Array): Promise<void> {
+  override writeFile(path: PathSpec, data: Uint8Array): Promise<void> {
     return writeCore(this.accessor, path, data)
   }
 
-  appendFile(path: PathSpec, data: Uint8Array): Promise<void> {
+  override appendFile(path: PathSpec, data: Uint8Array): Promise<void> {
     return appendCore(this.accessor, path, data)
   }
 
-  readdir(path: PathSpec): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<string[]> {
     return readdirCore(this.accessor, path, this.index)
   }
 
-  stat(path: PathSpec): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return statCore(this.accessor, path)
   }
 
-  exists(path: PathSpec): Promise<boolean> {
+  override exists(path: PathSpec): Promise<boolean> {
     return existsCore(this.accessor, path)
   }
 
-  mkdir(path: PathSpec, options?: { recursive?: boolean }): Promise<void> {
+  override mkdir(path: PathSpec, options?: { recursive?: boolean }): Promise<void> {
     return mkdirCore(this.accessor, path, options?.recursive === true)
   }
 
-  rmdir(path: PathSpec): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return rmdirCore(this.accessor, path)
   }
 
-  unlink(path: PathSpec): Promise<void> {
+  override unlink(path: PathSpec): Promise<void> {
     return unlinkCore(this.accessor, path)
   }
 
-  rename(src: PathSpec, dst: PathSpec): Promise<void> {
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
     return renameCore(this.accessor, src, dst)
   }
 
-  truncate(path: PathSpec, length: number): Promise<void> {
+  override truncate(path: PathSpec, length: number): Promise<void> {
     return truncateCore(this.accessor, path, length)
   }
 
-  copy(src: PathSpec, dst: PathSpec): Promise<void> {
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
     return copyCore(this.accessor, src, dst)
   }
 
-  rmR(path: PathSpec): Promise<void> {
+  override rmR(path: PathSpec): Promise<void> {
     return rmRCore(this.accessor, path)
   }
 
-  du(path: PathSpec): Promise<number> {
+  override du(path: PathSpec): Promise<number> {
     return duSizeCore(this.accessor, path)
   }
 
-  find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
+  override find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
     return findCore(this.accessor, path, options as RAMFindOptions)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
           mountPrefixOf(p.virtual, p.vfsPath)

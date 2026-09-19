@@ -31,7 +31,6 @@ import { buildDeltaHook } from '@struktoai/mirage-core/core/github/watch'
 import { GITHUB_OPS } from '@struktoai/mirage-core/ops/github/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { GITHUB_PROMPT } from '@struktoai/mirage-core/vfs/github/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -52,20 +51,20 @@ export interface GitHubVFSState {
   truncated: boolean
 }
 
-export class GitHubVFS extends BaseVFS implements VFS {
+export class GitHubVFS extends BaseVFS {
   readonly kind: string = VFSName.GITHUB
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // The git tree API reports the exact blob size for every file; the
   // blob read returns those same bytes, and submodule gitlinks (which
   // have no size and no blob) are excluded from the tree.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   // Blob shas are stable per-path markers, so cached reads can be
   // probe-verified under ALWAYS and snapshots carry drift fingerprints.
-  readonly supportsSnapshot: boolean = true
+  override readonly supportsSnapshot: boolean = true
   override readonly indexTtl: number = 86_400
-  readonly prompt: string = GITHUB_PROMPT
+  override readonly prompt: string = GITHUB_PROMPT
   readonly config: GitHubConfig
-  readonly accessor: GitHubAccessor
+  override readonly accessor: GitHubAccessor
 
   private constructor(config: GitHubConfig, accessor: GitHubAccessor, index: IndexCacheStore) {
     super()
@@ -101,27 +100,27 @@ export class GitHubVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return GITHUB_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return GITHUB_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return githubRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return githubReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return githubStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>
@@ -139,7 +138,7 @@ export class GitHubVFS extends BaseVFS implements VFS {
     return githubResolveGlob(this.accessor, effective, this.index)
   }
 
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 

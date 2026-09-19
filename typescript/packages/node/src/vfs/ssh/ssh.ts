@@ -16,7 +16,7 @@ import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions, VFS } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
@@ -53,17 +53,17 @@ export interface SSHVFSState {
   config: SSHConfigRedacted
 }
 
-export class SSHVFS extends BaseVFS implements VFS {
+export class SSHVFS extends BaseVFS {
   readonly kind = VFSName.SSH
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // SFTP stat/readdir report the remote inode's exact byte size for every
   // file; reads are the same raw bytes.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 60
-  readonly prompt = SSH_PROMPT
+  override readonly prompt = SSH_PROMPT
   readonly config: SSHConfig
-  readonly accessor: SSHAccessor
-  readonly opsMap: Record<string, unknown> = {
+  override readonly accessor: SSHAccessor
+  override readonly opsMap: Record<string, unknown> = {
     read_bytes: readCoreFn,
     write: writeCore,
     readdir: readdirCore,
@@ -100,83 +100,83 @@ export class SSHVFS extends BaseVFS implements VFS {
     await super.close()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return SSH_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return SSH_COMMANDS
   }
 
-  streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
     return streamCore(this.accessor, p)
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return readCoreFn(this.accessor, p)
   }
 
-  writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
     return writeCore(this.accessor, p, data)
   }
 
-  appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
     return appendCore(this.accessor, p, data)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return readdirCore(this.accessor, p)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return statCore(this.accessor, p)
   }
 
-  exists(p: PathSpec): Promise<boolean> {
+  override exists(p: PathSpec): Promise<boolean> {
     return existsCore(this.accessor, p)
   }
 
-  mkdir(p: PathSpec, options?: { recursive?: boolean }): Promise<void> {
+  override mkdir(p: PathSpec, options?: { recursive?: boolean }): Promise<void> {
     return mkdirCore(this.accessor, p, options?.recursive === true)
   }
 
-  rmdir(p: PathSpec): Promise<void> {
+  override rmdir(p: PathSpec): Promise<void> {
     return rmdirCore(this.accessor, p)
   }
 
-  unlink(p: PathSpec): Promise<void> {
+  override unlink(p: PathSpec): Promise<void> {
     return unlinkCore(this.accessor, p)
   }
 
-  rename(src: PathSpec, dst: PathSpec): Promise<void> {
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
     return renameCore(this.accessor, src, dst)
   }
 
-  truncate(p: PathSpec, length: number): Promise<void> {
+  override truncate(p: PathSpec, length: number): Promise<void> {
     return truncateCore(this.accessor, p, length)
   }
 
-  copy(src: PathSpec, dst: PathSpec): Promise<void> {
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
     return copyCore(this.accessor, src, dst)
   }
 
-  rmR(p: PathSpec): Promise<void> {
+  override rmR(p: PathSpec): Promise<void> {
     return rmRCore(this.accessor, p)
   }
 
-  du(p: PathSpec): Promise<number> {
+  override du(p: PathSpec): Promise<number> {
     return duSizeCore(this.accessor, p)
   }
 
-  find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
+  override find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
     return findCore(this.accessor, p, options as SshFindOptions)
   }
 
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
           mountPrefixOf(p.virtual, p.vfsPath)

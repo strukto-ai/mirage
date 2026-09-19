@@ -30,7 +30,7 @@ import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { op, OpsRegistry } from '../ops/registry.ts'
 import { FileType, MountMode, VFSName, PathSpec } from '../types.ts'
-import { BaseVFS, type VFS } from '../vfs/base.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
@@ -40,7 +40,7 @@ import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { expandOperands } from './executor/builtins/shared.ts'
 
-class MockVFS extends BaseVFS implements VFS {
+class MockVFS extends BaseVFS {
   readonly kind = 'mock'
   opens = 0
   closes = 0
@@ -243,7 +243,7 @@ describe('Workspace lifecycle', () => {
         resume = resolve
       })
       const prefix = shadow ? '/' : '/data'
-      const mounts: Record<string, VFS> = { [prefix]: old }
+      const mounts: Record<string, BaseVFS> = { [prefix]: old }
       if (change === 'reveal') mounts['/'] = replacement
       const ws = new Workspace(mounts, { shellParser: await getTestParser() })
       ws.registerCli(
@@ -448,7 +448,7 @@ describe('Workspace dynamic mount index', () => {
 })
 
 describe('Workspace custom cache option', () => {
-  class StubCache extends BaseVFS implements VFS, FileCache {
+  class StubCache extends BaseVFS implements FileCache {
     readonly kind = VFSName.RAM
     readonly store = new Map<string, Uint8Array>()
     getCalls = 0
@@ -488,7 +488,7 @@ describe('Workspace custom cache option', () => {
     evictPaths(paths: Iterable<string>): void {
       for (const key of paths) this.store.delete(key)
     }
-    exists(key: string | PathSpec): Promise<boolean> {
+    override exists(key: string | PathSpec): Promise<boolean> {
       const k = typeof key === 'string' ? key : key.mountPath
       return Promise.resolve(this.store.has(k))
     }

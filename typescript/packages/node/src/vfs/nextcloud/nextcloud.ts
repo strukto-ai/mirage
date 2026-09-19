@@ -2,7 +2,7 @@ import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions, VFS } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
@@ -42,16 +42,16 @@ export interface NextcloudVFSState {
   config: NextcloudConfigRedacted
 }
 
-export class NextcloudVFS extends BaseVFS implements VFS {
+export class NextcloudVFS extends BaseVFS {
   readonly kind = VFSName.NEXTCLOUD
-  readonly cachesReads = true
+  override readonly cachesReads = true
   // WebDAV PROPFIND carries getcontentlength for every file; readdir
   // backfills any lister-omitted size with one stat per affected file.
-  readonly sizesAlwaysKnown: boolean = true
-  readonly supportsSnapshot = true
-  readonly prompt = NEXTCLOUD_PROMPT
-  readonly accessor: NextcloudAccessor
-  readonly opsMap: Record<string, unknown> = {
+  override readonly sizesAlwaysKnown: boolean = true
+  override readonly supportsSnapshot = true
+  override readonly prompt = NEXTCLOUD_PROMPT
+  override readonly accessor: NextcloudAccessor
+  override readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,
     write: writeCore,
     readdir: readdirCore,
@@ -81,27 +81,27 @@ export class NextcloudVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return NEXTCLOUD_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return NEXTCLOUD_OPS
   }
 
-  streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
     return streamCore(this.accessor, path, this.index)
   }
 
-  readFile(path: PathSpec): Promise<Uint8Array> {
+  override readFile(path: PathSpec): Promise<Uint8Array> {
     return readCore(this.accessor, path, this.index)
   }
 
-  writeFile(path: PathSpec, data: Uint8Array): Promise<void> {
+  override writeFile(path: PathSpec, data: Uint8Array): Promise<void> {
     return writeCore(this.accessor, path, data, this.index)
   }
 
-  async appendFile(path: PathSpec, data: Uint8Array): Promise<void> {
+  override async appendFile(path: PathSpec, data: Uint8Array): Promise<void> {
     let existing: Uint8Array
     try {
       existing = await readCore(this.accessor, path, this.index)
@@ -115,55 +115,55 @@ export class NextcloudVFS extends BaseVFS implements VFS {
     await writeCore(this.accessor, path, merged, this.index)
   }
 
-  readdir(path: PathSpec): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<string[]> {
     return readdirCore(this.accessor, path, this.index)
   }
 
-  stat(path: PathSpec): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return statCore(this.accessor, path, this.index)
   }
 
-  exists(path: PathSpec): Promise<boolean> {
+  override exists(path: PathSpec): Promise<boolean> {
     return existsCore(this.accessor, path)
   }
 
-  mkdir(path: PathSpec): Promise<void> {
+  override mkdir(path: PathSpec): Promise<void> {
     return mkdirCore(this.accessor, path)
   }
 
-  rmdir(path: PathSpec): Promise<void> {
+  override rmdir(path: PathSpec): Promise<void> {
     return rmdirCore(this.accessor, path)
   }
 
-  unlink(path: PathSpec): Promise<void> {
+  override unlink(path: PathSpec): Promise<void> {
     return unlinkCore(this.accessor, path)
   }
 
-  rename(source: PathSpec, destination: PathSpec): Promise<void> {
+  override rename(source: PathSpec, destination: PathSpec): Promise<void> {
     return renameCore(this.accessor, source, destination)
   }
 
-  truncate(path: PathSpec, length: number): Promise<void> {
+  override truncate(path: PathSpec, length: number): Promise<void> {
     return truncateCore(this.accessor, path, length)
   }
 
-  copy(source: PathSpec, destination: PathSpec): Promise<void> {
+  override copy(source: PathSpec, destination: PathSpec): Promise<void> {
     return copyCore(this.accessor, source, destination)
   }
 
-  rmR(path: PathSpec): Promise<void> {
+  override rmR(path: PathSpec): Promise<void> {
     return rmRCore(this.accessor, path)
   }
 
-  du(path: PathSpec): Promise<number> {
+  override du(path: PathSpec): Promise<number> {
     return duSizeCore(this.accessor, path)
   }
 
-  find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
+  override find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
     return findCore(this.accessor, path, options)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((path) =>
           mountPrefixOf(path.virtual, path.vfsPath)
@@ -180,7 +180,7 @@ export class NextcloudVFS extends BaseVFS implements VFS {
     return resolveGlobCore(this.accessor, effective, this.index)
   }
 
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 

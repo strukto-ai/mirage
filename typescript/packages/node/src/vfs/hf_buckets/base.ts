@@ -16,7 +16,7 @@ import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions, VFS, VFSStateBase } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions, VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
@@ -40,22 +40,22 @@ import { buildDeltaHook } from '../../core/hf/watch.ts'
 
 const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
 
-export abstract class HfVFS extends BaseVFS implements VFS {
-  abstract readonly prompt: string
-  abstract readonly accessor: HfAccessor
+export abstract class HfVFS extends BaseVFS {
+  abstract override readonly prompt: string
+  abstract override readonly accessor: HfAccessor
   // Narrowed back to abstract, so BaseVFS's bare `{type}` cannot reach
   // a Hub VFS: all four carry a config and so owe their own redaction,
   // and inheriting the default would drop it and read back as an empty
   // mount. Python has no shared Hub base — its four VFS each spell
   // `get_state` — so this only pins the habit down.
   abstract override getState(): Promise<VFSStateBase>
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // The Hub tree API reports each file's exact byte size (the LFS
   // object size for LFS files); readdir backfills any lister-omitted
   // size with one stat.
-  readonly sizesAlwaysKnown: boolean = true
-  readonly supportsSnapshot: boolean = true
-  readonly opsMap: Record<string, unknown> = {
+  override readonly sizesAlwaysKnown: boolean = true
+  override readonly supportsSnapshot: boolean = true
+  override readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,
     readdir: readdirCore,
     stat: statCore,
@@ -75,59 +75,59 @@ export abstract class HfVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return HF_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return HF_OPS
   }
 
-  streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
     return streamCore(this.accessor, p)
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return readCore(this.accessor, p, this.index)
   }
 
-  writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
     return writeCore(this.accessor, p, data)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return readdirCore(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return statCore(this.accessor, p, this.index)
   }
 
-  exists(p: PathSpec): Promise<boolean> {
+  override exists(p: PathSpec): Promise<boolean> {
     return existsCore(this.accessor, p)
   }
 
-  mkdir(p: PathSpec): Promise<void> {
+  override mkdir(p: PathSpec): Promise<void> {
     return mkdirCore(this.accessor, p)
   }
 
-  unlink(p: PathSpec): Promise<void> {
+  override unlink(p: PathSpec): Promise<void> {
     return unlinkCore(this.accessor, p)
   }
 
-  du(p: PathSpec): Promise<number> {
+  override du(p: PathSpec): Promise<number> {
     return duSizeCore(this.accessor, p)
   }
 
-  find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
+  override find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
     return findCore(this.accessor, p, options)
   }
 
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
           mountPrefixOf(p.virtual, p.vfsPath)

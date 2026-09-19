@@ -26,7 +26,7 @@ import { HISTORY_OPS } from '../../ops/history/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { FileStat } from '../../types.ts'
 import { type PathSpec, VFSName } from '../../types.ts'
-import { BaseVFS, type VFS } from '../base.ts'
+import { BaseVFS } from '../base.ts'
 
 export const HISTORY_PREFIX = '/.bash_history'
 
@@ -35,13 +35,13 @@ export const HISTORY_PREFIX = '/.bash_history'
  * views from the workspace's hidden recorder on every read; holds no
  * storage of its own.
  */
-export class HistoryViewVFS extends BaseVFS implements VFS {
+export class HistoryViewVFS extends BaseVFS {
   readonly kind = VFSName.HISTORY
-  readonly cachesReads = false
+  override readonly cachesReads = false
   // The view renders from in-memory events, so stat() sizes it by
   // rendering: cheap, no network, and never null.
-  readonly sizesAlwaysKnown = true
-  readonly accessor: HistoryAccessor
+  override readonly sizesAlwaysKnown = true
+  override readonly accessor: HistoryAccessor
 
   constructor(observer: Observer) {
     super()
@@ -52,31 +52,31 @@ export class HistoryViewVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return HISTORY_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return HISTORY_COMMANDS
   }
 
-  streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
     return streamCore(this.accessor, path)
   }
 
-  readFile(path: PathSpec): Promise<Uint8Array> {
+  override readFile(path: PathSpec): Promise<Uint8Array> {
     return readCore(this.accessor, path)
   }
 
-  readdir(path: PathSpec): Promise<string[]> {
+  override readdir(path: PathSpec): Promise<string[]> {
     return readdirCore(this.accessor, path)
   }
 
-  stat(path: PathSpec): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     return statCore(this.accessor, path)
   }
 
-  find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
+  override find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
     return findCore(this.accessor, path, options)
   }
 }

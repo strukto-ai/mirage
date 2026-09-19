@@ -23,7 +23,6 @@ import { TokenManager } from '@struktoai/mirage-core/core/google/client'
 import { GMAIL_OPS } from '@struktoai/mirage-core/ops/gmail/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { GMAIL_PROMPT, GMAIL_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/gmail/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -41,18 +40,18 @@ export interface GmailVFSState {
   config: GmailConfigRedacted
 }
 
-export class GmailVFS extends BaseVFS implements VFS {
+export class GmailVFS extends BaseVFS {
   readonly kind: string = VFSName.GMAIL
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: .gmail.json is rendered at
   // readdir from the full message the listing already fetched, and
   // attachments carry the decoded byte count.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 86_400
-  readonly prompt: string = GMAIL_PROMPT
-  readonly writePrompt: string = GMAIL_WRITE_PROMPT
+  override readonly prompt: string = GMAIL_PROMPT
+  override readonly writePrompt: string = GMAIL_WRITE_PROMPT
   readonly config: GmailConfig
-  readonly accessor: GmailAccessor
+  override readonly accessor: GmailAccessor
 
   constructor(config: GmailConfig) {
     super()
@@ -65,27 +64,27 @@ export class GmailVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return GMAIL_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return GMAIL_OPS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return gmailRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return gmailReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return gmailStat(this.accessor, p, this.index)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective =
       prefix !== ''
         ? paths.map((p) =>

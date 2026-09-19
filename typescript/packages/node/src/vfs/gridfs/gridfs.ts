@@ -16,7 +16,7 @@ import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions, VFS } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -53,17 +53,17 @@ export interface GridFSVFSState {
   config: GridFSConfigRedacted
 }
 
-export class GridFSVFS extends BaseVFS implements VFS {
+export class GridFSVFS extends BaseVFS {
   readonly kind: string = VFSName.GRIDFS
-  readonly cachesReads: boolean = true
-  readonly supportsSnapshot: boolean = true
+  override readonly cachesReads: boolean = true
+  override readonly supportsSnapshot: boolean = true
   // byte store: stat() sizes every file from metadata
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
-  readonly prompt: string = GRIDFS_PROMPT
+  override readonly prompt: string = GRIDFS_PROMPT
   readonly config: GridFSConfig
-  readonly accessor: GridFSAccessor
-  readonly opsMap: Record<string, unknown> = {
+  override readonly accessor: GridFSAccessor
+  override readonly opsMap: Record<string, unknown> = {
     read_bytes: readCore,
     write: writeCore,
     readdir: readdirCore,
@@ -106,27 +106,27 @@ export class GridFSVFS extends BaseVFS implements VFS {
     await super.close()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return GRIDFS_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return GRIDFS_OPS
   }
 
-  streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
     return streamCore(this.accessor, p)
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return readCore(this.accessor, p)
   }
 
-  writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
     return writeCore(this.accessor, p, data)
   }
 
-  async appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override async appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
     let existing: Uint8Array
     try {
       existing = await readCore(this.accessor, p)
@@ -143,55 +143,55 @@ export class GridFSVFS extends BaseVFS implements VFS {
     await writeCore(this.accessor, p, merged)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return readdirCore(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return statCore(this.accessor, p)
   }
 
-  exists(p: PathSpec): Promise<boolean> {
+  override exists(p: PathSpec): Promise<boolean> {
     return existsCore(this.accessor, p)
   }
 
-  mkdir(p: PathSpec): Promise<void> {
+  override mkdir(p: PathSpec): Promise<void> {
     return mkdirCore(this.accessor, p)
   }
 
-  rmdir(p: PathSpec): Promise<void> {
+  override rmdir(p: PathSpec): Promise<void> {
     return rmdirCore(this.accessor, p)
   }
 
-  unlink(p: PathSpec): Promise<void> {
+  override unlink(p: PathSpec): Promise<void> {
     return unlinkCore(this.accessor, p)
   }
 
-  rename(src: PathSpec, dst: PathSpec): Promise<void> {
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
     return renameCore(this.accessor, src, dst)
   }
 
-  truncate(p: PathSpec, length: number): Promise<void> {
+  override truncate(p: PathSpec, length: number): Promise<void> {
     return truncateCore(this.accessor, p, length)
   }
 
-  copy(src: PathSpec, dst: PathSpec): Promise<void> {
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
     return copyCore(this.accessor, src, dst)
   }
 
-  rmR(p: PathSpec): Promise<void> {
+  override rmR(p: PathSpec): Promise<void> {
     return rmRCore(this.accessor, p)
   }
 
-  du(p: PathSpec): Promise<number> {
+  override du(p: PathSpec): Promise<number> {
     return duSizeCore(this.accessor, p)
   }
 
-  find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
+  override find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
     return findCore(this.accessor, p, options)
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
           mountPrefixOf(p.virtual, p.vfsPath)
@@ -208,7 +208,7 @@ export class GridFSVFS extends BaseVFS implements VFS {
     return globCore(this.accessor, effective, this.index)
   }
 
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 

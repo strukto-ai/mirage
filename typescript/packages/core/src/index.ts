@@ -58,7 +58,6 @@ export type {
 } from './policy/index.ts'
 export { Outcome, Scope } from './policy/index.ts'
 export { ProvisionResult } from './provision/types.ts'
-export type { VFS } from './vfs/base.ts'
 export { ChromaVFS } from './vfs/chroma/chroma.ts'
 export { normalizeDatabricksVolumeConfig } from './vfs/databricks_volume/config.ts'
 export { DevVFS } from './vfs/dev/dev.ts'

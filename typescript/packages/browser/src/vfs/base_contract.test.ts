@@ -30,12 +30,11 @@ const VFS_CLASSES = Object.entries(browserPkg as Record<string, unknown>).filter
     /^[A-Z]\w*VFS$/.test(entry[0]) && typeof entry[1] === 'function' && !NOT_BACKENDS.has(entry[0]),
 )
 
-// Inheriting the contract is what makes it reachable, not a style choice.
-// `Workspace` hands the mount's index config to `VFS.setIndex?.()` --
-// an optional call, so a VFS that restates `implements VFS`
-// instead of extending the base silently ignores `index: {...}` rather
-// than failing, and its own `close()` leaves a Redis index client open.
-// Node and core VFS classes have always extended it; browser's did not.
+// The contract is the class, so extending it is the only way to satisfy
+// it, and that is what makes `setIndex` and the base `close()` reachable:
+// a class beside it would ignore `index: {...}` rather than fail, and
+// leave a Redis index client open. Node and core VFS classes have always
+// extended it; browser's did not.
 describe('every exported VFS inherits the BaseVFS contract', () => {
   it('finds the VFS classes to check', () => {
     expect(VFS_CLASSES.length).toBeGreaterThanOrEqual(19)

@@ -21,7 +21,6 @@ import { stat as lanceStat } from '@struktoai/mirage-core/core/lancedb/stat'
 import { LANCEDB_OPS } from '@struktoai/mirage-core/ops/lancedb/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import {
   redactLanceDBConfig,
   resolveLanceDBConfig,
@@ -48,17 +47,17 @@ export interface LanceDBVFSState {
   needs_override: true
 }
 
-export class LanceDBVFS extends BaseVFS implements VFS {
+export class LanceDBVFS extends BaseVFS {
   readonly kind: string = VFSName.LANCEDB
-  readonly cachesReads: boolean
+  override readonly cachesReads: boolean
   // readdir seeds exact card sizes from the widened select and stat falls
   // back to rendering the row itself, so sizes are exact either way.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
-  readonly prompt: string = LANCEDB_PROMPT
+  override readonly prompt: string = LANCEDB_PROMPT
   readonly config: LanceDBConfigResolved
   readonly store: LanceDBStore
-  readonly accessor: LanceDBAccessor
+  override readonly accessor: LanceDBAccessor
 
   constructor(options: LanceDBVFSOptions | LanceDBConfig) {
     super()
@@ -97,23 +96,23 @@ export class LanceDBVFS extends BaseVFS implements VFS {
     await super.close()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return LANCEDB_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return LANCEDB_COMMANDS
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return lanceRead(this.accessor, p, this.index)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return lanceReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return lanceStat(this.accessor, p, this.index)
   }
 }

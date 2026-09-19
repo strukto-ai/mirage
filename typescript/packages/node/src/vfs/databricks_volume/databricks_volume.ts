@@ -36,7 +36,7 @@ import { walkFind } from '@struktoai/mirage-core/core/generic/find'
 import { DATABRICKS_VOLUME_OPS } from '@struktoai/mirage-core/ops/databricks_volume/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions, VFS } from '@struktoai/mirage-core/vfs/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
 import { DATABRICKS_VOLUME_PROMPT } from '@struktoai/mirage-core/vfs/databricks_volume/prompt'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -73,18 +73,18 @@ async function resolveAuth(config: DatabricksVolumeConfig): Promise<[string, str
   return [host, token]
 }
 
-export class DatabricksVolumeVFS extends BaseVFS implements VFS {
+export class DatabricksVolumeVFS extends BaseVFS {
   readonly kind: string = VFSName.DATABRICKS_VOLUME
-  readonly cachesReads: boolean = true
+  override readonly cachesReads: boolean = true
   // The Files API lists DirectoryEntry.file_size and stat HEADs report
   // Content-Length, both the exact byte count the download returns;
   // readdir backfills any lister-omitted size with one HEAD.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 600
-  readonly prompt: string = DATABRICKS_VOLUME_PROMPT
+  override readonly prompt: string = DATABRICKS_VOLUME_PROMPT
   readonly config: DatabricksVolumeConfig
-  readonly accessor: DatabricksVolumeAccessor
-  readonly opsMap: Record<string, unknown> = {
+  override readonly accessor: DatabricksVolumeAccessor
+  override readonly opsMap: Record<string, unknown> = {
     read_bytes: databricksVolumeRead,
     write: databricksVolumeWrite,
     readdir: databricksVolumeReaddir,
@@ -117,27 +117,27 @@ export class DatabricksVolumeVFS extends BaseVFS implements VFS {
     return Promise.resolve()
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return DATABRICKS_VOLUME_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return DATABRICKS_VOLUME_OPS
   }
 
-  streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
+  override streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
     return databricksVolumeReadStream(this.accessor, p)
   }
 
-  readFile(p: PathSpec): Promise<Uint8Array> {
+  override readFile(p: PathSpec): Promise<Uint8Array> {
     return databricksVolumeRead(this.accessor, p)
   }
 
-  writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
     return databricksVolumeWrite(this.accessor, p, data)
   }
 
-  async appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
+  override async appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
     let existing: Uint8Array
     try {
       existing = await databricksVolumeRead(this.accessor, p)
@@ -154,43 +154,43 @@ export class DatabricksVolumeVFS extends BaseVFS implements VFS {
     await databricksVolumeWrite(this.accessor, p, merged)
   }
 
-  readdir(p: PathSpec): Promise<string[]> {
+  override readdir(p: PathSpec): Promise<string[]> {
     return databricksVolumeReaddir(this.accessor, p, this.index)
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
+  override stat(p: PathSpec): Promise<FileStat> {
     return databricksVolumeStat(this.accessor, p)
   }
 
-  exists(p: PathSpec): Promise<boolean> {
+  override exists(p: PathSpec): Promise<boolean> {
     return databricksVolumeExists(this.accessor, p)
   }
 
-  mkdir(p: PathSpec): Promise<void> {
+  override mkdir(p: PathSpec): Promise<void> {
     return databricksVolumeMkdir(this.accessor, p, undefined, true)
   }
 
-  rmdir(p: PathSpec): Promise<void> {
+  override rmdir(p: PathSpec): Promise<void> {
     return databricksVolumeRmdir(this.accessor, p)
   }
 
-  unlink(p: PathSpec): Promise<void> {
+  override unlink(p: PathSpec): Promise<void> {
     return databricksVolumeUnlink(this.accessor, p)
   }
 
-  rename(src: PathSpec, dst: PathSpec): Promise<void> {
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
     return databricksVolumeRename(this.accessor, src, dst)
   }
 
-  copy(src: PathSpec, dst: PathSpec): Promise<void> {
+  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
     return databricksVolumeCopy(this.accessor, src, dst)
   }
 
-  async rmR(p: PathSpec): Promise<void> {
+  override async rmR(p: PathSpec): Promise<void> {
     await databricksVolumeRmRecursive(this.accessor, p)
   }
 
-  find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
+  override find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
     // Databricks readdir returns slash-less paths, so the walker classifies
     // through stat (which resolves via the index cache).
     return walkFind(
@@ -204,7 +204,7 @@ export class DatabricksVolumeVFS extends BaseVFS implements VFS {
     )
   }
 
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
+  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
     const effective = prefix
       ? paths.map((p) =>
           mountPrefixOf(p.virtual, p.vfsPath)

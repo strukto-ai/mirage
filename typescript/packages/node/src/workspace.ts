@@ -31,7 +31,7 @@ import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import './compression_codecs.ts'
 import './cache/file/utils.ts'
 import './runtime/sandbox/daytona/runtime.ts'
@@ -56,7 +56,7 @@ export type NodeWorkspaceOptions = WorkspaceOptions
 
 export class Workspace extends CoreWorkspace {
   /** A saved mount rebuilds through this package's VFS registry. */
-  protected static override async buildSavedVfs(entry: MountSnapshot): Promise<VFS | null> {
+  protected static override async buildSavedVfs(entry: MountSnapshot): Promise<BaseVFS | null> {
     const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
     return build === null ? null : buildVfs(build.name, build.config)
   }

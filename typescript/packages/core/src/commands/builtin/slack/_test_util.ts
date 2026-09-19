@@ -16,7 +16,7 @@ import { SlackAccessor, type SlackResourceLike } from '../../../accessor/slack.t
 import { IndexEntry } from '../../../cache/index/config.ts'
 import type { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import type { SlackResponse, SlackTransport } from '../../../core/slack/client.ts'
-import type { VFS } from '../../../vfs/base.ts'
+import { BaseVFS } from '../../../vfs/base.ts'
 
 export interface FakeCall {
   endpoint: string
@@ -39,19 +39,18 @@ export class FakeSlackTransport implements SlackTransport {
   }
 }
 
-export function makeFakeVfs(transport: SlackTransport): SlackResourceLike {
-  const accessor = new SlackAccessor(transport)
-  const vfs: VFS & { accessor: SlackAccessor } = {
-    kind: 'slack',
-    accessor,
-    open: () => Promise.resolve(),
-    close: () => Promise.resolve(),
-    getState: () => ({ type: 'slack' }),
-    loadState: () => {
-      // Nothing to take back.
-    },
+class FakeSlackVFS extends BaseVFS implements SlackResourceLike {
+  readonly kind = 'slack'
+  constructor(override readonly accessor: SlackAccessor) {
+    super()
   }
-  return vfs as SlackResourceLike
+  open(): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
+export function makeFakeVfs(transport: SlackTransport): SlackResourceLike {
+  return new FakeSlackVFS(new SlackAccessor(transport))
 }
 
 export async function seedChannel(

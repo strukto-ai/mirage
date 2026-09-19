@@ -15,7 +15,7 @@
 import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../utils/errors.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -63,7 +63,7 @@ export function globOptions(session: SessionState): GlobOptions {
   }
 }
 
-export interface ResourceWithGlob extends VFS {
+export interface ResourceWithGlob extends BaseVFS {
   glob(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
 }
 
