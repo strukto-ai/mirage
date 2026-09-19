@@ -41,6 +41,7 @@ const rows = (
 describe('makeGenericOps', () => {
   it('emits the read-only trio for a bare table', () => {
     expect(rows(makeGenericOps('x', makeTable()))).toEqual([
+      ['glob', 'x', null, false],
       ['read', 'x', null, false],
       ['readdir', 'x', null, false],
       ['stat', 'x', null, false],
@@ -64,6 +65,7 @@ describe('makeGenericOps', () => {
     )
     expect(new Set(ops.map((o) => o.name))).toEqual(
       new Set([
+        'glob',
         'read',
         'readdir',
         'stat',
@@ -83,7 +85,7 @@ describe('makeGenericOps', () => {
 
   it('fans out over multiple mounts', () => {
     const ops = makeGenericOps(['a', 'b'], makeTable())
-    expect(ops).toHaveLength(6)
+    expect(ops).toHaveLength(8)
     expect(new Set(ops.map((o) => o.vfs))).toEqual(new Set(['a', 'b']))
   })
 
@@ -91,7 +93,7 @@ describe('makeGenericOps', () => {
     const ops = makeGenericOps('x', makeTable(), {
       overrides: new Set(['readdir']),
     })
-    expect(new Set(ops.map((o) => o.name))).toEqual(new Set(['read', 'stat']))
+    expect(new Set(ops.map((o) => o.name))).toEqual(new Set(['glob', 'read', 'stat']))
   })
 
   it('emits no filetype-scoped ops', () => {

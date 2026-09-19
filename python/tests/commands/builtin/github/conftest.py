@@ -15,6 +15,7 @@
 import pytest_asyncio
 
 from mirage.vfs.github.github import GitHubVFS
+from tests.fixtures.driver_ops import ops
 from tests.fixtures.github_mock import github_config, mock_github_api
 
 __all__ = ["github_config", "mock_github_api"]
@@ -32,4 +33,4 @@ async def github_env(mock_github_api, github_config):
         repo=REPO,
         ref=REF,
     )
-    return vfs.accessor, vfs._index
+    return vfs.accessor, ops(vfs).index

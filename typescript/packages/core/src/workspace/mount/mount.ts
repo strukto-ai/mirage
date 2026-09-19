@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { KeyLock } from '../../cache/lock.ts'
+import { buildIndex } from '../../cache/index/factory.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
 import type {
@@ -87,6 +88,13 @@ export interface MountInit {
   vfs: BaseVFS
   mode?: MountMode
   consistency?: ConsistencyPolicy
+  // The store this mount runs its driver under; the registry builds
+  // one, shared with any alias of the same instance. A bare entry gets
+  // a RAM store at the driver's TTL.
+  index?: IndexCacheStore
+  // The `vfs:` value the driver was built from, recorded for snapshots;
+  // null for one constructed in code.
+  vfsRef?: string | null
 }
 
 export class MountEntry {
@@ -95,6 +103,10 @@ export class MountEntry {
   readonly vfs: BaseVFS
   mode: MountMode
   readonly consistency: ConsistencyPolicy
+  // `index` is this same store scoped by the cache manager, which is
+  // what ops and commands receive.
+  readonly indexStore: IndexCacheStore
+  readonly vfsRef: string | null
   activity = new VFSActivity()
   retiring = false
   beforeUse: (() => Promise<void>) | null = null
@@ -138,14 +150,54 @@ export class MountEntry {
     this.vfs = init.vfs
     this.mode = init.mode ?? MountMode.READ
     this.consistency = init.consistency ?? ConsistencyPolicy.LAZY
+    this.indexStore = init.index ?? buildIndex(undefined, init.vfs.indexTtl)
+    this.vfsRef = init.vfsRef ?? null
   }
 
-  /** Prepare and retain the VFS while its glob hook reads metadata. */
+  /** Whether the op table serves `name`, on any level of the cascade. */
+  hasOp(name: string): boolean {
+    return this.resolveCascade(name, null, this.ops, this.generalOps).length > 0
+  }
+
+  /**
+   * Expand glob words through the `glob` op, one pattern spec at a time;
+   * a driver whose table carries none leaves every word as typed. The
+   * mount stamps each word's mount-relative key before the op sees it,
+   * since the key is the placement's to know, and keeps the VFS retained
+   * while the walk reads metadata.
+   */
   async expandGlob(paths: readonly PathSpec[], prefix: string): Promise<PathSpec[]> {
+    const levels = this.resolveCascade('glob', null, this.ops, this.generalOps)
+    if (levels.length === 0) return [...paths]
     return this.use(async () => {
       const call = async (): Promise<PathSpec[]> => {
         await this.ensureReady()
-        return this.vfs.glob === undefined ? [...paths] : this.vfs.glob(paths, prefix)
+        const accessor = this.vfs.accessor ?? NOOP_ACCESSOR
+        // The raw store, not the cache-scoped view: the walk runs under
+        // the cache manager's mutation lock, which the view takes again.
+        const kwargs: OpKwargs = { index: this.indexStore }
+        const out: PathSpec[] = []
+        for (const p of paths) {
+          const spec =
+            prefix && !mountPrefixOf(p.virtual, p.vfsPath)
+              ? new PathSpec({
+                  virtual: p.virtual,
+                  directory: p.directory,
+                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
+                  resolved: p.resolved,
+                  vfsPath: mountKey(p.virtual, prefix),
+                  rawPath: p.rawPath,
+                })
+              : p
+          for (const op of levels) {
+            const matches = await op.fn(accessor, spec, [], kwargs)
+            if (matches !== null && matches !== undefined) {
+              out.push(...(matches as PathSpec[]))
+              break
+            }
+          }
+        }
+        return out
       }
       return this.cacheManager === null ? call() : this.cacheManager.withMutation(call)
     })
@@ -153,8 +205,7 @@ export class MountEntry {
 
   /** Metadata access bound to this mount's ownership. */
   get index(): IndexCacheStore {
-    const index = this.vfs.index
-    return this.cacheManager?.scopeIndex(index) ?? index
+    return this.cacheManager?.scopeIndex(this.indexStore) ?? this.indexStore
   }
 
   /** Finish deferred mount preparation before any backend or cache read. */

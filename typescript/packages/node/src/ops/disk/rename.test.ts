@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
+import { exists as existsCore } from '../../core/disk/exists.ts'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -33,10 +35,10 @@ afterEach(() => {
 
 describe('renameOp', () => {
   it('moves a file from src to dst', async () => {
-    await res.writeFile(spec('/a'), new TextEncoder().encode('hi'))
+    await ops(res).write(spec('/a'), new TextEncoder().encode('hi'))
     await renameOp.fn(res.accessor, spec('/a'), [spec('/b')], {})
-    expect(await res.exists(spec('/a'))).toBe(false)
-    expect(new TextDecoder().decode(await res.readFile(spec('/b')))).toBe('hi')
+    expect(await existsCore(res.accessor, spec('/a'))).toBe(false)
+    expect(new TextDecoder().decode(await ops(res).read(spec('/b')))).toBe('hi')
   })
 
   it('throws when destination is not a PathSpec', () => {

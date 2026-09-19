@@ -388,8 +388,12 @@ describe('buildVfs colon reference', () => {
   const CORE = pathToFileURL(
     resolve(fileURLToPath(import.meta.url), '../../../../core/dist/index.js'),
   ).href
+  const CORE_BASE = pathToFileURL(
+    resolve(fileURLToPath(import.meta.url), '../../../../core/dist/vfs/base.js'),
+  ).href
   const BACKEND =
     `import {RAMVFS} from ${JSON.stringify(CORE)}\n` +
+    `import {BaseVFS} from ${JSON.stringify(CORE_BASE)}\n` +
     'export class WikiVFS extends RAMVFS {\n' +
     '  constructor(config) { super(); this.config = config }\n' +
     '}\n' +
@@ -399,13 +403,14 @@ describe('buildVfs colon reference', () => {
     'export class NotAVFS {}\n' +
     'export class HalfVFS {\n' +
     '  get name() { return "half" }\n' +
+    '  ops() { return [] }\n' +
+    '  commands() { return [] }\n' +
     '  async close() {}\n' +
-    '}\n' +
-    'export class NamelessVFS {\n' +
-    '  name = ""\n' +
-    '  async close() {}\n' +
-    '  getState() { return {type: ""} }\n' +
+    '  getState() { return {type: "half"} }\n' +
     '  loadState() {}\n' +
+    '}\n' +
+    'export class NamelessVFS extends BaseVFS {\n' +
+    '  name = ""\n' +
     '}\n' +
     'export const NOT_A_CLASS = {name: "wiki"}\n'
 
@@ -451,17 +456,18 @@ describe('buildVfs colon reference', () => {
   it('refuses a class that does not build a VFS', async () => {
     const dir = fixture()
     await expect(buildVfs(`${join(dir, 'wiki.mjs')}:NotAVFS`)).rejects.toThrow(
-      'is missing close, getState, loadState',
+      'does not extend BaseVFS',
     )
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('names the members a half-built VFS left out', async () => {
-    // open/close alone used to pass, and the class reached installMounts and
-    // then crashed Workspace.save() on the getState it never declared.
+  it('refuses a lookalike that spells every member beside the contract', async () => {
+    // The brand is the contract, not a member list: a class declaring
+    // name, the tables, close and both state methods without extending
+    // BaseVFS is refused the same as one declaring none of them.
     const dir = fixture()
     await expect(buildVfs(`${join(dir, 'wiki.mjs')}:HalfVFS`)).rejects.toThrow(
-      'is missing getState, loadState',
+      'does not extend BaseVFS',
     )
     rmSync(dir, { recursive: true, force: true })
   })

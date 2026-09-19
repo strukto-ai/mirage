@@ -50,4 +50,4 @@ def test_vfs_commands_registered(config):
 def test_vfs_ops_registered(config):
     vfs = EmailVFS(config=config)
     ops = vfs.ops()
-    assert len(ops) == 3
+    assert len(ops) == 4

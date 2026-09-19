@@ -38,13 +38,14 @@ async def main() -> None:
 
     # Workspace A: a RAM mount whose INDEX is backed by Redis (not RAM).
     ram_a = RAMVFS()
-    Workspace({"/data": ram_a}, index=index_config)
+    ws_a = Workspace({"/data": ram_a}, index=index_config)
+    index_a = ws_a.mount("/data").index_store
     print("index store A is redis-backed: "
-          f"{isinstance(ram_a.index, RedisIndexCacheStore)}")
+          f"{isinstance(index_a, RedisIndexCacheStore)}")
 
     # Populate the shared Redis index through workspace A.
-    await ram_a.index.put("/data/hello.txt", _file("hello.txt"))
-    await ram_a.index.set_dir(
+    await index_a.put("/data/hello.txt", _file("hello.txt"))
+    await index_a.set_dir(
         "/data",
         [("hello.txt", _file("hello.txt")), ("notes.md", _file("notes.md"))],
     )
@@ -52,18 +53,19 @@ async def main() -> None:
     # Workspace B: a separate VFS pointed at the same Redis index
     # (same key_prefix). It sees what A cached without re-listing anything.
     ram_b = RAMVFS()
-    Workspace({"/data": ram_b}, index=index_config)
+    ws_b = Workspace({"/data": ram_b}, index=index_config)
+    index_b = ws_b.mount("/data").index_store
 
-    entry = await ram_b.index.get("/data/hello.txt")
+    entry = await index_b.get("/data/hello.txt")
     name = entry.entry.name if entry.entry else "(none)"
     print(f"shared index entry: {name}")
 
-    listing = await ram_b.index.list_dir("/data")
+    listing = await index_b.list_dir("/data")
     print(f"shared index listing: {', '.join(listing.entries or [])}")
 
-    await ram_a.index.clear()
-    await ram_a.index.close()
-    await ram_b.index.close()
+    await index_a.clear()
+    await ws_a.close()
+    await ws_b.close()
     print("wiped test keys from Redis")
 
 

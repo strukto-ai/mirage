@@ -18,11 +18,23 @@ import { stripMount } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
 
-// `BaseVFS.storageId` answers per instance by default, so one object
-// mounted at two prefixes keys as one store rather than two. Mirrors
-// Python's `vfs_storage_id`.
-export function vfsStorageId(vfs: BaseVFS): string {
-  return vfs.storageId()
+// A driver that knows where its bytes live (a disk root, a bucket and key
+// prefix) says so through `storageLocation`; one that does not is its own
+// location, keyed by identity, so one object mounted at two prefixes keys
+// as one store rather than two. Mirrors Python's `vfs_storage_location`.
+const OWN_LOCATION = new WeakMap<BaseVFS, string>()
+let ownLocations = 0
+
+export function vfsStorageLocation(vfs: BaseVFS): string {
+  const location = vfs.storageLocation()
+  if (location !== null) return location
+  let own = OWN_LOCATION.get(vfs)
+  if (own === undefined) {
+    ownLocations += 1
+    own = `${vfs.name}:${String(ownLocations)}`
+    OWN_LOCATION.set(vfs, own)
+  }
+  return own
 }
 
 /**
@@ -54,6 +66,6 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
       return rstripSlash(path.virtual)
     }
     const rel = rstripSlash(stripMount(path.virtual, rstripSlash(entry.prefix)))
-    return vfsStorageId(entry.vfs) + rel
+    return vfsStorageLocation(entry.vfs) + rel
   }
 }

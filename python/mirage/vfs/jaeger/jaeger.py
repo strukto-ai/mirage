@@ -16,15 +16,14 @@ from typing import Any
 
 from mirage.accessor.jaeger import JaegerAccessor
 from mirage.commands.builtin.jaeger import COMMANDS
-from mirage.core.jaeger.readdir import readdir
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.ops.jaeger import OPS as JAEGER_VFS_OPS
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.jaeger.config import JaegerConfig
 from mirage.vfs.jaeger.prompt import PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class JaegerVFS(BaseVFS):
@@ -42,21 +41,12 @@ class JaegerVFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = JaegerAccessor(self.config)
-        for command in COMMANDS:
-            self.register(command)
-        for op in JAEGER_VFS_OPS:
-            self.register_op(op)
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(
-            self.accessor,
-            paths,
-            index=self._index,
-        )
+    def ops(self) -> list[RegisteredOp]:
+        return JAEGER_VFS_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

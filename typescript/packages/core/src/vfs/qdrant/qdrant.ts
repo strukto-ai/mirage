@@ -15,13 +15,9 @@
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { QDRANT_COMMANDS } from '../../commands/builtin/qdrant/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
-import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
-import { read } from '../../core/qdrant/read.ts'
-import { readdir as qdrantReaddir } from '../../core/qdrant/readdir.ts'
-import { stat as qdrantStat } from '../../core/qdrant/stat.ts'
 import { QDRANT_OPS } from '../../ops/qdrant/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import { VFSName, type FileStat, type PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import {
   type QdrantConfigRedacted,
@@ -31,9 +27,6 @@ import {
   type QdrantConfigResolved,
 } from './config.ts'
 import { QDRANT_PROMPT } from './prompt.ts'
-
-const resolveGlob = makeResolveGlob(qdrantReaddir)
-
 export interface QdrantVFSOptions {
   config: QdrantConfig
 }
@@ -45,7 +38,7 @@ export interface QdrantVFSState {
 }
 
 export class QdrantVFS extends BaseVFS {
-  readonly name: string = VFSName.QDRANT
+  override readonly name: string = VFSName.QDRANT
   // readdir seeds exact rendered sizes from the scroll payloads and stat
   // falls back to rendering the row itself, so sizes are exact either way.
   override readonly sizesAlwaysKnown: boolean = true
@@ -85,21 +78,5 @@ export class QdrantVFS extends BaseVFS {
 
   override commands(): readonly RegisteredCommand[] {
     return QDRANT_COMMANDS
-  }
-
-  override glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
-    return resolveGlob(this.accessor, paths, this.index)
-  }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return read(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return qdrantReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return qdrantStat(this.accessor, p, this.index)
   }
 }

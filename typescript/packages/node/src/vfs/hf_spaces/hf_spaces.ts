@@ -30,7 +30,7 @@ export interface HfSpacesVFSState {
 }
 
 export class HfSpacesVFS extends HfHubVFS {
-  readonly name: string = VFSName.HF_SPACES
+  override readonly name: string = VFSName.HF_SPACES
   readonly prompt: string = HF_SPACES_PROMPT
   readonly config: HfRepoConfig
   readonly accessor: HfSpacesHubAccessor

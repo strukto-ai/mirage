@@ -14,32 +14,23 @@
 
 import { BoxAccessor } from '@struktoai/mirage-core/accessor/box'
 import { BOX_COMMANDS } from '@struktoai/mirage-core/commands/builtin/box/index'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { BoxTokenManager } from '@struktoai/mirage-core/core/box/client'
-import { read as boxRead } from '@struktoai/mirage-core/core/box/read'
-import { readdir as boxReaddir } from '@struktoai/mirage-core/core/box/readdir'
-import { stat as boxStat } from '@struktoai/mirage-core/core/box/stat'
 import { BOX_OPS } from '@struktoai/mirage-core/ops/box/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { BOX_PROMPT } from '@struktoai/mirage-core/vfs/box/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '@struktoai/mirage-core/core/box/watch'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
-
-const boxResolveGlob = makeResolveGlob(boxReaddir)
-
 export interface BoxVFSState {
   type: string
   config: BoxConfigRedacted
 }
 
 export class BoxVFS extends BaseVFS {
-  readonly name: string = VFSName.BOX
+  override readonly name: string = VFSName.BOX
   override readonly cachesReads: boolean = true
   // Box item listings carry an exact byte `size` for every file (0
   // included); sizeless weblinks are filtered out of listings.
@@ -70,37 +61,6 @@ export class BoxVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return BOX_OPS
   }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return boxRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return boxReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return boxStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return boxResolveGlob(this.accessor, effective, this.index)
-  }
-
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }

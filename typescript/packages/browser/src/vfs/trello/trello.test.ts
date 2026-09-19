@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { TRELLO_OPS } from '@struktoai/mirage-core/ops/trello/index'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -80,7 +81,7 @@ describe('TrelloVFS (browser)', () => {
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
     const r = new TrelloVFS({ apiKey: 'KEY', apiToken: 'TOK' })
-    const out = await r.readdir(
+    const out = await ops(r).readdir(
       new PathSpec({
         virtual: '/mnt/trello/workspaces',
         directory: '/mnt/trello/workspaces',
@@ -109,7 +110,7 @@ describe('TrelloVFS (browser)', () => {
       apiToken: 't',
       baseUrl: 'https://my.proxy.example/trello',
     })
-    await r.readdir(
+    await ops(r).readdir(
       new PathSpec({
         virtual: '/mnt/trello/workspaces',
         directory: '/mnt/trello/workspaces',
@@ -137,7 +138,7 @@ describe('TrelloVFS (browser)', () => {
       ),
     ) as unknown as typeof fetch
     const r = new TrelloVFS({ apiKey: 'k', apiToken: 't', workspaceId: 'w2' })
-    const out = await r.readdir(
+    const out = await ops(r).readdir(
       new PathSpec({
         virtual: '/mnt/trello/workspaces',
         directory: '/mnt/trello/workspaces',

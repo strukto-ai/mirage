@@ -130,26 +130,23 @@ def test_the_guard_runs_before_any_mount_is_installed():
         }, MountMode.WRITE)
 
 
-# A VFS keeps the index it was given when the workspace passes none
-# (#1012): `set_index(None)` used to run on every mount and replace a
-# `RedisIndexConfig` the VFS itself carried with a RAM default.
-def test_install_mounts_keeps_a_vfs_own_index_without_a_config():
-    vfs = RAMVFS()
-    vfs.set_index(
-        RedisIndexConfig(url="redis://127.0.0.1:1/0", key_prefix="own:"))
-    own = vfs.index
-    install_mounts(MountRegistry(),
-                   normalize_mounts({"/a": vfs}, MountMode.WRITE), None,
-                   MountMode.WRITE)
-    assert vfs.index is own
-    assert isinstance(vfs.index, RedisIndexCacheStore)
+# A mount keeps the index it names when the workspace passes none
+# (#1012): a `RedisIndexConfig` the placement carries must not be
+# replaced with a RAM default.
+def test_install_mounts_keeps_a_mounts_own_index_without_a_config():
+    registry = MountRegistry()
+    own = RedisIndexConfig(url="redis://127.0.0.1:1/0", key_prefix="own:")
+    install_mounts(
+        registry,
+        normalize_mounts({"/a": Mount(vfs=RAMVFS(), index=own)},
+                         MountMode.WRITE), None, MountMode.WRITE)
+    assert isinstance(
+        registry.mount_for("/a/").index_store, RedisIndexCacheStore)
 
 
 def test_install_mounts_applies_a_workspace_index_to_every_vfs():
-    vfs = RAMVFS()
-    own = vfs.index
-    install_mounts(MountRegistry(),
-                   normalize_mounts({"/a": vfs}, MountMode.WRITE),
+    registry = MountRegistry()
+    install_mounts(registry, normalize_mounts({"/a": RAMVFS()},
+                                              MountMode.WRITE),
                    IndexConfig(ttl=5), MountMode.WRITE)
-    assert vfs.index is not own
-    assert vfs.index._ttl == 5
+    assert registry.mount_for("/a/").index_store._ttl == 5

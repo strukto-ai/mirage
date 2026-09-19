@@ -56,6 +56,7 @@ def rows(ops) -> set:
 def test_read_only_table_emits_trio():
     ops = make_generic_ops("x", make_table())
     assert rows(ops) == {
+        ("glob", "x", None, False),
         ("read", "x", None, False),
         ("readdir", "x", None, False),
         ("stat", "x", None, False),
@@ -74,6 +75,7 @@ def test_full_table_emits_mutations():
                        set_attrs=AsyncMock())
     names = {(o.name, o.write) for o in make_generic_ops("x", table)}
     assert names == {
+        ("glob", False),
         ("read", False),
         ("readdir", False),
         ("stat", False),
@@ -92,12 +94,12 @@ def test_full_table_emits_mutations():
 def test_multi_vfs_fan_out():
     ops = make_generic_ops(["a", "b"], make_table())
     assert {o.vfs for o in ops} == {"a", "b"}
-    assert len(ops) == 6
+    assert len(ops) == 8
 
 
 def test_overrides_skip_names():
     ops = make_generic_ops("x", make_table(), overrides={"readdir"})
-    assert {o.name for o in ops} == {"read", "stat"}
+    assert {o.name for o in ops} == {"glob", "read", "stat"}
 
 
 def test_emits_no_filetype_scoped_ops():

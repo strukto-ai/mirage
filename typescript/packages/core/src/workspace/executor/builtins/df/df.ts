@@ -276,7 +276,7 @@ export async function handleDf(
 
   const data: string[][] = []
   for (const mount of mounts) {
-    const cap = await mount.use(() => mount.vfs.statfs())
+    const cap = await mount.use(() => mount.vfs.capacity())
     const cells = [mount.vfs.name]
     if (showType) cells.push(mount.vfs.name)
     cells.push(...numCells(cap, human, si, block, inodes))

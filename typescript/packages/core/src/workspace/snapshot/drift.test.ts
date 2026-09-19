@@ -33,7 +33,7 @@ interface RegistryLike {
 }
 
 class SnapshotVFS extends BaseVFS {
-  readonly name = 's3'
+  override readonly name = 's3'
   constructor(override readonly supportsSnapshot: boolean) {
     super()
   }

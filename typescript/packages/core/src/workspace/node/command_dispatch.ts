@@ -753,7 +753,7 @@ async function routeArgv(
     return handleTouch(namespace, dispatch, session, operands)
   }
 
-  // Capacity (registry-routed: enumerates mounts, reports per-mount statfs;
+  // Capacity (registry-routed: enumerates mounts, reports per-mount capacity;
   // never fabricates numbers).
   if (name === 'df') {
     return handleDf(registry, session, dispatch, operands)

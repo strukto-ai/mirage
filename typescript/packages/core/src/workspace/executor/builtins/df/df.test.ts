@@ -23,7 +23,7 @@ import { Workspace } from '../../../workspace/workspace.ts'
 // / a provider that exposes storage numbers (real disk free space is
 // machine-specific, so this keeps the output deterministic).
 class QuotaVFS extends RAMVFS {
-  override statfs(): Promise<CapacityResult> {
+  override capacity(): Promise<CapacityResult> {
     return Promise.resolve({
       state: CapacityState.QUOTA,
       total: 1024000,
@@ -55,8 +55,8 @@ function cols(out: string, i: number): string[] {
 }
 
 describe('df', () => {
-  it('default statfs state is UNKNOWN', async () => {
-    const cap = await new RAMVFS().statfs()
+  it('default capacity state is UNKNOWN', async () => {
+    const cap = await new RAMVFS().capacity()
     expect(cap.state).toBe(CapacityState.UNKNOWN)
     expect(cap.total).toBeUndefined()
   })

@@ -15,9 +15,6 @@
 import { LanceDBAccessor } from '@struktoai/mirage-core/accessor/lancedb'
 import { LANCEDB_COMMANDS } from '@struktoai/mirage-core/commands/builtin/lancedb/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { read as lanceRead } from '@struktoai/mirage-core/core/lancedb/read'
-import { readdir as lanceReaddir } from '@struktoai/mirage-core/core/lancedb/readdir'
-import { stat as lanceStat } from '@struktoai/mirage-core/core/lancedb/stat'
 import { LANCEDB_OPS } from '@struktoai/mirage-core/ops/lancedb/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
@@ -32,7 +29,6 @@ import type {
 } from '@struktoai/mirage-core/vfs/lancedb/config'
 import { LANCEDB_PROMPT } from '@struktoai/mirage-core/vfs/lancedb/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { LanceDBStore } from './store.ts'
 
 const REMOTE_SCHEMES = ['s3://', 'gs://', 'az://', 'hf://', 'db://']
@@ -48,7 +44,7 @@ export interface LanceDBVFSState {
 }
 
 export class LanceDBVFS extends BaseVFS {
-  readonly name: string = VFSName.LANCEDB
+  override readonly name: string = VFSName.LANCEDB
   override readonly cachesReads: boolean
   // readdir seeds exact card sizes from the widened select and stat falls
   // back to rendering the row itself, so sizes are exact either way.
@@ -97,17 +93,5 @@ export class LanceDBVFS extends BaseVFS {
 
   override commands(): readonly RegisteredCommand[] {
     return LANCEDB_COMMANDS
-  }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return lanceRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return lanceReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return lanceStat(this.accessor, p, this.index)
   }
 }

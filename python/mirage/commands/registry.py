@@ -22,6 +22,34 @@ from mirage.commands.config import RegisteredCommand, command, cross_command
 _CommandSource: TypeAlias = RegisteredCommand | Callable[..., Any]
 
 
+def registered_commands(
+        items: Iterable[_CommandSource]) -> list[RegisteredCommand]:
+    """Flatten command sources into their registrations, in order.
+
+    Args:
+        items (Iterable[_CommandSource]): ``RegisteredCommand`` values
+            and ``@command``-decorated functions, each of which may
+            carry several registrations.
+
+    Raises:
+        TypeError: an item is neither.
+    """
+    values: list[RegisteredCommand] = []
+    for item in items:
+        registrations = ([item] if isinstance(item, RegisteredCommand) else
+                         getattr(item, "_registered_commands", None))
+        if registrations is None:
+            raise TypeError(
+                "command catalogs require RegisteredCommand values or "
+                "@command-decorated functions")
+        for registered in registrations:
+            if not isinstance(registered, RegisteredCommand):
+                raise TypeError("command catalog registrations must be "
+                                "RegisteredCommand values")
+            values.append(registered)
+    return values
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class CommandCatalog(Sequence[RegisteredCommand]):
     """Immutable command table with exact name/filetype lookup."""
@@ -31,21 +59,10 @@ class CommandCatalog(Sequence[RegisteredCommand]):
                      RegisteredCommand] = field(repr=False)
 
     def __init__(self, items: Iterable[_CommandSource]) -> None:
-        values: list[RegisteredCommand] = []
+        values = registered_commands(items)
         by_key: dict[tuple[str, str | None], RegisteredCommand] = {}
-        for item in items:
-            registrations = ([item] if isinstance(item, RegisteredCommand) else
-                             getattr(item, "_registered_commands", None))
-            if registrations is None:
-                raise TypeError(
-                    "command catalogs require RegisteredCommand values or "
-                    "@command-decorated functions")
-            for registered in registrations:
-                if not isinstance(registered, RegisteredCommand):
-                    raise TypeError("command catalog registrations must be "
-                                    "RegisteredCommand values")
-                values.append(registered)
-                by_key[(registered.name, registered.filetype)] = registered
+        for registered in values:
+            by_key[(registered.name, registered.filetype)] = registered
         object.__setattr__(self, "_items", tuple(values))
         object.__setattr__(self, "_by_key", MappingProxyType(by_key))
 

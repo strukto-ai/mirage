@@ -7,6 +7,7 @@ from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
+from tests.fixtures.driver_ops import ops
 
 
 class FakeClient:
@@ -50,6 +51,6 @@ async def test_cat_returns_full_json():
                  vfs_path="aaa.json",
                  resolved=True)
     out, _io = await _command(res, "cat")(res.accessor, [p], [],
-                                          CommandOpts(index=res.index))
+                                          CommandOpts(index=ops(res).index))
     data = json.loads(await _bytes(out))
     assert data["memory"] == "loves bananas"

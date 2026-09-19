@@ -105,6 +105,9 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       if (deps.sharedMounts.has(r)) continue
       await r.close()
     }
+    // The stores are the mounts' own, whoever owns the drivers.
+    const stores = new Set(deps.registry.allMounts().map((mount) => mount.indexStore))
+    for (const store of stores) await store.close()
   } catch (err) {
     failures.push(err)
   }

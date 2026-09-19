@@ -9,9 +9,8 @@ class _OverlayRAMVFS(RAMVFS):
     """RAM VFS with the native setattr op stripped, standing in for
     an API backend that has no attribute slot."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._ops_list = [ro for ro in self._ops_list if ro.name != "setattr"]
+    def ops(self):
+        return [ro for ro in super().ops() if ro.name != "setattr"]
 
 
 def _make_overlay_ws(

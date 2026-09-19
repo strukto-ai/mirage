@@ -13,13 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MongoDBAccessor } from '@struktoai/mirage-core/accessor/mongodb'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { MONGODB_COMMANDS } from '@struktoai/mirage-core/commands/builtin/mongodb/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { read as mongoRead } from '@struktoai/mirage-core/core/mongodb/read'
-import { readdir as mongoReaddir } from '@struktoai/mirage-core/core/mongodb/readdir'
 import { detectScope as detectMongoScope } from '@struktoai/mirage-core/core/mongodb/scope'
-import { stat as mongoStat } from '@struktoai/mirage-core/core/mongodb/stat'
 import { MONGODB_OPS } from '@struktoai/mirage-core/ops/mongodb/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
@@ -33,13 +29,8 @@ import type {
   MongoDBConfigResolved,
 } from '@struktoai/mirage-core/vfs/mongodb/config'
 import { MONGODB_PROMPT } from '@struktoai/mirage-core/vfs/mongodb/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { MongoDBStore } from './store.ts'
-
-const resolveMongoGlob = makeResolveGlob(mongoReaddir)
-
 void detectMongoScope
 
 export interface MongoDBVFSOptions {
@@ -54,7 +45,7 @@ export interface MongoDBVFSState {
 }
 
 export class MongoDBVFS extends BaseVFS {
-  readonly name: string = VFSName.MONGODB
+  override readonly name: string = VFSName.MONGODB
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
   override readonly prompt: string
@@ -101,35 +92,5 @@ export class MongoDBVFS extends BaseVFS {
 
   override commands(): readonly RegisteredCommand[] {
     return MONGODB_COMMANDS
-  }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return mongoRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return mongoReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return mongoStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return resolveMongoGlob(this.accessor, effective, this.index)
   }
 }

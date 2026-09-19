@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   Accessor,
+  BaseVFS,
   command,
   type CommandIO,
   CommandSpec,
@@ -27,7 +28,6 @@ import {
   enotdir,
   FileStat,
   FileType,
-  GenericVFS,
   IOResult,
   MountMode,
   type PathSpec,
@@ -37,7 +37,7 @@ import {
 } from "@struktoai/mirage-node";
 
 // A whole custom backend in one script: four core functions over your
-// data source, one CommandIO table, one GenericVFS. Every generic
+// data source, one CommandIO table, one BaseVFS. Every generic
 // command (ls, cat, grep, find, head, wc, ...) works for free, and so
 // does versioning, in the shape the content calls for: the wiki's pages
 // are the VFS's own, so they ride its state and a snapshot rebuilds
@@ -172,7 +172,7 @@ function makeIO(): CommandIO<WikiAccessor> {
   };
 }
 
-class WikiVFS extends GenericVFS<WikiAccessor> {
+class WikiVFS extends BaseVFS<WikiAccessor> {
   readonly wiki: WikiAccessor;
 
   constructor(pages: Tree = PAGES) {
@@ -215,7 +215,7 @@ class WikiVFS extends GenericVFS<WikiAccessor> {
 // is handed back needs no name in any registry.
 const FEED: Tree = { "status.md": "All systems go.\n" };
 
-class FeedVFS extends GenericVFS<WikiAccessor> {
+class FeedVFS extends BaseVFS<WikiAccessor> {
   constructor() {
     super({
       name: "feed",

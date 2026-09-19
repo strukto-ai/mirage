@@ -43,6 +43,10 @@ class OpsTable(Protocol):
         ...
 
     @property
+    def max_glob_matches(self) -> int | None:
+        ...
+
+    @property
     def read_range(self) -> OpFn | None:
         ...
 

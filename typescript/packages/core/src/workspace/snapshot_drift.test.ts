@@ -71,7 +71,7 @@ class FakeRemoteAccessor extends Accessor {
 }
 
 class FakeRemoteVFS extends BaseVFS {
-  readonly name = 'fake-remote'
+  override readonly name = 'fake-remote'
   override readonly cachesReads = true
   override readonly supportsSnapshot = true
   override readonly accessor: FakeRemoteAccessor
@@ -82,25 +82,6 @@ class FakeRemoteVFS extends BaseVFS {
   }
   override close(): Promise<void> {
     return Promise.resolve()
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    const entry = this.accessor.blobs.get(p.virtual)
-    if (entry === undefined) {
-      const err = new Error(`not found: ${p.virtual}`) as Error & { code: string }
-      err.code = 'ENOENT'
-      return Promise.reject(err)
-    }
-    return Promise.resolve(
-      new FileStat({
-        name: p.virtual.split('/').pop() ?? p.virtual,
-        size: entry.bytes.byteLength,
-        type: FileType.FILE,
-        content: ContentType.TEXT,
-        fingerprint: entry.fingerprint,
-        revision: entry.revision,
-      }),
-    )
   }
 
   override getState(): { type: string; config: { token: string } } {
@@ -543,7 +524,7 @@ it.each(
     })
     let closed = false
     class AsyncStateVFS extends BaseVFS {
-      readonly name = 'ram'
+      override readonly name = 'ram'
       override async getState(): Promise<{ type: string }> {
         enter()
         await release

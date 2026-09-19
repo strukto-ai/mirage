@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import dataclasses
 from typing import Any, cast
 
 try:
@@ -23,56 +22,15 @@ except ImportError as _err:
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.commands.builtin.redis import COMMANDS as REDIS_COMMANDS
-from mirage.core.redis.append import append_bytes
-from mirage.core.redis.constants import SCOPE_ERROR
-from mirage.core.redis.copy import copy
-from mirage.core.redis.create import create
-from mirage.core.redis.du import entries as du_entries
-from mirage.core.redis.du import size as du_size
-from mirage.core.redis.exists import exists
-from mirage.core.redis.find import find
-from mirage.core.redis.mkdir import mkdir
-from mirage.core.redis.read import read_bytes
-from mirage.core.redis.readdir import readdir
-from mirage.core.redis.rename import rename
-from mirage.core.redis.rm import rm_r
-from mirage.core.redis.rmdir import rmdir
-from mirage.core.redis.stat import stat as redis_stat
-from mirage.core.redis.stream import read_stream
-from mirage.core.redis.truncate import truncate
-from mirage.core.redis.unlink import unlink
-from mirage.core.redis.write import write_bytes
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.ops.redis import OPS as REDIS_OPS
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
-from mirage.utils.key_prefix import mount_key
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.redis.prompt import PROMPT
 from mirage.vfs.redis.store import RedisStore, escape_glob
 from mirage.vfs.secrets import REDACTED_SECRET
-
-_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
-
-_REDIS_OPS = {
-    "read_bytes": read_bytes,
-    "write": write_bytes,
-    "readdir": readdir,
-    "stat": redis_stat,
-    "unlink": unlink,
-    "rmdir": rmdir,
-    "copy": copy,
-    "rename": rename,
-    "mkdir": mkdir,
-    "read_stream": read_stream,
-    "rm_recursive": rm_r,
-    "du_size": du_size,
-    "du_entries": du_entries,
-    "create": create,
-    "truncate": truncate,
-    "exists": exists,
-    "find_flat": find,
-    "append": append_bytes,
-}
 
 
 class RedisVFS(BaseVFS):
@@ -82,7 +40,6 @@ class RedisVFS(BaseVFS):
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
     index_ttl: float = 0
-    _ops: dict[str, Any] = _REDIS_OPS
     prompt: str = PROMPT
 
     def __init__(
@@ -95,30 +52,20 @@ class RedisVFS(BaseVFS):
         self.key_prefix = key_prefix
         self._store = RedisStore(url=url, key_prefix=key_prefix)
         self.accessor = RedisAccessor(self._store)
-        for fn in REDIS_COMMANDS:
-            self.register(fn)
-        for ro in REDIS_OPS:
-            self.register_op(ro)
 
-    def storage_id(self) -> str:
+    def ops(self) -> list[RegisteredOp]:
+        return REDIS_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(REDIS_COMMANDS)
+
+    def storage_location(self) -> str:
         # The server URL (host, port and db) plus the key prefix pin the
         # keyspace two mounts would share. The prefix is joined path-like
         # so nested prefixes collapse onto one key.
         prefix = self.key_prefix.strip("/")
         base = f"{self.name}:{self.url}"
         return f"{base}/{prefix}" if prefix else base
-
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        if prefix:
-            paths = [
-                dataclasses.replace(p, vfs_path=mount_key(p.virtual, prefix))
-                if isinstance(p, PathSpec) else p for p in paths
-            ]
-        return await _resolve_glob(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
         prefix = self._store._prefix

@@ -15,22 +15,15 @@
 from typing import Any
 
 from mirage.accessor.linear import LinearAccessor
+from mirage.commands.builtin.linear import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.linear.config import LinearConfig
-from mirage.core.linear.read import read
-from mirage.core.linear.readdir import readdir
-from mirage.core.linear.stat import stat
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.linear import OPS as LINEAR_VFS_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.linear.prompt import PROMPT, WRITE_PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
-
-_LINEAR_OPS = {
-    "read_bytes": read,
-    "readdir": readdir,
-    "stat": stat,
-}
 
 
 class LinearVFS(BaseVFS):
@@ -42,7 +35,6 @@ class LinearVFS(BaseVFS):
     # (comments.jsonl via one bounded comments call), so stat always reports
     # the rendered byte length and fskit mounts serve exact reads.
     sizes_always_known: bool = True
-    _ops: dict[str, Any] = _LINEAR_OPS
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
 
@@ -50,20 +42,12 @@ class LinearVFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = LinearAccessor(self.config)
-        from mirage.commands.builtin.linear import COMMANDS
-        from mirage.ops.linear import OPS as LINEAR_VFS_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for op in LINEAR_VFS_OPS:
-            self.register_op(op)
+    def ops(self) -> list[RegisteredOp]:
+        return LINEAR_VFS_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

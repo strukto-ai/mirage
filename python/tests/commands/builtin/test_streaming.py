@@ -18,6 +18,7 @@ from mirage.accessor import NOOPAccessor
 from mirage.commands import COMMANDS as _CMDS
 from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
+from tests.fixtures.driver_ops import ops
 
 _ps = PathSpec.from_str_path
 
@@ -43,7 +44,7 @@ async def _chunks(parts: list[bytes]):
 
 @pytest.mark.asyncio
 async def test_cat_file_returns_async_iterator(backend):
-    await backend.write(_ps("/tmp/f.txt"), data=b"hello world")
+    await ops(backend).write(_ps("/tmp/f.txt"), data=b"hello world")
     stdout, io = await cat(backend.accessor, [_ps('/tmp/f.txt')], [],
                            CommandOpts())
     assert hasattr(stdout, "__aiter__")
@@ -70,7 +71,7 @@ async def test_cat_bytes_stdin():
 
 @pytest.mark.asyncio
 async def test_cat_number_lines(backend):
-    await backend.write(_ps("/tmp/f.txt"), data=b"aaa\nbbb\n")
+    await ops(backend).write(_ps("/tmp/f.txt"), data=b"aaa\nbbb\n")
     stdout, io = await cat(backend.accessor, [_ps('/tmp/f.txt')], [],
                            CommandOpts(flags={'number': True}))
     assert hasattr(stdout, "__aiter__")
@@ -86,8 +87,8 @@ async def test_cat_number_lines(backend):
 
 @pytest.mark.asyncio
 async def test_grep_file_returns_async_iterator(backend):
-    await backend.write(_ps("/tmp/f.txt"),
-                        data=b"apple\nbanana\napricot\ncherry\n")
+    await ops(backend).write(_ps("/tmp/f.txt"),
+                             data=b"apple\nbanana\napricot\ncherry\n")
     stdout, io = await grep(backend.accessor, [_ps('/tmp/f.txt')], ['ap'],
                             CommandOpts())
     assert hasattr(stdout, "__aiter__")
@@ -171,7 +172,7 @@ async def test_grep_count_only():
 @pytest.mark.asyncio
 async def test_head_file_returns_async_iterator(backend):
     lines = b"\n".join(f"line{i}".encode() for i in range(20))
-    await backend.write(_ps("/tmp/f.txt"), data=lines)
+    await ops(backend).write(_ps("/tmp/f.txt"), data=lines)
     stdout, io = await head(backend.accessor, [_ps('/tmp/f.txt')], [],
                             CommandOpts(flags={'lines': '3'}))
     assert hasattr(stdout, "__aiter__")
@@ -245,7 +246,7 @@ async def test_cut_stdin_streaming():
 
 @pytest.mark.asyncio
 async def test_cut_file_returns_async_iterator(backend):
-    await backend.write(_ps("/tmp/f.txt"), data=b"a,b,c\nd,e,f\n")
+    await ops(backend).write(_ps("/tmp/f.txt"), data=b"a,b,c\nd,e,f\n")
     stdout, io = await cut(
         backend.accessor, [_ps('/tmp/f.txt')], [],
         CommandOpts(flags={

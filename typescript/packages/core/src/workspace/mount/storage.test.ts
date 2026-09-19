@@ -16,20 +16,20 @@ import { describe, expect, it } from 'vitest'
 import { BaseVFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from './registry.ts'
-import { makeStorageKey, vfsStorageId } from './storage.ts'
+import { makeStorageKey, vfsStorageLocation } from './storage.ts'
 
 class StoreVFS extends BaseVFS {
-  readonly name = 'ram'
+  override readonly name = 'ram'
 }
 
 // A VFS pinned by config, the way disk/s3/redis are: two instances
 // naming one target must compare equal.
 class RootedVFS extends BaseVFS {
-  readonly name = 'disk'
+  override readonly name = 'disk'
   constructor(readonly root: string) {
     super()
   }
-  override storageId(): string {
+  override storageLocation(): string {
     return `${this.name}:${this.root}`
   }
 }
@@ -97,9 +97,9 @@ describe('makeStorageKey', () => {
     expect(key(spec('/a/y.txt'))).not.toBe(key(spec('/b/y.txt')))
   })
 
-  it('vfsStorageId is stable per object', () => {
+  it('vfsStorageLocation is stable per object', () => {
     const store = new StoreVFS()
-    expect(vfsStorageId(store)).toBe(vfsStorageId(store))
-    expect(vfsStorageId(store)).not.toBe(vfsStorageId(new StoreVFS()))
+    expect(vfsStorageLocation(store)).toBe(vfsStorageLocation(store))
+    expect(vfsStorageLocation(store)).not.toBe(vfsStorageLocation(new StoreVFS()))
   })
 })

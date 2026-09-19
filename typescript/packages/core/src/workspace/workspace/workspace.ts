@@ -24,7 +24,6 @@ import { type OpKwargs, OpsRegistry } from '../../ops/registry.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
-import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
@@ -112,6 +111,7 @@ import { Runtimes } from './runtimes.ts'
 import { Session } from './handle.ts'
 import type { ExecuteResult } from './types.ts'
 import { type ExecuteOptions, type MountSpec, type WorkspaceOptions } from './types.ts'
+import { Mount } from '../mount/spec.ts'
 import { commandName, forkForCall } from './utils.ts'
 import { WatchManager } from './watch.ts'
 
@@ -190,14 +190,14 @@ export class Workspace {
       normalized.bare,
       options.mode ?? MountMode.READ,
       normalized.modes,
+      {
+        ...(options.index !== undefined ? { index: options.index } : {}),
+        refs: normalized.refs,
+        indexes: normalized.indexes,
+      },
     )
     const consistency = options.consistency ?? ConsistencyPolicy.LAZY
     this.registry.setConsistency(consistency)
-    if (options.index !== undefined) {
-      for (const vfs of Object.values(normalized.bare)) {
-        vfs.setIndex(options.index)
-      }
-    }
     this.wsId = options.workspaceId ?? newWorkspaceId()
     this.jobTable = new JobTable(options.consoleFactory ?? null)
     const stores = resolveControlStores(this.wsId, options)
@@ -361,19 +361,6 @@ export class Workspace {
       defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
     for (const vfs of [...this.registry.allMounts().map((m) => m.vfs), this.cache]) {
       this.opsRegistry.registerVfs(vfs)
-    }
-    for (const mount of this.registry.allMounts()) {
-      const cmds = mount.vfs.commands?.()
-      if (cmds !== undefined) {
-        for (const cmd of cmds) {
-          if (cmd.filetype !== null) mount.register(cmd)
-          else if (cmd.vfs === null) mount.registerGeneral(cmd)
-          else mount.register(cmd)
-        }
-      }
-      for (const cmd of GENERAL_COMMANDS) {
-        mount.registerGeneral(cmd)
-      }
     }
     for (const [prefix, commandLimits] of Object.entries({
       ...normalized.commandLimits,
@@ -910,20 +897,19 @@ export class Workspace {
    * Add a mount to a running workspace. Registers the VFS's ops globally
    * on this workspace's OpsRegistry so dispatch can find them.
    */
-  addMount(prefix: string, vfs: BaseVFS, mode: MountMode = MountMode.READ): MountEntry {
+  addMount(
+    prefix: string,
+    vfs: BaseVFS,
+    mode: MountMode = MountMode.READ,
+    vfsRef: string | null = null,
+  ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     this.registry.checkVfsAvailable(vfs)
     const previous = this.registry.allMounts()
-    // Configure before mount() captures the index in its CacheManager.
-    // An alias must retain the index used by the VFS's other mounts.
-    if (
-      this.indexConfig !== undefined &&
-      this.registry.tryMountForPrefix(prefix) === null &&
-      !this.registry.allMounts().some((mount) => mount.vfs === vfs)
-    ) {
-      vfs.setIndex(this.indexConfig)
-    }
-    const m = this.registry.mount(prefix, vfs, mode)
+    const m = this.registry.mount(prefix, vfs, mode, ConsistencyPolicy.LAZY, {
+      ...(this.indexConfig !== undefined ? { index: this.indexConfig } : {}),
+      vfsRef,
+    })
     prepareAddedMount(this.registry, m, previous)
     this.opsRegistry.registerVfs(vfs)
     return m
@@ -1347,7 +1333,7 @@ export class Workspace {
     this: T,
     source: string | Uint8Array,
     options: WorkspaceOptions = {},
-    overrides: Record<string, BaseVFS> = {},
+    overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const bytes = typeof source === 'string' ? readFileBytes(source) : source
@@ -1359,7 +1345,7 @@ export class Workspace {
     this: T,
     state: WorkspaceStateDict,
     options: WorkspaceOptions = {},
-    overrides: Record<string, BaseVFS> = {},
+    overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
@@ -1383,15 +1369,12 @@ export class Workspace {
     this: T,
     state: WorkspaceStateDict,
     options: WorkspaceOptions = {},
-    overrides: Record<string, BaseVFS> = {},
+    overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const rebuilt = await withRebuiltMounts(state, overrides, (m) => this.buildSavedVfs(m))
     const args = buildMountArgs(state, rebuilt, cliOverrides)
-    const mounts: Record<string, MountSpec> = {}
-    for (const [prefix, [vfs, mode]] of Object.entries(args.mountArgs)) {
-      mounts[prefix] = [vfs, mode]
-    }
+    const mounts: Record<string, MountSpec> = { ...args.mountArgs }
     const mergedOptions: WorkspaceOptions = {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
@@ -1399,8 +1382,8 @@ export class Workspace {
       ...options,
     }
     const ws = new this(mounts, mergedOptions) as InstanceType<T>
-    for (const vfs of Object.values(overrides)) {
-      ws.sharedMounts.add(vfs)
+    for (const override of Object.values(overrides)) {
+      ws.sharedMounts.add(override instanceof Mount ? override.vfs : override)
     }
     await applyStateDict(ws, state)
     return ws

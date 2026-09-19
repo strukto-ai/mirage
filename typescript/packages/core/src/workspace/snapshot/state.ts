@@ -59,6 +59,7 @@ import { VERSION } from '../../version.ts'
 import type { NodeMeta } from '../mount/namespace/namespace.ts'
 import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
 import type { Workspace } from '../workspace/workspace.ts'
+import { Mount } from '../mount/spec.ts'
 import type { MountArgs } from './config.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
 import type {
@@ -96,7 +97,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
       mode: m.mode,
       consistency: ConsistencyPolicy.LAZY,
       vfs_class: m.vfs.name,
-      vfs_ref: m.vfs.vfsRef,
+      vfs_ref: m.vfsRef,
       vfs_state: state,
     })
   }
@@ -238,7 +239,7 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
 
 export function buildMountArgs(
   state: WorkspaceStateDict,
-  overrides: Record<string, BaseVFS> = {},
+  overrides: Record<string, BaseVFS | Mount> = {},
   cliOverrides: CLIOverrides = {},
 ): MountArgs {
   if (state.version < FORMAT_VERSION) {
@@ -247,7 +248,7 @@ export function buildMountArgs(
         `(loader expects v${String(FORMAT_VERSION)})`,
     )
   }
-  const normalized: Record<string, BaseVFS> = {}
+  const normalized: Record<string, BaseVFS | Mount> = {}
   for (const [prefix, vfs] of Object.entries(overrides)) {
     normalized[normMountPrefix(prefix)] = vfs
   }
@@ -273,15 +274,23 @@ export function buildMountArgs(
         `factory (register) or pass a live instance.`,
     )
   }
-  const mountArgs: Record<string, [BaseVFS, MountMode]> = {}
+  const mountArgs: Record<string, Mount> = {}
   for (const m of state.mounts) {
     if (!VALID_MODES.includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
     }
-    mountArgs[m.prefix] = [
-      normalized[normMountPrefix(m.prefix)] ?? new RAMVFS(),
-      m.mode as MountMode,
-    ]
+    // A live override placed as a `Mount` names the door it
+    // came through; a bare VFS, or a rebuilt one, keeps the saved
+    // reference so a second round trip rebuilds through the same door.
+    const override = normalized[normMountPrefix(m.prefix)]
+    const placed = override instanceof Mount ? override : null
+    mountArgs[m.prefix] = new Mount(
+      placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
+      {
+        mode: m.mode as MountMode,
+        vfsRef: placed !== null ? (placed.options.vfsRef ?? null) : savedRef(m),
+      },
+    )
   }
   const cliEntries = state.clis ?? []
   const missingClis = cliEntries
@@ -385,10 +394,10 @@ export function savedVfsBuild(
  */
 export async function withRebuiltMounts(
   state: WorkspaceStateDict,
-  overrides: Record<string, BaseVFS>,
+  overrides: Record<string, BaseVFS | Mount>,
   build: SavedResourceBuilder,
-): Promise<Record<string, BaseVFS>> {
-  const merged: Record<string, BaseVFS> = { ...overrides }
+): Promise<Record<string, BaseVFS | Mount>> {
+  const merged: Record<string, BaseVFS | Mount> = { ...overrides }
   const held = new Set(Object.keys(overrides).map(normMountPrefix))
   for (const m of state.mounts) {
     if (held.has(normMountPrefix(m.prefix))) continue

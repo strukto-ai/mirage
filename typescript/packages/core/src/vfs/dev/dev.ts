@@ -14,11 +14,9 @@
 
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { DEV_COMMANDS } from '../../commands/builtin/dev/index.ts'
-import { read, stat, stream } from '../../core/dev/index.ts'
 import { DEV_OPS } from '../../ops/dev/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import { type FileStat, type PathSpec } from '../../types.ts'
 import { RAMVFS } from '../ram/ram.ts'
 import type { RAMStore } from '../ram/store.ts'
 import { DevStore } from './store.ts'
@@ -33,17 +31,5 @@ export class DevVFS extends RAMVFS {
 
   override commands(): readonly RegisteredCommand[] {
     return DEV_COMMANDS
-  }
-
-  override streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
-    return stream(this.accessor, path)
-  }
-
-  override readFile(path: PathSpec): Promise<Uint8Array> {
-    return read(this.accessor, path)
-  }
-
-  override stat(path: PathSpec): Promise<FileStat> {
-    return stat(this.accessor, path)
   }
 }

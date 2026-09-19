@@ -50,8 +50,8 @@ export interface Capabilities {
   caches_reads: boolean | string
   supports_snapshot: boolean | string
   sizes_always_known: boolean | string
-  storage_id: boolean
-  statfs: boolean
+  storage_location: boolean
+  capacity: boolean
 }
 
 export interface CommandIoFacts {
@@ -195,8 +195,8 @@ export function capabilitiesOf(className: string, classes: Map<string, ClassInfo
     caches_reads: booleanCapability(values, 'cachesReads', false, className),
     supports_snapshot: booleanCapability(values, 'supportsSnapshot', false, className),
     sizes_always_known: booleanCapability(values, 'sizesAlwaysKnown', false, className),
-    storage_id: overrides.some((info) => declaresMethod(info, 'storageId')),
-    statfs: overrides.some((info) => declaresMethod(info, 'statfs')),
+    storage_location: overrides.some((info) => declaresMethod(info, 'storageLocation')),
+    capacity: overrides.some((info) => declaresMethod(info, 'capacity')),
   }
 }
 

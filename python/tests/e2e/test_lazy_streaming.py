@@ -19,23 +19,25 @@ import pytest
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.driver_ops import ops
 
 
 @pytest.fixture
 def ws():
     mem = RAMVFS()
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/big.txt"),
-                  data=b"\n".join(f"line {i}".encode() for i in range(10000))))
+        ops(mem).write(PathSpec.from_str_path("/big.txt"),
+                       data=b"\n".join(f"line {i}".encode()
+                                       for i in range(10000))))
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/small.txt"),
-                  data=b"apple\nbanana\napricot\ncherry\n"))
+        ops(mem).write(PathSpec.from_str_path("/small.txt"),
+                       data=b"apple\nbanana\napricot\ncherry\n"))
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/dupes.txt"),
-                  data=b"a\na\nb\nb\nc\n"))
+        ops(mem).write(PathSpec.from_str_path("/dupes.txt"),
+                       data=b"a\na\nb\nb\nc\n"))
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/csv.txt"),
-                  data=b"name,age,city\nalice,30,nyc\nbob,25,sf\n"))
+        ops(mem).write(PathSpec.from_str_path("/csv.txt"),
+                       data=b"name,age,city\nalice,30,nyc\nbob,25,sf\n"))
     return Workspace(
         {"/data": (mem, MountMode.WRITE)},
         mode=MountMode.WRITE,

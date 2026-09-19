@@ -86,17 +86,17 @@ def test_strict_load_raises_when_s3_etag_drifts(tmp_path):
         asyncio.run(src.snapshot(snap))
         store["data.csv"] = b"VERSION 2 DRIFTED\n"
 
-        vfs = S3VFS(_config())
-        dst = _load(snap, mounts={"/s3": vfs})
+        dst = _load(snap, mounts={"/s3": S3VFS(_config())})
+        index = dst.mount("/s3").index_store
         # A warm index must not hide the backend fingerprint from drift.
         asyncio.run(
-            vfs.index.put(
+            index.put(
                 "/s3/data.csv",
                 IndexEntry(id="data.csv",
                            name="data.csv",
                            resource_type="file",
                            size=len(b"version 1 bytes\n"))))
-        assert asyncio.run(vfs.index.get("/s3/data.csv")).entry is not None
+        assert asyncio.run(index.get("/s3/data.csv")).entry is not None
         with pytest.raises(ContentDriftError) as exc_info:
             asyncio.run(dst.shell("cat /s3/data.csv"))
         assert exc_info.value.path == "/s3/data.csv"
@@ -359,8 +359,8 @@ async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
         record("read", scope.virtual, "ram", 3, start_op(), fingerprint="old")
         yield payload
 
-    vfs.register_op(lazy_read)
     ws = Workspace({"/data": vfs})
+    ws.mount("/data").register_fns([lazy_read])
     scope = RecordingScope()
     try:
         stream, _ = await ws.dispatch("read",

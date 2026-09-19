@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { exists as existsCore } from '../../core/disk/exists.ts'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -34,6 +35,6 @@ afterEach(() => {
 describe('mkdirOp', () => {
   it('creates a directory recursively (parents=true default in op)', async () => {
     await mkdirOp.fn(res.accessor, spec('/a/b/c'), [], {})
-    expect(await res.exists(spec('/a/b/c'))).toBe(true)
+    expect(await existsCore(res.accessor, spec('/a/b/c'))).toBe(true)
   })
 })

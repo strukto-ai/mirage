@@ -30,7 +30,7 @@ export interface HfBucketsVFSState {
 }
 
 export class HfBucketsVFS extends HfVFS {
-  readonly name: string = VFSName.HF_BUCKETS
+  override readonly name: string = VFSName.HF_BUCKETS
   readonly prompt: string = HF_BUCKETS_PROMPT
   readonly config: HfBucketsConfig
   readonly accessor: HfBucketsAccessor

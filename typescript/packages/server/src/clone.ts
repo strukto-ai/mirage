@@ -18,6 +18,7 @@ import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapsh
 import { normMountPrefix } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { resolveSourcesFor } from '@struktoai/mirage-core/secrets/sources'
 import { Workspace, buildVfs } from '@struktoai/mirage-node'
@@ -46,7 +47,7 @@ export interface OverrideShape {
 export async function buildOverrideMounts(
   override: OverrideShape | null,
   declared: unknown,
-): Promise<Record<string, BaseVFS>> {
+): Promise<Record<string, BaseVFS | Mount>> {
   const mounts = override?.mounts
   if (mounts === undefined) return {}
   const blocks = Object.entries(mounts)
@@ -54,9 +55,10 @@ export async function buildOverrideMounts(
     declared,
     blocks.map(([, block]) => block.config ?? {}),
   )
-  const out: Record<string, BaseVFS> = {}
+  const out: Record<string, Mount> = {}
   for (const [prefix, block] of blocks) {
-    out[normMountPrefix(prefix)] = await buildVfs(block.vfs, block.config ?? {}, sources)
+    const vfs = await buildVfs(block.vfs, block.config ?? {}, sources)
+    out[normMountPrefix(prefix)] = new Mount(vfs, { vfsRef: block.vfs })
   }
   return out
 }

@@ -15,7 +15,6 @@
 import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../utils/errors.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -61,10 +60,6 @@ export function globOptions(session: SessionState): GlobOptions {
     failglob: session.shopts.failglob ?? SHOPT_DEFAULTS.get('failglob') ?? false,
     globstar: session.shopts.globstar ?? SHOPT_DEFAULTS.get('globstar') ?? false,
   }
-}
-
-export interface ResourceWithGlob extends BaseVFS {
-  glob(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
 }
 
 // Virtual paths a directory owes the namespace, matching a segment.
@@ -196,7 +191,7 @@ async function levelMatches(
   await owner.ensureReady()
   const prefix = rstripSlash(owner.prefix)
   const out: string[] = []
-  if (owner.vfs.glob !== undefined) {
+  if (owner.hasOp('glob')) {
     const spec = new PathSpec({
       virtual: real,
       directory: real,
@@ -404,15 +399,14 @@ async function isDirectory(
   const owner = mountOf(registry, real, mount)
   const prefix = rstripSlash(owner.prefix)
   if (rstripSlash(real) === prefix) return true
-  await owner.ensureReady()
-  let row: FileStat | undefined
+  if (!owner.hasOp('stat')) return true
+  let row: FileStat
   try {
-    row = await owner.vfs.stat?.(PathSpec.fromStrPath(real, mountKey(real, prefix)))
+    row = (await owner.executeOp('stat', real)) as FileStat
   } catch (err) {
     if (isFsError(err)) return false
     throw err
   }
-  if (row === undefined) return true
   return row.type === FileType.DIRECTORY
 }
 
@@ -465,7 +459,7 @@ export async function resolveGlobs(
       const linked = !midPath && listingDir(links, directory) !== directory
       const extra =
         midPath || linked ? [] : namespaceChildren(registry, links, directory, item.pattern)
-      if (!linked && mount.vfs.glob === undefined && extra.length === 0) {
+      if (!linked && !mount.hasOp('glob') && extra.length === 0) {
         result.push(item)
         continue
       }

@@ -206,9 +206,9 @@ async def test_remote_line_invalidates_local_read_caches():
     try:
         mount = next(m for m in ws._registry.mounts() if m.prefix == "/data/")
         stale = IndexEntry(id="stale", name="stale.txt", resource_type="ram")
-        await mount.vfs.index.put("/stale.txt", stale)
+        await mount.index_store.put("/stale.txt", stale)
         await ws.shell("python3 anything")
-        looked = await mount.vfs.index.get("/stale.txt")
+        looked = await mount.index_store.get("/stale.txt")
         assert looked.entry is None
     finally:
         await ws.close()

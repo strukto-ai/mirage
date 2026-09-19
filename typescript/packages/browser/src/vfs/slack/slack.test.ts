@@ -14,6 +14,7 @@
 
 import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
 import { SLACK_OPS } from '@struktoai/mirage-core/ops/slack/index'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -103,7 +104,7 @@ describe('SlackVFS (browser)', () => {
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
     const r = new SlackVFS({ proxyUrl: '/api/slack' })
-    const out = await r.readdir(
+    const out = await ops(r).readdir(
       new PathSpec({
         virtual: '/mnt/slack/channels',
         directory: '/mnt/slack/channels',

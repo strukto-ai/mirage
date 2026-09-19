@@ -15,14 +15,15 @@
 from typing import Any
 
 from mirage.accessor.email import EmailAccessor
+from mirage.commands.builtin.email import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.email.config import EmailConfig
-from mirage.core.email.readdir import readdir
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.email import OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.email.prompt import PROMPT, WRITE_PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class EmailVFS(BaseVFS):
@@ -45,20 +46,12 @@ class EmailVFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = EmailAccessor(config)
-        from mirage.commands.builtin.email import COMMANDS
-        from mirage.ops.email import OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in OPS:
-            self.register_op(fn)
+    def ops(self) -> list[RegisteredOp]:
+        return OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

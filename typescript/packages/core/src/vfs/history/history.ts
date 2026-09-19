@@ -13,19 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { HistoryAccessor } from '../../accessor/history.ts'
-import { find as findCore } from '../../core/history/find.ts'
-import type { FindOptions } from '../../core/ram/find.ts'
-import { read as readCore } from '../../core/history/read.ts'
-import { readdir as readdirCore } from '../../core/history/readdir.ts'
-import { stat as statCore } from '../../core/history/stat.ts'
-import { stream as streamCore } from '../../core/history/stream.ts'
 import { HISTORY_COMMANDS } from '../../commands/builtin/history/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
 import type { Observer } from '../../observe/observer.ts'
 import { HISTORY_OPS } from '../../ops/history/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import type { FileStat } from '../../types.ts'
-import { type PathSpec, VFSName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 
 export const HISTORY_PREFIX = '/.bash_history'
@@ -36,7 +29,7 @@ export const HISTORY_PREFIX = '/.bash_history'
  * storage of its own.
  */
 export class HistoryViewVFS extends BaseVFS {
-  readonly name = VFSName.HISTORY
+  override readonly name = VFSName.HISTORY
   override readonly cachesReads = false
   // The view renders from in-memory events, so stat() sizes it by
   // rendering: cheap, no network, and never null.
@@ -53,25 +46,5 @@ export class HistoryViewVFS extends BaseVFS {
 
   override commands(): readonly RegisteredCommand[] {
     return HISTORY_COMMANDS
-  }
-
-  override streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
-    return streamCore(this.accessor, path)
-  }
-
-  override readFile(path: PathSpec): Promise<Uint8Array> {
-    return readCore(this.accessor, path)
-  }
-
-  override readdir(path: PathSpec): Promise<string[]> {
-    return readdirCore(this.accessor, path)
-  }
-
-  override stat(path: PathSpec): Promise<FileStat> {
-    return statCore(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    return findCore(this.accessor, path, options)
   }
 }

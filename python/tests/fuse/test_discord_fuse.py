@@ -63,14 +63,12 @@ def _run(coro):
 
 
 def _make_world() -> tuple[DiscordVFS, Workspace]:
-    # Seeding happens after the mount: installing a VFS re-derives
-    # its index from the workspace's config, so an index seeded before
-    # is thrown away, and a second workspace over the same VFS
-    # would throw away this one.
+    # Seeding happens after the mount: the index a driver runs under
+    # is the mount's, built when the VFS is placed.
     config = DiscordConfig(token="test-token")
     vfs = DiscordVFS(config=config)
     ws = Workspace({f"{PREFIX}/": vfs}, mode=MountMode.READ)
-    index = vfs.index
+    index = ws.mount(PREFIX).index_store
     _run(index.set_dir(PREFIX, [(GUILD, guild_entry(GUILD_PAYLOAD))]))
     _run(index.put(f"{PREFIX}/{CHANNEL_PATH}", channel_entry(CHANNEL_PAYLOAD)))
     _run(

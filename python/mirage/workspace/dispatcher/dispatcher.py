@@ -943,8 +943,8 @@ class Dispatcher:
         """
         manager = mount.cache_manager
         if manager is None:
-            manager = CacheManager(self._cache, mount.vfs.index, mount.prefix,
-                                   mount.vfs.caches_reads)
+            manager = CacheManager(self._cache, mount.index_store,
+                                   mount.prefix, mount.vfs.caches_reads)
         return manager
 
     async def invalidate_after_write(self,

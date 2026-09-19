@@ -5,6 +5,7 @@ from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
+from tests.fixtures.driver_ops import ops
 
 
 class FakeClient:
@@ -52,7 +53,7 @@ async def test_rg_recursive_by_default_matches_content():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
     source, _io = await _command(res, "rg")(res.accessor, [p], ["bananas"],
-                                            CommandOpts(index=res.index))
+                                            CommandOpts(index=ops(res).index))
     out = await _bytes(source)
     assert b"bananas" in out
     assert b"sci-fi" not in out

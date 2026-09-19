@@ -55,7 +55,7 @@ export class FakeDiscordTransport implements DiscordTransport {
 }
 
 class FakeDiscordVFS extends BaseVFS implements DiscordResourceLike {
-  readonly name = 'discord'
+  override readonly name = 'discord'
   constructor(override readonly accessor: DiscordAccessor) {
     super()
   }

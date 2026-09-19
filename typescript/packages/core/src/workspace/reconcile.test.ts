@@ -190,19 +190,19 @@ it.each(['gate', 'shell'])('reconciles GitHub IDs before the %s reread', async (
   try {
     const path = '/gh/f.txt'
     const scope = new PathSpec({ virtual: path, vfsPath: 'f.txt', directory: '/gh/' })
-    expect((await githubStat(accessor, scope, vfs.index)).fingerprint).toBe('v1')
+    const mount = mountOf(ws, path)
+    expect((await githubStat(accessor, scope, mount.indexStore)).fingerprint).toBe('v1')
     await ws.cache.set(path, new TextEncoder().encode('v1'), { fingerprint: 'v1' })
     vi.spyOn(ws.opsRegistry, 'call').mockImplementation((_op, _vfs, _accessor, p, _args, kwargs) =>
       githubStat(accessor, p, kwargs?.index),
     )
-    const mount = mountOf(ws, path)
     const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry, ConsistencyPolicy.ALWAYS)
     // An unchanged live object must not be mistaken for a missing path.
     expect(await rec.mayServeCached(mount, path)).toBe(true)
     sha = 'v2'
     if (surface === 'gate') expect(await rec.mayServeCached(mount, path)).toBe(false)
     else await rec.reconcileRead(mount, path)
-    expect(new TextDecoder().decode(await githubRead(accessor, scope, vfs.index))).toBe('v2')
+    expect(new TextDecoder().decode(await githubRead(accessor, scope, mount.indexStore))).toBe('v2')
   } finally {
     vi.restoreAllMocks()
     await ws.close()

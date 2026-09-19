@@ -13,32 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { NotionAccessor } from '@struktoai/mirage-core/accessor/notion'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { NOTION_COMMANDS } from '@struktoai/mirage-core/commands/builtin/notion/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { MCPNotionTransport } from '@struktoai/mirage-core/core/notion/client'
 import type { MCPNotionTransportOptions } from '@struktoai/mirage-core/core/notion/client'
-import { read as notionRead } from '@struktoai/mirage-core/core/notion/read'
-import { readdir as notionReaddir } from '@struktoai/mirage-core/core/notion/readdir'
-import { stat as notionStat } from '@struktoai/mirage-core/core/notion/stat'
 import { NOTION_OPS } from '@struktoai/mirage-core/ops/notion/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { NOTION_PROMPT, NOTION_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/notion/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { redactNotionConfig, type NotionConfig, type NotionConfigRedacted } from './config.ts'
-
-const resolveNotionGlob = makeResolveGlob<NotionAccessor>(notionReaddir)
-
 export interface NotionVFSState {
   type: string
   config: NotionConfigRedacted
 }
 
 export class NotionVFS extends BaseVFS {
-  readonly name: string = VFSName.NOTION
+  override readonly name: string = VFSName.NOTION
   override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 600
   override readonly prompt: string = NOTION_PROMPT
@@ -60,37 +51,6 @@ export class NotionVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return NOTION_OPS
   }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return notionRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return notionReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return notionStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return resolveNotionGlob(this.accessor, effective, this.index)
-  }
-
   override getState(): Promise<NotionVFSState> {
     return Promise.resolve({
       type: this.name,

@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 from mirage.cache.context import push_cache_manager
+from mirage.cache.index.factory import build_index
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.utils.limit import run_with_timeout
@@ -153,6 +154,8 @@ class MountEntry:
         vfs: BaseVFS,
         mode: MountMode = MountMode.READ,
         consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+        index: IndexCacheStore | None = None,
+        vfs_ref: str | None = None,
     ) -> None:
         if not prefix.startswith("/"):
             raise ValueError(f"prefix must start with /: {prefix!r}")
@@ -165,6 +168,16 @@ class MountEntry:
         self.vfs = vfs
         self.mode = mode
         self.consistency = consistency
+        # The store this mount runs its driver under, built by the
+        # registry when the driver is placed and shared with any alias
+        # of the same instance; a bare entry gets a RAM store at the
+        # driver's TTL. ``index`` is the same store scoped by the cache
+        # manager, which is what ops and commands receive.
+        self.index_store: IndexCacheStore = (index if index is not None else
+                                             build_index(None, vfs.index_ttl))
+        # The ``vfs:`` value the driver was built from, recorded for
+        # snapshots; None for one constructed in code.
+        self.vfs_ref = vfs_ref
         self.activity = VFSActivity()
         self.retiring = False
         self.before_use: Callable[[], Awaitable[None]] | None = None
@@ -202,19 +215,59 @@ class MountEntry:
         finally:
             release()
 
+    def has_op(self, name: str) -> bool:
+        """Whether the op table serves ``name`` on any level of the cascade.
+
+        Args:
+            name (str): the op name.
+        """
+        return bool(
+            self._resolve_cascade(name, None, self._ops, self._general_ops))
+
     async def expand_glob(self, paths: list[PathSpec],
                           prefix: str) -> list[PathSpec]:
-        """Keep the VFS open and prepared while its glob hook runs."""
+        """Expand glob words through the ``glob`` op, one spec at a time.
+
+        A driver whose table carries no ``glob`` leaves every word as
+        typed. The mount stamps each word's mount-relative key before the
+        op sees it, since the key is the placement's to know, and keeps
+        the VFS retained while the walk reads metadata.
+
+        Args:
+            paths (list[PathSpec]): the words, pattern specs among them.
+            prefix (str): the mount prefix without its trailing slash.
+        """
+        levels = self._resolve_cascade("glob", None, self._ops,
+                                       self._general_ops)
+        if not levels:
+            return list(paths)
         async with self.use():
             if self.cache_manager is None:
-                return await self.vfs.resolve_glob(paths, prefix=prefix)
+                return await self._run_glob(levels, paths, prefix)
             async with self.cache_manager.mutation():
                 await self.ensure_ready()
-                return await self.vfs.resolve_glob(paths, prefix=prefix)
+                return await self._run_glob(levels, paths, prefix)
+
+    async def _run_glob(self, levels: list[RegisteredOp],
+                        paths: list[PathSpec], prefix: str) -> list[PathSpec]:
+        # The raw store, not the cache-scoped view: the walk runs under
+        # the cache manager's mutation lock, which the view takes again.
+        index = self.index_store
+        out: list[PathSpec] = []
+        for p in paths:
+            spec = (dataclasses.replace(p,
+                                        vfs_path=mount_key(p.virtual, prefix))
+                    if prefix and isinstance(p, PathSpec) else p)
+            for op in levels:
+                matches = await op.fn(self.vfs.accessor, spec, index=index)
+                if matches is not None:
+                    out.extend(matches)
+                    break
+        return out
 
     @property
     def index(self) -> IndexCacheStore:
-        index = self.vfs.index
+        index = self.index_store
         return self.cache_manager.scope_index(
             index) if self.cache_manager else index
 

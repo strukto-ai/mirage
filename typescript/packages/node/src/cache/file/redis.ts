@@ -95,6 +95,13 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     return `${this.metaPrefix}${key}`
   }
 
+  // The cache's own key test, part of `FileCache` and not a driver verb:
+  // the key is the cache entry's, not a path the mount resolves.
+  async exists(key: string | PathSpec): Promise<boolean> {
+    const k = typeof key === 'string' ? key : key.mountPath
+    const c = await this.cacheClient()
+    return (await c.exists(this.dataKey(k))) > 0
+  }
   async get(key: string): Promise<Uint8Array | null> {
     const c = await this.cacheClient()
     const mod = await this.module()
@@ -174,13 +181,6 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     pipe.del(this.metaKey(key))
     await pipe.exec()
   }
-
-  override async exists(key: string | PathSpec): Promise<boolean> {
-    const k = typeof key === 'string' ? key : key.mountPath
-    const c = await this.cacheClient()
-    return (await c.exists(this.dataKey(k))) > 0
-  }
-
   async isFresh(key: string, remoteFingerprint: string): Promise<boolean> {
     const c = await this.cacheClient()
     const fp = await c.get(this.metaKey(key))

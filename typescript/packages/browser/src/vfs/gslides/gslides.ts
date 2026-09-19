@@ -13,35 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GSlidesAccessor } from '@struktoai/mirage-core/accessor/gslides'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { GSLIDES_COMMANDS } from '@struktoai/mirage-core/commands/builtin/gslides/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { TokenManager } from '@struktoai/mirage-core/core/google/client'
-import { read as gslidesRead } from '@struktoai/mirage-core/core/gslides/read'
-import { readdir as gslidesReaddir } from '@struktoai/mirage-core/core/gslides/readdir'
-import { stat as gslidesStat } from '@struktoai/mirage-core/core/gslides/stat'
 import { GSLIDES_OPS } from '@struktoai/mirage-core/ops/gslides/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { GSLIDES_PROMPT, GSLIDES_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/gslides/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import {
   redactGSlidesConfig,
   type GSlidesConfig,
   type GSlidesConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gslides/config'
-
-const gslidesResolveGlob = makeResolveGlob(gslidesReaddir)
-
 export interface GSlidesVFSState {
   type: string
   config: GSlidesConfigRedacted
 }
 
 export class GSlidesVFS extends BaseVFS {
-  readonly name: string = VFSName.GSLIDES
+  override readonly name: string = VFSName.GSLIDES
   override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = GSLIDES_PROMPT
@@ -62,37 +53,6 @@ export class GSlidesVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return GSLIDES_OPS
   }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return gslidesRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return gslidesReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return gslidesStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return gslidesResolveGlob(this.accessor, effective, this.index)
-  }
-
   override getState(): Promise<GSlidesVFSState> {
     return Promise.resolve({
       type: this.name,

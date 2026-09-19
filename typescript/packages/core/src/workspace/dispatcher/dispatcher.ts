@@ -1024,7 +1024,7 @@ export class Dispatcher {
   private managerFor(mount: MountEntry): CacheManager {
     return (
       mount.cacheManager ??
-      new CacheManager(this.cache, mount.vfs.index, mount.prefix, mount.vfs.cachesReads)
+      new CacheManager(this.cache, mount.indexStore, mount.prefix, mount.vfs.cachesReads)
     )
   }
 

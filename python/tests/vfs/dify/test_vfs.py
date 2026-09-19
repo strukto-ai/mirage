@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
+from mirage.ops.registry import RegisteredOp
 from mirage.types import VFSName
 from mirage.vfs.dify import DifyConfig
 from mirage.vfs.registry import REGISTRY, build_vfs
@@ -93,7 +94,12 @@ async def test_dify_vfs_registers_expected_commands_and_ops():
     )
 
     commands = {item.name for item in vfs.commands()}
-    ops = {item.name for item in vfs.ops()}
+    ops = {
+        ro.name
+        for item in vfs.ops()
+        for ro in (
+            [item] if isinstance(item, RegisteredOp) else item._registered_ops)
+    }
 
     assert {"cat", "ls", "grep", "find", "head", "tail",
             "wc"}.issubset(commands)

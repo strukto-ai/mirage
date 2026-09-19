@@ -112,7 +112,7 @@ describe('the op facade evicts the index like the shell does', () => {
     // reason: nothing was ever cached, so nothing needed evicting.
     const { ws, cleanup } = diskWorkspace()
     try {
-      const index = ws.registry.mountFor('/d').vfs.index
+      const index = ws.registry.mountFor('/d').indexStore
       expect(index).toBeDefined()
       await ws.vfs.readdir('/d')
       expect((await index.listDir('/d')).entries).toEqual(['/d/seed'])

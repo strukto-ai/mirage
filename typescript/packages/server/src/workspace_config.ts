@@ -74,8 +74,9 @@ export async function buildWorkspaceFromConfig(configPath: string): Promise<Work
   const args = await configToWorkspaceArgs(config)
   const mounts: Record<string, MountSpec> = {}
   const commandLimits: Record<string, Record<string, Limit>> = {}
-  for (const [prefix, [vfs, mode, limits]] of Object.entries(args.mounts)) {
-    mounts[prefix] = [vfs, mode]
+  for (const [prefix, placement] of Object.entries(args.mounts)) {
+    mounts[prefix] = placement
+    const limits = placement.options.commandLimits ?? {}
     if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
   }
   // Every option the config produced rides through, so a new config

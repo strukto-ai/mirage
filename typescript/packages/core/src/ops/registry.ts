@@ -134,8 +134,13 @@ export class OpsRegistry {
         }
       }
     }
-    for (const ro of vfs.ops?.() ?? []) {
-      entries.set(keyFor(ro.name, ro.filetype, ro.vfs), ro)
+    // A driver's ops come from its `ops()` table and/or `@op`-decorated
+    // methods (the prototype walk above). A decorator-only registration
+    // carries no table, so guard the call rather than require one.
+    if (typeof vfs.ops === 'function') {
+      for (const ro of vfs.ops()) {
+        entries.set(keyFor(ro.name, ro.filetype, ro.vfs), ro)
+      }
     }
     return entries
   }

@@ -33,7 +33,7 @@ import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
 
 class StubVFS extends BaseVFS {
-  readonly name = 'ram'
+  override readonly name = 'ram'
   override close(): Promise<void> {
     return Promise.resolve()
   }
@@ -104,12 +104,20 @@ describe('Mount.executeCmd glob operands', () => {
   // The dispatcher hands a pattern to the handler whole. Resolving is the
   // handler's job, done once through the shared adapter, which is where
   // the namespace facts (links, nested mount roots, a trailing slash) are
-  // in view; the VFS's own glob hook cannot see them, so expanding
+  // in view; the VFS's own glob op cannot see them, so expanding
   // here would destroy what the handler needs. Python's dispatcher never
   // expands either.
   class GlobbingVFS extends StubVFS {
-    override glob(): Promise<PathSpec[]> {
-      return Promise.resolve([PathSpec.fromStrPath('/ram/a.txt', 'a.txt')])
+    override ops(): readonly RegisteredOp[] {
+      return [
+        {
+          name: 'glob',
+          vfs: this.name,
+          filetype: null,
+          write: false,
+          fn: () => Promise.resolve([PathSpec.fromStrPath('/ram/a.txt', 'a.txt')]),
+        },
+      ]
     }
   }
   const pattern = new PathSpec({
@@ -122,11 +130,9 @@ describe('Mount.executeCmd glob operands', () => {
   })
 
   it('hands the pattern to the handler rather than expanding it', async () => {
-    const m = new MountEntry({
-      prefix: '/ram/',
-      vfs: new GlobbingVFS(),
-      mode: MountMode.WRITE,
-    })
+    const vfs = new GlobbingVFS()
+    const m = new MountEntry({ prefix: '/ram/', vfs, mode: MountMode.WRITE })
+    m.registerFns(vfs.ops())
     let got: string[] = []
     const [cmd] = command({
       name: 'cat',

@@ -9,13 +9,13 @@
 import { createHash } from 'node:crypto'
 import {
   Accessor,
+  BaseVFS,
   ContentType,
   eisdir,
   enoent,
   enotdir,
   FileStat,
   FileType,
-  GenericVFS,
   streamFromBytes,
 } from '@struktoai/mirage-core'
 
@@ -95,7 +95,7 @@ function makeIO() {
 // Owned content: the pages ride the state and rebuild without help. The
 // registry constructs a referenced class with the mount's config object,
 // so the constructor reads its pages off that shape.
-export class WikiVFS extends GenericVFS {
+export class WikiVFS extends BaseVFS {
   constructor(config = {}) {
     const store = new PageAccessor({ ...(config.pages ?? PAGES) })
     super({ name: 'wiki', accessor: store, io: makeIO(), supportsSnapshot: true })
@@ -103,7 +103,7 @@ export class WikiVFS extends GenericVFS {
   }
 
   getState() {
-    return { type: this.kind, pages: { ...this.store.pages } }
+    return { type: this.name, pages: { ...this.store.pages } }
   }
 
   loadState(state) {
@@ -112,7 +112,7 @@ export class WikiVFS extends GenericVFS {
 }
 
 // Observed content: the default state asks to be handed back live.
-export class FeedVFS extends GenericVFS {
+export class FeedVFS extends BaseVFS {
   constructor() {
     super({ name: 'feed', accessor: new PageAccessor(FEED), io: makeIO(), supportsSnapshot: true })
   }

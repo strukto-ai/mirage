@@ -14,30 +14,21 @@
 
 import { DiscordAccessor } from '@struktoai/mirage-core/accessor/discord'
 import { DISCORD_COMMANDS } from '@struktoai/mirage-core/commands/builtin/discord/index'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { BrowserDiscordTransport } from '@struktoai/mirage-core/core/discord/client_browser'
-import { read as discordRead } from '@struktoai/mirage-core/core/discord/read'
-import { readdir as discordReaddir } from '@struktoai/mirage-core/core/discord/readdir'
-import { stat as discordStat } from '@struktoai/mirage-core/core/discord/stat'
 import { DISCORD_OPS } from '@struktoai/mirage-core/ops/discord/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { DISCORD_PROMPT, DISCORD_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/discord/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { redactDiscordConfig, type DiscordConfig, type DiscordConfigRedacted } from './config.ts'
-
-const resolveDiscordGlob = makeResolveGlob(discordReaddir)
-
 export interface DiscordVFSState {
   type: string
   config: DiscordConfigRedacted
 }
 
 export class DiscordVFS extends BaseVFS {
-  readonly name: string = VFSName.DISCORD
+  override readonly name: string = VFSName.DISCORD
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and members/*.json
   // are rendered at readdir from payloads the listing already fetched, and
@@ -66,37 +57,6 @@ export class DiscordVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return DISCORD_OPS
   }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return discordRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return discordReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return discordStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return resolveDiscordGlob(this.accessor, effective, this.index)
-  }
-
   override getState(): Promise<DiscordVFSState> {
     return Promise.resolve({
       type: this.name,

@@ -19,6 +19,7 @@ import { CLISpec } from '../../../commands/cli/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { createShellParser } from '../../../shell/parse/index.ts'
+import { ops } from '../../../test-utils.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { dropMountCaches } from './run.ts'
@@ -48,8 +49,8 @@ function warmWorkspace(): [Workspace, RAMVFS, RAMVFS] {
 }
 
 async function seed(ram: RAMVFS, other: RAMVFS): Promise<void> {
-  await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
-  await other.writeFile(PathSpec.fromStrPath('/b.txt'), ENC.encode('v1\n'))
+  await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+  await ops(other).write(PathSpec.fromStrPath('/b.txt'), ENC.encode('v1\n'))
 }
 
 async function warm(ws: Workspace): Promise<void> {
@@ -59,9 +60,9 @@ async function warm(ws: Workspace): Promise<void> {
 }
 
 async function mutateOutOfBand(ram: RAMVFS, other: RAMVFS): Promise<void> {
-  await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
-  await ram.writeFile(PathSpec.fromStrPath('/new.txt'), ENC.encode('fresh\n'))
-  await other.writeFile(PathSpec.fromStrPath('/b.txt'), ENC.encode('v2\n'))
+  await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
+  await ops(ram).write(PathSpec.fromStrPath('/new.txt'), ENC.encode('fresh\n'))
+  await ops(other).write(PathSpec.fromStrPath('/b.txt'), ENC.encode('v2\n'))
 }
 
 async function readBack(ws: Workspace): Promise<[string, string, string]> {
@@ -99,7 +100,7 @@ function outOfBandWriter(ram: RAMVFS): () => Promise<[Uint8Array, IOResult]> {
   // A leaf that reaches its service past every mount, as an account CLI does:
   // the file lands in the store, and no vfs path was touched.
   return async () => {
-    await ram.writeFile(PathSpec.fromStrPath('/made.txt'), ENC.encode('made\n'))
+    await ops(ram).write(PathSpec.fromStrPath('/made.txt'), ENC.encode('made\n'))
     return [ENC.encode('ok\n'), new IOResult()]
   }
 }

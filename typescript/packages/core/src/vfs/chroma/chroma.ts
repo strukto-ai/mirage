@@ -15,13 +15,9 @@
 import { ChromaAccessor } from '../../accessor/chroma.ts'
 import { CHROMA_COMMANDS } from '../../commands/builtin/chroma/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
-import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
-import { readBytes } from '../../core/chroma/read.ts'
-import { readdir as chromaReaddir } from '../../core/chroma/readdir.ts'
-import { stat as chromaStat } from '../../core/chroma/stat.ts'
 import { CHROMA_OPS } from '../../ops/chroma/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import { VFSName, type FileStat, type PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import {
   type ChromaConfigRedacted,
@@ -31,9 +27,6 @@ import {
   type ChromaConfigResolved,
 } from './config.ts'
 import { CHROMA_PROMPT } from './prompt.ts'
-
-const resolveGlob = makeResolveGlob(chromaReaddir)
-
 export interface ChromaVFSOptions {
   config: ChromaConfig
 }
@@ -45,7 +38,7 @@ export interface ChromaVFSState {
 }
 
 export class ChromaVFS extends BaseVFS {
-  readonly name: string = VFSName.CHROMA
+  override readonly name: string = VFSName.CHROMA
   override readonly cachesReads: boolean = false
   override readonly supportsSnapshot: boolean = false
   // Every file is sized exactly, by one chunk scan per directory the caller
@@ -87,21 +80,5 @@ export class ChromaVFS extends BaseVFS {
 
   override commands(): readonly RegisteredCommand[] {
     return CHROMA_COMMANDS
-  }
-
-  override glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
-    return resolveGlob(this.accessor, paths, this.index)
-  }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return readBytes(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return chromaReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return chromaStat(this.accessor, p, this.index)
   }
 }

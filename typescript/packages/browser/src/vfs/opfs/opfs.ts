@@ -12,40 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { OPFSAccessor } from '../../accessor/opfs.ts'
 import { OPFS_COMMANDS } from '../../commands/builtin/opfs/index.ts'
-import { appendBytes as appendCore } from '../../core/opfs/append.ts'
-import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
-import { copy as copyCore } from '../../core/opfs/copy.ts'
-import { size as duSizeCore } from '../../core/opfs/du/index.ts'
-import { exists as existsCore } from '../../core/opfs/exists.ts'
-import { find as findCore, type FindOptions as OPFSFindOptions } from '../../core/opfs/find.ts'
-import { mkdir as mkdirCore } from '../../core/opfs/mkdir.ts'
-import { read as readCoreFn } from '../../core/opfs/read.ts'
-import { readdir as readdirCore } from '../../core/opfs/readdir.ts'
-import { rename as renameCore } from '../../core/opfs/rename.ts'
-import { rmR as rmRCore } from '../../core/opfs/rm.ts'
-import { rmdir as rmdirCore } from '../../core/opfs/rmdir.ts'
-import { stat as statCore } from '../../core/opfs/stat.ts'
-import { stream as streamCore } from '../../core/opfs/stream.ts'
-import { truncate as truncateCore } from '../../core/opfs/truncate.ts'
-import { unlink as unlinkCore } from '../../core/opfs/unlink.ts'
 import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
-import { writeBytes as writeCore } from '../../core/opfs/write.ts'
 import { OPFS_OPS } from '../../ops/opfs/index.ts'
 import { OPFS_PROMPT } from './prompt.ts'
-
-const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
-
 export interface OPFSVFSOptions {
   root?: string
 }
@@ -101,7 +78,7 @@ async function splitAndCreate(
 }
 
 export class OPFSVFS extends BaseVFS {
-  readonly name = VFSName.OPFS
+  override readonly name = VFSName.OPFS
   // OPFS is a real filesystem: getFile().size is the exact byte count a
   // read returns.
   override readonly sizesAlwaysKnown: boolean = true
@@ -149,92 +126,6 @@ export class OPFSVFS extends BaseVFS {
   override commands(): readonly RegisteredCommand[] {
     return OPFS_COMMANDS
   }
-
-  override async *streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
-    await this.root()
-    yield* streamCore(this.accessor, p)
-  }
-
-  override async readFile(p: PathSpec): Promise<Uint8Array> {
-    await this.root()
-    return readCoreFn(this.accessor, p)
-  }
-
-  override async writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
-    await this.root()
-    return writeCore(this.accessor, p, data)
-  }
-
-  override async appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
-    await this.root()
-    return appendCore(this.accessor, p, data)
-  }
-
-  override async readdir(p: PathSpec): Promise<string[]> {
-    await this.root()
-    return readdirCore(this.accessor, p)
-  }
-
-  override async stat(p: PathSpec): Promise<FileStat> {
-    await this.root()
-    return statCore(this.accessor, p)
-  }
-
-  override async exists(p: PathSpec): Promise<boolean> {
-    await this.root()
-    return existsCore(this.accessor, p)
-  }
-
-  override async mkdir(p: PathSpec, options?: { recursive?: boolean }): Promise<void> {
-    await this.root()
-    return mkdirCore(this.accessor, p, options?.recursive === true)
-  }
-
-  override async rmdir(p: PathSpec): Promise<void> {
-    await this.root()
-    return rmdirCore(this.accessor, p)
-  }
-
-  override async unlink(p: PathSpec): Promise<void> {
-    await this.root()
-    return unlinkCore(this.accessor, p)
-  }
-
-  override async rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.root()
-    return renameCore(this.accessor, src, dst)
-  }
-
-  override async truncate(p: PathSpec, length: number): Promise<void> {
-    await this.root()
-    return truncateCore(this.accessor, p, length)
-  }
-
-  override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    await this.root()
-    return copyCore(this.accessor, src, dst)
-  }
-
-  override async rmR(p: PathSpec): Promise<void> {
-    await this.root()
-    return rmRCore(this.accessor, p)
-  }
-
-  override async du(p: PathSpec): Promise<number> {
-    await this.root()
-    return duSizeCore(this.accessor, p)
-  }
-
-  override async find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    await this.root()
-    return findCore(this.accessor, p, options as OPFSFindOptions)
-  }
-
-  override async glob(paths: readonly PathSpec[]): Promise<PathSpec[]> {
-    await this.root()
-    return globCore(this.accessor, paths)
-  }
-
   override async getState(): Promise<OPFSVFSState> {
     const handle = await this.root()
     const files: Record<string, Uint8Array> = {}

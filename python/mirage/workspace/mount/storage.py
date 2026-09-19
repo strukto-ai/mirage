@@ -21,16 +21,19 @@ from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.registry import MountRegistry
 
 
-def vfs_storage_id(vfs: BaseVFS) -> str:
-    """Storage identity of a VFS.
+def vfs_storage_location(vfs: BaseVFS) -> str:
+    """Where a VFS's bytes live, as one string.
 
-    ``BaseVFS.storage_id`` answers per instance by default, so one
-    object mounted at two prefixes keys as one store rather than two.
+    A driver that knows (a disk root, a bucket and key prefix) says so
+    through ``storage_location``; one that does not is its own location,
+    keyed by identity, so one object mounted at two prefixes keys as one
+    store rather than two.
 
     Args:
         vfs (BaseVFS): The mounted VFS.
     """
-    return vfs.storage_id()
+    location = vfs.storage_location()
+    return location if location is not None else f"{vfs.name}:{id(vfs):x}"
 
 
 def storage_key(registry: MountRegistry, path: PathSpec) -> str:
@@ -65,7 +68,7 @@ def storage_key(registry: MountRegistry, path: PathSpec) -> str:
         # command tries to read it.
         return path.virtual.rstrip("/")
     rel = strip_mount(path.virtual, entry.prefix.rstrip("/")).rstrip("/")
-    return vfs_storage_id(entry.vfs) + rel
+    return vfs_storage_location(entry.vfs) + rel
 
 
 def make_storage_key(registry: MountRegistry) -> Callable[[PathSpec], str]:

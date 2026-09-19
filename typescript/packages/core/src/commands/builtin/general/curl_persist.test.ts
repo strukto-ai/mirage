@@ -38,7 +38,7 @@ function mockFetch(): void {
 }
 
 class StubVFS extends BaseVFS {
-  readonly name = 'stub'
+  override readonly name = 'stub'
   override close(): Promise<void> {
     return Promise.resolve()
   }

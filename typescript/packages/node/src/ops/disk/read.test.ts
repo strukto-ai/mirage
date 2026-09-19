@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -33,7 +34,7 @@ afterEach(() => {
 
 describe('readOp', () => {
   it('returns file bytes', async () => {
-    await res.writeFile(spec('/x.txt'), new TextEncoder().encode('hi'))
+    await ops(res).write(spec('/x.txt'), new TextEncoder().encode('hi'))
     const out = (await readOp.fn(res.accessor, spec('/x.txt'), [], {})) as Uint8Array
     expect(new TextDecoder().decode(out)).toBe('hi')
   })

@@ -213,7 +213,7 @@ async def main() -> None:
     result = await ws.shell(f"dirname {issue_path}/issue.json")
     print(await result.stdout_str())
 
-    # ── glob expansion (exercises resolve_glob → readdir) ──
+    # ── glob expansion (exercises the glob op → readdir) ──
     issues_dir = f"/linear/teams/{first_team}/issues"
     print(f"=== echo {issues_dir}/* (glob) ===")
     r = await ws.shell(f"echo {issues_dir}/*")

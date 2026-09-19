@@ -25,12 +25,11 @@ from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 
 
 def _make_gdrive_ops() -> tuple[Ops, IndexCacheStore]:
-    # Mounting re-derives the VFS's index from the workspace's
-    # config, so the store to seed is the one the mount ends up with.
+    # The store to seed is the one the mount runs the driver under.
     vfs = GoogleDriveVFS(
         config=GoogleDriveConfig(client_id="x", refresh_token="y"))
     ws = Workspace({"/gdrive/": vfs}, mode=MountMode.READ)
-    return ws.vfs, vfs.index
+    return ws.vfs, ws.mount("/gdrive/").index_store
 
 
 @pytest.mark.asyncio

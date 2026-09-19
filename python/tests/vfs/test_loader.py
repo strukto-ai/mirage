@@ -16,8 +16,10 @@ import asyncio
 
 import pytest
 
+from mirage.core.ram.stream import read_stream
 from mirage.types import PathSpec
 from mirage.vfs.loader import load_backend_class
+from tests.fixtures.driver_ops import ops
 
 _ps = PathSpec.from_str_path
 
@@ -25,7 +27,7 @@ _ps = PathSpec.from_str_path
 def _cat_sync(backend, path):
 
     async def _collect():
-        return b"".join([c async for c in backend.read_stream(path)])
+        return b"".join([c async for c in read_stream(backend.accessor, path)])
 
     return asyncio.run(_collect())
 
@@ -44,7 +46,7 @@ def test_load_from_script_file(tmp_path):
     cls = load_backend_class(f"{script}:CustomBackend")
     assert cls.__name__ == "CustomBackend"
     instance = cls()
-    asyncio.run(instance.write(_ps("/test.txt"), data=b"hello"))
+    asyncio.run(ops(instance).write(_ps("/test.txt"), b"hello"))
     assert _cat_sync(instance, _ps("/test.txt")) == b"hello"
 
 

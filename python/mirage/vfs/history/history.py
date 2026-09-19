@@ -14,7 +14,10 @@
 
 from mirage.accessor.history import HistoryAccessor
 from mirage.commands.builtin.history import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.ops.history import OPS
+from mirage.ops.registry import RegisteredOp
 from mirage.vfs.base import BaseVFS
 
 HISTORY_PREFIX = "/.bash_history"
@@ -40,7 +43,9 @@ class HistoryViewVFS(BaseVFS):
         super().__init__()
         self.observer = observer
         self.accessor = HistoryAccessor(observer)
-        for fn in COMMANDS:
-            self.register(fn)
-        for op in OPS:
-            self.register_op(op)
+
+    def ops(self) -> list[RegisteredOp]:
+        return OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)

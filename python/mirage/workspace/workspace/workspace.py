@@ -502,13 +502,16 @@ class Workspace:
     def add_mount(self,
                   prefix: str,
                   vfs: BaseVFS,
-                  mode: MountMode = MountMode.READ) -> MountEntry:
+                  mode: MountMode = MountMode.READ,
+                  vfs_ref: str | None = None) -> MountEntry:
         """Add a VFS to a running workspace, mirroring TS ``addMount``.
 
         Args:
             prefix (str): virtual mount point; duplicates are refused.
             vfs (BaseVFS): VFS providing commands and ops.
             mode (MountMode): access mode, read-only unless explicitly raised.
+            vfs_ref (str | None): the ``vfs:`` value the driver was built
+                from, recorded for snapshots; None for one built in code.
 
         Returns:
             MountEntry: the installed mount, with its normalized prefix.
@@ -518,13 +521,11 @@ class Workspace:
         check_vfs(prefix, vfs)
         self._registry.check_vfs_available(vfs)
         previous = self._registry.mounts()
-        # Configure before mount() captures the index in its CacheManager.
-        # An alias must retain the index used by the VFS's other mounts.
-        if (self._index_config is not None
-                and self._registry.try_mount_for_prefix(prefix) is None
-                and not any(m.vfs is vfs for m in self._registry.mounts())):
-            vfs.set_index(self._index_config)
-        entry = self._registry.mount(prefix, vfs, mode)
+        entry = self._registry.mount(prefix,
+                                     vfs,
+                                     mode,
+                                     index=self._index_config,
+                                     vfs_ref=vfs_ref)
         prepare_added_mount(self._registry, entry, previous)
         self._ops.set_mounts(self._registry.ops_mounts())
         return entry

@@ -16,8 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Accessor } from '@struktoai/mirage-core/accessor/base'
 import type { CommandIO } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { streamFromBytes } from '@struktoai/mirage-core/commands/builtin/utils/wrap'
-import type { VFSStateBase } from '@struktoai/mirage-core/vfs/base'
-import { GenericVFS } from '@struktoai/mirage-core/vfs/generic'
+import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import {
   ContentType,
@@ -27,6 +26,7 @@ import {
   type PathSpec,
 } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
+import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { MountKey } from '@struktoai/mirage-core/workspace/snapshot/keys'
 import { buildMountArgs, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { buildVfs, register } from './vfs/registry.ts'
@@ -88,7 +88,7 @@ function notesIO(): CommandIO<NotesAccessor> {
 }
 
 /** Content the VFS owns rides its state, so a version restores it. */
-class Notes extends GenericVFS<NotesAccessor> {
+class Notes extends BaseVFS<NotesAccessor> {
   readonly notes: NotesAccessor
 
   constructor(pages: Record<string, string> = {}) {
@@ -108,7 +108,7 @@ class Notes extends GenericVFS<NotesAccessor> {
 }
 
 /** Keeps the default state, so it has to be handed back live. */
-class Bare extends GenericVFS<NotesAccessor> {
+class Bare extends BaseVFS<NotesAccessor> {
   constructor() {
     super({ name: 'bare-test', accessor: new NotesAccessor({}), io: notesIO() })
   }
@@ -149,17 +149,25 @@ describe('snapshot rebuild through the registry', () => {
     await expect(Workspace.fromState(state)).rejects.toThrow(/mounts= must include/)
   })
 
-  it('records the reference the registry built a VFS from', async () => {
-    register('notes-test', () => Promise.resolve(new Notes()))
-    const built = await buildVfs('notes-test')
-    expect(built.vfsRef).toBe('notes-test')
-    expect(new Notes().vfsRef).toBeNull()
-    await built.close()
+  it('records the reference a mount was placed with', async () => {
+    const ws = new Workspace(
+      { '/n/': new Mount(new Notes(), { vfsRef: 'notes-test' }), '/b/': new Notes() },
+      { mode: MountMode.READ },
+    )
+    try {
+      expect(ws.mount('/n/').vfsRef).toBe('notes-test')
+      expect(ws.mount('/b/').vfsRef).toBeNull()
+    } finally {
+      await ws.close()
+    }
   })
 
   it('rebuilds an alias over a builtin through its ref, not its type', async () => {
     register('seeded-test', () => Promise.resolve(new SeededRAM()))
-    const ws = new Workspace({ '/s/': await buildVfs('seeded-test') }, { mode: MountMode.WRITE })
+    const ws = new Workspace(
+      { '/s/': new Mount(await buildVfs('seeded-test'), { vfsRef: 'seeded-test' }) },
+      { mode: MountMode.WRITE },
+    )
     await ws.shell('echo one > /s/a.txt')
     const state = await toStateDict(ws)
     await ws.close()
@@ -173,7 +181,7 @@ describe('snapshot rebuild through the registry', () => {
     try {
       const seeded = restored.mounts().find((m) => m.prefix === '/s/')
       expect(seeded?.vfs).toBeInstanceOf(SeededRAM)
-      expect(seeded === undefined ? null : seeded.vfs.vfsRef).toBe('seeded-test')
+      expect(seeded?.vfsRef).toBe('seeded-test')
       const out = await restored.shell('cat /s/a.txt')
       expect(out.stdoutText).toBe('one\n')
     } finally {

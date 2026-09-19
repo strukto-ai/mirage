@@ -223,7 +223,7 @@ it.each(
     if (alias === 'initial') mounts['/alias'] = vfs
     const ws = new Workspace(mounts, { shellParser: parser })
     if (alias === 'dynamic') ws.addMount('/alias', vfs)
-    vi.spyOn(vfs, 'statfs').mockImplementation(async () => {
+    vi.spyOn(vfs, 'capacity').mockImplementation(async () => {
       entered()
       await release
       expect(closed).toBe(false)
@@ -346,7 +346,7 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
   const release = new Promise<void>((resolve) => {
     resume = resolve
   })
-  const index = vfs.index
+  const index = ws.mount('/data').indexStore
   const method = kind === 'service' ? 'invalidate' : 'clear'
   const invalidate = index[method].bind(index)
   await index.put(

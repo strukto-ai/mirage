@@ -14,34 +14,25 @@
 
 import { GCalAccessor } from '@struktoai/mirage-core/accessor/gcal'
 import { GCAL_COMMANDS } from '@struktoai/mirage-core/commands/builtin/gcal/index'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { read as gcalRead } from '@struktoai/mirage-core/core/gcal/read'
-import { readdir as gcalReaddir } from '@struktoai/mirage-core/core/gcal/readdir'
-import { stat as gcalStat } from '@struktoai/mirage-core/core/gcal/stat'
 import { TokenManager } from '@struktoai/mirage-core/core/google/client'
 import { GCAL_OPS } from '@struktoai/mirage-core/ops/gcal/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { GCAL_PROMPT, GCAL_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/gcal/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import {
   redactGCalConfig,
   type GCalConfig,
   type GCalConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gcal/config'
-
-const gcalResolveGlob = makeResolveGlob(gcalReaddir)
-
 export interface GCalVFSState {
   type: string
   config: GCalConfigRedacted
 }
 
 export class GCalVFS extends BaseVFS {
-  readonly name: string = VFSName.GCAL
+  override readonly name: string = VFSName.GCAL
   override readonly cachesReads: boolean = true
   // Shorter than the other Google mounts: a calendar is edited by other
   // people and a day-long index would keep serving a schedule that has
@@ -65,37 +56,6 @@ export class GCalVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return GCAL_OPS
   }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return gcalRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return gcalReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return gcalStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return gcalResolveGlob(this.accessor, effective, this.index)
-  }
-
   override getState(): Promise<GCalVFSState> {
     return Promise.resolve({
       type: this.name,

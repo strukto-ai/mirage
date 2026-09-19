@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fakeHfOperator, installFakeOperator } from '../../core/hf/mock.ts'
@@ -22,7 +23,7 @@ import { HfModelsVFS } from './hf_models.ts'
 // the whole tree and the generic walk over it costs no requests. A native op
 // would buy a constant factor and cost a second implementation of the same
 // traversal.
-const OPS = ['read', 'readdir', 'stat']
+const OPS = ['glob', 'read', 'readdir', 'stat']
 
 // The mount is read-only, so the byte-mutation ops are absent from the op
 // table exactly as they are from python's `_OPS`. The table is the
@@ -47,12 +48,12 @@ afterEach(() => {
 describe('HfModelsVFS', () => {
   it('exposes the python-parity op table and flags', () => {
     const vfs = new HfModelsVFS({ repoId: 'ns/model' })
-    const ops = vfs
+    const names = vfs
       .ops()
       .filter((op) => op.vfs === vfs.name)
       .map((op) => op.name)
-    expect([...new Set(ops)].sort()).toEqual([...OPS].sort())
-    for (const op of ABSENT_OPS) expect(ops).not.toContain(op)
+    expect([...new Set(names)].sort()).toEqual([...OPS].sort())
+    for (const op of ABSENT_OPS) expect(names).not.toContain(op)
     expect(vfs.name).toBe('hf_models')
     expect(vfs.cachesReads).toBe(true)
     expect(vfs.supportsSnapshot).toBe(true)
@@ -99,7 +100,7 @@ describe('HfModelsVFS', () => {
         return Promise.resolve(new Response('{}', { status: 200 }))
       }),
     )
-    const data = await vfs.readFile(PathSpec.fromStrPath('/config.json'))
+    const data = await ops(vfs).read(PathSpec.fromStrPath('/config.json'))
     expect(new TextDecoder().decode(data)).toBe('{}')
     expect(urls.some((u) => u.includes('/api/models/ns/model/tree/main'))).toBe(true)
     // A model's content hangs off the bare repo id; datasets and spaces sit
@@ -125,7 +126,7 @@ describe('HfModelsVFS', () => {
         ),
       ),
     )
-    const stat = await vfs.stat(PathSpec.fromStrPath('/model.safetensors'))
+    const stat = await ops(vfs).stat(PathSpec.fromStrPath('/model.safetensors'))
     expect(stat.size).toBe(4798702184)
     expect(stat.extra.lfs_oid).toBe('sha')
   })

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { ops } from '../../test-utils.ts'
 import { PathSpec } from '../../types.ts'
 import { RAMVFS } from './ram.ts'
 
@@ -44,9 +45,15 @@ describe('RAM VFS: presign + fingerprint', () => {
   it('glob is callable on RAM store when files exist', async () => {
     const r = new RAMVFS()
     r.store.files.set('/a.txt', new Uint8Array([1]))
-    const result = await (r as unknown as { glob(p: PathSpec[]): Promise<PathSpec[]> }).glob([
-      PathSpec.fromStrPath('/a.txt'),
-    ])
+    const result = await ops(r).glob(
+      new PathSpec({
+        vfsPath: 'a*',
+        virtual: '/a*',
+        directory: '/',
+        pattern: 'a*',
+        resolved: false,
+      }),
+    )
     expect(result.length).toBe(1)
   })
 })

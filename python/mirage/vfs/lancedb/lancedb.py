@@ -15,14 +15,15 @@
 from typing import Any
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.core.lancedb.readdir import readdir
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.commands.builtin.lancedb import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
+from mirage.ops.lancedb import OPS as LANCEDB_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.lancedb.config import LanceDBConfig
 from mirage.vfs.lancedb.prompt import PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 _REMOTE_SCHEMES = ("s3://", "gs://", "az://", "hf://", "db://")
 
@@ -44,20 +45,12 @@ class LanceDBVFS(BaseVFS):
         self.config = config
         self.caches_reads = config.uri.startswith(_REMOTE_SCHEMES)
         self.accessor = LanceDBAccessor(self.config)
-        from mirage.commands.builtin.lancedb import COMMANDS
-        from mirage.ops.lancedb import OPS as LANCEDB_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in LANCEDB_OPS:
-            self.register_op(fn)
+    def ops(self) -> list[RegisteredOp]:
+        return LANCEDB_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

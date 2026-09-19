@@ -12,44 +12,71 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor
-from mirage.cache.index import (IndexCacheStore, IndexConfig,
-                                RAMIndexCacheStore, RedisIndexConfig)
+from mirage.commands.builtin.generic_bind import (CommandIO,
+                                                  make_generic_commands)
 from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
+from mirage.ops.generic import make_generic_ops
 from mirage.ops.registry import RegisteredOp
-from mirage.types import CapacityResult, CapacityState, PathSpec
+from mirage.types import CapacityResult, CapacityState
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.watch.base import DeltaHook
 
-try:
-    from mirage.cache.index import RedisIndexCacheStore
-except ImportError:
-    RedisIndexCacheStore = None
-
 
 class BaseVFS:
+    """What a driver supplies, and nothing a mount runs it with.
+
+    A driver is an accessor and the tables it serves through: ``ops``
+    for the VFS/FUSE verbs and ``commands`` for the shell. Everything
+    a tree needs to run one (the placement, the index store, the
+    registered tables, the reference it was built from) lives on the
+    mount, so an author never sees it.
+
+    There are two ways to be one. A builtin declares its facts as
+    class attributes and returns from ``ops`` and ``commands`` the
+    tables its ``ops/<name>`` and ``commands/builtin/<name>`` modules
+    build, so it calls ``super().__init__()`` bare. A custom backend
+    hands the constructor an accessor and a ``CommandIO`` table, and
+    the whole generic command set (``ls``, ``cat``, ``grep``, ``find``,
+    ``head``, ``wc``, ...) plus glob resolution and the VFS/FUSE ops
+    are derived from it: the one-file path, which
+    ``examples/python/other/custom_vfs.py`` walks end to end. Optional
+    fields on the table unlock more surface (``write`` enables the
+    byte-mutation family, ``find`` and ``du_size`` become native fast
+    paths), and a command whose requirements the table cannot meet is
+    never registered rather than registered and broken.
+
+    Snapshots and versions see one of two things, and a subclass picks
+    which by what it owns. Content the VFS holds itself (an in-memory
+    store) is mirage-owned state: override ``get_state`` and
+    ``load_state`` to carry it, register the class under its name, and
+    a snapshot or a version rebuilds the mount with that content and
+    no override. Content that lives in a remote service is only
+    observed: keep the default state, set ``supports_snapshot`` and
+    fill ``FileStat.fingerprint``, and a snapshot pins what it read
+    while ``Workspace.load`` asks for the live VFS back.
+    """
 
     name: str = "base"
-    caches_reads: bool = False
     accessor: Accessor = Accessor()
-    _ops: dict[str, Callable[..., Any]] = {}
-    # The ``vfs:`` value the registry built this instance from, a
-    # name (``"s3"``, ``"wiki"``) or a code reference
-    # (``"./wiki.py:WikiVFS"``), stamped by ``build_vfs``; None
-    # for an instance constructed in code. A snapshot records it beside
-    # the class path so the loader can rebuild the mount through the
-    # same door yaml used, which is the only door that knows a class
-    # loaded from a script file. Mirrors TypeScript ``BaseVFS.vfsRef``.
-    vfs_ref: str | None = None
     prompt: str = ""
     write_prompt: str = ""
 
+    # How long the mount's index keeps a listing or a stat, in seconds,
+    # when no index config says otherwise.
     index_ttl: float = 600
+
+    # Whether reads may be served from and written to the file cache.
+    # A read-mostly network store sets it; a live source (a database
+    # collection, a chat channel) leaves it off so ``tail -f`` and the
+    # like are never masked by a cached snapshot.
+    caches_reads: bool = False
 
     # Whether this VFS carries enough version information for
     # snapshot+replay drift detection. When True, the VFS's stat()
@@ -76,100 +103,157 @@ class BaseVFS:
     # docs/python/setup/fuse.mdx.
     sizes_always_known: bool = False
 
+    _closed: bool = False
+
+    # Whether this driver was built from a table, and the two tables
+    # derived from it when it was.
+    _from_table: bool = False
+    _commands_table: list[RegisteredCommand] | None = None
+    _ops_table: list[RegisteredOp] | None = None
+
     def __init__(
         self,
-        index: IndexConfig | None = None,
-        **kwargs: Any,
+        *,
+        name: str | None = None,
+        accessor: Accessor | None = None,
+        io: CommandIO | None = None,
+        prompt: str | None = None,
+        write_prompt: str | None = None,
+        overrides: set[str] | None = None,
+        commands: list[Callable[..., Any]] | None = None,
+        ops: list[Callable[..., Any]] | None = None,
+        provision_overrides: dict[str, Callable[..., Any]] | None = None,
+        auto_ops: bool = True,
+        caches_reads: bool | None = None,
+        sizes_always_known: bool | None = None,
+        supports_snapshot: bool | None = None,
     ) -> None:
-        super().__init__(**kwargs)
-        self._closed = False
-        self._commands: list[RegisteredCommand] = []
-        self._ops_list: list[RegisteredOp] = []
-        self._index: IndexCacheStore
-        self.set_index(index)
+        """Build a driver from a table, or nothing at all.
 
-    def set_index(self, config: IndexConfig | None = None) -> None:
-        cfg = (config if config is not None else IndexConfig(
-            ttl=self.index_ttl))
-        if isinstance(cfg, RedisIndexConfig):
-            if RedisIndexCacheStore is None:
-                raise ImportError(
-                    "RedisIndexConfig requires the 'redis' extra. "
-                    "Install with: pip install mirage-ai[redis]")
-            self._index = RedisIndexCacheStore(
-                ttl=cfg.ttl,
-                url=cfg.url,
-                key_prefix=cfg.key_prefix,
-            )
-        else:
-            self._index = RAMIndexCacheStore(ttl=cfg.ttl)
+        Every argument is optional, so a class that declares its facts
+        as attributes and returns its tables from ``ops`` and
+        ``commands`` calls ``super().__init__()`` bare. Given ``io``,
+        the whole generic command set and the derived op set are wired
+        from the table.
 
-    @property
-    def index(self) -> IndexCacheStore:
-        return self._index
-
-    async def resolve_glob(self,
-                           paths: list[PathSpec],
-                           prefix: str = "") -> list[PathSpec]:
-        raise NotImplementedError
-
-    def storage_id(self) -> str:
-        """Identity of the storage this VFS reads and writes.
-
-        Two mounts whose mounts return the same value address the same
-        bytes, so a move between them must refuse rather than copy the
-        object over itself and then unlink the source. The default treats
-        every instance as its own storage, which is the safe direction to
-        be wrong in: a false "different" only keeps the pre-existing
-        behavior, while a false "same" would refuse a legitimate move.
-        Backends whose config pins the storage (a disk root, a bucket and
-        key prefix) override this so two separately constructed instances
-        pointing at one target still compare equal.
+        Args:
+            name (str | None): VFS name commands register under; also
+                the registry key when the class is exposed through
+                ``register_vfs`` or a ``mirage.vfs`` entry point. None
+                keeps the class attribute.
+            accessor (Accessor | None): backend handle passed to every
+                core function.
+            io (CommandIO | None): the backend's IO table.
+            prompt (str | None): LLM-facing description of the layout.
+            write_prompt (str | None): appended when mounted writable.
+            overrides (set[str] | None): generic command names the
+                backend replaces (pass the replacements via ``commands``).
+            commands (list[Callable] | None): extra ``@command``
+                functions (bespoke verbs or override replacements).
+            ops (list[Callable] | None): ``@op`` functions or
+                ``RegisteredOp`` values layered over the derived set; one
+                carrying no filetype shadows the derived op of its name.
+            provision_overrides (dict[str, Callable] | None): per-command
+                cost estimators replacing the catalog default.
+            auto_ops (bool): derive the op set from the table; disable to
+                serve only the explicit ``ops``.
+            caches_reads (bool | None): serve repeat reads from the file
+                cache; enable only for stable, read-mostly content.
+            sizes_always_known (bool | None): whether ``io.stat`` sizes
+                every regular file without fetching it, which is also
+                what makes the mount legal on FSKit.
+            supports_snapshot (bool | None): whether ``io.stat`` fills
+                ``FileStat.fingerprint`` with a stable per-path marker.
+                Setting it without that is not drift detection.
         """
-        return f"{self.name}:{id(self):x}"
-
-    async def statfs(self) -> CapacityResult:
-        """Capacity of this backend for df. Default: UNKNOWN (rendered as
-        ``-``). Backends that can report truthfully — a real filesystem, or
-        a provider that exposes a storage quota — override this. Never
-        fabricate a number: report QUOTA only with real values, else
-        ELASTIC/NA/UNKNOWN.
-        """
-        return CapacityResult(state=CapacityState.UNKNOWN)
-
-    def __getattr__(self, name: str) -> Any:
-        # Read through the instance, not the class. A builtin sets ``_ops``
-        # as a class attribute and resolves the same either way, but a kit
-        # backend has no class of its own to hang one on and builds the map
-        # per instance in ``GenericVFS.__init__``; ``type(self)._ops``
-        # read past it and reported every op the table carried as missing.
-        # No recursion: ``_ops`` is always found, on the class if nowhere
-        # else, so this lookup never re-enters ``__getattr__``.
-        fn = self._ops.get(name)
-        if fn is not None:
-            return partial(fn, self.accessor)
-        raise AttributeError(
-            f"'{type(self).__name__}' has no attribute '{name}'")
-
-    def register_op(self, fn: Any) -> None:
-        if isinstance(fn, RegisteredOp):
-            self._ops_list.append(fn)
+        # Cooperative, so a mixin beside this class in a subclass's bases
+        # (the RAM cache store's key locks) still initializes.
+        super().__init__()
+        if name is not None:
+            if not name:
+                raise ValueError("a VFS needs a non-empty name")
+            self.name = name
+        if accessor is not None:
+            self.accessor = accessor
+        if prompt is not None:
+            self.prompt = prompt
+        if write_prompt is not None:
+            self.write_prompt = write_prompt
+        if caches_reads is not None:
+            self.caches_reads = caches_reads
+        if sizes_always_known is not None:
+            self.sizes_always_known = sizes_always_known
+        if supports_snapshot is not None:
+            self.supports_snapshot = supports_snapshot
+        if io is None:
+            if any(x is not None
+                   for x in (overrides, commands, ops, provision_overrides)):
+                raise ValueError(
+                    "overrides, commands, ops and provision_overrides "
+                    "derive from an io table; pass io")
             return
-        for ro in fn._registered_ops:
-            self._ops_list.append(ro)
+        self._from_table = True
+        self._commands_table = registered_commands([
+            *make_generic_commands(self.name,
+                                   io,
+                                   overrides=overrides,
+                                   provision_overrides=provision_overrides),
+            *(commands or []),
+        ])
+        user_ops: list[RegisteredOp] = []
+        for fn in ops or []:
+            if isinstance(fn, RegisteredOp):
+                user_ops.append(fn)
+            else:
+                user_ops.extend(getattr(fn, "_registered_ops"))
+        # A user op carrying no filetype replaces the derived op of the
+        # same name: the derived set is built with those names skipped,
+        # so two handlers never compete for one key.
+        shadowed = {ro.name for ro in user_ops if ro.filetype is None}
+        derived = (make_generic_ops(self.name, io, overrides=shadowed)
+                   if auto_ops else [])
+        self._ops_table = [*derived, *user_ops]
 
     def ops(self) -> list[RegisteredOp]:
-        return self._ops_list
+        """The VFS/FUSE verbs this driver serves, as registered ops.
 
-    def register(self, fn: Any) -> None:
-        if isinstance(fn, RegisteredCommand):
-            self._commands.append(fn)
-            return
-        for rc in fn._registered_commands:
-            self._commands.append(rc)
+        A verb that is not in this list is not served: the mount answers
+        ``Operation not supported`` for it. A driver built from a table
+        serves the set derived from it; a builtin returns the list its
+        ``ops/<name>`` module derives from the backend's table.
+        """
+        return self._ops_table if self._ops_table is not None else []
 
     def commands(self) -> list[RegisteredCommand]:
-        return self._commands
+        """The shell commands this driver serves, as registered commands."""
+        return (self._commands_table
+                if self._commands_table is not None else [])
+
+    def storage_location(self) -> str | None:
+        """Where this driver's bytes live, as one string a person can read.
+
+        ``disk:/srv/data``, ``s3:aws:my-bucket/prefix``. Two mounts with
+        the same location address the same bytes, which is how ``cp`` and
+        ``mv`` across mounts refuse to copy a file onto itself. None, the
+        default, means unknown, and the mount then treats this instance
+        as a location of its own, which is the safe direction to be wrong
+        in: a false "different" only keeps the pre-existing behavior,
+        while a false "same" would refuse a legitimate move. A driver
+        whose config pins the storage (a disk root, a bucket and key
+        prefix) overrides this so two instances pointing at one target
+        compare equal.
+        """
+        return None
+
+    async def capacity(self) -> CapacityResult:
+        """How much space this backend has, for ``df``.
+
+        The default is UNKNOWN, which ``df`` renders as ``-``. A driver
+        that can answer truthfully (a real filesystem, a provider that
+        exposes a storage quota) overrides this. Never fabricate a number:
+        report QUOTA only with real values, else ELASTIC/NA/UNKNOWN.
+        """
+        return CapacityResult(state=CapacityState.UNKNOWN)
 
     def delta_hook(self) -> DeltaHook | None:
         """Hook a consumer's poll loop can pull deltas from, or None.
@@ -177,21 +261,34 @@ class BaseVFS:
         None means this backend has no native change detection, which
         is most of them; a subclass that has one overrides this and
         narrows the return to ``DeltaHook``.
-
-        Declaring it here rather than behind a capability protocol is
-        deliberate. The protocol only ever answered "does this VFS
-        have one", which a None default answers with no ``isinstance``,
-        no import, and no second place to keep in step. TypeScript has
-        always done it this way (``deltaHook?()`` on ``BaseVFS``).
         """
         return None
 
     def get_state(self) -> dict[str, Any]:
-        return {
-            "type": self.name,
-        }
+        """What a snapshot records for this driver.
+
+        The default carries only the type, which is enough to rebuild a
+        builtin that owns nothing. A driver built from a table adds
+        ``needs_override``: the base cannot know a subclass's
+        constructor, so both loaders then require the mount to be handed
+        back live (``mounts=``; ``Workspace.copy`` does this itself). A
+        driver that owns its content (an in-memory store) overrides this
+        and ``load_state`` to carry it and drops the flag; a driver over
+        a remote service keeps the default and pins what it read through
+        ``supports_snapshot`` fingerprints instead.
+        """
+        if not self._from_table:
+            return {"type": self.name}
+        return {"type": self.name, "needs_override": True}
 
     def config_state(self, config: BaseModel, **extra: Any) -> dict[str, Any]:
+        """``get_state`` for a driver rebuilt from a config: the type and
+        the config with its secrets redacted.
+
+        Args:
+            config (BaseModel): the config the driver was built from.
+            **extra (Any): further keys to record beside it.
+        """
         cfg = redacted_config_dump(config)
         return {
             "type": self.name,
@@ -200,7 +297,11 @@ class BaseVFS:
         }
 
     def load_state(self, state: dict[str, Any]) -> None:
-        pass
+        """Take back what ``get_state`` put out. A no-op by default.
+
+        Args:
+            state (dict[str, Any]): the recorded state.
+        """
 
     @property
     def is_closed(self) -> bool:
@@ -208,8 +309,12 @@ class BaseVFS:
         return self._closed
 
     async def close(self) -> None:
+        """Release what this driver owns, exactly once: its accessor.
+
+        A driver with handles of its own (a pool, a channel) overrides
+        this and calls ``super().close()``.
+        """
         if self._closed:
             return
         await self.accessor.close()
-        await self._index.close()
         self._closed = True

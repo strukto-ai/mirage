@@ -71,16 +71,11 @@ export class Workspace extends CoreWorkspace {
     }
     const mountTargets: [string, MountBackend, string | undefined][] = []
     for (const [prefix, value] of Object.entries(mounts)) {
+      specs[prefix] = value
       if (value instanceof Mount) {
-        specs[prefix] =
-          value.options.mode !== undefined ? [value.vfs, value.options.mode] : value.vfs
-        if (value.options.commandLimits !== undefined)
-          commandLimits[prefix] = value.options.commandLimits
         const backend = value.options.backend ?? MountBackend.WORKSPACE
         if (KERNEL_BACKENDS.includes(backend))
           mountTargets.push([prefix, backend, value.options.mountpoint])
-      } else {
-        specs[prefix] = value
       }
     }
     super(specs, {

@@ -370,5 +370,4 @@ def build_vfs(name: str, config: dict[str, Any] | None = None) -> BaseVFS:
         defect = _vfs_defect(built)
         if defect is not None:
             raise TypeError(f"VFS ref {name!r} {defect}")
-    built.vfs_ref = name
     return built

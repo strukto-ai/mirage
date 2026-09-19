@@ -14,36 +14,27 @@
 
 import { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
 import { GDRIVE_COMMANDS } from '@struktoai/mirage-core/commands/builtin/gdrive/index'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { read as gdriveRead } from '@struktoai/mirage-core/core/gdrive/read'
-import { readdir as gdriveReaddir } from '@struktoai/mirage-core/core/gdrive/readdir'
-import { stat as gdriveStat } from '@struktoai/mirage-core/core/gdrive/stat'
 import { buildDeltaHook } from '@struktoai/mirage-core/core/gdrive/watch'
 import { TokenManager } from '@struktoai/mirage-core/core/google/client'
 import { GDRIVE_OPS } from '@struktoai/mirage-core/ops/gdrive/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { GDRIVE_PROMPT } from '@struktoai/mirage-core/vfs/gdrive/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import {
   redactGDriveConfig,
   type GDriveConfig,
   type GDriveConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gdrive/config'
-
-const gdriveResolveGlob = makeResolveGlob(gdriveReaddir)
-
 export interface GDriveVFSState {
   type: string
   config: GDriveConfigRedacted
 }
 
 export class GDriveVFS extends BaseVFS {
-  readonly name: string = VFSName.GDRIVE
+  override readonly name: string = VFSName.GDRIVE
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = true
   override readonly indexTtl: number = 86_400
@@ -64,37 +55,6 @@ export class GDriveVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return GDRIVE_OPS
   }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return gdriveRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return gdriveReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return gdriveStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return gdriveResolveGlob(this.accessor, effective, this.index)
-  }
-
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }

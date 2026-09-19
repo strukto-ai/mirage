@@ -30,7 +30,7 @@ export interface HfDatasetsVFSState {
 }
 
 export class HfDatasetsVFS extends HfHubVFS {
-  readonly name: string = VFSName.HF_DATASETS
+  override readonly name: string = VFSName.HF_DATASETS
   readonly prompt: string = HF_DATASETS_PROMPT
   readonly config: HfRepoConfig
   readonly accessor: HfDatasetsHubAccessor

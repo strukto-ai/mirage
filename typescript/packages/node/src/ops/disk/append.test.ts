@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -33,14 +34,14 @@ afterEach(() => {
 
 describe('appendOp', () => {
   it('appends to an existing file', async () => {
-    await res.writeFile(spec('/x'), new TextEncoder().encode('A'))
+    await ops(res).write(spec('/x'), new TextEncoder().encode('A'))
     await appendOp.fn(res.accessor, spec('/x'), [new TextEncoder().encode('B')], {})
-    expect(new TextDecoder().decode(await res.readFile(spec('/x')))).toBe('AB')
+    expect(new TextDecoder().decode(await ops(res).read(spec('/x')))).toBe('AB')
   })
 
   it('creates the file when it does not exist yet', async () => {
     await appendOp.fn(res.accessor, spec('/new'), [new TextEncoder().encode('hi')], {})
-    expect(new TextDecoder().decode(await res.readFile(spec('/new')))).toBe('hi')
+    expect(new TextDecoder().decode(await ops(res).read(spec('/new')))).toBe('hi')
   })
 
   it('throws on non-Uint8Array first arg', () => {

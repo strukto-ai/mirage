@@ -305,6 +305,5 @@ export async function buildVfs(
     if (err instanceof z.ZodError) throw new Error(`${name}: ${errorSummary(err)}`)
     throw err
   }
-  built.vfsRef = name
   return built
 }

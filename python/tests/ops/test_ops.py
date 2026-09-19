@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+from dataclasses import replace
 
 import pytest
 
@@ -173,6 +174,12 @@ class TestRename:
 class UngrantedRemote(RAMVFS):
     caches_reads = True
     name = "s3"
+
+    def ops(self):
+        return [replace(ro, vfs=self.name) for ro in super().ops()]
+
+    def commands(self):
+        return [replace(rc, vfs=self.name) for rc in super().commands()]
 
 
 @pytest.fixture

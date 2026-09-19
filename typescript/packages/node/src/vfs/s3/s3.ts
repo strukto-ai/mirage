@@ -13,44 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { S3_COMMANDS } from '@struktoai/mirage-core/commands/builtin/s3/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { SCOPE_ERROR as S3_SCOPE_ERROR } from '@struktoai/mirage-core/core/s3/constants'
-import { copy as copyCore } from '@struktoai/mirage-core/core/s3/copy'
-import { size as duSizeCore } from '@struktoai/mirage-core/core/s3/du/index'
-import { exists as existsCore } from '@struktoai/mirage-core/core/s3/exists'
-import { find as findCore } from '@struktoai/mirage-core/core/s3/find'
-import { mkdir as mkdirCore } from '@struktoai/mirage-core/core/s3/mkdir'
-import { read as readCore } from '@struktoai/mirage-core/core/s3/read'
-import { readdir as readdirCore } from '@struktoai/mirage-core/core/s3/readdir'
-import { rename as renameCore } from '@struktoai/mirage-core/core/s3/rename'
-import { rmR as rmRCore } from '@struktoai/mirage-core/core/s3/rm'
-import { rmdir as rmdirCore } from '@struktoai/mirage-core/core/s3/rmdir'
-import { stat as statCore } from '@struktoai/mirage-core/core/s3/stat'
-import { stream as streamCore } from '@struktoai/mirage-core/core/s3/stream'
-import { truncate as truncateCore } from '@struktoai/mirage-core/core/s3/truncate'
-import { unlink as unlinkCore } from '@struktoai/mirage-core/core/s3/unlink'
-import { write as writeCore } from '@struktoai/mirage-core/core/s3/write'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { S3_OPS } from '@struktoai/mirage-core/ops/s3/index'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import type { S3HttpAgents } from '@struktoai/mirage-core/vfs/s3/config'
 import { S3_PROMPT } from '@struktoai/mirage-core/vfs/s3/prompt'
-import { s3StorageId } from '@struktoai/mirage-core/vfs/s3/storage_id'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { s3StorageLocation } from '@struktoai/mirage-core/vfs/s3/storage_id'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '@struktoai/mirage-core/core/s3/watch'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
-
-const globCore = makeResolveGlob(readdirCore, S3_SCOPE_ERROR)
-
 function createProxyAgents(proxy: string): S3HttpAgents {
   return { httpAgent: new HttpProxyAgent(proxy), httpsAgent: new HttpsProxyAgent(proxy) }
 }
@@ -61,7 +38,7 @@ export interface S3VFSState {
 }
 
 export class S3VFS extends BaseVFS {
-  readonly name: string = VFSName.S3
+  override readonly name: string = VFSName.S3
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = true
   // byte store: stat() sizes every file from metadata
@@ -89,8 +66,8 @@ export class S3VFS extends BaseVFS {
     })
   }
 
-  override storageId(): string {
-    return s3StorageId(this.name, this.config)
+  override storageLocation(): string {
+    return s3StorageLocation(this.name, this.config)
   }
   override commands(): readonly RegisteredCommand[] {
     return S3_COMMANDS.toArray()
@@ -99,101 +76,6 @@ export class S3VFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return S3_OPS
   }
-
-  override streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
-    return streamCore(this.accessor, p)
-  }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return readCore(this.accessor, p)
-  }
-
-  override writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
-    return writeCore(this.accessor, p, data)
-  }
-
-  override async appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
-    let existing: Uint8Array
-    try {
-      existing = await readCore(this.accessor, p)
-    } catch (err) {
-      if ((err as { code?: string } | null)?.code === 'ENOENT') {
-        existing = new Uint8Array()
-      } else {
-        throw err
-      }
-    }
-    const merged = new Uint8Array(existing.byteLength + data.byteLength)
-    merged.set(existing, 0)
-    merged.set(data, existing.byteLength)
-    await writeCore(this.accessor, p, merged)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return readdirCore(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return statCore(this.accessor, p)
-  }
-
-  override exists(p: PathSpec): Promise<boolean> {
-    return existsCore(this.accessor, p)
-  }
-
-  override mkdir(p: PathSpec): Promise<void> {
-    return mkdirCore(this.accessor, p)
-  }
-
-  override rmdir(p: PathSpec): Promise<void> {
-    return rmdirCore(this.accessor, p)
-  }
-
-  override unlink(p: PathSpec): Promise<void> {
-    return unlinkCore(this.accessor, p)
-  }
-
-  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    return renameCore(this.accessor, src, dst)
-  }
-
-  override truncate(p: PathSpec, length: number): Promise<void> {
-    return truncateCore(this.accessor, p, length)
-  }
-
-  override copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return copyCore(this.accessor, src, dst)
-  }
-
-  override rmR(p: PathSpec): Promise<void> {
-    return rmRCore(this.accessor, p)
-  }
-
-  override du(p: PathSpec): Promise<number> {
-    return duSizeCore(this.accessor, p)
-  }
-
-  override find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    return findCore(this.accessor, p, options)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective = prefix
-      ? paths.map((p) =>
-          mountPrefixOf(p.virtual, p.vfsPath)
-            ? p
-            : new PathSpec({
-                virtual: p.virtual,
-                directory: p.directory,
-                ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                resolved: p.resolved,
-                vfsPath: mountKey(p.virtual, prefix),
-              }),
-        )
-      : paths
-    return globCore(this.accessor, effective, this.index)
-  }
-
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }

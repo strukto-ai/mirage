@@ -26,6 +26,7 @@ def _op(name: str):
 def test_registers_read_only_trio():
     rows = {(o.name, o.vfs, o.filetype, o.write) for o in OPS}
     assert rows == {
+        ("glob", "slack", None, False),
         ("read", "slack", None, False),
         ("readdir", "slack", None, False),
         ("stat", "slack", None, False),

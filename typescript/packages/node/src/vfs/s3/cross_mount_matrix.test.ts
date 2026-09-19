@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -80,19 +81,20 @@ async function populate(
   }
   const { PathSpec } = await import('@struktoai/mirage-core/types')
   const fullPath = `/${name}`
-  const r = state.vfs as RAMVFS | DiskVFS
+  const table = ops(state.vfs)
   const parts = name.split('/').filter(Boolean)
   if (parts.length > 1) {
     const dir = `/${parts.slice(0, -1).join('/')}`
     try {
-      await r.mkdir(new PathSpec({ vfsPath: stripSlash(dir), virtual: dir, directory: dir }), {
-        recursive: true,
-      })
+      await table.mkdir(
+        new PathSpec({ vfsPath: stripSlash(dir), virtual: dir, directory: dir }),
+        true,
+      )
     } catch {
       // ignore existing dirs
     }
   }
-  await r.writeFile(
+  await table.write(
     new PathSpec({ vfsPath: stripSlash(fullPath), virtual: fullPath, directory: fullPath }),
     content,
   )

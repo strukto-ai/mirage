@@ -17,6 +17,7 @@ import { createShellParser } from '@struktoai/mirage-core/shell/parse'
 import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/types'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
@@ -59,7 +60,7 @@ export class Workspace extends CoreWorkspace {
     return build === null ? null : buildVfs(build.name, build.config)
   }
 
-  constructor(mounts: Record<string, BaseVFS>, options: WorkspaceOptions = {}) {
+  constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
     super(mounts, {
       ...options,
       sessionId: options.sessionId ?? randomSessionId(),

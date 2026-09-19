@@ -1,5 +1,6 @@
 import pytest
 
+from mirage.ops.registry import RegisteredOp
 from mirage.types import VFSName
 from mirage.vfs.registry import REGISTRY, build_vfs
 
@@ -25,7 +26,12 @@ async def test_chroma_vfs_registers_expected_commands_and_ops():
     vfs = build_vfs("chroma", {"collection_name": "docs"})
 
     commands = {item.name for item in vfs.commands()}
-    ops = {item.name for item in vfs.ops()}
+    ops = {
+        ro.name
+        for item in vfs.ops()
+        for ro in (
+            [item] if isinstance(item, RegisteredOp) else item._registered_ops)
+    }
 
     assert {
         "cat", "ls", "grep", "find", "head", "tail", "tree", "chroma-query"

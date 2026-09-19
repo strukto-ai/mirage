@@ -25,7 +25,10 @@ import { Decisions, MountRootPolicy, OutputCapPolicy, Policies } from '../../pol
 import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
 import { effectivePathMode, strongestModeUnder } from '../../context/session_context.ts'
-import { MountEntry } from './mount.ts'
+import { MountEntry, type MountInit } from './mount.ts'
+import type { IndexConfig } from '../../cache/index/config.ts'
+import { buildIndex } from '../../cache/index/factory.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -63,7 +66,21 @@ export interface OpsMountInfo {
   mode: MountMode
 }
 
+/** What a placement adds to a driver: the store config and the reference it came from. */
+export interface MountPlacementInit {
+  index?: IndexConfig
+  vfsRef?: string | null
+}
+
+/** The placements of the mounts a registry is constructed with, keyed by raw prefix. */
+export interface RegistryPlacements {
+  index?: IndexConfig
+  indexes?: Record<string, IndexConfig>
+  refs?: Record<string, string>
+}
+
 export class MountRegistry {
+  private readonly indexConfig: IndexConfig | undefined
   private readonly mountList: MountEntry[]
   readonly retiringMounts = new Map<BaseVFS, Promise<void>>()
   readonly retiredMounts = new WeakSet<BaseVFS>()
@@ -105,8 +122,8 @@ export class MountRegistry {
   async invalidateAfterExternal(): Promise<void> {
     await this.cacheStore?.clear()
     for (const mount of this.allMounts()) {
-      if (mount.cacheManager !== null) await mount.cacheManager.clearIndex(mount.vfs.index)
-      else await mount.use(() => mount.vfs.index.clear())
+      if (mount.cacheManager !== null) await mount.cacheManager.clearIndex(mount.indexStore)
+      else await mount.use(() => mount.indexStore.clear())
     }
   }
 
@@ -128,7 +145,7 @@ export class MountRegistry {
   private attachManager(m: MountEntry): void {
     m.cacheManager = new CacheManager(
       this.cacheStore,
-      m.vfs.index,
+      m.indexStore,
       m.prefix,
       m.vfs.cachesReads,
       (path) => !m.retiring && this.tryMountFor(path) === m,
@@ -139,14 +156,18 @@ export class MountRegistry {
     mounts: Record<string, BaseVFS>,
     defaultMode: MountMode,
     modeOverrides: Record<string, MountMode> = {},
+    placements: RegistryPlacements = {},
   ) {
+    this.indexConfig = placements.index
     const list: MountEntry[] = []
     const seen = new Set<string>()
     const overrides: Record<string, MountMode> = {}
     for (const [k, v] of Object.entries(modeOverrides)) {
       overrides[normalizePrefix(k)] = v
     }
-    list.push(new MountEntry({ prefix: DEV_PREFIX, vfs: new DevVFS(), mode: MountMode.WRITE }))
+    list.push(
+      MountRegistry.place({ prefix: DEV_PREFIX, vfs: new DevVFS(), mode: MountMode.WRITE }, list),
+    )
     seen.add(DEV_PREFIX)
     for (const [rawPrefix, vfs] of Object.entries(mounts)) {
       const prefix = normalizePrefix(rawPrefix)
@@ -156,14 +177,56 @@ export class MountRegistry {
       if (vfs.isClosed) throw new Error('VFS is closed; create a new VFS instance')
       seen.add(prefix)
       const mode = overrides[prefix] ?? defaultMode
-      const entry = new MountEntry({ prefix, vfs, mode })
-      const alias = list.find((existing) => existing.vfs === vfs)
-      if (alias !== undefined) entry.activity = alias.activity
-      list.push(entry)
+      const index = this.indexFor(vfs, placements.indexes?.[rawPrefix], list)
+      const vfsRef = placements.refs?.[rawPrefix] ?? null
+      list.push(MountRegistry.place({ prefix, vfs, mode, index, vfsRef }, list))
     }
     list.sort((a, b) => b.prefix.length - a.prefix.length)
     this.mountList = list
     this.rootRef = list.find((m) => m.prefix === '/') ?? null
+  }
+
+  /**
+   * Build one mount with everything the tree needs to run its driver:
+   * the driver's command and op tables registered on the entry, the
+   * general commands beside them, and the activity gate shared with any
+   * earlier mount of the same instance. The constructor and `mount()`
+   * both place through here, so a mount is the same whichever door
+   * built it. Mirrors the Python registry, whose constructor mounts
+   * through `mount()` as well.
+   */
+  private static place(init: MountInit, siblings: readonly MountEntry[]): MountEntry {
+    const m = new MountEntry(init)
+    const alias = siblings.find((existing) => existing.vfs === init.vfs)
+    if (alias !== undefined) m.activity = alias.activity
+    for (const cmd of init.vfs.commands()) {
+      if (cmd.filetype !== null) m.register(cmd)
+      else if (cmd.vfs === null) m.registerGeneral(cmd)
+      else m.register(cmd)
+    }
+    for (const cmd of GENERAL_COMMANDS) {
+      m.registerGeneral(cmd)
+    }
+    for (const op of init.vfs.ops()) {
+      if (op.vfs === null) m.registerGeneralOp(op)
+      else m.registerOp(op)
+    }
+    return m
+  }
+
+  /**
+   * The store a driver runs under: the one its earlier mount already
+   * has, else a new one from the mount's or the workspace's index
+   * config, else a RAM store at the driver's own TTL.
+   */
+  private indexFor(
+    vfs: BaseVFS,
+    config: IndexConfig | undefined,
+    siblings: readonly MountEntry[],
+  ): IndexCacheStore {
+    const alias = siblings.find((existing) => existing.vfs === vfs)
+    if (alias !== undefined) return alias.indexStore
+    return buildIndex(config ?? this.indexConfig, vfs.indexTtl)
   }
 
   setConsistency(consistency: ConsistencyPolicy): void {
@@ -194,6 +257,7 @@ export class MountRegistry {
     vfs: BaseVFS,
     mode: MountMode = MountMode.READ,
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+    placement: MountPlacementInit = {},
   ): MountEntry {
     this.checkVfsAvailable(vfs)
     const norm = normalizePrefix(prefix)
@@ -202,27 +266,12 @@ export class MountRegistry {
         throw new Error(`duplicate mount prefix: ${norm}`)
       }
     }
-    const m = new MountEntry({ prefix: norm, vfs, mode, consistency })
-    const alias = this.mountList.find((existing) => existing.vfs === vfs)
-    if (alias !== undefined) m.activity = alias.activity
-    const cmds = vfs.commands?.()
-    if (cmds !== undefined) {
-      for (const cmd of cmds) {
-        if (cmd.filetype !== null) m.register(cmd)
-        else if (cmd.vfs === null) m.registerGeneral(cmd)
-        else m.register(cmd)
-      }
-    }
-    for (const cmd of GENERAL_COMMANDS) {
-      m.registerGeneral(cmd)
-    }
-    const ops = vfs.ops?.()
-    if (ops !== undefined) {
-      for (const op of ops) {
-        if (op.vfs === null) m.registerGeneralOp(op)
-        else m.registerOp(op)
-      }
-    }
+    const index = this.indexFor(vfs, placement.index, this.mountList)
+    const vfsRef = placement.vfsRef ?? null
+    const m = MountRegistry.place(
+      { prefix: norm, vfs, mode, consistency, index, vfsRef },
+      this.mountList,
+    )
     if (this.cacheStore !== null) this.attachManager(m)
     this.mountList.push(m)
     this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)

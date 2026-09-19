@@ -14,34 +14,25 @@
 
 import { GDocsAccessor } from '@struktoai/mirage-core/accessor/gdocs'
 import { GDOCS_COMMANDS } from '@struktoai/mirage-core/commands/builtin/gdocs/index'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { read as gdocsRead } from '@struktoai/mirage-core/core/gdocs/read'
-import { readdir as gdocsReaddir } from '@struktoai/mirage-core/core/gdocs/readdir'
-import { stat as gdocsStat } from '@struktoai/mirage-core/core/gdocs/stat'
 import { TokenManager } from '@struktoai/mirage-core/core/google/client'
 import { GDOCS_OPS } from '@struktoai/mirage-core/ops/gdocs/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { GDOCS_PROMPT, GDOCS_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/gdocs/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import {
   redactGDocsConfig,
   type GDocsConfig,
   type GDocsConfigRedacted,
 } from '@struktoai/mirage-core/vfs/gdocs/config'
-
-const gdocsResolveGlob = makeResolveGlob(gdocsReaddir)
-
 export interface GDocsVFSState {
   type: string
   config: GDocsConfigRedacted
 }
 
 export class GDocsVFS extends BaseVFS {
-  readonly name: string = VFSName.GDOCS
+  override readonly name: string = VFSName.GDOCS
   override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = GDOCS_PROMPT
@@ -62,37 +53,6 @@ export class GDocsVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return GDOCS_OPS
   }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return gdocsRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return gdocsReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return gdocsStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return gdocsResolveGlob(this.accessor, effective, this.index)
-  }
-
   override getState(): Promise<GDocsVFSState> {
     return Promise.resolve({
       type: this.name,

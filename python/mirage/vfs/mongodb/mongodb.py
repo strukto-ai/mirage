@@ -15,14 +15,15 @@
 from typing import Any
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.core.mongodb.readdir import readdir
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.commands.builtin.mongodb import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
+from mirage.ops.mongodb import OPS as MONGODB_VFS_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
 from mirage.vfs.mongodb.prompt import PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class MongoDBVFS(BaseVFS):
@@ -39,20 +40,12 @@ class MongoDBVFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = MongoDBAccessor(self.config)
-        from mirage.commands.builtin.mongodb import COMMANDS
-        from mirage.ops.mongodb import OPS as MONGODB_VFS_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for op in MONGODB_VFS_OPS:
-            self.register_op(op)
+    def ops(self) -> list[RegisteredOp]:
+        return MONGODB_VFS_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

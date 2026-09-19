@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
+import { exists as existsCore } from '../../core/disk/exists.ts'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -33,9 +35,9 @@ afterEach(() => {
 
 describe('unlinkOp', () => {
   it('removes an existing file', async () => {
-    await res.writeFile(spec('/x'), new Uint8Array([1]))
+    await ops(res).write(spec('/x'), new Uint8Array([1]))
     await unlinkOp.fn(res.accessor, spec('/x'), [], {})
-    expect(await res.exists(spec('/x'))).toBe(false)
+    expect(await existsCore(res.accessor, spec('/x'))).toBe(false)
   })
 
   it('is a no-op on missing file', async () => {

@@ -14,7 +14,7 @@
 
 import { resolveConfigSecrets } from '@struktoai/mirage-core/secrets/sources'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
-import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { type BaseVFS, VFS_BRAND } from '@struktoai/mirage-core/vfs/base'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { errorSummary } from '@struktoai/mirage-core/secrets/summary'
 import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
@@ -331,30 +331,25 @@ export function register(name: string, factory: VFSFactory): void {
 // moves the failure later and into a frame the author never wrote, which is
 // the very thing this guard exists to prevent: `close` alone accepted a
 // class whose missing `getState` crashed `Workspace.save()` instead.
-const VFS_METHODS = ['close', 'getState', 'loadState'] as const
-
 /**
  * The reason a loaded export cannot serve as a VFS, or null when it
  * can.
  *
  * A string rather than a boolean because a colon reference loads whatever
  * the file exports, and "did not build a VFS" does not tell the author
- * which member they forgot.
+ * what is wrong.
  *
- * Structural, and deliberately unlike the python twin, which checks
- * `isinstance(built, BaseVFS)` instead. The contract differs because the
- * languages do: python's mount door already refuses a non-subclass
- * (`workspace/workspace/mounts.py::check_vfs`), so a structural check
- * there would accept what a later door rejects. A script file here may
- * load its own copy of the package, so `instanceof` would refuse a class
- * that extends `BaseVFS` in every sense but module identity. Both guards
- * end at the same place: the name a VFS is keyed by must not be empty.
+ * The check is the `BaseVFS` brand, which is the same contract the python
+ * twin enforces with `isinstance`. It is a brand rather than `instanceof`
+ * because a script file may load its own copy of the package, and a real
+ * subclass of that copy must pass; and a brand rather than a member list
+ * because every member of the contract has a default, so nothing but
+ * `name` could be probed for anyway.
  */
 function vfsDefect(value: unknown): string | null {
   if (value === null || typeof value !== 'object') return `built a ${typeof value}`
-  const node = value as Record<string, unknown>
-  const missing = VFS_METHODS.filter((name) => typeof node[name] !== 'function')
-  if (missing.length > 0) return `is missing ${missing.join(', ')}`
+  const node = value as Record<PropertyKey, unknown>
+  if (node[VFS_BRAND] !== true) return 'does not extend BaseVFS'
   // A VFS is keyed by `name`: it is how a command or op registered for
   // this backend is found, so an empty one silently registers nothing.
   if (typeof node.name !== 'string' || node.name === '') return 'has no name'
@@ -430,6 +425,5 @@ export async function buildVfs(
   if (built === null) {
     throw new Error(`unknown VFS ${JSON.stringify(name)}; known: ${knownVfsNames().join(', ')}`)
   }
-  built.vfsRef = name
   return built
 }

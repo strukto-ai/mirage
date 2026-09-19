@@ -21,6 +21,7 @@ from mirage.cache.index.config import LookupStatus
 from mirage.config import MountBlock, RedisIndexBlock, WorkspaceConfig
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.mount.spec import Mount
 
 
 def test_redis_index_config_default_key_prefix():
@@ -28,16 +29,14 @@ def test_redis_index_config_default_key_prefix():
 
 
 def test_workspace_index_param_applies_to_mounts():
-    r = RAMVFS()
-    Workspace({"/m": r},
-              index=RedisIndexConfig(url="redis://localhost:6379/0"))
-    assert isinstance(r.index, RedisIndexCacheStore)
+    ws = Workspace({"/m": RAMVFS()},
+                   index=RedisIndexConfig(url="redis://localhost:6379/0"))
+    assert isinstance(ws.mount("/m/").index_store, RedisIndexCacheStore)
 
 
 def test_workspace_default_index_is_ram():
-    r = RAMVFS()
-    Workspace({"/m": r})
-    assert isinstance(r.index, RAMIndexCacheStore)
+    ws = Workspace({"/m": RAMVFS()})
+    assert isinstance(ws.mount("/m/").index_store, RAMIndexCacheStore)
 
 
 @pytest.mark.asyncio
@@ -54,41 +53,40 @@ async def test_config_index_redis_block_builds_redis_config():
 @pytest.mark.asyncio
 async def test_added_mount_inherits_redis_index():
     ws = Workspace({}, index=RedisIndexConfig(key_prefix="shared:"))
-    vfs = RAMVFS()
-    ws.add_mount("/late", vfs)
+    entry = ws.add_mount("/late", RAMVFS())
     try:
-        assert isinstance(vfs.index, RedisIndexCacheStore)
+        assert isinstance(entry.index_store, RedisIndexCacheStore)
     finally:
         await ws.close()
 
 
-# A VFS keeps the index it was given when the workspace has no index
-# config (#1012), on the dynamic path as on construction.
+# A mount that names its own index keeps it, whatever the workspace
+# config says (#1012): the placement is where the store is chosen.
 @pytest.mark.asyncio
-async def test_added_mount_keeps_a_vfs_own_index_without_a_config():
-    ws = Workspace({})
-    vfs = RAMVFS()
-    vfs.set_index(
-        RedisIndexConfig(url="redis://127.0.0.1:1/0", key_prefix="own:"))
-    own = vfs.index
-    ws.add_mount("/late", vfs)
+async def test_mount_own_index_wins_over_the_workspace_config():
+    own = RedisIndexConfig(url="redis://127.0.0.1:1/0", key_prefix="own:")
+    ws = Workspace(
+        {
+            "/own": Mount(vfs=RAMVFS(), index=own),
+            "/shared": RAMVFS()
+        },
+        index=IndexConfig(ttl=5))
     try:
-        assert vfs.index is own
-        assert isinstance(vfs.index, RedisIndexCacheStore)
+        assert isinstance(ws.mount("/own/").index_store, RedisIndexCacheStore)
+        assert isinstance(ws.mount("/shared/").index_store, RAMIndexCacheStore)
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
 async def test_added_mount_inherits_index_ttl():
-    initial = RAMVFS()
-    ws = Workspace({"/initial": initial}, index=IndexConfig(ttl=-1))
-    added = RAMVFS()
-    ws.add_mount("/late", added)
+    ws = Workspace({"/initial": RAMVFS()}, index=IndexConfig(ttl=-1))
+    ws.add_mount("/late", RAMVFS())
     try:
-        for vfs in (initial, added):
-            await vfs.index.set_dir("/listing", [])
-            assert (await vfs.index.list_dir("/listing")).status == \
+        for prefix in ("/initial/", "/late/"):
+            store = ws.mount(prefix).index_store
+            await store.set_dir("/listing", [])
+            assert (await store.list_dir("/listing")).status == \
                 LookupStatus.EXPIRED
     finally:
         await ws.close()
@@ -99,19 +97,18 @@ async def test_added_mount_keeps_index_coherent_across_aliases_and_duplicates(
 ):
     ws = Workspace({}, index=IndexConfig(ttl=3600))
     vfs = RAMVFS()
-    ws.add_mount("/late", vfs, MountMode.WRITE)
-    index = vfs.index
+    entry = ws.add_mount("/late", vfs, MountMode.WRITE)
+    index = entry.index_store
     rejected = RAMVFS()
-    rejected_index = rejected.index
     try:
         await index.set_dir("/late", [])
-        ws.add_mount("/alias", vfs)
-        assert vfs.index is index
+        alias = ws.add_mount("/alias", vfs)
+        # An alias runs under the store its instance already has.
+        assert alias.index_store is index
         assert (await index.list_dir("/late")).entries == []
         with pytest.raises(ValueError, match="duplicate mount prefix"):
             ws.add_mount("late/", rejected)
-        assert rejected.index is rejected_index
-        # The manager must invalidate the configured index, not the store
+        # The manager must invalidate the configured index, not a store
         # the VFS had before it was attached to the workspace.
         await ws.vfs.write("/late/new.txt", b"new")
         assert (await index.list_dir("/late")).status == LookupStatus.NOT_FOUND

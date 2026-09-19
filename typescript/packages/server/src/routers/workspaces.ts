@@ -18,6 +18,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Limit } from '@struktoai/mirage-core/types'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { type WorkspaceRegistry } from '../registry.ts'
@@ -103,8 +104,9 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       }
       const vfsMap: Record<string, MountSpec> = {}
       const commandLimits: Record<string, Record<string, Limit>> = {}
-      for (const [prefix, [vfs, mode, limits]] of Object.entries(args.mounts)) {
-        vfsMap[prefix] = [vfs, mode]
+      for (const [prefix, placement] of Object.entries(args.mounts)) {
+        vfsMap[prefix] = placement
+        const limits = placement.options.commandLimits ?? {}
         if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
       }
       // The registry id and the state-store scope must be the same identity,
@@ -173,7 +175,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       } catch {
         return reply.status(400).send({ detail: `snapshot not found: ${path}` })
       }
-      let overrides: Record<string, BaseVFS>
+      let overrides: Record<string, BaseVFS | Mount>
       try {
         // An override mount's credential may be a pointer at one of
         // these declarations; a container the constructor will reject

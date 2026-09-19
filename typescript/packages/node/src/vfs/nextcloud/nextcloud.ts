@@ -1,30 +1,10 @@
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { NEXTCLOUD_COMMANDS } from '../../commands/builtin/nextcloud/index.ts'
-import { SCOPE_ERROR } from '../../core/nextcloud/constants.ts'
-import { copy as copyCore } from '../../core/nextcloud/copy.ts'
-import { size as duSizeCore } from '../../core/nextcloud/du/index.ts'
-import { exists as existsCore } from '../../core/nextcloud/exists.ts'
-import { find as findCore } from '../../core/nextcloud/find.ts'
-import { mkdir as mkdirCore } from '../../core/nextcloud/mkdir.ts'
-import { read as readCore } from '../../core/nextcloud/read.ts'
-import { readdir as readdirCore } from '../../core/nextcloud/readdir.ts'
-import { rename as renameCore } from '../../core/nextcloud/rename.ts'
-import { rmR as rmRCore } from '../../core/nextcloud/rm.ts'
-import { rmdir as rmdirCore } from '../../core/nextcloud/rmdir.ts'
-import { stat as statCore } from '../../core/nextcloud/stat.ts'
-import { stream as streamCore } from '../../core/nextcloud/stream.ts'
-import { truncate as truncateCore } from '../../core/nextcloud/truncate.ts'
-import { unlink as unlinkCore } from '../../core/nextcloud/unlink.ts'
-import { write as writeCore } from '../../core/nextcloud/write.ts'
 import { buildDeltaHook } from '../../core/nextcloud/watch.ts'
 import { NEXTCLOUD_OPS } from '../../ops/nextcloud/index.ts'
 import {
@@ -33,16 +13,13 @@ import {
   type NextcloudConfigRedacted,
 } from './config.ts'
 import { NEXTCLOUD_PROMPT } from './prompt.ts'
-
-const resolveGlobCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
-
 export interface NextcloudVFSState {
   type: string
   config: NextcloudConfigRedacted
 }
 
 export class NextcloudVFS extends BaseVFS {
-  readonly name = VFSName.NEXTCLOUD
+  override readonly name = VFSName.NEXTCLOUD
   override readonly cachesReads = true
   // WebDAV PROPFIND carries getcontentlength for every file; readdir
   // backfills any lister-omitted size with one stat per affected file.
@@ -61,98 +38,6 @@ export class NextcloudVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return NEXTCLOUD_OPS
   }
-
-  override streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
-    return streamCore(this.accessor, path, this.index)
-  }
-
-  override readFile(path: PathSpec): Promise<Uint8Array> {
-    return readCore(this.accessor, path, this.index)
-  }
-
-  override writeFile(path: PathSpec, data: Uint8Array): Promise<void> {
-    return writeCore(this.accessor, path, data, this.index)
-  }
-
-  override async appendFile(path: PathSpec, data: Uint8Array): Promise<void> {
-    let existing: Uint8Array
-    try {
-      existing = await readCore(this.accessor, path, this.index)
-    } catch (error) {
-      if ((error as { code?: string } | null)?.code !== 'ENOENT') throw error
-      existing = new Uint8Array()
-    }
-    const merged = new Uint8Array(existing.byteLength + data.byteLength)
-    merged.set(existing)
-    merged.set(data, existing.byteLength)
-    await writeCore(this.accessor, path, merged, this.index)
-  }
-
-  override readdir(path: PathSpec): Promise<string[]> {
-    return readdirCore(this.accessor, path, this.index)
-  }
-
-  override stat(path: PathSpec): Promise<FileStat> {
-    return statCore(this.accessor, path, this.index)
-  }
-
-  override exists(path: PathSpec): Promise<boolean> {
-    return existsCore(this.accessor, path)
-  }
-
-  override mkdir(path: PathSpec): Promise<void> {
-    return mkdirCore(this.accessor, path)
-  }
-
-  override rmdir(path: PathSpec): Promise<void> {
-    return rmdirCore(this.accessor, path)
-  }
-
-  override unlink(path: PathSpec): Promise<void> {
-    return unlinkCore(this.accessor, path)
-  }
-
-  override rename(source: PathSpec, destination: PathSpec): Promise<void> {
-    return renameCore(this.accessor, source, destination)
-  }
-
-  override truncate(path: PathSpec, length: number): Promise<void> {
-    return truncateCore(this.accessor, path, length)
-  }
-
-  override copy(source: PathSpec, destination: PathSpec): Promise<void> {
-    return copyCore(this.accessor, source, destination)
-  }
-
-  override rmR(path: PathSpec): Promise<void> {
-    return rmRCore(this.accessor, path)
-  }
-
-  override du(path: PathSpec): Promise<number> {
-    return duSizeCore(this.accessor, path)
-  }
-
-  override find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    return findCore(this.accessor, path, options)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective = prefix
-      ? paths.map((path) =>
-          mountPrefixOf(path.virtual, path.vfsPath)
-            ? path
-            : new PathSpec({
-                virtual: path.virtual,
-                directory: path.directory,
-                ...(path.pattern !== null ? { pattern: path.pattern } : {}),
-                resolved: path.resolved,
-                vfsPath: mountKey(path.virtual, prefix),
-              }),
-        )
-      : paths
-    return resolveGlobCore(this.accessor, effective, this.index)
-  }
-
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }

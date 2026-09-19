@@ -147,9 +147,10 @@ async def test_always_probes_live_s3_with_warm_index(index_type, surface,
         ws = Workspace({"/s3": vfs},
                        index=index,
                        consistency=ConsistencyPolicy.ALWAYS)
+        store = ws.mount("/s3").index_store
         try:
             assert (await ws.shell("ls /s3/")).exit_code == 0
-            assert (await vfs.index.get("/s3/f.txt")).entry is not None
+            assert (await store.get("/s3/f.txt")).entry is not None
             assert (await ws.shell("cat /s3/f.txt")).stdout == b"v1"
             assert await ws.cache.exists("/s3/f.txt")
             if change == "overwrite":
@@ -167,7 +168,7 @@ async def test_always_probes_live_s3_with_warm_index(index_type, surface,
                 with pytest.raises(FileNotFoundError):
                     await ws.vfs.read("/s3/f.txt")
         finally:
-            await vfs.index.clear()
+            await store.clear()
             await ws.close()
 
 

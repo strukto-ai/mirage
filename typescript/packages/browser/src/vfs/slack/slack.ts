@@ -13,31 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { SlackAccessor } from '@struktoai/mirage-core/accessor/slack'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { BrowserSlackTransport } from '@struktoai/mirage-core/core/slack/client_browser'
-import { read as slackRead } from '@struktoai/mirage-core/core/slack/read'
-import { readdir as slackReaddir } from '@struktoai/mirage-core/core/slack/readdir'
-import { stat as slackStat } from '@struktoai/mirage-core/core/slack/stat'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { SLACK_OPS } from '@struktoai/mirage-core/ops/slack/index'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { SLACK_PROMPT, SLACK_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/slack/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from './config.ts'
-
-const resolveSlackGlob = makeResolveGlob(slackReaddir)
-
 export interface SlackVFSState {
   type: string
   config: SlackConfigRedacted
 }
 
 export class SlackVFS extends BaseVFS {
-  readonly name: string = VFSName.SLACK
+  override readonly name: string = VFSName.SLACK
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and users/*.json
   // are rendered at readdir from payloads the listing already fetched
@@ -67,37 +58,6 @@ export class SlackVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return SLACK_OPS
   }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return slackRead(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return slackReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return slackStat(this.accessor, p, this.index)
-  }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return resolveSlackGlob(this.accessor, effective, this.index)
-  }
-
   override getState(): Promise<SlackVFSState> {
     return Promise.resolve({
       type: this.name,

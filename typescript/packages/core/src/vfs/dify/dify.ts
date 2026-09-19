@@ -15,13 +15,9 @@
 import { DifyAccessor } from '../../accessor/dify.ts'
 import { DIFY_COMMANDS } from '../../commands/builtin/dify/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
-import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
-import { readBytes } from '../../core/dify/read.ts'
-import { readdir as difyReaddir } from '../../core/dify/readdir.ts'
-import { stat as difyStat } from '../../core/dify/stat.ts'
 import { DIFY_OPS } from '../../ops/dify/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import { VFSName, type FileStat, type PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import {
   type DifyConfigRedacted,
@@ -31,9 +27,6 @@ import {
   type DifyConfigResolved,
 } from './config.ts'
 import { DIFY_PROMPT } from './prompt.ts'
-
-const resolveGlob = makeResolveGlob(difyReaddir)
-
 export interface DifyVFSOptions {
   config: DifyConfig
 }
@@ -45,7 +38,7 @@ export interface DifyVFSState {
 }
 
 export class DifyVFS extends BaseVFS {
-  readonly name: string = VFSName.DIFY
+  override readonly name: string = VFSName.DIFY
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = false
   override readonly prompt: string = DIFY_PROMPT
@@ -83,21 +76,5 @@ export class DifyVFS extends BaseVFS {
 
   override commands(): readonly RegisteredCommand[] {
     return DIFY_COMMANDS
-  }
-
-  override glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
-    return resolveGlob(this.accessor, paths, this.index)
-  }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return readBytes(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return difyReaddir(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return difyStat(this.accessor, p, this.index)
   }
 }

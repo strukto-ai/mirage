@@ -107,7 +107,7 @@ export async function requestChecks(server: Awaited<ReturnType<typeof startWandb
     )
     try {
       for (const step of scenario.steps) {
-        if (step.invalidate) await vfs.index.invalidate()
+        if (step.invalidate) await ws.registry.mountForPrefix('/wandb/').indexStore.invalidate()
         const start = server.requests.length
         const result = await ws.shell(step.command)
         results.push({ exit_code: result.exitCode, requests: server.requests.slice(start) })

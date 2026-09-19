@@ -344,7 +344,7 @@ async def handle_df(
     data: list[list[str]] = []
     for mount in mounts:
         async with mount.use():
-            cap = await mount.vfs.statfs()
+            cap = await mount.vfs.capacity()
         cells = [mount.vfs.name]
         if show_type:
             cells.append(mount.vfs.name)

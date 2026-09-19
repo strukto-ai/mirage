@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -33,8 +34,8 @@ afterEach(() => {
 
 describe('readdirOp', () => {
   it('lists directory entries with full virtual paths', async () => {
-    await res.writeFile(spec('/b'), new Uint8Array())
-    await res.writeFile(spec('/a'), new Uint8Array())
+    await ops(res).write(spec('/b'), new Uint8Array())
+    await ops(res).write(spec('/a'), new Uint8Array())
     expect(await readdirOp.fn(res.accessor, spec('/'), [], {})).toEqual(['/a', '/b'])
   })
 })

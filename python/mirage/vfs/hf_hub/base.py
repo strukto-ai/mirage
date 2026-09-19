@@ -12,21 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import dataclasses
 from typing import Any, Generic, TypeVar
 
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.commands.builtin.hf_hub import COMMANDS as HF_COMMANDS
-from mirage.commands.builtin.hf_hub.io import IO as HF_IO
-from mirage.core.hf_hub.exists import exists
-from mirage.core.hf_hub.read import read_bytes
-from mirage.core.hf_hub.readdir import readdir
-from mirage.core.hf_hub.stat import stat as hf_stat
-from mirage.core.hf_hub.stream import range_read, read_stream
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.hf_hub.watch import build_delta_hook
 from mirage.ops.hf_hub import OPS as HF_OPS
-from mirage.types import PathSpec
-from mirage.utils.key_prefix import mount_key
+from mirage.ops.registry import RegisteredOp
 from mirage.vfs.base import BaseVFS
 from mirage.watch.base import DeltaHook
 
@@ -35,21 +29,6 @@ from mirage.watch.base import DeltaHook
 # allows; python attributes are invariant, so the same narrowing has to be a
 # type parameter or mypy reads every subclass as an illegal override.
 A = TypeVar("A", bound=HfHubAccessor)
-
-# Read-only, for the reason spelled out in commands/builtin/hf_hub/io.py:
-# a Hub write is a commit, so it belongs to the `hf` CLI rather than to a
-# POSIX write. This table is the second channel and has to agree with the
-# first: it answers `dispatch("write", ...)` and the FUSE adapter, so
-# leaving the mutations here would have kept every write path open except
-# the shell one.
-_OPS = {
-    "read_bytes": read_bytes,
-    "readdir": readdir,
-    "stat": hf_stat,
-    "read_stream": read_stream,
-    "range_read": range_read,
-    "exists": exists,
-}
 
 
 class HfHubVFS(BaseVFS, Generic[A]):
@@ -75,32 +54,21 @@ class HfHubVFS(BaseVFS, Generic[A]):
     # literal, the way every other VFS writes it: the spec dump reads
     # this off the source, and an imported name reads as unresolvable.
     index_ttl: float = 86_400
-    _ops: dict[str, Any] = _OPS
     supports_snapshot: bool = True
 
     def __init__(self, config: Any) -> None:
         super().__init__()
         self.config = config
         self.accessor = self.ACCESSOR(self.config)
-        for fn in HF_COMMANDS:
-            self.register(fn)
-        for op in HF_OPS:
-            self.register_op(op)
+
+    def ops(self) -> list[RegisteredOp]:
+        return HF_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(HF_COMMANDS)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
-
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        if prefix:
-            paths = [
-                dataclasses.replace(p, vfs_path=mount_key(p.virtual, prefix))
-                if isinstance(p, PathSpec) else p for p in paths
-            ]
-        return await HF_IO.resolve_glob(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

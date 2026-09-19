@@ -16,16 +16,15 @@ from typing import Any
 
 from mirage.accessor.gcal import GCalAccessor
 from mirage.commands.builtin.gcal import COMMANDS
-from mirage.core.gcal.readdir import readdir
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.google.client import TokenManager
 from mirage.ops.gcal import OPS as GCAL_VFS_OPS
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gcal.config import GCalConfig
 from mirage.vfs.gcal.prompt import PROMPT, WRITE_PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class GCalVFS(BaseVFS):
@@ -45,22 +44,17 @@ class GCalVFS(BaseVFS):
         self.config = config
         self._token_manager = TokenManager(config)
         self.accessor = GCalAccessor(self.config, self._token_manager)
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in GCAL_VFS_OPS:
-            self.register_op(fn)
+
+    def ops(self) -> list[RegisteredOp]:
+        return GCAL_VFS_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""
         await self._token_manager.close()
         await super().close()
-
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

@@ -63,7 +63,7 @@ describe('SSHVFS — identity', () => {
   it('ops() length matches SSH_OPS', () => {
     const res = makeVfs(state)
     expect(res.ops().length).toBe(SSH_OPS.length)
-    expect(res.ops().length).toBe(12)
+    expect(res.ops().length).toBe(13)
   })
 })
 

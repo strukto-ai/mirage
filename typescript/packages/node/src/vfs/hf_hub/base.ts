@@ -12,28 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { VFSStateBase } from '@struktoai/mirage-core/vfs/base'
-import { PathSpec } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { DeltaHook } from '@struktoai/mirage-core/watch/index'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { HF_HUB_COMMANDS } from '../../commands/builtin/hf_hub/index.ts'
-import { SCOPE_ERROR } from '../../core/hf_hub/constants.ts'
-import { exists as existsCore } from '../../core/hf_hub/exists.ts'
-import { read as readCore } from '../../core/hf_hub/read.ts'
-import { readdir as readdirCore } from '../../core/hf_hub/readdir.ts'
-import { stat as statCore } from '../../core/hf_hub/stat.ts'
-import { stream as streamCore } from '../../core/hf_hub/stream.ts'
 import { buildDeltaHook } from '../../core/hf_hub/watch.ts'
 import { HF_HUB_OPS } from '../../ops/hf_hub/index.ts'
-
-const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
-
 /**
  * The shared body of the three Hub *repository* VFS.
  *
@@ -71,48 +58,9 @@ export abstract class HfHubVFS extends BaseVFS {
   override ops(): readonly RegisteredOp[] {
     return HF_HUB_OPS
   }
-
-  override streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
-    return streamCore(this.accessor, p, this.index)
-  }
-
-  override readFile(p: PathSpec): Promise<Uint8Array> {
-    return readCore(this.accessor, p, this.index)
-  }
-
-  override readdir(p: PathSpec): Promise<string[]> {
-    return readdirCore(this.accessor, p, this.index)
-  }
-
-  override stat(p: PathSpec): Promise<FileStat> {
-    return statCore(this.accessor, p, this.index)
-  }
-
-  override exists(p: PathSpec): Promise<boolean> {
-    return existsCore(this.accessor, p, this.index)
-  }
-
   override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
-
-  override glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective = prefix
-      ? paths.map((p) =>
-          mountPrefixOf(p.virtual, p.vfsPath)
-            ? p
-            : new PathSpec({
-                virtual: p.virtual,
-                directory: p.directory,
-                ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                resolved: p.resolved,
-                vfsPath: mountKey(p.virtual, prefix),
-              }),
-        )
-      : paths
-    return globCore(this.accessor, effective, this.index)
-  }
-
   override loadState(_state: unknown): Promise<void> {
     return Promise.resolve()
   }

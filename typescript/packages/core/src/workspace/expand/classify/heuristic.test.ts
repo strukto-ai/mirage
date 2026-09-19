@@ -19,7 +19,7 @@ import { MountRegistry } from '../../mount/registry.ts'
 import { classifyWord } from './heuristic.ts'
 
 class StubVFS extends BaseVFS {
-  readonly name = 'stub'
+  override readonly name = 'stub'
   override close(): Promise<void> {
     return Promise.resolve()
   }
