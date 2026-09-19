@@ -88,6 +88,8 @@ def normalize_mounts(mounts: dict[str, VFSMount],
                     backend=value.backend,
                     mountpoint=value.mountpoint,
                     command_limits=dict(value.command_limits or {}),
+                    vfs_ref=value.vfs_ref,
+                    index=value.index,
                 ))
         elif isinstance(value, tuple):
             if len(value) not in (2, 3):
@@ -123,21 +125,19 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
                    index: IndexConfig | None, default_mode: MountMode) -> bool:
     """Mount every spec, adding an implicit scratch root if none claims /.
 
-    A workspace-level ``index`` is installed on every VFS, its TTL
+    A workspace-level ``index`` builds every mount's store, its TTL
     included: the config names the store the whole workspace shares, so
     a VFS that declares ``index_ttl = 0`` caches its listings for the
     workspace's TTL under it (the redis index example relies on exactly
-    that to share a RAM mount's listing between two processes). With no
-    workspace config a VFS keeps the index it was constructed with
-    or given through ``set_index``, as the TypeScript workspace does;
-    resetting it to a RAM default here silently discarded a
-    ``RedisIndexConfig`` passed to the VFS itself.
+    that to share a RAM mount's listing between two processes). A mount
+    that names its own ``index`` keeps it; with neither, the mount runs
+    a RAM store at the driver's ``index_ttl``.
 
     Args:
         registry (MountRegistry): the workspace's mount table.
         specs (list[MountSpec]): the normalized mount specs.
-        index (IndexConfig | None): index config installed per VFS,
-            or None to leave each VFS's own index in place.
+        index (IndexConfig | None): the workspace's index config, or
+            None for a per-mount RAM store.
         default_mode (MountMode): mode for the implicit root.
 
     Returns:
@@ -145,9 +145,12 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
     """
     for spec in specs:
         registry.check_vfs_available(spec.vfs)
-        if index is not None:
-            spec.vfs.set_index(index)
-        entry = registry.mount(spec.prefix, spec.vfs, spec.mode)
+        entry = registry.mount(
+            spec.prefix,
+            spec.vfs,
+            spec.mode,
+            index=spec.index if spec.index is not None else index,
+            vfs_ref=spec.vfs_ref)
         if spec.command_limits:
             entry.command_limits.update(spec.command_limits)
     implicit_root = registry.root_mount is None
@@ -176,8 +179,8 @@ async def clear_mount_cache(cache: FileCacheMixin | None, prefix: str,
 def prepare_added_mount(registry: MountRegistry, entry: MountEntry,
                         previous: list[MountEntry]) -> None:
     """Keep synchronous registration; I/O awaits removal of shadowed state."""
-    indices = [entry.vfs.index]
-    indices.extend(m.vfs.index for m in previous
+    indices = [entry.index_store]
+    indices.extend(m.index_store for m in previous
                    if entry.prefix.startswith(m.prefix))
     entry.before_use = partial(clear_mount_cache, registry.file_cache,
                                entry.prefix, indices)
@@ -220,7 +223,7 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
         raise ValueError(f"mount is being unmounted: {norm!r}")
     entry.retiring = True
     try:
-        await clear_mount_cache(registry.file_cache, norm, [entry.vfs.index])
+        await clear_mount_cache(registry.file_cache, norm, [entry.index_store])
         if is_shutting_down():
             raise RuntimeError("Workspace is closed")
         if registry.try_mount_for_prefix(prefix) is not entry:
@@ -232,6 +235,10 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
     ops.unmount(prefix)
     remaining = registry.mounts()
     still_instance = any(m.vfs is removed.vfs for m in remaining)
+    # The store was the mount's, shared only with aliases of the same
+    # instance, so it closes with the last of them whoever owns the VFS.
+    if not still_instance:
+        await removed.index_store.close()
     # The mount owns its op table, so dropping the mount drops the ops
     # with it; the facade keeps no second registry to clean up.
     if not still_instance and id(removed.vfs) not in shared_mounts:
@@ -245,11 +252,7 @@ async def unmount(registry: MountRegistry, ops: Ops, prefix: str,
 
 async def _close_vfs(entry: MountEntry) -> None:
     await entry.activity.wait()
-    close = getattr(entry.vfs, "close", None)
-    if callable(close):
-        result = close()
-        if inspect.isawaitable(result):
-            await result
+    await entry.vfs.close()
 
 
 def _release_vfs(registry: MountRegistry, identity: int,

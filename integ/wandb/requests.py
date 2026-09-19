@@ -29,7 +29,7 @@ async def request_checks(base: str) -> list[dict[str, Any]]:
         try:
             for step in scenario['steps']:
                 if step.get('invalidate'):
-                    await vfs.index.invalidate()
+                    await ws.mount('/wandb/').index_store.invalidate()
                 start = len(requests)
                 result = await ws.shell(step['command'])
                 results.append({

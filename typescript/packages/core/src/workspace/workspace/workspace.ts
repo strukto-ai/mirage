@@ -21,10 +21,9 @@ import { IOResult } from '../../io/types.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { type OpKwargs, OpsRegistry } from '../../ops/registry.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
-import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
@@ -112,6 +111,7 @@ import { Runtimes } from './runtimes.ts'
 import { Session } from './handle.ts'
 import type { ExecuteResult } from './types.ts'
 import { type ExecuteOptions, type MountSpec, type WorkspaceOptions } from './types.ts'
+import { Mount } from '../mount/spec.ts'
 import { commandName, forkForCall } from './utils.ts'
 import { WatchManager } from './watch.ts'
 
@@ -125,7 +125,7 @@ export class Workspace {
   private readonly wsId: string
   private readonly stateStoreInternal: WorkspaceStateStore
   private readonly ownsStateStore: boolean
-  private readonly sharedMounts = new Set<VFS>()
+  private readonly sharedMounts = new Set<BaseVFS>()
   private readonly meta: WorkspaceMeta
   /**
    * The op table every mount's ops are registered on. Not the op
@@ -137,11 +137,9 @@ export class Workspace {
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
   private shellParserPromise: Promise<ShellParser> | null = null
-  private readonly opened = new Set<VFS>()
-  private readonly openOrder: VFS[] = []
   readonly jobTable: JobTable
   readonly agentId: string | null
-  readonly cache: FileCache & VFS
+  readonly cache: FileCache & BaseVFS
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
@@ -192,14 +190,14 @@ export class Workspace {
       normalized.bare,
       options.mode ?? MountMode.READ,
       normalized.modes,
+      {
+        ...(options.index !== undefined ? { index: options.index } : {}),
+        refs: normalized.refs,
+        indexes: normalized.indexes,
+      },
     )
     const consistency = options.consistency ?? ConsistencyPolicy.LAZY
     this.registry.setConsistency(consistency)
-    if (options.index !== undefined) {
-      for (const vfs of Object.values(normalized.bare)) {
-        vfs.setIndex?.(options.index)
-      }
-    }
     this.wsId = options.workspaceId ?? newWorkspaceId()
     this.jobTable = new JobTable(options.consoleFactory ?? null)
     const stores = resolveControlStores(this.wsId, options)
@@ -364,19 +362,6 @@ export class Workspace {
     for (const vfs of [...this.registry.allMounts().map((m) => m.vfs), this.cache]) {
       this.opsRegistry.registerVfs(vfs)
     }
-    for (const mount of this.registry.allMounts()) {
-      const cmds = mount.vfs.commands?.()
-      if (cmds !== undefined) {
-        for (const cmd of cmds) {
-          if (cmd.filetype !== null) mount.register(cmd)
-          else if (cmd.vfs === null) mount.registerGeneral(cmd)
-          else mount.register(cmd)
-        }
-      }
-      for (const cmd of GENERAL_COMMANDS) {
-        mount.registerGeneral(cmd)
-      }
-    }
     for (const [prefix, commandLimits] of Object.entries({
       ...normalized.commandLimits,
       ...(options.commandLimits ?? {}),
@@ -406,7 +391,7 @@ export class Workspace {
       this.namespace,
       (path) => {
         const mount = this.registry.tryMountFor(path)
-        return mount === null ? null : { prefix: mount.prefix, kind: mount.vfs.kind }
+        return mount === null ? null : { prefix: mount.prefix, kind: mount.vfs.name }
       },
       { bind: (sessionId, run) => this.bindSession(sessionId, run) },
     )
@@ -912,20 +897,19 @@ export class Workspace {
    * Add a mount to a running workspace. Registers the VFS's ops globally
    * on this workspace's OpsRegistry so dispatch can find them.
    */
-  addMount(prefix: string, vfs: VFS, mode: MountMode = MountMode.READ): MountEntry {
+  addMount(
+    prefix: string,
+    vfs: BaseVFS,
+    mode: MountMode = MountMode.READ,
+    vfsRef: string | null = null,
+  ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     this.registry.checkVfsAvailable(vfs)
     const previous = this.registry.allMounts()
-    // Configure before mount() captures the index in its CacheManager.
-    // An alias must retain the index used by the VFS's other mounts.
-    if (
-      this.indexConfig !== undefined &&
-      this.registry.tryMountForPrefix(prefix) === null &&
-      !this.registry.allMounts().some((mount) => mount.vfs === vfs)
-    ) {
-      vfs.setIndex?.(this.indexConfig)
-    }
-    const m = this.registry.mount(prefix, vfs, mode)
+    const m = this.registry.mount(prefix, vfs, mode, ConsistencyPolicy.LAZY, {
+      ...(this.indexConfig !== undefined ? { index: this.indexConfig } : {}),
+      vfsRef,
+    })
     prepareAddedMount(this.registry, m, previous)
     this.opsRegistry.registerVfs(vfs)
     return m
@@ -951,8 +935,6 @@ export class Workspace {
       {
         registry: this.registry,
         opsRegistry: this.opsRegistry,
-        opened: this.opened,
-        openOrder: this.openOrder,
         sharedMounts: this.sharedMounts,
         isShuttingDown: () => this.isShuttingDown(),
       },
@@ -1132,31 +1114,18 @@ export class Workspace {
     return result
   }
 
-  async resolve(path: string): Promise<[VFS, PathSpec, MountMode]> {
+  async resolve(path: string): Promise<[BaseVFS, PathSpec, MountMode]> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.resolveInternal(path)
   }
 
-  private async resolveInternal(path: string): Promise<[VFS, PathSpec, MountMode]> {
+  private async resolveInternal(path: string): Promise<[BaseVFS, PathSpec, MountMode]> {
     if (this.closed) {
       throw new Error('Workspace is closed')
     }
     const result = this.registry.resolve(path)
-    const [vfs] = result
     await this.registry.mountFor(path).ensureReady()
-    await this.ensureOpen(vfs)
     return result
-  }
-
-  private async ensureOpen(vfs: VFS): Promise<void> {
-    if (this.opened.has(vfs)) return
-    const mount = this.registry.allMounts().find((m) => m.vfs === vfs && !m.retiring)
-    if (mount === undefined) throw new Error('VFS is no longer mounted')
-    await mount.use(async () => {
-      await vfs.open()
-      this.opened.add(vfs)
-      this.openOrder.push(vfs)
-    })
   }
 
   /**
@@ -1280,7 +1249,6 @@ export class Workspace {
       registerCloser: (fn) => {
         this.closers.push(fn)
       },
-      ensureOpen: (vfs) => this.ensureOpen(vfs),
       invalidateAllAfterRemote: () => this.invalidateAllAfterRemote(),
       provision: (cmd, opts) => this.provision(cmd, opts),
       execute: (cmd, opts) =>
@@ -1365,7 +1333,7 @@ export class Workspace {
     this: T,
     source: string | Uint8Array,
     options: WorkspaceOptions = {},
-    overrides: Record<string, VFS> = {},
+    overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const bytes = typeof source === 'string' ? readFileBytes(source) : source
@@ -1377,7 +1345,7 @@ export class Workspace {
     this: T,
     state: WorkspaceStateDict,
     options: WorkspaceOptions = {},
-    overrides: Record<string, VFS> = {},
+    overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
@@ -1393,7 +1361,7 @@ export class Workspace {
    * `type` the way Python's loader does, instead of substituting an
    * empty RAMVFS.
    */
-  protected static buildSavedVfs(_entry: MountSnapshot): Promise<VFS | null> {
+  protected static buildSavedVfs(_entry: MountSnapshot): Promise<BaseVFS | null> {
     return Promise.resolve(null)
   }
 
@@ -1401,15 +1369,12 @@ export class Workspace {
     this: T,
     state: WorkspaceStateDict,
     options: WorkspaceOptions = {},
-    overrides: Record<string, VFS> = {},
+    overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const rebuilt = await withRebuiltMounts(state, overrides, (m) => this.buildSavedVfs(m))
     const args = buildMountArgs(state, rebuilt, cliOverrides)
-    const mounts: Record<string, MountSpec> = {}
-    for (const [prefix, [vfs, mode]] of Object.entries(args.mountArgs)) {
-      mounts[prefix] = [vfs, mode]
-    }
+    const mounts: Record<string, MountSpec> = { ...args.mountArgs }
     const mergedOptions: WorkspaceOptions = {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.defaultAgentId !== null ? { agentId: args.defaultAgentId } : {}),
@@ -1417,8 +1382,8 @@ export class Workspace {
       ...options,
     }
     const ws = new this(mounts, mergedOptions) as InstanceType<T>
-    for (const vfs of Object.values(overrides)) {
-      ws.sharedMounts.add(vfs)
+    for (const override of Object.values(overrides)) {
+      ws.sharedMounts.add(override instanceof Mount ? override.vfs : override)
     }
     await applyStateDict(ws, state)
     return ws
@@ -1443,7 +1408,7 @@ export class Workspace {
     opts.ops = options.ops ?? this.opsRegistry
     const parser = options.shellParser ?? this.shellParser
     if (parser !== null) opts.shellParser = parser
-    const overrides: Record<string, VFS> = {}
+    const overrides: Record<string, BaseVFS> = {}
     for (const mount of this.registry.allMounts()) {
       for (const snap of state.mounts) {
         if (snap.prefix === mount.prefix && vfsStateRequiresOverride(snap.vfs_state)) {
@@ -1488,8 +1453,6 @@ export class Workspace {
         closers: this.closers,
         jobTable: this.jobTable,
         registry: this.registry,
-        opened: this.opened,
-        openOrder: this.openOrder,
         sharedMounts: this.sharedMounts,
       })
     } finally {

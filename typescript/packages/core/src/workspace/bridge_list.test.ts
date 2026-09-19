@@ -70,7 +70,7 @@ describe('runtime door readdir', () => {
     await ws.vfs.writeFile('/data/a.txt', 'hi')
     ops.register({
       name: 'stat',
-      vfs: vfs.kind,
+      vfs: vfs.name,
       filetype: null,
       fn: () => {
         throw new Error('401 Unauthorized')

@@ -19,7 +19,7 @@ import { parse as parseYaml } from 'yaml'
 import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
 import { CLISpec } from '@struktoai/mirage-core/commands/cli/types'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/routing/index'
 import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
@@ -930,7 +930,7 @@ export function loadWorkspaceConfigFile(
 }
 
 export interface WorkspaceArgs {
-  mounts: Record<string, [VFS, MountMode, Record<string, Limit>]>
+  mounts: Record<string, Mount>
   /**
    * Exactly what `new Workspace` takes, minus the two the loader always
    * resolves. Spelling the fields out here instead is what once dropped
@@ -1037,7 +1037,7 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
 export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const consistency = coerceConsistency(cfg.consistency)
-  const mounts: Record<string, [VFS, MountMode, Record<string, Limit>]> = {}
+  const mounts: Record<string, Mount> = {}
   const kernelMounts: Record<string, [MountBackend, string | undefined]> = {}
   // Built before the mounts, because a mount's config may point at one:
   // `resolveConfigSecrets` inside `buildVfs` fetches through these.
@@ -1049,7 +1049,11 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
     const r = await buildVfs(block.vfs, block.config ?? {}, sources)
     const m = coerceMountMode(block.mode, wsMode)
-    mounts[prefix] = [r, m, parseLimits(block.command_limits)]
+    mounts[prefix] = new Mount(r, {
+      mode: m,
+      commandLimits: parseLimits(block.command_limits),
+      vfsRef: block.vfs,
+    })
     const backend = (block.backend ?? MountBackend.WORKSPACE) as MountBackend
     if (KERNEL_BACKENDS.includes(backend)) kernelMounts[prefix] = [backend, block.mountpoint]
   }

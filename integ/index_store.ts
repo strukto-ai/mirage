@@ -60,7 +60,7 @@ function makeStore(prefix: string): { ws: Workspace; store: RedisIndexCacheStore
   const ram = new RAMVFS()
   const index: RedisIndexConfig = { type: 'redis', url: REDIS_URL, keyPrefix: prefix, ttl: TTL }
   const ws = new Workspace({ [DIR]: ram }, { index })
-  const store = ram.index
+  const store = ws.registry.mountForPrefix(DIR).indexStore
   if (!(store instanceof RedisIndexCacheStore)) {
     throw new Error(
       `ts: workspace index config did not reach the mount, got ${store.constructor.name}`,

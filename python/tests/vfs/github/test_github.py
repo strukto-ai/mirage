@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.cache.index import IndexConfig
+from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.repo import ensure_default_branch
 from mirage.core.github.stat import stat
@@ -25,6 +25,7 @@ from mirage.core.github.tree import ensure_tree
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.types import PathSpec, VFSName
 from mirage.vfs.github.github import GitHubVFS
+from tests.fixtures.driver_ops import ops
 
 CONFIG = GitHubConfig(token="test-token")
 OWNER = "test-owner"
@@ -152,7 +153,8 @@ async def test_stat_returns_sha_fingerprint() -> None:
     vfs = _make_vfs(tree=tree)
     with _offline(tree)[1]:
         result = await stat(vfs.accessor,
-                            PathSpec.from_str_path("/src/main.py"), vfs.index)
+                            PathSpec.from_str_path("/src/main.py"),
+                            ops(vfs).index)
     assert result.fingerprint == "abc123"
 
 
@@ -163,13 +165,16 @@ async def test_replacing_index_still_serves_the_tree() -> None:
         TreeEntry(path="src/main.py", type="blob", sha="abc123", size=100),
     }
     vfs = _make_vfs(tree=tree)
-    vfs.set_index(IndexConfig())
+    with _offline(tree)[1]:
+        await stat(vfs.accessor, PathSpec.from_str_path("/src/main.py"),
+                   ops(vfs).index)
 
     # The fresh store is empty, which reads as not-live, so the next read
     # fills it by refetching rather than reporting the path gone.
     with _offline(tree)[1]:
         result = await stat(vfs.accessor,
-                            PathSpec.from_str_path("/src/main.py"), vfs.index)
+                            PathSpec.from_str_path("/src/main.py"),
+                            RAMIndexCacheStore())
     assert result.fingerprint == "abc123"
 
 
@@ -178,7 +183,7 @@ async def test_stat_raises_when_path_not_in_tree() -> None:
     vfs = _make_vfs()
     with _offline({})[1], pytest.raises(FileNotFoundError):
         await stat(vfs.accessor, PathSpec.from_str_path("/nonexistent.py"),
-                   vfs.index)
+                   ops(vfs).index)
 
 
 def test_the_constructor_reaches_no_network() -> None:

@@ -23,12 +23,12 @@ HELP_HINT = (
 def build_file_prompt(mounts: list[MountEntry]) -> str:
     parts: list[str] = [HELP_HINT]
     for m in mounts:
-        prompt = m.vfs.PROMPT
+        prompt = m.vfs.prompt
         if not prompt:
             continue
         prefix = m.prefix.rstrip("/") or "/"
         section = prompt.format(prefix=prefix)
-        if m.mode != MountMode.READ and m.vfs.WRITE_PROMPT:
-            section += "\n" + m.vfs.WRITE_PROMPT.replace("{prefix}", prefix)
+        if m.mode != MountMode.READ and m.vfs.write_prompt:
+            section += "\n" + m.vfs.write_prompt.replace("{prefix}", prefix)
         parts.append(section)
     return "\n\n".join(parts)

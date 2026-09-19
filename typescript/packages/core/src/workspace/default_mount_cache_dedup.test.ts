@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest'
 import type { RAMFileCacheStore } from '../cache/file/ram.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser } from '../shell/parse/index.ts'
+import { ops } from '../test-utils.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -28,7 +29,7 @@ const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-b
 describe('default mount cache dedup', () => {
   it('cache hit does not double-store', async () => {
     const ram = new RAMVFS()
-    await ram.writeFile(PathSpec.fromStrPath('/big.bin'), new Uint8Array(4096))
+    await ops(ram).write(PathSpec.fromStrPath('/big.bin'), new Uint8Array(4096))
     const ws = new Workspace(
       { '/r': ram },
       {

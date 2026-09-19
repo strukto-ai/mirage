@@ -307,7 +307,7 @@ async def test_readdir_date_dir_returns_chat_and_files(accessor, index):
 @pytest.mark.asyncio
 async def test_readdir_skips_unreadable_file_payloads(accessor, index):
     # Tombstoned and access-restricted file payloads carry an id but no
-    # download URL and no size; they must not be listed, or SIZES_ALWAYS_KNOWN
+    # download URL and no size; they must not be listed, or sizes_always_known
     # would be false and read() would ENOENT on a listed file.
     await index.set_dir("/channels", [
         (

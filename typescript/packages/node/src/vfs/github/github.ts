@@ -13,9 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
-import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { GITHUB_COMMANDS } from '@struktoai/mirage-core/commands/builtin/github/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import {
@@ -23,27 +20,18 @@ import {
   fetchRepoInfo as fetchGitHubRepoInfo,
   fetchTree as fetchGitHubTree,
 } from '@struktoai/mirage-core/core/github/client'
-import { read as githubRead } from '@struktoai/mirage-core/core/github/read'
-import { readdir as githubReaddir } from '@struktoai/mirage-core/core/github/readdir'
-import { stat as githubStat } from '@struktoai/mirage-core/core/github/stat'
 import { buildTreeMap as githubBuildTreeMap } from '@struktoai/mirage-core/core/github/tree'
 import { buildDeltaHook } from '@struktoai/mirage-core/core/github/watch'
 import { GITHUB_OPS } from '@struktoai/mirage-core/ops/github/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { DeltaHook } from '@struktoai/mirage-core/watch/index'
 import {
   redactGitHubConfig,
   type GitHubConfig,
   type GitHubConfigRedacted,
 } from '@struktoai/mirage-core/core/github/config'
-
-const githubResolveGlob = makeResolveGlob(githubReaddir)
-
 export interface GitHubVFSState {
   type: string
   config: GitHubConfigRedacted
@@ -51,25 +39,24 @@ export interface GitHubVFSState {
   truncated: boolean
 }
 
-export class GitHubVFS extends BaseVFS implements VFS {
-  readonly kind: string = VFSName.GITHUB
-  readonly cachesReads: boolean = true
+export class GitHubVFS extends BaseVFS {
+  override readonly name: string = VFSName.GITHUB
+  override readonly cachesReads: boolean = true
   // The git tree API reports the exact blob size for every file; the
   // blob read returns those same bytes, and submodule gitlinks (which
   // have no size and no blob) are excluded from the tree.
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   // Blob shas are stable per-path markers, so cached reads can be
   // probe-verified under ALWAYS and snapshots carry drift fingerprints.
-  readonly supportsSnapshot: boolean = true
+  override readonly supportsSnapshot: boolean = true
   override readonly indexTtl: number = 86_400
   readonly config: GitHubConfig
-  readonly accessor: GitHubAccessor
+  override readonly accessor: GitHubAccessor
 
-  private constructor(config: GitHubConfig, accessor: GitHubAccessor, index: IndexCacheStore) {
+  private constructor(config: GitHubConfig, accessor: GitHubAccessor) {
     super()
     this.config = config
     this.accessor = accessor
-    this._index = index
   }
 
   static async create(config: GitHubConfig): Promise<GitHubVFS> {
@@ -89,61 +76,22 @@ export class GitHubVFS extends BaseVFS implements VFS {
       truncated,
       tree: treeMap,
     })
-    // Not seeded here: the index is keyed by mount prefix, which only a
-    // PathSpec knows, so the first read seeds it from the accessor's tree.
-    const index = new RAMIndexCacheStore({ ttl: 86_400 })
-    return new GitHubVFS(config, accessor, index)
+    return new GitHubVFS(config, accessor)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return GITHUB_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return GITHUB_OPS
   }
-
-  readFile(p: PathSpec): Promise<Uint8Array> {
-    return githubRead(this.accessor, p, this.index)
-  }
-
-  readdir(p: PathSpec): Promise<string[]> {
-    return githubReaddir(this.accessor, p, this.index)
-  }
-
-  stat(p: PathSpec): Promise<FileStat> {
-    return githubStat(this.accessor, p, this.index)
-  }
-
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return githubResolveGlob(this.accessor, effective, this.index)
-  }
-
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 
   override getState(): Promise<GitHubVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGitHubConfig(this.config),
       defaultBranch: this.accessor.defaultBranch,
       truncated: this.accessor.truncated,

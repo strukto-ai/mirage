@@ -15,9 +15,9 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { cachesReads } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser } from '../shell/parse/index.ts'
+import { ops } from '../test-utils.ts'
 import { ConsistencyPolicy, MountMode, PathSpec } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -38,7 +38,7 @@ describe('cache is a hidden store, not a mount', () => {
       const root = ws.registry.rootMount
       expect(root).not.toBeNull()
       expect(root?.vfs).not.toBe(ws.cache)
-      expect(cachesReads(root?.vfs ?? new RAMVFS())).toBe(false)
+      expect((root?.vfs ?? new RAMVFS()).cachesReads).toBe(false)
       expect(root?.prefix).toBe('/')
       expect(ws.registry.allMounts()).toContain(root)
     } finally {
@@ -75,10 +75,10 @@ describe('warm read serves from the hidden store, command stays on its mount', (
       },
     )
     try {
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+      await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
       const first = DEC.decode((await ws.shell('cat /r/a.txt')).stdout)
       expect(first).toContain('v1')
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
+      await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
       const second = DEC.decode((await ws.shell('cat /r/a.txt')).stdout)
       expect(second).toContain('v1')
       expect(second).not.toContain('v2')

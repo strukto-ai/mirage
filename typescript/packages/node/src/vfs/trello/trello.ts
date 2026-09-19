@@ -13,38 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { TrelloAccessor } from '@struktoai/mirage-core/accessor/trello'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { TRELLO_COMMANDS } from '@struktoai/mirage-core/commands/builtin/trello/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import { HttpTrelloTransport } from '@struktoai/mirage-core/core/trello/client'
-import { read as trelloRead } from '@struktoai/mirage-core/core/trello/read'
-import { readdir as trelloReaddir } from '@struktoai/mirage-core/core/trello/readdir'
-import { stat as trelloStat } from '@struktoai/mirage-core/core/trello/stat'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { TRELLO_OPS } from '@struktoai/mirage-core/ops/trello/index'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { TRELLO_PROMPT, TRELLO_WRITE_PROMPT } from '@struktoai/mirage-core/vfs/trello/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { redactTrelloConfig, type TrelloConfig, type TrelloConfigRedacted } from './config.ts'
-
-const resolveTrelloGlob = makeResolveGlob(trelloReaddir)
-
 export interface TrelloVFSState {
   type: string
   config: TrelloConfigRedacted
 }
 
-export class TrelloVFS extends BaseVFS implements VFS {
-  readonly kind: string = VFSName.TRELLO
-  readonly cachesReads: boolean = true
+export class TrelloVFS extends BaseVFS {
+  override readonly name: string = VFSName.TRELLO
+  override readonly cachesReads: boolean = true
   override readonly indexTtl: number = 600
-  readonly prompt: string = TRELLO_PROMPT
-  readonly writePrompt: string = TRELLO_WRITE_PROMPT
+  override readonly prompt: string = TRELLO_PROMPT
+  override readonly writePrompt: string = TRELLO_WRITE_PROMPT
   readonly config: TrelloConfig
-  readonly accessor: TrelloAccessor
+  override readonly accessor: TrelloAccessor
 
   constructor(config: TrelloConfig) {
     super()
@@ -59,52 +49,16 @@ export class TrelloVFS extends BaseVFS implements VFS {
     if (config.boardIds !== undefined) accessorOpts.boardIds = config.boardIds
     this.accessor = new TrelloAccessor(new HttpTrelloTransport(transportOpts), accessorOpts)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return TRELLO_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return TRELLO_OPS
   }
-
-  readFile(p: PathSpec): Promise<Uint8Array> {
-    return trelloRead(this.accessor, p, this.index)
-  }
-
-  readdir(p: PathSpec): Promise<string[]> {
-    return trelloReaddir(this.accessor, p, this.index)
-  }
-
-  stat(p: PathSpec): Promise<FileStat> {
-    return trelloStat(this.accessor, p, this.index)
-  }
-
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return resolveTrelloGlob(this.accessor, effective, this.index)
-  }
-
   override getState(): Promise<TrelloVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactTrelloConfig(this.config),
     })
   }

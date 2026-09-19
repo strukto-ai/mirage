@@ -202,7 +202,7 @@ def main() -> None:
             "cat": body.decode().strip(),
             # FSKit has no direct_io equivalent, so a read is driven entirely
             # by the size stat reports. These two agreeing is what the
-            # SIZES_ALWAYS_KNOWN guard exists to guarantee.
+            # sizes_always_known guard exists to guarantee.
             "size": stat_size,
             "read_bytes": len(body),
             "write_in_place": in_place,

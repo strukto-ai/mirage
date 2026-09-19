@@ -47,7 +47,7 @@ async function makeWs(): Promise<Workspace> {
 
 describe('DevVFS', () => {
   it('reports kind = ram (matching Python parity)', () => {
-    expect(new DevVFS().kind).toBe(VFSName.RAM)
+    expect(new DevVFS().name).toBe(VFSName.RAM)
   })
 
   it('exposes the same op surface as RAMVFS', () => {
@@ -245,7 +245,7 @@ describe('DevVFS auto-mount in Workspace', () => {
   it('Workspace auto-mounts /dev/ without the user having to declare it', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const [resolved] = await ws.resolve('/dev/null')
-    expect(resolved.kind).toBe(VFSName.RAM)
+    expect(resolved.name).toBe(VFSName.RAM)
     await ws.close()
   })
 

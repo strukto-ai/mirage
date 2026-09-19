@@ -17,7 +17,7 @@ import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, isTypeMismatch, resolveDirHandle, resolveParentDirHandle } from './utils.ts'
 
 export async function exists(accessor: OPFSAccessor, path: PathSpec): Promise<boolean> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const virtual = path.mountPath
   if (virtual === '/' || virtual === '') return true
   try {

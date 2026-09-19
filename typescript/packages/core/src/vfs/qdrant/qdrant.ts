@@ -15,14 +15,10 @@
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { QDRANT_COMMANDS } from '../../commands/builtin/qdrant/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
-import { makeResolveGlob } from '../../commands/builtin/generic_bind/index.ts'
-import { read } from '../../core/qdrant/read.ts'
-import { readdir as qdrantReaddir } from '../../core/qdrant/readdir.ts'
-import { stat as qdrantStat } from '../../core/qdrant/stat.ts'
 import { QDRANT_OPS } from '../../ops/qdrant/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import { VFSName, type FileStat, type PathSpec } from '../../types.ts'
-import { BaseVFS, type VFS } from '../base.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
 import {
   type QdrantConfigRedacted,
   redactQdrantConfig,
@@ -31,9 +27,6 @@ import {
   type QdrantConfigResolved,
 } from './config.ts'
 import { QDRANT_PROMPT } from './prompt.ts'
-
-const resolveGlob = makeResolveGlob(qdrantReaddir)
-
 export interface QdrantVFSOptions {
   config: QdrantConfig
 }
@@ -44,15 +37,15 @@ export interface QdrantVFSState {
   needs_override: true
 }
 
-export class QdrantVFS extends BaseVFS implements VFS {
-  readonly kind: string = VFSName.QDRANT
+export class QdrantVFS extends BaseVFS {
+  override readonly name: string = VFSName.QDRANT
   // readdir seeds exact rendered sizes from the scroll payloads and stat
   // falls back to rendering the row itself, so sizes are exact either way.
-  readonly sizesAlwaysKnown: boolean = true
-  readonly supportsSnapshot: boolean = false
-  readonly prompt: string = QDRANT_PROMPT
+  override readonly sizesAlwaysKnown: boolean = true
+  override readonly supportsSnapshot: boolean = false
+  override readonly prompt: string = QDRANT_PROMPT
   readonly config: QdrantConfigResolved
-  readonly accessor: QdrantAccessor
+  override readonly accessor: QdrantAccessor
 
   constructor(options: QdrantVFSOptions | QdrantConfig) {
     super()
@@ -63,7 +56,7 @@ export class QdrantVFS extends BaseVFS implements VFS {
 
   override getState(): QdrantVFSState {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactQdrantConfig(this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
@@ -79,32 +72,11 @@ export class QdrantVFS extends BaseVFS implements VFS {
   override loadState(_state: QdrantVFSState): Promise<void> {
     return Promise.resolve()
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return QDRANT_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return QDRANT_COMMANDS
-  }
-
-  glob(paths: readonly PathSpec[], _prefix = ''): Promise<PathSpec[]> {
-    return resolveGlob(this.accessor, paths, this.index)
-  }
-
-  readFile(p: PathSpec): Promise<Uint8Array> {
-    return read(this.accessor, p, this.index)
-  }
-
-  readdir(p: PathSpec): Promise<string[]> {
-    return qdrantReaddir(this.accessor, p, this.index)
-  }
-
-  stat(p: PathSpec): Promise<FileStat> {
-    return qdrantStat(this.accessor, p, this.index)
   }
 }

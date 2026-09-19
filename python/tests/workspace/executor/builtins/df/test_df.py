@@ -18,6 +18,8 @@ provider quota); everything else renders ``-`` rather than a fabricated
 total. Numbers here come from a fixed-quota stub so the output is
 deterministic (real disk free space is machine-specific).
 """
+from dataclasses import replace
+
 import pytest
 
 from mirage.types import CapacityResult, CapacityState, MountMode
@@ -32,7 +34,13 @@ class _QuotaVFS(RAMVFS):
 
     name = "quota"
 
-    async def statfs(self) -> CapacityResult:
+    def ops(self):
+        return [replace(ro, vfs=self.name) for ro in super().ops()]
+
+    def commands(self):
+        return [replace(rc, vfs=self.name) for rc in super().commands()]
+
+    async def capacity(self) -> CapacityResult:
         return CapacityResult(
             state=CapacityState.QUOTA,
             total=1024000,
@@ -61,7 +69,7 @@ async def _run(ws: Workspace, cmd: str) -> tuple[int, str]:
 
 def test_capacity_default_state_is_unknown():
     import asyncio
-    cap = asyncio.run(RAMVFS().statfs())
+    cap = asyncio.run(RAMVFS().capacity())
     assert cap.state == CapacityState.UNKNOWN
     assert cap.total is None
 
@@ -179,7 +187,7 @@ async def test_df_invalid_option():
 @pytest.mark.asyncio
 async def test_disk_statfs_real_quota(tmp_path):
     # The real disk backend reports real numbers (QUOTA), not fabricated.
-    cap = await DiskVFS(root=str(tmp_path)).statfs()
+    cap = await DiskVFS(root=str(tmp_path)).capacity()
     assert cap.state == CapacityState.QUOTA
     assert cap.total and cap.total > 0
     assert cap.available is not None and cap.available >= 0

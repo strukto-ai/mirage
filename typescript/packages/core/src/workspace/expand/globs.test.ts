@@ -14,54 +14,64 @@
 
 import { describe, expect, it } from 'vitest'
 import type { NamespaceLinks } from '../../ops/config.ts'
-import { BaseVFS, type VFS } from '../../vfs/base.ts'
+import type { RegisteredOp } from '../../ops/registry.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { MountRegistry } from '../mount/registry.ts'
-import { resolveGlobs, type ResourceWithGlob } from './globs.ts'
+import { resolveGlobs } from './globs.ts'
 
-class PlainVFS extends BaseVFS implements VFS {
-  readonly kind = 'plain'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+class PlainVFS extends BaseVFS {
+  override readonly name = 'plain'
   override close(): Promise<void> {
     return Promise.resolve()
   }
 }
 
 // A VFS that implements nullglob-off on its own: a no-match ask comes
-// back as the spec it was handed. `glob` is a public hook, so the shape
-// resolveGlobs sends is not a contract it can rely on.
-class EchoGlobVFS extends BaseVFS implements ResourceWithGlob {
-  readonly kind = 'echo'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+// back as the spec it was handed. The glob op is the driver's own, so the
+// shape resolveGlobs sends is not a contract it can rely on.
+class EchoGlobVFS extends BaseVFS {
+  override readonly name = 'echo'
   override close(): Promise<void> {
     return Promise.resolve()
   }
-  glob(paths: readonly PathSpec[]): Promise<PathSpec[]> {
-    return Promise.resolve([...paths])
+  override ops(): readonly RegisteredOp[] {
+    return [
+      {
+        name: 'glob',
+        vfs: this.name,
+        filetype: null,
+        write: false,
+        fn: (_accessor, path) => Promise.resolve([path]),
+      },
+    ]
   }
 }
 
 // A VFS whose stat answers only once its mount was readied, the way a
 // mount nothing has touched yet behaves.
-class LazyDirVFS extends BaseVFS implements VFS {
-  readonly kind = 'lazy'
+class LazyDirVFS extends BaseVFS {
+  override readonly name = 'lazy'
   ready = false
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
   override close(): Promise<void> {
     return Promise.resolve()
   }
-  stat(path: PathSpec): Promise<FileStat> {
-    if (!this.ready) return Promise.reject(enoent(path))
-    return Promise.resolve(
-      new FileStat({ name: path.virtual.split('/').pop() ?? '', type: FileType.DIRECTORY }),
-    )
+  override ops(): readonly RegisteredOp[] {
+    return [
+      {
+        name: 'stat',
+        vfs: this.name,
+        filetype: null,
+        write: false,
+        fn: (_accessor, path) => {
+          if (!this.ready) return Promise.reject(enoent(path))
+          return Promise.resolve(
+            new FileStat({ name: path.virtual.split('/').pop() ?? '', type: FileType.DIRECTORY }),
+          )
+        },
+      },
+    ]
   }
 }
 
@@ -76,19 +86,24 @@ function linkTo(target: string): NamespaceLinks {
   }
 }
 
-class GlobVFS extends BaseVFS implements ResourceWithGlob {
-  readonly kind = 'glob'
+class GlobVFS extends BaseVFS {
+  override readonly name = 'glob'
   constructor(private readonly results: PathSpec[]) {
     super()
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
   }
   override close(): Promise<void> {
     return Promise.resolve()
   }
-  glob(): Promise<PathSpec[]> {
-    return Promise.resolve(this.results)
+  override ops(): readonly RegisteredOp[] {
+    return [
+      {
+        name: 'glob',
+        vfs: this.name,
+        filetype: null,
+        write: false,
+        fn: () => Promise.resolve(this.results),
+      },
+    ]
   }
 }
 
@@ -142,7 +157,7 @@ describe('resolveGlobs', () => {
     expect(out.map((x) => (x as PathSpec).rawPath)).toEqual(['lnk/'])
   })
 
-  it('expands glob PathSpecs through VFS.glob', async () => {
+  it('expands glob PathSpecs through the glob op', async () => {
     const res = new GlobVFS([
       PathSpec.fromStrPath('/ram/a.txt'),
       PathSpec.fromStrPath('/ram/b.txt'),

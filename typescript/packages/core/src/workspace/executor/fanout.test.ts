@@ -46,13 +46,10 @@ const STAT_ONLY_DISPATCH: DispatchFn = ((op: string, path: PathSpec) => {
 }) as unknown as DispatchFn
 
 function wireMount(mount: MountEntry): void {
-  const cmds = mount.vfs.commands?.()
-  if (cmds !== undefined) {
-    for (const cmd of cmds) {
-      if (cmd.filetype !== null) mount.register(cmd)
-      else if (cmd.vfs === null) mount.registerGeneral(cmd)
-      else mount.register(cmd)
-    }
+  for (const cmd of mount.vfs.commands()) {
+    if (cmd.filetype !== null) mount.register(cmd)
+    else if (cmd.vfs === null) mount.registerGeneral(cmd)
+    else mount.register(cmd)
   }
 }
 
@@ -597,7 +594,6 @@ describe('traversal cancellation', () => {
             null,
             null,
             null,
-            undefined,
             undefined,
             undefined,
             undefined,

@@ -22,7 +22,7 @@ class HfModelsVFS(HfHubVFS[HfModelsAccessor]):
 
     ACCESSOR = HfModelsAccessor
     name: str = VFSName.HF_MODELS
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: HfModelsConfig) -> None:
         super().__init__(config)

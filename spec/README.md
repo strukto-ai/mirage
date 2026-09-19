@@ -75,8 +75,8 @@ side.
 
 `capabilities` carries, per registry name, `index_ttl`, `caches_reads`,
 `supports_snapshot` and `sizes_always_known`, plus whether the class overrides
-`storage_id` and `statfs` (booleans, since the base answers are per-instance
-identity and UNKNOWN). Python reads them off the class. TypeScript reads them
+`storage_location` and `capacity` (booleans, since the base answers are
+per-instance identity and UNKNOWN). Python reads them off the class. TypeScript reads them
 from the class *declarations* (`scripts/vfs_facts.ts`): the twins are
 instance fields, so observing them at runtime would mean constructing the
 VFS, and construction is not inert — `buildVfs('github', {})` issues
@@ -116,7 +116,7 @@ TypeScript view against Python. Python has no runtime split, so the merge has
 to pick one variant and it prefers node; without the first diff that preference
 silently discarded a divergence instead of resolving one. It did: the fifteen
 browser S3-family VFS declared neither `sizes_always_known` nor
-`storage_id` where their node twins declared both, and Python matched node, so
+`storage_location` where their node twins declared both, and Python matched node, so
 every gate passed while a browser `mv` between two mounts of one bucket saw two
 separate storages.
 

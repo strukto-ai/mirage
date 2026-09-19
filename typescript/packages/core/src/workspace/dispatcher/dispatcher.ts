@@ -43,7 +43,7 @@ import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../utils/errors.ts'
-import { cachesReads, type VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { ConsistencyPolicy, FileStat, FileType, MountMode, PathSpec, VFSName } from '../../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
@@ -123,7 +123,7 @@ function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
   ]
 }
 
-export type ResolveFn = (path: string) => Promise<[VFS, PathSpec, MountMode]>
+export type ResolveFn = (path: string) => Promise<[BaseVFS, PathSpec, MountMode]>
 
 /**
  * Stamp the caller's report: memory answered, no backend ran.
@@ -141,7 +141,7 @@ function memoryAnswered(report: OpReport | undefined, moved: number | null = nul
 
 export class Dispatcher {
   private readonly namespace: Namespace
-  private readonly cache: FileCache & VFS
+  private readonly cache: FileCache & BaseVFS
   private readonly opsRegistry: OpsRegistry
   private readonly policies: Policies
   // The snapshot drift queue rides along because this is the one door:
@@ -153,7 +153,7 @@ export class Dispatcher {
 
   constructor(
     namespace: Namespace,
-    cache: FileCache & VFS,
+    cache: FileCache & BaseVFS,
     opsRegistry: OpsRegistry,
     consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
     policies?: Policies,
@@ -270,7 +270,7 @@ export class Dispatcher {
       }
     }
     const resolvedOwner = this.namespace.tryMountFor(p.virtual)
-    let resolved: [VFS, PathSpec, MountMode]
+    let resolved: [BaseVFS, PathSpec, MountMode]
     try {
       resolved = await this.namespace.resolve(p.virtual, false)
     } catch (err) {
@@ -334,7 +334,7 @@ export class Dispatcher {
     if (opName === 'rename' && dstArg instanceof PathSpec) {
       await preOpsGate(this.policies, opName, dstArg, true, mountPrefix, sessionId(), issuer)
     }
-    const caches = cachesReads(vfs)
+    const caches = vfs.cachesReads
     // The file cache is keyed on the path alone, and what a command put
     // there is the rendered read. A raw read asks for a different value
     // under the same key, so it must not be served from that cache;
@@ -549,7 +549,7 @@ export class Dispatcher {
    * opsRegistry.call outside dispatch is a bug.
    */
   private async fencedCall(
-    vfs: VFS,
+    vfs: BaseVFS,
     mountPrefix: string,
     mode: MountMode,
     opName: string,
@@ -612,7 +612,7 @@ export class Dispatcher {
    * Dispatcher._moved_source_is_dir.
    */
   private async movedSourceIsDir(path: PathSpec, issuer?: symbol): Promise<boolean> {
-    let resolved: [VFS, PathSpec, MountMode]
+    let resolved: [BaseVFS, PathSpec, MountMode]
     try {
       resolved = await this.namespace.resolve(path.virtual, false)
     } catch {
@@ -658,7 +658,7 @@ export class Dispatcher {
    * cannot resurface from the node table once the hide lifts.
    */
   private async rmdirRemnants(
-    vfs: VFS,
+    vfs: BaseVFS,
     path: PathSpec,
     mountPrefix: string,
     mode: MountMode,
@@ -917,7 +917,7 @@ export class Dispatcher {
    */
   private async probeOp(
     opName: string,
-    resolved: [VFS, PathSpec, MountMode],
+    resolved: [BaseVFS, PathSpec, MountMode],
     issuer?: symbol,
   ): Promise<unknown> {
     const [vfs, scope] = resolved
@@ -953,7 +953,7 @@ export class Dispatcher {
    * gates as the native half. Mirrors Python's Dispatcher._apply_setattr.
    */
   private async applySetattr(
-    vfs: VFS,
+    vfs: BaseVFS,
     scope: PathSpec,
     p: PathSpec,
     kwargs: OpKwargs,
@@ -1024,7 +1024,7 @@ export class Dispatcher {
   private managerFor(mount: MountEntry): CacheManager {
     return (
       mount.cacheManager ??
-      new CacheManager(this.cache, mount.vfs.index ?? null, mount.prefix, cachesReads(mount.vfs))
+      new CacheManager(this.cache, mount.indexStore, mount.prefix, mount.vfs.cachesReads)
     )
   }
 
@@ -1068,7 +1068,7 @@ export class Dispatcher {
   isCacheablePath = (path: string): boolean => {
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return false
-    return !mount.retiring && cachesReads(mount.vfs)
+    return !mount.retiring && mount.vfs.cachesReads
   }
 
   /** Bind deferred command results to the mounts that produced them. */
@@ -1080,7 +1080,7 @@ export class Dispatcher {
       const prefix = ownerPrefix(mounts.keys(), path)
       const original = prefix === null ? null : mounts.get(prefix)
       const mount = this.namespace.tryMountFor(path)
-      return mount !== null && original === mount && !mount.retiring && cachesReads(mount.vfs)
+      return mount !== null && original === mount && !mount.retiring && mount.vfs.cachesReads
     }
   }
 

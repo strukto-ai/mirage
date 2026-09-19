@@ -39,7 +39,7 @@ describe('DiscordVFS (browser)', () => {
 
   it('constructs with proxyUrl and exposes expected fields', () => {
     const r = new DiscordVFS({ proxyUrl: '/api/discord' })
-    expect(r.kind).toBe(VFSName.DISCORD)
+    expect(r.name).toBe(VFSName.DISCORD)
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ proxyUrl: '/api/discord' })
@@ -96,7 +96,7 @@ describe('redactDiscordConfig (browser)', () => {
 describe('browser registry: discord', () => {
   it('builds discord VFS with proxyUrl (camelCase)', async () => {
     const r = await buildVfs('discord', { proxyUrl: '/api/discord' })
-    expect(r.kind).toBe(VFSName.DISCORD)
+    expect(r.name).toBe(VFSName.DISCORD)
     expect(r).toBeInstanceOf(DiscordVFS)
   })
 
@@ -104,7 +104,7 @@ describe('browser registry: discord', () => {
     const r = (await buildVfs('discord', {
       proxy_url: 'http://proxy/api/discord',
     })) as DiscordVFS
-    expect(r.kind).toBe(VFSName.DISCORD)
+    expect(r.name).toBe(VFSName.DISCORD)
     expect(r.config.proxyUrl).toBe('http://proxy/api/discord')
   })
 

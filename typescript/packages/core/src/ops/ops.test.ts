@@ -43,7 +43,7 @@ function mkFailingStat(err: unknown): Workspace {
   const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, ops })
   ops.register({
     name: 'stat',
-    vfs: vfs.kind,
+    vfs: vfs.name,
     filetype: null,
     fn: () => {
       throw err
@@ -354,7 +354,7 @@ describe('Ops is one door with the dispatcher', () => {
     ops.registerVfs(vfs)
     ops.register({
       name: 'read',
-      vfs: vfs.kind,
+      vfs: vfs.name,
       filetype: '.gdoc.json',
       write: false,
       fn: () => Promise.resolve(new TextEncoder().encode('rendered')),
@@ -390,6 +390,23 @@ describe('Ops is one door with the dispatcher', () => {
     await expect(ws.vfs.writeFile('/ro/a.txt', 'x')).rejects.toThrow('read-only')
   })
 })
+
+/**
+ * A RAM store wearing the s3 name, so the accounting door reads the
+ * mount as network-backed rather than local. Its two tables are
+ * re-stamped to match, the way a real s3 driver's are: a mount
+ * registers only the entries carrying its own VFS name, so a table
+ * still saying `ram` on a mount named `s3` is refused.
+ */
+function s3NamedRam(): RAMVFS {
+  const vfs = new RAMVFS()
+  const ops = vfs.ops().map((o) => (o.vfs === null ? o : { ...o, vfs: 's3' }))
+  // No shell commands: these tests drive the op door through `ws.vfs`,
+  // and a command table still stamped `ram` is refused on a mount named
+  // `s3`, which is the guard working rather than a problem to route around.
+  Object.assign(vfs, { name: 's3', commands: () => [], ops: () => ops })
+  return vfs
+}
 
 describe('Ops accounting survives the delegation', () => {
   class DenyBigReads implements Policy {
@@ -455,10 +472,9 @@ describe('Ops accounting survives the delegation', () => {
     // An ERROR-mode cap refuses the caller the bytes, but the backend
     // already moved them; dropping the record loses the whole transfer
     // rather than just truncating it. Mirrors Python's test_policies.py.
-    const vfs = new RAMVFS()
-    Object.assign(vfs, { kind: 's3' })
+    const vfs = s3NamedRam()
     const ops = new OpsRegistry()
-    for (const op of vfs.ops()) ops.register({ ...op, vfs: 's3' })
+    for (const op of vfs.ops()) ops.register(op)
     const ws = new Workspace(
       { '/m': vfs },
       { mode: MountMode.WRITE, ops, policies: [new HardCapReadsTo3()] },
@@ -478,10 +494,9 @@ describe('Ops accounting survives the delegation', () => {
     // must stay on the books: the door stamped the report at
     // completion, so the record does not depend on what kind of
     // exception followed. Mirrors Python's test_policies.py.
-    const vfs = new RAMVFS()
-    Object.assign(vfs, { kind: 's3' })
+    const vfs = s3NamedRam()
     const ops = new OpsRegistry()
-    for (const op of vfs.ops()) ops.register({ ...op, vfs: 's3' })
+    for (const op of vfs.ops()) ops.register(op)
     const ws = new Workspace(
       { '/m': vfs },
       { mode: MountMode.WRITE, ops, policies: [new BrokenPostOps()] },
@@ -727,7 +742,7 @@ describe('Ops.readlink', () => {
     // stat silenced is what proves the listing is the channel read.
     ops.register({
       name: 'stat',
-      vfs: vfs.kind,
+      vfs: vfs.name,
       filetype: null,
       fn: () => {
         throw enoent('/data/d')
@@ -736,7 +751,7 @@ describe('Ops.readlink', () => {
     })
     ops.register({
       name: 'readdir',
-      vfs: vfs.kind,
+      vfs: vfs.name,
       filetype: null,
       fn: async (accessor, path, args, kwargs) => {
         const entries = (await realReaddir(accessor, path, args, kwargs)) as string[]

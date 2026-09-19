@@ -30,7 +30,6 @@ describe.skipIf(skip)('RedisVFS as mount', () => {
     vfs = new RedisVFS(
       REDIS_URL !== undefined ? { url: REDIS_URL, keyPrefix: prefix } : { keyPrefix: prefix },
     )
-    await vfs.open()
     await vfs.store.clear()
     await vfs.store.addDir('/')
     ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })

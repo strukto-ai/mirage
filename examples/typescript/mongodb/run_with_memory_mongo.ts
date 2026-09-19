@@ -95,7 +95,7 @@ async function main(): Promise<void> {
       const DEC = new TextDecoder()
       try {
         const ps = (p: string) => PathSpec.fromStrPath(p)
-        const usersBytes = await vfs.readFile(ps('/app/users.jsonl'))
+        const usersBytes = await ws.vfs.readFile('/m/app/users.jsonl')
         const usersText = DEC.decode(usersBytes).trim().split('\n')
         console.log('app/users.jsonl:')
         for (const line of usersText) console.log(`  ${line}`)

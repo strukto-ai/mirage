@@ -38,8 +38,9 @@ class _CachingRAM(RAMVFS):
 
 
 def _workspace(vfs: RAMVFS) -> Workspace:
-    vfs.register_op(_read_tally)
-    return Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    ws.mount("/data/").register_fns([_read_tally])
+    return ws
 
 
 @pytest.mark.asyncio

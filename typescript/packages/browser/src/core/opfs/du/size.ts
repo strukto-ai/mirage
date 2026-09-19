@@ -17,5 +17,5 @@ import type { OPFSAccessor } from '../../../accessor/opfs.ts'
 import { sizeOfPath } from './walk.ts'
 
 export async function size(accessor: OPFSAccessor, p: PathSpec): Promise<number> {
-  return sizeOfPath(accessor.rootHandle, p.mountPath)
+  return sizeOfPath(await accessor.root(), p.mountPath)
 }

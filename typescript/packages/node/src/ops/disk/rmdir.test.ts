@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
+import { exists as existsCore } from '../../core/disk/exists.ts'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -23,10 +25,9 @@ let root: string
 let cleanup: () => void
 let res: DiskVFS
 
-beforeEach(async () => {
+beforeEach(() => {
   ;({ root, cleanup } = tmpRoot('mirage-disk-rmdir-op-'))
   res = new DiskVFS({ root })
-  await res.open()
 })
 afterEach(() => {
   cleanup()
@@ -34,9 +35,9 @@ afterEach(() => {
 
 describe('rmdirOp', () => {
   it('removes an empty directory', async () => {
-    await res.mkdir(spec('/d'))
+    await ops(res).mkdir(spec('/d'))
     await rmdirOp.fn(res.accessor, spec('/d'), [], {})
-    expect(await res.exists(spec('/d'))).toBe(false)
+    expect(await existsCore(res.accessor, spec('/d'))).toBe(false)
   })
 
   it('is a no-op on missing directory', async () => {

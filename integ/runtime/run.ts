@@ -41,7 +41,7 @@ import {
   type OpsContext,
   type OpsResultContext,
   type Policy,
-  type VFS,
+  type BaseVFS,
   type RunResult,
   type RuntimeEntry,
   type FilesystemOperation,
@@ -414,7 +414,7 @@ async function ensureMongo(): Promise<void> {
   mongoSeeded = true
 }
 
-async function buildVfs(spec: MountSpecJson, runId: string): Promise<VFS> {
+async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
   if (spec.vfs === 'ram') {
     const vfs = new RAMVFS()
     if (spec.generated_files !== undefined) {

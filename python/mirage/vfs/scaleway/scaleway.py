@@ -19,7 +19,7 @@ from mirage.vfs.scaleway.prompt import PROMPT
 
 class ScalewayVFS(S3AliasVFS):
 
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: ScalewayConfig) -> None:
         super().__init__(config)

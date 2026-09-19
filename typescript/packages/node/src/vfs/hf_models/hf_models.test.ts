@@ -12,25 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fakeHfOperator, installFakeOperator } from '../../core/hf/mock.ts'
 import { HfBucketsVFS } from '../hf_buckets/hf_buckets.ts'
 import { HfModelsVFS } from './hf_models.ts'
 
-// find_flat, du_size and du_entries are deliberately absent: the Hub's
-// listing is recursive, so one paged fetch is the whole tree and the generic
-// walk over it costs no requests. A native op would buy a constant factor and
-// cost a second implementation of the same traversal.
-const PY_OPS = ['read_bytes', 'readdir', 'stat', 'read_stream', 'range_read', 'exists']
+// No find or du op: the Hub's listing is recursive, so one paged fetch is
+// the whole tree and the generic walk over it costs no requests. A native op
+// would buy a constant factor and cost a second implementation of the same
+// traversal.
+const OPS = ['glob', 'read', 'readdir', 'stat']
 
-// The mount is read-only, so the byte-mutation ops are absent here exactly as
-// they are in python's `_OPS`. This list is the op-dispatcher channel, which a
-// shell command bypasses: it answers `dispatch('write', ...)` and the FUSE
-// adapter, so asserting the absence here is what keeps the two channels
-// agreeing. See commands/builtin/hf_hub/io.ts for why a Hub write belongs to
-// the `hf` CLI rather than to a POSIX write.
-const PY_ABSENT_OPS = ['write', 'create', 'unlink', 'rm_r', 'mkdir']
+// The mount is read-only, so the byte-mutation ops are absent from the op
+// table exactly as they are from python's `_OPS`. The table is the
+// op-dispatcher channel, which a shell command bypasses: it answers
+// `dispatch('write', ...)` and the FUSE adapter, so asserting the absence
+// here is what keeps the two channels agreeing. See
+// commands/builtin/hf_hub/io.ts for why a Hub write belongs to the `hf` CLI
+// rather than to a POSIX write.
+const ABSENT_OPS = ['write', 'create', 'append', 'unlink', 'mkdir', 'rmdir', 'rename', 'truncate']
 
 function treePage(rows: unknown[]): Response {
   return new Response(JSON.stringify(rows), {
@@ -44,11 +46,15 @@ afterEach(() => {
 })
 
 describe('HfModelsVFS', () => {
-  it('exposes the python-parity ops map and flags', () => {
+  it('exposes the python-parity op table and flags', () => {
     const vfs = new HfModelsVFS({ repoId: 'ns/model' })
-    expect(Object.keys(vfs.opsMap).sort()).toEqual([...PY_OPS].sort())
-    for (const op of PY_ABSENT_OPS) expect(vfs.opsMap[op]).toBeUndefined()
-    expect(vfs.kind).toBe('hf_models')
+    const names = vfs
+      .ops()
+      .filter((op) => op.vfs === vfs.name)
+      .map((op) => op.name)
+    expect([...new Set(names)].sort()).toEqual([...OPS].sort())
+    for (const op of ABSENT_OPS) expect(names).not.toContain(op)
+    expect(vfs.name).toBe('hf_models')
     expect(vfs.cachesReads).toBe(true)
     expect(vfs.supportsSnapshot).toBe(true)
     const optional = vfs as unknown as Record<string, unknown>
@@ -94,7 +100,7 @@ describe('HfModelsVFS', () => {
         return Promise.resolve(new Response('{}', { status: 200 }))
       }),
     )
-    const data = await vfs.readFile(PathSpec.fromStrPath('/config.json'))
+    const data = await ops(vfs).read(PathSpec.fromStrPath('/config.json'))
     expect(new TextDecoder().decode(data)).toBe('{}')
     expect(urls.some((u) => u.includes('/api/models/ns/model/tree/main'))).toBe(true)
     // A model's content hangs off the bare repo id; datasets and spaces sit
@@ -120,7 +126,7 @@ describe('HfModelsVFS', () => {
         ),
       ),
     )
-    const stat = await vfs.stat(PathSpec.fromStrPath('/model.safetensors'))
+    const stat = await ops(vfs).stat(PathSpec.fromStrPath('/model.safetensors'))
     expect(stat.size).toBe(4798702184)
     expect(stat.extra.lfs_oid).toBe('sha')
   })
@@ -129,7 +135,7 @@ describe('HfModelsVFS', () => {
 describe('HfBucketsVFS', () => {
   it('uses the bucket field and normalizes keyPrefix', () => {
     const vfs = new HfBucketsVFS({ bucket: 'ns/store', keyPrefix: '/lead/' })
-    expect(vfs.kind).toBe('hf_buckets')
+    expect(vfs.name).toBe('hf_buckets')
     expect(vfs.config.keyPrefix).toBe('lead/')
     expect(vfs.accessor.bucketUri).toBe('hf://buckets/ns/store')
     installFakeOperator(vfs.accessor, fakeHfOperator({ 'config.json': '{}' }))

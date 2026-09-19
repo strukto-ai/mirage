@@ -22,7 +22,7 @@ class HfSpacesVFS(HfHubVFS[HfSpacesAccessor]):
 
     ACCESSOR = HfSpacesAccessor
     name: str = VFSName.HF_SPACES
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: HfSpacesConfig) -> None:
         super().__init__(config)

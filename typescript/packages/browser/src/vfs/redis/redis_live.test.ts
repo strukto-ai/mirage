@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { spec } from '../../test-utils.ts'
@@ -33,9 +34,8 @@ describe.skipIf(skip)('RedisVFS against a live Upstash database', () => {
   let vfs: RedisVFS
   let ws: Workspace
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vfs = new RedisVFS({ url: DB_URL ?? '', keyPrefix: prefix })
-    await vfs.open()
     ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
   })
 
@@ -47,8 +47,8 @@ describe.skipIf(skip)('RedisVFS against a live Upstash database', () => {
   it(
     'round-trips every byte value and sizes it in bytes',
     async () => {
-      await vfs.writeFile(spec('/a.bin'), ALL_BYTES)
-      expect(await vfs.readFile(spec('/a.bin'))).toEqual(ALL_BYTES)
+      await ops(vfs).write(spec('/a.bin'), ALL_BYTES)
+      expect(await ops(vfs).read(spec('/a.bin'))).toEqual(ALL_BYTES)
       const r = await ws.shell('wc -c < /data/a.bin')
       expect(DEC.decode(r.stdout).trim()).toBe('256')
     },
@@ -123,8 +123,8 @@ describe.skipIf(skip)('RedisVFS against a live Upstash database', () => {
         keyPrefix: prefix,
         maxRequestBytes: 64,
       })
-      await chunked.writeFile(spec('/big.bin'), ALL_BYTES)
-      expect(await vfs.readFile(spec('/big.bin'))).toEqual(ALL_BYTES)
+      await ops(chunked).write(spec('/big.bin'), ALL_BYTES)
+      expect(await ops(vfs).read(spec('/big.bin'))).toEqual(ALL_BYTES)
     },
     LIVE,
   )

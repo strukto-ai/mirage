@@ -17,13 +17,14 @@ import asyncio
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.driver_ops import ops
 
 
 def _ws() -> Workspace:
     mem = RAMVFS()
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/hello.txt"),
-                  data=b"hello\nworld\nfoo\n"))
+        ops(mem).write(PathSpec.from_str_path("/hello.txt"),
+                       data=b"hello\nworld\nfoo\n"))
     return Workspace(
         {"/data": (mem, MountMode.WRITE)},
         mode=MountMode.WRITE,

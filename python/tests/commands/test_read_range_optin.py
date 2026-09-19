@@ -19,12 +19,9 @@ from collections.abc import Callable
 from typing import Any
 
 import mirage.commands.builtin as builtin
-import mirage.vfs as mounts
 from mirage.commands.builtin.generic_bind import CommandIO
-from mirage.vfs.base import BaseVFS
 
 WINDOW = ("offset", "size")
-VFS_RANGE = "range_read"
 
 
 def _takes_window(fn: Callable[..., Any]) -> bool:
@@ -81,27 +78,6 @@ def _tables() -> tuple[dict[str, CommandIO], list[str]]:
     return found, failed
 
 
-def _vfs_ranges() -> set[str]:
-    """Backend names whose VFS exposes the ``range_read`` method.
-
-    The VFS-level window is a second spelling of the same
-    capability, reached as ``VFS.range_read(path, start, end)``
-    rather than through the op dispatcher. It is derived from the
-    ``_ops`` table each VFS class declares.
-    """
-    found: set[str] = set()
-    for info in pkgutil.walk_packages(mounts.__path__, mounts.__name__ + "."):
-        try:
-            module = importlib.import_module(info.name)
-        except ImportError:
-            continue
-        for value in vars(module).values():
-            if (isinstance(value, type) and issubclass(value, BaseVFS)
-                    and VFS_RANGE in getattr(value, "_ops", {})):
-                found.add(value._ops[VFS_RANGE].__module__.split(".")[2])
-    return found
-
-
 def test_a_reader_that_takes_a_window_is_wired_as_the_native_range():
     """A backend that can range must say so, or nobody ever asks it to.
 
@@ -135,23 +111,3 @@ def test_a_wired_range_reader_actually_takes_a_window():
         name for name, io in tables.items()
         if io.read_range is not None and not _takes_window(io.read_range))
     assert not wrong, f"read_range does not take offset/size: {wrong}"
-
-
-def test_a_backend_that_ranges_for_its_vfs_ranges_for_the_ops_path_too():
-    """The two range surfaces have to agree on what a backend can do.
-
-    A ranged read is reachable two ways: ``VFS.range_read(path,
-    start, end)`` on the VFS object, and the ops dispatcher's
-    ``read(path, offset, size)`` through ``CommandIO.read_range``. A
-    backend wired for one and not the other is the same class of bug
-    that left eight readers taking a window nobody handed them: the
-    capability exists, one caller gets it, and the other quietly
-    downloads the whole object and slices.
-    """
-    tables, failed = _tables()
-    assert not failed, f"backend io modules would not import: {failed}"
-    ranged = _vfs_ranges()
-    assert ranged, "no VFS-level range_read found: the derivation broke"
-    gaps = sorted(name for name in ranged
-                  if name in tables and tables[name].read_range is None)
-    assert not gaps, (f"VFS ranges but the ops path does not: {gaps}")

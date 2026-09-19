@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -23,10 +24,9 @@ let root: string
 let cleanup: () => void
 let res: DiskVFS
 
-beforeEach(async () => {
+beforeEach(() => {
   ;({ root, cleanup } = tmpRoot('mirage-disk-write-op-'))
   res = new DiskVFS({ root })
-  await res.open()
 })
 afterEach(() => {
   cleanup()
@@ -35,7 +35,7 @@ afterEach(() => {
 describe('writeOp', () => {
   it('writes bytes to disk', async () => {
     await writeOp.fn(res.accessor, spec('/x.txt'), [new TextEncoder().encode('hello')], {})
-    expect(new TextDecoder().decode(await res.readFile(spec('/x.txt')))).toBe('hello')
+    expect(new TextDecoder().decode(await ops(res).read(spec('/x.txt')))).toBe('hello')
   })
 
   it('throws when first arg is not a Uint8Array', () => {

@@ -1,5 +1,6 @@
 import pytest
 
+from mirage.ops.registry import RegisteredOp
 from mirage.types import VFSName
 from mirage.vfs.registry import REGISTRY, build_vfs
 
@@ -14,7 +15,7 @@ async def test_chroma_vfs_is_registered():
 
     assert vfs.name == VFSName.CHROMA
     assert vfs.caches_reads is False
-    assert vfs.SUPPORTS_SNAPSHOT is False
+    assert vfs.supports_snapshot is False
     assert vfs.config.collection_name == "docs"
     assert vfs.config.slug_field == "page_slug"
     assert vfs.accessor.config is vfs.config
@@ -25,7 +26,12 @@ async def test_chroma_vfs_registers_expected_commands_and_ops():
     vfs = build_vfs("chroma", {"collection_name": "docs"})
 
     commands = {item.name for item in vfs.commands()}
-    ops = {item.name for item in vfs.ops_list()}
+    ops = {
+        ro.name
+        for item in vfs.ops()
+        for ro in (
+            [item] if isinstance(item, RegisteredOp) else item._registered_ops)
+    }
 
     assert {
         "cat", "ls", "grep", "find", "head", "tail", "tree", "chroma-query"

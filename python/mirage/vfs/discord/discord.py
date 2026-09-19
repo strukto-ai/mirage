@@ -15,14 +15,15 @@
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.commands.builtin.discord import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.discord.config import DiscordConfig
-from mirage.core.discord.readdir import readdir
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.discord import OPS as DISCORD_VFS_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.discord.prompt import PROMPT, WRITE_PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class DiscordVFS(BaseVFS):
@@ -33,28 +34,20 @@ class DiscordVFS(BaseVFS):
     # Every listed file carries an exact size: chat.jsonl and members/*.json
     # are rendered at readdir from payloads the listing already fetched, and
     # attachments carry Discord's CDN byte count.
-    SIZES_ALWAYS_KNOWN: bool = True
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: DiscordConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = DiscordAccessor(self.config)
-        from mirage.commands.builtin.discord import COMMANDS
-        from mirage.ops.discord import OPS as DISCORD_VFS_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in DISCORD_VFS_OPS:
-            self.register_op(fn)
+    def ops(self) -> list[RegisteredOp]:
+        return DISCORD_VFS_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

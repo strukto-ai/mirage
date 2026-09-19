@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VFS } from '../../../vfs/base.ts'
+import type { BaseVFS } from '../../../vfs/base.ts'
 import {
   FileStat,
   FileType,
@@ -449,7 +449,7 @@ export class Namespace {
 
   // Map a virtual path to its mount, following the symlink table first when
   // `follow` is set. Throws CycleError when resolution exceeds the hop limit.
-  async resolve(path: string, follow = true): Promise<[VFS, PathSpec, MountMode]> {
+  async resolve(path: string, follow = true): Promise<[BaseVFS, PathSpec, MountMode]> {
     if (follow) path = this.follow(path)
     return this.resolveFn(path)
   }

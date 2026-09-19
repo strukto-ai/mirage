@@ -104,7 +104,7 @@ See the [CLI versioning reference](/home/cli#versioning) for `log`, `diff`, `bra
     - Optional per-path `revision` when the backend exposes one
   </Card>
   <Card title="Not captured" icon="xmark">
-    - Live state of mounts with `SUPPORTS_SNAPSHOT=False` (Gmail, Slack, Linear, Notion, …)
+    - Live state of mounts with `supports_snapshot=False` (Gmail, Slack, Linear, Notion, …)
     - Files the agent never touched
     - Raw bytes of remote objects (recoverable only via revision pin)
   </Card>
@@ -163,7 +163,7 @@ The cache is the optimization, the fingerprint is the verifier, and the pin is t
 
 ## VFS Support Matrix
 
-Remote drift detection is opt-in per VFS through `SUPPORTS_SNAPSHOT` in Python and `supportsSnapshot` in TypeScript. A working adapter must also attach a fingerprint to each read record; a revision is optional and enables pinned replay.
+Remote drift detection is opt-in per VFS through `supports_snapshot` in Python and `supportsSnapshot` in TypeScript. A working adapter must also attach a fingerprint to each read record; a revision is optional and enables pinned replay.
 
 Legend: ✅ = implemented · 🟡 = VFS opts in, but recorded reads do not yet carry the fingerprint · ❌ = live-only · — = unavailable in that runtime.
 
@@ -194,7 +194,7 @@ from mirage.types import FileStat
 
 
 class MyVFS(BaseVFS):
-    SUPPORTS_SNAPSHOT = True  # 1. opt in
+    supports_snapshot = True  # 1. opt in
 
     async def stat(self, ...) -> FileStat:
         return FileStat(

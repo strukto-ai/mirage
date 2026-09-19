@@ -78,7 +78,7 @@ shell commands trigger) costs one HTTP request instead of N.
 
 ## Fingerprinting and Snapshots
 
-`SUPPORTS_SNAPSHOT = True`. Per-file fingerprints come from the WebDAV
+`supports_snapshot = True`. Per-file fingerprints come from the WebDAV
 `getetag` property, so snapshot drift detection works automatically:
 when a remote file changes, its ETag changes, and Mirage notices on the
 next access.

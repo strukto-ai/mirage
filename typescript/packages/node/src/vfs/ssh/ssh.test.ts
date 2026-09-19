@@ -45,7 +45,7 @@ beforeEach(() => {
 describe('SSHVFS — identity', () => {
   it('exposes kind = ssh and cachesReads = true', () => {
     const res = makeVfs(state)
-    expect(res.kind).toBe(VFSName.SSH)
+    expect(res.name).toBe(VFSName.SSH)
     expect(res.cachesReads).toBe(true)
   })
 
@@ -63,7 +63,7 @@ describe('SSHVFS — identity', () => {
   it('ops() length matches SSH_OPS', () => {
     const res = makeVfs(state)
     expect(res.ops().length).toBe(SSH_OPS.length)
-    expect(res.ops().length).toBe(12)
+    expect(res.ops().length).toBe(13)
   })
 })
 

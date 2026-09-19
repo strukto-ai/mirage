@@ -25,7 +25,7 @@ import {
   registerVfsFactory as registerBrowserVfs,
 } from '@struktoai/mirage-browser'
 import { MountMode } from '@struktoai/mirage-core/types'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type {
   Workspace,
@@ -104,8 +104,8 @@ function profileDocument(raw: Record<string, unknown>) {
 
 interface Host {
   name: string
-  workspace: new (mounts: Record<string, VFS>, options: WorkspaceOptions) => Workspace
-  build: (name: string, config: Record<string, unknown>) => Promise<VFS>
+  workspace: new (mounts: Record<string, BaseVFS>, options: WorkspaceOptions) => Workspace
+  build: (name: string, config: Record<string, unknown>) => Promise<BaseVFS>
 }
 
 const HOSTS: Host[] = [
@@ -271,7 +271,7 @@ async function action(
 }
 
 async function run(host: Host, testCase: Case): Promise<number> {
-  const mounts: Record<string, VFS> = {}
+  const mounts: Record<string, BaseVFS> = {}
   for (const [prefix, config] of Object.entries(testCase.settings.mounts)) {
     mounts[prefix] = await host.build(config.vfs, config.config ?? {})
   }

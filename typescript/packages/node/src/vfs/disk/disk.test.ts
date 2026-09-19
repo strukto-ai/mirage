@@ -16,6 +16,13 @@ import { chmodSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { CapacityState, FileType, VFSName } from '@struktoai/mirage-core/types'
+import { ops } from '@struktoai/mirage-core/test-utils'
+import { copy as copyCore } from '../../core/disk/copy.ts'
+import { size as duSize } from '../../core/disk/du/index.ts'
+import { exists as existsCore } from '../../core/disk/exists.ts'
+import { find as findCore } from '../../core/disk/find.ts'
+import { rmR as rmRCore } from '../../core/disk/rm.ts'
+import { stream as streamCore } from '../../core/disk/stream.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { DiskVFS } from './disk.ts'
 
@@ -23,10 +30,9 @@ let root: string
 let cleanup: () => void
 let res: DiskVFS
 
-beforeEach(async () => {
+beforeEach(() => {
   ;({ root, cleanup } = tmpRoot('mirage-diskvfs-'))
   res = new DiskVFS({ root })
-  await res.open()
 })
 
 afterEach(() => {
@@ -35,7 +41,7 @@ afterEach(() => {
 
 describe('DiskVFS — identity', () => {
   it('exposes kind, prompt, root', () => {
-    expect(res.kind).toBe(VFSName.DISK)
+    expect(res.name).toBe(VFSName.DISK)
     expect(typeof res.prompt).toBe('string')
     expect(res.root).toBe(root)
   })
@@ -48,8 +54,8 @@ describe('DiskVFS — identity', () => {
     expect(res.commands().length).toBeGreaterThan(0)
   })
 
-  it('statfs reports a real quota (df numbers, not fabricated)', async () => {
-    const cap = await res.statfs()
+  it('capacity reports a real quota (df numbers, not fabricated)', async () => {
+    const cap = await res.capacity()
     expect(cap.state).toBe(CapacityState.QUOTA)
     expect(cap.total ?? 0).toBeGreaterThan(0)
     expect(cap.available ?? -1).toBeGreaterThanOrEqual(0)
@@ -58,113 +64,113 @@ describe('DiskVFS — identity', () => {
 })
 
 describe('DiskVFS — fs methods', () => {
-  it('writeFile + readFile round-trip', async () => {
-    await res.writeFile(spec('/x.txt'), new TextEncoder().encode('hello'))
-    const data = await res.readFile(spec('/x.txt'))
+  it('write + read round-trip', async () => {
+    await ops(res).write(spec('/x.txt'), new TextEncoder().encode('hello'))
+    const data = await ops(res).read(spec('/x.txt'))
     expect(new TextDecoder().decode(data)).toBe('hello')
   })
 
-  it('writeFile does not create parent dirs', async () => {
+  it('write does not create parent dirs', async () => {
     // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent.
     await expect(
-      res.writeFile(spec('/a/b/c.txt'), new TextEncoder().encode('deep')),
+      ops(res).write(spec('/a/b/c.txt'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('appendFile concatenates', async () => {
-    await res.writeFile(spec('/a.txt'), new TextEncoder().encode('1'))
-    await res.appendFile(spec('/a.txt'), new TextEncoder().encode('2'))
-    expect(new TextDecoder().decode(await res.readFile(spec('/a.txt')))).toBe('12')
+  it('append concatenates', async () => {
+    await ops(res).write(spec('/a.txt'), new TextEncoder().encode('1'))
+    await ops(res).append(spec('/a.txt'), new TextEncoder().encode('2'))
+    expect(new TextDecoder().decode(await ops(res).read(spec('/a.txt')))).toBe('12')
   })
 
   it('readdir returns full virtual paths sorted', async () => {
-    await res.writeFile(spec('/b.txt'), new Uint8Array())
-    await res.writeFile(spec('/a.txt'), new Uint8Array())
-    expect(await res.readdir(spec('/'))).toEqual(['/a.txt', '/b.txt'])
+    await ops(res).write(spec('/b.txt'), new Uint8Array())
+    await ops(res).write(spec('/a.txt'), new Uint8Array())
+    expect(await ops(res).readdir(spec('/'))).toEqual(['/a.txt', '/b.txt'])
   })
 
   it('stat distinguishes files and directories', async () => {
-    await res.writeFile(spec('/file.txt'), new TextEncoder().encode('x'))
-    await res.mkdir(spec('/dir'))
-    const f = await res.stat(spec('/file.txt'))
+    await ops(res).write(spec('/file.txt'), new TextEncoder().encode('x'))
+    await ops(res).mkdir(spec('/dir'))
+    const f = await ops(res).stat(spec('/file.txt'))
     expect(f.size).toBe(1)
     expect(f.type).not.toBe(FileType.DIRECTORY)
-    const d = await res.stat(spec('/dir'))
+    const d = await ops(res).stat(spec('/dir'))
     expect(d.type).toBe(FileType.DIRECTORY)
   })
 
   it('exists() is truthy for created files and falsy for missing', async () => {
-    await res.writeFile(spec('/p.txt'), new Uint8Array())
-    expect(await res.exists(spec('/p.txt'))).toBe(true)
-    expect(await res.exists(spec('/nope.txt'))).toBe(false)
+    await ops(res).write(spec('/p.txt'), new Uint8Array())
+    expect(await existsCore(res.accessor, spec('/p.txt'))).toBe(true)
+    expect(await existsCore(res.accessor, spec('/nope.txt'))).toBe(false)
   })
 
   it('mkdir + rmdir', async () => {
-    await res.mkdir(spec('/d'))
-    expect(await res.exists(spec('/d'))).toBe(true)
-    await res.rmdir(spec('/d'))
-    expect(await res.exists(spec('/d'))).toBe(false)
+    await ops(res).mkdir(spec('/d'))
+    expect(await existsCore(res.accessor, spec('/d'))).toBe(true)
+    await ops(res).rmdir(spec('/d'))
+    expect(await existsCore(res.accessor, spec('/d'))).toBe(false)
   })
 
   it('unlink removes a file', async () => {
-    await res.writeFile(spec('/x'), new Uint8Array())
-    await res.unlink(spec('/x'))
-    expect(await res.exists(spec('/x'))).toBe(false)
+    await ops(res).write(spec('/x'), new Uint8Array())
+    await ops(res).unlink(spec('/x'))
+    expect(await existsCore(res.accessor, spec('/x'))).toBe(false)
   })
 
   it('rename moves a file', async () => {
-    await res.writeFile(spec('/a'), new TextEncoder().encode('A'))
-    await res.rename(spec('/a'), spec('/b'))
-    expect(await res.exists(spec('/a'))).toBe(false)
-    expect(new TextDecoder().decode(await res.readFile(spec('/b')))).toBe('A')
+    await ops(res).write(spec('/a'), new TextEncoder().encode('A'))
+    await ops(res).rename(spec('/a'), spec('/b'))
+    expect(await existsCore(res.accessor, spec('/a'))).toBe(false)
+    expect(new TextDecoder().decode(await ops(res).read(spec('/b')))).toBe('A')
   })
 
   it('copy duplicates a file', async () => {
-    await res.writeFile(spec('/src'), new TextEncoder().encode('CP'))
-    await res.copy(spec('/src'), spec('/dst'))
-    expect(new TextDecoder().decode(await res.readFile(spec('/dst')))).toBe('CP')
+    await ops(res).write(spec('/src'), new TextEncoder().encode('CP'))
+    await copyCore(res.accessor, spec('/src'), spec('/dst'))
+    expect(new TextDecoder().decode(await ops(res).read(spec('/dst')))).toBe('CP')
   })
 
   it('truncate shrinks a file', async () => {
-    await res.writeFile(spec('/t'), new TextEncoder().encode('hello'))
-    await res.truncate(spec('/t'), 2)
-    expect(new TextDecoder().decode(await res.readFile(spec('/t')))).toBe('he')
+    await ops(res).write(spec('/t'), new TextEncoder().encode('hello'))
+    await ops(res).truncate(spec('/t'), 2)
+    expect(new TextDecoder().decode(await ops(res).read(spec('/t')))).toBe('he')
   })
 
   it('rmR removes a directory recursively', async () => {
-    await res.mkdir(spec('/d'))
-    await res.writeFile(spec('/d/x.txt'), new TextEncoder().encode('x'))
-    await res.rmR(spec('/d'))
-    expect(await res.exists(spec('/d'))).toBe(false)
+    await ops(res).mkdir(spec('/d'))
+    await ops(res).write(spec('/d/x.txt'), new TextEncoder().encode('x'))
+    await rmRCore(res.accessor, spec('/d'))
+    expect(await existsCore(res.accessor, spec('/d'))).toBe(false)
   })
 
   it('du sums file sizes under a path', async () => {
-    await res.mkdir(spec('/d'))
-    await res.writeFile(spec('/d/a'), new Uint8Array([1, 2, 3]))
-    await res.writeFile(spec('/d/b'), new Uint8Array([4, 5]))
-    expect(await res.du(spec('/d'))).toBe(5)
+    await ops(res).mkdir(spec('/d'))
+    await ops(res).write(spec('/d/a'), new Uint8Array([1, 2, 3]))
+    await ops(res).write(spec('/d/b'), new Uint8Array([4, 5]))
+    expect(await duSize(res.accessor, spec('/d'))).toBe(5)
   })
 
-  it('streamPath yields file bytes', async () => {
-    await res.writeFile(spec('/big'), new TextEncoder().encode('chunk'))
+  it('stream yields file bytes', async () => {
+    await ops(res).write(spec('/big'), new TextEncoder().encode('chunk'))
     const chunks: Uint8Array[] = []
-    for await (const c of res.streamPath(spec('/big'))) chunks.push(c)
+    for await (const c of streamCore(res.accessor, spec('/big'))) chunks.push(c)
     expect(new TextDecoder().decode(chunks[0])).toBe('chunk')
   })
 
   it('find returns matching paths', async () => {
-    await res.writeFile(spec('/a.json'), new Uint8Array())
-    await res.writeFile(spec('/b.txt'), new Uint8Array())
-    const found = await res.find(spec('/'), { name: '*.json' })
+    await ops(res).write(spec('/a.json'), new Uint8Array())
+    await ops(res).write(spec('/b.txt'), new Uint8Array())
+    const found = await findCore(res.accessor, spec('/'), { name: '*.json' })
     expect(found).toEqual(['/a.json'])
   })
 })
 
 describe('DiskVFS — getState / loadState round-trip', () => {
   it('snapshots files', async () => {
-    await res.writeFile(spec('/a.txt'), new TextEncoder().encode('A'))
-    await res.mkdir(spec('/d'))
-    await res.writeFile(spec('/d/b.txt'), new TextEncoder().encode('B'))
+    await ops(res).write(spec('/a.txt'), new TextEncoder().encode('A'))
+    await ops(res).mkdir(spec('/d'))
+    await ops(res).write(spec('/d/b.txt'), new TextEncoder().encode('B'))
 
     const state = await res.getState()
     expect(Object.keys(state.files).sort()).toEqual(['a.txt', 'd/b.txt'])
@@ -174,17 +180,16 @@ describe('DiskVFS — getState / loadState round-trip', () => {
     const { root: root2, cleanup: c2 } = tmpRoot('mirage-diskvfs-load-')
     try {
       const res2 = new DiskVFS({ root: root2 })
-      await res2.open()
       await res2.loadState(state)
-      expect(new TextDecoder().decode(await res2.readFile(spec('/a.txt')))).toBe('A')
-      expect(new TextDecoder().decode(await res2.readFile(spec('/d/b.txt')))).toBe('B')
+      expect(new TextDecoder().decode(await ops(res2).read(spec('/a.txt')))).toBe('A')
+      expect(new TextDecoder().decode(await ops(res2).read(spec('/d/b.txt')))).toBe('B')
     } finally {
       c2()
     }
   })
 
   it('preserves file mode across a state round-trip', async () => {
-    await res.writeFile(spec('/f.txt'), new TextEncoder().encode('hi'))
+    await ops(res).write(spec('/f.txt'), new TextEncoder().encode('hi'))
     chmodSync(join(root, 'f.txt'), 0o640)
     const state = await res.getState()
     expect(state.modes?.['f.txt']).toBe(0o640)
@@ -192,7 +197,6 @@ describe('DiskVFS — getState / loadState round-trip', () => {
     const { root: root2, cleanup: c2 } = tmpRoot('mirage-diskvfs-mode-')
     try {
       const res2 = new DiskVFS({ root: root2 })
-      await res2.open()
       await res2.loadState(state)
       expect(statSync(join(root2, 'f.txt')).mode & 0o777).toBe(0o640)
     } finally {

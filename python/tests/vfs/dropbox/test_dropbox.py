@@ -30,8 +30,9 @@ def make_vfs(**overrides) -> DropboxVFS:
 
 def test_registers_read_write_op_surface():
     vfs = make_vfs()
-    ops = {(o.name, o.write) for o in vfs.ops_list()}
+    ops = {(o.name, o.write) for o in vfs.ops()}
     assert ops == {
+        ("glob", False),
         ("read", False),
         ("readdir", False),
         ("stat", False),

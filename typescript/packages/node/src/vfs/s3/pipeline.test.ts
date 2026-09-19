@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -31,18 +32,18 @@ function decode(bytes: Uint8Array): string {
 
 async function buildWs(): Promise<Workspace> {
   const mem = new RAMVFS()
-  await mem.writeFile(p('/hello.txt'), ENC.encode('hello world\n'))
-  await mem.writeFile(p('/numbers.txt'), ENC.encode('3\n1\n2\n1\n3\n'))
-  await mem.writeFile(
+  await ops(mem).write(p('/hello.txt'), ENC.encode('hello world\n'))
+  await ops(mem).write(p('/numbers.txt'), ENC.encode('3\n1\n2\n1\n3\n'))
+  await ops(mem).write(
     p('/log.txt'),
     ENC.encode('INFO start\nERROR fail\nINFO ok\nERROR bad\nINFO done\n'),
   )
-  await mem.mkdir(p('/subdir'))
-  await mem.writeFile(p('/subdir/a.txt'), ENC.encode('aaa\n'))
-  await mem.writeFile(p('/subdir/b.txt'), ENC.encode('bbb\n'))
-  await mem.writeFile(p('/config.json'), ENC.encode('{"key": "value"}\n'))
+  await ops(mem).mkdir(p('/subdir'))
+  await ops(mem).write(p('/subdir/a.txt'), ENC.encode('aaa\n'))
+  await ops(mem).write(p('/subdir/b.txt'), ENC.encode('bbb\n'))
+  await ops(mem).write(p('/config.json'), ENC.encode('{"key": "value"}\n'))
   const big = Array.from({ length: 5000 }, (_, i) => `row ${i.toString()}`).join('\n') + '\n'
-  await mem.writeFile(p('/big.txt'), ENC.encode(big))
+  await ops(mem).write(p('/big.txt'), ENC.encode(big))
   const ws = new Workspace({ '/data': mem }, { mode: MountMode.WRITE })
   ws.cwd = '/'
   return ws

@@ -18,9 +18,10 @@ import type { Explanation } from '@struktoai/mirage-core/policy/types'
 import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { parseMountMode } from '@struktoai/mirage-core/types'
+import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace, buildVfs, parseSessionProfile } from '@struktoai/mirage-node'
-import type { Mount, NodeWorkspaceOptions, SessionProfile } from '@struktoai/mirage-node'
+import type { NodeWorkspaceOptions, SessionProfile } from '@struktoai/mirage-node'
 import { askThroughApproval } from './approval.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -105,8 +106,10 @@ function isMountBlock(entry: MirageMount): entry is MirageMountBlock {
 
 async function resolveMount(entry: MirageMountBlock): Promise<MountSpec> {
   const vfs = await buildVfs(entry.vfs, entry.config ?? {})
-  if (entry.mode === undefined) return vfs
-  return [vfs, parseMountMode(entry.mode)]
+  return new Mount(vfs, {
+    ...(entry.mode !== undefined ? { mode: parseMountMode(entry.mode) } : {}),
+    vfsRef: entry.vfs,
+  })
 }
 
 /**

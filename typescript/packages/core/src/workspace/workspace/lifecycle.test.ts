@@ -223,7 +223,7 @@ it.each(
     if (alias === 'initial') mounts['/alias'] = vfs
     const ws = new Workspace(mounts, { shellParser: parser })
     if (alias === 'dynamic') ws.addMount('/alias', vfs)
-    vi.spyOn(vfs, 'statfs').mockImplementation(async () => {
+    vi.spyOn(vfs, 'capacity').mockImplementation(async () => {
       entered()
       await release
       expect(closed).toBe(false)
@@ -334,46 +334,6 @@ it('workspace close waits for VFS retirements before closing stores', async () =
   }
 })
 
-it('unmount drains an admitted VFS open before closing it', async () => {
-  const vfs = new RAMVFS()
-  const ws = new Workspace({ '/data': vfs }, { shellParser: parser })
-  let entered = (): void => undefined
-  let resume = (): void => undefined
-  const started = new Promise<void>((resolve) => {
-    entered = resolve
-  })
-  const release = new Promise<void>((resolve) => {
-    resume = resolve
-  })
-  let closed = false
-  vi.spyOn(vfs, 'open').mockImplementation(async () => {
-    entered()
-    await release
-  })
-  vi.spyOn(vfs, 'close').mockImplementation(() => {
-    closed = true
-    return Promise.resolve()
-  })
-  const reading = ws.dispatch('read', '/data/file').catch((error: unknown) => error)
-  let removing: Promise<void> | undefined
-  try {
-    await started
-    removing = ws.unmount('/data')
-    await vi.waitFor(() => {
-      expect(ws.registry.tryMountForPrefix('/data')).toBeNull()
-    })
-    expect(closed).toBe(false)
-    resume()
-    await removing
-    expect(closed).toBe(true)
-    expect(await reading).toMatchObject({ code: 'EBUSY' })
-  } finally {
-    resume()
-    await Promise.allSettled([reading, ...(removing === undefined ? [] : [removing])])
-    await ws.close()
-  }
-})
-
 it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (kind) => {
   const vfs = new RAMVFS()
   const ws = new Workspace({ '/data': vfs })
@@ -386,7 +346,7 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
   const release = new Promise<void>((resolve) => {
     resume = resolve
   })
-  const index = vfs.index
+  const index = ws.mount('/data').indexStore
   const method = kind === 'service' ? 'invalidate' : 'clear'
   const invalidate = index[method].bind(index)
   await index.put(

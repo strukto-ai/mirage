@@ -18,7 +18,7 @@ import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { destError, isNotFound, resolveFileHandle, toWritableChunk } from './utils.ts'
 
 export async function copy(accessor: OPFSAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   let srcHandle: FileSystemFileHandle
   try {
     srcHandle = await resolveFileHandle(root, src.mountPath, { create: false })

@@ -42,7 +42,7 @@ export async function read(
 ): Promise<Uint8Array> {
   const offset = options?.offset ?? 0
   const size = options?.size ?? null
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const timer = startOp()
   const virtual = path.mountPath
   let handle: FileSystemFileHandle

@@ -279,11 +279,11 @@ def _vfs_defect(built: BaseVFS) -> str | None:
     here would accept a class that supplies every member and then watch
     it be rejected two doors later, which is the opposite of what this
     guard is for. Deliberately unlike the TypeScript twin, which does
-    check members: ``VFS`` is an interface there, erased at runtime,
-    so structural is the only contract there is and nothing downstream
-    can ask for more. Here ``BaseVFS`` supplies every member, so a
-    subclass cannot be missing one and there is nothing left to check
-    but the name.
+    check members: a script file there may load its own copy of the
+    package, so an ``instanceof`` would refuse a class that extends
+    ``BaseVFS`` in every sense but module identity. Here ``BaseVFS``
+    supplies every member, so a subclass cannot be missing one and
+    there is nothing left to check but the name.
 
     Args:
         built (BaseVFS): the instance the referenced class produced.
@@ -370,5 +370,4 @@ def build_vfs(name: str, config: dict[str, Any] | None = None) -> BaseVFS:
         defect = _vfs_defect(built)
         if defect is not None:
             raise TypeError(f"VFS ref {name!r} {defect}")
-    built.vfs_ref = name
     return built

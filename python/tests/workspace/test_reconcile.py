@@ -89,7 +89,7 @@ async def test_may_serve_cached_no_fingerprint_forces_reread():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.namespace.ensure_loaded()
     mount = ws.namespace.mount_for("/data/f.txt")
-    assert mount.vfs.SUPPORTS_SNAPSHOT is False
+    assert mount.vfs.supports_snapshot is False
     rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
     assert await rec.may_serve_cached(mount, "/data/f.txt") is False
 
@@ -147,9 +147,10 @@ async def test_always_probes_live_s3_with_warm_index(index_type, surface,
         ws = Workspace({"/s3": vfs},
                        index=index,
                        consistency=ConsistencyPolicy.ALWAYS)
+        store = ws.mount("/s3").index_store
         try:
             assert (await ws.shell("ls /s3/")).exit_code == 0
-            assert (await vfs.index.get("/s3/f.txt")).entry is not None
+            assert (await store.get("/s3/f.txt")).entry is not None
             assert (await ws.shell("cat /s3/f.txt")).stdout == b"v1"
             assert await ws.cache.exists("/s3/f.txt")
             if change == "overwrite":
@@ -167,7 +168,7 @@ async def test_always_probes_live_s3_with_warm_index(index_type, surface,
                 with pytest.raises(FileNotFoundError):
                     await ws.vfs.read("/s3/f.txt")
         finally:
-            await vfs.index.clear()
+            await store.clear()
             await ws.close()
 
 
@@ -179,7 +180,7 @@ async def test_unverified_probe_cannot_serve_cached_bytes(
     ws = Workspace({"/data": RAMVFS()})
     try:
         mount = ws.namespace.mount_for("/data/f.txt")
-        monkeypatch.setattr(mount.vfs, "SUPPORTS_SNAPSHOT", True)
+        monkeypatch.setattr(mount.vfs, "supports_snapshot", True)
         await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
 
         async def stat(*args, **kwargs):

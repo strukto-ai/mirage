@@ -16,7 +16,6 @@ import {
   Workspace,
   configToWorkspaceArgs,
   loadWorkspaceConfigFile,
-  type MountSpec,
 } from '@struktoai/mirage-node'
 
 // The reviewer's policy as a document. workspace.yaml names the program
@@ -62,11 +61,7 @@ function pad(text: string, width: number): string {
 
 async function main(): Promise<void> {
   const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(CONFIG))
-  const mounts: Record<string, MountSpec> = {}
-  for (const [prefix, [vfs, mode]] of Object.entries(args.mounts)) {
-    mounts[prefix] = [vfs, mode]
-  }
-  const ws = new Workspace(mounts, args.options)
+  const ws = new Workspace(args.mounts, args.options)
   try {
     for (const line of SEED) await ws.shell(line)
     ws.createSession('reviewer', { profile: 'reviewer' })

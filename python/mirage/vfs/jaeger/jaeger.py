@@ -16,15 +16,14 @@ from typing import Any
 
 from mirage.accessor.jaeger import JaegerAccessor
 from mirage.commands.builtin.jaeger import COMMANDS
-from mirage.core.jaeger.readdir import readdir
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.ops.jaeger import OPS as JAEGER_VFS_OPS
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.jaeger.config import JaegerConfig
 from mirage.vfs.jaeger.prompt import PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class JaegerVFS(BaseVFS):
@@ -35,28 +34,19 @@ class JaegerVFS(BaseVFS):
     # Every listed file carries an exact size: a trace is rendered at readdir
     # from the search payload the listing already fetched, and operations.json
     # is sized by one call per service directory the caller opens.
-    SIZES_ALWAYS_KNOWN: bool = True
-    PROMPT: str = PROMPT
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
 
     def __init__(self, config: JaegerConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = JaegerAccessor(self.config)
-        for command in COMMANDS:
-            self.register(command)
-        for op in JAEGER_VFS_OPS:
-            self.register_op(op)
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(
-            self.accessor,
-            paths,
-            index=self._index,
-        )
+    def ops(self) -> list[RegisteredOp]:
+        return JAEGER_VFS_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

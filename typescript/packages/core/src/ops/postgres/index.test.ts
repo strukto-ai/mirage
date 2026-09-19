@@ -17,8 +17,8 @@ import { describe, expect, it } from 'vitest'
 import { POSTGRES_OPS } from './index.ts'
 
 describe('POSTGRES_OPS', () => {
-  it('registers exactly read, readdir, and stat for the postgres VFS', () => {
-    expect(POSTGRES_OPS.map((o) => o.name).sort()).toEqual(['read', 'readdir', 'stat'])
+  it('registers glob, read, readdir, and stat for the postgres VFS', () => {
+    expect(POSTGRES_OPS.map((o) => o.name).sort()).toEqual(['glob', 'read', 'readdir', 'stat'])
   })
 
   it('all ops target VFSName.POSTGRES and are read-only', () => {

@@ -20,6 +20,7 @@ from mirage.secrets.config import SecretSource
 from mirage.secrets.sources import resolve_config_secrets, resolve_sources_for
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.registry import build_vfs
+from mirage.workspace.mount.spec import Mount
 from mirage.workspace.snapshot import requires_vfs_override, to_state_dict
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
@@ -59,9 +60,10 @@ async def build_override_mounts(
         declared, [config for _, config in blocks.values()])
     out: dict[str, Any] = {}
     for prefix, (vfs_name, config) in blocks.items():
-        out[norm_mount_prefix(prefix)] = build_vfs(
+        built = build_vfs(
             vfs_name, await resolve_config_secrets(config, sources,
                                                    f"mounts.{prefix}.config"))
+        out[norm_mount_prefix(prefix)] = Mount(vfs=built, vfs_ref=vfs_name)
     return out
 
 

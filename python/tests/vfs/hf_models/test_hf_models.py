@@ -33,7 +33,7 @@ def test_config_immutable():
 
 def test_vfs_registers_ops_and_commands():
     r = HfModelsVFS(HfModelsConfig(repo_id="org/model"))
-    op_names = {o.name for o in r.ops_list()}
+    op_names = {o.name for o in r.ops()}
     cmd_names = {c.name for c in r.commands()}
     assert {"read", "readdir", "stat"} <= op_names
     assert {"cat", "ls", "stat"} <= cmd_names

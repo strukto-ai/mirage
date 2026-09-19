@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VFS } from '../../vfs/base.ts'
+import type { IndexConfig } from '../../cache/index/config.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import type { Limit, MountBackend, MountMode } from '../../types.ts'
 
 export interface MountSpecOptions {
@@ -29,11 +30,24 @@ export interface MountSpecOptions {
    */
   mountpoint?: string
   commandLimits?: Record<string, Limit>
+  /**
+   * The `vfs:` value the driver was built from: a registry name (`s3`)
+   * or a code reference (`./wiki.mjs:WikiVFS`), null for one constructed
+   * in code. A snapshot records it so the loader can rebuild the mount
+   * through the same door.
+   */
+  vfsRef?: string | null
+  /**
+   * The index store this mount runs its driver under; omitted takes the
+   * workspace's index config, or a RAM store at the driver's `indexTtl`
+   * when there is none.
+   */
+  index?: IndexConfig
 }
 
 export class Mount {
   constructor(
-    readonly vfs: VFS,
+    readonly vfs: BaseVFS,
     readonly options: MountSpecOptions = {},
   ) {}
 }

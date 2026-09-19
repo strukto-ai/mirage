@@ -17,8 +17,8 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { DISK_OPS } from './index.ts'
 
 describe('DISK_OPS', () => {
-  it('registers the expected 12 ops with VFS=disk', () => {
-    expect(DISK_OPS).toHaveLength(12)
+  it('registers the expected 13 ops with VFS=disk', () => {
+    expect(DISK_OPS).toHaveLength(13)
     for (const op of DISK_OPS) expect(op.vfs).toBe(VFSName.DISK)
   })
 
@@ -28,6 +28,7 @@ describe('DISK_OPS', () => {
       new Set([
         'append',
         'create',
+        'glob',
         'mkdir',
         'read',
         'readdir',

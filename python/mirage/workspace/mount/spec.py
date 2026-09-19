@@ -14,6 +14,7 @@
 
 from dataclasses import dataclass, field
 
+from mirage.cache.index import IndexConfig
 from mirage.types import Limit, MountBackend, MountMode
 from mirage.vfs.base import BaseVFS
 
@@ -29,3 +30,12 @@ class Mount:
     # directory appropriate for the backend. Ignored when backend is VFS.
     mountpoint: str | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)
+    # The ``vfs:`` value the driver was built from: a registry name
+    # (``"s3"``) or a code reference (``"./wiki.py:WikiVFS"``), None for
+    # one constructed in code. A snapshot records it so the loader can
+    # rebuild the mount through the same door.
+    vfs_ref: str | None = None
+    # The index store this mount runs its driver under; None takes the
+    # workspace's index config, or a RAM store at the driver's
+    # ``index_ttl`` when there is none.
+    index: IndexConfig | None = None

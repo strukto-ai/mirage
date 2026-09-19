@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+from dataclasses import replace
 
 import pytest
 
@@ -273,6 +274,12 @@ class CachingRAM(RAMVFS):
     caches_reads = True
     name = "s3"
 
+    def ops(self):
+        return [replace(ro, vfs=self.name) for ro in super().ops()]
+
+    def commands(self):
+        return [replace(rc, vfs=self.name) for rc in super().commands()]
+
 
 @pytest.mark.asyncio
 async def test_a_capped_read_records_what_the_backend_moved():
@@ -327,6 +334,12 @@ class HardCapProdReads(Policy):
 class ColdRemote(RAMVFS):
     caches_reads = False
     name = "s3"
+
+    def ops(self):
+        return [replace(ro, vfs=self.name) for ro in super().ops()]
+
+    def commands(self):
+        return [replace(rc, vfs=self.name) for rc in super().commands()]
 
 
 @pytest.mark.asyncio

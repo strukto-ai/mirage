@@ -25,11 +25,10 @@ from mirage.vfs.gslides import GSlidesConfig, GSlidesVFS
 
 
 def _make_gslides_ops() -> tuple[Ops, IndexCacheStore]:
-    # Mounting re-derives the VFS's index from the workspace's
-    # config, so the store to seed is the one the mount ends up with.
+    # The store to seed is the one the mount runs the driver under.
     vfs = GSlidesVFS(config=GSlidesConfig(client_id="x", refresh_token="y"))
     ws = Workspace({"/gslides/": vfs}, mode=MountMode.READ)
-    return ws.vfs, vfs.index
+    return ws.vfs, ws.mount("/gslides/").index_store
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
+from tests.fixtures.driver_ops import ops
 
 
 class FakeClient:
@@ -52,7 +53,7 @@ async def test_grep_recursive_matches_content():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
     source, _io = await _command(res, "grep")(res.accessor, [p], ["bananas"],
-                                              CommandOpts(index=res.index,
+                                              CommandOpts(index=ops(res).index,
                                                           flags={"r": True}))
     out = await _bytes(source)
     assert b"bananas" in out
@@ -63,7 +64,7 @@ async def test_grep_matches_the_json_file_contents():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
     source, _io = await _command(res, "grep")(res.accessor, [p], ["food"],
-                                              CommandOpts(index=res.index,
+                                              CommandOpts(index=ops(res).index,
                                                           flags={"r": True}))
     assert b"food" in await _bytes(source)
 
@@ -73,6 +74,6 @@ async def test_grep_bare_directory_is_a_directory():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
     source, io = await _command(res, "grep")(res.accessor, [p], ["bananas"],
-                                             CommandOpts(index=res.index))
+                                             CommandOpts(index=ops(res).index))
     assert io.exit_code == 2
     assert b"Is a directory" in (io.stderr or b"")

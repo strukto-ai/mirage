@@ -35,6 +35,7 @@ from mirage.vfs.registry import VFSEntry, resolve_class, resolve_entry
 from mirage.vfs.secrets import (has_redacted_secret, redacted_config_dump,
                                 revealed_config_dump)
 from mirage.workspace.mount.namespace import NodeMeta
+from mirage.workspace.mount.spec import Mount
 from mirage.workspace.session.resolve import narrow
 from mirage.workspace.session.session import (SessionState, vars_from_fields,
                                               vars_to_fields)
@@ -165,7 +166,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
             MountKey.CONSISTENCY: m.consistency.value,
             MountKey.VFS_CLASS:
             f"{type(m.vfs).__module__}.{type(m.vfs).__name__}",
-            MountKey.VFS_REF: m.vfs.vfs_ref,
+            MountKey.VFS_REF: m.vfs_ref,
             MountKey.VFS_STATE: vfs_state,
         })
 
@@ -277,12 +278,23 @@ def build_mount_args(state: dict[str, Any],
             f"{missing_clis}. These CLIs were saved with redacted "
             "config secrets.")
 
-    mount_args: dict[str, tuple[Any, ...]] = {}
+    mount_args: dict[str, Mount] = {}
     for m in state[StateKey.MOUNTS]:
         prefix = norm_mount_prefix(m[MountKey.PREFIX])
-        prov = (overrides[prefix]
-                if prefix in overrides else _construct_vfs(m))
-        mount_args[m[MountKey.PREFIX]] = (prov, MountMode(m[MountKey.MODE]))
+        override = overrides.get(prefix)
+        # A live override placed as a ``Mount`` names the door it came
+        # through; a bare VFS, or a rebuilt one, keeps the saved
+        # reference so a second round trip rebuilds through the same
+        # door.
+        if isinstance(override, Mount):
+            prov, ref = override.vfs, override.vfs_ref
+        else:
+            prov = override if override is not None else _construct_vfs(m)
+            ref = m.get(MountKey.VFS_REF)
+        mount_args[m[MountKey.PREFIX]] = Mount(vfs=prov,
+                                               mode=MountMode(
+                                                   m[MountKey.MODE]),
+                                               vfs_ref=ref)
 
     cli_args: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] = {}
     for e in cli_entries:
@@ -610,9 +622,6 @@ def _construct_vfs(mount_state: dict[str, Any]):
             built = cls(config_cls(**config))
         else:
             built = cls(**config)
-    # Carried forward so a second round trip rebuilds through the same
-    # reference; None when the original was constructed in code.
-    built.vfs_ref = mount_state.get(MountKey.VFS_REF)
     return built
 
 
@@ -621,10 +630,10 @@ def requires_vfs_override(mount_state: dict[str, Any]) -> bool:
 
     Three reasons, and TypeScript's ``vfsStateRequiresOverride``
     reads the first two the same way: the VFS said so
-    (``needs_override``, which ``GenericVFS`` writes by default
-    because the base cannot know a subclass's constructor), a config
-    secret was redacted, or the class is one this process cannot import
-    (a script file loaded under the loader's module name with no
+    (``needs_override``, which a driver built from a table writes by
+    default because the base cannot know a subclass's constructor), a
+    config secret was redacted, or the class is one this process cannot
+    import (a script file loaded under the loader's module name with no
     reference recorded, or a class from a package that is not
     installed). The redaction check scans every saved value rather than
     the secret fields of the class the mount resolves to: an alias

@@ -18,7 +18,7 @@ from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.mount.storage import make_storage_key, vfs_storage_id
+from mirage.workspace.mount.storage import make_storage_key
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -103,21 +103,6 @@ def test_nested_roots_do_not_collide_on_a_sibling(tmp_path):
         "/b/": DiskVFS(root=str(sibling)),
     })
     assert key(_spec("/a/y.txt")) != key(_spec("/b/y.txt"))
-
-
-def test_vfs_without_storage_id_keeps_object_identity():
-    """A custom VFS may not inherit BaseVFS.storage_id.
-
-    Falling back to the mount prefix would give one object two
-    identities and let a self-move through.
-    """
-
-    class _Custom:
-        pass
-
-    shared = _Custom()
-    assert vfs_storage_id(shared) == vfs_storage_id(shared)
-    assert vfs_storage_id(shared) != vfs_storage_id(_Custom())
 
 
 def test_path_outside_every_mount_falls_back_to_itself():

@@ -27,7 +27,6 @@ const KEY_PREFIX = "mirage:fs:";
 
 async function seed(): Promise<void> {
   const vfs = new RedisVFS({ url: REDIS_URL, keyPrefix: KEY_PREFIX });
-  await vfs.open();
   await vfs.store.clear();
   await vfs.store.addDir("/");
 
@@ -49,7 +48,10 @@ async function main(): Promise<void> {
 
   const vfs = new RedisVFS({ url: REDIS_URL, keyPrefix: KEY_PREFIX });
   const ws = new Workspace({
-    "/data/": new Mount(vfs, { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
+    "/data/": new Mount(vfs, {
+      mode: MountMode.WRITE,
+      backend: MountBackend.FUSE,
+    }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

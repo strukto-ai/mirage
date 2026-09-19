@@ -33,7 +33,6 @@ def test_authoring_surface_is_stable():
         "CommandSpec",
         "FileStat",
         "FlagView",
-        "GenericVFS",
         "IOResult",
         "Mount",
         "PathSpec",

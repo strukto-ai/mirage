@@ -20,6 +20,7 @@ import pytest
 from mirage.core.notion.config import NotionConfig
 from mirage.types import PathSpec
 from mirage.vfs.notion.notion import NotionVFS
+from tests.fixtures.driver_ops import ops
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("NOTION_API_KEY"),
@@ -41,7 +42,7 @@ def vfs(config):
 async def test_readdir_root(vfs):
     from mirage.core.notion.readdir import readdir
     entries = await readdir(vfs.accessor, PathSpec.from_str_path("/"),
-                            vfs.index)
+                            ops(vfs).index)
     assert any("pages" in e for e in entries)
 
 
@@ -49,7 +50,7 @@ async def test_readdir_root(vfs):
 async def test_readdir_pages(vfs):
     from mirage.core.notion.readdir import readdir
     entries = await readdir(vfs.accessor, PathSpec.from_str_path("/pages"),
-                            vfs.index)
+                            ops(vfs).index)
     assert len(entries) > 0
 
 
@@ -58,13 +59,13 @@ async def test_read_page_json(vfs):
     from mirage.core.notion.read import read
     from mirage.core.notion.readdir import readdir
     pages = await readdir(vfs.accessor, PathSpec.from_str_path("/pages"),
-                          vfs.index)
+                          ops(vfs).index)
     if not pages:
         pytest.skip("No pages found")
     first_page = pages[0]
     data = await read(vfs.accessor,
                       PathSpec.from_str_path(f"{first_page}/page.json"),
-                      vfs.index)
+                      ops(vfs).index)
     page = json.loads(data)
     assert "page_id" in page
     assert "title" in page

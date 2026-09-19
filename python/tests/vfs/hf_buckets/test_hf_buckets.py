@@ -23,7 +23,7 @@ def test_vfs_name():
     r = HfBucketsVFS(HfBucketsConfig(bucket="o/b"))
     assert r.name == VFSName.HF_BUCKETS
     assert r.caches_reads is True
-    assert r.SUPPORTS_SNAPSHOT is True
+    assert r.supports_snapshot is True
 
 
 def test_config_immutable():
@@ -34,7 +34,7 @@ def test_config_immutable():
 
 def test_vfs_registers_ops():
     r = HfBucketsVFS(HfBucketsConfig(bucket="o/b"))
-    op_names = {o.name for o in r.ops_list()}
+    op_names = {o.name for o in r.ops()}
     assert {"read", "readdir", "stat", "write", "create", "unlink"} <= op_names
 
 

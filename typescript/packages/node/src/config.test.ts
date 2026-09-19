@@ -449,7 +449,7 @@ describe('configToWorkspaceArgs', () => {
       },
     })
     const args = await configToWorkspaceArgs(cfg)
-    const limits = args.mounts['/']?.[2]
+    const limits = args.mounts['/']?.options.commandLimits
     expect(limits?.cat?.maxLines).toBe(10)
     expect(limits?.cat?.timeoutSeconds).toBe(5)
     expect(limits?.cat?.onExceed).toBe('error')
@@ -458,7 +458,7 @@ describe('configToWorkspaceArgs', () => {
   it('defaults to no command_limits when omitted', async () => {
     const cfg = loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } } })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.mounts['/']?.[2]).toEqual({})
+    expect(args.mounts['/']?.options.commandLimits).toEqual({})
   })
 
   it('rejects an invalid on_exceed value', async () => {
@@ -621,7 +621,7 @@ describe('configToWorkspaceArgs', () => {
       paths: { hide: ['/repo/docs/internal'] },
       vars: { hide: ['AWS_*', 'SLACK_TOKEN'] },
     })
-    expect(args.mounts['/scratch']?.[1]).toBe(MountMode.EXEC)
+    expect(args.mounts['/scratch']?.options.mode).toBe(MountMode.EXEC)
   })
 
   it('a deny rule with an unknown key fails at load', () => {
@@ -917,7 +917,7 @@ describe('mounts vfs: reference', () => {
     writeFileSync(join(dir, 'ws.yaml'), 'mounts:\n  /wiki:\n    vfs: ./wiki.mjs:WikiVFS\n')
     const cfg = loadWorkspaceConfigFile(join(dir, 'ws.yaml'))
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.mounts['/wiki']?.[0]?.constructor.name).toBe('WikiVFS')
+    expect(args.mounts['/wiki']?.vfs.constructor.name).toBe('WikiVFS')
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1406,7 +1406,7 @@ describe('a mount or CLI credential from the secrets plane', () => {
     )
     const entry = args.mounts['/slack']
     expect(entry).toBeDefined()
-    expect(JSON.stringify(entry?.[0])).not.toContain('CONFIG_DOOR_PROBE')
+    expect(JSON.stringify(entry?.vfs)).not.toContain('CONFIG_DOOR_PROBE')
   })
 
   it('resolves a CLI pointer against the same instances', async () => {

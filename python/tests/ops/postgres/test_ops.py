@@ -26,6 +26,7 @@ def _op(name: str):
 def test_registers_read_only_trio():
     rows = {(o.name, o.vfs, o.filetype, o.write) for o in OPS}
     assert rows == {
+        ("glob", "postgres", None, False),
         ("read", "postgres", None, False),
         ("readdir", "postgres", None, False),
         ("stat", "postgres", None, False),

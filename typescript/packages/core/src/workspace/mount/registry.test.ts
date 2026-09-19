@@ -18,26 +18,20 @@ import { CLISpec } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { BaseVFS, type VFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { isNoMount } from '../../utils/errors.ts'
 import { MountCommandUnsupported, MountRegistry } from './registry.ts'
 
-class StubVFS extends BaseVFS implements VFS {
-  readonly kind = 'stub'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+class StubVFS extends BaseVFS {
+  override readonly name = 'stub'
   override close(): Promise<void> {
     return Promise.resolve()
   }
 }
 
-class RAMStubVFS extends BaseVFS implements VFS {
-  readonly kind = 'ram'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+class RAMStubVFS extends BaseVFS {
+  override readonly name = 'ram'
   override close(): Promise<void> {
     return Promise.resolve()
   }
@@ -193,17 +187,17 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
     expect(mount).toBe(b)
   })
 
-  it('still allows fallback when fallback cmd is general (e.g. seq)', async () => {
-    const reg = new MountRegistry(
-      { '/a': new RAMStubVFS(), '/b': new RAMStubVFS() },
-      MountMode.READ,
-    )
-    const b = reg.mountForPrefix('/b')
-    const [seqB] = command({ name: 'seq', vfs: null, spec: EMPTY_SPEC, fn: NOOP_CMD })
-    if (seqB === undefined) throw new Error('missing seq cmd')
-    b.registerGeneral(seqB)
-    const mount = await reg.resolveMount('seq', [], '/a/x')
-    expect(mount).toBe(b)
+  it('never answers a general command with the /dev mount', () => {
+    // Every mount carries the general set (place() registers it), but
+    // /dev must not claim command routing, or a pathless general command
+    // would resolve to the device mount. Mirrors Python's
+    // test_mount_for_command_never_answers_dev.
+    const reg = new MountRegistry({}, MountMode.READ)
+    expect(reg.mountForCommand('seq')).toBeNull()
+    reg.mount('/d/', new RAMStubVFS(), MountMode.WRITE)
+    const mount = reg.mountForCommand('seq')
+    expect(mount).not.toBeNull()
+    expect(mount?.prefix).toBe('/d/')
   })
 
   it('finds nested VFS mount even when a parent mount intercepts cwd', async () => {
@@ -299,11 +293,8 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
   })
 })
 
-class LimitedVFS extends BaseVFS implements VFS {
-  readonly kind = 'limited'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+class LimitedVFS extends BaseVFS {
+  override readonly name = 'limited'
   override close(): Promise<void> {
     return Promise.resolve()
   }

@@ -12,50 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import dataclasses
 from typing import Any
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor, HfBucketsConfig
 from mirage.commands.builtin.hf_buckets import COMMANDS as HF_COMMANDS
-from mirage.core.hf_buckets.constants import SCOPE_ERROR
-from mirage.core.hf_buckets.create import create
-from mirage.core.hf_buckets.du import entries as du_entries
-from mirage.core.hf_buckets.du import size as du_size
-from mirage.core.hf_buckets.exists import exists
-from mirage.core.hf_buckets.find import find
-from mirage.core.hf_buckets.mkdir import mkdir
-from mirage.core.hf_buckets.read import read_bytes
-from mirage.core.hf_buckets.readdir import readdir
-from mirage.core.hf_buckets.stat import stat as hf_stat
-from mirage.core.hf_buckets.stream import range_read, read_stream
-from mirage.core.hf_buckets.unlink import unlink
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.hf_buckets.watch import build_delta_hook
-from mirage.core.hf_buckets.write import write_bytes
 from mirage.ops.hf_buckets import OPS as HF_OPS
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
-from mirage.utils.key_prefix import mount_key
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.hf_buckets.prompt import PROMPT
 from mirage.watch.base import DeltaHook
-
-_resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
-
-_OPS = {
-    "read_bytes": read_bytes,
-    "readdir": readdir,
-    "stat": hf_stat,
-    "read_stream": read_stream,
-    "range_read": range_read,
-    "du_size": du_size,
-    "du_entries": du_entries,
-    "exists": exists,
-    "find_flat": find,
-    "write": write_bytes,
-    "create": create,
-    "unlink": unlink,
-    "mkdir": mkdir,
-}
 
 
 class HfBucketsVFS(BaseVFS):
@@ -66,34 +35,23 @@ class HfBucketsVFS(BaseVFS):
     # The Hub tree API reports each file's exact byte size (the LFS
     # object size for LFS files); readdir backfills any lister-omitted
     # size with one stat.
-    SIZES_ALWAYS_KNOWN: bool = True
-    _ops: dict[str, Any] = _OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = True
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = True
 
     def __init__(self, config: HfBucketsConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = HfBucketsAccessor(self.config)
-        for fn in HF_COMMANDS:
-            self.register(fn)
-        for op in HF_OPS:
-            self.register_op(op)
+
+    def ops(self) -> list[RegisteredOp]:
+        return HF_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(HF_COMMANDS)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
-
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        if prefix:
-            paths = [
-                dataclasses.replace(p, vfs_path=mount_key(p.virtual, prefix))
-                if isinstance(p, PathSpec) else p for p in paths
-            ]
-        return await _resolve_glob(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

@@ -53,7 +53,7 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const virtual = path.mountPath
   const segs = splitSegments(virtual)
   if (segs.length === 0) return

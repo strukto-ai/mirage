@@ -72,7 +72,7 @@ describe('parseDatabricksCfg', () => {
 describe('DatabricksVolumeVFS', () => {
   it('creates with explicit credentials and exposes commands/ops', async () => {
     const vfs = await DatabricksVolumeVFS.create(normalizeDatabricksVolumeConfig(BASE_CONFIG))
-    expect(vfs.kind).toBe(VFSName.DATABRICKS_VOLUME)
+    expect(vfs.name).toBe(VFSName.DATABRICKS_VOLUME)
     expect(vfs.cachesReads).toBe(true)
     expect(vfs.commands().length).toBeGreaterThan(20)
     expect(vfs.ops().map((op) => op.name)).toContain('write')
@@ -82,6 +82,6 @@ describe('DatabricksVolumeVFS', () => {
 
   it('builds via the registry under the python name', async () => {
     const vfs = await buildVfs('databricks_volume', { ...BASE_CONFIG, root_path: '/r' })
-    expect(vfs.kind).toBe(VFSName.DATABRICKS_VOLUME)
+    expect(vfs.name).toBe(VFSName.DATABRICKS_VOLUME)
   })
 })

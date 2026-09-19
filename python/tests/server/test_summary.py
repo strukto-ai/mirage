@@ -22,7 +22,7 @@ class _PromptVFS(RAMVFS):
 
     def __init__(self, prompt: str) -> None:
         super().__init__()
-        self.PROMPT = prompt
+        self.prompt = prompt
 
 
 def test_short_prompt_is_returned_whole():

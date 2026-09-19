@@ -15,14 +15,15 @@
 from typing import Any
 
 from mirage.accessor.langfuse import LangfuseAccessor
-from mirage.core.langfuse.readdir import readdir
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.commands.builtin.langfuse import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
+from mirage.ops.langfuse import OPS as LANGFUSE_VFS_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.langfuse.config import LangfuseConfig
 from mirage.vfs.langfuse.prompt import PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class LangfuseVFS(BaseVFS):
@@ -30,30 +31,18 @@ class LangfuseVFS(BaseVFS):
     accessor: LangfuseAccessor
     name: str = VFSName.LANGFUSE
     caches_reads: bool = True
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: LangfuseConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = LangfuseAccessor(self.config)
-        from mirage.commands.builtin.langfuse import COMMANDS
-        from mirage.ops.langfuse import OPS as LANGFUSE_VFS_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in LANGFUSE_VFS_OPS:
-            self.register_op(fn)
+    def ops(self) -> list[RegisteredOp]:
+        return LANGFUSE_VFS_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(
-            self.accessor,
-            paths,
-            index=self._index,
-        )
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

@@ -14,13 +14,14 @@
 
 import type { HandOff } from '../../policy/types.ts'
 import type { CacheConfig } from '../../cache/file/config.ts'
-import type { IndexConfig } from '../../cache/index/config.ts'
 import type { CLISpec } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { IndexConfig } from '../../cache/index/config.ts'
+import type { Mount } from '../mount/spec.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
@@ -40,9 +41,10 @@ import type { WorkspaceStateStore } from '../store/base.ts'
  * `(VFS, mode, limits)` tuple form).
  */
 export type MountSpec =
-  | VFS
-  | readonly [VFS, MountMode]
-  | readonly [VFS, MountMode, Record<string, Limit>]
+  | BaseVFS
+  | readonly [BaseVFS, MountMode]
+  | readonly [BaseVFS, MountMode, Record<string, Limit>]
+  | Mount
 
 export interface WorkspaceOptions {
   mode?: MountMode

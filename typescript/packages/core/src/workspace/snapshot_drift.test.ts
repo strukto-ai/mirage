@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Accessor } from '../accessor/base.ts'
 import { record, revisionFor, runWithRecording, startOp } from '../observe/context.ts'
 import { type OpKwargs, OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
-import { BaseVFS, type VFS } from '../vfs/base.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import { writeSnapshotTar } from './snapshot/tar_io.ts'
@@ -70,45 +70,22 @@ class FakeRemoteAccessor extends Accessor {
   }
 }
 
-class FakeRemoteVFS extends BaseVFS implements VFS {
-  readonly kind = 'fake-remote'
-  readonly cachesReads = true
-  readonly supportsSnapshot = true
-  readonly accessor: FakeRemoteAccessor
+class FakeRemoteVFS extends BaseVFS {
+  override readonly name = 'fake-remote'
+  override readonly cachesReads = true
+  override readonly supportsSnapshot = true
+  override readonly accessor: FakeRemoteAccessor
 
   constructor(accessor: FakeRemoteAccessor) {
     super()
     this.accessor = accessor
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
   override close(): Promise<void> {
     return Promise.resolve()
   }
 
-  stat(p: PathSpec): Promise<FileStat> {
-    const entry = this.accessor.blobs.get(p.virtual)
-    if (entry === undefined) {
-      const err = new Error(`not found: ${p.virtual}`) as Error & { code: string }
-      err.code = 'ENOENT'
-      return Promise.reject(err)
-    }
-    return Promise.resolve(
-      new FileStat({
-        name: p.virtual.split('/').pop() ?? p.virtual,
-        size: entry.bytes.byteLength,
-        type: FileType.FILE,
-        content: ContentType.TEXT,
-        fingerprint: entry.fingerprint,
-        revision: entry.revision,
-      }),
-    )
-  }
-
   override getState(): { type: string; config: { token: string } } {
-    return { type: this.kind, config: { token: '<REDACTED>' } }
+    return { type: this.name, config: { token: '<REDACTED>' } }
   }
 }
 
@@ -261,7 +238,6 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
         { '/remote/': new FakeRemoteVFS(accessor) },
       )
       const index = loaded.namespace.mountFor('/remote/a.txt').index
-      if (index === undefined) throw new Error('missing index')
       await index.put(
         '/remote/a.txt',
         new IndexEntry({ id: 'a', name: 'a.txt', resourceType: 'file', size: 2 }),
@@ -548,10 +524,7 @@ it.each(
     })
     let closed = false
     class AsyncStateVFS extends BaseVFS {
-      readonly kind = 'ram'
-      open(): Promise<void> {
-        return Promise.resolve()
-      }
+      override readonly name = 'ram'
       override async getState(): Promise<{ type: string }> {
         enter()
         await release

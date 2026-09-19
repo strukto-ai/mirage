@@ -2,24 +2,14 @@ from typing import Any
 
 from mirage.accessor.chroma import ChromaAccessor
 from mirage.commands.builtin.chroma import COMMANDS
-from mirage.core.chroma.read import read_bytes, read_stream
-from mirage.core.chroma.readdir import readdir
-from mirage.core.chroma.stat import stat
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.ops.chroma import OPS as CHROMA_VFS_OPS
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.chroma.config import ChromaConfig
 from mirage.vfs.chroma.prompt import PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
-
-_CHROMA_OPS = {
-    "read_bytes": read_bytes,
-    "read_stream": read_stream,
-    "readdir": readdir,
-    "stat": stat,
-}
 
 
 class ChromaVFS(BaseVFS):
@@ -30,27 +20,20 @@ class ChromaVFS(BaseVFS):
     # Every file is sized exactly, by one chunk scan per directory the
     # caller stats; the path tree's own size is the producer's source
     # number and never becomes the reported byte length.
-    SIZES_ALWAYS_KNOWN: bool = True
-    _ops = _CHROMA_OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = False
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = False
 
     def __init__(self, config: ChromaConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = ChromaAccessor(config)
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in CHROMA_VFS_OPS:
-            self.register_op(fn)
+    def ops(self) -> list[RegisteredOp]:
+        return CHROMA_VFS_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return {

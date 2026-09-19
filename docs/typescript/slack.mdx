@@ -153,7 +153,7 @@ Every standard MIRAGE shell command works on the mounted Slack tree:
 | `find`          | Recursive search with `-name`, `-maxdepth` |
 | `tree`          | Directory tree view                        |
 | `pwd` / `cd`    | Navigate the virtual tree                  |
-| `echo` (glob)   | Glob expansion via `resolve_glob`          |
+| `echo` (glob)   | Glob expansion via the derived `glob` op   |
 
 Acting on Slack (sending, reacting, pins, member info, search) goes
 through the [slack CLI](/typescript/cli/slack) when installed; the

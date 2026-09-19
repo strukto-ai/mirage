@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskVFS } from '../vfs/disk/disk.ts'
@@ -147,7 +147,7 @@ export interface CrossEnv {
 
 interface MountHandle {
   kind: BackendKind
-  vfs: VFS
+  vfs: BaseVFS
   diskRoot: string | null
   ramVfs: RAMVFS | null
 }

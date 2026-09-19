@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
+import { exists as existsCore } from '../../core/disk/exists.ts'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
@@ -23,10 +25,9 @@ let root: string
 let cleanup: () => void
 let res: DiskVFS
 
-beforeEach(async () => {
+beforeEach(() => {
   ;({ root, cleanup } = tmpRoot('mirage-disk-create-op-'))
   res = new DiskVFS({ root })
-  await res.open()
 })
 afterEach(() => {
   cleanup()
@@ -35,13 +36,13 @@ afterEach(() => {
 describe('createOp', () => {
   it('creates an empty file', async () => {
     await createOp.fn(res.accessor, spec('/empty'), [], {})
-    expect((await res.readFile(spec('/empty'))).byteLength).toBe(0)
-    expect(await res.exists(spec('/empty'))).toBe(true)
+    expect((await ops(res).read(spec('/empty'))).byteLength).toBe(0)
+    expect(await existsCore(res.accessor, spec('/empty'))).toBe(true)
   })
 
   it('overwrites an existing file with empty contents', async () => {
-    await res.writeFile(spec('/x'), new TextEncoder().encode('full'))
+    await ops(res).write(spec('/x'), new TextEncoder().encode('full'))
     await createOp.fn(res.accessor, spec('/x'), [], {})
-    expect((await res.readFile(spec('/x'))).byteLength).toBe(0)
+    expect((await ops(res).read(spec('/x'))).byteLength).toBe(0)
   })
 })

@@ -19,7 +19,7 @@ from mirage.vfs.s3_alias import S3AliasVFS
 
 class BackblazeVFS(S3AliasVFS):
 
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: BackblazeConfig) -> None:
         super().__init__(config)

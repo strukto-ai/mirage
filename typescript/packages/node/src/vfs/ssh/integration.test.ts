@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHConfig } from './config.ts'
 import { SSHVFS } from './ssh.ts'
@@ -43,17 +44,17 @@ describe.skipIf(!enabled)('SSH integration (live host)', () => {
   })
 
   it('readdir / returns entries', async () => {
-    const entries = await r.readdir(PathSpec.fromStrPath('/'))
+    const entries = await ops(r).readdir(PathSpec.fromStrPath('/'))
     expect(entries.length).toBeGreaterThan(0)
   })
 
   it(`stat ${FILE} returns size > 0`, async () => {
-    const s = await r.stat(PathSpec.fromStrPath(FILE))
+    const s = await ops(r).stat(PathSpec.fromStrPath(FILE))
     expect(s.size ?? 0).toBeGreaterThan(0)
   })
 
-  it(`readFile ${FILE} returns non-empty bytes`, async () => {
-    const data = await r.readFile(PathSpec.fromStrPath(FILE))
+  it(`read ${FILE} returns non-empty bytes`, async () => {
+    const data = await ops(r).read(PathSpec.fromStrPath(FILE))
     expect(data.byteLength).toBeGreaterThan(0)
   })
 
@@ -63,12 +64,12 @@ describe.skipIf(!enabled)('SSH integration (live host)', () => {
     const path = `${TMPDIR}/mirage-ssh-test-${random}.txt`
     const payload = new TextEncoder().encode(`hello ${random}\n`)
     const ps = PathSpec.fromStrPath(path)
-    await r.writeFile(ps, payload)
+    await ops(r).write(ps, payload)
     try {
-      const back = await r.readFile(ps)
+      const back = await ops(r).read(ps)
       expect(new TextDecoder().decode(back)).toBe(`hello ${random}\n`)
     } finally {
-      await r.unlink(ps)
+      await ops(r).unlink(ps)
     }
   })
 })

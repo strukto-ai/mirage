@@ -14,11 +14,11 @@
 
 import { CacheEntry } from '../../cache/file/entry.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
-import { type VFSStateBase, vfsRefOf } from '../../vfs/base.ts'
+import type { VFSStateBase } from '../../vfs/base.ts'
 import { z } from 'zod'
 
 import { narrow } from '../session/resolve.ts'
@@ -59,6 +59,7 @@ import { VERSION } from '../../version.ts'
 import type { NodeMeta } from '../mount/namespace/namespace.ts'
 import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
 import type { Workspace } from '../workspace/workspace.ts'
+import { Mount } from '../mount/spec.ts'
 import type { MountArgs } from './config.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
 import type {
@@ -95,8 +96,8 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
       prefix: m.prefix,
       mode: m.mode,
       consistency: ConsistencyPolicy.LAZY,
-      vfs_class: m.vfs.kind,
-      vfs_ref: vfsRefOf(m.vfs),
+      vfs_class: m.vfs.name,
+      vfs_ref: m.vfsRef,
       vfs_state: state,
     })
   }
@@ -238,7 +239,7 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
 
 export function buildMountArgs(
   state: WorkspaceStateDict,
-  overrides: Record<string, VFS> = {},
+  overrides: Record<string, BaseVFS | Mount> = {},
   cliOverrides: CLIOverrides = {},
 ): MountArgs {
   if (state.version < FORMAT_VERSION) {
@@ -247,7 +248,7 @@ export function buildMountArgs(
         `(loader expects v${String(FORMAT_VERSION)})`,
     )
   }
-  const normalized: Record<string, VFS> = {}
+  const normalized: Record<string, BaseVFS | Mount> = {}
   for (const [prefix, vfs] of Object.entries(overrides)) {
     normalized[normMountPrefix(prefix)] = vfs
   }
@@ -273,15 +274,23 @@ export function buildMountArgs(
         `factory (register) or pass a live instance.`,
     )
   }
-  const mountArgs: Record<string, [VFS, MountMode]> = {}
+  const mountArgs: Record<string, Mount> = {}
   for (const m of state.mounts) {
     if (!VALID_MODES.includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
     }
-    mountArgs[m.prefix] = [
-      normalized[normMountPrefix(m.prefix)] ?? new RAMVFS(),
-      m.mode as MountMode,
-    ]
+    // A live override placed as a `Mount` names the door it
+    // came through; a bare VFS, or a rebuilt one, keeps the saved
+    // reference so a second round trip rebuilds through the same door.
+    const override = normalized[normMountPrefix(m.prefix)]
+    const placed = override instanceof Mount ? override : null
+    mountArgs[m.prefix] = new Mount(
+      placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
+      {
+        mode: m.mode as MountMode,
+        vfsRef: placed !== null ? (placed.options.vfsRef ?? null) : savedRef(m),
+      },
+    )
   }
   const cliEntries = state.clis ?? []
   const missingClis = cliEntries
@@ -316,7 +325,7 @@ export function buildMountArgs(
 }
 
 /** Builds the VFS a saved mount names, or null when it cannot. */
-export type SavedResourceBuilder = (entry: MountSnapshot) => Promise<VFS | null>
+export type SavedResourceBuilder = (entry: MountSnapshot) => Promise<BaseVFS | null>
 
 /**
  * The `vfs_ref` a saved mount was built from, or null: for one
@@ -351,7 +360,7 @@ export function restoresAsFreshRAM(entry: MountSnapshot): boolean {
  * or a code reference, which is how a mount declared as
  * `./wiki.mjs:WikiVFS` comes back), else the VFS's `type`, the
  * one locator a VFS constructed in code leaves. The ref comes first
- * because `type` is the class's `kind` and a subclass inherits it: an
+ * because `type` is the class's `name` and a subclass inherits it: an
  * alias registered over a builtin reports the builtin's type and rebuilt
  * as the builtin while the type was consulted first. A recorded ref this
  * registry cannot resolve is not a reason to fall back to that guess: the
@@ -385,10 +394,10 @@ export function savedVfsBuild(
  */
 export async function withRebuiltMounts(
   state: WorkspaceStateDict,
-  overrides: Record<string, VFS>,
+  overrides: Record<string, BaseVFS | Mount>,
   build: SavedResourceBuilder,
-): Promise<Record<string, VFS>> {
-  const merged: Record<string, VFS> = { ...overrides }
+): Promise<Record<string, BaseVFS | Mount>> {
+  const merged: Record<string, BaseVFS | Mount> = { ...overrides }
   const held = new Set(Object.keys(overrides).map(normMountPrefix))
   for (const m of state.mounts) {
     if (held.has(normMountPrefix(m.prefix))) continue

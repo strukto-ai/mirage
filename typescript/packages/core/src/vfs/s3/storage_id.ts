@@ -16,7 +16,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import type { S3Config } from './config.ts'
 
 /**
- * The storage identity of one S3-compatible mount.
+ * Where one S3-compatible mount's bytes live, as one string.
  *
  * `cp` and `mv` compare two operands to decide whether they name the same
  * file. Within one mount the mount-relative path answers that; across mounts
@@ -36,7 +36,7 @@ import type { S3Config } from './config.ts'
  * @param kind the VFS kind, which distinguishes the S3-compatible clones
  * @param config the mount's S3 config
  */
-export function s3StorageId(kind: string, config: S3Config): string {
+export function s3StorageLocation(kind: string, config: S3Config): string {
   const prefix = stripSlash(config.keyPrefix ?? '')
   const base = `${kind}:${config.endpoint ?? 'aws'}:${config.bucket}`
   return prefix === '' ? base : `${base}/${prefix}`

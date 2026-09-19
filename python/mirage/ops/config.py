@@ -99,6 +99,6 @@ class OpsMount:
     index: IndexCacheStore
     mode: MountMode
     ops: list[Any] = field(default_factory=list[Any])
-    # Mirrors BaseVFS.SIZES_ALWAYS_KNOWN. Read by the fskit mount
+    # Mirrors BaseVFS.sizes_always_known. Read by the fskit mount
     # guard, which cannot serve a VFS that sizes files only on read.
     sizes_always_known: bool = False

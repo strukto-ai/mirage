@@ -104,7 +104,7 @@ class Reconciler:
         """
         if self._consistency != ConsistencyPolicy.ALWAYS:
             return True
-        if not mount.vfs.SUPPORTS_SNAPSHOT:
+        if not mount.vfs.supports_snapshot:
             await self._cache.remove(path)
             await mount.index.clear()
             return False

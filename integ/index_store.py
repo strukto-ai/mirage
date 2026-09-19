@@ -64,12 +64,11 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 def make_store(prefix: str) -> tuple[Workspace, RedisIndexCacheStore]:
     """A RAM mount whose index the workspace config points at Redis."""
-    ram = RAMVFS()
-    ws = Workspace({DIR: ram},
+    ws = Workspace({DIR: RAMVFS()},
                    index=RedisIndexConfig(url=REDIS_URL,
                                           key_prefix=prefix,
                                           ttl=TTL))
-    store = ram.index
+    store = ws.mount(DIR).index_store
     if not isinstance(store, RedisIndexCacheStore):
         raise SystemExit(f"py: workspace index config did not reach the "
                          f"mount, got {type(store).__name__}")

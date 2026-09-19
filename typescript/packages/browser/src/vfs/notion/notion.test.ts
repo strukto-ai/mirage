@@ -36,7 +36,7 @@ describe('NotionVFS (browser)', () => {
   it('constructs with authProvider and exposes expected fields', () => {
     const authProvider = makeAuthProvider()
     const r = new NotionVFS({ authProvider })
-    expect(r.kind).toBe(VFSName.NOTION)
+    expect(r.name).toBe(VFSName.NOTION)
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ authProvider })

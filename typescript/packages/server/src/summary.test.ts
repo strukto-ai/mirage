@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
@@ -49,7 +49,7 @@ const ASTRAL = '\u{10400}'
 
 // `RAMVFS.prompt` is inferred as its own string literal, so a subclass
 // cannot widen it; the description only ever reads the field.
-function promptVfs(prompt: string): VFS {
+function promptVfs(prompt: string): BaseVFS {
   return Object.assign(new RAMVFS(), { prompt })
 }
 

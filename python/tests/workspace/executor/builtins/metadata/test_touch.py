@@ -9,10 +9,9 @@ class _StatOnlyRAMVFS(RAMVFS):
     """RAM VFS stripped of write-shaped ops, standing in for an API
     backend that can stat but never create files."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._ops_list = [
-            ro for ro in self._ops_list if ro.name not in {"setattr", "write"}
+    def ops(self):
+        return [
+            ro for ro in super().ops() if ro.name not in {"setattr", "write"}
         ]
 
 

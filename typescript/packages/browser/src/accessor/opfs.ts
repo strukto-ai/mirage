@@ -15,7 +15,7 @@
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
 
 export interface OPFSHandleProvider {
-  requireHandle(): FileSystemDirectoryHandle
+  root(): Promise<FileSystemDirectoryHandle>
 }
 
 export class OPFSAccessor extends Accessor {
@@ -26,7 +26,7 @@ export class OPFSAccessor extends Accessor {
     this.provider = provider
   }
 
-  get rootHandle(): FileSystemDirectoryHandle {
-    return this.provider.requireHandle()
+  root(): Promise<FileSystemDirectoryHandle> {
+    return this.provider.root()
   }
 }
