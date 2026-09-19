@@ -199,18 +199,15 @@ export class MountRegistry {
     const m = new MountEntry(init)
     const alias = siblings.find((existing) => existing.vfs === init.vfs)
     if (alias !== undefined) m.activity = alias.activity
-    for (const cmd of init.vfs.commands()) {
-      if (cmd.filetype !== null) m.register(cmd)
-      else if (cmd.vfs === null) m.registerGeneral(cmd)
-      else m.register(cmd)
-    }
+    // Through `registerFns`, as python's `registry.mount` does, so a
+    // family table that fans out over sibling VFS names (the HF four
+    // share one table) registers only this mount's entries instead of
+    // letting the last sibling win on a shared key.
+    m.registerFns(init.vfs.commands())
     for (const cmd of GENERAL_COMMANDS) {
       m.registerGeneral(cmd)
     }
-    for (const op of init.vfs.ops()) {
-      if (op.vfs === null) m.registerGeneralOp(op)
-      else m.registerOp(op)
-    }
+    m.registerFns(init.vfs.ops())
     return m
   }
 

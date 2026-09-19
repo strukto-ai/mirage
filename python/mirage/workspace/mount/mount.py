@@ -432,36 +432,47 @@ class MountEntry:
                 this mount's VFS.
         """
         pname = self.vfs.name
+        # Grouped by name, because a family table fans out over sibling
+        # VFS names: hf_buckets/hf_datasets/hf_models/hf_spaces share one
+        # `make_generic_ops(HF_VFS_NAMES, IO)` table, so most entries a
+        # mount is handed belong to a sibling and are simply skipped. A
+        # name whose entries name only other VFS is the real mistake (a
+        # table built for the wrong backend), and that still raises.
+        cmd_groups: dict[str, tuple[list[RegisteredCommand], set[str]]] = {}
+        op_groups: dict[str, tuple[list[RegisteredOp], set[str]]] = {}
         for fn in fns:
             rcs: list[RegisteredCommand] = ([fn] if isinstance(
                 fn, RegisteredCommand) else getattr(fn, "_registered_commands",
                                                     []))
-            if rcs:
-                matching = [
-                    rc for rc in rcs if rc.vfs is None or rc.vfs == pname
-                ]
-                if rcs and not matching:
-                    vfs_names = sorted(
-                        {rc.vfs
-                         for rc in rcs if rc.vfs is not None})
-                    raise ValueError(f"command {rcs[0].name!r} is for VFS(s) "
-                                     f"{vfs_names!r}, not {pname!r}")
-                for rc in matching:
-                    self.register(rc)
+            for rc in rcs:
+                keep, attempted = cmd_groups.setdefault(rc.name, ([], set()))
+                if rc.vfs is None or rc.vfs == pname:
+                    keep.append(rc)
+                else:
+                    attempted.add(rc.vfs)
             ros: list[RegisteredOp] = ([fn] if isinstance(fn, RegisteredOp)
                                        else getattr(fn, "_registered_ops", []))
-            if ros:
-                matching_ops = [
-                    ro for ro in ros if ro.vfs is None or ro.vfs == pname
-                ]
-                if ros and not matching_ops:
-                    vfs_names = sorted(
-                        {ro.vfs
-                         for ro in ros if ro.vfs is not None})
-                    raise ValueError(f"op {ros[0].name!r} is for VFS(s) "
-                                     f"{vfs_names!r}, not {pname!r}")
-                for ro in matching_ops:
-                    self.register_op(ro)
+            for ro in ros:
+                keep_op, attempted_op = op_groups.setdefault(
+                    ro.name, ([], set()))
+                if ro.vfs is None or ro.vfs == pname:
+                    keep_op.append(ro)
+                else:
+                    attempted_op.add(ro.vfs)
+        for name, (keep, attempted) in cmd_groups.items():
+            if not keep:
+                raise ValueError(f"command {name!r} is for VFS(s) "
+                                 f"{sorted(attempted)!r}, not {pname!r}")
+        for name, (keep_op, attempted_op) in op_groups.items():
+            if not keep_op:
+                raise ValueError(f"op {name!r} is for VFS(s) "
+                                 f"{sorted(attempted_op)!r}, not {pname!r}")
+        for keep, _attempted in cmd_groups.values():
+            for rc in keep:
+                self.register(rc)
+        for keep_op, _attempted_op in op_groups.values():
+            for ro in keep_op:
+                self.register_op(ro)
 
     def unregister(self, names: list[str]) -> None:
         """Remove all commands and ops with the given names.

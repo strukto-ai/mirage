@@ -551,15 +551,14 @@ async def run_case(
         notes on where the dry run disagreed with the run.
     """
     if case.get("clear_cache"):
-        # A full clear means the file cache AND every mount's index cache:
-        # remote listings live in the per-VFS index, and a listing
-        # populated by an earlier case must not leak into this one.
-        # mounts without an index cache have nothing to clear.
+        # A full clear means the file cache AND every mount's index
+        # cache: remote listings live in the mount's index, and a
+        # listing populated by an earlier case must not leak into this
+        # one. Every mount carries a store, built when its driver was
+        # placed, so there is nothing to probe for.
         await ws.cache.clear()
         for mount in ws.mounts():
-            store = getattr(mount.vfs, "index", None)
-            if store is not None:
-                await store.clear()
+            await mount.index_store.clear()
     start = time.monotonic()
     if case.get("provision"):
         plan = await ws.shell(case["command"], provision=True)
