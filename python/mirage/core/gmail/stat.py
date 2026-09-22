@@ -30,6 +30,7 @@ def _label_stat(match: ScopeMatch, path: PathSpec,
     return FileStat(
         name=entry.vfs_name,
         type=FileType.DIRECTORY,
+        id=entry.id,
         extra={"label_id": entry.id},
     )
 
@@ -41,6 +42,7 @@ def _message_stat(match: ScopeMatch, path: PathSpec,
         type=FileType.FILE,
         content=ContentType.JSON,
         size=entry.size,
+        id=entry.id,
         extra={
             "message_id": entry.id,
             **entry.extra
@@ -53,6 +55,7 @@ def _attachment_dir_stat(match: ScopeMatch, path: PathSpec,
     return FileStat(
         name=entry.vfs_name,
         type=FileType.DIRECTORY,
+        id=entry.id,
         extra={"message_id": entry.id},
     )
 
@@ -64,6 +67,7 @@ def _attachment_stat(match: ScopeMatch, path: PathSpec,
         type=FileType.FILE,
         content=content_type_for_path(entry.vfs_name),
         size=entry.size,
+        id=entry.id,
         extra={"attachment_id": entry.id},
     )
 

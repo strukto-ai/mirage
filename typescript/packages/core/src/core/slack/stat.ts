@@ -39,6 +39,7 @@ function channelStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): Fi
     name: entry.vfsName !== '' ? entry.vfsName : entry.name,
     type: FileType.DIRECTORY,
     ...(modified !== null ? { modified } : {}),
+    id: entry.id,
     extra: { channel_id: entry.id },
   })
 }
@@ -49,6 +50,7 @@ function userStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileS
     type: FileType.FILE,
     content: ContentType.JSON,
     ...(entry.size !== null ? { size: entry.size } : {}),
+    id: entry.id,
     extra: { user_id: entry.id },
   })
 }
@@ -78,6 +80,7 @@ function fileBlobStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): F
     content: contentTypeForMime(mimetype),
     size: entry.size ?? null,
     ...(modified !== null ? { modified } : {}),
+    id: entry.id,
     extra: { file_id: entry.id },
   })
 }

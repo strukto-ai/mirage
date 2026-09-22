@@ -34,6 +34,7 @@ function fileStat(memory: Record<string, unknown>): FileStat {
         : typeof memory.created_at === 'string'
           ? memory.created_at
           : null,
+    id: String(memory.id),
     extra: { created_at: memory.created_at, updated_at: memory.updated_at },
   })
 }

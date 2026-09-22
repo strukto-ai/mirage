@@ -770,38 +770,46 @@ async def test_xattr_flags_refuse_the_way_setxattr_2_does():
 
 
 @pytest.mark.asyncio
-async def test_backend_facts_read_back_and_refuse_writers():
-    # A Drive folder's id is what the agent needed and could not find;
-    # every scalar fact a backend's stat carries reads back the same way,
-    # and a list-valued one is not an attribute at all.
+async def test_backend_id_reads_back_and_refuses_writers():
+    # A Drive folder's id is what the agent needed and could not find; the
+    # id any backend's stat reports reads back the same way, and nothing
+    # else the stat carries in extra becomes an attribute.
     dispatcher, _ = _dispatcher(Policies())
     dispatcher._namespace.is_link = MagicMock(return_value=False)
     dispatcher._namespace.xattrs = MagicMock(return_value={"user.tag": b"t"})
     dispatcher._namespace.try_mount_for.return_value.execute_op = AsyncMock(
         return_value=FileStat(name="d",
                               type=FileType.DIRECTORY,
+                              id="1AbC",
                               extra={
                                   "file_id": "1AbC",
                                   "shared": True,
-                                  "count": 3,
-                                  "device_numbers": [1, 2],
                               }))
     listed, _ = await dispatcher.dispatch("listxattr", _path("/data/d"))
-    assert listed == [
-        "user.mirage.count", "user.mirage.file_id", "user.mirage.shared",
-        "user.tag"
-    ]
+    assert listed == ["user.mirage.id", "user.tag"]
     got, _ = await dispatcher.dispatch("getxattr",
                                        _path("/data/d"),
-                                       name="user.mirage.file_id")
+                                       name="user.mirage.id")
     assert got == b"1AbC"
     for op in ("setxattr", "removexattr"):
         with pytest.raises(PermissionError) as refused:
             await dispatcher.dispatch(op,
                                       _path("/data/d"),
-                                      name="user.mirage.file_id",
+                                      name="user.mirage.id",
                                       value=b"x")
         assert refused.value.errno == errno.EPERM
+
+
+@pytest.mark.asyncio
+async def test_a_backend_with_no_id_has_no_id_attribute():
+    dispatcher, _ = _dispatcher(Policies())
+    dispatcher._namespace.is_link = MagicMock(return_value=False)
+    dispatcher._namespace.xattrs = MagicMock(return_value={})
+    dispatcher._namespace.try_mount_for.return_value.execute_op = AsyncMock(
+        return_value=FileStat(
+            name="f", type=FileType.FILE, extra={"etag": "abc"}))
+    listed, _ = await dispatcher.dispatch("listxattr", _path("/data/f"))
+    assert listed == []
 
 
 @pytest.mark.asyncio

@@ -576,6 +576,7 @@ export interface FileStatInit {
   uid?: number | string | null
   gid?: number | string | null
   atime?: string | null
+  id?: string | null
   extra?: Record<string, unknown>
 }
 
@@ -591,6 +592,7 @@ export class FileStat {
   readonly uid: number | string | null
   readonly gid: number | string | null
   readonly atime: string | null
+  readonly id: string | null
   readonly extra: Record<string, unknown>
 
   constructor(init: FileStatInit) {
@@ -611,6 +613,7 @@ export class FileStat {
     this.uid = init.uid ?? null
     this.gid = init.gid ?? null
     this.atime = init.atime ?? null
+    this.id = init.id ?? null
     this.extra = init.extra ?? {}
     Object.freeze(this)
   }
@@ -635,6 +638,7 @@ export class FileStat {
       uid: this.uid,
       gid: this.gid,
       atime: this.atime,
+      id: this.id,
       extra: this.extra,
       ...update,
     })

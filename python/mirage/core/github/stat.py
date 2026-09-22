@@ -67,6 +67,7 @@ async def stat(
                 type=FileType.FILE,
                 content=content_type_for_path(result.entry.name),
                 fingerprint=result.entry.id,
+                id=result.entry.id,
                 extra={"sha": result.entry.id},
             )
         raise enoent(virtual)

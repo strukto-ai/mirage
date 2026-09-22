@@ -28,7 +28,4 @@ PROMPT = """\
   Date-prefixed globs (2026-05-*) push to a Drive modifiedTime range query.
 
   To act on Drive items by id (create, update, export, permissions),
-  use the gws CLI if installed: gws drive --help
-  A file's or folder's Drive id (a folder's is what a parent takes)
-  reads back as an extended attribute:
-    getfattr -n user.mirage.file_id --only-values {prefix}/<path>"""
+  use the gws CLI if installed: gws drive --help"""

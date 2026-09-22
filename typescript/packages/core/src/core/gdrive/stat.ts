@@ -46,6 +46,7 @@ async function statFromApi(
       name: node.name,
       type: FileType.DIRECTORY,
       modified,
+      id: node.id,
       extra: { file_id: node.id },
     })
   }
@@ -60,6 +61,7 @@ async function statFromApi(
     content: contentTypeForPath(vfsName),
     modified,
     fingerprint: modified !== '' ? modified : null,
+    id: node.id,
     extra: {
       file_id: node.id,
       resource_type: MIME_TO_RT[node.mimeType] ?? 'gdrive/file',
@@ -102,6 +104,7 @@ export async function stat(
       name: entry.vfsName !== '' ? entry.vfsName : entry.name,
       type: FileType.DIRECTORY,
       modified: entry.remoteTime,
+      id: entry.id,
       extra: { file_id: entry.id },
     })
   }
@@ -112,6 +115,7 @@ export async function stat(
     content: contentTypeForPath(entry.vfsName),
     modified: entry.remoteTime,
     fingerprint: entry.remoteTime !== '' ? entry.remoteTime : null,
+    id: entry.id,
     extra: {
       file_id: entry.id,
       resource_type: entry.resourceType,

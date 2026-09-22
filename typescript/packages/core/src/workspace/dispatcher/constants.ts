@@ -48,16 +48,16 @@ export const POLICY_WRITE_OPS: ReadonlySet<string> = new Set([
 
 // The extended-attribute ops, which the node table answers: what a caller
 // sets is stored on the path's node beside the overlay's mode and times,
-// and every scalar fact the backend's stat reports in `extra` (a Drive
-// file id, an etag) reads back as a `user.mirage.<key>` attribute that
-// only the backend can change.
+// and the id the backend's own API uses for the object (a Drive file id,
+// a Notion page id) reads back as `user.mirage.id`, which only the
+// backend can change.
 export const XATTR_OPS: ReadonlySet<string> = new Set([
   'getxattr',
   'listxattr',
   'setxattr',
   'removexattr',
 ])
-export const BACKEND_XATTR_PREFIX = 'user.mirage.'
+export const ID_XATTR = 'user.mirage.id'
 
 // Ops the node table itself answers: a symlink is namespace state with
 // no backend behind it, so the door is the authority for both

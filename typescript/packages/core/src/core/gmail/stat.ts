@@ -29,6 +29,7 @@ function labelStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): File
   return new FileStat({
     name: entry.vfsName,
     type: FileType.DIRECTORY,
+    id: entry.id,
     extra: { label_id: entry.id },
   })
 }
@@ -70,6 +71,7 @@ function messageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): Fi
     type: FileType.FILE,
     content: ContentType.JSON,
     size: entry.size,
+    id: entry.id,
     extra: { message_id: entry.id, ...entry.extra },
   })
 }
@@ -78,6 +80,7 @@ function attachmentDirStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntr
   return new FileStat({
     name: entry.vfsName,
     type: FileType.DIRECTORY,
+    id: entry.id,
     extra: { message_id: entry.id },
   })
 }
@@ -88,6 +91,7 @@ function attachmentStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry):
     type: FileType.FILE,
     content: contentTypeForPath(entry.vfsName),
     size: entry.size,
+    id: entry.id,
     extra: { attachment_id: entry.id },
   })
 }

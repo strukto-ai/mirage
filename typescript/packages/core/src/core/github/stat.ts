@@ -76,6 +76,7 @@ export async function stat(
       type: FileType.FILE,
       content: contentTypeForPath(result.entry.name),
       fingerprint: result.entry.id,
+      id: result.entry.id,
       extra: { sha: result.entry.id },
     })
   })

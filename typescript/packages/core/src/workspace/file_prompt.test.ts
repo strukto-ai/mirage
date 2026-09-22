@@ -13,19 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { GDRIVE_PROMPT } from './prompt.ts'
+import { MountMode } from '../types.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { Workspace } from './workspace/workspace.ts'
 
-describe('GDRIVE_PROMPT', () => {
-  it('cross-references the per-service shapes and notes scope', () => {
-    const rendered = GDRIVE_PROMPT.replace(/\{prefix\}/g, '/gdrive')
-    expect(rendered).toContain('.gdoc.json')
-    expect(rendered).toContain('.gsheet.json')
-    expect(rendered).toContain('.gslide.json')
-    expect(rendered).toContain('/gdocs prompt')
-    expect(rendered).toContain('/gsheets prompt')
-    expect(rendered).toContain('/gslides prompt')
-    expect(rendered).toContain('remote mount')
-    expect(rendered).toContain('modifiedTime range')
-    expect(rendered).toContain('No owned/ vs shared/')
+describe('buildFilePrompt', () => {
+  it('names the id attribute once', () => {
+    const ws = new Workspace(
+      { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    expect(ws.filePrompt.split('user.mirage.id').length - 1).toBe(1)
   })
 })

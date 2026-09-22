@@ -59,6 +59,7 @@ export function entryStat(idField: string, kind: FileType | ContentType): EntryS
       ...shape,
       size: entry.size,
       modified: entry.remoteTime !== '' ? entry.remoteTime : null,
+      id: entry.id,
       extra: { [idField]: entry.id },
     })
   }

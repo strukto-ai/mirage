@@ -652,8 +652,8 @@ class Ops:
                        session_id: str | None = None) -> bytes:
         """One extended attribute's value.
 
-        The node table answers: what a caller set, and the backend's own
-        facts under ``user.mirage.`` (a Drive file id, an etag).
+        The node table answers: what a caller set, and the id the
+        backend's own API uses for the object as ``user.mirage.id``.
 
         Args:
             path (str): Virtual path.
@@ -715,7 +715,7 @@ class Ops:
             session_id (str | None): Session to run as outside a line.
 
         Raises:
-            PermissionError: EPERM for a ``user.mirage.`` backend fact.
+            PermissionError: EPERM for ``user.mirage.id``.
         """
         await self._call("setxattr",
                          path,
@@ -742,7 +742,7 @@ class Ops:
 
         Raises:
             OSError: the attribute-not-set errno when it is not set;
-                EPERM for a ``user.mirage.`` backend fact.
+                EPERM for ``user.mirage.id``.
         """
         await self._call("removexattr",
                          path,

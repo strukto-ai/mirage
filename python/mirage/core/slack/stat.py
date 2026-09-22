@@ -44,6 +44,7 @@ def _channel_stat(match: ScopeMatch, path: PathSpec,
         name=entry.vfs_name or entry.name,
         type=FileType.DIRECTORY,
         modified=_slack_modified(entry.remote_time),
+        id=entry.id,
         extra={"channel_id": entry.id},
     )
 
@@ -55,6 +56,7 @@ def _user_stat(match: ScopeMatch, path: PathSpec,
         type=FileType.FILE,
         content=ContentType.JSON,
         size=entry.size,
+        id=entry.id,
         extra={"user_id": entry.id},
     )
 
@@ -73,6 +75,7 @@ def _file_blob_stat(match: ScopeMatch, path: PathSpec,
         content=content_type_for_mime(mimetype),
         size=entry.size,
         modified=_slack_modified(entry.remote_time),
+        id=entry.id,
         extra={"file_id": entry.id},
     )
 

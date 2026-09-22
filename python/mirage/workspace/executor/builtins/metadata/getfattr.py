@@ -109,9 +109,9 @@ async def handle_getfattr(
     that has a matching attribute, names sorted, a blank line after
     each block, ``-d``/``-n`` adding ``="value"``, and the default match
     ``^user\\.`` (``-m -`` matches every name). The attributes are the
-    op door's: what was set on the path, and the backend's own facts as
-    ``user.mirage.<key>`` (a Drive file id reads as
-    ``user.mirage.file_id``). ``-h`` reads a link's own attributes.
+    op door's: what was set on the path, and the id the backend's own
+    API uses for it as ``user.mirage.id``. ``-h`` reads a link's own
+    attributes.
 
     Args:
         dispatch (DispatchFn): op dispatcher.

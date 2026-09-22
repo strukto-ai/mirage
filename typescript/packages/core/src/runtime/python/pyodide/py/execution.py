@@ -313,7 +313,7 @@ def seed_sys_path(paths):
 
 # Emscripten builds os without the extended-attribute family CPython has
 # on linux, so a guest asking a mounted path for its attributes (a Drive
-# folder's id is user.mirage.file_id) got AttributeError. The host
+# folder's id is user.mirage.id) got AttributeError. The host
 # registers _mirage_xattr, which answers from the workspace door, and
 # each condition it reports is raised as the errno linux would raise.
 XATTR_ERRNO = {

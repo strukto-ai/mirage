@@ -437,8 +437,8 @@ export class Ops {
 
   /**
    * One extended attribute's value. The node table answers: what a
-   * caller set, and the backend's own facts under `user.mirage.` (a
-   * Drive file id, an etag). `nofollow` reads a link entry's own
+   * caller set, and the id the backend's own API uses for the object as
+   * `user.mirage.id`. `nofollow` reads a link entry's own
    * attributes. Throws ENODATA when the path has no such attribute.
    * Mirrors Python's Ops.getxattr.
    */
@@ -466,7 +466,7 @@ export class Ops {
    * Store an extended attribute on a path's namespace node, so it works
    * on every backend and moves with a rename. `create` refuses with
    * EEXIST when it is set (XATTR_CREATE) and `replace` with ENODATA when
-   * it is not (XATTR_REPLACE); a `user.mirage.` backend fact is EPERM.
+   * it is not (XATTR_REPLACE); `user.mirage.id` is EPERM.
    * Mirrors Python's Ops.setxattr.
    */
   async setxattr(

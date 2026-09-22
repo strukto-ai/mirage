@@ -311,6 +311,7 @@ function entryStat(item: Record<string, unknown>): FileStat {
       name,
       type: FileType.DIRECTORY,
       modified: asString(item.lastModifiedDateTime),
+      id: asString(item.id),
       extra: { size_bytes: asNumber(item.size), child_count: folderChildCount(item) },
     })
   }
@@ -321,6 +322,7 @@ function entryStat(item: Record<string, unknown>): FileStat {
     size: asNumber(item.size),
     modified: asString(item.lastModifiedDateTime),
     fingerprint: asString(item.cTag),
+    id: asString(item.id),
     extra: { id: item.id, ctag: item.cTag, etag: item.eTag },
   })
 }

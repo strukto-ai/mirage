@@ -65,7 +65,7 @@ import { Reconciler } from '../reconcile.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import {
-  BACKEND_XATTR_PREFIX,
+  ID_XATTR,
   DISPATCH_READ_OPS,
   DISPATCH_WRITE_OPS,
   HIDDEN_CREATE_OPS,
@@ -1034,12 +1034,13 @@ export class Dispatcher {
   /**
    * The read-only attributes a path carries from its backend.
    *
-   * Every string, integer or boolean fact the backend's stat reports in
-   * `extra` reads back as `user.mirage.<key>`: a Drive file id, an etag,
-   * a Box id. The stat also settles whether the path exists, which an
-   * attribute op answers first (ENOENT). A link node's own attributes
-   * and a directory that exists only in the namespace have no backend
-   * behind them, so they carry none. Mirrors Python's
+   * The id the backend's stat reports reads back as `user.mirage.id`:
+   * a Drive file id, a Notion page id, a Slack channel id. A backend
+   * whose path is the only id (S3, disk, RAM) reports none, so its paths
+   * carry no such attribute. The stat also settles whether the path
+   * exists, which an attribute op answers first (ENOENT). A link node's
+   * own attributes and a directory that exists only in the namespace
+   * have no backend behind them, so they carry none. Mirrors Python's
    * Dispatcher._xattr_facts.
    */
   private async xattrFacts(
@@ -1070,18 +1071,7 @@ export class Dispatcher {
       if (this.namespaceResult('stat', path.virtual) instanceof FileStat) return facts
       throw mount === null ? noMount(path.virtual) : enoent(path.virtual)
     }
-    const encoder = new TextEncoder()
-    for (const key of Object.keys(stat.extra).sort(compareCodePoints)) {
-      const value = stat.extra[key]
-      if (typeof value === 'boolean') {
-        facts.set(BACKEND_XATTR_PREFIX + key, encoder.encode(value ? 'true' : 'false'))
-      } else if (
-        typeof value === 'string' ||
-        (typeof value === 'number' && Number.isInteger(value))
-      ) {
-        facts.set(BACKEND_XATTR_PREFIX + key, encoder.encode(String(value)))
-      }
-    }
+    if (stat.id !== null) facts.set(ID_XATTR, new TextEncoder().encode(stat.id))
     return facts
   }
 

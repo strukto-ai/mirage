@@ -53,6 +53,7 @@ def entry_stat(id_field: str, filetype: ContentType | FileType) -> EntryStatFn:
                 type=filetype,
                 size=entry.size,
                 modified=entry.remote_time or None,
+                id=entry.id,
                 extra={id_field: entry.id},
             )
         return FileStat(
@@ -61,6 +62,7 @@ def entry_stat(id_field: str, filetype: ContentType | FileType) -> EntryStatFn:
             content=filetype,
             size=entry.size,
             modified=entry.remote_time or None,
+            id=entry.id,
             extra={id_field: entry.id},
         )
 

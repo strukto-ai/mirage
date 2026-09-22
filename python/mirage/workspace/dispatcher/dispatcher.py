@@ -51,9 +51,9 @@ from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.snapshot.drift import DriftQueue
 
 from mirage.workspace.dispatcher.constants import (  # isort: skip
-    BACKEND_XATTR_PREFIX, DISPATCH_READ_OPS, DISPATCH_WRITE_OPS,
-    HIDDEN_CREATE_OPS, LINK_ENTRY_OPS, NAMESPACE_TABLE_OPS, POLICY_WRITE_OPS,
-    SETATTR_KEYS, XATTR_OPS)
+    DISPATCH_READ_OPS, DISPATCH_WRITE_OPS, HIDDEN_CREATE_OPS, ID_XATTR,
+    LINK_ENTRY_OPS, NAMESPACE_TABLE_OPS, POLICY_WRITE_OPS, SETATTR_KEYS,
+    XATTR_OPS)
 
 
 def _memory_answered(report: OpReport | None,
@@ -891,12 +891,14 @@ class Dispatcher:
                            path: PathSpec) -> dict[str, bytes]:
         """The read-only attributes a path carries from its backend.
 
-        Every string, integer or boolean fact the backend's stat reports
-        in ``extra`` reads back as ``user.mirage.<key>``: a Drive file
-        id, an etag, a Box id. The stat also settles whether the path
-        exists, which an attribute op answers first (ENOENT). A link
-        node's own attributes and a directory that exists only in the
-        namespace have no backend behind them, so they carry none.
+        The id the backend's stat reports reads back as
+        ``user.mirage.id``: a Drive file id, a Notion page id, a Slack
+        channel id. A backend whose path is the only id (S3, disk, RAM)
+        reports none, so its paths carry no such attribute. The stat
+        also settles whether the path exists, which an attribute op
+        answers first (ENOENT). A link node's own attributes and a
+        directory that exists only in the namespace have no backend
+        behind them, so they carry none.
 
         Args:
             mount (MountEntry | None): the mount owning the path.
@@ -919,14 +921,7 @@ class Dispatcher:
             if mount is None:
                 raise no_mount(path.virtual)
             raise enoent(path)
-        facts: dict[str, bytes] = {}
-        for key, value in sorted((stat.extra or {}).items()):
-            if isinstance(value, bool):
-                facts[BACKEND_XATTR_PREFIX +
-                      key] = b"true" if value else b"false"
-            elif isinstance(value, (str, int)):
-                facts[BACKEND_XATTR_PREFIX + key] = str(value).encode()
-        return facts
+        return {} if stat.id is None else {ID_XATTR: stat.id.encode()}
 
     async def _apply_setattr(self, mount: MountEntry, path: PathSpec,
                              kwargs: dict[str, Any]) -> dict[str, Any]:

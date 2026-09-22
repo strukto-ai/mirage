@@ -30,6 +30,7 @@ function statFromItem(item: BoxItem): FileStat {
       name: vfsName,
       type: FileType.DIRECTORY,
       modified: item.modified_at ?? '',
+      id: item.id,
       extra: { box_id: item.id },
     })
   }
@@ -47,6 +48,7 @@ function statFromItem(item: BoxItem): FileStat {
     content: contentTypeForPath(vfsName),
     modified,
     fingerprint: sha1 ?? (modified !== '' ? modified : null),
+    id: item.id,
     extra: { box_id: item.id, resource_type: rt, ...(sha1 === null ? {} : { sha1 }) },
   })
 }
@@ -69,6 +71,7 @@ export async function stat(
       name: '/',
       type: FileType.DIRECTORY,
       modified: info.modified_at ?? '',
+      id: accessor.rootFolderId,
       extra: { box_id: accessor.rootFolderId },
     })
   }
@@ -114,6 +117,7 @@ export async function stat(
       name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
       type: FileType.DIRECTORY,
       modified: result.entry.remoteTime,
+      id: result.entry.id,
       extra: { box_id: result.entry.id },
     })
   }
@@ -126,6 +130,7 @@ export async function stat(
     content: contentTypeForPath(result.entry.vfsName),
     modified: result.entry.remoteTime,
     fingerprint: sha1 ?? (result.entry.remoteTime !== '' ? result.entry.remoteTime : null),
+    id: result.entry.id,
     extra: {
       box_id: result.entry.id,
       resource_type: result.entry.resourceType,

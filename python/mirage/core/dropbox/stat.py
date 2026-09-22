@@ -39,6 +39,7 @@ def _stat_from_entry(entry: dict[str, Any]) -> FileStat:
             name=name,
             type=FileType.DIRECTORY,
             modified=modified,
+            id=entry.get("id"),
             extra={"dropbox_id": entry_id},
         )
     size = entry.get("size")
@@ -49,6 +50,7 @@ def _stat_from_entry(entry: dict[str, Any]) -> FileStat:
         content=content_type_for_path(name),
         modified=modified,
         fingerprint=modified or None,
+        id=entry.get("id"),
         extra={
             "dropbox_id": entry_id,
             "resource_type": "dropbox/file",
@@ -112,6 +114,7 @@ async def stat(
             name=result.entry.vfs_name or result.entry.name,
             type=FileType.DIRECTORY,
             modified=result.entry.remote_time,
+            id=result.entry.id,
             extra={"dropbox_id": result.entry.id},
         )
     return FileStat(
@@ -121,6 +124,7 @@ async def stat(
         content=content_type_for_path(result.entry.vfs_name),
         modified=result.entry.remote_time,
         fingerprint=result.entry.remote_time or None,
+        id=result.entry.id,
         extra={
             "dropbox_id": result.entry.id,
             "resource_type": result.entry.resource_type,
