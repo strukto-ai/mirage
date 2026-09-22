@@ -63,6 +63,4 @@ The browser examples in `examples/typescript/browser/src/gdrive_pkce.ts` show a 
 
 A Shared Drive is writable on the same terms as My Drive: every Drive call carries `supportsAllDrives`, so what you may change is decided by your role on that drive rather than by the mount, and a role that forbids the change fails with `EACCES` on that operand.
 
-A file's or folder's Drive id reads back as the extended attribute `user.mirage.file_id` (`getfattr -n user.mirage.file_id --only-values /drive/Reports`), which is the id `gws` takes for a parent.
-
 For the mounted layout, the `gws` command reference, and snapshot behavior see the [Python Drive docs](/python/vfs/gdrive).

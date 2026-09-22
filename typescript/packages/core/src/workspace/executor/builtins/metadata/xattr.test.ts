@@ -15,13 +15,13 @@
 import { describe, expect, it } from 'vitest'
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { parseCommand } from '../../../../commands/spec/parser.ts'
-import { eperm, enoent, noXattr } from '../../../../utils/errors.ts'
+import { eexist, enoent, noXattr } from '../../../../utils/errors.ts'
 import { GETFATTR_USAGE, attrError, attrOperands, attrUsageRefusal } from './xattr.ts'
 
 describe('attr helpers', () => {
   it('say No such attribute whatever the platform errno', () => {
     expect(attrError(noXattr('/f'))).toBe('No such attribute')
-    expect(attrError(eperm('/f'))).toBe('Operation not permitted')
+    expect(attrError(eexist('/f'))).toBe('File exists')
     expect(attrError(enoent('/f'))).toBe('No such file or directory')
   })
 

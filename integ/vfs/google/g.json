@@ -489,20 +489,6 @@
         "stdout": "{\"presentationId\":true,\"title\":\"Deck\",\"slides\":1}\n",
         "stderr": ""
       }
-    },
-    {
-      "id": "g_folder_id_from_getfattr",
-      "seq": 500031,
-      "targets": [
-        "gdrive"
-      ],
-      "clear_cache": true,
-      "command": "mkdir /data/idd && F=$(getfattr --only-values -n user.mirage.file_id /data/idd) && gws drive files get --params \"{\\\"fileId\\\": \\\"$F\\\"}\" | jq -c '{name, mimeType}' && rmdir /data/idd",
-      "expect": {
-        "exit": 0,
-        "stdout": "{\"name\":\"idd\",\"mimeType\":\"application/vnd.google-apps.folder\"}\n",
-        "stderr": ""
-      }
     }
   ]
 }

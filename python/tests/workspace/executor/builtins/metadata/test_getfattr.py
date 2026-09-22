@@ -132,15 +132,6 @@ async def test_recursive_walk_reports_links_without_descending():
 
 
 @pytest.mark.asyncio
-async def test_backend_facts_read_as_user_mirage():
-    # The Drive folder id the agent went looking for arrives this way on
-    # a gdrive mount; a RAM mount reports no facts, so this pins only
-    # that nothing is invented.
-    code, out, _ = await _run(await _seeded(), "getfattr -m 'user.mirage' d")
-    assert (code, out) == (0, b"")
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("line, first", [
     ("getfattr", ""),
     ("getfattr -Z d/f", "getfattr: invalid option -- 'Z'\n"),

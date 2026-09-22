@@ -274,23 +274,9 @@ Standard commands available on the mounted Google Drive tree:
 | `cmp`           | Compare two files byte by byte             |
 | `tsort`         | Topological sort                           |
 | `file`          | Detect file type                           |
-| `getfattr`      | Extended attributes, incl. the Drive id    |
 
 ## Acting on Drive
 
 Acting on Drive files by id (create, update, copy, delete, share,
 export, plus the Docs/Sheets/Slides helpers) goes through the
 [gws CLI](/python/cli/gws) when installed.
-
-A file's or folder's Drive id reads back as the extended attribute
-`user.mirage.file_id`, so a folder's id can be passed as a parent
-without searching for it:
-
-```bash
-parent=$(getfattr -n user.mirage.file_id --only-values /gdrive/Reports)
-gws drive files create --json "{\"name\": \"notes\", \"parents\": [\"$parent\"]}"
-```
-
-The attribute belongs to Drive, so `setfattr` refuses to change it
-with `Operation not permitted`. Attributes under any other name are
-stored by Mirage and work on every mount.

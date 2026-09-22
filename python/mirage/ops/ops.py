@@ -701,7 +701,7 @@ class Ops:
         """Store an extended attribute on a path.
 
         Stored on the path's namespace node, so it works on every
-        backend and moves with a rename. A backend fact is read-only.
+        backend and moves with a rename. ``user.mirage.id`` is read-only.
 
         Args:
             path (str): Virtual path.
