@@ -217,13 +217,13 @@ async def test_a_borrowed_builtin_name_answers_like_a_custom_command(ws):
         m.register_general(
             RegisteredCommand(name,
                               spec=spec,
-                              resource=None,
+                              vfs=None,
                               filetype=None,
                               fn=custom))
     for name in ("grep", "diff", "python3", "mycmd"):
-        result = await ws.execute(f"cd /data && {name} --mode=a x")
+        result = await ws.shell(f"cd /data && {name} --mode=a x")
         assert (result.exit_code, result.stdout) == (0, b"custom\n"), name
-        result = await ws.execute(f"cd /data && {name} --bogus x")
+        result = await ws.shell(f"cd /data && {name} --bogus x")
         assert result.exit_code == 1, name
         assert result.stderr == (
             f"{name}: unrecognized option '--bogus'\n"

@@ -17,7 +17,7 @@ import { type CommandFn, RegisteredCommand } from '../commands/config.ts'
 import { CommandSpec, Operand, Option } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -26,9 +26,9 @@ const ENC = new TextEncoder()
 
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(ram)
+  registry.registerVfs(ram)
   return new Workspace(
     { '/data': ram },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
@@ -55,14 +55,14 @@ describe('a borrowed builtin name', () => {
     for (const name of names) {
       if (name in mount.commands()) mount.unregister([name])
       mount.registerGeneral(
-        new RegisteredCommand({ name, spec, resource: null, filetype: null, fn: custom }),
+        new RegisteredCommand({ name, spec, vfs: null, filetype: null, fn: custom }),
       )
     }
     try {
       for (const name of names) {
-        const ok = await ws.execute(`cd /data && ${name} --mode=a x`)
+        const ok = await ws.shell(`cd /data && ${name} --mode=a x`)
         expect([ok.exitCode, stdoutStr(ok)], name).toEqual([0, 'custom\n'])
-        const refused = await ws.execute(`cd /data && ${name} --bogus x`)
+        const refused = await ws.shell(`cd /data && ${name} --bogus x`)
         expect(refused.exitCode, name).toBe(1)
         expect(stderrStr(refused), name).toBe(
           `${name}: unrecognized option '--bogus'\nTry '${name} --help' for more information.\n`,
