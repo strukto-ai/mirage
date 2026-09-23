@@ -1069,6 +1069,38 @@
           }
         }
       ]
+    },
+    {
+      "id": "listing_survives_a_failing_record",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/api": {
+            "vfs": "ram",
+            "files": {
+              "items/0.json": "{\"id\": 0}\n",
+              "items/1.json": "{\"id\": 1}\n",
+              "items/2.json": "{\"id\": 2}\n",
+              "items/3.json": "{\"id\": 3}\n"
+            },
+            "failing": [
+              "items/2.json"
+            ]
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os\nfrom pathlib import Path\nprint(sorted(os.listdir('/api/items')))\nprint(Path('/api/items/1.json').stat().st_size)\nfor probe in (lambda p: Path(p).stat(), lambda p: Path(p).read_text()):\n    try:\n        probe('/api/items/2.json')\n        print('served')\n    except Exception:\n        print('failed')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['0.json', '1.json', '2.json', '3.json']\n10\nfailed\nfailed\n"
+          }
+        }
+      ]
     }
   ]
 }

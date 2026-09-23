@@ -25,6 +25,8 @@ import os  # noqa: E402
 import re  # noqa: E402
 import shlex  # noqa: E402
 import uuid  # noqa: E402
+from collections.abc import Awaitable, Callable  # noqa: E402
+from dataclasses import replace  # noqa: E402
 from typing import Any  # noqa: E402
 
 from mirage import EXTERNAL_COMMANDS  # noqa: E402
@@ -32,8 +34,10 @@ from mirage import MountMode  # noqa: E402
 from mirage import ProcessExecution  # noqa: E402
 from mirage import ProcessExecutorMixin  # noqa: E402
 from mirage import Workspace  # noqa: E402
+from mirage.accessor.base import Accessor  # noqa: E402
 from mirage.commands.cli.types import CLISpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
+from mirage.ops.registry import RegisteredOp  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
 from mirage.policy.types import CommandContext  # noqa: E402
 from mirage.policy.types import Deny  # noqa: E402
@@ -47,6 +51,7 @@ from mirage.runtime.table import build_runtime  # noqa: E402
 from mirage.runtime.table import register_runtime  # noqa: E402
 from mirage.runtime.types import RunResult  # noqa: E402
 from mirage.types import Limit, PathSpec  # noqa: E402
+from mirage.vfs.ram import RAMVFS  # noqa: E402
 
 HOST = "python"
 SUITE_DIR = Path(__file__).parent
@@ -353,11 +358,48 @@ async def _ensure_mongo() -> None:
     _mongo_seeded = True
 
 
+class FailingRAMVFS(RAMVFS):
+    """A RAM mount whose named records fail their stat and read.
+
+    The shape of one broken record behind a REST collection: the
+    listing names it, and every question about it errors with whatever
+    the upstream said, which is no filesystem error at all.
+
+    Args:
+        failing (list[str]): names, spelled as a mount's ``files``
+            spells them, whose stat and read fail.
+    """
+
+    def __init__(self, failing: list[str]) -> None:
+        super().__init__()
+        self._failing = frozenset(failing)
+
+    def ops(self) -> list[RegisteredOp]:
+        return [
+            replace(ro, fn=self._guard(ro.fn)) if ro.name in ("stat",
+                                                              "read") else ro
+            for ro in super().ops()
+        ]
+
+    def _guard(
+            self,
+            fn: Callable[...,
+                         Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+
+        async def guarded(accessor: Accessor, path: PathSpec,
+                          **kwargs: Any) -> Any:
+            if path.vfs_path.strip("/") in self._failing:
+                raise RuntimeError("upstream 502 Bad Gateway")
+            return await fn(accessor, path, **kwargs)
+
+        return guarded
+
+
 async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
     kind = spec["vfs"]
     if kind == "ram":
-        from mirage.vfs.ram import RAMVFS
-        vfs = RAMVFS()
+        vfs = (FailingRAMVFS(spec["failing"])
+               if "failing" in spec else RAMVFS())
         if "generated_files" in spec:
             vfs.load_state({
                 "files": {

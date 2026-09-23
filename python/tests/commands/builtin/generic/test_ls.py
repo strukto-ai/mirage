@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from functools import partial
@@ -106,6 +107,27 @@ async def test_walk_lists_immediate_children():
     warnings = [w.message for w in res.warnings]
     assert [e.name for e in entries] == ["a.txt", "b.txt"]
     assert warnings == []
+
+
+@pytest.mark.asyncio
+async def test_walk_stats_one_entry_at_a_time():
+    # On a mount that keeps no listing index each entry's stat is a
+    # backend request; a whole directory's worth at once is a burst.
+    tree = {"/dir": _dir("dir")}
+    tree.update({f"/dir/{i}.json": _file(f"{i}.json") for i in range(40)})
+    readdir, stat = _make_fs_backend(tree)
+    flight = {"now": 0, "peak": 0}
+
+    async def slow_stat(p: PathSpec, index=None) -> FileStat:
+        flight["now"] += 1
+        flight["peak"] = max(flight["peak"], flight["now"])
+        await asyncio.sleep(0.001)
+        flight["now"] -= 1
+        return await stat(p, index)
+
+    res = await walk(_spec("/dir"), readdir=readdir, stat=slow_stat)
+    assert len(res.entries) == 40
+    assert flight["peak"] == 1
 
 
 @pytest.mark.asyncio

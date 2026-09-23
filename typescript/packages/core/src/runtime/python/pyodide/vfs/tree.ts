@@ -78,6 +78,13 @@ export class NodeTree {
         this.stamp(seed, path, node)
       }
     }
+    for (const path of seed.unclassified) {
+      const node = this.placeFile(path)
+      if (node !== null) {
+        node.unreadable = true
+        node.unclassified = true
+      }
+    }
     for (const [path, bytes] of seed.files) {
       const node = this.placeFile(path)
       if (node === null) continue
@@ -145,6 +152,28 @@ export class NodeTree {
       parent.children.set(name, node)
     }
     return node
+  }
+
+  /**
+   * Give a placed node the kind a mount reported for it afterwards.
+   *
+   * Only a node placed from an unclassified listing row is ever built on
+   * a guess, and the guess is a regular file. When the mount says it is
+   * a directory, the node trades its content for a child table, which is
+   * what `makeNode` would have built for one.
+   *
+   * Args:
+   *   node: the node to retype.
+   *   mode: the mode the mount reported, type bits included.
+   */
+  retype(node: FSNode, mode: number): void {
+    const becomesDir = this.host.isDir(mode) && !this.host.isDir(node.mode)
+    node.mode = mode
+    if (!becomesDir) return
+    node.children = new Map()
+    delete node.contents
+    delete node.usedBytes
+    delete node.loaded
   }
 
   childOf(parent: FSNode, name: string): FSNode | undefined {

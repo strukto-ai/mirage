@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from collections.abc import Awaitable
 from typing import Any
 
@@ -29,6 +30,8 @@ from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.path import norm
 from mirage.utils.stat_view import (content_size, device_rdev, is_dir, is_link,
                                     mtime_ns, posix_mode)
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeVFS:
@@ -198,21 +201,28 @@ class RuntimeVFS:
                        is_link=is_link(fs),
                        rdev=device_rdev(fs))
 
-    def readdir(self, path: str) -> list[VFSEntry]:
+    def readdir(self, path: str, *, classify: bool = True) -> list[VFSEntry]:
         """List a directory as resolved entries (the TS door's shape).
 
         A backend that slash-marks directories skips the stat; every
-        other entry is classified by the stat the readdir just
-        populated the index with, so the lookup is RAM, not another
-        API call. An entry that vanished between list and stat (or a
-        dangling link) rides as a size-0 file instead of failing the
-        whole listing: the guest's own open reports the miss.
+        other entry is classified by its own stat, which is RAM when
+        the readdir filled the index and a backend request when the
+        mount keeps none. One entry at a time, since each op hops to
+        the loop and blocks this thread.
+
+        An entry whose stat fails, for any reason, rides unclassified:
+        a size-0 non-directory with no mode and no mtime, the row that
+        says "not known". One entry never fails the listing, the way a
+        kernel readdir never stats at all. What went wrong is not lost:
+        the guest's own stat or open of that entry asks the mount again
+        and reports it. Only the listing itself failing fails the call.
 
         A row that did stat carries its mode and mtime too, since the
         struct is already in hand: a guest that seeds a whole tree from
         one listing (Emscripten does) then needs no second stat per
-        file. The two slash-marked rows report None for both, which is
-        the honest answer for a listing that never asked.
+        file. The slash-marked and unclassified rows report None for
+        both, which is the honest answer for a listing that never
+        learned them.
 
         The link mark comes from the name plane, since stat follows and
         no backend listing reports a link. One table read per listing,
@@ -222,6 +232,10 @@ class RuntimeVFS:
 
         Args:
             path (str): guest-absolute virtual path.
+            classify (bool): stat each entry to learn its kind. A guest
+                that only needs names (monty's listdir) passes False and
+                every row comes back unclassified, one request for the
+                listing and none per entry, as a POSIX readdir costs.
         """
         entries: list[VFSEntry] = []
         listing = self.call("readdir", path)
@@ -235,11 +249,19 @@ class RuntimeVFS:
                 entries.append(
                     VFSEntry(path=raw, size=0, is_dir=True, is_link=linked))
                 continue
+            unclassified = VFSEntry(path=raw,
+                                    size=0,
+                                    is_dir=False,
+                                    is_link=linked)
+            if not classify:
+                entries.append(unclassified)
+                continue
             try:
                 st = self.stat(raw)
-            except FileNotFoundError:
-                entries.append(
-                    VFSEntry(path=raw, size=0, is_dir=False, is_link=linked))
+            except Exception as exc:
+                logger.debug("runtime vfs: readdir %s: stat %s: %s", path, raw,
+                             exc)
+                entries.append(unclassified)
                 continue
             entries.append(
                 VFSEntry(path=raw,

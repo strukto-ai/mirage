@@ -49,8 +49,8 @@ function doorOn(ws: Workspace): RuntimeVFS {
 }
 
 // The runtime door's readdir is the sandboxed runtimes' directory read:
-// what it swallows, a guest can never see, and what it fails, pyodide's
-// syncMounts treats as the whole tree.
+// what it fails, a guest sees as the whole directory failing, so one
+// entry's stat never fails it; that entry's own stat still reports why.
 describe('runtime door readdir', () => {
   it('a dangling link degrades to a zero row instead of failing the listing', async () => {
     const { ws } = mkWorld()
@@ -61,11 +61,11 @@ describe('runtime door readdir', () => {
     expect(row).toMatchObject({ size: 0, isDir: false, isLink: true })
   })
 
-  it('a non-missing stat failure propagates instead of degrading the row', async () => {
-    // Only a genuine missing path (the dangling-link race above) may
-    // read back as a zero row; authorization failures, timeouts, and
-    // backend bugs must surface, or an incomplete listing replaces a
-    // healthy snapshot.
+  it('a failing entry stat leaves the row unclassified and surfaces on its own stat', async () => {
+    // An authorization failure, a timeout or a backend bug on one entry
+    // does not fail the directory, the way a kernel readdir never stats.
+    // It is not swallowed either: the row carries no mode, and the
+    // guest's own stat of the entry asks again and gets the failure.
     const { ws, ops, vfs } = mkWorld()
     await ws.vfs.writeFile('/data/a.txt', 'hi')
     ops.register({
@@ -77,7 +77,9 @@ describe('runtime door readdir', () => {
       },
       write: false,
     })
-    await expect(doorOn(ws).readdir('/data')).rejects.toThrow('401 Unauthorized')
+    const door = doorOn(ws)
+    expect(await door.readdir('/data')).toEqual([{ path: '/data/a.txt', size: 0, isDir: false }])
+    await expect(door.stat('/data/a.txt')).rejects.toThrow('401 Unauthorized')
   })
 
   // A live link stats as its target, so the row's own kind says nothing

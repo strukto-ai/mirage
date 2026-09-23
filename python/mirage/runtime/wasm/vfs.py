@@ -18,7 +18,7 @@ from typing import Any
 
 from mirage.runtime.types import VFSStat
 from mirage.runtime.vfs import RuntimeVFS
-from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_SYMLINK
+from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_SYMLINK, FT_UNKNOWN
 from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.constants import READONLY_HINT
@@ -297,6 +297,9 @@ class WasmVFS:
         Core entries arrive kind-resolved (the door stats what the
         backend does not slash-mark), so a guest's ``d_type`` is real
         instead of FT_UNKNOWN paid off with one lazy stat per entry.
+        The exception is an entry whose stat failed: it rides
+        unclassified, so it is FT_UNKNOWN, and a guest that needs its
+        kind stats it and meets the failure there rather than a guess.
         A link is reported as one: preview1 has the filetype, the door
         marks the row, and a guest that reads ``d_type`` (CPython's
         ``scandir`` does) then answers ``is_symlink`` without a call of
@@ -320,8 +323,12 @@ class WasmVFS:
                 continue
             if entry.is_link:
                 entries[base] = FT_SYMLINK
-                continue
-            entries[base] = FT_DIR if entry.is_dir else FT_REG
+            elif entry.is_dir:
+                entries[base] = FT_DIR
+            elif entry.mode is None:
+                entries[base] = FT_UNKNOWN
+            else:
+                entries[base] = FT_REG
         return sorted(entries.items())
 
     def _readdir_root(self) -> list[tuple[str, int]]:

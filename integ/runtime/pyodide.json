@@ -1354,6 +1354,41 @@
           }
         }
       ]
+    },
+    {
+      "id": "listing_survives_a_failing_record",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/api": {
+            "vfs": "ram",
+            "files": {
+              "items/0.json": "{\"id\": 0}\n",
+              "items/1.json": "{\"id\": 1}\n",
+              "items/2.json": "{\"id\": 2}\n",
+              "items/3.json": "{\"id\": 3}\n"
+            },
+            "failing": [
+              "items/2.json"
+            ]
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import errno, glob, os\nprint(sorted(os.listdir('/api/items')))\nprint(len(glob.glob('/api/items/*.json')))\nprint(os.stat('/api/items/1.json').st_size)\nfor probe in (os.stat, lambda p: open(p).read()):\n    try:\n        probe('/api/items/2.json')\n        print('served')\n    except OSError as e:\n        print(errno.errorcode[e.errno])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['0.json', '1.json', '2.json', '3.json']\n4\n10\nEIO\nEIO\n"
+          }
+        }
+      ]
     }
   ]
 }

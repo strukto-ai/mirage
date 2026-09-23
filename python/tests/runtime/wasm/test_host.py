@@ -19,10 +19,10 @@ import pytest
 pytest.importorskip("wasmtime")
 
 from mirage.runtime.wasm.abi import (  # noqa: E402  # isort: skip
-    FST_ATIM, FST_ATIM_NOW, FST_MTIM, FST_MTIM_NOW, FT_CHR, FT_DIR, FT_REG,
-    FT_SYMLINK)
+    EINVAL, EIO, ENOENT, FST_ATIM, FST_ATIM_NOW, FST_MTIM, FST_MTIM_NOW,
+    FT_CHR, FT_DIR, FT_REG, FT_SYMLINK)
 from mirage.runtime.wasm.host import (  # noqa: E402  # isort: skip
-    WasiFs, _filetype, _spec, _stamp)
+    WasiFs, _call_guarded, _filetype, _spec, _stamp)
 from mirage.runtime.types import VFSStat  # noqa: E402
 
 from mirage.utils.stat_view import (  # noqa: E402  # isort: skip
@@ -46,6 +46,31 @@ def test_spec_covers_every_fs_import_of_the_shipped_guests():
     # python.wasm imports 28 preview1 fs functions; qjs-wasi.wasm a
     # 16-function subset. fd_renumber is shadowed too (dup2 support).
     assert len(_spec()) == 29
+
+
+def _raising(exc):
+    """A host function double that fails with `exc`.
+
+    Args:
+        exc (BaseException): what the call raises.
+    """
+
+    def fn(caller, *args):
+        raise exc
+
+    return fn
+
+
+def test_guarded_call_maps_an_fs_error_to_its_errno():
+    assert _call_guarded(_raising(FileNotFoundError("x")), None) == ENOENT
+    assert _call_guarded(_raising(ValueError("row too large")), None) == EINVAL
+
+
+def test_guarded_call_answers_eio_for_an_upstream_failure():
+    # One record a remote API refuses must fail the guest's call on it,
+    # not trap the whole run the guest could have finished without it.
+    upstream = RuntimeError("upstream 502 Bad Gateway")
+    assert _call_guarded(_raising(upstream), None) == EIO
 
 
 def test_filetype_reads_the_kind_link_first():

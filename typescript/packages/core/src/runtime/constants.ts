@@ -14,3 +14,14 @@
 
 /** Capture unresolved program names without taking over the workspace shell. */
 export const EXTERNAL_COMMANDS = '@external'
+
+/**
+ * The most per-entry requests a runtime keeps in flight.
+ *
+ * Classifying or preloading an entry is a request of its own on a
+ * mount that keeps no listing index, so an unbounded listing puts a
+ * whole directory's worth of requests on the wire together. The door's
+ * classifying stats share one such cap, and so does a preload walk.
+ * Python works one entry at a time and needs no bound.
+ */
+export const LISTING_ENTRY_CONCURRENCY = 16

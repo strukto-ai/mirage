@@ -48,14 +48,16 @@ requirement_met() {
 }
 
 # Whether this case can run over the CLI at all. Worlds carrying code
-# policies (runner-local Policy classes) cannot cross the yaml/daemon
-# boundary, and read_op steps need the SDK op door.
+# policies (runner-local Policy classes) or a failing mount (a runner-local
+# VFS) cannot cross the yaml/daemon boundary, and read_op steps need the
+# SDK op door.
 cli_expressible() {
   local case_json="$1"
   jq -e '
     ((.world.mounts // {"/ram": {"vfs": "ram"}})
       | to_entries | all(.value.vfs == "ram"))
     and (((.world.mounts // {}) | to_entries) | all(.value.generated_files == null))
+    and (((.world.mounts // {}) | to_entries) | all(.value.failing == null))
     and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select((type == "object" and .name == "echobox") or . == "echobox")) | length) == 0)
     and (((.world.register_runtimes // {}) | length) == 0)

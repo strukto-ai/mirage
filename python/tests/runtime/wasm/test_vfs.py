@@ -22,7 +22,7 @@ from mirage.ops.namespace_view import merge_readdir
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSStat
 from mirage.runtime.vfs import RuntimeVFS
-from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_SYMLINK
+from mirage.runtime.wasm.abi import FT_DIR, FT_REG, FT_SYMLINK, FT_UNKNOWN
 from mirage.runtime.wasm.config import WasmFsConfig
 from mirage.runtime.wasm.vfs import WasmVFS
 from mirage.types import ContentType, FileStat, FileType
@@ -152,6 +152,19 @@ class FakeVFS(RuntimeVFS):
         raise NotImplementedError(op)
 
 
+class FailingStatVFS(FakeVFS):
+    """A double whose stat of one path fails the way a remote API does."""
+
+    def __init__(self, failing, **kwargs):
+        super().__init__(**kwargs)
+        self.failing = failing
+
+    def _raw(self, op, path, **kwargs):
+        if op == "stat" and path == self.failing:
+            raise OSError(host_errno.EIO, "upstream 502 Bad Gateway", path)
+        return super()._raw(op, path, **kwargs)
+
+
 def test_mount_prefix_routes_to_bridge_even_when_host_file_exists(tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "f.txt").write_text("host-side")
@@ -216,6 +229,22 @@ def test_readdir_bridge_resolves_kind_from_slash_or_stat():
                      prefixes=["/data/"])
     fs = WasmVFS(core=bridge)
     assert fs.readdir("/data") == [("f.txt", FT_REG), ("sub", FT_DIR)]
+
+
+def test_readdir_reports_an_entry_it_could_not_stat_as_unknown():
+    # One entry's failing stat does not fail the listing. Its d_type is
+    # FT_UNKNOWN rather than a guess, so a guest that needs the kind
+    # stats it and meets the failure there.
+    bridge = FailingStatVFS("/data/bad.txt",
+                            files={
+                                "/data/f.txt": b"",
+                                "/data/bad.txt": b""
+                            },
+                            prefixes=["/data/"])
+    fs = WasmVFS(core=bridge)
+    assert fs.readdir("/data") == [("bad.txt", FT_UNKNOWN), ("f.txt", FT_REG)]
+    with pytest.raises(OSError):
+        fs.stat("/data/bad.txt")
 
 
 def test_readdir_reports_a_link_as_a_link():

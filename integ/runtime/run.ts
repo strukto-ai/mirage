@@ -45,6 +45,7 @@ import {
   type RunResult,
   type RuntimeEntry,
   type FilesystemOperation,
+  type RegisteredOp,
 } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
@@ -101,6 +102,9 @@ interface MountSpecJson {
   vfs: string
   files?: Record<string, string>
   generated_files?: number
+  // Names, spelled as `files` spells them, whose stat and read fail the
+  // way an upstream 5xx does while the listing still names them.
+  failing?: string[]
   limits?: Record<string, Record<string, unknown>>
 }
 
@@ -414,9 +418,41 @@ async function ensureMongo(): Promise<void> {
   mongoSeeded = true
 }
 
+/**
+ * A RAM mount whose named records fail their stat and read.
+ *
+ * The shape of one broken record behind a REST collection: the listing
+ * names it, and every question about it errors with whatever the
+ * upstream said, which is no filesystem code at all.
+ */
+class FailingRAMVFS extends RAMVFS {
+  private readonly failing: ReadonlySet<string>
+
+  constructor(failing: readonly string[]) {
+    super()
+    this.failing = new Set(failing)
+  }
+
+  override ops(): readonly RegisteredOp[] {
+    return super
+      .ops()
+      .map((op) =>
+        op.name === 'stat' || op.name === 'read' ? { ...op, fn: this.guard(op.fn) } : op,
+      )
+  }
+
+  private guard(fn: RegisteredOp['fn']): RegisteredOp['fn'] {
+    return (accessor, path, args, kwargs) => {
+      const name = path.vfsPath.split('/').filter(Boolean).join('/')
+      if (this.failing.has(name)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
+      return fn(accessor, path, args, kwargs)
+    }
+  }
+}
+
 async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
   if (spec.vfs === 'ram') {
-    const vfs = new RAMVFS()
+    const vfs = spec.failing !== undefined ? new FailingRAMVFS(spec.failing) : new RAMVFS()
     if (spec.generated_files !== undefined) {
       vfs.loadState({
         type: 'ram',

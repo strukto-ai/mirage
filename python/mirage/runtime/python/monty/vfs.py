@@ -88,14 +88,22 @@ class MontyVFS:
                              lambda core: core.read(virtual))
 
     def readdir(self, virtual: str) -> list[VFSEntry] | None:
-        """The directory's entries, or None when it is not a directory."""
+        """The directory's entries, or None when it is not a directory.
+
+        Unclassified: every caller reads a row's path or only whether
+        the listing answered, and a guest that wants a kind stats the
+        entry itself, so the door stats nothing per entry.
+
+        Args:
+            virtual (str): the directory to list.
+        """
         # Deliberately past the negative cache in both directions: the
         # self-heal that materializes a directory into monty's own tree
         # runs a listing for a path a stat just missed.
         if self._core is None:
             return None
         try:
-            return self._core.readdir(virtual)
+            return self._core.readdir(virtual, classify=False)
         except ABSENT_PATH:
             return None
 

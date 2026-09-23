@@ -26,6 +26,7 @@ export class MirageFsSeed implements FSLike {
   readonly files = new Map<string, Uint8Array>()
   readonly devices = new Map<string, { mode: number; rdev: number }>()
   readonly unreadable = new Set<string>()
+  readonly unclassified = new Set<string>()
   readonly links = new Map<string, string>()
   readonly modes = new Map<string, number>()
   readonly stamps = new Map<string, { atimeMs: number; mtimeMs: number }>()
@@ -92,5 +93,19 @@ export class MirageFsSeed implements FSLike {
    */
   markUnreadable(path: string): void {
     this.unreadable.add(path)
+  }
+
+  /**
+   * Note an entry the mount listed but would not stat, asked twice.
+   *
+   * Seeded as a node that answers neither a stat nor an open: its kind,
+   * size and content are all unknown, and inventing any of them would
+   * hand the guest a file the mount never described.
+   *
+   * Args:
+   *   path: guest-absolute path that could not be classified.
+   */
+  markUnclassified(path: string): void {
+    this.unclassified.add(path)
   }
 }

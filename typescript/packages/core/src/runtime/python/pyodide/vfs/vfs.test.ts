@@ -21,7 +21,9 @@ import { preloadInto } from './preload.ts'
 import { changedAttrs, MirageFs } from './vfs.ts'
 import { MirageFsSeed } from './seed.ts'
 import type { BridgeDispatchFn } from '../../../types.ts'
-import type { FSNode } from './types.ts'
+import type { VFSEntry, VFSStat } from '../../../vfs.ts'
+import { DIR_MODE, FILE_MODE } from './constants.ts'
+import type { FSNode, SyncVFS } from './types.ts'
 import { ContentType, FileStat, FileType, type SetAttrFields } from '../../../../types.ts'
 
 const enc = new TextEncoder()
@@ -46,6 +48,10 @@ describe('MirageFs', () => {
   const mounts: string[] = []
   const store = new Map<string, Uint8Array>()
   const unreadable = new Set<string>()
+  // Paths whose stat and read fail the way an upstream 5xx does, always
+  // or only on the first stat.
+  const broken = new Set<string>()
+  const brokenOnce = new Set<string>()
   const links = new Map<string, string>()
   const attrs: [string, SetAttrFields][] = []
   let counter = 0
@@ -66,6 +72,49 @@ describe('MirageFs', () => {
     fs.seed(seed)
   }
 
+  // The worker shape: nothing is seeded, and every lookup, listing and
+  // read goes through a synchronous channel, here a double over the rows
+  // and stats a test hands it.
+  function mountOver(prefix: string, sync: SyncVFS): void {
+    mounts.push(prefix)
+    const mountpoint = prefix.slice(0, -1)
+    const fs = new MirageFs(
+      py.FS,
+      py.ERRNO_CODES,
+      journal,
+      mountpoint,
+      (path) => vfs.mountOf(path),
+      sync,
+    )
+    py.FS.mkdirTree(mountpoint)
+    py.FS.mount(fs.type, {}, mountpoint)
+  }
+
+  function syncOver(
+    rows: Record<string, VFSEntry[]>,
+    stats: Record<string, VFSStat | Error>,
+    statCalls: string[],
+  ): SyncVFS {
+    return {
+      read: (path) => store.get(path) ?? new Uint8Array(),
+      stat: (path) => {
+        statCalls.push(path)
+        const found = stats[path]
+        if (found === undefined) {
+          throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
+        }
+        if (found instanceof Error) throw found
+        return found
+      },
+      readdir: (path) => rows[path] ?? [],
+      readlink: (path) => {
+        throw new Error(`not a link: ${path}`)
+      },
+      flush: () => undefined,
+      xattr: () => undefined,
+    }
+  }
+
   // The runtime's post-run drain, applied host-side where awaiting the
   // bridge needs no JSPI.
   async function drain(): Promise<void> {
@@ -78,6 +127,7 @@ describe('MirageFs', () => {
       calls.push(bytes ? { op, path, bytes: new Uint8Array(bytes) } : { op, path })
       if (op === 'read') {
         if (unreadable.has(path)) return Promise.reject(new Error('backend unavailable'))
+        if (broken.has(path)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
         const found = store.get(path)
         if (found === undefined) return Promise.reject(new Error(`no such file: ${path}`))
         return Promise.resolve(found)
@@ -102,6 +152,9 @@ describe('MirageFs', () => {
         return Promise.resolve(listed)
       }
       if (op === 'stat') {
+        if (broken.has(path) || brokenOnce.delete(path)) {
+          return Promise.reject(new Error('upstream 502 Bad Gateway'))
+        }
         const found = store.get(path)
         if (found === undefined) {
           // A link, whose mark rides the resolver, or a path that went
@@ -156,6 +209,8 @@ describe('MirageFs', () => {
     mounts.length = 0
     store.clear()
     unreadable.clear()
+    broken.clear()
+    brokenOnce.clear()
     links.clear()
     attrs.length = 0
     journal.takeMutations()
@@ -406,6 +461,115 @@ except OSError as e:
     // since only absence makes an empty base safe to build a write on.
     expect(py.globals.get('_errno')).toBe(py.ERRNO_CODES.EIO)
     expect(journal.takeMutations()).toEqual([])
+  })
+
+  // A REST collection answers a record's stat by fetching it, so one bad
+  // record fails its stat. The listing must survive that, and the record
+  // must not turn into an empty file: both its stat and its open say EIO.
+  it('lists an entry the mount will not stat, and refuses its stat and open', async () => {
+    const p = prefix()
+    store.set(`${p}good.json`, enc.encode('{}'))
+    store.set(`${p}bad.json`, enc.encode('{}'))
+    broken.add(`${p}bad.json`)
+    await mountPrefix(p)
+    await py.runPythonAsync(`
+import os
+_names = ','.join(sorted(os.listdir('${p}')))
+_good = os.stat('${p}good.json').st_size
+_errnos = []
+for _probe in (os.stat, lambda path: open(path).read()):
+    try:
+        _probe('${p}bad.json')
+        _errnos.append(0)
+    except OSError as e:
+        _errnos.append(e.errno)
+_errnos = ','.join(map(str, _errnos))
+`)
+    expect(py.globals.get('_names')).toBe('bad.json,good.json')
+    expect(py.globals.get('_good')).toBe(2)
+    const eio = String(py.ERRNO_CODES.EIO)
+    expect(py.globals.get('_errnos')).toBe(`${eio},${eio}`)
+  })
+
+  // The preload is the guest's only chance to ask, so an entry whose stat
+  // failed once is asked again, and an answer seeds it as usual.
+  it('seeds an entry whose first stat failed from the second', async () => {
+    const p = prefix()
+    store.set(`${p}late.json`, enc.encode('{"id": 7}'))
+    brokenOnce.add(`${p}late.json`)
+    await mountPrefix(p)
+    await py.runPythonAsync(`
+import os
+_st = os.stat('${p}late.json')
+_perm = _st.st_mode & 0o7777
+_size = _st.st_size
+_body = open('${p}late.json').read()
+`)
+    expect(py.globals.get('_body')).toBe('{"id": 7}')
+    expect(py.globals.get('_perm')).toBe(STORE_MODE)
+    expect(py.globals.get('_size')).toBe(9)
+  })
+
+  // Over a worker the node is placed from the listing and its stat is the
+  // guest's own: it goes to the mount rather than answering size 0 from
+  // the placeholder, so the failure the listing swallowed surfaces here.
+  it('asks the mount before it stats a node the listing could not classify', async () => {
+    const p = prefix()
+    const statCalls: string[] = []
+    mountOver(
+      p,
+      syncOver(
+        {
+          [p]: [
+            { path: `${p}good.json`, size: 2, isDir: false, mode: FILE_MODE, mtimeMs: 0 },
+            { path: `${p}bad.json`, size: 0, isDir: false },
+          ],
+        },
+        { [`${p}bad.json`]: new Error('upstream 502 Bad Gateway') },
+        statCalls,
+      ),
+    )
+    await py.runPythonAsync(`
+import os
+_names = ','.join(sorted(os.listdir('${p}')))
+_good = os.stat('${p}good.json').st_size
+try:
+    os.stat('${p}bad.json')
+    _errno = 0
+except OSError as e:
+    _errno = e.errno
+`)
+    expect(py.globals.get('_names')).toBe('bad.json,good.json')
+    expect(py.globals.get('_good')).toBe(2)
+    expect(py.globals.get('_errno')).toBe(py.ERRNO_CODES.EIO)
+    expect(statCalls).toEqual([`${p}bad.json`])
+  })
+
+  // The placeholder is a regular file; a mount that answers "directory"
+  // once it recovers turns the node into one the guest can list.
+  it('turns a placeholder into a directory when the mount says it is one', async () => {
+    const p = prefix()
+    mountOver(
+      p,
+      syncOver(
+        {
+          [p]: [{ path: `${p}sub`, size: 0, isDir: false }],
+          [`${p}sub/`]: [
+            { path: `${p}sub/x.json`, size: 2, isDir: false, mode: FILE_MODE, mtimeMs: 0 },
+          ],
+        },
+        { [`${p}sub`]: { size: 0, isDir: true, mode: DIR_MODE, mtimeMs: 0 } },
+        [],
+      ),
+    )
+    await py.runPythonAsync(`
+import os, stat
+os.listdir('${p}')
+_isdir = stat.S_ISDIR(os.stat('${p}sub').st_mode)
+_inner = ','.join(os.listdir('${p}sub'))
+`)
+    expect(py.globals.get('_isdir')).toBe(true)
+    expect(py.globals.get('_inner')).toBe('x.json')
   })
 
   // Filenames are the mount's to choose, so the child table is keyed by a

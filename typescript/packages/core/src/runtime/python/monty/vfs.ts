@@ -218,11 +218,17 @@ export class MontyVFS {
     }
   }
 
-  /** The directory's entries. Throws when it is not a directory. */
+  /**
+   * The directory's entries. Throws when it is not a directory.
+   *
+   * Unclassified: every caller reads a row's path or only whether the
+   * listing answered, and a guest that wants a kind stats the entry
+   * itself, so the door stats nothing per entry.
+   */
   async readdir(path: string): Promise<VFSEntry[]> {
     const prefix = path.endsWith('/') ? path : path + '/'
     try {
-      return await this.core.readdir(prefix)
+      return await this.core.readdir(prefix, false)
     } catch (caught) {
       throw asGuestError(caught, path)
     }
@@ -282,6 +288,15 @@ export class MontyVFS {
    * The parent's entry for `path`, or null when the parent lacks one
    * or has no listing to lack it in. A parent the mount refuses to
    * list is neither, and raises.
+   *
+   * The listing is unclassified, so a row with no stat and no slash
+   * mark says nothing about kind, and the callers read `isDir` off it
+   * (an open refuses a directory, a mkdir accepts one). That row is
+   * classified by the path's own stat: one request for the path asked
+   * about, never one per sibling. A link row takes its target's kind
+   * the same way, since the stat follows it; a dangling one keeps its
+   * own row, with no mode, because the name is there even when its
+   * target is not.
    */
   async entryFor(path: string): Promise<VFSEntry | null> {
     if (this.missing.has(path)) return null
@@ -289,8 +304,18 @@ export class MontyVFS {
     const parent = slash <= 0 ? '/' : path.slice(0, slash)
     const entries = await this.readdirOrNull(parent)
     const found = entries?.find((e) => e.path === path || e.path === path + '/') ?? null
-    if (found === null) this.missing.add(path)
-    return found
+    if (found === null) {
+      this.missing.add(path)
+      return null
+    }
+    if (found.isDir || found.mode !== undefined) return found
+    const row = await this.orNull(path, ABSENT_PATH, () => this.core.stat(path))
+    if (row === null) {
+      if (found.isLink === true) return found
+      this.missing.add(path)
+      return null
+    }
+    return { ...row, path: found.path, ...(found.isLink === true ? { isLink: true } : {}) }
   }
 
   /**

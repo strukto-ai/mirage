@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import logging
 import posixpath
 import time
 from dataclasses import dataclass
@@ -23,8 +24,8 @@ from typing import Any, Callable, Literal
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FileHandle, FileTable
 from mirage.runtime.types import VFSStat
-from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
-                                     ENOTDIR, FDFLAG_APPEND, FST_ATIM,
+from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EIO, EISDIR,
+                                     ENOENT, ENOTDIR, FDFLAG_APPEND, FST_ATIM,
                                      FST_ATIM_NOW, FST_MTIM, FST_MTIM_NOW,
                                      FT_CHR, FT_DIR, FT_REG, FT_SYMLINK,
                                      LINK_REFUSAL, LOOKUP_SYMLINK_FOLLOW,
@@ -36,6 +37,8 @@ from mirage.runtime.wasm.abi import (EBADF, EEXIST, EINVAL, EISDIR, ENOENT,
 # yapf: enable
 from mirage.runtime.wasm.vfs import WasmVFS
 from mirage.utils.dates import timestamp_iso
+
+logger = logging.getLogger(__name__)
 
 FdKind = Literal["stdin", "stdout", "stderr", "dir", "file"]
 
@@ -97,10 +100,14 @@ def _stamp(fst_flags: int, set_bit: int, now_bit: int, value: int,
 
 def _call_guarded(fn: Callable[..., Any], caller: "wasmtime.Caller", *args:
                   int) -> int:
-    """Run a preview1 host function, mapping fs errors to guest errnos.
+    """Run a preview1 host function, mapping every failure to a guest errno.
 
-    Only filesystem-shaped exceptions are mapped; anything else
-    propagates and traps the run loudly.
+    Filesystem-shaped exceptions get their own errno. Anything else, a
+    backend's upstream error on one record most often, is EIO: a
+    syscall has no other channel to say it failed, and trapping instead
+    killed the whole run over one file the guest could have skipped.
+    The TypeScript hosts answer the same (quickjs's ``wasiErrno``,
+    pyodide's read-through) and so does the FUSE classifier.
 
     Args:
         fn (Callable): bound WasiFs method for one preview1 import.
@@ -110,6 +117,9 @@ def _call_guarded(fn: Callable[..., Any], caller: "wasmtime.Caller", *args:
         return fn(caller, *args)
     except (OSError, ValueError, NotImplementedError, CrossMountError) as exc:
         return errno_for(exc)
+    except Exception as exc:
+        logger.debug("wasi host call failed: %r", exc)
+        return EIO
 
 
 @dataclass(slots=True)

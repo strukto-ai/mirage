@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { isMissingOp, isMissingPath } from '../utils/errors.ts'
 import {
   contentSize,
@@ -22,6 +23,7 @@ import {
   mtimeMs,
   posixMode,
 } from '../utils/stat_view.ts'
+import { LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { planFlush } from './handles/index.ts'
@@ -40,14 +42,28 @@ export interface VFSEntry {
   isLink?: boolean
   // The stat's mode and stamp, absent on a row that carries no stat.
   // A backend that slash-marks its directories is listed without one,
-  // which is the whole point of the mark, so the row says "not known"
-  // rather than inventing a default the guest cannot tell from an
-  // answer. A row that did stat carries both, so a guest seeding a
-  // whole tree from one listing needs no second stat per file.
+  // which is the whole point of the mark, and so is an entry the
+  // listing did not classify, so the row says "not known" rather than
+  // inventing a default the guest cannot tell from an answer. A row
+  // that did stat carries both, so a guest seeding a whole tree from
+  // one listing needs no second stat per file.
   mode?: number
   mtimeMs?: number
   // Encoded logical major:minor; present only for a character device.
   rdev?: number
+}
+
+/**
+ * Whether a listing row is one the door did not classify.
+ *
+ * Its size-0 non-directory shape is a placeholder, not an answer: a
+ * guest that needs the entry's kind, size or stamp must ask the mount
+ * with a stat of its own, which also reports whatever failed. A
+ * slash-marked directory and a link carry no mode either, but their
+ * kind is known.
+ */
+export function isUnclassified(entry: VFSEntry | VFSStat): boolean {
+  return entry.mode === undefined && !entry.isDir && entry.isLink !== true
 }
 
 /** One path's metadata, in the shape every guest encoder needs. */
@@ -138,6 +154,10 @@ export class RuntimeVFS {
   private readonly dispatch: BridgeDispatchFn
   private readonly resolver: MountResolver
   private readonly noAppend = new Set<string>()
+  // One cap for every listing this door classifies, so listings that
+  // run together (a preload walking a tree) share it rather than each
+  // bringing its own.
+  private readonly classifying = new ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY)
 
   constructor(dispatch: BridgeDispatchFn, resolver: MountResolver = new PrefixResolver(() => [])) {
     this.dispatch = dispatch
@@ -208,25 +228,39 @@ export class RuntimeVFS {
    * List a directory as resolved entries (Python's `readdir` shape).
    *
    * A backend that slash-marks directories skips the stat; every other
-   * entry is classified by the stat the readdir just populated the
-   * index with, so the lookup is RAM, not another API call. An entry
-   * that vanished between list and stat (or a dangling link) rides as
-   * a size-0 file instead of failing the whole listing: the guest's
-   * own open reports the miss.
+   * entry is classified by its own stat, which is RAM when the readdir
+   * filled the index and a backend request when the mount keeps none.
+   * At most `LISTING_ENTRY_CONCURRENCY` of those run at once across
+   * every listing this door serves, so a large directory on an
+   * unindexed mount does not put every entry's request on the wire
+   * together.
+   *
+   * An entry whose stat fails, for any reason, rides unclassified: a
+   * size-0 non-directory with no mode and no stamp, the row that says
+   * "not known". One entry never fails the listing, the way a kernel
+   * readdir never stats at all. What went wrong is not lost: the
+   * guest's own stat or open of that entry asks the mount again and
+   * reports it. Only the listing itself failing fails the call.
    *
    * A row that did stat carries its mode and stamp too, since the
    * struct is already in hand: a guest that seeds a whole tree from
    * one listing (Emscripten does) then needs no second stat per file.
-   * The two slash-marked rows report neither, which is the honest
-   * answer for a listing that never asked.
+   * The slash-marked and unclassified rows report neither, which is
+   * the honest answer for a listing that never learned them.
    *
    * The link mark comes from the name plane, since stat follows and no
    * backend listing reports a link. One table read per listing, and it
    * only ever marks a name the listing itself returned, so a link the
    * session hides stays hidden: the dispatcher filtered it out of the
    * entries above and an unmatched mark marks nothing.
+   *
+   * @param path guest-absolute virtual path of the directory.
+   * @param classify stat each entry to learn its kind. A guest that
+   *   only needs names (monty's listdir, quickjs) passes false and
+   *   every row comes back unclassified, one request for the listing
+   *   and none per entry, as a POSIX readdir costs.
    */
-  async readdir(path: string): Promise<VFSEntry[]> {
+  async readdir(path: string, classify = true): Promise<VFSEntry[]> {
     const out = await this.dispatch('readdir', path)
     if (!Array.isArray(out)) {
       throw new TypeError(`runtime vfs: readdir ${path} expected array`)
@@ -244,17 +278,17 @@ export class RuntimeVFS {
         // Backends that mark directories with a trailing slash skip the
         // stat; unmarked entries (e.g. RAM) need one to learn dir-ness.
         if (raw.endsWith('/')) return { path: raw, size: 0, isDir: true, ...linked }
+        const unclassified: VFSEntry = { path: raw, size: 0, isDir: false, ...linked }
+        if (!classify) return unclassified
+        const release = await this.classifying.acquire()
         let st: VFSStat
         try {
           st = await this.stat(raw)
         } catch (err) {
-          // A dangling link, or an entry that vanished between list and
-          // stat, must not fail the whole listing; the guest's own open
-          // reports the miss. Anything else (authorization, a timeout, a
-          // backend bug) propagates, or pyodide's syncMounts would
-          // replace a healthy snapshot with a silently degraded one.
-          if (!isMissingPath(err)) throw err
-          return { path: raw, size: 0, isDir: false, ...linked }
+          console.debug(`runtime vfs: readdir ${path}: stat ${raw}: ${String(err)}`)
+          return unclassified
+        } finally {
+          release()
         }
         return {
           path: raw,

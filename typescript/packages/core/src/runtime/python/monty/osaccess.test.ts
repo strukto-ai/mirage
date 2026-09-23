@@ -516,6 +516,48 @@ describe('MirageOSAccess mounted open and append', () => {
     expect(calls).toEqual([['/ram/x/y', { parents: true }]])
   })
 
+  // RAM lists a directory as a bare name, and the listing no longer
+  // stats it, so the kind has to come from the path's own stat.
+  it('refuses to open a mounted directory listed without a slash', async () => {
+    const access = accessOn(listing(['/ram/d', '/ram/d/a.txt'], ['/ram/d']))
+    await expect(Promise.resolve(access.handle('open', ['/ram/d', 'r']))).rejects.toThrow(
+      '[Errno 21] Is a directory',
+    )
+  })
+
+  it('mkdir under exist_ok accepts a mounted directory listed without a slash', async () => {
+    const access = accessOn(listing(['/ram/d', '/ram/d/a.txt'], ['/ram/d']))
+    expect(await access.handle('Path.mkdir', ['/ram/d'], { exist_ok: true })).toBeNull()
+  })
+
+  // The follow-stat of a dangling link misses, but the listed name is
+  // still there: O_EXCL refuses it rather than creating through it.
+  it('refuses an exclusive open of a dangling link it listed', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
+      if (op === 'readdir') return Promise.resolve(['/ram/lnk'])
+      return Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' }))
+    })
+    const access = accessOn(dispatch, {}, ['/ram'], ['lnk'])
+    await expect(Promise.resolve(access.handle('open', ['/ram/lnk', 'x']))).rejects.toThrow(
+      '[Errno 17] File exists',
+    )
+    expect(dispatch.mock.calls.some(([op]) => op === 'create')).toBe(false)
+  })
+
+  // A read follows the link, so a dangling one fails at open, as POSIX
+  // and python's monty answer, rather than handing back a handle whose
+  // first read fails.
+  it('refuses a read open of a dangling link it listed', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
+      if (op === 'readdir') return Promise.resolve(['/ram/lnk'])
+      return Promise.reject(Object.assign(new Error(`gone: ${path}`), { code: 'ENOENT' }))
+    })
+    const access = accessOn(dispatch, {}, ['/ram'], ['lnk'])
+    await expect(Promise.resolve(access.handle('open', ['/ram/lnk', 'r']))).rejects.toThrow(
+      '[Errno 2] No such file or directory',
+    )
+  })
+
   it('mkdir on an existing file raises FileExistsError even under exist_ok', async () => {
     const dispatch = listing(['/ram/a.txt'])
     const access = accessOn(dispatch)

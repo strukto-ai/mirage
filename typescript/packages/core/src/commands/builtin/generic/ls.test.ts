@@ -94,6 +94,24 @@ describe('lsGeneric', () => {
     expect(await run({})).toEqual(['Banana.txt', 'CHERRY.txt', 'apple.txt'])
   })
 
+  // On a mount that keeps no listing index each entry's stat is a
+  // backend request; a whole directory's worth at once is a burst.
+  it('stats one entry at a time', async () => {
+    const names = Array.from({ length: 40 }, (_, i) => `/${String(i)}.json`)
+    let inFlight = 0
+    let peak = 0
+    const slowStat = async (p: PathSpec): Promise<FileStat> => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      inFlight -= 1
+      return new FileStat({ name: key(p).split('/').pop() ?? '', type: FileType.FILE })
+    }
+    const result = await lsGeneric([spec('/')], opts({}), () => Promise.resolve(names), slowStat)
+    expect(DEC.decode((result?.[0] ?? new Uint8Array()) as Uint8Array).split('\n')).toHaveLength(41)
+    expect(peak).toBe(1)
+  })
+
   it('-r reverses the ASCII order', async () => {
     expect(await run({ reverse: true })).toEqual(['apple.txt', 'CHERRY.txt', 'Banana.txt'])
   })

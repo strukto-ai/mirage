@@ -12,7 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RuntimeVFS, VFSEntry } from '../../../vfs.ts'
+import { ConcurrencyLimiter } from '../../../../concurrency/limiter.ts'
+import { LISTING_ENTRY_CONCURRENCY } from '../../../constants.ts'
+import { isMissingPath } from '../../../../utils/errors.ts'
+import { isUnclassified, type RuntimeVFS, type VFSEntry, type VFSStat } from '../../../vfs.ts'
 
 export interface FSLike {
   mkdirTree(path: string): void
@@ -25,6 +28,11 @@ export interface FSLike {
    * when nothing will write to it.
    */
   markUnreadable?(path: string): void
+  /**
+   * Note a listed entry the mount would not stat. A target that does not
+   * implement this omits the entry, as it omits an unreadable file.
+   */
+  markUnclassified?(path: string): void
   /**
    * Note a namespace symlink and its target. A target that cannot hold
    * links omits them, which is what every seed did before links were
@@ -46,20 +54,43 @@ export interface FSLike {
  * Carry a row's mode and stamp onto the target it was just written to.
  *
  * The row already holds both (the door stats every entry it does not
- * slash-mark), so this costs no extra call. Without it a seeded tree
+ * slash-mark, and leaves both off one it could not classify), so this
+ * costs no extra call. Without it a seeded tree
  * reports the tree's own defaults: 0o644 whatever the mount says, and
  * an mtime of the moment the node was built, so every file a guest
  * stats looks like it was modified this second.
  *
- * A slash-marked row carries neither and is left alone; so is a link,
- * whose mode is fixed at 0o777 on every POSIX system.
+ * A slash-marked or unclassified row carries neither and is left
+ * alone; so is a link, whose mode is fixed at 0o777 on every POSIX
+ * system.
  */
 function applyMeta(fs: FSLike, entry: VFSEntry): void {
   if (entry.mode !== undefined) fs.chmod?.(entry.path, entry.mode)
   if (entry.mtimeMs !== undefined) fs.utime?.(entry.path, entry.mtimeMs, entry.mtimeMs)
 }
 
-async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promise<void> {
+/**
+ * Run one of the walk's requests under its shared cap.
+ *
+ * Held around a single request and released before anything else is
+ * awaited, never across a subtree: a directory that kept its slot
+ * while its children waited for one could starve the walk.
+ */
+async function held<T>(limiter: ConcurrencyLimiter, request: () => Promise<T>): Promise<T> {
+  const release = await limiter.acquire()
+  try {
+    return await request()
+  } finally {
+    release()
+  }
+}
+
+async function preloadEntry(
+  fs: FSLike,
+  vfs: RuntimeVFS,
+  entry: VFSEntry,
+  limiter: ConcurrencyLimiter,
+): Promise<void> {
   // A namespace symlink is copied as a link, never followed: stat
   // reports the target, so a directory link would copy its whole
   // subtree here and a cyclic one would never terminate. The target is
@@ -68,7 +99,7 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promi
   if (entry.isLink === true) {
     if (fs.symlink === undefined) return
     try {
-      fs.symlink(entry.path, await vfs.readlink(entry.path))
+      fs.symlink(entry.path, await held(limiter, () => vfs.readlink(entry.path)))
     } catch (err) {
       // A link the namespace listed and then would not resolve: leaving
       // it out is the honest seed, since inventing a target would make
@@ -77,6 +108,26 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promi
         `mirage preload: cannot read link ${entry.path}: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
+    return
+  }
+  if (isUnclassified(entry)) {
+    // The door's stat of this entry failed, and the guest will have no
+    // way to ask again once the run starts, so this is its stat: an
+    // answer seeds the entry as what the mount says it is, an entry
+    // that is gone stays out, and any other failure seeds a node that
+    // refuses both stat and open.
+    let st: VFSStat
+    try {
+      st = await held(limiter, () => vfs.stat(entry.path))
+    } catch (err) {
+      if (isMissingPath(err)) return
+      fs.markUnclassified?.(entry.path)
+      console.warn(
+        `mirage preload: cannot stat ${entry.path}: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      return
+    }
+    await preloadEntry(fs, vfs, { path: entry.path, ...st }, limiter)
     return
   }
   if (entry.isDir) {
@@ -89,11 +140,11 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promi
       // must fail the whole collection, so syncMounts keeps the
       // previous healthy snapshot instead of replacing it with one
       // where this subtree reads as empty.
-      await preloadInto(fs, vfs, next)
+      await preloadInto(fs, vfs, next, limiter)
       return
     }
     try {
-      await preloadInto(fs, vfs, next)
+      await preloadInto(fs, vfs, next, limiter)
     } catch (err) {
       console.warn(
         `mirage preload: skipping subtree ${next}: ${err instanceof Error ? err.message : String(err)}`,
@@ -107,7 +158,7 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promi
     return
   }
   try {
-    const bytes = await vfs.read(entry.path)
+    const bytes = await held(limiter, () => vfs.read(entry.path))
     fs.writeFile(entry.path, bytes)
     applyMeta(fs, entry)
   } catch (err) {
@@ -125,15 +176,30 @@ async function preloadEntry(fs: FSLike, vfs: RuntimeVFS, entry: VFSEntry): Promi
 /**
  * Copy one mount prefix into a synchronous target.
  *
+ * The whole walk keeps at most `LISTING_ENTRY_CONCURRENCY` requests
+ * in flight (listings, reads, readlinks), through one limiter shared
+ * down the recursion, so a wide tree does not multiply the cap by its
+ * breadth. An entry the door could not classify is stat'd once more
+ * here: the
+ * answer seeds it as usual, and a second failure seeds a node whose
+ * stat and open both report it, never a guess at a file.
+ *
  * Args:
  *   fs: the tree collector to fill.
  *   vfs: the runtime's mount vocabulary to read through.
  *   prefix: the mount prefix to walk.
+ *   limiter: the walk's cap, created by the top-level call and passed
+ *     down the recursion.
  */
-export async function preloadInto(fs: FSLike, vfs: RuntimeVFS, prefix: string): Promise<void> {
+export async function preloadInto(
+  fs: FSLike,
+  vfs: RuntimeVFS,
+  prefix: string,
+  limiter: ConcurrencyLimiter = new ConcurrencyLimiter(LISTING_ENTRY_CONCURRENCY),
+): Promise<void> {
   const prefixWithSlash = prefix.endsWith('/') ? prefix : prefix + '/'
   const prefixWithoutSlash = prefixWithSlash.slice(0, -1)
   fs.mkdirTree(prefixWithoutSlash)
-  const entries = await vfs.readdir(prefixWithSlash)
-  await Promise.all(entries.map((entry) => preloadEntry(fs, vfs, entry)))
+  const entries = await held(limiter, () => vfs.readdir(prefixWithSlash))
+  await Promise.all(entries.map((entry) => preloadEntry(fs, vfs, entry, limiter)))
 }

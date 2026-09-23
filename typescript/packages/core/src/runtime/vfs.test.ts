@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { enotsup } from '../utils/errors.ts'
 import { ContentType, DEVICE_NUMBERS_KEY, FileStat, FileType } from '../types.ts'
 import { CHAR_MODE, DIR_MODE, FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
+import { LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import { RuntimeVFS } from './vfs.ts'
@@ -158,12 +159,57 @@ describe('RuntimeVFS transport', () => {
     ])
   })
 
-  it('propagates a stat failure that is not a missing path', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
-      if (op === 'readdir') return Promise.resolve(['/ram/a.txt'])
-      return Promise.reject(new Error('401 Unauthorized'))
+  // One record a remote API refuses must not cost the guest the whole
+  // directory: the row rides unclassified and the guest's own open of
+  // it reports the failure.
+  it('keeps the listing when one entry stat fails', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
+      if (op === 'readdir') return Promise.resolve(['/ram/a.txt', '/ram/bad.txt'])
+      if (path === '/ram/bad.txt') return Promise.reject(new Error('upstream 502 Bad Gateway'))
+      return Promise.resolve(new FileStat({ name: 'a.txt', size: 4, type: FileType.FILE }))
     })
+    expect(await new RuntimeVFS(dispatch).readdir('/ram/')).toEqual([
+      { path: '/ram/a.txt', size: 4, isDir: false, mode: FILE_MODE, mtimeMs: 0 },
+      { path: '/ram/bad.txt', size: 0, isDir: false },
+    ])
+  })
+
+  it('still fails when the listing itself fails', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.reject(new Error('401 Unauthorized')))
     await expect(new RuntimeVFS(dispatch).readdir('/ram/')).rejects.toThrow('401 Unauthorized')
+  })
+
+  // On a mount that keeps no listing index every classifying stat is a
+  // backend request, so a large directory must not fire them together.
+  it('stats at most LISTING_ENTRY_CONCURRENCY entries at once', async () => {
+    let inFlight = 0
+    let peak = 0
+    const names = Array.from({ length: 100 }, (_, i) => `/ram/${String(i)}.json`)
+    const dispatch = vi.fn<BridgeDispatchFn>(async (op) => {
+      if (op === 'readdir') return names
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      inFlight -= 1
+      return new FileStat({ name: 'x', size: 1, type: FileType.FILE })
+    })
+    const entries = await new RuntimeVFS(dispatch).readdir('/ram/')
+    expect(entries).toHaveLength(100)
+    expect(peak).toBe(LISTING_ENTRY_CONCURRENCY)
+  })
+
+  // A guest that only wants names pays for the listing and nothing else,
+  // the way a POSIX readdir costs one call.
+  it('stats nothing when asked for names only', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op) => {
+      if (op === 'readdir') return Promise.resolve(['/ram/a.txt', '/ram/sub/'])
+      throw new Error('stat should not be called')
+    })
+    expect(await new RuntimeVFS(dispatch).readdir('/ram/', false)).toEqual([
+      { path: '/ram/a.txt', size: 0, isDir: false },
+      { path: '/ram/sub/', size: 0, isDir: true },
+    ])
+    expect(dispatch).toHaveBeenCalledTimes(1)
   })
 
   // The mark is the name plane's, since stat follows a link and no

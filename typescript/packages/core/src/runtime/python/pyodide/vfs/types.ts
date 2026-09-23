@@ -91,6 +91,8 @@ export interface FSNode {
   contents?: Uint8Array
   usedBytes?: number
   unreadable?: boolean
+  /** Placed from an unclassified listing row; `getattr` asks the mount first. */
+  unclassified?: boolean
   loaded?: boolean
   /**
    * A symlink's target, verbatim as it was typed. Emscripten's own

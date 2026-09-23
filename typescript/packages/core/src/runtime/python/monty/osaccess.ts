@@ -437,6 +437,9 @@ export class MirageOSAccess {
       throw listed !== null ? guestError('EISDIR', path) : guestError('ENOENT', path)
     }
     if (entry.isDir) throw guestError('EISDIR', path)
+    // A read follows a link, and a dangling one is listed as its own
+    // row with no mode: the name is there, but nothing to open.
+    if (entry.isLink === true && entry.mode === undefined) throw guestError('ENOENT', path)
     return handle
   }
 

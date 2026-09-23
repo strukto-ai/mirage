@@ -51,6 +51,8 @@ class ListingVFS(RuntimeVFS):
             st = self._stats.get(path)
             if st is None:
                 raise FileNotFoundError(path)
+            if isinstance(st, Exception):
+                raise st
             return st
         raise NotImplementedError(op)
 
@@ -157,6 +159,43 @@ def test_readdir_lifts_names_into_entries():
     # dangling link) rides as a size-0 file instead of failing the
     # whole listing.
     assert vfs.stat_calls == ["/data/a.txt", "/data/ghost.txt"]
+
+
+def test_readdir_keeps_the_listing_when_one_stat_fails():
+    # One record a remote API refuses must not cost the guest the whole
+    # directory: the row rides unclassified and the guest's own open of
+    # it reports the failure.
+    vfs = ListingVFS(
+        listing=["/data/a.txt", "/data/bad.txt"],
+        stats={
+            "/data/a.txt": FileStat(name="a.txt", size=4, type=FileType.FILE),
+            "/data/bad.txt": RuntimeError("upstream 502 Bad Gateway"),
+        },
+    )
+    assert vfs.readdir("/data/") == [
+        VFSEntry(path="/data/a.txt",
+                 size=4,
+                 is_dir=False,
+                 mode=FILE_MODE,
+                 mtime_ns=0),
+        VFSEntry(path="/data/bad.txt", size=0, is_dir=False),
+    ]
+
+
+def test_readdir_names_only_stats_nothing():
+    # A guest that only wants names pays for the listing and nothing
+    # else, the way a POSIX readdir costs one call.
+    vfs = ListingVFS(
+        listing=["/data/sub/", "/data/a.txt"],
+        stats={
+            "/data/a.txt": FileStat(name="a.txt", size=4, type=FileType.FILE),
+        },
+    )
+    assert vfs.readdir("/data/", classify=False) == [
+        VFSEntry(path="/data/sub/", size=0, is_dir=True),
+        VFSEntry(path="/data/a.txt", size=0, is_dir=False),
+    ]
+    assert vfs.stat_calls == []
 
 
 def test_readdir_stats_unmarked_directories():

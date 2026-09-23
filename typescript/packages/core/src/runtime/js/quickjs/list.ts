@@ -31,7 +31,7 @@ export async function readdir(
   } else {
     try {
       const prefix = path.endsWith('/') ? path : path + '/'
-      for (const entry of await vfs.readdir(prefix)) {
+      for (const entry of await vfs.readdir(prefix, false)) {
         const rel = entry.path.replace(/\/$/, '').slice(prefix.length)
         if (rel.length > 0 && !rel.includes('/')) names.push(rel)
       }

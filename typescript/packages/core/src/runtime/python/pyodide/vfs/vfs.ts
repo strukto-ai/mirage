@@ -18,7 +18,7 @@ import type { SetAttrFields } from '../../../../types.ts'
 import { BLKSIZE, LINK_MODE, SEEK_CUR, SEEK_END } from './constants.ts'
 import { errnoError } from './errors.ts'
 import { classify } from '../../../../errors/index.ts'
-import type { VFSEntry, VFSStat } from '../../../vfs.ts'
+import { isUnclassified, type VFSEntry, type VFSStat } from '../../../vfs.ts'
 import type { MutationJournal } from './journal.ts'
 import type { MirageFsSeed } from './seed.ts'
 import { NodeTree } from './tree.ts'
@@ -222,6 +222,7 @@ export class MirageFs {
   }
 
   private getattr(node: FSNode): FSAttr {
+    if (node.unclassified === true) this.classifyNode(node)
     // A link sizes as its target string, which is what lstat reports on
     // every POSIX system and what MEMFS answers for its own links.
     const size = this.host.isLink(node.mode)
@@ -400,7 +401,36 @@ export class MirageFs {
     if (stat.mtimeMs !== undefined) node.atime = node.mtime = node.ctime = stat.mtimeMs
     if (target !== undefined) node.link = target
     else if (this.host.isFile(mode)) node.loaded = false
+    // Emscripten's getdents looks up every name it lists, so a row the
+    // door could not classify still needs a node; it goes in as a
+    // regular file and is asked about before its first stat.
+    if (isUnclassified(stat)) node.unclassified = true
     return node
+  }
+
+  /**
+   * Ask the mount what a node placed from an unclassified row is.
+   *
+   * The listing that placed it swallowed a failed stat so the rest of
+   * the directory could list; the guest's own stat is where that
+   * failure belongs, so this one asks the mount rather than answering
+   * from the guess. An answer restamps the node, turning it into a
+   * directory if that is what it is; content already loaded or written
+   * keeps its own length. Without a worker there is no mount to ask
+   * mid-run, and the preload already asked twice, so the answer is EIO.
+   *
+   * Args:
+   *   node: the node to classify.
+   */
+  private classifyNode(node: FSNode): void {
+    const sync = this.sync
+    if (sync === undefined) throw errnoError(this.host, this.errno, 'EIO')
+    const stat = this.readThrough(() => sync.stat(this.tree.pathOf(node)))
+    node.unclassified = false
+    this.tree.retype(node, stat.mode)
+    node.rdev = stat.rdev ?? 0
+    node.atime = node.mtime = node.ctime = stat.mtimeMs
+    if (this.host.isFile(stat.mode) && node.loaded === false) node.usedBytes = stat.size
   }
 
   private loadContents(node: FSNode): void {

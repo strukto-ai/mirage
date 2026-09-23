@@ -409,7 +409,10 @@ async function mountRow(
 
 // An entry that cannot be stat'd is skipped with its own diagnostic rather
 // than failing the whole directory: GNU keeps listing the siblings and exits
-// 1. Mirrors the per-entry tolerance of Python ls `_stat_entries`.
+// 1. One entry at a time, as GNU's lstat loop and find's walk go: on a mount
+// that keeps no listing index each stat is a backend request, and firing a
+// whole directory's worth together is a burst the backend may refuse. Mirrors
+// Python ls `_stat_entries`.
 async function listDir(
   readdir: Readdir,
   stat: Stat,
@@ -436,22 +439,18 @@ async function listDir(
     structureOnly = true
   }
   const prefix = mountPrefixOf(dir.virtual, dir.vfsPath)
-  const settled = await Promise.allSettled(entries.map((p) => stat(childSpec(p, prefix))))
   const stats: FileStat[] = []
-  for (let i = 0; i < settled.length; i++) {
-    const outcome = settled[i]
-    const entry = entries[i]
-    if (outcome === undefined || entry === undefined) continue
-    if (outcome.status === 'rejected') {
-      if (!isWalkError(outcome.reason)) throw outcome.reason
+  for (const entry of entries) {
+    try {
+      stats.push(await stat(childSpec(entry, prefix)))
+    } catch (err) {
+      if (!isWalkError(err)) throw err
       // An entry below an operand is never a command-line arg.
       warnings.push({
-        message: `ls: cannot access '${entry}': ${errText(outcome.reason)}`,
+        message: `ls: cannot access '${entry}': ${errText(err)}`,
         serious: false,
       })
-      continue
     }
-    stats.push(outcome.value)
   }
   const seen = new Set(stats.map((s) => s.name))
   for (const link of links?.children(dir.virtual) ?? []) {

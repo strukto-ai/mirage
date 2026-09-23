@@ -217,6 +217,28 @@ describe('MontyVFS values', () => {
     expect(await vfs.entryFor('/ram/a')).toMatchObject({ isDir: false })
     expect(await vfs.entryFor('/ram/nope')).toBeNull()
   })
+
+  // The listing stats nothing, and a backend that does not slash-mark
+  // its directories (RAM) lists one as a bare name. An open that must
+  // refuse a directory, and a mkdir that must accept one, read the kind
+  // off this row, so the path's own stat supplies it; its siblings are
+  // never stat'd.
+  it('classifies the found row by its own stat, and no sibling', async () => {
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
+      if (op === 'readdir') return Promise.resolve(['/ram/d', '/ram/a', '/ram/b'])
+      if (op === 'stat' && path === '/ram/d') {
+        return Promise.resolve(new FileStat({ name: 'd', type: FileType.DIRECTORY }))
+      }
+      return Promise.reject(new Error(`unexpected ${op} ${path}`))
+    })
+    expect(await viewOn(dispatch).entryFor('/ram/d')).toMatchObject({
+      path: '/ram/d',
+      isDir: true,
+    })
+    expect(dispatch.mock.calls.filter(([op]) => op === 'stat')).toEqual([
+      ['stat', '/ram/d', undefined, undefined, undefined],
+    ])
+  })
 })
 
 describe('MontyVFS stat', () => {

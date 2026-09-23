@@ -689,6 +689,38 @@
           }
         }
       ]
+    },
+    {
+      "id": "listing_survives_a_failing_record",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/api": {
+            "vfs": "ram",
+            "files": {
+              "items/0.json": "{\"id\": 0}\n",
+              "items/1.json": "{\"id\": 1}\n",
+              "items/2.json": "{\"id\": 2}\n",
+              "items/3.json": "{\"id\": 3}\n"
+            },
+            "failing": [
+              "items/2.json"
+            ]
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"const [names, err] = os.readdir('/api/items')\nconsole.log(err, names.filter((n) => n.endsWith('.json')).sort().join(','))\nconst [good] = os.stat('/api/items/1.json')\nconst [bad, badErr] = os.stat('/api/items/2.json')\nconsole.log(good.size, bad, badErr === 0 ? 'served' : 'failed', std.open('/api/items/2.json', 'r'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0 0.json,1.json,2.json,3.json\n10 null failed null\n"
+          }
+        }
+      ]
     }
   ]
 }
