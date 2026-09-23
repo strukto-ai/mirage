@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { IndexType, LookupStatus } from './config.ts'
+import { IndexType, LookupStatus, type RedisIndexConfig } from './config.ts'
 import { buildIndex } from './factory.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
@@ -35,10 +35,11 @@ describe('buildIndex', () => {
   })
 
   it('builds a redis store from a redis config', () => {
-    const store = buildIndex(
-      { type: IndexType.REDIS, url: 'redis://127.0.0.1:1/0', keyPrefix: 't:' },
-      -1,
-    )
-    expect(store).toBeInstanceOf(RedisIndexCacheStore)
+    const config: RedisIndexConfig = {
+      type: IndexType.REDIS,
+      url: 'redis://127.0.0.1:1/0',
+      keyPrefix: 't:',
+    }
+    expect(buildIndex(config, -1)).toBeInstanceOf(RedisIndexCacheStore)
   })
 })
