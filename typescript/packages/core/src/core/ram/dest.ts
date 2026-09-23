@@ -15,7 +15,7 @@
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { ancestors } from '../../utils/path.ts'
-import { eexist, enoent, enotdir } from '../../utils/errors.ts'
+import { eexist, eisdir, enoent, enotdir } from '../../utils/errors.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 
 // Reject a destination whose parent chain is not all directories. Mirrors how
@@ -53,6 +53,15 @@ export function checkDestParents(accessor: RAMAccessor, dst: PathSpec, d: string
 // with a file key: -p added it anyway, the directory shadowed the file, and
 // reading it started reporting EISDIR while the bytes stayed orphaned in the
 // store. Pinned against GNU coreutils in docker.
+// open(2) for writing answers a directory with EISDIR whatever the caller
+// meant to do next, so bash prints `d: Is a directory` for `> d` and `>> d`
+// alike and tee and truncate say the same. A real filesystem gets this from
+// the kernel; a keyed store has to ask its own directory table, or the bytes
+// land on a key the directory shadows and are unreachable from then on.
+export function checkWriteTarget(accessor: RAMAccessor, spec: PathSpec, key: string): void {
+  if (accessor.store.dirs.has(key)) throw eisdir(spec)
+}
+
 export function checkMkdirTarget(
   accessor: RAMAccessor,
   spec: PathSpec,

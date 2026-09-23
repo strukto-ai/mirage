@@ -19,8 +19,8 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as aioredis
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.store.redis import RedisWorkspaceStateStore
 
@@ -133,7 +133,7 @@ async def test_workspace_discovery_and_session_sharing(prefix):
     with only the store config + workspace id finds its default
     session and reads its session table."""
     store_a = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.EXEC,
                    workspace_id="agent-ws",
                    store=store_a)

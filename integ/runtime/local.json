@@ -9,7 +9,7 @@
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -28,11 +28,11 @@
       "world": {
         "runtimes": [
           "local",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },

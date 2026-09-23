@@ -60,7 +60,7 @@ describe('resolveScript', () => {
   it('normalizes an absolute path', () => {
     const s = resolveScript('/data/../data/run.py', '/cwd')
     expect(s.virtual).toBe('/data/run.py')
-    expect(s.resourcePath).toBe('data/run.py')
+    expect(s.vfsPath).toBe('data/run.py')
     expect(s.directory).toBe('/data/')
     expect(s.resolved).toBe(true)
   })

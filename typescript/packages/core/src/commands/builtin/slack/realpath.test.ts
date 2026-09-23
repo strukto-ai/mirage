@@ -16,7 +16,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeSlackTransport, makeFakeResource } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs } from './_test_util.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 const SLACK_REALPATH = SLACK_COMMANDS.filter((c) => c.name === 'realpath' && c.filetype == null)
@@ -30,8 +30,8 @@ async function runRealpath(
   const cmd = SLACK_REALPATH[0]
   if (cmd === undefined) throw new Error('realpath not registered')
   const transport = new FakeSlackTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -51,7 +51,7 @@ describe('slack realpath', () => {
         virtual: '/mnt/slack/./channels//general__C1',
         directory: '/mnt/slack/./channels//general__C1',
         resolved: false,
-        resourcePath: mountKey('/mnt/slack/./channels//general__C1', '/mnt/slack'),
+        vfsPath: mountKey('/mnt/slack/./channels//general__C1', '/mnt/slack'),
       }),
     ])
     expect(out).toBe('/mnt/slack/channels/general__C1\n')
@@ -63,7 +63,7 @@ describe('slack realpath', () => {
         virtual: '/mnt/slack/channels/general__C1/../foo',
         directory: '/mnt/slack/channels/general__C1/../foo',
         resolved: false,
-        resourcePath: mountKey('/mnt/slack/channels/general__C1/../foo', '/mnt/slack'),
+        vfsPath: mountKey('/mnt/slack/channels/general__C1/../foo', '/mnt/slack'),
       }),
     ])
     expect(out).toBe('/mnt/slack/channels/foo\n')

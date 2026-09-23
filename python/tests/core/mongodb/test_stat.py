@@ -19,8 +19,8 @@ import pytest
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.mongodb.stat import stat
-from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import ContentType, FileType, PathSpec
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def accessor():
 
 
 def _path(s: str) -> PathSpec:
-    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
+    return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
 @pytest.fixture(autouse=True)

@@ -13,23 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EventDict } from '../../observe/observer.ts'
-import type { ResourceStateBase } from '../../resource/base.ts'
-import type { RAMResourceState } from '../../resource/ram/ram.ts'
+import type { VFSStateBase } from '../../vfs/base.ts'
+import type { RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { MountMode } from '../../types.ts'
 import type { VarFields } from '../session/session.ts'
+import type { NodeFields } from '../mount/namespace/store.ts'
 
-export type ResourceState = RAMResourceState | (ResourceStateBase & Record<string, unknown>)
+export type VFSState = RAMVFSState | (VFSStateBase & Record<string, unknown>)
 
 export interface MountSnapshot {
   index: number
   prefix: string
   mode: string
-  consistency: string
-  resource_class: string
-  // The `resource:` value the registry built the resource from, or null
-  // for one constructed in code. See `resourceRefOf`.
-  resource_ref: string | null
-  resource_state: ResourceState
+  read: string
+  ttl: number
+  vfs_class: string
+  // The `vfs:` value the registry built the VFS from, or null
+  // for one constructed in code. See `vfsRefOf`.
+  vfs_ref: string | null
+  vfs_state: VFSState
 }
 
 export interface CacheEntrySnapshot {
@@ -74,14 +76,9 @@ export interface JobSnapshot {
  * bytes the agent actually saw, populated at read time from the GET
  * response. At least one of `fingerprint` and `revision` is non-null.
  */
-export interface NodeMetaSnapshot {
-  target?: string
-  mtime?: number
-  mode?: number
-  uid?: number | string
-  gid?: number | string
-  atime?: string
-}
+// A namespace node exactly as its store holds it (`metaToFields`), the
+// field set Python's `NodeMeta.to_fields` writes into a snapshot too.
+export type NodeMetaSnapshot = NodeFields
 
 export interface FingerprintEntrySnapshot {
   path: string
@@ -127,7 +124,7 @@ export interface WorkspaceStateDict {
    */
   fingerprints?: FingerprintEntrySnapshot[]
   /**
-   * Mount prefixes whose resource opts out of snapshot replay
+   * Mount prefixes whose VFS opts out of snapshot replay
    * (e.g. Gmail, Slack). Replay logs a warning naming these.
    */
   live_only_mounts?: string[]

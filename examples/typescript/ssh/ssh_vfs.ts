@@ -16,7 +16,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { MountMode, patchNodeFs, SSHResource, type SSHConfig, Workspace } from '@struktoai/mirage-node'
+import { MountMode, patchNodeFs, SSHVFS, type SSHConfig, Workspace } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
@@ -46,8 +46,8 @@ function buildConfig(): SSHConfig {
 
 async function main(): Promise<void> {
   const MOUNT = '/ssh'
-  const resource = new SSHResource(buildConfig())
-  const ws = new Workspace({ [MOUNT]: resource }, { mode: MountMode.WRITE })
+  const vfs = new SSHVFS(buildConfig())
+  const ws = new Workspace({ [MOUNT]: vfs }, { mode: MountMode.WRITE })
   const restore = patchNodeFs(ws)
   try {
     console.log(`=== VFS MODE: mounted at ${MOUNT} (in-process fs patch) ===\n`)

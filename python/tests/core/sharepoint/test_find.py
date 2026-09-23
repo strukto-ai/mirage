@@ -44,7 +44,7 @@ def _patched(monkeypatch):
 
 
 def _spec() -> PathSpec:
-    return PathSpec(resource_path=mount_key("/sp/reports", "/sp"),
+    return PathSpec(vfs_path=mount_key("/sp/reports", "/sp"),
                     virtual="/sp/reports",
                     directory="/sp/reports")
 
@@ -121,11 +121,11 @@ async def _fake_drive_root_empty(config, loc):
 
 
 def _root_spec() -> PathSpec:
-    return PathSpec(resource_path="", virtual="/sp", directory="/sp")
+    return PathSpec(vfs_path="", virtual="/sp", directory="/sp")
 
 
 def _site_spec() -> PathSpec:
-    return PathSpec(resource_path=mount_key("/sp/Team", "/sp"),
+    return PathSpec(vfs_path=mount_key("/sp/Team", "/sp"),
                     virtual="/sp/Team",
                     directory="/sp/Team")
 

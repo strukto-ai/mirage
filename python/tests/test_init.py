@@ -21,19 +21,19 @@ def test_all_names_resolve():
 
 
 def test_authoring_surface_is_stable():
-    # The root is the public contract for an out-of-tree resource, CLI,
+    # The root is the public contract for an out-of-tree VFS, CLI,
     # policy, runtime or secrets source, the way @struktoai/mirage-core's
     # index.ts is; removing a name is a breaking change and must be
     # deliberate.
     assert set(mirage.__all__) >= {
         "Accessor",
-        "BaseResource",
+        "BaseVFS",
         "CLISpec",
         "CommandIO",
         "CommandSpec",
         "FileStat",
         "FlagView",
-        "GenericResource",
+        "GenericVFS",
         "IOResult",
         "Mount",
         "PathSpec",
@@ -41,9 +41,9 @@ def test_authoring_surface_is_stable():
         "Runtime",
         "SPECS",
         "Workspace",
-        "build_resource",
+        "build_vfs",
         "command",
-        "known_resources",
+        "known_vfs_names",
         "known_runtimes",
         "known_sources",
         "make_generic_commands",
@@ -51,7 +51,7 @@ def test_authoring_surface_is_stable():
         "make_resolve_glob",
         "op",
         "register_cli_spec",
-        "register_resource",
+        "register_vfs",
         "register_runtime",
         "register_secrets",
         "stream_from_bytes",

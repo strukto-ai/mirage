@@ -20,8 +20,8 @@ from mirage.accessor.trello import TrelloAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.trello import COMMANDS
 from mirage.commands.config import CommandOpts
-from mirage.resource.trello.config import TrelloConfig
 from mirage.types import PathSpec
+from mirage.vfs.trello.config import TrelloConfig
 
 WORKSPACES = [{"id": "ws1", "displayName": "Engineering", "name": "eng"}]
 
@@ -39,7 +39,7 @@ def _find_command():
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.strip("/"))
+                    vfs_path=virtual.strip("/"))
 
 
 async def _run(paths, *texts: str, **flags) -> list[str]:

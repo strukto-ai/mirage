@@ -96,7 +96,7 @@ export class CLIRegistry {
     const model = spec.configModel
     if (model instanceof z.ZodObject) {
       // The same snake_case YAML config block serves Python and TS alike
-      // (the resource registries already promise this), and the pydantic
+      // (the VFS registries already promise this), and the pydantic
       // arm is snake_case-native, so a key that camelizes onto a declared
       // field is delivered there. Keys that resolve to no field keep the
       // caller's spelling: an unknown key is then reported as typed, and

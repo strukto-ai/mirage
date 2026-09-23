@@ -71,6 +71,6 @@ def test_unknown_config_key_fails_loud():
 
 def test_reach_defaults_to_process():
     # A runtime that declares nothing gets the no-promise claim: it
-    # may act around the workspace gate. Only an explicit "vfs"
+    # may act around the workspace gate. Only an explicit "workspace"
     # narrows it.
     assert MarkerRuntime().reach == "process"

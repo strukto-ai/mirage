@@ -20,7 +20,7 @@ from mirage.utils.key_prefix import mount_key
 
 
 def _ps(path: str) -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, "/db"),
+    return PathSpec(vfs_path=mount_key(path, "/db"),
                     virtual=path,
                     directory=path)
 

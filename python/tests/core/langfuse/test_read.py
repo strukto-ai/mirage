@@ -21,8 +21,8 @@ from langfuse.api.core.api_error import ApiError
 from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.langfuse.read import read
-from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.types import PathSpec
+from mirage.vfs.langfuse.config import LangfuseConfig
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ async def test_read_trace(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path="traces/abc123.json",
+            PathSpec(vfs_path="traces/abc123.json",
                      virtual="/traces/abc123.json",
                      directory="/traces/abc123.json"), index)
 
@@ -69,7 +69,7 @@ async def test_read_prompt_version(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path="prompts/summarize/1.json",
+            PathSpec(vfs_path="prompts/summarize/1.json",
                      virtual="/prompts/summarize/1.json",
                      directory="/prompts/summarize/1.json"), index)
 
@@ -99,7 +99,7 @@ async def test_read_dataset_items(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path="datasets/qa-eval/items.jsonl",
+            PathSpec(vfs_path="datasets/qa-eval/items.jsonl",
                      virtual="/datasets/qa-eval/items.jsonl",
                      directory="/datasets/qa-eval/items.jsonl"), index)
 
@@ -114,7 +114,7 @@ async def test_read_invalid_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(resource_path="not_a_valid_path",
+            PathSpec(vfs_path="not_a_valid_path",
                      virtual="/not_a_valid_path",
                      directory="/not_a_valid_path"), index)
 
@@ -129,7 +129,7 @@ async def test_read_session_trace(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path="sessions/sid1/tid1.json",
+            PathSpec(vfs_path="sessions/sid1/tid1.json",
                      virtual="/sessions/sid1/tid1.json",
                      directory="/sessions/sid1/tid1.json"), index)
 
@@ -149,7 +149,7 @@ async def test_read_dataset_run_renders_jsonl(accessor, index):
     ):
         result = await read(
             accessor,
-            PathSpec(resource_path="datasets/qa-eval/runs/run-a.jsonl",
+            PathSpec(vfs_path="datasets/qa-eval/runs/run-a.jsonl",
                      virtual="/datasets/qa-eval/runs/run-a.jsonl",
                      directory="/datasets/qa-eval/runs/run-a.jsonl"), index)
 
@@ -170,7 +170,7 @@ async def test_read_trace_not_found_is_enoent(accessor, index):
         with pytest.raises(FileNotFoundError):
             await read(
                 accessor,
-                PathSpec(resource_path="traces/gone.json",
+                PathSpec(vfs_path="traces/gone.json",
                          virtual="/traces/gone.json",
                          directory="/traces/gone.json"), index)
 
@@ -186,6 +186,6 @@ async def test_read_trace_server_error_propagates(accessor, index):
         with pytest.raises(ApiError):
             await read(
                 accessor,
-                PathSpec(resource_path="traces/tid1.json",
+                PathSpec(vfs_path="traces/tid1.json",
                          virtual="/traces/tid1.json",
                          directory="/traces/tid1.json"), index)

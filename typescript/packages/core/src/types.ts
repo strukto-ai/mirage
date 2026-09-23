@@ -14,7 +14,7 @@
 
 import type { IndexCacheStore } from './cache/index/store.ts'
 import type { CommandRule } from './policy/types.ts'
-import type { FindOptions } from './resource/base.ts'
+import type { FindOptions } from './vfs/base.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 
 // Any value that survives a JSON round trip: what a decoded payload holds,
@@ -43,13 +43,13 @@ export type MountMode = (typeof MountMode)[keyof typeof MountMode]
 /**
  * How a mount is exposed to the outside world.
  *
- * `vfs` is the default: the mount lives only inside mirage's own filesystem
+ * `workspace` is the default: the mount lives only inside mirage's own filesystem
  * and is reached through the command surface, with nothing registered with
  * the kernel. `fuse` and `fskit` additionally expose it as a real mountpoint.
  *
  * `fskit` is macOS 15.4+ only and needs no kernel extension. It has no
- * `direct_io` equivalent, so it serves correct reads only for resources that
- * set `sizesAlwaysKnown`; the mount-time guard warns about resources whose
+ * `direct_io` equivalent, so it serves correct reads only for mounts that
+ * set `sizesAlwaysKnown`; the mount-time guard warns about mounts whose
  * size-unknown files will read as empty. Writes are also limited: appends and
  * metadata ops persist, but the macFUSE FSKit shim flushes pages a file did
  * not already have (a new file, or truncate-then-write) as NUL bytes (pinned
@@ -57,7 +57,7 @@ export type MountMode = (typeof MountMode)[keyof typeof MountMode]
  * auto-selecting fskit would silently degrade every API-backed mount.
  */
 export const MountBackend = Object.freeze({
-  VFS: 'vfs',
+  WORKSPACE: 'workspace',
   FUSE: 'fuse',
   FSKIT: 'fskit',
 } as const)
@@ -84,7 +84,7 @@ export function weakerMode(a: MountMode, b: MountMode): MountMode {
 /**
  * What the data door treats as nonexistent for one session.
  *
- * A sibling of `Session.mountModes`: per-session narrowing that the
+ * A sibling of `SessionState.mountModes`: per-session narrowing that the
  * doors enforce, null-on-the-session means unrestricted. Hiding is
  * "does not exist", never "forbidden" — matching paths answer ENOENT
  * and drop out of listings, which is what makes a hide the way a profile
@@ -191,15 +191,82 @@ export function parseMountMode(value: string): MountMode {
   throw new Error(`invalid mount mode: '${value}'`)
 }
 
-export const ConsistencyPolicy = Object.freeze({
-  LAZY: 'lazy',
-  ALWAYS: 'always',
+/**
+ * How a mount decides whether cached bytes may be served.
+ *
+ * FRESH revalidates against the backend's content token before serving a
+ * cached copy; BOUNDED serves without revalidating, within the staleness
+ * bound the mount declares.
+ *
+ * PINNED names the content a commit's fingerprint records. There is no
+ * version layer to pin to, so a mount declaring it is refused at mount time
+ * rather than quietly degraded to head: the vocabulary is published, so
+ * someone will type it, and an informative refusal costs one branch over a
+ * generic invalid-value error.
+ */
+export const ReadPolicy = Object.freeze({
+  FRESH: 'fresh',
+  BOUNDED: 'bounded',
+  PINNED: 'pinned',
 } as const)
 
-export type ConsistencyPolicy = (typeof ConsistencyPolicy)[keyof typeof ConsistencyPolicy]
+export type ReadPolicy = (typeof ReadPolicy)[keyof typeof ReadPolicy]
 
 /**
- * Behaviour when a remote resource's live fingerprint differs from the
+ * Seconds. Matches IndexConfig.ttl (cache/index/config.ts) so bodies and
+ * listings expire together out of the box.
+ */
+export const DEFAULT_READ_TTL = 600
+
+/**
+ * One mount's read policy and the bound that goes with it.
+ *
+ * The bound is set under FRESH too, so every cache entry carries one. Two
+ * workspaces sharing one Redis cache under different policies would otherwise
+ * write entries the other refuses to serve, and bounce them between cold reads
+ * indefinitely.
+ *
+ * It is stamped when the entry is written and enforced by the store, so the
+ * bound that applies is the writing mount's, not the reading mount's. Those are
+ * the same mount inside one workspace; they differ across a shared cache, a
+ * lowered `ttl` and a restored snapshot, and there the older bound stands until
+ * the entry expires. Making the reader authoritative needs a write timestamp
+ * every store can read back, which redis does not keep.
+ */
+export interface ReadSpec {
+  readonly policy: ReadPolicy
+  readonly ttl: number
+}
+
+/**
+ * The policy a mount takes when it declares none, and the one pinned onto the
+ * three synthetic anchors (`/dev`, the history view, the implicit `/` root).
+ *
+ * Those three are installed outside `normalizeMounts`, so they never meet the
+ * capability verdict; none of them caches reads, so inheriting a workspace-level
+ * `fresh` would stamp on them exactly the combination the verdict refuses.
+ */
+export const DEFAULT_READ_SPEC: ReadSpec = Object.freeze({
+  policy: ReadPolicy.BOUNDED,
+  ttl: DEFAULT_READ_TTL,
+})
+
+/**
+ * What the cache write path needs to know about a path's mount.
+ *
+ * Answered per path against the mount table pinned at command start, so a
+ * fill that lands after the command is stamped with the bound of the mount
+ * that produced the bytes rather than whatever holds the prefix by then.
+ * `cacheable` is read first and short-circuits, so `ttl` is never consulted
+ * for a path that is not being cached.
+ */
+export interface CacheFacts {
+  readonly cacheable: boolean
+  readonly ttl: number
+}
+
+/**
+ * Behaviour when a remote VFS's live fingerprint differs from the
  * value recorded at snapshot time.
  */
 export const DriftPolicy = Object.freeze({
@@ -353,7 +420,7 @@ export interface Refusal {
   readonly askId: string | null
 }
 
-export const ResourceName = Object.freeze({
+export const VFSName = Object.freeze({
   DISK: 'disk',
   S3: 's3',
   RAM: 'ram',
@@ -411,7 +478,7 @@ export const ResourceName = Object.freeze({
   HISTORY: 'history',
 } as const)
 
-export type ResourceName = (typeof ResourceName)[keyof typeof ResourceName]
+export type VFSName = (typeof VFSName)[keyof typeof VFSName]
 
 /**
  * POSIX file type (the `st_mode` kind), the switch behavior branches on.
@@ -755,7 +822,7 @@ export type MoveStrategy = NativeMove | PrimitiveMove
 export interface PathSpecInit {
   virtual: string
   directory: string
-  resourcePath: string
+  vfsPath: string
   pattern?: string | null
   resolved?: boolean
   rawPath?: string
@@ -764,7 +831,7 @@ export interface PathSpecInit {
 export class PathSpec {
   readonly virtual: string
   readonly directory: string
-  readonly resourcePath: string
+  readonly vfsPath: string
   readonly pattern: string | null
   readonly resolved: boolean
   // The word's spelling: as typed for relative words, the absolute path
@@ -774,7 +841,7 @@ export class PathSpec {
   constructor(init: PathSpecInit) {
     this.virtual = init.virtual
     this.directory = init.directory
-    this.resourcePath = init.resourcePath
+    this.vfsPath = init.vfsPath
     this.pattern = init.pattern ?? null
     this.resolved = init.resolved ?? true
     this.rawPath = init.rawPath ?? init.virtual
@@ -782,23 +849,23 @@ export class PathSpec {
   }
 
   // Mount-relative path with a leading slash. Pure formatting of
-  // `resourcePath` ('' -> '/', 'sub/x' -> '/sub/x'); used for
+  // `vfsPath` ('' -> '/', 'sub/x' -> '/sub/x'); used for
   // byte-accounting keys and path arithmetic in slash-framed
   // mount-relative space.
   get mountPath(): string {
-    return `/${this.resourcePath}`
+    return `/${this.vfsPath}`
   }
 
   get dir(): PathSpec {
-    // The directory's resourcePath is its virtual form with this path's
+    // The directory's vfsPath is its virtual form with this path's
     // mount prefix removed; the prefix length is recovered from the
-    // (virtual, resourcePath) pair. Idempotent for specs that are already
+    // (virtual, vfsPath) pair. Idempotent for specs that are already
     // directories.
-    const cut = rstripSlash(this.virtual).length - this.resourcePath.length
+    const cut = rstripSlash(this.virtual).length - this.vfsPath.length
     return new PathSpec({
       virtual: this.directory,
       directory: this.directory,
-      resourcePath: stripSlash(this.directory.slice(cut)),
+      vfsPath: stripSlash(this.directory.slice(cut)),
       pattern: this.pattern,
       resolved: false,
     })
@@ -808,15 +875,15 @@ export class PathSpec {
     return `${rstripSlash(this.virtual)}/${name}`
   }
 
-  // Wrap a path string; defaults to a root-mounted resourcePath (the path
+  // Wrap a path string; defaults to a root-mounted vfsPath (the path
   // is assumed to carry no mount prefix).
-  static fromStrPath(path: string, resourcePath?: string): PathSpec {
+  static fromStrPath(path: string, vfsPath?: string): PathSpec {
     const idx = path.lastIndexOf('/')
     const directory = path.slice(0, idx + 1) || '/'
     return new PathSpec({
       virtual: path,
       directory,
-      resourcePath: resourcePath ?? stripSlash(path),
+      vfsPath: vfsPath ?? stripSlash(path),
     })
   }
 }

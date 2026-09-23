@@ -17,7 +17,7 @@ import { stream as dropboxStream } from '../../../core/dropbox/read.ts'
 import { readdir as dropboxReaddir } from '../../../core/dropbox/readdir.ts'
 import { stat as dropboxStat } from '../../../core/dropbox/stat.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
+import { type FileStat, VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { patternArg } from '../grep_pattern.ts'
@@ -101,7 +101,7 @@ async function rgCommand(
 
 export const DROPBOX_RG = command({
   name: 'rg',
-  resource: ResourceName.DROPBOX,
+  vfs: VFSName.DROPBOX,
   spec: specOf('rg'),
   fn: rgCommand,
   // Same cost estimate the generic-bound rg carried; narrowing only ever

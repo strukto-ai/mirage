@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "by_resource": {
+    "by_vfs": {
       "box": {
         "filetypes": [],
         "has_aggregate": false,
@@ -90,7 +90,7 @@
     "has_aggregate": false,
     "has_provision": false,
     "has_write": true,
-    "resources": [
+    "vfs_names": [
       "box",
       "databricks_volume",
       "disk",

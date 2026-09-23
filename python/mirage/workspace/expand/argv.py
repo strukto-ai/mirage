@@ -36,7 +36,7 @@ from mirage.workspace.lookup import (Consumer, WordPolicy,
                                      runtime_refused, word_policy)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +90,7 @@ class Argv:
 
 async def expand_argv(
     parts: list[TSNodeLike],
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     registry: MountRegistry,
@@ -107,7 +107,7 @@ async def expand_argv(
     Args:
         parts (list[TSNodeLike]): word nodes after env-prefix
             stripping and process-substitution removal.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         registry (MountRegistry): mount registry for classification.

@@ -11,7 +11,7 @@
   },
   "commands": {
     "grep": {
-      "by_resource": {
+      "by_vfs": {
         "github": [
           "has_provision"
         ]
@@ -33,7 +33,7 @@
       "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
     },
     "github": {
-      "owner": "Python leaves owner/repo nullable because GitHubResource also takes them as constructor arguments and raises when neither supplied them; TypeScript has no such escape hatch, so requiring them in the schema is its honest contract. A YAML mount naming neither is refused by both, at different moments.",
+      "owner": "Python leaves owner/repo nullable because GitHubVFS also takes them as constructor arguments and raises when neither supplied them; TypeScript has no such escape hatch, so requiring them in the schema is its honest contract. A YAML mount naming neither is refused by both, at different moments.",
       "repo": "See owner."
     },
     "gmail": {
@@ -55,18 +55,18 @@
       "presignedUrlProvider": "The browser's authentication model: a signer callable in place of credentials. Python has no browser runtime."
     }
   },
-  "language_only_resources": {
+  "language_only_vfs_names": {
     "opfs": "Browser-only OPFS backend. Python has no browser runtime, so there is nothing to mirror."
   },
-  "resource_capabilities": {
+  "vfs_capabilities": {
     "github": {
       "supports_snapshot": "TypeScript records the blob SHA as a snapshot fingerprint; python stamps the same SHA in core/github/stat.py but does not declare SUPPORTS_SNAPSHOT, so no drift check fires. Left to the snapshot redesign (#721) rather than flipped here, because turning it on changes what a python snapshot records."
     },
     "lancedb": {
-      "caches_reads": "TypeScript computes it per mount from the URI scheme (remote tables cache, local ones do not); python has no such branch and never caches. A value, not a table, so there is nothing to single-source."
+      "caches_reads": "Both languages compute it per mount from the URI scheme (remote tables cache, local ones do not): lancedb.py sets it in __init__, lancedb.ts in its constructor. The generators disagree because python reads the class attribute, which is still the base default at class level, while the TypeScript walk reads the constructor assignment. A per-instance value, not a table, so there is nothing to single-source."
     }
   },
-  "resource_expansions": {
+  "vfs_expansions": {
     "python": {
       "hf_buckets": [
         "hf_buckets",
@@ -76,7 +76,7 @@
       ]
     }
   },
-  "unconstructible_resources": {
+  "unconstructible_vfs_names": {
     "browser": {
       "databricks_volume": "Node-only on purpose, and not for want of a factory: the Databricks Files API sends no CORS headers, so a browser fetch is blocked whatever the config says. docs/typescript/setup/databricks_volume.mdx states it. The commands still register because they live in core, which every bundle carries.",
       "history": "See python: the history view mount is workspace-internal.",
@@ -86,10 +86,10 @@
       "history": "See python: the history view mount is workspace-internal."
     },
     "python": {
-      "history": "The /.bash_history view mount is created by the workspace itself and is never named in YAML or a snapshot, so it registers commands without a build_resource entry."
+      "history": "The /.bash_history view mount is created by the workspace itself and is never named in YAML or a snapshot, so it registers commands without a build_vfs entry."
     }
   },
-  "variant_resource_facts": {
+  "variant_vfs_facts": {
     "capabilities": {},
     "command_io": {}
   }

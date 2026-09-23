@@ -24,7 +24,7 @@ from mirage.commands.config import CommandOpts
 from mirage.context import (reset_current_session, reset_mount_gate,
                             set_current_session, set_mount_gate)
 from mirage.types import MountMode, PathSpec, ShowEntry, ShownPaths
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 async def _readdir(_accessor: Accessor,
@@ -80,10 +80,11 @@ async def test_tee_holds_each_path_to_its_regions_mode():
     # before the backend sees it.
     writes: list[str] = []
     tee = _tee(writes)
-    sess = Session(session_id="agent",
-                   mount_modes={"/s3": MountMode.READ},
-                   shown_paths=ShownPaths(
-                       entries=(ShowEntry("/s3/build", MountMode.WRITE), )))
+    sess = SessionState(
+        session_id="agent",
+        mount_modes={"/s3": MountMode.READ},
+        shown_paths=ShownPaths(
+            entries=(ShowEntry("/s3/build", MountMode.WRITE), )))
     session_token = set_current_session(sess)
     gate_token = set_mount_gate("/s3", MountMode.WRITE)
     try:
@@ -102,10 +103,11 @@ async def test_tee_holds_each_path_to_its_regions_mode():
 async def test_tee_writes_inside_the_granted_region():
     writes: list[str] = []
     tee = _tee(writes)
-    sess = Session(session_id="agent",
-                   mount_modes={"/s3": MountMode.READ},
-                   shown_paths=ShownPaths(
-                       entries=(ShowEntry("/s3/build", MountMode.WRITE), )))
+    sess = SessionState(
+        session_id="agent",
+        mount_modes={"/s3": MountMode.READ},
+        shown_paths=ShownPaths(
+            entries=(ShowEntry("/s3/build", MountMode.WRITE), )))
     session_token = set_current_session(sess)
     gate_token = set_mount_gate("/s3", MountMode.WRITE)
     try:

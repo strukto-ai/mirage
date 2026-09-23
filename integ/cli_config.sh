@@ -34,7 +34,7 @@ probe() {
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
 YML
 
   # --- Part A: the home is the single root; run the real workload ---

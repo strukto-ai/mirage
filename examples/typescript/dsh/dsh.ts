@@ -29,9 +29,9 @@ import type { ShellExecutor, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import {
   buildRuntime,
   MountMode,
-  RAMResource,
-  RedisResource,
-  SlackResource,
+  RAMVFS,
+  RedisVFS,
+  SlackVFS,
   Workspace,
   parseSessionProfile,
 } from '@struktoai/mirage-node'
@@ -189,13 +189,13 @@ async function main(): Promise<void> {
   const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379/1'
 
   // EXEC admits code execution (the mode ladder is READ < WRITE < EXEC);
-  // monty is set up to capture python and python3, and the catch-all vfs
+  // monty is set up to capture python and python3, and the catch-all workspace
   // runtime serving the shell commands is always present.
   const ws = new Workspace(
     {
-      '/tmp': [new RAMResource(), MountMode.EXEC],
-      '/redis': [new RedisResource({ url: redisUrl, keyPrefix: 'dsh:' }), MountMode.WRITE],
-      '/slack': [new SlackResource({ token }), MountMode.EXEC],
+      '/tmp': [new RAMVFS(), MountMode.EXEC],
+      '/redis': [new RedisVFS({ url: redisUrl, keyPrefix: 'dsh:' }), MountMode.WRITE],
+      '/slack': [new SlackVFS({ token }), MountMode.EXEC],
     },
     {
       runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })],

@@ -18,7 +18,7 @@ import { DiscordAccessor } from '../../accessor/discord.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from '../../core/discord/client.ts'
-import { type FileStat, FileType, PathSpec, ResourceName } from '../../types.ts'
+import { type FileStat, FileType, PathSpec, VFSName } from '../../types.ts'
 import { DISCORD_OPS } from './index.ts'
 
 const statOp = DISCORD_OPS.find((o) => o.name === 'stat' && o.filetype === null)
@@ -34,14 +34,14 @@ class FakeDiscordTransport implements DiscordTransport {
 }
 
 describe('ops/discord/stat', () => {
-  it('is registered against ResourceName.DISCORD as a non-write stat op', () => {
+  it('is registered against VFSName.DISCORD as a non-write stat op', () => {
     expect(statOp.name).toBe('stat')
-    expect(statOp.resource).toBe(ResourceName.DISCORD)
+    expect(statOp.vfs).toBe(VFSName.DISCORD)
     expect(statOp.write).toBe(false)
     expect(statOp.filetype).toBeNull()
   })
 
-  it('dispatches to coreStat using the resource accessor', async () => {
+  it('dispatches to coreStat using the VFS accessor', async () => {
     const idx = new RAMIndexCacheStore()
     await idx.setDir('/mnt/discord/My Server__G1/channels', [
       [
@@ -62,7 +62,7 @@ describe('ops/discord/stat', () => {
       new PathSpec({
         virtual: '/mnt/discord/My Server__G1/channels/general__C1',
         directory: '/mnt/discord/My Server__G1/channels/general__C1',
-        resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+        vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
       }),
       [],
       { index: idx },

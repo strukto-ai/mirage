@@ -1,12 +1,12 @@
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
-class _StatOnlyRAMResource(RAMResource):
-    """RAM resource stripped of write-shaped ops, standing in for an API
+class _StatOnlyRAMVFS(RAMVFS):
+    """RAM VFS stripped of write-shaped ops, standing in for an API
     backend that can stat but never create files."""
 
     def __init__(self) -> None:
@@ -17,13 +17,13 @@ class _StatOnlyRAMResource(RAMResource):
 
 
 def _make_ws(mode: MountMode = MountMode.WRITE) -> Workspace:
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    return Workspace({"/data/": (resource, mode)}, mode=MountMode.WRITE)
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    return Workspace({"/data/": (vfs, mode)}, mode=MountMode.WRITE)
 
 
 async def _run(ws: Workspace, cmd: str) -> tuple[int, str, str]:
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return r.exit_code, await r.stdout_str(), await r.stderr_str()
 
 
@@ -56,10 +56,9 @@ async def test_touch_no_create_flag():
 
 @pytest.mark.asyncio
 async def test_touch_cannot_create_on_stat_only_mount():
-    resource = _StatOnlyRAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
-                   mode=MountMode.WRITE)
+    vfs = _StatOnlyRAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, _, err = await _run(ws, "touch /data/new.txt")
     assert code == 1
     assert "cannot touch '/data/new.txt': Read-only file system" in err
@@ -69,10 +68,9 @@ async def test_touch_cannot_create_on_stat_only_mount():
 
 @pytest.mark.asyncio
 async def test_touch_stat_only_mount_existing_file_uses_overlay():
-    resource = _StatOnlyRAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
-                   mode=MountMode.WRITE)
+    vfs = _StatOnlyRAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, _, _ = await _run(ws, "touch -t 202603041200 /data/f.txt")
     assert code == 0
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))

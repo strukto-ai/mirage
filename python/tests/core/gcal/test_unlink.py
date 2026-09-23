@@ -25,7 +25,7 @@ EVENT = "/primary/2026-08-11/aaaa1__0900-1030_PhD_Defense.gcal.json"
 def spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.lstrip("/"))
+                    vfs_path=virtual.lstrip("/"))
 
 
 async def test_unlink_deletes_the_event_the_name_carries(api, accessor, index):

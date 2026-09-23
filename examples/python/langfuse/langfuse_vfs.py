@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
+from mirage.vfs.langfuse import LangfuseConfig, LangfuseVFS
 
 load_dotenv(".env.development")
 
@@ -28,11 +28,11 @@ config = LangfuseConfig(
     secret_key=os.environ["LANGFUSE_SECRET_KEY"],
     host=os.environ["LANGFUSE_HOST"],
 )
-resource = LangfuseResource(config=config)
+vfs = LangfuseVFS(config=config)
 
 
 async def main():
-    with Workspace({"/langfuse/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/langfuse/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE: open() reads from Langfuse ===\n")
 
         print("--- os.listdir() top-level ---")
@@ -95,7 +95,7 @@ async def main():
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, "
               f"{total} bytes transferred")

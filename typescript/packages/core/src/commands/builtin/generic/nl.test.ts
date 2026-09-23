@@ -37,7 +37,7 @@ async function run(line: Line): Promise<{ exit: number; stdout: string; stderr: 
     ...line,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'ram' } as never,
+    vfs: { kind: 'ram' } as never,
   } as CommandOpts
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and nl never answers that way, so say so rather than destructure
@@ -559,7 +559,7 @@ describe('nl -b p<re> compiles a POSIX BRE, not this engine s dialect', () => {
       ...nlBag('-b', 'p' + pattern),
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'ram' } as never,
+      vfs: { kind: 'ram' } as never,
     } as CommandOpts
     const result = await nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
@@ -655,7 +655,7 @@ describe('nl pads an unnumbered line over the separator', () => {
       ...nlBag(),
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'ram' } as never,
+      vfs: { kind: 'ram' } as never,
     } as CommandOpts
     const result = await nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
@@ -834,7 +834,7 @@ describe('nl reads an empty -d as disabling delimiters', () => {
       ...nlBag('-d', ''),
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'ram' } as never,
+      vfs: { kind: 'ram' } as never,
     } as CommandOpts
     const result = await nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
@@ -852,7 +852,7 @@ describe('nl reads an empty -d as disabling delimiters', () => {
       ...nlBag(),
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'ram' } as never,
+      vfs: { kind: 'ram' } as never,
     } as CommandOpts
     const result = await nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
@@ -875,7 +875,7 @@ describe('nl pads a delimiter only when it is one byte', () => {
       ...nlBag('-d', delimiter),
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'ram' } as never,
+      vfs: { kind: 'ram' } as never,
     } as CommandOpts
     const result = await nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
@@ -957,7 +957,7 @@ describe('nl line number overflow is deferred', () => {
       flags: { starting_line_number: start, ...flags },
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'ram' } as never,
+      vfs: { kind: 'ram' } as never,
     } as CommandOpts
     const result = await nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')
@@ -1007,7 +1007,7 @@ describe('nl line number overflow is deferred', () => {
       flags: { starting_line_number: INTMAX_MAX_TXT },
       filetypeFns: null,
       cwd: '/',
-      resource: { kind: 'ram' } as never,
+      vfs: { kind: 'ram' } as never,
     } as CommandOpts
     const result = await nlGeneric([], opts, stubStream)
     if (result === null) throw new Error('nl declined to handle its own operands')

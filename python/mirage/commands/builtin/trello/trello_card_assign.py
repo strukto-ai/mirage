@@ -32,7 +32,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("trello card assign", resource="trello", spec=SPEC, write=True)
+@command("trello card assign", vfs="trello", spec=SPEC, write=True)
 async def trello_card_assign(
         accessor: TrelloAccessor, paths: list[PathSpec], texts: list[str],
         opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

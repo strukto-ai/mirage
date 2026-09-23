@@ -12,28 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.resource.ssh import SSHConfig, SSHResource
 from mirage.types import MountMode
+from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.workspace.mount.registry import MountRegistry
 
 
 def test_ssh_mount_registration():
     registry = MountRegistry()
     cfg = SSHConfig(host="dev", root="/home/ubuntu")
-    resource = SSHResource(cfg)
-    registry.mount("/ssh/", resource, mode=MountMode.WRITE)
+    vfs = SSHVFS(cfg)
+    registry.mount("/ssh/", vfs, mode=MountMode.WRITE)
     mount = registry.mount_for("/ssh/some/file.txt")
     assert mount is not None
-    assert mount.resource.name == "ssh"
+    assert mount.vfs.name == "ssh"
 
 
 def test_ssh_mount_command_resolution():
     registry = MountRegistry()
     cfg = SSHConfig(host="dev")
-    resource = SSHResource(cfg)
-    registry.mount("/remote/", resource, mode=MountMode.WRITE)
+    vfs = SSHVFS(cfg)
+    registry.mount("/remote/", vfs, mode=MountMode.WRITE)
     mount = registry.mount_for("/remote/test.py")
     assert mount is not None
     cmd = mount.resolve_command("cat", None)
     assert cmd is not None
-    assert cmd.resource == "ssh"
+    assert cmd.vfs == "ssh"

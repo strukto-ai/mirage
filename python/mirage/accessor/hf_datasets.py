@@ -21,4 +21,4 @@ class HfDatasetsConfig(HfRepoConfig):
 
 class HfDatasetsAccessor(HfHubAccessor):
     REPO_TYPE = "dataset"
-    RESOURCE_NAME = "hf_datasets"
+    VFS_NAME = "hf_datasets"

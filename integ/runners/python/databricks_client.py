@@ -22,7 +22,7 @@ from urllib.parse import quote, urlencode
 
 
 # A stand-in for databricks-sdk's WorkspaceClient, injected into
-# DatabricksVolumeResource so the resource under test talks HTTP to the fake
+# DatabricksVolumeVFS so the VFS under test talks HTTP to the fake
 # instead of to a real workspace. It lives with the python runner rather than
 # with the fake, because the fake is a TypeScript kit service now and this is
 # the one piece of the old databricks_server.py that was never a server.

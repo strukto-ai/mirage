@@ -59,7 +59,7 @@ import {
 } from '../provision/control.ts'
 import { handleConnectionProvision, handlePipeProvision } from '../provision/pipes.ts'
 import { handleRedirectProvision } from '../provision/redirect.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 
 // eval / source execute their payload, so they are NOT free builtins:
 // leaving them out lets them fall through to command resolution, which
@@ -151,7 +151,7 @@ async function gateCommand(
   ctx: ProvisionContext,
   name: string,
   parts: TSNodeLike[],
-  session: Session,
+  session: SessionState,
   planScope: PlanScope,
   redirects: readonly PathSpec[] = [],
 ): Promise<[ProvisionResult | null, (string | PathSpec)[]]> {
@@ -189,12 +189,12 @@ async function gateCommand(
 // a phantom write.
 async function provisionRedirected(
   ctx: ProvisionContext,
-  recurse: (n: TSNodeLike, s: Session) => Promise<ProvisionResult>,
-  recurseUnknown: (n: unknown, s: Session) => Promise<ProvisionResult>,
+  recurse: (n: TSNodeLike, s: SessionState) => Promise<ProvisionResult>,
+  recurseUnknown: (n: unknown, s: SessionState) => Promise<ProvisionResult>,
   planScope: PlanScope,
   command: unknown,
   redirects: Redirect[],
-  session: Session,
+  session: SessionState,
 ): Promise<ProvisionResult> {
   const [expanded, pipeNode] = await expandRedirects(
     redirects,
@@ -282,7 +282,7 @@ async function provisionRedirected(
 export async function provisionNode(
   ctx: ProvisionContext,
   node: TSNodeLike | null | undefined,
-  session: Session,
+  session: SessionState,
   scope?: PlanScope,
 ): Promise<ProvisionResult> {
   const planScope: PlanScope = scope ?? {
@@ -290,9 +290,9 @@ export async function provisionNode(
     planning: new Set(),
     gated: new Map(),
   }
-  const recurse = (n: TSNodeLike, s: Session): Promise<ProvisionResult> =>
+  const recurse = (n: TSNodeLike, s: SessionState): Promise<ProvisionResult> =>
     provisionNode(ctx, n, s, planScope)
-  const recurseUnknown = (n: unknown, s: Session): Promise<ProvisionResult> =>
+  const recurseUnknown = (n: unknown, s: SessionState): Promise<ProvisionResult> =>
     recurse(n as TSNodeLike, s)
   if (node === null || node === undefined) {
     return new ProvisionResult({ precision: Precision.EXACT })
@@ -370,7 +370,7 @@ export async function provisionNode(
       // Mirror the executor: a trailing redirect hoisted over an
       // &&/|| list binds to the last command.
       const [left, op, right] = getListParts(command)
-      const wrapped = (n: unknown, s: Session): Promise<ProvisionResult> =>
+      const wrapped = (n: unknown, s: SessionState): Promise<ProvisionResult> =>
         n === right
           ? provisionRedirected(ctx, recurse, recurseUnknown, planScope, right, redirects, s)
           : recurseUnknown(n, s)
@@ -391,7 +391,7 @@ export async function provisionNode(
     // so far to its right operand.
     for (const [op, right] of continuation) {
       const planned = plan
-      const wrapped = (n: unknown, s: Session): Promise<ProvisionResult> =>
+      const wrapped = (n: unknown, s: SessionState): Promise<ProvisionResult> =>
         n === node ? Promise.resolve(planned) : recurseUnknown(n, s)
       plan = await handleConnectionProvision(wrapped, node, op, right, session)
     }

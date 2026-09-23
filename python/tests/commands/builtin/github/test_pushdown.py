@@ -41,14 +41,11 @@ def counting_read(monkeypatch):
 
 
 def _root() -> PathSpec:
-    return PathSpec(resource_path="",
-                    virtual="/",
-                    directory="/",
-                    resolved=False)
+    return PathSpec(vfs_path="", virtual="/", directory="/", resolved=False)
 
 
 def _subdir() -> PathSpec:
-    return PathSpec(resource_path="src",
+    return PathSpec(vfs_path="src",
                     virtual="/src",
                     directory="/src",
                     resolved=False)

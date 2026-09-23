@@ -23,8 +23,8 @@ from mirage.fuse.backend import MountBackend
 from mirage.fuse.fs import MirageFS
 from mirage.fuse.mount import (_await_ready, _prepare_mountpoint, _run_fuse,
                                load_fuse)
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -49,8 +49,8 @@ _FUSE = SimpleNamespace(FUSE=_CaptureFuse)
 
 @pytest.fixture
 def fs():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    return MirageFS(ws.fs)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    return MirageFS(ws.vfs)
 
 
 def test_run_fuse_mount_options(fs):

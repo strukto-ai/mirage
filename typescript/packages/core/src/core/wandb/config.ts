@@ -5,7 +5,7 @@ import {
   secretStr,
   type ConfigOf,
   type RedactedConfig,
-} from '../../resource/secrets.ts'
+} from '../../vfs/secrets.ts'
 
 export const WandbConfigSchema = z
   .object({

@@ -26,7 +26,7 @@ T = TypeVar("T")
 # physical one even when a mount is spelled the same way.
 #
 # They can be spelled the same: a disk mount whose root sits at or under
-# its own virtual prefix (`{"/data/": DiskResource(root="/data")}`) hands
+# its own virtual prefix (`{"/data/": DiskVFS(root="/data")}`) hands
 # the host a path `is_mounted` answers True for, so the door routed it
 # back into the workspace, back into the same backend, forever. No
 # string tells the two apart, so the caller is the only signal there is.

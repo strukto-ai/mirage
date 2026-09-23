@@ -15,6 +15,17 @@
 import * as jqWasm from 'jq-wasm'
 import { ARGS_VAR, INPUTS_VAR, type JqOptions } from './types.ts'
 
+// The convenience raw() cache keeps an aborted instance; own its lifecycle here.
+let instance: Promise<jqWasm.Jq> | null = null
+
+async function evaluator(): Promise<jqWasm.Jq> {
+  instance ??= jqWasm.loadJq().catch((error: unknown) => {
+    instance = null
+    throw error
+  })
+  return instance
+}
+
 const INPUTS_REF = /(?<![\w$.:])inputs(?![\w:])/
 const ARGS_REF = /\$ARGS(?![\w:])/
 const IDENT = /[A-Za-z_][A-Za-z0-9_]*/y
@@ -180,7 +191,28 @@ export async function jqEval(
     body = `(${expr})`
   }
   const program = prelude === '' ? expr : prelude + body
-  const result = await jqWasm.raw(JSON.stringify(obj), program, args)
+  const input = JSON.stringify(obj)
+  const jq = await evaluator()
+  let result: jqWasm.JqResult
+  try {
+    result = jq.raw(input, program, args)
+  } catch (error) {
+    if (!(error instanceof WebAssembly.RuntimeError)) throw error
+    instance = null
+    const bytes = new TextEncoder().encode(input).byteLength
+    // This is the pinned build's reproduced allocation-abort signature.
+    const detail =
+      error.message === 'Aborted(). Build with -sASSERTIONS for more info.'
+        ? 'This jq-wasm build has a 256 MiB heap limit; parsed JSON and query ' +
+          'allocations can exceed the input size. Reduce the input or use a native jq runtime. '
+        : `WebAssembly trap: ${error.message}. `
+    throw new Error(
+      `WASM evaluation failed for ${String(bytes)} bytes of JSON input. ` +
+        detail +
+        'The evaluator has been reset for the next call.',
+      { cause: error },
+    )
+  }
   if (result.exitCode !== 0) {
     throw new Error(result.stderr || `jq exited with code ${String(result.exitCode)}`)
   }

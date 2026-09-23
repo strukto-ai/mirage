@@ -24,7 +24,7 @@ const DEC = new TextDecoder()
 
 function spec(path: string): PathSpec {
   return new PathSpec({
-    resourcePath: stripSlash(path),
+    vfsPath: stripSlash(path),
     virtual: path,
     directory: path,
     resolved: true,
@@ -35,7 +35,7 @@ function opts(
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): CommandOpts {
-  return { stdin, flags, filetypeFns: null, cwd: '/', resource: {} } as CommandOpts
+  return { stdin, flags, filetypeFns: null, cwd: '/', vfs: {} } as CommandOpts
 }
 
 function makeStream(files: Record<string, string>) {
@@ -272,40 +272,72 @@ describe('awkGeneric', () => {
   })
 })
 
-describe('awk unsupported constructs fail loud', () => {
-  it('rejects an arithmetic assignment', async () => {
-    await expect(run([], ['{x = y + 1; print x}'], opts({}, ENC.encode('line\n')))).rejects.toThrow(
-      'unsupported construct',
-    )
+describe('awk runs what the scraper refused', () => {
+  it('builds an indent in a for loop', async () => {
+    const program = '{indent="";for(i=1;i<NF;i++)indent=indent"    ";print indent $NF}'
+    const stdin = ENC.encode('School/Courses_Materials/notes.md\n')
+    const [out] = await run([], [program], opts({ F: '/' }, stdin))
+    expect(out).toBe('        notes.md\n')
   })
 
-  it('rejects a function call in print', async () => {
-    await expect(run([], ['{print toupper($1)}'], opts({}, ENC.encode('line\n')))).rejects.toThrow(
-      "unsupported construct: 'print toupper($1)'",
-    )
+  it.each([
+    ['{x = y + 1; print x}', 'line\n', '1\n'],
+    ['{print toupper($1)}', 'line\n', 'LINE\n'],
+    ['{printf "%s\\n", $1}', 'line\n', 'line\n'],
+    ['{if ($1) print $1}', 'line\n', 'line\n'],
+    ['length($1) ~ /1/', 'a\n', 'a\n'],
+    ['NR % 2 == 0 {print}', 'a\nb\n', 'b\n'],
+    ['{gsub(/a/, "b"); print}', 'banana\n', 'bbnbnb\n'],
+    ['{while (i++ < 2) print i, $1}', 'x\n', '1 x\n2 x\n'],
+    ['{c[$1]++} END{print c["a"], length(c)}', 'a\nb\na\n', '2 2\n'],
+    ['function twice(n){return n*2} {print twice($1)}', '21\n', '42\n'],
+  ])('runs %j', async (program, stdin, expected) => {
+    const [out] = await run([], [program], opts({}, ENC.encode(stdin)))
+    expect(out).toBe(expected)
+  })
+})
+
+async function runIo(program: string, stdin: string): Promise<[string, number, string]> {
+  const [out, io] = await run([], [program], opts({}, ENC.encode(stdin)))
+  return [out, io.exitCode, DEC.decode(await materialize(io.stderr))]
+}
+
+describe('awk fatal paths', () => {
+  it.each([
+    ['{getline line; print line}', 'awk: getline is not supported in mirage\n'],
+    ['{print > "out.txt"}', 'awk: file output requires a workspace\n'],
+    ['{system("ls")}', 'awk: system() is not supported in mirage\n'],
+  ])('refuses %j', async (program, message) => {
+    expect(await runIo(program, 'a\n')).toEqual(['', 2, message])
   })
 
-  it('rejects printf', async () => {
-    await expect(run([], ['{printf "%s\\n", $1}'], opts({}, ENC.encode('line\n')))).rejects.toThrow(
-      'unsupported construct',
-    )
+  it('keeps the output written before a runtime error', async () => {
+    expect(await runIo('{print $1; print 1/0; print 9}', 'a\n')).toEqual([
+      'a\n',
+      2,
+      'awk: division by zero\n',
+    ])
   })
 
-  it('rejects an if statement', async () => {
-    await expect(run([], ['{if ($1) print $1}'], opts({}, ENC.encode('line\n')))).rejects.toThrow(
-      'unsupported construct',
-    )
+  it('exits with the program code and still runs END', async () => {
+    expect(await runIo('NR==2{exit 3} {print} END{print "end"}', 'a\nb\nc\n')).toEqual([
+      'a\nend\n',
+      3,
+      '',
+    ])
   })
 
-  it('rejects an unsupported match operand', async () => {
-    await expect(run([], ['length($1) ~ /1/'], opts({}, ENC.encode('a\n')))).rejects.toThrow(
-      'unsupported construct',
-    )
+  it('writes /dev/stderr to the error stream', async () => {
+    expect(await runIo('{print "warn" > "/dev/stderr"; print}', 'a\n')).toEqual([
+      'a\n',
+      0,
+      'warn\n',
+    ])
   })
 
-  it('rejects arithmetic in a condition', async () => {
-    await expect(run([], ['NR % 2 == 0 {print}'], opts({}, ENC.encode('a\nb\n')))).rejects.toThrow(
-      'unsupported construct',
+  it('refuses a syntax error as a usage error', async () => {
+    await expect(run([], ['{print $(}'], opts({}, ENC.encode('a\n')))).rejects.toThrow(
+      'syntax error',
     )
   })
 })
@@ -455,5 +487,63 @@ describe('awk unset values', () => {
   it('prints empty for an out-of-range field', async () => {
     const [out] = await run([], ['{print $5}'], opts({}, ENC.encode('one two\n')))
     expect(out).toBe('\n')
+  })
+})
+
+async function* chunked(parts: readonly (string | Uint8Array)[]): AsyncIterable<Uint8Array> {
+  for (const part of parts) {
+    await Promise.resolve()
+    yield typeof part === 'string' ? ENC.encode(part) : part
+  }
+}
+
+describe('awk RS', () => {
+  it.each<[string, Record<string, string[] | string>, string, string]>([
+    ['BEGIN{RS=":"} {print NR": "$0}', {}, 'a:b', '1: a\n2: b\n'],
+    ['{print NR": "$0}', { v: ['RS=:'] }, 'a:b:\n', '1: a\n2: b\n3: \n\n'],
+    ['{print NR": "$0; RS="2"}', {}, 'a\nb2c2d\n', '1: a\n2: b\n3: c\n4: d\n\n'],
+    ['{print NF": "$0}', { v: ['RS='] }, '\n\na b\nc\n\n\nd\n', '3: a b\nc\n1: d\n'],
+    ['{print NF}', { v: ['RS='], F: ':' }, 'a:b\nc\n\nd', '3\n1\n'],
+    ['{print NR": "$0}', { v: ['RS=[0-9]+'] }, 'a12b345c', '1: a\n2: b\n3: c\n'],
+  ])('separates records for %j with %j', async (program, flags, stdin, expected) => {
+    expect(await runStdin(program, stdin, flags)).toBe(expected)
+  })
+
+  it.each<[string[], string, string]>([
+    [['a\n', '\nb\n'], '', 'a|b|'],
+    [['a1', '2b'], '[0-9]+', 'a|b|'],
+    [['a:', 'b'], ':', 'a|b|'],
+  ])('holds a record across the chunks %j', async (parts, rs, expected) => {
+    const o = { ...opts({ v: [`RS=${rs}`] }), stdin: chunked(parts) }
+    const [out] = await run([], ['{printf "%s|", $0}'], o)
+    expect(out).toBe(expected)
+  })
+
+  it('decodes a character split across chunks', async () => {
+    const parts = [Uint8Array.of(0x68, 0xc3), Uint8Array.of(0xa9, 0x3a, 0x78)]
+    const o = { ...opts({ v: ['RS=:'] }), stdin: chunked(parts) }
+    const [out] = await run([], ['{printf "%s|", $0}'], o)
+    expect(out).toBe('h\u00e9|x|')
+  })
+
+  it('never lets a record span two files', async () => {
+    const files = { '/a.txt': 'a:b', '/b.txt': 'c:d:' }
+    const paths = [spec('/a.txt'), spec('/b.txt')]
+    const [out] = await run(paths, ['{print FNR, NR, $0}'], opts({ v: ['RS=:'] }), files)
+    expect(out).toBe('1 1 a\n2 2 b\n1 3 c\n2 4 d\n')
+  })
+
+  it('takes the whole newline run as the paragraph separator', async () => {
+    const o = { ...opts({ v: ['RS='] }), stdin: chunked(['a\n\n', '\nb\n']) }
+    const [out] = await run([], ['{printf "%s|", $0; RS="\\n"}'], o)
+    expect(out).toBe('a|b|')
+  })
+
+  it('is fatal on a bad regex', async () => {
+    expect(await runIo('BEGIN{RS="[a"} {print}', 'ab')).toEqual([
+      '',
+      2,
+      'awk: syntax error in regular expression [a at source line 1\n',
+    ])
   })
 })

@@ -39,10 +39,8 @@ export class Watcher implements WatchRuntime {
 
   private frame(mount: WatchMount, virtual: string): PathSpec {
     const normalized = `/${stripSlash(virtual)}`
-    const resourcePath = normalized.startsWith(mount.prefix)
-      ? normalized.slice(mount.prefix.length)
-      : ''
-    return PathSpec.fromStrPath(normalized, resourcePath)
+    const vfsPath = normalized.startsWith(mount.prefix) ? normalized.slice(mount.prefix.length) : ''
+    return PathSpec.fromStrPath(normalized, vfsPath)
   }
 
   private inScope(root: string, virtual: string): boolean {

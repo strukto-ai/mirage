@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_HEAD = RAM_COMMANDS.filter((c) => c.name === 'head' && c.filetype == null)
 
@@ -25,13 +25,13 @@ const DEC = new TextDecoder()
 const TWENTY_LINES = Array.from({ length: 20 }, (_, i) => `line${String(i + 1)}`).join('\n')
 
 async function runHead(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = RAM_HEAD[0]
   if (cmd === undefined) throw new Error('head not registered')
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -46,67 +46,61 @@ async function runHead(
 
 describe('head', () => {
   it('returns first 10 lines by default', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
     const expected = Array.from({ length: 10 }, (_, i) => `line${String(i + 1)}`).join('\n') + '\n'
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe(expected)
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe(expected)
   })
 
   it('-n 3 returns first 3 lines', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '3' })).toBe(
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '3' })).toBe(
       'line1\nline2\nline3\n',
     )
   })
 
   it('-n 1 returns first line', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '1' })).toBe(
-      'line1\n',
-    )
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '1' })).toBe('line1\n')
   })
 
   it('-n larger than file returns all', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '100' })).toBe(
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc'))
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { lines: '100' })).toBe(
       'a\nb\nc',
     )
   })
 
   it('-c returns specific byte count', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '5' })).toBe(
-      'abcde',
-    )
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '5' })).toBe('abcde')
   })
 
   it('-c larger than file returns all bytes', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abc'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '100' })).toBe(
-      'abc',
-    )
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abc'))
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '100' })).toBe('abc')
   })
 
   it('-c 0 returns empty', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abc'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '0' })).toBe('')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abc'))
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { bytes: '0' })).toBe('')
   })
 
   it('empty file', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', new Uint8Array())
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe('')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', new Uint8Array())
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe('')
   })
 
   it('single line without newline', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('hello'))
-    expect(await runHead(resource, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe('hello')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('hello'))
+    expect(await runHead(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe('hello')
   })
 })

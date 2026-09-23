@@ -14,7 +14,7 @@
 
 import type { DifyAccessor } from '../../../accessor/dify.ts'
 import { statLight } from '../../../core/dify/stat.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
@@ -31,7 +31,7 @@ const DIFY_OVERRIDES = new Set(['find', 'search'])
 const DIFY_LIGHT_STAT_OPS: CommandIO<DifyAccessor> = { ...DIFY_IO, stat: statLight }
 
 export const DIFY_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DifyAccessor>(ResourceName.DIFY, DIFY_IO, {
+  ...makeGenericCommands<DifyAccessor>(VFSName.DIFY, DIFY_IO, {
     overrides: DIFY_OVERRIDES,
     opsOverrides: { ls: DIFY_LIGHT_STAT_OPS },
   }),

@@ -34,7 +34,7 @@ function path(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: '',
+    vfsPath: '',
     rawPath: virtual,
     resolved: true,
   })
@@ -240,7 +240,7 @@ describe('ScriptPolicy', () => {
   })
 
   it('fails closed on an engine that cannot evaluate', async () => {
-    const policy = track(policyOf(entry(JUDGE, 'vfs')))
+    const policy = track(policyOf(entry(JUDGE, 'workspace')))
     const action = await policy.preCommand(ctx())
     expect((action as { reason: string }).reason).toMatch(/cannot evaluate one/)
   })

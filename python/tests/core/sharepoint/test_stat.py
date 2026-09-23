@@ -22,14 +22,14 @@ def _accessor() -> SharePointAccessor:
 
 
 def _ps(virtual: str) -> PathSpec:
-    return PathSpec(resource_path=mount_key(virtual, "/sp"),
+    return PathSpec(vfs_path=mount_key(virtual, "/sp"),
                     virtual=virtual,
                     directory=virtual)
 
 
 @pytest.mark.asyncio
 async def test_stat_root_is_directory():
-    path = PathSpec(resource_path=mount_key("/sp/", "/sp"),
+    path = PathSpec(vfs_path=mount_key("/sp/", "/sp"),
                     virtual="/sp/",
                     directory="/sp/")
     result = await stat(_accessor(), path)
@@ -49,7 +49,7 @@ async def test_stat_site_is_directory():
                       },
                   ]
               })
-        path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/Engineering", "/sp"),
                         virtual="/sp/Engineering",
                         directory="/sp/Engineering")
         result = await stat(_accessor(), path)
@@ -58,8 +58,7 @@ async def test_stat_site_is_directory():
 
 @pytest.mark.asyncio
 async def test_stat_drive_is_directory():
-    path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
-                                            "/sp"),
+    path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents", "/sp"),
                     virtual="/sp/Engineering/Documents",
                     directory="/sp/Engineering/Documents")
     result = await stat(_accessor(), path)
@@ -82,7 +81,7 @@ async def test_stat_file_from_api():
                       "mimeType": "application/vnd.openxml"
                   },
               })
-        path = PathSpec(resource_path=mount_key(
+        path = PathSpec(vfs_path=mount_key(
             "/sp/Engineering/Documents/report.docx", "/sp"),
                         virtual="/sp/Engineering/Documents/report.docx",
                         directory="/sp/Engineering/Documents/report.docx")
@@ -107,8 +106,8 @@ async def test_stat_folder_from_api():
                       "childCount": 2
                   },
               })
-        path = PathSpec(resource_path=mount_key(
-            "/sp/Engineering/Documents/src", "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents/src",
+                                           "/sp"),
                         virtual="/sp/Engineering/Documents/src",
                         directory="/sp/Engineering/Documents/src")
         result = await stat(_accessor(), path)
@@ -126,7 +125,7 @@ async def test_stat_missing_raises_file_not_found():
                   "code": "itemNotFound",
                   "message": "no"
               }})
-        path = PathSpec(resource_path=mount_key(
+        path = PathSpec(vfs_path=mount_key(
             "/sp/Engineering/Documents/nope.txt", "/sp"),
                         virtual="/sp/Engineering/Documents/nope.txt",
                         directory="/sp/Engineering/Documents/nope.txt")
@@ -150,13 +149,13 @@ async def test_stat_from_index_after_readdir():
                       },
                   ]
               })
-        parent = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
-                                                  "/sp"),
+        parent = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents",
+                                             "/sp"),
                           virtual="/sp/Engineering/Documents",
                           directory="/sp/Engineering/Documents")
         await readdir(_accessor(), parent, index)
-    path = PathSpec(resource_path=mount_key(
-        "/sp/Engineering/Documents/notes.txt", "/sp"),
+    path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents/notes.txt",
+                                       "/sp"),
                     virtual="/sp/Engineering/Documents/notes.txt",
                     directory="/sp/Engineering/Documents/notes.txt")
     result = await stat(_accessor(), path, index)
@@ -167,15 +166,15 @@ async def test_stat_from_index_after_readdir():
 
 @pytest.mark.asyncio
 async def test_stat_site_and_drive_have_no_metadata():
-    site_path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
+    site_path = PathSpec(vfs_path=mount_key("/sp/Engineering", "/sp"),
                          virtual="/sp/Engineering",
                          directory="/sp/Engineering")
     result = await stat(_accessor(), site_path)
     assert result.size is None
     assert result.modified is None
 
-    drive_path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
-                                                  "/sp"),
+    drive_path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents",
+                                             "/sp"),
                           virtual="/sp/Engineering/Documents",
                           directory="/sp/Engineering/Documents")
     result = await stat(_accessor(), drive_path)

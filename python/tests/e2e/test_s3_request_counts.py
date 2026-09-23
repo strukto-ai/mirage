@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import MountMode
+from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
 
@@ -43,7 +43,7 @@ def counted_s3():
         result.paginate = paginate
         return result
 
-    resource = S3Resource(
+    vfs = S3VFS(
         S3Config(bucket='bucket',
                  region='us-east-1',
                  aws_access_key_id='fake',
@@ -51,7 +51,7 @@ def counted_s3():
     with (patch_s3_session(session), patch.object(client, 'head_object', head),
           patch.object(client, 'list_objects_v2', listing),
           patch.object(client, 'get_paginator', paginator)):
-        yield Workspace({'/s3': (resource, MountMode.WRITE)}), counts
+        yield Workspace({'/s3': (vfs, MountMode.WRITE)}), counts
 
 
 @pytest.mark.asyncio
@@ -74,7 +74,7 @@ def counted_s3():
 ])
 async def test_command_request_counts(counted_s3, command, expected):
     ws, counts = counted_s3
-    result = await ws.execute(command)
+    result = await ws.shell(command)
     await result.stdout_str()
     assert result.exit_code == (1 if 'missing' in command else 0)
     assert counts == expected
@@ -83,13 +83,13 @@ async def test_command_request_counts(counted_s3, command, expected):
 @pytest.mark.asyncio
 async def test_recursive_walks_share_complete_index(counted_s3):
     ws, counts = counted_s3
-    cold = await ws.execute('du -a /s3')
+    cold = await ws.shell('du -a /s3')
     cold_text = await cold.stdout_str()
     counts.clear()
-    warm = await ws.execute('du -a /s3')
+    warm = await ws.shell('du -a /s3')
     assert await warm.stdout_str() == cold_text
     assert counts == {}
-    found = await ws.execute('find /s3 -type f')
+    found = await ws.shell('find /s3 -type f')
     assert found.exit_code == 0
     found_text = await found.stdout_str()
     assert 'a.txt' in found_text and 'b.txt' in found_text
@@ -99,16 +99,16 @@ async def test_recursive_walks_share_complete_index(counted_s3):
 @pytest.mark.asyncio
 async def test_find_warms_du_on_a_non_root_directory(counted_s3):
     ws, counts = counted_s3
-    found = await ws.execute('find /s3/d')
+    found = await ws.shell('find /s3/d')
     assert found.exit_code == 0
     assert 'b.txt' in await found.stdout_str()
     counts.clear()
-    first = await ws.execute('du -a /s3/d')
+    first = await ws.shell('du -a /s3/d')
     first_text = await first.stdout_str()
     assert first.exit_code == 0
     assert counts == {}
     counts.clear()
-    second = await ws.execute('du -a /s3/d')
+    second = await ws.shell('du -a /s3/d')
     assert await second.stdout_str() == first_text
     assert counts == {}
 
@@ -118,21 +118,21 @@ async def test_find_warms_du_on_a_non_root_directory(counted_s3):
 async def test_deleted_recursive_root_is_not_reported_after_expiry(warmup):
     objects = {'d/a.txt': b'old'}
     session = MultiBucketSession({'bucket': objects})
-    resource = S3Resource(
+    vfs = S3VFS(
         S3Config(bucket='bucket',
                  region='us-east-1',
                  aws_access_key_id='fake',
                  aws_secret_access_key='fake'))
-    ws = Workspace({'/s3': (resource, MountMode.WRITE)})
+    ws = Workspace({'/s3': (vfs, MountMode.WRITE)})
     with (patch_s3_session(session), patch('mirage.cache.index.ram.datetime')
           as clock):
         clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        first = await ws.execute(warmup + ' /s3/d')
+        first = await ws.shell(warmup + ' /s3/d')
         await first.stdout_str()
         assert first.exit_code == 0
         objects.clear()
         clock.now.return_value += timedelta(seconds=601)
         for command in ['stat', 'find']:
-            result = await ws.execute(command + ' /s3/d')
+            result = await ws.shell(command + ' /s3/d')
             assert await result.stdout_str() == ''
             assert result.exit_code == 1

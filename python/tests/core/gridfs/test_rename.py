@@ -73,7 +73,7 @@ def _accessor() -> GridFSAccessor:
 
 
 def _spec(key: str) -> PathSpec:
-    return PathSpec(resource_path=key, virtual=f"/mnt/{key}", directory="/mnt")
+    return PathSpec(vfs_path=key, virtual=f"/mnt/{key}", directory="/mnt")
 
 
 def _install(monkeypatch, files: _FakeFiles) -> None:

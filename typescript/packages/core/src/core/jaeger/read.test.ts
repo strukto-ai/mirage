@@ -44,7 +44,7 @@ function accessor(transport: JaegerTransport, config: JaegerAccessorConfig = {})
 }
 
 function spec(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: stripSlash(virtual) })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: stripSlash(virtual) })
 }
 
 import { JaegerApiError } from './client.ts'

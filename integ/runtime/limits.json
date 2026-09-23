@@ -6,7 +6,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -23,7 +23,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -35,7 +35,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -47,7 +47,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -76,7 +76,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -93,7 +93,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -105,7 +105,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -117,7 +117,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -146,7 +146,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -163,7 +163,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -175,7 +175,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -187,7 +187,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -215,7 +215,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -232,7 +232,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -244,7 +244,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -256,7 +256,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -285,7 +285,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -302,7 +302,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -314,7 +314,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -326,7 +326,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -355,7 +355,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -372,7 +372,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -384,7 +384,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -396,7 +396,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -425,7 +425,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -442,7 +442,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -454,7 +454,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -466,7 +466,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -495,7 +495,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -512,7 +512,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -524,7 +524,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -536,7 +536,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -565,7 +565,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -582,7 +582,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -594,7 +594,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -606,7 +606,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },
@@ -635,7 +635,7 @@
    "world": {
     "mounts": {
      "/a": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "1\n2\n3\n4\n5\n",
        "small.txt": "x\ny\n"
@@ -652,7 +652,7 @@
       }
      },
      "/a/sub": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "g.txt": "match\nmatch\nmatch\n"
       },
@@ -664,7 +664,7 @@
       }
      },
      "/b": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "6\n7\n8\n9\n10\n"
       },
@@ -676,7 +676,7 @@
       }
      },
      "/c": {
-      "resource": "ram",
+      "vfs": "ram",
       "files": {
        "f.txt": "abcdefgh"
       },

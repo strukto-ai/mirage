@@ -21,8 +21,8 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.mongodb.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
-from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 GENERICS = "mirage.commands.builtin.generic_bind.search._GENERICS"
 RESOLVE = "mirage.commands.builtin.generic_bind.adapter.make_resolve_glob"
@@ -50,13 +50,13 @@ def _stat_reads(monkeypatch):
 
 
 def _path(s: str) -> PathSpec:
-    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
+    return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
 def _glob_path() -> PathSpec:
     return PathSpec(virtual="/db1/collections/*",
                     directory="/db1/collections",
-                    resource_path="db1/collections/*",
+                    vfs_path="db1/collections/*",
                     pattern="*",
                     resolved=False)
 

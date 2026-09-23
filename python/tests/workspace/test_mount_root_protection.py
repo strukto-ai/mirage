@@ -19,20 +19,20 @@ Covers two related behaviors enforced by the command dispatcher
 1. **Write rule** — destructive/conflicting commands targeting a mount
    root (`rm /r2`, `mv /r2 /x`, `mkdir /r2`, `touch /r2`, `ln s /r2`)
    are refused with Unix-style error messages, instead of silently
-   modifying the underlying resource.
+   modifying the underlying VFS.
 
 2. **Read fan-out** — traversal commands (`find`, `tree`, `du`,
    `grep -r`, `ls -R`) on a path at or above mount roots run across
    each affected mount and concatenate output, so users see
-   contents from every mount instead of only the parent's resource.
+   contents from every mount instead of only the parent's VFS.
 
 Together these make mount roots behave like first-class directories
 that the user can navigate but not accidentally destroy.
 """
 import asyncio
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 # ── fixtures ──────────────────────────────────────
@@ -40,20 +40,20 @@ from mirage.workspace import Workspace
 
 def _ws_two_mounts() -> Workspace:
     return Workspace({
-        "/r2": (RAMResource(), MountMode.WRITE),
-        "/ram": (RAMResource(), MountMode.WRITE),
+        "/r2": (RAMVFS(), MountMode.WRITE),
+        "/ram": (RAMVFS(), MountMode.WRITE),
     })
 
 
 def _ws_nested() -> Workspace:
     return Workspace({
-        "/data": (RAMResource(), MountMode.WRITE),
-        "/data/inner": (RAMResource(), MountMode.WRITE),
+        "/data": (RAMVFS(), MountMode.WRITE),
+        "/data/inner": (RAMVFS(), MountMode.WRITE),
     })
 
 
 async def _exec(ws: Workspace, cmd: str):
-    return await ws.execute(cmd)
+    return await ws.shell(cmd)
 
 
 def _run(coro):
@@ -264,13 +264,13 @@ def test_ln_s_refuses_mount_root_as_link_name():
 
 def test_ln_inside_a_single_mount_is_not_blocked_by_guard():
     # ln within one mount should not be refused by the mount-root guard.
-    # (Whether the underlying resource supports ln is a separate concern;
+    # (Whether the underlying VFS supports ln is a separate concern;
     # the guard's job is only to reject mount-root targets.)
     async def go():
         ws = _ws_two_mounts()
         await _exec(ws, "touch /r2/source")
         r = await _exec(ws, "ln -s /r2/source /r2/link")
-        # Either ln succeeds, or the resource doesn't support it. The
+        # Either ln succeeds, or the VFS doesn't support it. The
         # guard's "File exists" message must NOT appear because /r2/link
         # is not a mount root.
         assert b"File exists" not in (r.stderr or b"")
@@ -365,7 +365,7 @@ def test_find_inside_one_mount_is_unchanged():
 def test_find_with_no_descendants_does_not_fan_out():
     # Single mount; no descendants under /. Fan-out path must not run.
     async def go():
-        ws = Workspace({"/r2": (RAMResource(), MountMode.WRITE)})
+        ws = Workspace({"/r2": (RAMVFS(), MountMode.WRITE)})
         await _exec(ws, "touch /r2/file")
         r = await _exec(ws, "find /r2")
         assert r.exit_code == 0
@@ -397,7 +397,7 @@ def test_find_filters_parent_paths_under_descendant_mount():
     # output under the descendant prefix.
     async def go():
         ws = _ws_nested()
-        # Put a key in the parent /data resource that lives at the
+        # Put a key in the parent /data VFS that lives at the
         # SAME path as the /data/inner mount root.
         await _exec(ws, "mkdir /data/inner"
                     )  # blocked: /data/inner is a mount root → File exists

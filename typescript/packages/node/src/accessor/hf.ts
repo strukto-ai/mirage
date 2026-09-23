@@ -14,20 +14,20 @@
 
 import type { Operator } from 'opendal'
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { loadOptionalPeer } from '../optional_peer.ts'
-import type { HfBucketsConfig, HfRepoConfig } from '../resource/hf_buckets/config.ts'
+import type { HfBucketsConfig, HfRepoConfig } from '../vfs/hf_buckets/config.ts'
 
-export const HF_RESOURCES = [
-  ResourceName.HF_BUCKETS,
-  ResourceName.HF_DATASETS,
-  ResourceName.HF_MODELS,
-  ResourceName.HF_SPACES,
+export const HF_VFS_NAMES = [
+  VFSName.HF_BUCKETS,
+  VFSName.HF_DATASETS,
+  VFSName.HF_MODELS,
+  VFSName.HF_SPACES,
 ] as const
 
 export abstract class HfAccessor extends Accessor {
   abstract readonly repoType: string
-  abstract readonly resourceName: ResourceName
+  abstract readonly vfsName: VFSName
   private operatorPromise: Promise<Operator> | null = null
 
   constructor(public readonly config: HfBucketsConfig | HfRepoConfig) {
@@ -71,7 +71,7 @@ export abstract class HfAccessor extends Accessor {
   private async createOperator(): Promise<Operator> {
     const mod = await loadOptionalPeer(
       () => import('opendal') as Promise<{ Operator: typeof Operator }>,
-      { feature: 'HuggingFace resources', packageName: 'opendal' },
+      { feature: 'HuggingFace VFS', packageName: 'opendal' },
     )
     return new mod.Operator('hf', this.operatorOptions())
   }
@@ -87,7 +87,7 @@ function stripSlashes(value: string): string {
 
 export class HfBucketsAccessor extends HfAccessor {
   readonly repoType: string = 'bucket'
-  readonly resourceName: ResourceName = ResourceName.HF_BUCKETS
+  readonly vfsName: VFSName = VFSName.HF_BUCKETS
 
   get bucketUri(): string {
     return `hf://buckets/${this.repoId}`
@@ -96,7 +96,7 @@ export class HfBucketsAccessor extends HfAccessor {
 
 export class HfDatasetsAccessor extends HfAccessor {
   readonly repoType: string = 'dataset'
-  readonly resourceName: ResourceName = ResourceName.HF_DATASETS
+  readonly vfsName: VFSName = VFSName.HF_DATASETS
 
   get bucketUri(): string {
     return `hf://datasets/${this.repoId}`
@@ -105,7 +105,7 @@ export class HfDatasetsAccessor extends HfAccessor {
 
 export class HfModelsAccessor extends HfAccessor {
   readonly repoType: string = 'model'
-  readonly resourceName: ResourceName = ResourceName.HF_MODELS
+  readonly vfsName: VFSName = VFSName.HF_MODELS
 
   get bucketUri(): string {
     return `hf://models/${this.repoId}`
@@ -114,7 +114,7 @@ export class HfModelsAccessor extends HfAccessor {
 
 export class HfSpacesAccessor extends HfAccessor {
   readonly repoType: string = 'space'
-  readonly resourceName: ResourceName = ResourceName.HF_SPACES
+  readonly vfsName: VFSName = VFSName.HF_SPACES
 
   get bucketUri(): string {
     return `hf://spaces/${this.repoId}`

@@ -25,14 +25,14 @@ import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { revisionFor } from '../../observe/context.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import { BaseResource, type Resource } from '../../resource/base.ts'
+import { BaseVFS, type VFS } from '../../vfs/base.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from './mount.ts'
 
-class StubResource extends BaseResource implements Resource {
+class StubVFS extends BaseVFS implements VFS {
   readonly kind = 'ram'
   open(): Promise<void> {
     return Promise.resolve()
@@ -49,39 +49,35 @@ const OK_CMD_STDOUT: CommandFn = () => [new TextEncoder().encode('ok'), new IORe
 const HANG_CMD: CommandFn = () => new Promise(() => undefined)
 
 function makeMount(mode: MountMode = MountMode.WRITE): MountEntry {
-  return new MountEntry({ prefix: '/ram/', resource: new StubResource(), mode })
+  return new MountEntry({ prefix: '/ram/', vfs: new StubVFS(), mode })
 }
 
 describe('Mount constructor validation', () => {
   it('requires prefix to start with /', () => {
-    expect(() => new MountEntry({ prefix: 'ram/', resource: new StubResource() })).toThrow(
-      /start with/,
-    )
+    expect(() => new MountEntry({ prefix: 'ram/', vfs: new StubVFS() })).toThrow(/start with/)
   })
 
   it('requires prefix to end with /', () => {
-    expect(() => new MountEntry({ prefix: '/ram', resource: new StubResource() })).toThrow(
-      /end with/,
-    )
+    expect(() => new MountEntry({ prefix: '/ram', vfs: new StubVFS() })).toThrow(/end with/)
   })
 
   it('rejects double-slash prefixes', () => {
-    expect(() => new MountEntry({ prefix: '//ram/', resource: new StubResource() })).toThrow(/\/\//)
+    expect(() => new MountEntry({ prefix: '//ram/', vfs: new StubVFS() })).toThrow(/\/\//)
   })
 
   it('defaults mode to READ', () => {
-    const m = new MountEntry({ prefix: '/ram/', resource: new StubResource() })
+    const m = new MountEntry({ prefix: '/ram/', vfs: new StubVFS() })
     expect(m.mode).toBe(MountMode.READ)
   })
 })
 
 describe('Mount.resolveCommand fallback chain', () => {
-  it('prefers filetype-specific over resource-specific', () => {
+  it('prefers filetype-specific over VFS-specific', () => {
     const m = makeMount()
-    const [generic] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
+    const [generic] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
     const [json] = command({
       name: 'cat',
-      resource: 'ram',
+      vfs: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
       filetype: '.json',
@@ -93,9 +89,9 @@ describe('Mount.resolveCommand fallback chain', () => {
     expect(m.resolveCommand('cat', '.csv')).toBe(generic)
   })
 
-  it('falls back to general when no resource-specific match', () => {
+  it('falls back to general when no VFS-specific match', () => {
     const m = makeMount()
-    const [echo] = command({ name: 'echo', resource: null, spec: BASIC_SPEC, fn: OK_CMD })
+    const [echo] = command({ name: 'echo', vfs: null, spec: BASIC_SPEC, fn: OK_CMD })
     if (echo === undefined) throw new Error('missing')
     m.registerGeneral(echo)
     expect(m.resolveCommand('echo')).toBe(echo)
@@ -111,10 +107,10 @@ describe('Mount.executeCmd glob operands', () => {
   // The dispatcher hands a pattern to the handler whole. Resolving is the
   // handler's job, done once through the shared adapter, which is where
   // the namespace facts (links, nested mount roots, a trailing slash) are
-  // in view; the resource's own glob hook cannot see them, so expanding
+  // in view; the VFS's own glob hook cannot see them, so expanding
   // here would destroy what the handler needs. Python's dispatcher never
   // expands either.
-  class GlobbingResource extends StubResource {
+  class GlobbingVFS extends StubVFS {
     glob(): Promise<PathSpec[]> {
       return Promise.resolve([PathSpec.fromStrPath('/ram/a.txt', 'a.txt')])
     }
@@ -122,7 +118,7 @@ describe('Mount.executeCmd glob operands', () => {
   const pattern = new PathSpec({
     virtual: '/ram/*.txt',
     directory: '/ram/',
-    resourcePath: '*.txt',
+    vfsPath: '*.txt',
     pattern: '*.txt',
     resolved: false,
     rawPath: '*.txt',
@@ -131,13 +127,13 @@ describe('Mount.executeCmd glob operands', () => {
   it('hands the pattern to the handler rather than expanding it', async () => {
     const m = new MountEntry({
       prefix: '/ram/',
-      resource: new GlobbingResource(),
+      vfs: new GlobbingVFS(),
       mode: MountMode.WRITE,
     })
     let got: string[] = []
     const [cmd] = command({
       name: 'cat',
-      resource: 'ram',
+      vfs: 'ram',
       spec: BASIC_SPEC,
       fn: (_a, paths) => {
         got = paths.map((p) => p.virtual)
@@ -154,7 +150,7 @@ describe('Mount.executeCmd glob operands', () => {
 describe('Mount.specFor', () => {
   it('returns the registered spec', () => {
     const m = makeMount()
-    const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
+    const [cmd] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     expect(m.specFor('cat')).toBe(cmd.spec)
@@ -168,10 +164,10 @@ describe('Mount.specFor', () => {
 describe('Mount.filetypeHandlers', () => {
   it('returns only filetype-specific variants of a command', () => {
     const m = makeMount()
-    const [generic] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
+    const [generic] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
     const [json] = command({
       name: 'cat',
-      resource: 'ram',
+      vfs: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
       filetype: '.json',
@@ -187,10 +183,10 @@ describe('Mount.filetypeHandlers', () => {
 describe('Mount.unregister', () => {
   it('removes all cmd variants and general fallbacks with the same name', () => {
     const m = makeMount()
-    const [generic] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
+    const [generic] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
     const [json] = command({
       name: 'cat',
-      resource: 'ram',
+      vfs: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
       filetype: '.json',
@@ -218,12 +214,12 @@ describe('Mount.executeCmd', () => {
   ] as const)(
     'only wrapper responses bypass the write guard: %s declared=%s %s',
     async (mode, declared, flag) => {
-      const resource = new RAMResource()
-      const m = new MountEntry({ prefix: '/ram/', resource, mode })
+      const vfs = new RAMVFS()
+      const m = new MountEntry({ prefix: '/ram/', vfs, mode })
       const calls: string[] = []
       const [cmd] = command<RAMAccessor>({
         name: 'mutate',
-        resource: 'ram',
+        vfs: 'ram',
         spec: new CommandSpec({
           options: declared ? [new Option({ long: '--version', type: 'bool' })] : [],
         }),
@@ -245,18 +241,18 @@ describe('Mount.executeCmd', () => {
             'mutate: read-only mount at /ram/\n',
           )
           expect(calls).toEqual([])
-          expect(resource.store.files.has('/changed')).toBe(false)
+          expect(vfs.store.files.has('/changed')).toBe(false)
         } else {
           expect(io.exitCode).toBe(0)
           expect(output).toBe('custom version\n')
           expect(calls).toEqual(['handler'])
-          expect(new TextDecoder().decode(resource.store.files.get('/changed'))).toBe('changed')
+          expect(new TextDecoder().decode(vfs.store.files.get('/changed'))).toBe('changed')
         }
       } else {
         expect(io.exitCode).toBe(0)
         expect(output).not.toBe('')
         expect(calls).toEqual([])
-        expect(resource.store.files.has('/changed')).toBe(false)
+        expect(vfs.store.files.has('/changed')).toBe(false)
       }
     },
   )
@@ -272,7 +268,7 @@ describe('Mount.executeCmd', () => {
     const m = makeMount()
     const [cmd] = command({
       name: 'cat',
-      resource: 'ram',
+      vfs: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD_STDOUT,
     })
@@ -287,7 +283,7 @@ describe('Mount.executeCmd', () => {
     const m = makeMount(MountMode.READ)
     const [wcmd] = command({
       name: 'rm',
-      resource: 'ram',
+      vfs: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
       write: true,
@@ -308,7 +304,7 @@ describe('Mount.executeCmd', () => {
     const m = makeMount(MountMode.READ)
     const [wcmd] = command({
       name: 'rm',
-      resource: 'ram',
+      vfs: 'ram',
       spec: BASIC_SPEC,
       fn: OK_CMD,
       write: true,
@@ -326,12 +322,11 @@ describe('Mount.executeCmd', () => {
     let seenPrefix: string | null = null
     const fn: CommandFn = (_accessor, paths) => {
       seenPrefix =
-        (paths[0] === undefined
-          ? undefined
-          : mountPrefixOf(paths[0].virtual, paths[0].resourcePath)) ?? null
+        (paths[0] === undefined ? undefined : mountPrefixOf(paths[0].virtual, paths[0].vfsPath)) ??
+        null
       return [null, new IOResult()]
     }
-    const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn })
+    const [cmd] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     await m.executeCmd('cat', [PathSpec.fromStrPath('/ram/hello.txt')], [], {})
@@ -355,10 +350,10 @@ describe('Mount.executeCmd', () => {
       builtins.push(paths[0]?.virtual ?? '')
       return [null, new IOResult()]
     }
-    const [plain] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: builtin })
+    const [plain] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: builtin })
     const [typed] = command({
       name: 'cat',
-      resource: 'ram',
+      vfs: 'ram',
       spec: BASIC_SPEC,
       fn: renderer,
       filetype: '.tally',
@@ -389,7 +384,7 @@ describe('Mount.executeCmd', () => {
     // mount's own table).
     const m = makeMount()
     m.commandLimits.set('cat', new Limit({ timeoutSeconds: 0.05 }))
-    const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: HANG_CMD })
+    const [cmd] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: HANG_CMD })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     await expect(
@@ -403,7 +398,7 @@ describe('Mount.executeOp', () => {
     const m = makeMount()
     const op: RegisteredOp = {
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       write: false,
       fn: (_accessor: Accessor, path: PathSpec) =>
@@ -423,7 +418,7 @@ describe('Mount.executeOp', () => {
     const m = makeMount(MountMode.READ)
     const op: RegisteredOp = {
       name: 'write',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       write: true,
       fn: () => Promise.resolve(),
@@ -445,7 +440,7 @@ describe('Mount.revisions', () => {
     let observed: string | null = '<unset>'
     const op: RegisteredOp = {
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       write: false,
       fn: (_accessor: Accessor, path: PathSpec) => {
@@ -463,7 +458,7 @@ describe('Mount.revisions', () => {
     m.revisions.set('/ram/x.txt', 'rev-1')
     const op: RegisteredOp = {
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       write: false,
       fn: () => Promise.resolve(new Uint8Array()),
@@ -477,15 +472,15 @@ describe('Mount.revisions', () => {
 describe('Mount.isGeneralCommand', () => {
   it('returns true for general commands', () => {
     const m = makeMount()
-    const [cmd] = command({ name: 'seq', resource: null, spec: BASIC_SPEC, fn: OK_CMD })
+    const [cmd] = command({ name: 'seq', vfs: null, spec: BASIC_SPEC, fn: OK_CMD })
     if (cmd === undefined) throw new Error('missing')
     m.registerGeneral(cmd)
     expect(m.isGeneralCommand('seq')).toBe(true)
   })
 
-  it('returns false for resource-specific commands', () => {
+  it('returns false for VFS-specific commands', () => {
     const m = makeMount()
-    const [cmd] = command({ name: 'cat', resource: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
+    const [cmd] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: OK_CMD })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     expect(m.isGeneralCommand('cat')).toBe(false)
@@ -497,12 +492,12 @@ describe('Mount.isGeneralCommand', () => {
 })
 
 describe('Mount.registerCross / resolveCross', () => {
-  it('round-trips a cross-mount command by (name, targetResource)', () => {
+  it('round-trips a cross-mount command by (name, targetVfs)', () => {
     const m = makeMount()
     const rc = new RegisteredCommand({
       name: 'cp',
       spec: BASIC_SPEC,
-      resource: 'ram->disk',
+      vfs: 'ram->disk',
       fn: OK_CMD,
       src: 'ram',
       dst: 'disk',

@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GWS, GmailResource, MountMode, Workspace, type FileStat, type GmailConfig } from '@struktoai/mirage-node'
+import { GWS, GmailVFS, MountMode, Workspace, type FileStat, type GmailConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -35,7 +35,7 @@ async function run(
   cmd: string,
 ): Promise<{ out: string; err: string; code: number }> {
   try {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
   } catch (err) {
     return { out: '', err: err instanceof Error ? err.message : String(err), code: 1 }
@@ -50,8 +50,8 @@ function printSection(label: string, out: string, err: string, max = 500): void 
 
 async function main(): Promise<void> {
   const config = buildConfig()
-  const resource = new GmailResource(config)
-  const ws = new Workspace({ '/gmail': resource }, { mode: MountMode.WRITE })
+  const vfs = new GmailVFS(config)
+  const ws = new Workspace({ '/gmail': vfs }, { mode: MountMode.WRITE })
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })
 
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${msgPath} ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "${msgPath}" && chown 500:dev "${msgPath}" && touch -t 202601021530 "${msgPath}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

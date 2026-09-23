@@ -72,7 +72,7 @@ const CASES: [string, string, string][] = [
 describe('set -C noclobber', () => {
   it.each(CASES)('%s', async (cmd, out, err) => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(cmd)
+    const io = await ws.shell(cmd)
     expect(stdoutStr(io)).toBe(out)
     expect(stderrStr(io)).toBe(err)
     await ws.close()
@@ -84,7 +84,7 @@ describe('set -C noclobber', () => {
     // target's contents and nothing else: `touch marker > existing` still
     // created the marker.
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       'echo a > /ram/f; set -C; touch /ram/marker > /ram/f;' + ' echo rc=$?; ls /ram/marker',
     )
     expect(stderrStr(io)).toBe(
@@ -100,7 +100,7 @@ describe('set -C noclobber', () => {
     // time the probe looked there was nothing to refuse and the line
     // reported success while the file was gone.
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       'echo one > /ram/f; set -C; rm /ram/f > /ram/f; echo rc=$?; cat /ram/f',
     )
     expect(stdoutStr(io)).toBe('rc=1\none\n')
@@ -113,7 +113,7 @@ describe('set -C noclobber', () => {
     // statement began. Probing every target against one pre-command
     // snapshot passed both and wrote the output.
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       'set -C; echo x > /ram/dup > /ram/dup; echo rc=$?; cat /ram/dup; echo end',
     )
     expect(stderrStr(io)).toBe('/ram/dup: cannot overwrite existing file\n')
@@ -127,12 +127,12 @@ describe('set -C noclobber', () => {
     // `>>` and `>|` never refuse, but they do open, so a later `>` onto
     // the same absent target refuses against what they created.
     const { ws } = await makeWorkspace()
-    const ap = await ws.execute(
+    const ap = await ws.shell(
       'set -C; echo x >> /ram/ap > /ram/ap; echo rc=$?; cat /ram/ap; echo end',
     )
     expect(stderrStr(ap)).toBe('/ram/ap: cannot overwrite existing file\n')
     expect(stdoutStr(ap)).toBe('rc=1\nend\n')
-    const ov = await ws.execute(
+    const ov = await ws.shell(
       'set -C; echo x >| /ram/ov > /ram/ov; echo rc=$?; cat /ram/ov; echo end',
     )
     expect(stderrStr(ov)).toBe('/ram/ov: cannot overwrite existing file\n')
@@ -144,9 +144,9 @@ describe('set -C noclobber', () => {
     const { ws } = await makeWorkspace()
     // The session is reused across calls, so the default is asserted
     // before anything sets the option.
-    expect(stdoutStr(await ws.execute('set -o'))).toContain('noclobber      \toff\n')
-    expect(stdoutStr(await ws.execute('set -C; set -o'))).toContain('noclobber      \ton\n')
-    expect(stdoutStr(await ws.execute('set +o'))).toContain('set -o noclobber\n')
+    expect(stdoutStr(await ws.shell('set -o'))).toContain('noclobber      \toff\n')
+    expect(stdoutStr(await ws.shell('set -C; set -o'))).toContain('noclobber      \ton\n')
+    expect(stdoutStr(await ws.shell('set +o'))).toContain('set -o noclobber\n')
     await ws.close()
   })
 })

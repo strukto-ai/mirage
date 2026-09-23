@@ -22,13 +22,15 @@ from mirage.shell import parse
 from mirage.shell.helpers import get_parts
 from mirage.utils.glob_walk import glob_pattern, unmark_globs
 from mirage.workspace.expand.parts import expand_parts, expand_words
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
 
 def _words(cmd: str, env=None, stdout: bytes = b""):
     parts = get_parts(parse(cmd).named_children[0])
-    session = Session(session_id="t", cwd="/", vars=vars_from_env(env or {}))
+    session = SessionState(session_id="t",
+                           cwd="/",
+                           vars=vars_from_env(env or {}))
     execute_fn = AsyncMock(return_value=IOResult(stdout=stdout))
     return asyncio.run(expand_words(parts, session, execute_fn))
 
@@ -115,7 +117,7 @@ def test_brace_unquoted_expansion_atom_is_live():
 def test_expand_parts_is_the_unmarked_view():
     cmd = "c '/data/*.txt' \"/data/\"*.txt {a,b}* '/data/*'?.txt"
     parts = get_parts(parse(cmd).named_children[0])
-    session = Session(session_id="t", cwd="/", vars=vars_from_env({}))
+    session = SessionState(session_id="t", cwd="/", vars=vars_from_env({}))
     execute_fn = AsyncMock(return_value=IOResult())
     words = asyncio.run(expand_words(parts, session, execute_fn))
     texts = asyncio.run(expand_parts(parts, session, execute_fn))

@@ -17,8 +17,8 @@ from typing import Any
 
 from mirage.core.qdrant.payload import field_value, without_field
 from mirage.core.render.json import compact_json_text, value_text
-from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import JsonValue
+from mirage.vfs.qdrant.config import QdrantConfig
 
 _SKIP_KEYS = {"_distance", "_rowid", "_score"}
 

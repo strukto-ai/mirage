@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { logicalCwd } from '../../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { PWD_OPTIONS, PWD_USAGE } from './constants.ts'
@@ -23,7 +23,7 @@ import type { BuiltinCall, Result } from '../types.ts'
 // Print the working directory, logical by default and physical under -P
 // (or `set -P`). GNU ignores every operand: `pwd extra` still prints the
 // cwd.
-export function handlePwd(operands: DirArgs, session: Session): Result {
+export function handlePwd(operands: DirArgs, session: SessionState): Result {
   const shellPhysical = session.shellOptions.physical === true
   const { bad, physical } = splitModeOptions(operands, PWD_OPTIONS, shellPhysical)
   if (bad !== null) {

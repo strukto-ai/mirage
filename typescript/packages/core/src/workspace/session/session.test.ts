@@ -16,14 +16,14 @@ import { makeVar, VarAttr, withValue } from '../../shell/variable.ts'
 import { seedVar, setAttr } from './state.ts'
 import { varsFromEntries, varsFromEnv, varsFromFields, varsToFields } from './session.ts'
 import { describe, expect, it } from 'vitest'
-import { Session } from './session.ts'
+import { SessionState } from './session.ts'
 import { MountMode } from '../../types.ts'
 import type { AdmissionRules, Decision } from '../../policy/types.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 
-describe('Session', () => {
+describe('SessionState', () => {
   it('defaults cwd=/ and an env holding only the seeded $PWD', () => {
-    const s = new Session({ sessionId: 'x' })
+    const s = new SessionState({ sessionId: 'x' })
     expect(s.cwd).toBe('/')
     // bash exports $PWD from startup, so even a session that never ran
     // `cd` has one.
@@ -33,7 +33,7 @@ describe('Session', () => {
   })
 
   it('cwd and env are mutable', () => {
-    const s = new Session({ sessionId: 'x' })
+    const s = new SessionState({ sessionId: 'x' })
     s.cwd = '/data'
     seedVar(s, 'FOO', 'bar')
     expect(s.cwd).toBe('/data')
@@ -41,7 +41,7 @@ describe('Session', () => {
   })
 
   it('toJSON includes only the serializable fields, snake_case like Python', () => {
-    const s = new Session({ sessionId: 'x', cwd: '/a', vars: varsFromEnv({ K: 'V' }) })
+    const s = new SessionState({ sessionId: 'x', cwd: '/a', vars: varsFromEnv({ K: 'V' }) })
     const json = s.toJSON()
     expect(json).toEqual({
       session_id: 'x',
@@ -60,8 +60,8 @@ describe('Session', () => {
   })
 
   it('fromJSON round-trips', () => {
-    const original = new Session({ sessionId: 'x', cwd: '/a', vars: varsFromEnv({ K: 'V' }) })
-    const restored = Session.fromJSON(
+    const original = new SessionState({ sessionId: 'x', cwd: '/a', vars: varsFromEnv({ K: 'V' }) })
+    const restored = SessionState.fromJSON(
       original.toJSON() as {
         session_id: string
         cwd: string
@@ -75,7 +75,7 @@ describe('Session', () => {
   })
 
   it('round-trips mountModes through toJSON/fromJSON', () => {
-    const original = new Session({
+    const original = new SessionState({
       sessionId: 'x',
       mountModes: new Map([
         ['/s3', MountMode.READ],
@@ -84,7 +84,7 @@ describe('Session', () => {
     })
     const json = original.toJSON()
     expect(json.mount_modes).toEqual({ '/s3': 'read', '/scratch': 'write' })
-    const restored = Session.fromJSON(
+    const restored = SessionState.fromJSON(
       json as { session_id: string; mount_modes?: Record<string, MountMode> | null },
     )
     expect(restored.mountModes?.get('/s3')).toBe(MountMode.READ)
@@ -92,24 +92,24 @@ describe('Session', () => {
   })
 
   it('round-trips the profile name and omits it when none', () => {
-    expect('profile' in new Session({ sessionId: 'a' }).toJSON()).toBe(false)
-    const original = new Session({ sessionId: 'rt', profile: 'admin' })
+    expect('profile' in new SessionState({ sessionId: 'a' }).toJSON()).toBe(false)
+    const original = new SessionState({ sessionId: 'rt', profile: 'admin' })
     const json = original.toJSON()
     expect(json.profile).toBe('admin')
-    expect(Session.fromJSON(json as { session_id: string; profile?: string | null }).profile).toBe(
-      'admin',
-    )
+    expect(
+      SessionState.fromJSON(json as { session_id: string; profile?: string | null }).profile,
+    ).toBe('admin')
     expect(original.fork().profile).toBe('admin')
   })
 
   it('toJSON omits mount_modes when unrestricted', () => {
-    const s = new Session({ sessionId: 'x' })
+    const s = new SessionState({ sessionId: 'x' })
     expect('mount_modes' in s.toJSON()).toBe(false)
-    expect(Session.fromJSON({ session_id: 'x' }).mountModes).toBeNull()
+    expect(SessionState.fromJSON({ session_id: 'x' }).mountModes).toBeNull()
   })
 
   it('round-trips the path axis through toJSON/fromJSON', () => {
-    const original = new Session({
+    const original = new SessionState({
       sessionId: 'x',
       shownPaths: {
         entries: [
@@ -124,7 +124,7 @@ describe('Session', () => {
       entries: [{ path: '/repo/public', mode: 'read' }, { path: '/repo/notes' }],
     })
     expect(json.hide_reasons).toEqual([{ patterns: ['/repo/vendor'], reason: 'licensing noise' }])
-    const restored = Session.fromJSON(
+    const restored = SessionState.fromJSON(
       json as {
         session_id: string
         shown_paths?: { entries?: { path: string; mode?: MountMode }[] } | null
@@ -139,17 +139,17 @@ describe('Session', () => {
   })
 
   it('toJSON omits the path axis when the document states none', () => {
-    const s = new Session({ sessionId: 'x' })
+    const s = new SessionState({ sessionId: 'x' })
     expect('shown_paths' in s.toJSON()).toBe(false)
     expect('hide_reasons' in s.toJSON()).toBe(false)
-    expect(Session.fromJSON({ session_id: 'x' }).shownPaths).toBeNull()
-    expect(Session.fromJSON({ session_id: 'x' }).hideReasons).toEqual([])
+    expect(SessionState.fromJSON({ session_id: 'x' }).shownPaths).toBeNull()
+    expect(SessionState.fromJSON({ session_id: 'x' }).hideReasons).toEqual([])
   })
 })
 
-describe('Session.fork', () => {
+describe('SessionState.fork', () => {
   it('copies every field, including mountModes and shellOptions', () => {
-    const original = new Session({
+    const original = new SessionState({
       sessionId: 'orig',
       cwd: '/disk',
       mountModes: new Map([
@@ -179,7 +179,7 @@ describe('Session.fork', () => {
   })
 
   it('applies overrides without mutating the original', () => {
-    const original = new Session({
+    const original = new SessionState({
       sessionId: 'orig',
       cwd: '/disk',
       vars: varsFromEnv({ FOO: 'bar' }),
@@ -196,7 +196,7 @@ describe('Session.fork', () => {
   // source's logical name over would make the fork's pwd describe a
   // directory it is not in — the bug an `execute({cwd})` call hit.
   it('drops the logical cwd when the caller overrides cwd', () => {
-    const original = new Session({
+    const original = new SessionState({
       sessionId: 'orig',
       cwd: '/data/deep/real',
       logicalCwd: '/data/lk',
@@ -206,13 +206,13 @@ describe('Session.fork', () => {
   })
 
   it('keeps an explicitly supplied logical cwd alongside a cwd override', () => {
-    const original = new Session({ sessionId: 'orig', cwd: '/a' })
+    const original = new SessionState({ sessionId: 'orig', cwd: '/a' })
     const forked = original.fork({ cwd: '/data/deep/real', logicalCwd: '/data/lk' })
     expect(forked.logicalCwd).toBe('/data/lk')
   })
 
   it('deep-copies mutable containers so mutations on the fork do not leak', () => {
-    const original = new Session({
+    const original = new SessionState({
       sessionId: 'orig',
       vars: { FOO: makeVar('bar'), A: makeVar(['1']) },
     })
@@ -226,7 +226,7 @@ describe('Session.fork', () => {
 
 describe('ownRecord', () => {
   it('session records treat prototype-colliding names as ordinary keys', () => {
-    const session = new Session({ sessionId: 's' })
+    const session = new SessionState({ sessionId: 's' })
     seedVar(session, '__proto__', '5')
     expect(session.env.__proto__).toBe('5')
     expect(Object.getPrototypeOf(session.env)).toBe(null)
@@ -237,7 +237,7 @@ describe('ownRecord', () => {
   })
 
   it('fork keeps the null prototype and copies prototype-named entries', () => {
-    const session = new Session({ sessionId: 's' })
+    const session = new SessionState({ sessionId: 's' })
     seedVar(session, '__proto__', '5')
     const forked = session.fork()
     expect(forked.env.__proto__).toBe('5')
@@ -253,11 +253,11 @@ describe('a stored session keeps its attributes', () => {
     // `fromJSON` read `env` as a process environment, so one flush and
     // reload turned a plain `X=hello` into an exported one and shipped it
     // to every child runtime.
-    const s = new Session({ sessionId: 's1' })
+    const s = new SessionState({ sessionId: 's1' })
     seedVar(s, 'PLAIN', 'hello')
     s.vars.EXPO = makeVar('world', new Set([VarAttr.Export]))
     s.vars.MARKED = makeVar(null, new Set([VarAttr.Readonly]))
-    const back = Session.fromJSON(s.toJSON() as Parameters<typeof Session.fromJSON>[0])
+    const back = SessionState.fromJSON(s.toJSON() as Parameters<typeof SessionState.fromJSON>[0])
     expect(back.vars.PLAIN?.attrs.size).toBe(0)
     expect(back.vars.PLAIN?.value).toBe('hello')
     expect([...(back.vars.EXPO?.attrs ?? [])]).toEqual([VarAttr.Export])
@@ -270,7 +270,7 @@ describe('a stored session keeps its attributes', () => {
     // values and no letters. That shape *is* a process environment, so
     // every name in it is exported -- which is what `ws.env = {...}` and
     // a cross-language handoff both mean.
-    const back = Session.fromJSON({ session_id: 'x', env: { A: '1' } })
+    const back = SessionState.fromJSON({ session_id: 'x', env: { A: '1' } })
     expect([...(back.vars.A?.attrs ?? [])]).toEqual([VarAttr.Export])
   })
 
@@ -279,17 +279,17 @@ describe('a stored session keeps its attributes', () => {
     // with nothing in it. Written only when non-empty, a session whose
     // last attribute had been cleared serialized as a bare process
     // environment, and the reload re-exported everything it held.
-    const s = new Session({ sessionId: 's1' })
+    const s = new SessionState({ sessionId: 's1' })
     seedVar(s, 'X', 'secret')
     setAttr(s, 'PWD', VarAttr.Export, false)
     const json = s.toJSON() as { var_attrs: Record<string, string> }
     expect(json.var_attrs).toEqual({})
-    const back = Session.fromJSON(json as never)
+    const back = SessionState.fromJSON(json as never)
     expect(back.vars.X?.attrs.has(VarAttr.Export)).toBe(false)
   })
 
   it('carries an unset marked name through with no value', () => {
-    const s = new Session({ sessionId: 's1' })
+    const s = new SessionState({ sessionId: 's1' })
     s.vars.Z = makeVar(null, new Set([VarAttr.Export]))
     const json = s.toJSON() as { env: Record<string, string>; var_attrs: Record<string, string> }
     expect('Z' in json.env).toBe(false)
@@ -304,14 +304,14 @@ describe('the command tier round-trips through the record', () => {
       ask: [{ reason: 'sign-off', commands: ['git push'], paths: ['/repo/*'], mount: '/repo' }],
       deny: [{ reason: 'no', commands: ['rm'] }],
     }
-    const s = new Session({ sessionId: 's1', commands: own })
+    const s = new SessionState({ sessionId: 's1', commands: own })
     const d = s.toJSON()
     expect(d.commands).toEqual({
       allow: ['ls', 'git log'],
       ask: [{ reason: 'sign-off', commands: ['git push'], paths: ['/repo/*'], mount: '/repo' }],
       deny: [{ reason: 'no', commands: ['rm'], paths: [] }],
     })
-    const back = Session.fromJSON(d as Parameters<typeof Session.fromJSON>[0])
+    const back = SessionState.fromJSON(d as Parameters<typeof SessionState.fromJSON>[0])
     expect(back.commands).toEqual({
       allow: ['ls', 'git log'],
       ask: [{ reason: 'sign-off', commands: ['git push'], paths: ['/repo/*'], mount: '/repo' }],
@@ -319,8 +319,8 @@ describe('the command tier round-trips through the record', () => {
     })
     // Null means unstated and is not written; a tier without an allow
     // list writes allow as null, distinct from an empty list.
-    expect('commands' in new Session({ sessionId: 's2' }).toJSON()).toBe(false)
-    const bare = new Session({
+    expect('commands' in new SessionState({ sessionId: 's2' }).toJSON()).toBe(false)
+    const bare = new SessionState({
       sessionId: 's3',
       commands: { allow: null, ask: [], deny: [{ reason: 'x' }] },
     })
@@ -346,16 +346,16 @@ describe('ledger records round-trip through the record', () => {
       { ...base, id: 'd1', argv: ['push'], outcome: Outcome.ALLOW, scope: Scope.SESSION },
       { ...base, id: 'd2', argv: ['push', '--force'], outcome: Outcome.DENY, scope: Scope.ONCE },
     ]
-    const s = new Session({ sessionId: 's1', decisions: records })
+    const s = new SessionState({ sessionId: 's1', decisions: records })
     const d = s.toJSON() as { decisions?: { id: string; outcome: string; scope: string }[] }
     expect(d.decisions?.map((r) => [r.id, r.outcome, r.scope])).toEqual([
       ['d1', 'allow', 'session'],
       ['d2', 'deny', 'once'],
     ])
-    const back = Session.fromJSON(d as Parameters<typeof Session.fromJSON>[0])
+    const back = SessionState.fromJSON(d as Parameters<typeof SessionState.fromJSON>[0])
     expect(back.decisions).toEqual(records)
     // Nothing held writes nothing, and a fork carries what is held.
-    expect('decisions' in new Session({ sessionId: 's2' }).toJSON()).toBe(false)
+    expect('decisions' in new SessionState({ sessionId: 's2' }).toJSON()).toBe(false)
     expect(s.fork().decisions).toEqual(records)
   })
 })
@@ -398,8 +398,8 @@ describe('varsFromEntries', () => {
 })
 
 describe('managed serialization', () => {
-  function managedSession(value: string | null): Session {
-    const session = new Session({ sessionId: 's', cwd: '/' })
+  function managedSession(value: string | null): SessionState {
+    const session = new SessionState({ sessionId: 's', cwd: '/' })
     session.vars.TOKEN = {
       value,
       attrs: new Set([VarAttr.Export]),
@@ -419,7 +419,7 @@ describe('managed serialization', () => {
   })
 
   it('writes fetch only when eager', () => {
-    const session = new Session({ sessionId: 's', cwd: '/' })
+    const session = new SessionState({ sessionId: 's', cwd: '/' })
     session.vars.E = {
       value: null,
       attrs: new Set([VarAttr.Export]),
@@ -431,7 +431,7 @@ describe('managed serialization', () => {
 
   it('round-trips as declared-but-unfetched', () => {
     const data = managedSession('s3cr3t').toJSON()
-    const restored = Session.fromJSON(data as Parameters<typeof Session.fromJSON>[0])
+    const restored = SessionState.fromJSON(data as Parameters<typeof SessionState.fromJSON>[0])
     const v = restored.vars.TOKEN
     expect(v?.value).toBeNull()
     expect(v?.attrs).toEqual(new Set([VarAttr.Export]))
@@ -441,7 +441,7 @@ describe('managed serialization', () => {
   it('discards a value a tampered payload smuggles into env', () => {
     const data = managedSession(null).toJSON()
     ;(data.env as Record<string, string>).TOKEN = 'smuggled'
-    const restored = Session.fromJSON(data as Parameters<typeof Session.fromJSON>[0])
+    const restored = SessionState.fromJSON(data as Parameters<typeof SessionState.fromJSON>[0])
     expect(restored.vars.TOKEN?.value).toBeNull()
     expect(restored.vars.TOKEN?.managed).not.toBeUndefined()
   })

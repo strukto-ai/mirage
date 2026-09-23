@@ -20,7 +20,7 @@ independent implementation uses
 from mirage import Workspace
 from mirage.commands.cli.builtin.himalaya import HIMALAYA
 from mirage.core.email.config import EmailConfig
-from mirage.resource.email import EmailResource
+from mirage.vfs.email import EmailVFS
 
 config = EmailConfig(
     imap_host="imap.example.com",
@@ -28,7 +28,7 @@ config = EmailConfig(
     username="agent@example.com",
     password="app-password",
 )
-ws = Workspace({"/mail": EmailResource(config)})
+ws = Workspace({"/mail": EmailVFS(config)})
 ws.register_cli("himalaya", HIMALAYA, config.model_dump())
 ```
 

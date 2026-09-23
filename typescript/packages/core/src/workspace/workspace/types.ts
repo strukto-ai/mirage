@@ -20,33 +20,40 @@ import type { ByteSource } from '../../io/types.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
-import type { Limit, ConsistencyPolicy, DriftPolicy, MountMode, Refusal } from '../../types.ts'
+import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { RouteDecision, RoutePolicy } from '../../runtime/routing/index.ts'
 import type { RuntimeEntry } from '../../runtime/base.ts'
+import type { Mount } from '../mount/spec.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
 import type { SessionStore } from '../session/store.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 
 /**
- * One mount entry: a bare resource takes the workspace default mode, a
- * `[resource, mode]` pair pins the mount's own mode, and an optional
+ * One mount entry: a bare VFS takes the workspace default mode, a
+ * `[VFS, mode]` pair pins the mount's own mode, and an optional
  * third element attaches per-command limits (mirrors the Python
- * `(resource, mode, limits)` tuple form).
+ * `(VFS, mode, limits)` tuple form).
  */
 export type MountSpec =
-  | Resource
-  | readonly [Resource, MountMode]
-  | readonly [Resource, MountMode, Record<string, Limit>]
+  | VFS
+  | Mount
+  | readonly [VFS, MountMode]
+  | readonly [VFS, MountMode, Record<string, Limit>]
 
 export interface WorkspaceOptions {
   mode?: MountMode
-  consistency?: ConsistencyPolicy
+  /**
+   * The read policy a mount inherits when it declares none. There is
+   * deliberately no workspace-level bound: `ttl:` exists only inside a
+   * mount block, where it cannot be confused with `index: {ttl:}`.
+   */
+  read?: ReadSpec
   commandLimits?: Record<string, Record<string, Limit>>
   /**
    * Behaviour for the post-load drift check on fingerprinted reads. Only
@@ -54,7 +61,7 @@ export interface WorkspaceOptions {
    * workspaces never have fingerprints to check.
    *
    * - `STRICT` (load default): raise `ContentDriftError` on the first
-   *   mismatch when the workspace's first `dispatch`/`execute` runs.
+   *   mismatch when the workspace's first `dispatch`/`shell` runs.
    * - `OFF`: skip drift checks entirely and evict the snapshot cache
    *   for fingerprinted paths.
    */
@@ -104,8 +111,8 @@ export interface WorkspaceOptions {
   }
   /**
    * The workspace's ordered runtime world: instances and name
-   * shorthands including 'vfs'; the first capturer binds each
-   * command. Unset = the default world (pyodide, quickjs, vfs).
+   * shorthands including 'workspace'; the first capturer binds each
+   * command. Unset = the default world (pyodide, quickjs, workspace).
    */
   runtimes?: RuntimeEntry[]
   /**
@@ -229,7 +236,7 @@ export interface ExecuteOptions {
    * isolated session, like a bash subshell `(cd <cwd> && cmd)`. Mutations
    * (cd, export) inside the call do NOT persist back to the workspace's
    * session. To change the persistent cwd, assign `ws.cwd` directly or run
-   * `ws.execute('cd <path>')` without this option.
+   * `ws.shell('cd <path>')` without this option.
    */
   cwd?: string
   /**
@@ -237,7 +244,7 @@ export interface ExecuteOptions {
    * session's env. Providing this runs the command in an isolated session,
    * like `env FOO=bar cmd`. Mutations (export) inside the call do NOT
    * persist back to the workspace's session. To change the persistent env,
-   * assign `ws.env` directly or run `ws.execute('export FOO=bar')` without
+   * assign `ws.env` directly or run `ws.shell('export FOO=bar')` without
    * this option.
    */
   env?: Record<string, string>

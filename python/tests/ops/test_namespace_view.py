@@ -19,7 +19,7 @@ from mirage.ops.namespace_view import (child_mount_names, merge_readdir,
                                        namespace_listing, namespace_names,
                                        namespace_stat, visible_child_segments)
 from mirage.types import FileType, HiddenPaths
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 PREFIXES = ["/base/", "/base/inner/", "/base/inner/deep/", "/other/", "/"]
 
@@ -42,9 +42,9 @@ def scoped_session():
     role narrows their modes and never decides whether they exist, so
     only a hide keeps a name out of a listing.
     """
-    session = Session(session_id="agent",
-                      hidden_paths=HiddenPaths(paths=("/other",
-                                                      "/top/secret")))
+    session = SessionState(session_id="agent",
+                           hidden_paths=HiddenPaths(paths=("/other",
+                                                           "/top/secret")))
     token = set_current_session(session)
     yield session
     reset_current_session(token)
@@ -157,8 +157,8 @@ def hidden_mount_session():
     and every verb applied to it answers ENOENT, so a listing must not
     hand back its name either.
     """
-    session = Session(session_id="blind",
-                      hidden_paths=HiddenPaths(paths=("/ghost/deep", )))
+    session = SessionState(session_id="blind",
+                           hidden_paths=HiddenPaths(paths=("/ghost/deep", )))
     token = set_current_session(session)
     yield session
     reset_current_session(token)

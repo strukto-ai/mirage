@@ -16,14 +16,14 @@ import asyncio
 
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 @pytest.fixture
 def ws():
-    mem = RAMResource()
+    mem = RAMVFS()
     asyncio.run(
         mem.write(PathSpec.from_str_path("/big.txt"),
                   data=b"\n".join(f"line {i}".encode() for i in range(10000))))
@@ -44,14 +44,14 @@ def ws():
 
 @pytest.mark.asyncio
 async def test_cat_grep_head_streams(ws):
-    io = await ws.execute("cat /data/big.txt | grep 'line 1' | head -n 3")
+    io = await ws.shell("cat /data/big.txt | grep 'line 1' | head -n 3")
     lines = (await io.stdout_str()).strip().split("\n")
     assert len(lines) == 3
 
 
 @pytest.mark.asyncio
 async def test_cat_head_early_termination(ws):
-    io = await ws.execute("cat /data/big.txt | head -n 5")
+    io = await ws.shell("cat /data/big.txt | head -n 5")
     lines = (await io.stdout_str()).strip().split("\n")
     assert len(lines) == 5
     assert lines[0] == "line 0"
@@ -59,7 +59,7 @@ async def test_cat_head_early_termination(ws):
 
 @pytest.mark.asyncio
 async def test_cat_cut_head(ws):
-    io = await ws.execute("cat /data/csv.txt | cut -d , -f 1 | head -n 2")
+    io = await ws.shell("cat /data/csv.txt | cut -d , -f 1 | head -n 2")
     lines = (await io.stdout_str()).strip().split("\n")
     assert len(lines) == 2
     assert lines[0] == "name"
@@ -68,7 +68,7 @@ async def test_cat_cut_head(ws):
 
 @pytest.mark.asyncio
 async def test_cat_sort_head(ws):
-    io = await ws.execute("cat /data/small.txt | sort | head -n 2")
+    io = await ws.shell("cat /data/small.txt | sort | head -n 2")
     lines = (await io.stdout_str()).strip().split("\n")
     assert len(lines) == 2
     assert lines == sorted(lines)
@@ -76,27 +76,27 @@ async def test_cat_sort_head(ws):
 
 @pytest.mark.asyncio
 async def test_cat_uniq(ws):
-    io = await ws.execute("cat /data/dupes.txt | uniq")
+    io = await ws.shell("cat /data/dupes.txt | uniq")
     lines = (await io.stdout_str()).strip().split("\n")
     assert lines == ["a", "b", "c"]
 
 
 @pytest.mark.asyncio
 async def test_cat_tr_grep(ws):
-    io = await ws.execute("cat /data/small.txt | tr a A | grep Ap")
+    io = await ws.shell("cat /data/small.txt | tr a A | grep Ap")
     result = await io.stdout_str()
     assert "Apple" in result or "Apricot" in result
 
 
 @pytest.mark.asyncio
 async def test_cat_grep_wc_l(ws):
-    io = await ws.execute("cat /data/small.txt | grep a | wc -l")
+    io = await ws.shell("cat /data/small.txt | grep a | wc -l")
     assert (await io.stdout_str()).strip() == "3"
 
 
 @pytest.mark.asyncio
 async def test_find_path_output(ws):
-    io = await ws.execute("find /data -name '*.txt'")
+    io = await ws.shell("find /data -name '*.txt'")
     result = await io.stdout_str()
     assert "/data/" in result
 
@@ -104,7 +104,7 @@ async def test_find_path_output(ws):
 def test_execute_via_asyncio_run(ws):
 
     async def _run():
-        io = await ws.execute("cat /data/small.txt | head -n 2")
+        io = await ws.shell("cat /data/small.txt | head -n 2")
         return (await io.stdout_str()).strip().split("\n")
 
     lines = asyncio.run(_run())

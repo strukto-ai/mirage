@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { installFakeNavigator, makeMockRoot } from '../../../test-utils.ts'
-import { OPFSResource } from '../../../resource/opfs/opfs.ts'
+import { OPFSVFS } from '../../../vfs/opfs/opfs.ts'
 import { Workspace } from '../../../workspace.ts'
 
 let ws: Workspace
@@ -23,7 +23,7 @@ let restoreNav: () => void
 const DEC = new TextDecoder()
 
 async function run(cmd: string): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   return {
     stdout: DEC.decode(r.stdout),
     stderr: DEC.decode(r.stderr),
@@ -33,11 +33,11 @@ async function run(cmd: string): Promise<{ stdout: string; stderr: string; exitC
 
 beforeEach(async () => {
   restoreNav = installFakeNavigator(() => makeMockRoot())
-  ws = new Workspace({ '/data': new OPFSResource() }, { mode: MountMode.WRITE })
-  await ws.fs.writeFile('/data/hello.txt', 'hello from opfs\n')
-  await ws.fs.writeFile('/data/q1.csv', 'revenue,100\nexpense,80\nprofit,20\n')
-  await ws.fs.mkdir('/data/sub')
-  await ws.fs.writeFile('/data/sub/nested.txt', 'line1\nline2\nline3\n')
+  ws = new Workspace({ '/data': new OPFSVFS() }, { mode: MountMode.WRITE })
+  await ws.vfs.writeFile('/data/hello.txt', 'hello from opfs\n')
+  await ws.vfs.writeFile('/data/q1.csv', 'revenue,100\nexpense,80\nprofit,20\n')
+  await ws.vfs.mkdir('/data/sub')
+  await ws.vfs.writeFile('/data/sub/nested.txt', 'line1\nline2\nline3\n')
 })
 
 afterEach(async () => {
@@ -121,23 +121,23 @@ describe('OPFS commands — writers', () => {
     const r = await run('sort -o /data/sorted.csv /data/q1.csv')
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe('')
-    const output = DEC.decode(await ws.fs.readFile('/data/sorted.csv'))
+    const output = DEC.decode(await ws.vfs.readFile('/data/sorted.csv'))
     expect(output).toBe('expense,80\nprofit,20\nrevenue,100\n')
   })
 
   it('uniq writes output to a second path', async () => {
-    await ws.fs.writeFile('/data/repeated.txt', 'alpha\nalpha\nbeta\nbeta\n')
+    await ws.vfs.writeFile('/data/repeated.txt', 'alpha\nalpha\nbeta\nbeta\n')
     const r = await run('uniq /data/repeated.txt /data/unique.txt')
     expect(r.exitCode).toBe(0)
     expect(r.stdout).toBe('')
-    const output = DEC.decode(await ws.fs.readFile('/data/unique.txt'))
+    const output = DEC.decode(await ws.vfs.readFile('/data/unique.txt'))
     expect(output).toBe('alpha\nbeta\n')
   })
 
   it('tee -a appends to a file', async () => {
     const r = await run("echo 'appended' | tee -a /data/hello.txt")
     expect(r.exitCode).toBe(0)
-    const after = DEC.decode(await ws.fs.readFile('/data/hello.txt'))
+    const after = DEC.decode(await ws.vfs.readFile('/data/hello.txt'))
     expect(after).toBe('hello from opfs\nappended\n')
   })
 })

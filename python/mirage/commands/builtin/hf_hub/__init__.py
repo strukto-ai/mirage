@@ -15,16 +15,13 @@
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.hf_hub.io import IO as _IO
 
-# The three git-repo resources. `hf_buckets` is deliberately absent: it is a
+# The three git-repo VFS. `hf_buckets` is deliberately absent: it is a
 # different Hugging Face product (Xet-backed mutable object storage, no
 # commits and no revisions) and keeps its own OpenDAL-backed commands.
 #
-# Registration is per concrete resource rather than under one shared
+# Registration is per concrete VFS rather than under one shared
 # "hf_hub" name because that name is not mountable: nothing builds it, so a
-# command tagged with it names a resource the registry cannot produce.
-RESOURCES = ["hf_models", "hf_datasets", "hf_spaces"]
+# command tagged with it names a VFS the registry cannot produce.
+VFS_NAMES = ["hf_models", "hf_datasets", "hf_spaces"]
 
-COMMANDS = [
-    fn for resource in RESOURCES
-    for fn in make_generic_commands(resource, _IO)
-]
+COMMANDS = [fn for vfs in VFS_NAMES for fn in make_generic_commands(vfs, _IO)]

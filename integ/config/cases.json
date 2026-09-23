@@ -3,7 +3,7 @@
   "cases": [
     {
       "id": "ssh_password_and_passphrase_reach_the_host",
-      "resource": "ssh",
+      "vfs": "ssh",
       "config": {
         "host": "h",
         "username": "u",
@@ -23,7 +23,7 @@
     },
     {
       "id": "ssh_port_must_be_numeric",
-      "resource": "ssh",
+      "vfs": "ssh",
       "config": {
         "host": "h",
         "port": "twenty-two"
@@ -34,7 +34,7 @@
     },
     {
       "id": "s3_bucket_must_be_a_string",
-      "resource": "s3",
+      "vfs": "s3",
       "config": {
         "bucket": 123
       },
@@ -44,7 +44,7 @@
     },
     {
       "id": "github_token_must_be_a_string",
-      "resource": "github",
+      "vfs": "github",
       "config": {
         "token": [],
         "owner": "o",
@@ -56,7 +56,7 @@
     },
     {
       "id": "google_access_token_is_a_credential",
-      "resource": "gdrive",
+      "vfs": "gdrive",
       "config": {
         "access_token": "sa-token"
       },
@@ -68,7 +68,7 @@
     },
     {
       "id": "google_refresh_grant_still_works",
-      "resource": "gdrive",
+      "vfs": "gdrive",
       "config": {
         "client_id": "id",
         "client_secret": "s",
@@ -84,7 +84,7 @@
     },
     {
       "id": "google_needs_a_credential",
-      "resource": "gdrive",
+      "vfs": "gdrive",
       "config": {
         "api_base": "http://127.0.0.1:1"
       },
@@ -94,7 +94,7 @@
     },
     {
       "id": "calendar_knobs_live_on_the_calendar_mount",
-      "resource": "gcal",
+      "vfs": "gcal",
       "config": {
         "access_token": "t",
         "time_zone": "UTC",
@@ -109,7 +109,7 @@
     },
     {
       "id": "calendar_knobs_do_not_reach_a_drive_mount",
-      "resource": "gdrive",
+      "vfs": "gdrive",
       "config": {
         "access_token": "t",
         "time_zone": "UTC"
@@ -125,7 +125,7 @@
     },
     {
       "id": "notion_api_version_is_kept",
-      "resource": "notion",
+      "vfs": "notion",
       "config": {
         "api_key": "k",
         "api_version": "2025-09-03"
@@ -139,7 +139,7 @@
     },
     {
       "id": "oci_path_style_can_be_turned_off",
-      "resource": "oci",
+      "vfs": "oci",
       "config": {
         "bucket": "b",
         "namespace": "ns",
@@ -155,7 +155,7 @@
     },
     {
       "id": "supabase_path_style_defaults_on",
-      "resource": "supabase",
+      "vfs": "supabase",
       "config": {
         "bucket": "b",
         "project_ref": "p",
@@ -170,7 +170,7 @@
     },
     {
       "id": "hf_bucket_endpoint_is_optional",
-      "resource": "hf_buckets",
+      "vfs": "hf_buckets",
       "config": {
         "bucket": "ns/name"
       },
@@ -182,7 +182,7 @@
     },
     {
       "id": "gcs_region_is_optional",
-      "resource": "gcs",
+      "vfs": "gcs",
       "config": {
         "bucket": "b",
         "access_key_id": "a",
@@ -197,7 +197,7 @@
     },
     {
       "id": "onedrive_refuses_two_drive_targets",
-      "resource": "onedrive",
+      "vfs": "onedrive",
       "config": {
         "access_token": "t",
         "drive_id": "d",
@@ -209,7 +209,7 @@
     },
     {
       "id": "wandb_read_only_config",
-      "resource": "wandb",
+      "vfs": "wandb",
       "config": {
         "entities": [
           "lab"
@@ -232,7 +232,7 @@
     },
     {
       "id": "wandb_requires_entities",
-      "resource": "wandb",
+      "vfs": "wandb",
       "config": {},
       "expect": {
         "refused": "wandb: entities"
@@ -240,7 +240,7 @@
     },
     {
       "id": "wandb_empty_entities_refused",
-      "resource": "wandb",
+      "vfs": "wandb",
       "config": {
         "entities": []
       },
@@ -250,7 +250,7 @@
     },
     {
       "id": "wandb_page_size_bounded",
-      "resource": "wandb",
+      "vfs": "wandb",
       "config": {
         "entities": [
           "lab"

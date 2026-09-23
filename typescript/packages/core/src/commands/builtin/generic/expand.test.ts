@@ -41,7 +41,7 @@ async function run(
     ...line,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'ram' } as never,
+    vfs: { kind: 'ram' } as never,
   } as CommandOpts
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and expand never answers that way, so say so rather than

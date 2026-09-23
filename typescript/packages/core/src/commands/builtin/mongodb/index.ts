@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { MONGODB_CAT } from './cat.ts'
@@ -28,7 +28,7 @@ import { resolveGlobOf } from '../generic_bind/adapter.ts'
 const MONGODB_OVERRIDES = new Set(['cat', 'grep', 'rg', 'tail', 'wc'])
 
 export const MONGODB_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<MongoDBAccessor>(ResourceName.MONGODB, MONGODB_IO, {
+  ...makeGenericCommands<MongoDBAccessor>(VFSName.MONGODB, MONGODB_IO, {
     overrides: MONGODB_OVERRIDES,
   }),
   ...withDefaultProvisions(

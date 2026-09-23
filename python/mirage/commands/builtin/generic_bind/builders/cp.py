@@ -44,9 +44,7 @@ async def _walk_find(readdir: OperationFn,
                               stat=stat,
                               index=index,
                               args=parse_find_args((), type=type))
-    return [
-        "/" + rekey(src.virtual, src.resource_path, path) for path in results
-    ]
+    return ["/" + rekey(src.virtual, src.vfs_path, path) for path in results]
 
 
 def _make_find(ops: CommandIO, accessor: Accessor,
@@ -90,7 +88,7 @@ async def cp(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
-        raise ValueError("cp: no resource")
+        raise ValueError("cp: no VFS")
     fl = FlagView(opts.flags, spec=SPECS["cp"])
     parsed = parse_flags(fl)
     paths = await ops.resolve_glob(accessor, paths, opts.index)

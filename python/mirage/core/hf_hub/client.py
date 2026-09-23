@@ -24,9 +24,9 @@ from mirage.core.api.client import (ApiResponse, RetryPolicy, SessionArg,
                                     api_request, resolve_session, status_error)
 from mirage.core.hf_hub.constants import (API_BASE, API_SEGMENTS, MAX_RETRIES,
                                           RESOLVE_SEGMENTS, RETRY_STATUSES)
-from mirage.resource.secrets import reveal_secret
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
+from mirage.vfs.secrets import reveal_secret
 
 logger = logging.getLogger(__name__)
 

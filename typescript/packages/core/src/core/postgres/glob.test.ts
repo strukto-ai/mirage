@@ -23,7 +23,7 @@ vi.mock('./readdir.ts', () => ({
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { PathSpec } from '../../types.ts'
-import { resolvePostgresConfig } from '../../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
 import { POSTGRES_IO } from '../../commands/builtin/postgres/io.ts'
@@ -48,7 +48,7 @@ describe('resolveGlob', () => {
 
   it('passes through resolved paths unchanged', async () => {
     const p = new PathSpec({
-      resourcePath: 'pg/public',
+      vfsPath: 'pg/public',
       virtual: '/pg/public',
       directory: '/pg/',
     })
@@ -66,18 +66,18 @@ describe('resolveGlob', () => {
       directory: '/pg/public/tables/',
       pattern: 'u*',
       resolved: false,
-      resourcePath: mountKey('/pg/public/tables/u*', '/pg'),
+      vfsPath: mountKey('/pg/public/tables/u*', '/pg'),
     })
     const out = await resolveGlob(makeAccessor(), [p])
     expect(out.map((x) => x.virtual)).toEqual(['/pg/public/tables/users'])
-    expect(
-      out[0] === undefined ? undefined : mountPrefixOf(out[0].virtual, out[0].resourcePath),
-    ).toBe('/pg')
+    expect(out[0] === undefined ? undefined : mountPrefixOf(out[0].virtual, out[0].vfsPath)).toBe(
+      '/pg',
+    )
   })
 
   it('passes through unresolved-but-no-pattern paths unchanged', async () => {
     const p = new PathSpec({
-      resourcePath: 'pg/public',
+      vfsPath: 'pg/public',
       virtual: '/pg/public',
       directory: '/pg/',
       resolved: false,

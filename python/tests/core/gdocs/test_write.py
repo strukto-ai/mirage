@@ -18,7 +18,7 @@ import pytest
 
 from mirage.core.gdocs.client import TokenManager
 from mirage.core.gdocs.write import append_text
-from mirage.resource.gdocs.config import GDocsConfig
+from mirage.vfs.gdocs.config import GDocsConfig
 
 
 @pytest.fixture

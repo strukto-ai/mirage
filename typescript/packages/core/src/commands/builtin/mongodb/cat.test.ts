@@ -27,7 +27,7 @@ import { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { stubMongoDriver } from '../../../core/mongodb/_test_util.ts'
 import * as readModule from '../../../core/mongodb/read.ts'
 import * as statModule from '../../../core/mongodb/stat.ts'
-import { resolveMongoDBConfig } from '../../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
 import { materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { MONGODB_CAT } from './cat.ts'
@@ -45,7 +45,7 @@ function mk(name: string): PathSpec {
     virtual: `/mongo/app/${name}`,
     directory: '/mongo/app/',
     resolved: true,
-    resourcePath: mountKey(`/mongo/app/${name}`, '/mongo'),
+    vfsPath: mountKey(`/mongo/app/${name}`, '/mongo'),
   })
 }
 

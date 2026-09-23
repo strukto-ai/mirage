@@ -30,7 +30,7 @@ import { concatBytes } from '../../../core/jq/format.ts'
 import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError } from '../../../commands/errors.ts'
 import type { CLIInstall } from '../../cli/types.ts'
-import type { Session } from '../../session/session.ts'
+import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
@@ -210,7 +210,7 @@ export function dropsMountCaches(spec: CLISpec): boolean {
 export async function handleCli(
   install: CLIInstall,
   parts: readonly (string | PathSpec)[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   context: CLIContext = {},
   dropCaches: (() => Promise<void>) | null = null,

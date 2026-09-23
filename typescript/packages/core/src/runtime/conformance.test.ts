@@ -15,7 +15,7 @@
 import { WorkspaceBinding } from './binding.ts'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ContentType, FileStat, FileType, MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
@@ -430,15 +430,15 @@ const QUICKJS_ROWS: Row[] = [
 async function world(runtime: string): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const data = new RAMResource()
-  const other = new RAMResource()
-  const ro = new RAMResource()
-  ops.registerResource(data)
-  ops.registerResource(other)
-  ops.registerResource(ro)
+  const data = new RAMVFS()
+  const other = new RAMVFS()
+  const ro = new RAMVFS()
+  ops.registerVfs(data)
+  ops.registerVfs(other)
+  ops.registerVfs(ro)
   const ws = new Workspace(
     {},
-    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [runtime, 'vfs'] },
+    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [runtime, 'workspace'] },
   )
   ws.addMount('/data', data, MountMode.WRITE)
   ws.addMount('/other', other, MountMode.WRITE)
@@ -448,14 +448,14 @@ async function world(runtime: string): Promise<Workspace> {
 
 async function runRow(ws: Workspace, row: Row): Promise<void> {
   for (const s of row.setup ?? []) {
-    const io = await ws.execute(s)
+    const io = await ws.shell(s)
     expect(io.exitCode, `setup failed: ${s} -> ${stderrStr(io)}`).toBe(0)
   }
-  const io = await ws.execute(row.line)
+  const io = await ws.shell(row.line)
   expect(io.exitCode, `${row.line} -> ${stderrStr(io)}`).toBe(row.exitCode ?? 0)
   if (row.lineOut !== undefined) expect(stdoutStr(io)).toContain(row.lineOut)
   for (const [cmd, want] of row.checks ?? []) {
-    const check = await ws.execute(cmd)
+    const check = await ws.shell(cmd)
     // An absence assertion over the stdout of a command that failed is
     // vacuous: a mount the mutation damaged answers nothing, and "x is
     // gone" then holds for every x.
@@ -478,7 +478,7 @@ function conformance(label: string, runtime: string, boot: string, rows: Row[]):
     let ws: Workspace
     beforeAll(async () => {
       ws = await world(runtime)
-      const io = await ws.execute(boot)
+      const io = await ws.shell(boot)
       expect(io.exitCode, `boot failed: ${stderrStr(io)}`).toBe(0)
     }, 240_000)
     afterAll(async () => {
@@ -502,11 +502,11 @@ conformance('quickjs conformance', 'quickjs', 'node -e "1"', QUICKJS_ROWS)
 async function rootWorld(runtime: string): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const root = new RAMResource()
-  ops.registerResource(root)
+  const root = new RAMVFS()
+  ops.registerVfs(root)
   return new Workspace(
     { '/': [root, MountMode.EXEC] },
-    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [runtime, 'vfs'] },
+    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [runtime, 'workspace'] },
   )
 }
 
@@ -521,9 +521,9 @@ describe('a root mount', () => {
   ] as const) {
     it(`is served like any other by ${runtime}`, async () => {
       const ws = await rootWorld(runtime)
-      const io = await ws.execute(line)
+      const io = await ws.shell(line)
       expect(io.exitCode, `${line} -> ${stderrStr(io)}`).toBe(0)
-      const check = await ws.execute('cat /mine.txt')
+      const check = await ws.shell('cat /mine.txt')
       expect(check.exitCode, `cat failed: ${stderrStr(check)}`).toBe(0)
       expect(stdoutStr(check)).toContain('R')
       await ws.close()
@@ -540,8 +540,8 @@ describe('a root mount', () => {
       seen.push(args.join(' '))
     })
     const ws = await rootWorld('pyodide')
-    await ws.execute(`python3 -c "from pathlib import Path; Path('/mine.txt').write_text('R')"`)
-    const check = await ws.execute('cat /mine.txt')
+    await ws.shell(`python3 -c "from pathlib import Path; Path('/mine.txt').write_text('R')"`)
+    const check = await ws.shell('cat /mine.txt')
     expect(check.exitCode, 'the mount should not have the file').not.toBe(0)
     expect(seen.join(' ')).toContain("cannot serve a mount at '/'")
     warn.mockRestore()

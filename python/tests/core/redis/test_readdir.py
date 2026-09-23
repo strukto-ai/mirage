@@ -20,8 +20,8 @@ import pytest_asyncio
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.redis.readdir import readdir
-from mirage.resource.redis.store import RedisStore
 from mirage.types import PathSpec
+from mirage.vfs.redis.store import RedisStore
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -52,9 +52,9 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    entries = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    entries = await readdir(accessor,
+                            PathSpec(vfs_path="", virtual="/", directory="/"),
+                            index)
     assert "/a.txt" in entries
     assert "/b.txt" in entries
     assert "/sub" in entries
@@ -64,8 +64,8 @@ async def test_readdir_root(accessor, index):
 @pytest.mark.asyncio
 async def test_readdir_subdir(accessor, index):
     entries = await readdir(
-        accessor,
-        PathSpec(resource_path="sub", virtual="/sub", directory="/sub"), index)
+        accessor, PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"),
+        index)
     assert "/sub/c.txt" in entries
     assert "/sub/d.txt" in entries
     assert "/sub/deep" in entries
@@ -80,9 +80,8 @@ async def test_readdir_empty_dir(index):
     await s.add_dir("/empty")
     a = RedisAccessor(s)
     entries = await readdir(
-        a, PathSpec(resource_path="empty",
-                    virtual="/empty",
-                    directory="/empty"), index)
+        a, PathSpec(vfs_path="empty", virtual="/empty", directory="/empty"),
+        index)
     assert entries == []
     await s.clear()
     await s.close()
@@ -97,7 +96,7 @@ async def test_readdir_not_found(index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             a,
-            PathSpec(resource_path="nonexistent",
+            PathSpec(vfs_path="nonexistent",
                      virtual="/nonexistent",
                      directory="/nonexistent"), index)
     await s.clear()
@@ -108,7 +107,7 @@ async def test_readdir_not_found(index):
 async def test_readdir_deep(accessor, index):
     entries = await readdir(
         accessor,
-        PathSpec(resource_path="sub/deep",
+        PathSpec(vfs_path="sub/deep",
                  virtual="/sub/deep",
                  directory="/sub/deep"), index)
     assert "/sub/deep/e.txt" in entries
@@ -128,7 +127,7 @@ async def test_readdir_file_component_is_not_a_directory(index):
         with pytest.raises(NotADirectoryError):
             await readdir(
                 a,
-                PathSpec(resource_path=virtual.lstrip("/"),
+                PathSpec(vfs_path=virtual.lstrip("/"),
                          virtual=virtual,
                          directory=virtual), index)
     await s.clear()
@@ -145,7 +144,7 @@ async def test_readdir_missing_stays_not_found_at_any_depth(index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             a,
-            PathSpec(resource_path="nope/deeper",
+            PathSpec(vfs_path="nope/deeper",
                      virtual="/nope/deeper",
                      directory="/nope/deeper"), index)
     await s.clear()
@@ -168,7 +167,7 @@ async def test_readdir_orphan_below_a_missing_dir_is_not_found(index):
         with pytest.raises(FileNotFoundError):
             await readdir(
                 a,
-                PathSpec(resource_path=virtual.lstrip("/"),
+                PathSpec(vfs_path=virtual.lstrip("/"),
                          virtual=virtual,
                          directory=virtual), index)
     await s.clear()

@@ -23,7 +23,7 @@ async def test_read_returns_content():
     url = f"{_BASE}/drives/{_DRIVE_ID}/root:/report.txt:/content"
     with aioresponses() as m:
         m.get(url, body=b"file content")
-        path = PathSpec(resource_path=mount_key(
+        path = PathSpec(vfs_path=mount_key(
             "/sp/Engineering/Documents/report.txt", "/sp"),
                         virtual="/sp/Engineering/Documents/report.txt",
                         directory="/sp/Engineering/Documents/report.txt")
@@ -41,7 +41,7 @@ async def test_read_missing_raises_file_not_found():
                   "code": "itemNotFound",
                   "message": "no"
               }})
-        path = PathSpec(resource_path=mount_key(
+        path = PathSpec(vfs_path=mount_key(
             "/sp/Engineering/Documents/nope.txt", "/sp"),
                         virtual="/sp/Engineering/Documents/nope.txt",
                         directory="/sp/Engineering/Documents/nope.txt")
@@ -60,7 +60,7 @@ async def test_read_range():
 
     with aioresponses() as m:
         m.get(url, callback=_cb)
-        path = PathSpec(resource_path=mount_key(
+        path = PathSpec(vfs_path=mount_key(
             "/sp/Engineering/Documents/data.bin", "/sp"),
                         virtual="/sp/Engineering/Documents/data.bin",
                         directory="/sp/Engineering/Documents/data.bin")

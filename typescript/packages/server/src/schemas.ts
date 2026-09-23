@@ -14,7 +14,7 @@
 
 export interface MountSummary {
   prefix: string
-  resource: string
+  vfs: string
   mode: string
   description: string
 }

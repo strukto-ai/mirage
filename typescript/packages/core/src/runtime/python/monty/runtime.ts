@@ -57,7 +57,7 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
   // The interpreter is an in-process guest with no host syscalls: its
   // file I/O can only travel the VFS bridge, so every effect passes
   // the workspace gate (mount modes, policy, recording).
-  override readonly reach = 'vfs'
+  override readonly reach = 'workspace'
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
   // No import system to resolve a module with, so `-m` has nothing to
   // run; the refusal names this runtime rather than inventing a

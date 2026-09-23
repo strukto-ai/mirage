@@ -1,9 +1,5 @@
 import { Accessor } from './base.ts'
-import {
-  resolveMem0Config,
-  type Mem0Config,
-  type Mem0ConfigResolved,
-} from '../resource/mem0/config.ts'
+import { resolveMem0Config, type Mem0Config, type Mem0ConfigResolved } from '../vfs/mem0/config.ts'
 import { md5Hex } from '../utils/hash.ts'
 
 const ENCODER = new TextEncoder()

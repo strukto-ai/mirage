@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.gcs import GCSConfig, GCSResource
+from mirage.vfs.gcs import GCSVFS, GCSConfig
 
 load_dotenv(".env.development")
 
@@ -28,10 +28,10 @@ config = GCSConfig(
     secret_access_key=os.environ["GCS_SECRET_ACCESS_KEY"],
 )
 
-resource = GCSResource(config)
+vfs = GCSVFS(config)
 
 with Workspace(
-    {"/gcs/": Mount(resource, mode=MountMode.READ,
+    {"/gcs/": Mount(vfs, mode=MountMode.READ,
                     backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
@@ -68,6 +68,6 @@ with Workspace(
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes")

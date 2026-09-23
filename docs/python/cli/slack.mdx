@@ -19,10 +19,10 @@ independent Slack implementation uses
 from mirage import Workspace
 from mirage.commands.cli.builtin.slack import SLACK
 from mirage.core.slack.config import SlackConfig
-from mirage.resource.slack import SlackResource
+from mirage.vfs.slack import SlackVFS
 
 config = SlackConfig(token="xoxb-...", search_token="xoxp-...")
-ws = Workspace({"/slack": SlackResource(config)})
+ws = Workspace({"/slack": SlackVFS(config)})
 ws.register_cli("slack", SLACK, config.model_dump())
 ```
 

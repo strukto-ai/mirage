@@ -19,8 +19,8 @@ from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 from pymongo import AsyncMongoClient
 
 from mirage.accessor.base import Accessor
-from mirage.resource.secrets import reveal_secret
 from mirage.utils import key_prefix as kp
+from mirage.vfs.secrets import reveal_secret
 
 
 class GridFSConfig(BaseModel):

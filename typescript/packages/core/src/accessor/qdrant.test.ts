@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { QdrantPoint } from '../core/qdrant/client.ts'
 import { groupName } from '../core/qdrant/naming.ts'
-import { resolveQdrantConfig } from '../resource/qdrant/config.ts'
+import { resolveQdrantConfig } from '../vfs/qdrant/config.ts'
 import { NAME_MAX_BYTES, byteLength } from '../utils/sanitize.ts'
 import { QdrantAccessor } from './qdrant.ts'
 

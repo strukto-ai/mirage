@@ -18,9 +18,9 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.ssh import SSHConfig, SSHResource
 from mirage.runtime.sandbox.ssh import SSHRuntime
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.ssh import SSHVFS, SSHConfig
 
 # The dataset lives in S3; the compute lives on a machine you can
 # already ssh into. The workspace holds both: the bucket at /data and
@@ -41,7 +41,7 @@ load_dotenv(".env.development")
 
 REMOTE_DIR = "/home/ubuntu/mirage"
 
-data = S3Resource(
+data = S3VFS(
     S3Config(
         bucket=os.environ["AWS_S3_BUCKET"],
         region=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
@@ -50,7 +50,7 @@ data = S3Resource(
         key_prefix="ssh-runtime-demo/",
     ))
 
-proj = SSHResource(SSHConfig(host="dev", root=REMOTE_DIR, known_hosts=None))
+proj = SSHVFS(SSHConfig(host="dev", root=REMOTE_DIR, known_hosts=None))
 
 runtime = SSHRuntime(captures=["python3"], config={"host": "dev"})
 
@@ -65,7 +65,7 @@ POINTS_CSV = "name,value\nalpha,1.5\nbeta,2.5\ngamma,4.0\n"
 
 
 async def show(ws: Workspace, command: str) -> None:
-    result = await ws.execute(command, cwd=REMOTE_DIR)
+    result = await ws.shell(command, cwd=REMOTE_DIR)
     print(f"$ {command}")
     stdout = await result.stdout_str()
     if stdout:
@@ -81,12 +81,12 @@ async def main() -> None:
         REMOTE_DIR: proj
     },
                    mode=MountMode.EXEC,
-                   runtimes=[runtime, "vfs"])
+                   runtimes=[runtime, "workspace"])
 
     # Seed both sides through the workspace: the dataset into S3, the
     # loader onto the box (an SFTP write; the box provisions itself).
-    await ws.execute("cat > /data/points.csv", stdin=POINTS_CSV.encode())
-    await ws.execute(f"cat > {REMOTE_DIR}/load.py", stdin=LOAD_PY.encode())
+    await ws.shell("cat > /data/points.csv", stdin=POINTS_CSV.encode())
+    await ws.shell(f"cat > {REMOTE_DIR}/load.py", stdin=LOAD_PY.encode())
     await show(ws, "ls /data")
     await show(ws, "ls")
 

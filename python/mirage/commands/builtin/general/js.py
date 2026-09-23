@@ -59,5 +59,5 @@ async def _js(
                           cwd=opts.cwd)
 
 
-js = command("js", resource=None, spec=SPECS["js"])(_js)
-node = command("node", resource=None, spec=SPECS["node"])(_js)
+js = command("js", vfs=None, spec=SPECS["js"])(_js)
+node = command("node", vfs=None, spec=SPECS["node"])(_js)

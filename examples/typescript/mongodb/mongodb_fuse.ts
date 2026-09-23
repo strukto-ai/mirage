@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
-  MongoDBResource,
+  MongoDBVFS,
   Mount,
   MountBackend,
   MountMode,
@@ -39,9 +39,9 @@ async function main(): Promise<void> {
     console.error("MONGODB_URI missing in .env.development");
     process.exit(1);
   }
-  const resource = new MongoDBResource({ uri, databases: [DB] });
+  const vfs = new MongoDBVFS({ uri, databases: [DB] });
   const ws = new Workspace({
-    "/mongodb/": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/mongodb/": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
     }
   } finally {
     await ws.close();
-    await resource.close();
+    await vfs.close();
   }
 }
 

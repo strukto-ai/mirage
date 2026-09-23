@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
-  GSheetsResource,
+  GSheetsVFS,
   Mount,
   MountBackend,
   MountMode,
@@ -44,9 +44,9 @@ function buildConfig(): GSheetsConfig {
   return { clientId, clientSecret, refreshToken };
 }
 async function main(): Promise<void> {
-  const resource = new GSheetsResource(buildConfig());
+  const vfs = new GSheetsVFS(buildConfig());
   const ws = new Workspace({
-    "/gsheets": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/gsheets": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

@@ -222,14 +222,14 @@ export async function expandOperands(
     const spec = item instanceof PathSpec ? item : PathSpec.fromStrPath(item)
     if (spec.pattern !== null) {
       const mount = namespace.mountFor(spec.virtual)
-      if (mount.resource.glob !== undefined) {
+      if (mount.vfs.glob !== undefined) {
         const prefix = rstripSlash(mount.prefix)
         const withPrefix = new PathSpec({
           virtual: spec.virtual,
           directory: spec.directory,
           pattern: spec.pattern,
           resolved: spec.resolved,
-          resourcePath: mountKey(spec.virtual, prefix),
+          vfsPath: mountKey(spec.virtual, prefix),
         })
         const expanded = await mount.expandGlob([withPrefix], prefix)
         for (const p of expanded) if (p instanceof PathSpec) out.push(p)

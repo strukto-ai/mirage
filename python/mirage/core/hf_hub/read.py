@@ -47,7 +47,7 @@ async def resolve_entry(
         IsADirectoryError: the path names a directory.
     """
     virtual = path_spec.virtual
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     rel = path_spec.mount_path.strip("/")
     if not rel:
         raise eisdir(virtual)
@@ -84,5 +84,5 @@ async def read_bytes(accessor: HfHubAccessor,
                         size=size) if offset or size is not None else None
     timer = start_op()
     data = await hub_bytes(accessor.token, url, window, session=accessor.pool)
-    record("read", raw, accessor.RESOURCE_NAME, len(data), timer)
+    record("read", raw, accessor.VFS_NAME, len(data), timer)
     return data

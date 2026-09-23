@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../../ops/registry.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser, stdoutStr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -27,26 +27,26 @@ import { Workspace } from '../workspace/workspace.ts'
 
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const root = new RAMResource()
-  const inner = new RAMResource()
+  const root = new RAMVFS()
+  const inner = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(root)
-  registry.registerResource(inner)
+  registry.registerVfs(root)
+  registry.registerVfs(inner)
   const ws = new Workspace(
     { '/': root, '/base/inner': inner },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
   )
   ws.createSession('s')
-  await ws.execute('mkdir -p /base/sub', { sessionId: 's' })
-  await ws.execute('printf 111 > /base/f1', { sessionId: 's' })
-  await ws.execute('printf 2222222 > /base/sub/f2', { sessionId: 's' })
-  await ws.execute('printf 3333333 > /base/inner/g1', { sessionId: 's' })
-  await ws.execute('ln -s /base/sub/f2 /base/link', { sessionId: 's' })
+  await ws.shell('mkdir -p /base/sub', { sessionId: 's' })
+  await ws.shell('printf 111 > /base/f1', { sessionId: 's' })
+  await ws.shell('printf 2222222 > /base/sub/f2', { sessionId: 's' })
+  await ws.shell('printf 3333333 > /base/inner/g1', { sessionId: 's' })
+  await ws.shell('ln -s /base/sub/f2 /base/link', { sessionId: 's' })
   return ws
 }
 
 async function out(ws: Workspace, line: string): Promise<string> {
-  return stdoutStr(await ws.execute(line, { sessionId: 's' }))
+  return stdoutStr(await ws.shell(line, { sessionId: 's' }))
 }
 
 describe('glob expansion sees namespace state', () => {
@@ -98,8 +98,8 @@ describe('glob expansion sees namespace state', () => {
   // The live `*` matches the literal `*` in the first name.
   it('keeps a match spelled like the glob word', async () => {
     const ws = await makeWs()
-    await ws.execute("touch '/base/*a.txt'", { sessionId: 's' })
-    await ws.execute('touch /base/xa.txt', { sessionId: 's' })
+    await ws.shell("touch '/base/*a.txt'", { sessionId: 's' })
+    await ws.shell('touch /base/xa.txt', { sessionId: 's' })
     expect((await out(ws, 'echo /base/*a.txt')).split(/\s+/).filter(Boolean)).toEqual([
       '/base/*a.txt',
       '/base/xa.txt',
@@ -114,9 +114,9 @@ describe('glob expansion sees namespace state', () => {
   //   echo '/data/*d'/*.txt -> /data/*d/one.txt /data/*d/two.txt
   it('lists a directory whose name holds a quoted glob character', async () => {
     const ws = await makeWs()
-    await ws.execute("mkdir '/base/*d'", { sessionId: 's' })
-    await ws.execute("touch '/base/*d/one.txt'", { sessionId: 's' })
-    await ws.execute("touch '/base/*d/two.txt'", { sessionId: 's' })
+    await ws.shell("mkdir '/base/*d'", { sessionId: 's' })
+    await ws.shell("touch '/base/*d/one.txt'", { sessionId: 's' })
+    await ws.shell("touch '/base/*d/two.txt'", { sessionId: 's' })
     expect((await out(ws, "echo '/base/*d'/*.txt")).split(/\s+/).filter(Boolean)).toEqual([
       '/base/*d/one.txt',
       '/base/*d/two.txt',
@@ -150,8 +150,8 @@ describe('glob expansion sees namespace state', () => {
   // checked. Both spellings must answer identically.
   it('refuses a mount root a glob produced', async () => {
     const ws = await makeWs()
-    const typed = await ws.execute('tar -cf /out.tar /base/inner', { sessionId: 's' })
-    const globbed = await ws.execute('tar -cf /out2.tar /base/i*', { sessionId: 's' })
+    const typed = await ws.shell('tar -cf /out.tar /base/inner', { sessionId: 's' })
+    const globbed = await ws.shell('tar -cf /out2.tar /base/i*', { sessionId: 's' })
     expect(new TextDecoder().decode(globbed.stderr)).toBe(new TextDecoder().decode(typed.stderr))
     expect(globbed.exitCode).toBe(typed.exitCode)
     expect(new TextDecoder().decode(globbed.stderr)).toContain('Device or resource busy')
@@ -166,8 +166,8 @@ describe('glob expansion sees namespace state', () => {
 describe('glob expansion follows a symlinked directory', () => {
   async function makeLinked(): Promise<Workspace> {
     const ws = await makeWs()
-    await ws.execute('ln -s /base/sub /base/dlink', { sessionId: 's' })
-    await ws.execute('ln -s /base/inner /base/mlink', { sessionId: 's' })
+    await ws.shell('ln -s /base/sub /base/dlink', { sessionId: 's' })
+    await ws.shell('ln -s /base/inner /base/mlink', { sessionId: 's' })
     return ws
   }
 
@@ -203,21 +203,21 @@ describe('glob expansion follows a symlinked directory', () => {
 // (#1065).
 async function makeDirsWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const root = new RAMResource()
-  const inner = new RAMResource()
+  const root = new RAMVFS()
+  const inner = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(root)
-  registry.registerResource(inner)
+  registry.registerVfs(root)
+  registry.registerVfs(inner)
   const ws = new Workspace(
     { '/': root, '/data/records/inner': inner },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
   )
   ws.createSession('s')
-  await ws.execute('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
-  await ws.execute('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
-  await ws.execute('echo plain > /data/records/plain.txt', { sessionId: 's' })
-  await ws.execute('ln -s /data/records/2026-09-10 /data/records/lnk', { sessionId: 's' })
-  await ws.execute('ln -s /data/records/nowhere /data/records/broken', { sessionId: 's' })
+  await ws.shell('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
+  await ws.shell('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
+  await ws.shell('echo plain > /data/records/plain.txt', { sessionId: 's' })
+  await ws.shell('ln -s /data/records/2026-09-10 /data/records/lnk', { sessionId: 's' })
+  await ws.shell('ln -s /data/records/nowhere /data/records/broken', { sessionId: 's' })
   return ws
 }
 
@@ -227,18 +227,18 @@ async function makeDirsWs(): Promise<Workspace> {
 async function makeFlatWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const registry = new OpsRegistry()
-  const data = new RAMResource()
-  registry.registerResource(data)
+  const data = new RAMVFS()
+  registry.registerVfs(data)
   const ws = new Workspace(
     { '/data': data },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
   )
   ws.createSession('s')
-  await ws.execute('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
-  await ws.execute('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
-  await ws.execute('echo plain > /data/records/plain.txt', { sessionId: 's' })
-  await ws.execute('ln -s /data/records/2026-09-10 /data/records/lnk', { sessionId: 's' })
-  await ws.execute('ln -s /data/records/nowhere /data/records/broken', { sessionId: 's' })
+  await ws.shell('mkdir -p /data/records/2026-09-10 /data/records/2026-09-11', { sessionId: 's' })
+  await ws.shell('echo sample > /data/records/2026-09-10/sample.txt', { sessionId: 's' })
+  await ws.shell('echo plain > /data/records/plain.txt', { sessionId: 's' })
+  await ws.shell('ln -s /data/records/2026-09-10 /data/records/lnk', { sessionId: 's' })
+  await ws.shell('ln -s /data/records/nowhere /data/records/broken', { sessionId: 's' })
   return ws
 }
 

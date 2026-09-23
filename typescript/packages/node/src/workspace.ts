@@ -18,7 +18,6 @@ import type { ProvisionResult } from '@struktoai/mirage-core/provision/types'
 import { createShellParser } from '@struktoai/mirage-core/shell/parse'
 import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { KERNEL_BACKENDS, MountBackend } from '@struktoai/mirage-core/types'
-import type { Limit } from '@struktoai/mirage-core/types'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
   ExecuteOptions,
@@ -28,12 +27,11 @@ import type {
 } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { KernelMounts } from './workspace/workspace/kernel_mounts.ts'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import { savedResourceBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
+import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
-import { buildResource, knownResources } from './resource/registry.ts'
-import type { Resource } from '@struktoai/mirage-core/resource/base'
+import { buildVfs, knownVfsNames } from './vfs/registry.ts'
+import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import './compression_codecs.ts'
-import './cache/file/utils.ts'
 import './runtime/sandbox/daytona/runtime.ts'
 import './secrets/constants.ts'
 
@@ -55,39 +53,31 @@ function loadShellParser(): Promise<ShellParser> {
 export type NodeWorkspaceOptions = WorkspaceOptions
 
 export class Workspace extends CoreWorkspace {
-  /** A saved mount rebuilds through this package's resource registry. */
-  protected static override async buildSavedResource(
-    entry: MountSnapshot,
-  ): Promise<Resource | null> {
-    const build = savedResourceBuild(entry, (name) => knownResources().includes(name))
-    return build === null ? null : buildResource(build.name, build.config)
+  /** A saved mount rebuilds through this package's VFS registry. */
+  protected static override async buildSavedVfs(entry: MountSnapshot): Promise<VFS | null> {
+    const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
+    return build === null ? null : buildVfs(build.name, build.config)
   }
 
   private fuseSetupPromise: Promise<void> | null = null
   private readonly kernelMounts = new KernelMounts(this)
 
-  constructor(resources: Record<string, MountSpec | Mount>, options: NodeWorkspaceOptions = {}) {
-    const specs: Record<string, MountSpec> = {}
-    const commandLimits: Record<string, Record<string, Limit>> = {
-      ...(options.commandLimits ?? {}),
-    }
+  constructor(mounts: Record<string, MountSpec>, options: NodeWorkspaceOptions = {}) {
+    // Core takes a `Mount` directly now, so this unwrap is down to the one
+    // fact core has no use for: which mounts also want a real mountpoint.
+    // It used to re-spell the mount as [vfs, mode] and lift commandLimits
+    // by hand, which is how a `Mount`'s read policy would have been lost
+    // before reaching the workspace.
     const mountTargets: [string, MountBackend, string | undefined][] = []
-    for (const [prefix, value] of Object.entries(resources)) {
-      if (value instanceof Mount) {
-        specs[prefix] =
-          value.options.mode !== undefined ? [value.resource, value.options.mode] : value.resource
-        if (value.options.commandLimits !== undefined)
-          commandLimits[prefix] = value.options.commandLimits
-        const backend = value.options.backend ?? MountBackend.VFS
-        if (KERNEL_BACKENDS.includes(backend))
-          mountTargets.push([prefix, backend, value.options.mountpoint])
-      } else {
-        specs[prefix] = value
+    for (const [prefix, value] of Object.entries(mounts)) {
+      if (!(value instanceof Mount)) continue
+      const backend = value.options.backend ?? MountBackend.WORKSPACE
+      if (KERNEL_BACKENDS.includes(backend)) {
+        mountTargets.push([prefix, backend, value.options.mountpoint])
       }
     }
-    super(specs, {
+    super(mounts, {
       ...options,
-      ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
       shellParserFactory: options.shellParserFactory ?? loadShellParser,
     })
     if (mountTargets.length > 0) {
@@ -155,24 +145,21 @@ export class Workspace extends CoreWorkspace {
     }
   }
 
-  override execute(
+  override shell(
     command: string,
     options?: ExecuteOptions & { provision?: false | undefined },
   ): Promise<ExecuteResult>
-  override execute(
+  override shell(
     command: string,
     options: ExecuteOptions & { provision: true },
   ): Promise<ProvisionResult>
-  override execute(
-    command: string,
-    options: ExecuteOptions,
-  ): Promise<ExecuteResult | ProvisionResult>
-  override async execute(
+  override shell(command: string, options: ExecuteOptions): Promise<ExecuteResult | ProvisionResult>
+  override async shell(
     command: string,
     options: ExecuteOptions = {},
   ): Promise<ExecuteResult | ProvisionResult> {
     await this.fuseReady()
-    return super.execute(command, options)
+    return super.shell(command, options)
   }
 
   override async close(): Promise<void> {

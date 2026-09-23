@@ -53,7 +53,7 @@ class S3Walk:
             root (PathSpec): Watch root (mount-virtual path).
         """
         config = self._accessor.config
-        prefix = mount_prefix_of(root.virtual, root.resource_path)
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         stem = _key(root.mount_path, config).rstrip("/")
         base = (stem + "/") if stem else ""
         files: list[str] = []

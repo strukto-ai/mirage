@@ -82,9 +82,8 @@ async def test_readdir_folder_sizes_messages(accessor, index):
                 return_value=HEADERS)):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="INBOX",
-                     virtual="/INBOX",
-                     directory="/INBOX"), index)
+            PathSpec(vfs_path="INBOX", virtual="/INBOX", directory="/INBOX"),
+            index)
 
     assert result == ["/INBOX/2024-01-15"]
     listing = await index.list_dir("/INBOX/2024-01-15")
@@ -108,9 +107,8 @@ async def test_readdir_buckets_a_dateless_message_by_internaldate(
                 return_value=NO_DATE_HEADERS)):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="INBOX",
-                     virtual="/INBOX",
-                     directory="/INBOX"), index)
+            PathSpec(vfs_path="INBOX", virtual="/INBOX", directory="/INBOX"),
+            index)
 
     assert result == ["/INBOX/2026-08-07"]
 

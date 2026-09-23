@@ -21,7 +21,7 @@ extend-safe-fixes = ["F841"]
 external = ["E125"]
 
 [lint.per-file-ignores]
-"python/mirage/resource/*/prompt.py" = ["E501"]
+"python/mirage/vfs/*/prompt.py" = ["E501"]
 # Ruff measures E501 in display columns, so East Asian characters count as two.
 # These CJK prose fixtures passed flake8's character-based measurement.
 "python/tests/utils/test_sanitize.py" = ["E501"]

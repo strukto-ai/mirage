@@ -10,6 +10,7 @@ from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, usage_hint
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.posix import class_characters
 
 _TRY_HELP = "\n" + usage_hint("tr")
 
@@ -36,7 +37,11 @@ def _expand_ranges(s: str) -> str:
     result: list[str] = []
     i = 0
     while i < len(s):
-        if i + 2 < len(s) and s[i + 1] == "-":
+        if s.startswith("[:", i) and ":]" in s[i + 2:]:
+            end = s.index(":]", i + 2)
+            result.append(class_characters(s[i + 2:end]))
+            i = end + 2
+        elif i + 2 < len(s) and s[i + 1] == "-":
             start, end = ord(s[i]), ord(s[i + 2])
             result.extend(chr(c) for c in range(start, end + 1))
             i += 3
@@ -113,7 +118,7 @@ async def tr(
 
     table: dict[int, int] | None = None
     if not parsed.delete and set2:
-        table = str.maketrans(set1, set2)
+        table = str.maketrans(set1, set2[:len(set1)])
     elif not parsed.delete and not set2 and not parsed.squeeze:
         raise ValueError(
             f"tr: missing operand after '{quote_text(texts[0])}'\n"

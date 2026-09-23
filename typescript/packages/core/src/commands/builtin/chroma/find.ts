@@ -18,7 +18,7 @@ import { find as chromaFind } from '../../../core/chroma/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { CHROMA_IO } from './io.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -47,8 +47,8 @@ async function normalizeFindOutput(
   if (stdout === null) return null
   const data = await materialize(stdout)
   const root =
-    rstripSlash(mountPrefixOf(searchPath.virtual, searchPath.resourcePath)) !== ''
-      ? rstripSlash(mountPrefixOf(searchPath.virtual, searchPath.resourcePath))
+    rstripSlash(mountPrefixOf(searchPath.virtual, searchPath.vfsPath)) !== ''
+      ? rstripSlash(mountPrefixOf(searchPath.virtual, searchPath.vfsPath))
       : '/'
   const text = DEC.decode(data)
   const lines = text === '' ? [] : text.replace(/\n$/, '').split('\n')
@@ -82,7 +82,7 @@ async function findCommand(
 
 export const CHROMA_FIND = command({
   name: 'find',
-  resource: ResourceName.CHROMA,
+  vfs: VFSName.CHROMA,
   spec: specOf('find'),
   fn: findCommand,
 })

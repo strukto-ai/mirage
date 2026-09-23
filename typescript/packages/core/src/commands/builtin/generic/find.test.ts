@@ -15,7 +15,7 @@
 import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import type { IOResult } from '../../../io/types.ts'
-import type { FindOptions } from '../../../resource/base.ts'
+import type { FindOptions } from '../../../vfs/base.ts'
 import { ContentType, type FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandOpts } from '../../config.ts'
 import type { LinkView } from '../../../ops/types.ts'
@@ -34,7 +34,7 @@ function enoent(p: string): Error {
 }
 
 function spec(p: string): PathSpec {
-  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p, resolved: false })
+  return new PathSpec({ vfsPath: stripSlash(p), virtual: p, directory: p, resolved: false })
 }
 
 function fakeFind(root: PathSpec, _options: FindOptions): Promise<string[]> {
@@ -132,7 +132,7 @@ describe('generic command find', () => {
 
     it('prints the operand as typed, not the path it resolved to', async () => {
       const linked = new PathSpec({
-        resourcePath: 'a.txt',
+        vfsPath: 'a.txt',
         virtual: '/mnt/a.txt',
         directory: '/mnt/',
         resolved: true,
@@ -147,7 +147,7 @@ describe('generic command find', () => {
     // see it". GNU findutils 4.10.0: exit 1 and the diagnostic below.
     it('names a start point that is not there and exits 1', async () => {
       const root = new PathSpec({
-        resourcePath: 'nope',
+        vfsPath: 'nope',
         virtual: '/mnt/nope',
         directory: '/mnt/',
         resolved: false,
@@ -168,7 +168,7 @@ describe('generic command find', () => {
     it('walks an implicit directory start point', async () => {
       const dirStat = { name: 'logs', type: FileType.DIRECTORY } as FileStat
       const root = new PathSpec({
-        resourcePath: 'logs',
+        vfsPath: 'logs',
         virtual: '/mnt/logs',
         directory: '/mnt/',
         resolved: false,
@@ -185,7 +185,7 @@ describe('generic command find', () => {
     it('still walks a directory start point', async () => {
       const dirStat = { name: 'mnt', type: FileType.DIRECTORY } as FileStat
       const root = new PathSpec({
-        resourcePath: '',
+        vfsPath: '',
         virtual: '/mnt',
         directory: '/',
         resolved: false,
@@ -206,7 +206,7 @@ describe('generic command find', () => {
 
     function root(): PathSpec {
       return new PathSpec({
-        resourcePath: '',
+        vfsPath: '',
         virtual: '/mnt',
         directory: '/',
         resolved: false,

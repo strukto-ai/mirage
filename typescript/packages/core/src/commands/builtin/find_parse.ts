@@ -15,7 +15,13 @@
 import { FindParseError } from '../errors.ts'
 import { parseDateExpr } from '../../utils/dates.ts'
 import { UTC_ZONE } from '../../utils/timezone.ts'
-import type { PredNode } from './find_eval.ts'
+import {
+  treeHasAction,
+  treeHasPrune,
+  withoutPrune,
+  type ActionKind,
+  type PredNode,
+} from './find_eval.ts'
 import {
   EXEC_BATCH_END,
   EXEC_END,
@@ -30,12 +36,124 @@ import {
 } from './constants.ts'
 import type { ExecAction, FindAction } from './types.ts'
 
-const EXEC_PLACEMENT =
-  'find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses'
+const POSITIONAL = 'under -o, ! or parentheses'
+
+// GNU's words: -delete turns -depth on, and a -prune under -depth is a
+// no-op the line surely did not mean; spelling -depth out takes the no-op
+// knowingly.
+const DELETE_PRUNE =
+  'find: The -delete action automatically turns on -depth, but -prune does nothing when ' +
+  '-depth is in effect.  If you want to carry on anyway, just explicitly use the -depth option.'
 
 /** The `-exec` actions of an expression, in order. */
 export function execActions(actions: readonly FindAction[]): ExecAction[] {
   return actions.filter((a): a is ExecAction => a.kind === 'exec')
+}
+
+function actionWord(action: FindAction): string {
+  return `-${action.kind}`
+}
+
+function sameAction(a: FindAction, b: FindAction): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'printf' && b.kind === 'printf') return a.format === b.format
+  if (a.kind !== 'exec' || b.kind !== 'exec') return true
+  return (
+    a.batch === b.batch &&
+    a.argv.length === b.argv.length &&
+    a.argv.every((w, i) => w === b.argv[i])
+  )
+}
+
+function holdsExecResult(node: PredNode): boolean {
+  if (node.op === 'action') return node.kind === 'exec' && node.batch !== true
+  if (node.op === 'not') return holdsExecResult(node.kid)
+  if (node.op === 'and' || node.op === 'or') return node.kids.some(holdsExecResult)
+  return false
+}
+
+// Refuse an `-exec ... ;` whose exit status picks the next arm. GNU's
+// `-exec ... ;` is false when its command fails, so an `-o` arm ending in
+// one hands the failing rows to the next arm (`-type d -exec false ; -o
+// -prune` prunes exactly the directories the command rejects). The executor
+// learns the status only after the walk, once the tree has decided every
+// row, so such an -exec may stand only where nothing follows it. `-exec ...
+// +` is true whatever the command exits, as GNU's is, and sits anywhere an
+// action may.
+function checkExecResult(node: PredNode): void {
+  if (node.op === 'or') {
+    for (const kid of node.kids.slice(0, -1)) {
+      if (holdsExecResult(kid)) {
+        throw new FindParseError(`find: -exec must end the expression ${POSITIONAL}`)
+      }
+    }
+  }
+  if (node.op === 'not') checkExecResult(node.kid)
+  else if (node.op === 'and' || node.op === 'or') for (const kid of node.kids) checkExecResult(kid)
+}
+
+function firstAction(node: PredNode): string {
+  if (node.op === 'action') return `-${node.kind}`
+  if (node.op === 'not') return firstAction(node.kid)
+  if (node.op === 'and' || node.op === 'or') {
+    const kid = node.kids.find(treeHasAction)
+    if (kid !== undefined) return firstAction(kid)
+  }
+  throw new Error(`no action under ${JSON.stringify(node)}`)
+}
+
+// Refuse a tree in which reaching an action does not end evaluation. The
+// executor runs the one action on every kept row, so the tree may reach an
+// action only where GNU would then evaluate nothing else: as the last
+// factor of its `-a` chain (a factor holding one counts), with the chain's
+// `-o` short-circuiting on the true it returns, and never under `!`, which
+// would turn that true into a false the enclosing `-o` carries on from.
+// `( -name a -print ) -print` would print `a` twice and `-print -name x -o
+// -print` prints every row twice, and neither fits one action per row.
+function checkPositional(node: PredNode): void {
+  if (node.op === 'not') {
+    if (treeHasAction(node.kid)) {
+      throw new FindParseError(`find: ${firstAction(node.kid)} is not supported under !`)
+    }
+    checkPositional(node.kid)
+  } else if (node.op === 'and') {
+    for (const kid of node.kids.slice(0, -1)) {
+      if (treeHasAction(kid)) {
+        throw new FindParseError(`find: ${firstAction(kid)} must end its -a chain ${POSITIONAL}`)
+      }
+    }
+    for (const kid of node.kids) checkPositional(kid)
+  } else if (node.op === 'or') {
+    for (const kid of node.kids) checkPositional(kid)
+  }
+}
+
+// Reduce a positional expression's actions to the one it may hold. Every
+// action written is in the tree, so the rows are exact; the executor then
+// runs `actions` on each row without knowing which node reached it, which
+// is only right when they are all the same action (`-name a -print -o -name
+// b -print`), never `-print` on one arm and `-print0`, a different `-exec`
+// or a different `-printf` format on the other.
+function settleActions(tree: PredNode, actions: readonly FindAction[]): FindAction[] {
+  checkPositional(tree)
+  const distinct: FindAction[] = []
+  for (const action of actions) {
+    if (!distinct.some((seen) => sameAction(seen, action))) distinct.push(action)
+  }
+  const [first, second] = distinct
+  if (first !== undefined && second !== undefined) {
+    if (first.kind === 'exec' && second.kind === 'exec') {
+      throw new FindParseError(`find: -exec may run only one command ${POSITIONAL}`)
+    }
+    if (first.kind === 'printf' && second.kind === 'printf') {
+      throw new FindParseError(`find: -printf may print only one format ${POSITIONAL}`)
+    }
+    throw new FindParseError(
+      `find: ${actionWord(first)} and ${actionWord(second)} cannot be combined ${POSITIONAL}`,
+    )
+  }
+  checkExecResult(tree)
+  return distinct
 }
 
 /**
@@ -43,7 +161,9 @@ export function execActions(actions: readonly FindAction[]): ExecAction[] {
  * window lifts out of it. The tests a backend can answer per entry stay in
  * `tree`; the windows (depth, size, mtime) and the actions are global to
  * the expression, because a native find op evaluates the tree and the
- * executor applies the actions to what came back. `newer` holds `-newer`
+ * executor applies the actions to what came back. A time test also sits in
+ * the tree as an `mtime` node, for its position alone: a `-prune` after it
+ * fires only where the test holds. `newer` holds `-newer`
  * reference operands as typed, for the executor to resolve against the
  * dispatcher into `-newermt` bounds before any backend sees the
  * expression.
@@ -57,7 +177,6 @@ export interface FindExpr {
   mtimeMin: number | null
   mtimeMax: number | null
   usesEmpty: boolean
-  printf: string | null
   // In the order written: GNU runs actions per position, so
   // `-exec echo {} ";" -print -exec echo again {} ";"` alternates the
   // three per match.
@@ -204,26 +323,31 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     mtimeMin: null as number | null,
     mtimeMax: null as number | null,
     usesEmpty: false,
-    printf: null as string | null,
     actions: [] as FindAction[],
     newer: [] as string[],
     depthFirst: false,
   }
   let pos = 0
   let depth = 0
-  // How many parentheses and negations enclose the current token, and
-  // whether a top-level `-o` has been seen: an action under either would
-  // need per-position evaluation the flat window cannot do.
+  // Parentheses and negations enclosing the current token.
   let nested = 0
   let inOr = false
+  const shape = { positional: false, depthOption: false }
   let mtimeSeen = false
   let newerToken: string | null = null
-  const checkActionPlacement = (token: string): void => {
+  const checkWindowPlacement = (token: string): void => {
     if (nested > 0 || inOr) {
       throw new FindParseError(
         `find: ${token} is supported only in a top-level -a chain, not under -o, ! or parentheses`,
       )
     }
+  }
+  // An action inside parentheses or under `!` makes the expression
+  // positional: the tree decides per entry which action is reached, rather
+  // than the chain running them all in order.
+  const actionNode = (kind: ActionKind, batch = false): PredNode => {
+    if (nested > 0) shape.positional = true
+    return batch ? { op: 'action', kind, batch } : { op: 'action', kind }
   }
   // Fold one mtime window into the expression's single window. The flat
   // window cannot evaluate a time test per predicate node, so repeated
@@ -301,13 +425,6 @@ export function parseFindExpression(tokens: string[]): FindExpr {
         throw new FindParseError('find: Only one instance of {} is supported with -exec ... +')
       }
     }
-    if (nested > 0 || inOr) {
-      // The executor runs the action on the matches the tree produced,
-      // which is an AND with every test; under `-o`, `!` or parentheses
-      // GNU would run it per position, and silently running it on the
-      // wrong set is worse than refusing.
-      throw new FindParseError(EXEC_PLACEMENT)
-    }
     return { kind: 'exec', argv, batch }
   }
 
@@ -315,10 +432,16 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     const tok = advance()
     if (tok === undefined) throw new FindParseError('find: expected predicate')
     if (
-      (g.actions.length > 0 || g.printf !== null) &&
+      g.actions.length > 0 &&
+      nested === 0 &&
+      !inOr &&
       (tok === '-empty' ||
+        tok === '-prune' ||
         (FIND_VALUE_PREDICATES.has(tok) && !['-printf', '-maxdepth', '-mindepth'].includes(tok)))
     ) {
+      // Along a top-level -a chain the actions run in order on every row
+      // the tree kept, so a test after one would apply to the actions
+      // before it too. Elsewhere the tree itself decides (checkPositional).
       throw new FindParseError(`find: ${tok}: tests after actions are not supported`)
     }
     if (FIND_VALUE_PREDICATES.has(tok)) {
@@ -329,17 +452,10 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok === '-path') return { op: 'path', pattern: value }
       if (tok === '-type') return typeNode(value)
       if (tok === '-printf') {
-        if (g.printf !== null) {
-          throw new FindParseError('find: multiple -printf actions are not supported')
-        }
-        checkActionPlacement(tok)
-        // An action, not a test: it always matches, replaces the default
-        // -print rendering, and one format applies to every row (GNU
-        // evaluates actions per expression position, which the flat
-        // window cannot express; a single trailing -printf, the way
-        // agents write it, renders identically).
-        g.printf = value
-        return { op: 'true' }
+        // An action, not a test: it always matches and replaces the
+        // default -print rendering, at its position in the chain.
+        g.actions.push({ kind: 'printf', format: value })
+        return actionNode('printf')
       }
       if (tok === '-maxdepth') {
         g.maxDepth = parseDepth(value, '-maxdepth')
@@ -354,7 +470,7 @@ export function parseFindExpression(tokens: string[]): FindExpr {
         return { op: 'true' }
       }
       if (tok === '-newer' || tok === '-newermt') {
-        checkActionPlacement(tok)
+        checkWindowPlacement(tok)
         newerToken = tok
       }
       if (tok === '-newer') {
@@ -364,16 +480,18 @@ export function parseFindExpression(tokens: string[]): FindExpr {
         return { op: 'true' }
       }
       if (tok === '-newermt') {
-        mergeWindow(strictlyAfter(parseNewermt(value)), null)
-        return { op: 'true' }
+        const lower = strictlyAfter(parseNewermt(value))
+        mergeWindow(lower, null)
+        return { op: 'mtime', lo: lower, hi: null }
       }
       const [mtLo, mtHi] = parseMtime(value)
       mergeWindow(mtLo, mtHi)
-      return { op: 'true' }
+      return { op: 'mtime', lo: mtLo, hi: mtHi }
     }
     if (FIND_EXEC_PREDICATES.has(tok)) {
-      g.actions.push(parseExec())
-      return { op: 'true' }
+      const action = parseExec()
+      g.actions.push(action)
+      return actionNode('exec', action.batch)
     }
     if (tok === '-empty') {
       g.usesEmpty = true
@@ -381,13 +499,16 @@ export function parseFindExpression(tokens: string[]): FindExpr {
     }
     const rowKind = FIND_ROW_ACTIONS.get(tok)
     if (rowKind !== undefined) {
-      checkActionPlacement(tok)
       g.actions.push({ kind: rowKind })
       if (rowKind === 'delete') g.depthFirst = true
-      return { op: 'true' }
+      return actionNode(rowKind)
     }
+    if (tok === '-prune') return { op: 'prune', pruned: [], pending: [] }
     if (tok === '-depth') {
+      // Spelled out, unlike the -depth that -delete turns on: only this one
+      // lets a -prune ride beside -delete, as a knowing no-op.
       g.depthFirst = true
+      shape.depthOption = true
       return { op: 'true' }
     }
     if (FIND_BARE_PREDICATES.has(tok)) return { op: 'true' }
@@ -453,17 +574,12 @@ export function parseFindExpression(tokens: string[]): FindExpr {
       if (tok !== '-o' && tok !== '-or') break
       advance()
       afterOperator(tok)
+      // Each arm reaches its own actions, and a window under one cannot be
+      // exact.
+      shape.positional = true
       if (nested === 0) {
         inOr = true
-        if (newerToken !== null) checkActionPlacement(newerToken)
-        // An action already parsed sits on the left of this `-o`, which
-        // is the same detachment from the tree seen from the other side:
-        // `-exec false {} ; -o -print` would run the action and then
-        // print nothing.
-        if (execActions(g.actions).length > 0) throw new FindParseError(EXEC_PLACEMENT)
-        const action = g.actions[0]
-        if (action !== undefined) checkActionPlacement(`-${action.kind}`)
-        if (g.printf !== null) checkActionPlacement('-printf')
+        if (newerToken !== null) checkWindowPlacement(newerToken)
       }
       terms.push(andExpr())
     }
@@ -476,13 +592,10 @@ export function parseFindExpression(tokens: string[]): FindExpr {
   const tree = orExpr()
   const trailing = peek()
   if (trailing !== undefined) throw new FindParseError(`find: unexpected token '${trailing}'`)
-  if (execActions(g.actions).length > 0 && g.printf !== null) {
-    // -printf rows are rendered by the backend's generic before the
-    // executor sees them, so there is no path left to hand -exec.
-    throw new FindParseError('find: -exec cannot be combined with -printf')
+  const actions = shape.positional ? settleActions(tree, g.actions) : g.actions
+  if (treeHasPrune(tree) && g.depthFirst) {
+    if (!shape.depthOption) throw new FindParseError(DELETE_PRUNE)
+    return { ...g, tree: withoutPrune(tree), actions }
   }
-  if (g.actions.length > 0 && g.printf !== null) {
-    throw new FindParseError('find: -printf cannot be combined with other actions')
-  }
-  return { tree, ...g }
+  return { ...g, tree, actions }
 }

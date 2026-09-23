@@ -14,7 +14,7 @@ so only real top-level commands land.
 
 ```mermaid
 flowchart TD
-    Exec["ws.execute(cmd)"] --> Obs[Observer]
+    Exec["ws.shell(cmd)"] --> Obs[Observer]
     Obs --> Store[("ObserverStore<br/>RAM · Disk · Redis")]
     Store --> Hist["history builtin<br/>(calling session)"]
     Store --> File["/.bash_history<br/>(all sessions)"]
@@ -30,37 +30,37 @@ is no runtime API to change it.
 
 ```python Python
 from mirage import Workspace, MountMode
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.redis_store import RedisObserverStore
 
 # RAM (default), nothing to configure
-ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
 # Persist to disk
-ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE,
+ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE,
                observe=DiskObserverStore("/var/mirage/history"))
 
 # Persist to Redis
-ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE,
+ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE,
                observe=RedisObserverStore("redis://localhost:6379/0"))
 ```
 
 ```typescript TypeScript
-import { DiskObserverStore, RAMResource, RedisObserverStore, Workspace } from '@struktoai/mirage-node'
+import { DiskObserverStore, RAMVFS, RedisObserverStore, Workspace } from '@struktoai/mirage-node'
 
 // RAM (default), nothing to configure
-const ws = new Workspace({ '/data': new RAMResource() })
+const ws = new Workspace({ '/data': new RAMVFS() })
 
 // Persist to disk
 const wsDisk = new Workspace(
-  { '/data': new RAMResource() },
+  { '/data': new RAMVFS() },
   { observe: new DiskObserverStore('/var/mirage/history') },
 )
 
 // Persist to Redis
 const wsRedis = new Workspace(
-  { '/data': new RAMResource() },
+  { '/data': new RAMVFS() },
   { observe: new RedisObserverStore({ url: 'redis://localhost:6379/0' }) },
 )
 ```

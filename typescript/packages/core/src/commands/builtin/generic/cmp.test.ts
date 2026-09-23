@@ -24,8 +24,8 @@ import type { CommandOpts } from '../../config.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
-const P1 = new PathSpec({ virtual: '/F/one', directory: '/F', resourcePath: 'one' })
-const P2 = new PathSpec({ virtual: '/F/two', directory: '/F', resourcePath: 'two' })
+const P1 = new PathSpec({ virtual: '/F/one', directory: '/F', vfsPath: 'one' })
+const P2 = new PathSpec({ virtual: '/F/two', directory: '/F', vfsPath: 'two' })
 
 function bytes(...values: number[]): Uint8Array {
   return new Uint8Array(values)

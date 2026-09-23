@@ -19,9 +19,9 @@ import pytest
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.mv import Move, moved_path, parse_flags
 from mirage.commands.spec.flag_view import FlagView
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import MOUNT, conflict_index
 
@@ -33,7 +33,7 @@ async def run(ws, line: str) -> tuple[int, bytes, bytes]:
         ws (Workspace): workspace with the repository and CLI.
         line (str): the command line, without the leading directory.
     """
-    result = await ws.execute(f"git -C /repo {line}")
+    result = await ws.shell(f"git -C /repo {line}")
     return result.exit_code, result.stdout or b"", result.stderr or b""
 
 
@@ -76,7 +76,7 @@ async def test_a_missing_source_is_fatal(git_rw):
 
 @pytest.mark.asyncio
 async def test_an_untracked_source_is_fatal(git_rw):
-    await git_rw.execute("echo u > /repo/u.txt")
+    await git_rw.shell("echo u > /repo/u.txt")
     _code, _out, err = await run(git_rw, "mv u.txt c.txt")
     assert err == (b"fatal: not under version control, source=u.txt, "
                    b"destination=c.txt\n")
@@ -96,7 +96,7 @@ async def test_an_existing_destination_is_refused_unless_forced(
 
 @pytest.mark.asyncio
 async def test_a_directory_destination_takes_the_basename(git_rw):
-    await git_rw.execute("mkdir /repo/into")
+    await git_rw.shell("mkdir /repo/into")
     await run(git_rw, "mv a.txt into")
     assert (await run(git_rw,
                       "status --porcelain"))[1] == b"R  a.txt -> into/a.txt\n"
@@ -111,10 +111,10 @@ async def test_several_sources_need_a_directory(git_rw):
 @pytest.mark.asyncio
 async def test_a_directory_moves_with_everything_under_it(
         git_rw, repo_path: Path):
-    await git_rw.execute("mkdir /repo/docs && echo x > /repo/docs/one.md")
+    await git_rw.shell("mkdir /repo/docs && echo x > /repo/docs/one.md")
     await run(git_rw, "add docs")
     await run(git_rw, "commit -m docs")
-    await git_rw.execute("echo u > /repo/docs/untracked.md")
+    await git_rw.shell("echo u > /repo/docs/untracked.md")
     assert await run(git_rw, "mv docs notes") == (0, b"", b"")
     assert (repo_path / "notes" / "untracked.md").exists()
     assert (await run(git_rw, "status --porcelain"))[1] == (
@@ -153,8 +153,8 @@ async def test_a_missing_destination_directory_is_the_renames_failure(git_rw):
 
 @pytest.mark.asyncio
 async def test_two_sources_cannot_land_on_one_name(git_rw, repo_path: Path):
-    await git_rw.execute("mkdir -p /repo/a /repo/b /repo/dest")
-    await git_rw.execute("echo ax > /repo/a/x && echo bx > /repo/b/x")
+    await git_rw.shell("mkdir -p /repo/a /repo/b /repo/dest")
+    await git_rw.shell("echo ax > /repo/a/x && echo bx > /repo/b/x")
     await run(git_rw, "add a b")
     await run(git_rw, "commit -m two")
     code, _out, err = await run(git_rw, "mv a/x b/x dest")
@@ -167,8 +167,8 @@ async def test_two_sources_cannot_land_on_one_name(git_rw, repo_path: Path):
 
 @pytest.mark.asyncio
 async def test_two_directories_collide_at_the_path_that_collides(git_rw):
-    await git_rw.execute("mkdir -p /repo/a/sub /repo/b/sub /repo/dest")
-    await git_rw.execute("echo 1 > /repo/a/sub/f && echo 2 > /repo/b/sub/f")
+    await git_rw.shell("mkdir -p /repo/a/sub /repo/b/sub /repo/dest")
+    await git_rw.shell("echo 1 > /repo/a/sub/f && echo 2 > /repo/b/sub/f")
     await run(git_rw, "add a b")
     await run(git_rw, "commit -m dirs")
     _code, _out, err = await run(git_rw, "mv a/sub b/sub dest")
@@ -178,8 +178,8 @@ async def test_two_directories_collide_at_the_path_that_collides(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_sources_own_fault_outranks_the_collision(git_rw):
-    await git_rw.execute("mkdir -p /repo/a /repo/b /repo/dest")
-    await git_rw.execute("echo ax > /repo/a/x && echo bx > /repo/b/x")
+    await git_rw.shell("mkdir -p /repo/a /repo/b /repo/dest")
+    await git_rw.shell("echo ax > /repo/a/x && echo bx > /repo/b/x")
     await run(git_rw, "add a")
     await run(git_rw, "commit -m one")
     _code, _out, err = await run(git_rw, "mv a/x b/x dest")
@@ -189,8 +189,8 @@ async def test_a_sources_own_fault_outranks_the_collision(git_rw):
 
 @pytest.mark.asyncio
 async def test_k_skips_the_source_that_would_collide(git_rw, repo_path: Path):
-    await git_rw.execute("mkdir -p /repo/a /repo/b /repo/dest")
-    await git_rw.execute("echo ax > /repo/a/x && echo bx > /repo/b/x")
+    await git_rw.shell("mkdir -p /repo/a /repo/b /repo/dest")
+    await git_rw.shell("echo ax > /repo/a/x && echo bx > /repo/b/x")
     await run(git_rw, "add a b")
     await run(git_rw, "commit -m two")
     assert await run(git_rw, "mv -k a/x b/x dest") == (0, b"", b"")
@@ -218,7 +218,7 @@ async def test_a_conflicted_source_outranks_an_occupied_destination(
 @pytest.mark.asyncio
 async def test_a_directory_holding_a_conflict_is_refused_by_that_path(
         git_rw, repo_path: Path):
-    await git_rw.execute("mkdir /repo/docs && echo x > /repo/docs/one.md")
+    await git_rw.shell("mkdir /repo/docs && echo x > /repo/docs/one.md")
     await run(git_rw, "add docs")
     await run(git_rw, "commit -m docs")
     conflict_index(repo_path, "docs/one.md")
@@ -239,15 +239,15 @@ async def test_k_skips_a_conflicted_source(git_rw, repo_path: Path):
 
 @pytest.mark.asyncio
 async def test_a_directory_carries_its_symlinks(git_rw):
-    await git_rw.execute("mkdir /repo/docs && echo x > /repo/docs/one.md")
-    await git_rw.execute("ln -s one.md /repo/docs/link")
+    await git_rw.shell("mkdir /repo/docs && echo x > /repo/docs/one.md")
+    await git_rw.shell("ln -s one.md /repo/docs/link")
     await run(git_rw, "add docs")
     await run(git_rw, "commit -m docs")
     assert await run(git_rw, "mv docs notes") == (0, b"", b"")
     # The link lives in the namespace, not on the disk the mount serves,
     # so it is read back through the workspace rather than off the path.
-    moved = await git_rw.execute("readlink /repo/notes/link")
-    left = await git_rw.execute("readlink /repo/docs/link")
+    moved = await git_rw.shell("readlink /repo/notes/link")
+    left = await git_rw.shell("readlink /repo/docs/link")
     assert moved.stdout == b"one.md\n"
     assert left.exit_code != 0
     assert (await run(git_rw, "status --porcelain"))[1] == (
@@ -258,12 +258,12 @@ async def test_a_directory_carries_its_symlinks(git_rw):
 async def test_a_directory_holding_a_mount_will_not_move(repo_path: Path):
     with Workspace(
         {
-            MOUNT: DiskResource(root=str(repo_path)),
-            "/repo/docs/inner/": RAMResource(),
+            MOUNT: DiskVFS(root=str(repo_path)),
+            "/repo/docs/inner/": RAMVFS(),
         },
             mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
-        await ws.execute("mkdir -p /repo/docs && echo x > /repo/docs/one.md")
+        await ws.shell("mkdir -p /repo/docs && echo x > /repo/docs/one.md")
         await run(ws, "add docs")
         code, _out, err = await run(ws, "mv docs notes")
         assert code == 128
@@ -277,12 +277,12 @@ async def test_a_directory_holding_a_mount_will_not_move(repo_path: Path):
 async def test_a_mount_root_itself_will_not_move(repo_path: Path):
     with Workspace(
         {
-            MOUNT: DiskResource(root=str(repo_path)),
-            "/repo/inner/": RAMResource(),
+            MOUNT: DiskVFS(root=str(repo_path)),
+            "/repo/inner/": RAMVFS(),
         },
             mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
-        await ws.execute("echo x > /repo/inner/one.md")
+        await ws.shell("echo x > /repo/inner/one.md")
         await run(ws, "add inner")
         code, _out, err = await run(ws, "mv inner elsewhere")
         assert code == 128
@@ -300,12 +300,12 @@ async def test_a_file_will_not_move_into_another_mount(repo_path: Path):
     # path.
     with Workspace(
         {
-            MOUNT: DiskResource(root=str(repo_path)),
-            "/repo/inner/": RAMResource(),
+            MOUNT: DiskVFS(root=str(repo_path)),
+            "/repo/inner/": RAMVFS(),
         },
             mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
-        await ws.execute("echo x > /repo/one.md")
+        await ws.shell("echo x > /repo/one.md")
         await run(ws, "add one.md")
         code, _out, err = await run(ws, "mv one.md inner/one.md")
         assert code == 128
@@ -318,12 +318,12 @@ async def test_a_file_will_not_move_into_another_mount(repo_path: Path):
 async def test_a_file_will_not_move_out_of_a_nested_mount(repo_path: Path):
     with Workspace(
         {
-            MOUNT: DiskResource(root=str(repo_path)),
-            "/repo/inner/": RAMResource(),
+            MOUNT: DiskVFS(root=str(repo_path)),
+            "/repo/inner/": RAMVFS(),
         },
             mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
-        await ws.execute("echo x > /repo/inner/one.md")
+        await ws.shell("echo x > /repo/inner/one.md")
         await run(ws, "add inner/one.md")
         code, _out, err = await run(ws, "mv inner/one.md one.md")
         assert code == 128
@@ -337,12 +337,12 @@ async def test_a_move_inside_one_mount_still_goes(repo_path: Path):
     # that never leaves the repository's own mount is untouched by it.
     with Workspace(
         {
-            MOUNT: DiskResource(root=str(repo_path)),
-            "/repo/inner/": RAMResource(),
+            MOUNT: DiskVFS(root=str(repo_path)),
+            "/repo/inner/": RAMVFS(),
         },
             mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
-        await ws.execute("mkdir -p /repo/docs && echo x > /repo/one.md")
+        await ws.shell("mkdir -p /repo/docs && echo x > /repo/one.md")
         await run(ws, "add one.md")
         assert await run(ws, "mv one.md docs/one.md") == (0, b"", b"")
         assert (repo_path / "docs" / "one.md").exists()
@@ -352,12 +352,12 @@ async def test_a_move_inside_one_mount_still_goes(repo_path: Path):
 async def test_k_skips_a_source_that_holds_a_mount(repo_path: Path):
     with Workspace(
         {
-            MOUNT: DiskResource(root=str(repo_path)),
-            "/repo/docs/inner/": RAMResource(),
+            MOUNT: DiskVFS(root=str(repo_path)),
+            "/repo/docs/inner/": RAMVFS(),
         },
             mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
-        await ws.execute("mkdir -p /repo/docs && echo x > /repo/docs/one.md")
+        await ws.shell("mkdir -p /repo/docs && echo x > /repo/docs/one.md")
         await run(ws, "add docs")
         assert await run(ws, "mv -k docs notes") == (0, b"", b"")
         assert (repo_path / "docs" / "one.md").exists()
@@ -396,28 +396,28 @@ async def test_the_overlay_travels_with_a_moved_file(git_rw):
     # recorded in the namespace overlay, and leaving it at the emptied
     # name both lost it at the landing and left it to be inherited by
     # whatever was written at the old name next.
-    assert (await git_rw.execute("chmod 400 /repo/a.txt")).exit_code == 0
+    assert (await git_rw.shell("chmod 400 /repo/a.txt")).exit_code == 0
     assert await run(git_rw, "mv a.txt c.txt") == (0, b"", b"")
-    listed = await git_rw.execute("ls -l /repo/c.txt")
+    listed = await git_rw.shell("ls -l /repo/c.txt")
     assert (listed.stdout or b"").startswith(b"-r--------")
     assert git_rw.namespace.meta_for("/repo/a.txt") is None
 
 
 @pytest.mark.asyncio
 async def test_a_link_below_a_moved_directory_travels_too(git_rw):
-    await git_rw.execute("mkdir -p /repo/d && echo t > /repo/t.txt")
-    await git_rw.execute("ln -s /repo/t.txt /repo/d/link")
+    await git_rw.shell("mkdir -p /repo/d && echo t > /repo/t.txt")
+    await git_rw.shell("ln -s /repo/t.txt /repo/d/link")
     assert (await run(git_rw, "add d"))[0] == 0
     assert await run(git_rw, "mv d notes") == (0, b"", b"")
-    read = await git_rw.execute("readlink /repo/notes/link")
+    read = await git_rw.shell("readlink /repo/notes/link")
     assert (read.exit_code, read.stdout) == (0, b"/repo/t.txt\n")
 
 
 @pytest.mark.asyncio
 async def test_a_directory_and_something_inside_it_cannot_both_move(
         git_rw, repo_path: Path):
-    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
-    await git_rw.execute("echo z > /repo/dir/file")
+    await git_rw.shell("mkdir -p /repo/dir /repo/dest")
+    await git_rw.shell("echo z > /repo/dir/file")
     await run(git_rw, "add dir")
     await run(git_rw, "commit -m dir")
     code, _out, err = await run(git_rw, "mv dir dir/file dest")
@@ -432,8 +432,8 @@ async def test_a_directory_and_something_inside_it_cannot_both_move(
 
 @pytest.mark.asyncio
 async def test_the_child_is_named_first_whatever_the_order(git_rw):
-    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
-    await git_rw.execute("echo z > /repo/dir/file")
+    await git_rw.shell("mkdir -p /repo/dir /repo/dest")
+    await git_rw.shell("echo z > /repo/dir/file")
     await run(git_rw, "add dir")
     await run(git_rw, "commit -m dir")
     _code, _out, err = await run(git_rw, "mv dir/file dir dest")
@@ -443,8 +443,8 @@ async def test_the_child_is_named_first_whatever_the_order(git_rw):
 
 @pytest.mark.asyncio
 async def test_k_does_not_skip_an_overlapping_source(git_rw, repo_path: Path):
-    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
-    await git_rw.execute("echo z > /repo/dir/file")
+    await git_rw.shell("mkdir -p /repo/dir /repo/dest")
+    await git_rw.shell("echo z > /repo/dir/file")
     await run(git_rw, "add dir")
     await run(git_rw, "commit -m dir")
     code, _out, err = await run(git_rw, "mv -k dir dir/file dest")
@@ -456,8 +456,8 @@ async def test_k_does_not_skip_an_overlapping_source(git_rw, repo_path: Path):
 
 @pytest.mark.asyncio
 async def test_a_sources_own_fault_outranks_the_overlap(git_rw):
-    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
-    await git_rw.execute("echo z > /repo/dir/file")
+    await git_rw.shell("mkdir -p /repo/dir /repo/dest")
+    await git_rw.shell("echo z > /repo/dir/file")
     await run(git_rw, "add dir")
     await run(git_rw, "commit -m dir")
     # The overlap is read off the whole line once every source has
@@ -470,11 +470,11 @@ async def test_a_sources_own_fault_outranks_the_overlap(git_rw):
 @pytest.mark.asyncio
 async def test_k_taking_a_source_out_takes_it_out_of_the_overlap(
         git_rw, repo_path: Path):
-    await git_rw.execute("mkdir -p /repo/dir /repo/dest")
-    await git_rw.execute("echo z > /repo/dir/file")
+    await git_rw.shell("mkdir -p /repo/dir /repo/dest")
+    await git_rw.shell("echo z > /repo/dir/file")
     await run(git_rw, "add dir")
     await run(git_rw, "commit -m dir")
-    await git_rw.execute("echo o > /repo/dir/other")
+    await git_rw.shell("echo o > /repo/dir/other")
     # ``dir/other`` is untracked, so it is skipped before the overlap
     # is looked at and the directory moves on its own.
     assert await run(git_rw, "mv -k dir dir/other dest") == (0, b"", b"")
@@ -490,7 +490,7 @@ async def test_f_takes_the_destinations_conflict_stages_with_it(
     # since write_index lays them back over the entry and the moved
     # blob is the copy that disappears.
     conflict_index(repo_path, "b.txt")
-    with Workspace({MOUNT: DiskResource(root=str(repo_path))},
+    with Workspace({MOUNT: DiskVFS(root=str(repo_path))},
                    mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
         assert (await run(ws, "status --short"))[1].startswith(b"UU b.txt\n")

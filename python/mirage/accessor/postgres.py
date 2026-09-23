@@ -15,8 +15,8 @@
 import asyncpg
 
 from mirage.accessor.base import Accessor
-from mirage.resource.postgres.config import PostgresConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.postgres.config import PostgresConfig
+from mirage.vfs.secrets import reveal_secret
 
 
 class PostgresAccessor(Accessor):

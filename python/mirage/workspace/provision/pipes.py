@@ -16,13 +16,13 @@ from typing import Any
 
 from mirage.provision import ProvisionResult
 from mirage.provision.rollup import rollup_list, rollup_pipe
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 async def handle_pipe_provision(
     provision_node_fn,
     commands: list[Any],
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Plan a pipe: all commands run."""
     children = []
@@ -36,7 +36,7 @@ async def handle_connection_provision(
     left: Any,
     op: str,
     right: Any,
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Plan &&, ||"""
     children = []

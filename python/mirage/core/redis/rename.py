@@ -16,9 +16,9 @@ from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import invalidate_subtree
 from mirage.core.redis.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
-from mirage.resource.redis.store import RedisStore
 from mirage.types import PathSpec
 from mirage.utils.path import norm
+from mirage.vfs.redis.store import RedisStore
 
 
 async def _move_subtree(store: RedisStore, s: str, d: str) -> None:

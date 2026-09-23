@@ -16,10 +16,10 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { Resource } from '@struktoai/mirage-core/resource/base'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { DiskResource } from '../resource/disk/disk.ts'
+import { DiskVFS } from '../vfs/disk/disk.ts'
 import { Workspace } from '../workspace.ts'
 
 const DEC = new TextDecoder()
@@ -60,8 +60,8 @@ function runNative(cwd: string, cmd: string, stdin: Uint8Array | null): Promise<
 
 function makeRamEnv(): NativeEnv {
   const tmp = mkdtempSync(join(tmpdir(), 'mirage-native-ram-'))
-  const resource = new RAMResource()
-  const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
+  const vfs = new RAMVFS()
+  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
 
   const env: NativeEnv = {
     kind: 'ram',
@@ -73,19 +73,19 @@ function makeRamEnv(): NativeEnv {
       const remote = '/' + relative
       const parts = relative.split('/')
       for (let i = 1; i < parts.length; i++) {
-        resource.store.dirs.add('/' + parts.slice(0, i).join('/'))
+        vfs.store.dirs.add('/' + parts.slice(0, i).join('/'))
       }
-      resource.store.files.set(remote, content)
+      vfs.store.files.set(remote, content)
       // Mirror the native side: files on the tmp filesystem carry an
       // mtime, and -mtime windows exclude unknown-mtime entries.
-      resource.store.modified.set(remote, new Date().toISOString())
+      vfs.store.modified.set(remote, new Date().toISOString())
     },
     native(cmd, stdin = null) {
       return runNative(tmp, cmd, stdin)
     },
     async mirage(cmd, stdin = null) {
       ws.cwd = '/data'
-      const io = await ws.execute(cmd, stdin === null ? {} : { stdin })
+      const io = await ws.shell(cmd, stdin === null ? {} : { stdin })
       return DEC.decode(io.stdout)
     },
     async cleanup() {
@@ -100,8 +100,8 @@ function makeDiskEnv(): NativeEnv {
   const tmp = mkdtempSync(join(tmpdir(), 'mirage-native-disk-'))
   const diskRoot = join(tmp, 'disk')
   mkdirSync(diskRoot, { recursive: true })
-  const resource = new DiskResource({ root: diskRoot })
-  const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
+  const vfs = new DiskVFS({ root: diskRoot })
+  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
 
   const env: NativeEnv = {
     kind: 'disk',
@@ -116,7 +116,7 @@ function makeDiskEnv(): NativeEnv {
     },
     async mirage(cmd, stdin = null) {
       ws.cwd = '/data'
-      const io = await ws.execute(cmd, stdin === null ? {} : { stdin })
+      const io = await ws.shell(cmd, stdin === null ? {} : { stdin })
       return DEC.decode(io.stdout)
     },
     async cleanup() {
@@ -147,26 +147,26 @@ export interface CrossEnv {
 
 interface MountHandle {
   kind: BackendKind
-  resource: Resource
+  vfs: VFS
   diskRoot: string | null
-  ramResource: RAMResource | null
+  ramVfs: RAMVFS | null
 }
 
 function makeMount(kind: BackendKind, tmp: string, idx: number): MountHandle {
   if (kind === 'ram') {
-    const resource = new RAMResource()
-    return { kind, resource, diskRoot: null, ramResource: resource }
+    const vfs = new RAMVFS()
+    return { kind, vfs, diskRoot: null, ramVfs: vfs }
   }
   const diskRoot = join(tmp, `disk${String(idx)}`)
   mkdirSync(diskRoot, { recursive: true })
-  const resource = new DiskResource({ root: diskRoot })
-  return { kind, resource, diskRoot, ramResource: null }
+  const vfs = new DiskVFS({ root: diskRoot })
+  return { kind, vfs, diskRoot, ramVfs: null }
 }
 
 function writeToMount(mount: MountHandle, relative: string, content: Uint8Array): void {
   if (mount.kind === 'ram') {
-    const ram = mount.ramResource
-    if (ram === null) throw new Error('ram mount missing resource')
+    const ram = mount.ramVfs
+    if (ram === null) throw new Error('ram mount missing VFS')
     const parts = relative.split('/')
     for (let i = 1; i < parts.length; i++) {
       ram.store.dirs.add('/' + parts.slice(0, i).join('/'))
@@ -185,7 +185,7 @@ export function makeCrossEnv(kinds: readonly [BackendKind, BackendKind]): CrossE
   const tmp = mkdtempSync(join(tmpdir(), 'mirage-native-cross-'))
   const m1 = makeMount(kinds[0], tmp, 1)
   const m2 = makeMount(kinds[1], tmp, 2)
-  const ws = new Workspace({ '/m1': m1.resource, '/m2': m2.resource }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/m1': m1.vfs, '/m2': m2.vfs }, { mode: MountMode.WRITE })
   ws.cwd = '/m1'
 
   return {
@@ -196,19 +196,19 @@ export function makeCrossEnv(kinds: readonly [BackendKind, BackendKind]): CrossE
       writeToMount(mount, relative, content)
     },
     async run(cmd) {
-      const io = await ws.execute(cmd)
+      const io = await ws.shell(cmd)
       return DEC.decode(io.stdout)
     },
     async exit(cmd) {
-      const io = await ws.execute(cmd)
+      const io = await ws.shell(cmd)
       return io.exitCode
     },
     async stderr(cmd) {
-      const io = await ws.execute(cmd)
+      const io = await ws.shell(cmd)
       return DEC.decode(io.stderr)
     },
     async provision(cmd) {
-      return ws.execute(cmd, { provision: true })
+      return ws.shell(cmd, { provision: true })
     },
     async cleanup() {
       await ws.close()

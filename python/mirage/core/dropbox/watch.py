@@ -98,7 +98,7 @@ def _frame(accessor: DropboxAccessor, root: PathSpec,
     everything below the root, and is safe because ``path_lower`` is
     ``path_display`` lowercased, same length.
     """
-    prefix = mount_prefix_of(root.virtual, root.resource_path)
+    prefix = mount_prefix_of(root.virtual, root.vfs_path)
     display = entry.get("path_display") or entry.get("path_lower")
     if not display:
         return None

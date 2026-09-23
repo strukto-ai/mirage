@@ -31,18 +31,18 @@ from mirage.errors import classify
 from mirage.policy import Policy
 from mirage.policy.types import (CommandContext, Deny, OpsContext,
                                  SessionContext)
-from mirage.resource.ram import RAMResource
-from mirage.resource.registry import build_resource, register_resource
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.registry import build_vfs, register_vfs
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import apply_state_dict, to_state_dict
 
 SUITE = Path(__file__).with_name("cases.json")
 
 
-class CachedRAMResource(RAMResource):
-    """A local fixture exercising the same read cache as remote resources."""
+class CachedRAMVFS(RAMVFS):
+    """A local fixture exercising the same read cache as remote mounts."""
 
     caches_reads = True
 
@@ -56,7 +56,7 @@ class CachedRAMResource(RAMResource):
         })
 
 
-register_resource("cached-ram", CachedRAMResource)
+register_vfs("cached-ram", CachedRAMVFS)
 
 
 class RulePolicy(Policy):
@@ -117,12 +117,12 @@ async def action(ws: Workspace, step: dict[str, Any],
         finally:
             reset_current_session(token)
     if op == "mount":
-        resource = build_resource(step["resource"], step.get("config", {}))
+        vfs = build_vfs(step["vfs"], step.get("config", {}))
         try:
-            return ws.add_mount(step["path"], resource,
+            return ws.add_mount(step["path"], vfs,
                                 MountMode(step.get("mode", "read"))).prefix
         except Exception:
-            await resource.close()
+            await vfs.close()
             raise
     if op == "unmount":
         await ws.unmount(step["path"])
@@ -160,23 +160,26 @@ async def action(ws: Workspace, step: dict[str, Any],
         policy = policies.pop(step["id"], None)
         return ws.policies.remove(policy) if policy is not None else False
     elif op == "write":
-        await ws.fs.write(step["path"], step["data"].encode())
+        await ws.vfs.write(step["path"], step["data"].encode())
     elif op == "read":
-        return (await ws.fs.read(step["path"])).decode()
+        return (await ws.vfs.read(step["path"])).decode()
     elif op == "readdir":
-        return sorted(await ws.fs.readdir(step["path"]))
+        return sorted(await ws.vfs.readdir(step["path"]))
     elif op == "stat":
-        row = await ws.fs.stat(step["path"])
+        row = await ws.vfs.stat(step["path"])
         return {"type": row.type.value, "size": row.size}
     elif op == "exec":
-        result = await ws.execute(step["command"],
-                                  session_id=step.get("session"))
+        result = await ws.shell(step["command"],
+                                session_id=step.get("session"))
         return {
             "exit_code": result.exit_code,
             "stdout": await result.stdout_str(),
             "stderr": await result.stderr_str(),
             "refusal": result.refusal.reason if result.refusal else None,
         }
+    elif op == "concurrent":
+        return list(await asyncio.gather(*(action(ws, sub, policies, held)
+                                           for sub in step["steps"])))
     elif op == "snapshot":
         held["state"] = await to_state_dict(ws)
     elif op == "checkout":
@@ -219,6 +222,10 @@ async def run(case: dict[str, Any]) -> int:
 
 def matches(actual: Any, expected: Any) -> bool:
     """Objects select fields; error and *_contains assertions select text."""
+    if isinstance(expected, list):
+        return (isinstance(actual, list) and len(actual) == len(expected)
+                and all(
+                    matches(got, want) for got, want in zip(actual, expected)))
     if not isinstance(expected, dict):
         return actual == expected
     if not isinstance(actual, dict):

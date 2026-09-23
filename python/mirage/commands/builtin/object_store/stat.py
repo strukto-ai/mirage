@@ -27,7 +27,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_stat(resource: str, io: CommandIO) -> Callable[..., Any]:
+def make_stat(vfs: str, io: CommandIO) -> Callable[..., Any]:
     """Build the index-threaded stat override for one keyed store.
 
     Wiring only, and it delegates to ``stat_generic`` rather than to the
@@ -39,7 +39,7 @@ def make_stat(resource: str, io: CommandIO) -> Callable[..., Any]:
     named the older set.
 
     Args:
-        resource (str): resource name the command registers under.
+        vfs (str): VFS name the command registers under.
         io (CommandIO): the backend's op table.
     """
     stat_core = io.stat
@@ -63,7 +63,6 @@ def make_stat(resource: str, io: CommandIO) -> Callable[..., Any]:
                               index=opts.index)
         return await stat_generic(resolved, list(texts), opts, stat_fn)
 
-    wrapped: Callable[..., Any] = command("stat",
-                                          resource=resource,
+    wrapped: Callable[..., Any] = command("stat", vfs=vfs,
                                           spec=SPECS["stat"])(stat)
     return wrapped

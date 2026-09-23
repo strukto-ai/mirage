@@ -14,7 +14,7 @@
 
 import type { GitHubAccessor } from '../../../accessor/github.ts'
 import { find as githubFind } from '../../../core/github/find.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
@@ -38,7 +38,7 @@ async function findCommand(
 
 export const GITHUB_FIND = command({
   name: 'find',
-  resource: ResourceName.GITHUB,
+  vfs: VFSName.GITHUB,
   spec: specOf('find'),
   fn: findCommand,
   provision: metadataProvision,

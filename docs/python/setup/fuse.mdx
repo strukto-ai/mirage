@@ -34,10 +34,10 @@ uv add "mirage-ai[fuse]"
 
 ```python
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 with Workspace(
-    {"/data": Mount(RAMResource(), mode=MountMode.WRITE,
+    {"/data": Mount(RAMVFS(), mode=MountMode.WRITE,
                     backend=MountBackend.FUSE)}) as ws:
     print("mountpoints:", ws.fuse_mountpoints)
 ```
@@ -56,7 +56,7 @@ field:
 
 | `backend` | Effect |
 | --- | --- |
-| `vfs` (default) | Lives only inside mirage's own filesystem, reached through the command surface. Nothing is registered with the kernel. |
+| `workspace` (default) | Lives only inside mirage's own filesystem, reached through the command surface. Nothing is registered with the kernel. |
 | `fuse` | Also exposed as a real mountpoint via FUSE. |
 | `fskit` | Also exposed as a real mountpoint via FSKit, with no kernel extension. macOS 15.4+ only; see below. |
 
@@ -67,15 +67,15 @@ where it lands; omit it for a fresh temp directory:
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
     backend: fuse
     mountpoint: /tmp/data-repo   # explicit path
   /s3:
-    resource: s3
+    vfs: s3
     backend: MountBackend.FUSE             # temp directory
   /logs:
-    resource: disk
-    # no backend key: stays on the vfs default, not kernel-mounted
+    vfs: disk
+    # no backend key: stays on the workspace default, not kernel-mounted
 ```
 
 `ws.fuse_mountpoints` returns a `{prefix: path}` map of the live mountpoints.
@@ -95,17 +95,17 @@ flowchart LR
     A[cat /Volumes/.../file] --> K[kernel VFS]
     K -->|backend=fuse| X[macFUSE kext] --> L[libfuse]
     K -->|backend=fskit| F[fskitd + macFUSE FSKit module] --> L
-    L --> M[MirageFS] --> R[resource]
+    L --> M[MirageFS] --> R[vfs]
 ```
 
 Set `backend` on the mount:
 
 ```python
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 with Workspace({
-    "/data/": Mount(RAMResource(), mode=MountMode.WRITE,
+    "/data/": Mount(RAMVFS(), mode=MountMode.WRITE,
                     backend=MountBackend.FSKIT)
 }) as ws:
     print(ws.fuse_mountpoint)   # /Volumes/mirage-...
@@ -121,7 +121,7 @@ are enforced at mount time rather than discovered at run time:
   volume: the `/Volumes` entry appears when the filesystem goes live and is
   removed when it unmounts. `/Volumes` is root-owned, so nothing here needs
   (or could get) elevated permissions.
-- **Every mounted resource must be able to size its files.** See below.
+- **Every mounted VFS must be able to size its files.** See below.
 
 There is deliberately **no `auto`** value: auto-selecting FSKit would silently
 break every API-backed mount, and an option whose safe value is always the
@@ -171,7 +171,7 @@ TypeScript supports the same backend with the same guards
 
 ## Size semantics for API-backed files
 
-Some resources (Linear, Trello, Slack, ...) cannot report a file's size
+Some mounts (Linear, Trello, Slack, ...) cannot report a file's size
 without fetching its content, so `stat` returns an unknown size. Over the
 FUSE mount these files behave like Linux `/proc` files: they stat as **0
 bytes until first open**, and become fully readable the moment anything opens
@@ -222,3 +222,7 @@ enforced by Mirage mount modes, not by the kernel. For that reason, never
 mount with the `default_permissions` FUSE option. It would make the kernel
 enforce the displayed bits, and a `chmod 000` could lock Mirage out of its
 own files.
+
+Extended attributes over FUSE are the ones the Mirage shell's `getfattr`
+and `setfattr` read and write. Mirage stores them in its namespace beside
+the symlinks, so every backend takes them.

@@ -17,7 +17,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { loadOptionalPeer } from '../../optional_peer.ts'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
-import type { GridFSConfig } from '../../resource/gridfs/config.ts'
+import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
 
 export interface GridFSFileDoc {
   _id: ObjectId
@@ -44,7 +44,7 @@ let cachedModule: Promise<GridFSModule> | null = null
 
 export async function loadGridFSModule(): Promise<GridFSModule> {
   cachedModule ??= loadOptionalPeer(() => import('mongodb') as unknown as Promise<GridFSModule>, {
-    feature: 'GridFSResource',
+    feature: 'GridFSVFS',
     packageName: 'mongodb',
   })
   return cachedModule
@@ -63,7 +63,7 @@ export function stripKeyPrefix(key: string, config: GridFSConfig): string {
 }
 
 export function rawPathOf(path: PathSpec): string {
-  const prefix = kp.mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = kp.mountPrefixOf(path.virtual, path.vfsPath)
   return prefix !== '' && path.virtual.startsWith(prefix)
     ? path.virtual.slice(prefix.length) || '/'
     : path.virtual

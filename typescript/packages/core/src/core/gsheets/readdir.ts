@@ -22,7 +22,7 @@ import { TOP_LEVEL_DIRS } from '../google/constants.ts'
 import { MIME } from './constants.ts'
 import { detectScope } from './scope.ts'
 import { listAllFiles } from '../google/drive.ts'
-import { makeFilename } from '../../resource/gsheets/sheet_entry.ts'
+import { makeFilename } from '../../vfs/gsheets/sheet_entry.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
 export async function readdir(
@@ -30,7 +30,7 @@ export async function readdir(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const modifiedRange = path.pattern ? globToModifiedRange(path.pattern) : null
   const raw = path.pattern ? path.directory : path.virtual
   let p = raw

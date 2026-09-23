@@ -17,22 +17,22 @@ import asyncio
 from mirage.commands.registry import RegisteredCommand
 from mirage.commands.spec import SPECS
 from mirage.io.types import IOResult
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _run(ws, cmd, cwd="/"):
     ws._cwd = cwd
-    return asyncio.run(ws.execute(cmd))
+    return asyncio.run(ws.shell(cmd))
 
 
 def test_filetype_fns_passed_to_generic_command():
     ws = Workspace(
-        {"/tmp/": RAMResource()},
+        {"/tmp/": RAMVFS()},
         mode=MountMode.WRITE,
     )
-    asyncio.run(ws.fs.write("/tmp/a.txt", b"hello"))
+    asyncio.run(ws.vfs.write("/tmp/a.txt", b"hello"))
 
     received = {}
 
@@ -47,13 +47,13 @@ def test_filetype_fns_passed_to_generic_command():
     mount.register(
         RegisteredCommand("mycat",
                           spec=SPECS["cat"],
-                          resource="ram",
+                          vfs="ram",
                           filetype=None,
                           fn=my_cat))
     mount.register(
         RegisteredCommand("mycat",
                           spec=SPECS["cat"],
-                          resource="ram",
+                          vfs="ram",
                           filetype=".parquet",
                           fn=my_cat_parquet))
 
@@ -65,10 +65,10 @@ def test_filetype_fns_passed_to_generic_command():
 
 def test_filetype_fns_not_passed_to_filetype_command():
     ws = Workspace(
-        {"/tmp/": RAMResource()},
+        {"/tmp/": RAMVFS()},
         mode=MountMode.WRITE,
     )
-    asyncio.run(ws.fs.write("/tmp/a.parquet", b"fake-parquet"))
+    asyncio.run(ws.vfs.write("/tmp/a.parquet", b"fake-parquet"))
 
     received = {}
 
@@ -83,13 +83,13 @@ def test_filetype_fns_not_passed_to_filetype_command():
     mount.register(
         RegisteredCommand("mycat",
                           spec=SPECS["cat"],
-                          resource="ram",
+                          vfs="ram",
                           filetype=None,
                           fn=my_cat))
     mount.register(
         RegisteredCommand("mycat",
                           spec=SPECS["cat"],
-                          resource="ram",
+                          vfs="ram",
                           filetype=".parquet",
                           fn=my_cat_parquet))
 
@@ -100,10 +100,10 @@ def test_filetype_fns_not_passed_to_filetype_command():
 
 def test_filetype_fns_empty_when_no_variants():
     ws = Workspace(
-        {"/tmp/": RAMResource()},
+        {"/tmp/": RAMVFS()},
         mode=MountMode.WRITE,
     )
-    asyncio.run(ws.fs.write("/tmp/a.txt", b"hello"))
+    asyncio.run(ws.vfs.write("/tmp/a.txt", b"hello"))
 
     received = {}
 
@@ -114,7 +114,7 @@ def test_filetype_fns_empty_when_no_variants():
     ws._registry.mount_for("/tmp/").register(
         RegisteredCommand("myecho",
                           spec=SPECS["echo"],
-                          resource="ram",
+                          vfs="ram",
                           filetype=None,
                           fn=my_echo))
 
@@ -137,14 +137,14 @@ def test_a_directory_does_not_route_to_a_filetype_handler():
         fired.append(paths[0].virtual)
         return b"rendered\n", IOResult()
 
-    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     _run(ws, "mkdir -p /data/dir.tally")
-    asyncio.run(ws.fs.write("/data/dir.tally/inside.txt", b"nested\n"))
-    asyncio.run(ws.fs.write("/data/file.tally", b"raw\n"))
+    asyncio.run(ws.vfs.write("/data/dir.tally/inside.txt", b"nested\n"))
+    asyncio.run(ws.vfs.write("/data/file.tally", b"raw\n"))
     ws._registry.mount_for("/data/").register(
         RegisteredCommand("cat",
                           spec=SPECS["cat"],
-                          resource="ram",
+                          vfs="ram",
                           filetype=".tally",
                           fn=renderer))
 

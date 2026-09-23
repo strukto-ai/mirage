@@ -22,9 +22,9 @@ from openhands.sdk import LLM, Agent, Conversation, Tool
 
 from mirage import MountMode, Workspace
 from mirage.agents.openhands import MirageWorkspace, register_mirage_terminal
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
-ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 llm = LLM(
     model=os.getenv("LLM_MODEL", "anthropic/claude-sonnet-4-6"),
@@ -48,7 +48,7 @@ with MirageWorkspace(workspace=ws, working_dir="/") as mirage_ws:
 | Symbol | Purpose |
 | --- | --- |
 | `MirageWorkspace` | OpenHands `Workspace` implementation backed by a Mirage workspace. |
-| `MirageTerminalExecutor` | Terminal executor that pipes through `Workspace.execute()`. |
+| `MirageTerminalExecutor` | Terminal executor that pipes through `Workspace.shell()`. |
 | `register_mirage_terminal` | Registers the Mirage terminal tool so the agent can `Tool(name=...)` it. |
 
 ## Examples

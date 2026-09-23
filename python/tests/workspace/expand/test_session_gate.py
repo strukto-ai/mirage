@@ -16,7 +16,7 @@ import pytest
 
 from mirage.policy import Action, Deny, Policy
 from mirage.policy.types import SessionContext
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -32,7 +32,7 @@ class DenyAws(Policy):
 @pytest.fixture
 def guarded():
     """A workspace whose policy refuses writes to ``AWS_*``."""
-    with Workspace({"/ram/": RAMResource()}, policies=[DenyAws()]) as ws:
+    with Workspace({"/ram/": RAMVFS()}, policies=[DenyAws()]) as ws:
         yield ws
 
 
@@ -43,7 +43,7 @@ async def value_of(ws, name: str) -> bytes:
         ws (Workspace): the workspace under test.
         name (str): variable name.
     """
-    result = await ws.execute(f"echo [${name}]")
+    result = await ws.shell(f"echo [${name}]")
     return (result.stdout or b"").strip()
 
 
@@ -65,7 +65,7 @@ async def value_of(ws, name: str) -> bytes:
 )
 async def test_every_session_writer_clears_the_gate(guarded, line: str,
                                                     name: str):
-    result = await guarded.execute(line)
+    result = await guarded.shell(line)
     assert result.exit_code != 0, f"{line!r} was not refused"
     assert b"not yours to set" in (result.stderr or b""), line
     assert await value_of(guarded, name) == b"[]", f"{line!r} wrote anyway"
@@ -84,7 +84,7 @@ async def test_every_session_writer_clears_the_gate(guarded, line: str,
 )
 async def test_a_name_no_rule_covers_still_writes(guarded, line: str,
                                                   name: str, expected: bytes):
-    await guarded.execute(line)
+    await guarded.shell(line)
     assert await value_of(guarded, name) == expected
 
 
@@ -94,10 +94,10 @@ async def test_a_subscripted_printf_target_clears_the_gate(guarded):
     # session write like any other. Taking the direct path for it left
     # `printf -v 'AWS_KEY[0]'` as the one spelling a pre_session rule
     # could not refuse.
-    result = await guarded.execute("printf -v 'AWS_KEY[0]' %s x")
+    result = await guarded.shell("printf -v 'AWS_KEY[0]' %s x")
     assert result.exit_code != 0
     assert b"not yours to set" in (result.stderr or b"")
-    read = await guarded.execute('echo "[${AWS_KEY[0]}]"')
+    read = await guarded.shell('echo "[${AWS_KEY[0]}]"')
     assert (read.stdout or b"").strip() == b"[]"
 
 
@@ -117,5 +117,5 @@ async def test_a_subscripted_printf_target_clears_the_gate(guarded):
 )
 async def test_an_expansion_write_keeps_the_other_elements(
         guarded, line: str, expected: bytes):
-    result = await guarded.execute(line)
+    result = await guarded.shell(line)
     assert (result.stdout or b"").strip() == expected

@@ -28,7 +28,7 @@ import {
   type QdrantRow,
 } from '../core/qdrant/client.ts'
 import { valueText } from '../core/render/json.ts'
-import type { QdrantConfigResolved } from '../resource/qdrant/config.ts'
+import type { QdrantConfigResolved } from '../vfs/qdrant/config.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { rowStem } from '../core/qdrant/naming.ts'
 import { fieldValue } from '../core/qdrant/payload.ts'
@@ -56,7 +56,7 @@ export class QdrantAccessor extends Accessor {
     if (this.client === null) {
       const mod = (await loadOptionalPeer(
         () => import(/* @vite-ignore */ '@qdrant/js-client-rest'),
-        { feature: 'QdrantResource', packageName: '@qdrant/js-client-rest' },
+        { feature: 'QdrantVFS', packageName: '@qdrant/js-client-rest' },
       )) as { QdrantClient: QdrantClientCtor }
       const auth = this.config.apiKey !== null ? { apiKey: this.config.apiKey } : {}
       this.client = new mod.QdrantClient(

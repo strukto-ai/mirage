@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '../../../../types.ts'
 import { fsStrerror } from '../../../../utils/errors.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { scopePath } from '../scope.ts'
@@ -27,7 +27,7 @@ export async function handleSource(
   dispatch: DispatchFn,
   executeFn: ExecuteStringFn,
   path: string | PathSpec,
-  session: Session,
+  session: SessionState,
   args: string[] = [],
 ): Promise<Result> {
   const raw = scopePath(path)

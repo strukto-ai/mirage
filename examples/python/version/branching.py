@@ -24,7 +24,7 @@ from pathlib import Path
 CONFIG_YAML = """\
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE
 """
 

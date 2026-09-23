@@ -117,7 +117,7 @@ class RuntimeVFS:
         try:
             return self._raw(op, path, **kwargs)
         except OperationNotSupportedError as exc:
-            # execute_op raises this for an op the mount's resource does
+            # execute_op raises this for an op the mount's VFS does
             # not register; guests spell that ENOTSUP.
             raise NotImplementedError(str(exc)) from exc
 

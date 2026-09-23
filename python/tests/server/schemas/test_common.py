@@ -2,11 +2,11 @@ from mirage.server.schemas.common import MountSummary, SessionSummary
 
 
 def test_mount_summary_defaults_description_empty():
-    summary = MountSummary(prefix="/data", resource="ram", mode="rw")
+    summary = MountSummary(prefix="/data", vfs="ram", mode="rw")
     assert summary.description == ""
     assert summary.model_dump() == {
         "prefix": "/data",
-        "resource": "ram",
+        "vfs": "ram",
         "mode": "rw",
         "description": "",
     }

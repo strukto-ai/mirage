@@ -45,7 +45,7 @@ async def readdir(
         FileNotFoundError: no component of the path exists.
         NotADirectoryError: the path, or a component of it, is a file.
     """
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
     found = await lookup(accessor, index, prefix, key_of(prefix, path))
     if found.children is not None:

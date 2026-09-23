@@ -14,12 +14,12 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import { resolveLanceDBConfig } from '../../resource/lancedb/config.ts'
+import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import type { LanceDriver } from './_driver.ts'
 import { read } from './read.ts'
 
-const BLOB_PATH = new PathSpec({ resourcePath: '1.bin', virtual: '/1.bin', directory: '/1.bin' })
+const BLOB_PATH = new PathSpec({ vfsPath: '1.bin', virtual: '/1.bin', directory: '/1.bin' })
 
 function makeAccessor(blob: unknown): LanceDBAccessor {
   const driver = {

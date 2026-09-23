@@ -1,12 +1,12 @@
 ---
 title: Databricks Volume
 icon: /images/databricks-logo.svg
-description: Set up Databricks credentials for the Unity Catalog volume resource.
+description: Set up Databricks credentials for the Unity Catalog volume VFS.
 ---
 
 ## Credentials
 
-The resource reads a Unity Catalog volume over the Databricks SDK. It needs a
+The VFS reads a Unity Catalog volume over the Databricks SDK. It needs a
 workspace host plus one auth method: a personal access token, a config
 profile, or the SDK defaults (handy inside Databricks Apps).
 
@@ -35,4 +35,4 @@ DATABRICKS_TOKEN=dapi...
 - **SDK defaults:** omit host, token, and profile to fall through to the
   Databricks SDK default auth chain (for example inside Databricks Apps).
 
-For Python configuration, see the [Python Databricks Volume resource](/python/resource/databricks_volume) page.
+For Python configuration, see the [Python Databricks Volume VFS](/python/vfs/databricks_volume) page.

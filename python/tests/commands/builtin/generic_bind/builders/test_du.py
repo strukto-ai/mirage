@@ -59,7 +59,7 @@ def _ops(max_du_entries: int | None = None) -> CommandIO:
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.lstrip("/"))
+                    vfs_path=virtual.lstrip("/"))
 
 
 async def _run(ops: CommandIO, path: str, **flags) -> tuple[str, int, str]:
@@ -121,8 +121,7 @@ async def test_no_operand_walks_the_working_directory():
     stream, io = await du(
         _ops(), object(), [], [],
         CommandOpts(cwd=PathSpec(
-            virtual='/db', directory='/db', resource_path='db',
-            resolved=False)))
+            virtual='/db', directory='/db', vfs_path='db', resolved=False)))
     assert (await materialize(stream)).decode() == "2\t/db/sub\n5\t/db\n"
     assert io.exit_code == 0
 

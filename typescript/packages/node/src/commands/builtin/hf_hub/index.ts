@@ -14,24 +14,20 @@
 
 import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { HfHubAccessor } from '../../../accessor/hf_hub.ts'
 import { HF_HUB_IO } from './io.ts'
 
-// The three git-repo resources. `hf_buckets` is deliberately absent: it is a
+// The three git-repo VFS. `hf_buckets` is deliberately absent: it is a
 // different Hugging Face product (Xet-backed mutable object storage, no
 // commits and no revisions) and keeps its own OpenDAL-backed commands.
-export const HF_HUB_RESOURCES = [
-  ResourceName.HF_MODELS,
-  ResourceName.HF_DATASETS,
-  ResourceName.HF_SPACES,
-] as const
+export const HF_HUB_VFS_NAMES = [VFSName.HF_MODELS, VFSName.HF_DATASETS, VFSName.HF_SPACES] as const
 
 // cp and mv are skipped because the Hub has no server-side copy or rename.
 const HF_HUB_OVERRIDES = new Set(['cp', 'mv'])
 
-export const HF_HUB_COMMANDS: readonly RegisteredCommand[] = HF_HUB_RESOURCES.flatMap((resource) =>
-  makeGenericCommands<HfHubAccessor>(resource, HF_HUB_IO, {
+export const HF_HUB_COMMANDS: readonly RegisteredCommand[] = HF_HUB_VFS_NAMES.flatMap((vfs) =>
+  makeGenericCommands<HfHubAccessor>(vfs, HF_HUB_IO, {
     overrides: HF_HUB_OVERRIDES,
   }),
 )

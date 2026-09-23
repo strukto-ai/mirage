@@ -16,7 +16,7 @@
 import {
   MountMode,
   Outcome,
-  RAMResource,
+  RAMVFS,
   Scope,
   Workspace,
   parseSessionProfile,
@@ -46,15 +46,15 @@ const reviewer: AskHandler = (record: Decision): Promise<Decision> => {
 };
 
 async function run(ws: Workspace, line: string): Promise<void> {
-  await ws.fs.writeFile("/data/a.txt", "a\n");
-  const res = await ws.execute(line, { sessionId: "agent" });
+  await ws.vfs.writeFile("/data/a.txt", "a\n");
+  const res = await ws.shell(line, { sessionId: "agent" });
   const how = res.refusal === null ? "ran" : `refused (${res.refusal.kind})`;
   console.log(`${line}: ${how}, exit ${String(res.exitCode)}`);
 }
 
 async function main(): Promise<void> {
   const ws = new Workspace(
-    { "/data/": new RAMResource() },
+    { "/data/": new RAMVFS() },
     { mode: MountMode.WRITE, profiles: { agent: ROLE }, onAsk: reviewer },
   );
   ws.createSession("agent", { profile: "agent" });

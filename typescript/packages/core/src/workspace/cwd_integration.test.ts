@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -27,7 +27,7 @@ const ENC = new TextEncoder()
 
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const r = new RAMResource()
+  const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add('/subdir')
   r.store.dirs.add('/subdir/nested')
@@ -35,7 +35,7 @@ async function makeWs(): Promise<Workspace> {
   r.store.files.set('/subdir/nested/deep.txt', ENC.encode('deep'))
 
   const registry = new OpsRegistry()
-  registry.registerResource(r)
+  registry.registerVfs(r)
   return new Workspace(
     { '/ram/': r },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
@@ -44,13 +44,13 @@ async function makeWs(): Promise<Workspace> {
 
 async function makeWsSpecial(): Promise<Workspace> {
   const parser = await getTestParser()
-  const r = new RAMResource()
+  const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add("/Zecheng's Server")
   r.store.files.set("/Zecheng's Server/image.png", ENC.encode('PNG'))
 
   const registry = new OpsRegistry()
-  registry.registerResource(r)
+  registry.registerVfs(r)
   return new Workspace(
     { '/ram/': r },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
@@ -58,7 +58,7 @@ async function makeWsSpecial(): Promise<Workspace> {
 }
 
 async function runOut(ws: Workspace, cmd: string): Promise<string> {
-  const io = await ws.execute(cmd)
+  const io = await ws.shell(cmd)
   return stdoutStr(io)
 }
 
@@ -96,14 +96,14 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
 
   it('cd ~ with $HOME unset → error', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('cd /ram/subdir && cd ~')
+    const io = await ws.shell('cd /ram/subdir && cd ~')
     expect(io.exitCode).not.toBe(0)
     await ws.close()
   })
 
   it('bare cd with $HOME unset → error (HOME not set)', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('cd /ram/subdir && cd')
+    const io = await ws.shell('cd /ram/subdir && cd')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('HOME not set')
     await ws.close()
@@ -220,7 +220,7 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
 
   it('cd - without OLDPWD errors', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('cd -')
+    const io = await ws.shell('cd -')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('OLDPWD not set')
     await ws.close()
@@ -246,7 +246,7 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
 
   it('quoted tilde is not expanded', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('export HOME=/ram/subdir && cat "~/file.txt"')
+    const io = await ws.shell('export HOME=/ram/subdir && cat "~/file.txt"')
     expect(io.exitCode).not.toBe(0)
     await ws.close()
   })
@@ -301,7 +301,7 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
 
   it('cd -x → invalid option, exit 2', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('cd -x /ram')
+    const io = await ws.shell('cd -x /ram')
     expect(io.exitCode).toBe(2)
     expect(stderrStr(io)).toContain('invalid option')
     await ws.close()
@@ -309,7 +309,7 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
 
   it('cd a b → too many arguments, exit 1', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('cd /ram /ram/subdir')
+    const io = await ws.shell('cd /ram /ram/subdir')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toContain('too many arguments')
     await ws.close()
@@ -317,7 +317,7 @@ describe('cwd integration (port of tests/workspace/test_cwd_integration.py)', ()
 
   it("cd '~' (quoted) is literal, not $HOME", async () => {
     const ws = await makeWs()
-    const io = await ws.execute("cd /ram && cd '~'")
+    const io = await ws.shell("cd /ram && cd '~'")
     expect(io.exitCode).not.toBe(0)
     await ws.close()
   })

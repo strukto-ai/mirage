@@ -87,10 +87,10 @@ async def _stat_day(accessor: GmailAccessor, match: ScopeMatch, path: PathSpec,
     if entry is not None:
         return FileStat(name=entry.vfs_name, type=FileType.DIRECTORY)
     label_virtual = path.virtual.rstrip("/").rsplit("/", 1)[0]
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     label_spec = PathSpec(virtual=label_virtual,
                           directory=label_virtual,
-                          resource_path=mount_key(label_virtual, prefix))
+                          vfs_path=mount_key(label_virtual, prefix))
     if await resolve_entry(readdir, accessor, label_spec, index) is None:
         raise enoent(path.virtual)
     return FileStat(name=match.slots["day"], type=FileType.DIRECTORY)

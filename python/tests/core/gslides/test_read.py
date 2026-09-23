@@ -56,7 +56,7 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             ),
     ):
         path = PathSpec(
-            resource_path=mount_key(
+            vfs_path=mount_key(
                 "/gslides/owned/2026-04-01_Deck__slide1.gslide.json",
                 "/gslides"),
             virtual="/gslides/owned/2026-04-01_Deck__slide1.gslide.json",
@@ -82,8 +82,8 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
             ),
     ):
         path = PathSpec(
-            resource_path=mount_key("/gslides/owned/Missing__xyz.gslide.json",
-                                    "/gslides"),
+            vfs_path=mount_key("/gslides/owned/Missing__xyz.gslide.json",
+                               "/gslides"),
             virtual="/gslides/owned/Missing__xyz.gslide.json",
             directory="/gslides/owned/Missing__xyz.gslide.json",
         )

@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_TAIL = RAM_COMMANDS.filter((c) => c.name === 'tail' && c.filetype == null)
 
@@ -25,13 +25,13 @@ const DEC = new TextDecoder()
 const TWENTY_LINES = Array.from({ length: 20 }, (_, i) => `line${String(i + 1)}`).join('\n')
 
 async function runTail(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = RAM_TAIL[0]
   if (cmd === undefined) throw new Error('tail not registered')
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -46,91 +46,87 @@ async function runTail(
 
 describe('tail', () => {
   it('returns last 10 lines by default', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
     const expected = Array.from({ length: 10 }, (_, i) => `line${String(i + 11)}`).join('\n')
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe(expected)
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe(expected)
   })
 
   it('-n 3 returns last 3 lines', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '3' })).toBe(
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '3' })).toBe(
       'line18\nline19\nline20',
     )
   })
 
   it('-n 1 returns last line', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '1' })).toBe('line20')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode(TWENTY_LINES))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '1' })).toBe('line20')
   })
 
   it('-n larger than file returns all', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc'))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '100' })).toBe(
-      'a\nb\nc',
-    )
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc'))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { n: '100' })).toBe('a\nb\nc')
   })
 
   it('-c returns specific byte count', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '5' })).toBe('fghij')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '5' })).toBe('fghij')
   })
 
   it('-c larger than file returns all bytes', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abc'))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '100' })).toBe('abc')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abc'))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '100' })).toBe('abc')
   })
 
   it('-c 0 returns empty', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abc'))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '0' })).toBe('')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abc'))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '0' })).toBe('')
   })
 
   it('-c -N counts back from the end, like -c N', async () => {
     // This used to drop the FIRST N bytes: the raw signed value went into
     // raw.slice(-bytesMode), so a leading '-' flipped the slice around.
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '-3' })).toBe('hij')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '-3' })).toBe('hij')
   })
 
   it('-c +N counts forward from byte N', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '+3' })).toBe(
-      'cdefghij',
-    )
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '+3' })).toBe('cdefghij')
   })
 
   it('-c +1 and -c +0 are the whole file', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
     const path = [PathSpec.fromStrPath('/tmp/f.txt')]
-    expect(await runTail(resource, path, { c: '+1' })).toBe('abcdefghij')
-    expect(await runTail(resource, path, { c: '+0' })).toBe('abcdefghij')
+    expect(await runTail(vfs, path, { c: '+1' })).toBe('abcdefghij')
+    expect(await runTail(vfs, path, { c: '+0' })).toBe('abcdefghij')
   })
 
   it('-c +N past the end returns empty', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '+99' })).toBe('')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('abcdefghij'))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { c: '+99' })).toBe('')
   })
 
   it('empty file', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', new Uint8Array())
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe('')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', new Uint8Array())
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe('')
   })
 
   it('single line without newline', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('hello'))
-    expect(await runTail(resource, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe('hello')
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('hello'))
+    expect(await runTail(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])).toBe('hello')
   })
 })

@@ -21,8 +21,8 @@ from mirage.accessor.jaeger import JaegerAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.jaeger.client import JaegerApiError
 from mirage.core.jaeger.read import read
-from mirage.resource.jaeger.config import JaegerConfig
 from mirage.types import PathSpec
+from mirage.vfs.jaeger.config import JaegerConfig
 
 TRACE_A = "a" * 32
 
@@ -39,7 +39,7 @@ def index():
 
 def spec(path: str) -> PathSpec:
     virtual = f"/{path}"
-    return PathSpec(resource_path=path, virtual=virtual, directory=virtual)
+    return PathSpec(vfs_path=path, virtual=virtual, directory=virtual)
 
 
 def known_service():

@@ -27,7 +27,7 @@ import {
   parseConfigWithSchema,
   redactConfigWithSchema,
   type RedactedConfig,
-} from '../resource/secrets.ts'
+} from '../vfs/secrets.ts'
 import { stripSlash } from '../utils/slash.ts'
 
 export interface OneDriveConfig extends MsGraphConfig {

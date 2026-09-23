@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../../ops/registry.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import type { Action, OpsContext, Policy } from '../../policy/index.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -30,8 +30,8 @@ class NoRmdir implements Policy {
 async function shellWs(policies: Policy[] = []): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const root = new RAMResource()
-  ops.registerResource(root)
+  const root = new RAMVFS()
+  ops.registerVfs(root)
   const ws = new Workspace(
     { '/': root },
     { mode: MountMode.WRITE, ops, shellParser: parser, policies },
@@ -46,7 +46,7 @@ describe('find actions', () => {
     // `-exec {} \;` runs each match itself rather than looking up `{}`.
     const ws = await shellWs()
     try {
-      const r = await ws.execute(
+      const r = await ws.shell(
         "mkdir -p /data/fh/s; printf 'echo ran\\n' > /data/fh/s/x; chmod 700 /data/fh/s/x; cd /data/fh; find s -type f -exec {} \\; ; echo rc=$?",
         { sessionId: 's' },
       )
@@ -63,11 +63,11 @@ describe('find actions', () => {
     // inherit the removed one's mode.
     const ws = await shellWs()
     try {
-      await ws.execute('mkdir -p /data/m; touch /data/m/f /data/m/d', { sessionId: 's' })
+      await ws.shell('mkdir -p /data/m; touch /data/m/f /data/m/d', { sessionId: 's' })
       await ws.namespace.setAttrs('/data/m/f', { mode: 0o600 })
       await ws.namespace.setAttrs('/data/m/d', { mode: 0o700 })
       expect(ws.namespace.metaFor('/data/m/f')).not.toBeNull()
-      const r = await ws.execute('find /data/m -name f -delete; echo rc=$?', { sessionId: 's' })
+      const r = await ws.shell('find /data/m -name f -delete; echo rc=$?', { sessionId: 's' })
       expect(r.stdoutText).toBe('rc=0\n')
       expect(ws.namespace.metaFor('/data/m/f')).toBeNull()
       expect(ws.namespace.metaFor('/data/m/d')).not.toBeNull()
@@ -81,7 +81,7 @@ describe('find actions', () => {
     // hides the program from find nor runs in its place.
     const ws = await shellWs()
     try {
-      const r = await ws.execute(
+      const r = await ws.shell(
         "mkdir -p /data/sh; printf 'content\\n' > /data/sh/f; cd /data/sh; cat() { echo BAD; }; find . -type f -exec cat {} \\; ; echo rc=$?",
         { sessionId: 's' },
       )
@@ -97,7 +97,7 @@ describe('find actions', () => {
     // -delete` as it judges `rmdir emptydir`.
     const ws = await shellWs([new NoRmdir()])
     try {
-      const r = await ws.execute(
+      const r = await ws.shell(
         'mkdir -p /data/rd/e; touch /data/rd/f; find /data/rd/f -delete; echo rc=$?; find /data/rd/e -delete; echo rc=$?; test -d /data/rd/e; echo $?',
         { sessionId: 's' },
       )
@@ -113,7 +113,7 @@ describe('find actions', () => {
     // the first child takes it and the next reads EOF.
     const ws = await shellWs()
     try {
-      const r = await ws.execute(
+      const r = await ws.shell(
         'mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?; printf z | find d -maxdepth 0 -exec true \\; -exec cat \\; ; echo rc=$?; printf abc | find d -maxdepth 0 -exec head -c 1 \\; -exec cat \\; ; echo rc=$?',
         { sessionId: 's' },
       )
@@ -130,8 +130,8 @@ describe('find actions', () => {
     // An alias is as invisible to execvp as a function: the program runs.
     const ws = await shellWs()
     try {
-      await ws.execute("shopt -s expand_aliases; alias cat='echo BAD'", { sessionId: 's' })
-      const r = await ws.execute(
+      await ws.shell("shopt -s expand_aliases; alias cat='echo BAD'", { sessionId: 's' })
+      const r = await ws.shell(
         "mkdir -p /data/al; printf 'content\\n' > /data/al/f; cd /data/al; find . -type f -exec cat {} \\; ; echo rc=$?; command cat f",
         { sessionId: 's' },
       )
@@ -149,7 +149,7 @@ describe('find actions', () => {
     // they removed (exit 0) while `-type f -delete -ls` reports it gone.
     const ws = await shellWs()
     try {
-      const r = await ws.execute(
+      const r = await ws.shell(
         'mkdir -p /data/dl; touch /data/dl/f /data/dl/g; cd /data; find dl/f -delete -ls; echo rc=$?; find dl -name g -size -1k -delete -ls; echo rc=$?; find dl -type d -delete -ls; echo rc=$?; test -e dl; echo e=$?',
         { sessionId: 's' },
       )
@@ -180,6 +180,104 @@ describe('find actions', () => {
     }
   })
 
+  it('renders -printf rows through the format with stats', async () => {
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/pf/sub; printf 'hello\\n' > /data/pf/a.txt; printf 'hi\\n' > /data/pf/sub/b.txt; find /data/pf -printf '%p %y %d\\n'; find /data/pf -name a.txt -printf '%f %s\\n'",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe(
+        '/data/pf d 0\n/data/pf/a.txt f 1\n/data/pf/sub d 1\n/data/pf/sub/b.txt f 2\na.txt 6\n',
+      )
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs -printf per row, in order, beside the other actions', async () => {
+    // GNU findutils 4.10: each row runs the -a chain in the order written,
+    // a failing `-exec ;` ends it before a later -printf, and a batched
+    // `-exec +` runs once after every row.
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/pa; echo hi > /data/pa/a; echo yo > /data/pa/b; cd /data; find pa -type f -printf '%p\\n' -exec cat {} \\; ; find pa -type f -exec cat {} \\; -printf '%f\\n'; find pa -type f -printf '%p ' -print; find pa -type f -printf '%f ' -printf '%s\\n'; find pa -type f -exec grep -q hi {} \\; -printf 'hit %p\\n'; find pa -type f -printf '%f\\n' -exec echo batch {} +",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe(
+        [
+          'pa/a',
+          'hi',
+          'pa/b',
+          'yo',
+          'hi',
+          'a',
+          'yo',
+          'b',
+          'pa/a pa/a',
+          'pa/b pa/b',
+          'a 3',
+          'b 3',
+          'hit pa/a',
+          'a',
+          'b',
+          'batch pa/a pa/b',
+          '',
+        ].join('\n'),
+      )
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('measures -printf %P and %d from the start point a row came from', async () => {
+    // GNU: `find d d/sub` walks d/sub twice, once under each start point.
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/pp/sub; echo g > /data/pp/sub/g; cd /data; find pp pp/sub -type f -printf '%P %d|' -print",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('sub/g 2|pp/sub/g\ng 1|pp/sub/g\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('orders -printf rows under -depth', async () => {
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/pd/s; touch /data/pd/f /data/pd/s/g; cd /data; find pd -depth -printf '%p\\n'",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('pd/f\npd/s/g\npd/s\npd\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('renders the stat find already holds for -printf', async () => {
+    // GNU stats a row once: -printf reads a row an earlier -delete removed
+    // only when a test or an earlier -printf statted it first, and
+    // otherwise reports it gone and exits 1. A format with no stat
+    // directive never looks.
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/ps; cd /data; echo 1 > ps/f; find ps -type f -delete -printf '%s %p\\n'; echo rc=$?; echo 1 > ps/f; find ps -type f -delete -printf '%p\\n'; echo rc=$?; echo 1 > ps/f; find ps -type f -printf '%s|' -delete -printf '%s\\n'; echo rc=$?; echo 1 > ps/f; find ps -size -2k -type f -delete -printf '%s\\n'; echo rc=$?",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('rc=1\nps/f\nrc=0\n2|2\nrc=0\n2\nrc=0\n')
+      expect(r.stderrText).toBe("find: 'ps/f': No such file or directory\n")
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('runs the -exec head as a program', async () => {
     // execvp answers `printf` with coreutils printf, which has no -v: the
     // word is the format (GNU adds a warning about the excess arguments,
@@ -187,7 +285,7 @@ describe('find actions', () => {
     // starts is a shell again, so its printf assigns.
     const ws = await shellWs()
     try {
-      const r = await ws.execute(
+      const r = await ws.shell(
         'mkdir -p /data/fp; touch /data/fp/f; cd /data/fp; find . -type f -exec printf -v x hi \\; ; echo "[$x]"; find . -type f -exec sh -c \'printf -v y hi; echo "[$y]"\' \\; ; printf -v z hi; echo "[$z]"',
         { sessionId: 's' },
       )

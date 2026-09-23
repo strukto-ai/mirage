@@ -28,6 +28,22 @@ export function googleError(code: number, message: string, status: string): Repl
 
 export const NOT_FOUND: Reply = googleError(404, 'File not found.', 'NOT_FOUND')
 
+// Drive v3 answers in its older error shape: no `status`, and an `errors`
+// list naming the reason and, for a bad id, the parameter that carried it.
+export function driveError(code: number, message: string, reason: string, param?: string): Reply {
+  const where = param === undefined ? {} : { location: param, locationType: 'parameter' }
+  return {
+    status: code,
+    body: { error: { code, message, errors: [{ message, domain: 'global', reason, ...where }] } },
+  }
+}
+
+// What live Drive answers for any id it cannot find, whether the id is the
+// file the path names or a parent the request placed it under.
+export function fileNotFound(id: string): Reply {
+  return driveError(404, `File not found: ${id}.`, 'notFound', 'fileId')
+}
+
 // Whether a step that reads state answered with a Reply instead of the value
 // it was asked for, so a route can hand the refusal straight back.
 export function isReply<T extends object>(v: T | Reply): v is Reply {

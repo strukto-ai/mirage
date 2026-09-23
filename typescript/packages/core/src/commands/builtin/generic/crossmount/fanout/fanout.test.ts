@@ -27,7 +27,7 @@ function scope(path: string): PathSpec {
     virtual: path,
     directory: path.slice(0, path.lastIndexOf('/') + 1),
     resolved: true,
-    resourcePath: mountKey(path, ''),
+    vfsPath: mountKey(path, ''),
   })
 }
 

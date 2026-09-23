@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
+import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import { fitIdName, parseIdName } from '../../utils/naming.ts'
 import { NAME_MAX_BYTES, byteLength, pathSafeName } from '../../utils/sanitize.ts'

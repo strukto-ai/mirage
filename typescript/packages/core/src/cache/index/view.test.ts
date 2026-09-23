@@ -23,10 +23,10 @@ import {
 import { RAMFileCacheStore } from '../file/ram.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { IndexView } from './view.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
-import { Session } from '../../workspace/session/session.ts'
+import { SessionState } from '../../workspace/session/session.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
 const cases = ['backend', 'store'].flatMap((phase) =>
@@ -49,10 +49,10 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
                 keyPrefix: `lifecycle:${crypto.randomUUID()}:`,
               }
             : { type }
-        const resource = new RAMResource()
-        const ws = new Workspace({ '/data': resource }, { index: config, mode: MountMode.WRITE })
-        ws.addMount('/alias', resource)
-        const index = resource.index
+        const vfs = new RAMVFS()
+        const ws = new Workspace({ '/data': vfs }, { index: config, mode: MountMode.WRITE })
+        ws.addMount('/alias', vfs)
+        const index = vfs.index
         let enter = (): void => undefined
         let resume = (): void => undefined
         const entered = new Promise<void>((resolve) => {
@@ -61,9 +61,9 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const release = new Promise<void>((resolve) => {
           resume = resolve
         })
-        ws.ops.register({
+        ws.opsRegistry.register({
           name: 'stat',
-          resource: 'ram',
+          vfs: 'ram',
           filetype: null,
           write: false,
           fn: async (_accessor, _path, _args, { index }) => {
@@ -80,7 +80,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
             })
           },
         })
-        const session = new Session({
+        const session = new SessionState({
           sessionId: 'agent',
           hiddenPaths: { paths: ['/data/source/private'] },
         })
@@ -97,9 +97,9 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         try {
           await entered
           await ws.unmount('/data')
-          const replacement = new RAMResource()
+          const replacement = new RAMVFS()
           ws.addMount('/data', replacement)
-          await ws.fs.readdir('/data')
+          await ws.vfs.readdir('/data')
           await replacement.index.put(
             '/data/fresh',
             new IndexEntry({ id: 'new', name: 'fresh', resourceType: 'file' }),
@@ -131,11 +131,11 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
                 keyPrefix: `lifecycle:${crypto.randomUUID()}:`,
               }
             : { type }
-        const resource = new RAMResource()
+        const vfs = new RAMVFS()
         const prefix = shadow ? '/' : '/data'
-        const ws = new Workspace({ [prefix]: resource }, { index: config })
-        ws.addMount('/alias', resource)
-        const index = resource.index
+        const ws = new Workspace({ [prefix]: vfs }, { index: config })
+        ws.addMount('/alias', vfs)
+        const index = vfs.index
         const entry = new IndexEntry({ id: 'old', name: 'stale', resourceType: 'file' })
         let enter = (): void => undefined
         let resume = (): void => undefined
@@ -164,9 +164,9 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
             })
           }
         }
-        ws.ops.register({
+        ws.opsRegistry.register({
           name: 'readdir',
-          resource: 'ram',
+          vfs: 'ram',
           filetype: null,
           write: false,
           fn: async (_accessor, _path, _args, { index }) => {
@@ -177,15 +177,15 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
             return ['/data/stale']
           },
         })
-        const reading = ws.fs.readdir('/data')
+        const reading = ws.vfs.readdir('/data')
         let changing: Promise<unknown> | undefined
-        const replacement = new RAMResource()
+        const replacement = new RAMVFS()
         try {
           await entered
           let changed = false
           if (shadow) {
             ws.addMount('/data', replacement)
-            changing = ws.fs.readdir('/data').then(() => {
+            changing = ws.vfs.readdir('/data').then(() => {
               changed = true
             })
           } else {
@@ -201,7 +201,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           await changing
           if (!shadow) {
             ws.addMount('/data', replacement)
-            await ws.fs.readdir('/data')
+            await ws.vfs.readdir('/data')
           }
           await replacement.index.put(
             '/data/fresh',

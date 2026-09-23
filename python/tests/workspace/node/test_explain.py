@@ -23,7 +23,6 @@ from mirage import Workspace
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.policy.match import Outcome
 from mirage.policy.types import Scope
-from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult
@@ -32,6 +31,7 @@ from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.shell.console import JobConsole
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 
 
 class _FakeConfig(BaseModel):
@@ -94,13 +94,13 @@ DENY_CAT = {
 
 @pytest_asyncio.fixture()
 async def ws():
-    workspace = Workspace({"/data/": RAMResource()},
+    workspace = Workspace({"/data/": RAMVFS()},
                           mode=MountMode.WRITE,
                           profiles={"r": PROFILE})
-    await workspace.execute("mkdir -p /data/prod")
-    await workspace.fs.write("/data/prod/x.txt", b"x\n")
-    await workspace.fs.write("/data/a.txt", b"a\n")
-    await workspace.fs.write("/data/secret.txt", b"s\n")
+    await workspace.shell("mkdir -p /data/prod")
+    await workspace.vfs.write("/data/prod/x.txt", b"x\n")
+    await workspace.vfs.write("/data/a.txt", b"a\n")
+    await workspace.vfs.write("/data/secret.txt", b"s\n")
     workspace.create_session("s", profile="r")
     yield workspace
     await workspace.close()
@@ -150,7 +150,7 @@ async def test_explain_reads_every_command_of_a_line(ws):
 @pytest.mark.asyncio
 async def test_explain_says_exactly_what_the_run_would_say(ws):
     for line in ("rm /data/prod/x.txt", "git push origin main", "gerp x"):
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         said, = await ws.explain(line, "s")
         assert said.exit_code == ran.exit_code
         assert said.stderr == (ran.stderr or b"").decode()
@@ -166,7 +166,7 @@ async def test_explain_spends_nothing(ws):
     assert ws.decisions.pending() == ()
     assert ws.get_session("s").decisions == ()
     await ws.explain("rm /data/prod/x.txt", "s")
-    assert sorted(await ws.fs.readdir("/data")) == [
+    assert sorted(await ws.vfs.readdir("/data")) == [
         "/data/a.txt", "/data/prod", "/data/secret.txt"
     ]
 
@@ -177,12 +177,12 @@ async def test_a_denied_command_stops_the_whole_line(ws):
     # part of it refuses the intent: judging each command as the
     # dispatcher reached it deleted the first file and refused the
     # second.
-    ran = await ws.execute("rm /data/a.txt && rm /data/prod/x.txt",
-                           session_id="s")
+    ran = await ws.shell("rm /data/a.txt && rm /data/prod/x.txt",
+                         session_id="s")
     assert ran.exit_code == 1
     assert ran.stderr == (
         b"rm: /data/prod/x.txt: production data is protected\n")
-    assert "/data/a.txt" in await ws.fs.readdir("/data")
+    assert "/data/a.txt" in await ws.vfs.readdir("/data")
 
 
 @pytest.mark.asyncio
@@ -191,27 +191,27 @@ async def test_a_word_the_session_cannot_see_leaves_the_line_alone(ws):
     # verdict, so it stays bash: the stage fails and the rest of the
     # line does what bash does. A typo must not cost an agent the work
     # the line already did.
-    ran = await ws.execute("rm /data/a.txt && gerp x", session_id="s")
+    ran = await ws.shell("rm /data/a.txt && gerp x", session_id="s")
     assert ran.exit_code == 127
     assert ran.stderr == b"gerp: command not found\n"
-    assert "/data/a.txt" not in await ws.fs.readdir("/data")
+    assert "/data/a.txt" not in await ws.vfs.readdir("/data")
 
 
 @pytest.mark.asyncio
 async def test_an_asked_command_holds_the_line_until_it_is_answered(ws):
     line = "rm /data/a.txt && cat /data/secret.txt"
-    ran = await ws.execute(line, session_id="s")
+    ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 126
-    assert "/data/a.txt" in await ws.fs.readdir("/data")
+    assert "/data/a.txt" in await ws.vfs.readdir("/data")
     # Exactly one request, from the one pass that judged the line.
     pending, = ws.decisions.pending()
     await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.ONCE)
     # The whole line replays, which is only sound because none of it
     # ran the first time, and the grant is spent exactly once even
     # though two passes now read it.
-    again = await ws.execute(line, session_id="s")
+    again = await ws.shell(line, session_id="s")
     assert again.exit_code == 0
-    assert "/data/a.txt" not in await ws.fs.readdir("/data")
+    assert "/data/a.txt" not in await ws.vfs.readdir("/data")
     assert ws.decisions.pending() == ()
 
 
@@ -220,7 +220,7 @@ async def test_a_cd_earlier_in_the_line_moves_what_later_rules_read(ws):
     # The line is judged before it runs, so the pass has to walk a
     # literal `cd` itself or a rule about /data/prod would answer about
     # whatever directory the session happened to be in.
-    ran = await ws.execute("cd /data/prod && rm x.txt", session_id="s")
+    ran = await ws.shell("cd /data/prod && rm x.txt", session_id="s")
     assert ran.exit_code == 1
     assert ran.stderr == b"rm: x.txt: production data is protected\n"
 
@@ -233,7 +233,7 @@ async def test_explain_reads_a_cd_the_same_way_the_run_does(ws):
     line = "cd /data/prod && rm x.txt"
     _, removed = await ws.explain(line, "s")
     assert removed.outcome is Outcome.DENY
-    ran = await ws.execute(line, session_id="s")
+    ran = await ws.shell(line, session_id="s")
     assert removed.exit_code == ran.exit_code
     assert removed.stderr == (ran.stderr or b"").decode()
 
@@ -246,10 +246,10 @@ async def test_the_hold_reaches_only_as_far_as_the_text_does(ws):
     # commands have run. Pinned rather than only documented, because
     # the cost lands on the replay: approving this re-runs a line whose
     # first half is already done.
-    ran = await ws.execute("S=/data/secret.txt; rm /data/a.txt && cat $S",
-                           session_id="s")
+    ran = await ws.shell("S=/data/secret.txt; rm /data/a.txt && cat $S",
+                         session_id="s")
     assert ran.exit_code == 126
-    assert "/data/a.txt" not in await ws.fs.readdir("/data")
+    assert "/data/a.txt" not in await ws.vfs.readdir("/data")
     assert len(ws.decisions.pending()) == 1
 
 
@@ -257,15 +257,15 @@ async def test_the_hold_reaches_only_as_far_as_the_text_does(ws):
 async def test_a_cd_in_a_subshell_does_not_move_later_commands(ws):
     # bash restores the cwd when the subshell exits, so carrying the cd
     # past it refused a line that was never going to touch /data/prod.
-    ran = await ws.execute("(cd /data/prod && ls) && rm x.txt", session_id="s")
+    ran = await ws.shell("(cd /data/prod && ls) && rm x.txt", session_id="s")
     assert ran.exit_code == 1
     assert b"production data is protected" not in (ran.stderr or b"")
-    assert "/data/prod/x.txt" in await ws.fs.readdir("/data/prod")
+    assert "/data/prod/x.txt" in await ws.vfs.readdir("/data/prod")
 
 
 @pytest.mark.asyncio
 async def test_a_grant_the_session_holds_shows_the_line_running(ws):
-    ran = await ws.execute("git push origin main", session_id="s")
+    ran = await ws.shell("git push origin main", session_id="s")
     assert ran.exit_code == 126
     pending, = ws.decisions.pending()
     await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.SESSION)
@@ -290,12 +290,12 @@ SEALED = {
 
 @pytest_asyncio.fixture()
 async def sealed():
-    workspace = Workspace({"/data/": RAMResource()},
+    workspace = Workspace({"/data/": RAMVFS()},
                           mode=MountMode.WRITE,
                           profiles={"r": SEALED})
-    await workspace.execute("mkdir -p /data/prod")
-    await workspace.fs.write("/data/prod/x.txt", b"x\n")
-    await workspace.fs.write("/data/a.txt", b"a\n")
+    await workspace.shell("mkdir -p /data/prod")
+    await workspace.vfs.write("/data/prod/x.txt", b"x\n")
+    await workspace.vfs.write("/data/a.txt", b"a\n")
     workspace.create_session("s", profile="r")
     yield workspace
     await workspace.close()
@@ -314,11 +314,11 @@ async def test_explain_reads_the_statements_redirect_target(sealed):
 
 @pytest.mark.asyncio
 async def test_a_rule_on_a_redirect_target_holds_the_whole_line(sealed):
-    ran = await sealed.execute("rm /data/a.txt && echo x > /data/prod/x.txt",
-                               session_id="s")
+    ran = await sealed.shell("rm /data/a.txt && echo x > /data/prod/x.txt",
+                             session_id="s")
     assert ran.exit_code != 0
     assert b"sealed until review" in (ran.stderr or b"")
-    assert "/data/a.txt" in await sealed.fs.readdir("/data")
+    assert "/data/a.txt" in await sealed.vfs.readdir("/data")
 
 
 class _NoCat(Policy):
@@ -335,11 +335,11 @@ class _NoCat(Policy):
 
 @pytest_asyncio.fixture()
 async def coded():
-    workspace = Workspace({"/data/": RAMResource()},
+    workspace = Workspace({"/data/": RAMVFS()},
                           mode=MountMode.WRITE,
                           policies=[_NoCat()])
-    await workspace.fs.write("/data/a.txt", b"a\n")
-    await workspace.fs.write("/data/b.txt", b"b\n")
+    await workspace.vfs.write("/data/a.txt", b"a\n")
+    await workspace.vfs.write("/data/b.txt", b"b\n")
     yield workspace
     await workspace.close()
 
@@ -351,12 +351,12 @@ async def test_a_coded_policy_holds_the_line_without_a_document(coded):
     # (MountRootPolicy). Returning early on `commands is None` held the
     # line for a document and left a policy with the half-line behavior
     # the pass exists to remove.
-    ran = await coded.execute("rm /data/a.txt && cat /data/b.txt")
+    ran = await coded.shell("rm /data/a.txt && cat /data/b.txt")
     assert ran.exit_code != 0
     assert ran.stderr == b"cat: Permission denied\n"
     assert ran.refusal is not None
     assert ran.refusal.reason == "cat is refused by policy"
-    assert "/data/a.txt" in await coded.fs.readdir("/data")
+    assert "/data/a.txt" in await coded.vfs.readdir("/data")
 
 
 def _answering(asked: list[str], outcome: Outcome, scope: Scope = Scope.ONCE):
@@ -384,14 +384,14 @@ async def _inline_workspace(on_ask, profile=PROFILE) -> Workspace:
         on_ask (AskHandler): the host.
         profile (dict): the document session ``s`` runs under.
     """
-    workspace = Workspace({"/data/": RAMResource()},
+    workspace = Workspace({"/data/": RAMVFS()},
                           mode=MountMode.WRITE,
                           profiles={"r": profile},
                           on_ask=on_ask)
-    await workspace.execute("mkdir -p /data/prod")
-    await workspace.fs.write("/data/prod/x.txt", b"x\n")
-    await workspace.fs.write("/data/a.txt", b"a\n")
-    await workspace.fs.write("/data/secret.txt", b"s\n")
+    await workspace.shell("mkdir -p /data/prod")
+    await workspace.vfs.write("/data/prod/x.txt", b"x\n")
+    await workspace.vfs.write("/data/a.txt", b"a\n")
+    await workspace.vfs.write("/data/secret.txt", b"s\n")
     workspace.create_session("s", profile="r")
     return workspace
 
@@ -410,12 +410,12 @@ async def test_an_answered_ask_does_not_end_the_scan(inline):
     # line is fine" let the later deny run behind an approval, which is
     # the half-line behavior in its worst form, since the agent was
     # told yes.
-    ran = await inline.execute("cat /data/secret.txt && rm /data/prod/x.txt",
-                               session_id="s")
+    ran = await inline.shell("cat /data/secret.txt && rm /data/prod/x.txt",
+                             session_id="s")
     assert ran.exit_code != 0
     assert b"production data is protected" in (ran.stderr or b"")
     assert b"s\n" not in (ran.stdout or b"")
-    assert "/data/prod/x.txt" in await inline.fs.readdir("/data/prod")
+    assert "/data/prod/x.txt" in await inline.vfs.readdir("/data/prod")
 
 
 @pytest.mark.asyncio
@@ -429,12 +429,12 @@ async def test_a_compound_line_answered_inline_asks_once_per_run():
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
         line = "rm /data/a.txt && cat /data/secret.txt"
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout == b"s\n"
         assert len(asked) == 1
-        await ws.fs.write("/data/a.txt", b"a\n")
-        again = await ws.execute(line, session_id="s")
+        await ws.vfs.write("/data/a.txt", b"a\n")
+        again = await ws.shell(line, session_id="s")
         assert again.exit_code == 0
         assert len(asked) == 2
         # Both grants were spent by the lines they were given for.
@@ -454,10 +454,10 @@ async def test_a_refused_compound_line_is_refused_again_without_asking():
     try:
         line = "rm /data/a.txt && cat /data/secret.txt"
         for expected in (1, 1, 2):
-            ran = await ws.execute(line, session_id="s")
+            ran = await ws.shell(line, session_id="s")
             assert ran.exit_code == 126
             assert len(asked) == expected
-        assert "/data/a.txt" in await ws.fs.readdir("/data")
+        assert "/data/a.txt" in await ws.vfs.readdir("/data")
     finally:
         await ws.close()
 
@@ -472,12 +472,12 @@ async def test_a_grant_handed_to_a_refused_line_does_not_outlive_it():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute("cat /data/secret.txt && rm /data/prod/x.txt",
-                               session_id="s")
+        ran = await ws.shell("cat /data/secret.txt && rm /data/prod/x.txt",
+                             session_id="s")
         assert ran.exit_code != 0
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
-        again = await ws.execute("cat /data/secret.txt", session_id="s")
+        again = await ws.shell("cat /data/secret.txt", session_id="s")
         assert again.exit_code == 0
         assert again.stdout == b"s\n"
         assert len(asked) == 2
@@ -494,13 +494,13 @@ async def test_a_grant_the_run_never_reaches_does_not_outlive_the_line():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute("cat /data/missing && cat /data/secret.txt",
-                               session_id="s")
+        ran = await ws.shell("cat /data/missing && cat /data/secret.txt",
+                             session_id="s")
         assert ran.exit_code == 1
         assert ran.stdout == b""
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
-        again = await ws.execute("cat /data/secret.txt", session_id="s")
+        again = await ws.shell("cat /data/secret.txt", session_id="s")
         assert again.exit_code == 0
         assert again.stdout == b"s\n"
         assert len(asked) == 2
@@ -518,7 +518,7 @@ async def test_a_grant_does_not_outlive_a_line_that_fails_before_it_runs(
     monkeypatch.setattr(secrets_registry, "_CUSTOM", {})
     register_secrets("fake", _FakeConfig, _dead_fetch)
     asked: list[str] = []
-    ws = Workspace({"/data/": RAMResource()},
+    ws = Workspace({"/data/": RAMVFS()},
                    mode=MountMode.WRITE,
                    profiles={"r": PROFILE},
                    env={"TOKEN": {
@@ -527,15 +527,15 @@ async def test_a_grant_does_not_outlive_a_line_that_fails_before_it_runs(
                    }},
                    on_ask=_answering(asked, Outcome.ALLOW))
     try:
-        await ws.fs.write("/data/secret.txt", b"s\n")
+        await ws.vfs.write("/data/secret.txt", b"s\n")
         ws.create_session("s", profile="r")
-        ran = await ws.execute("cat /data/secret.txt && echo $TOKEN",
-                               session_id="s")
+        ran = await ws.shell("cat /data/secret.txt && echo $TOKEN",
+                             session_id="s")
         assert ran.exit_code == 1
         assert ran.stderr == b"TOKEN: cannot fetch from fake\n"
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
-        again = await ws.execute("cat /data/secret.txt", session_id="s")
+        again = await ws.shell("cat /data/secret.txt", session_id="s")
         assert again.exit_code == 0
         assert again.stdout == b"s\n"
         assert len(asked) == 2
@@ -563,11 +563,11 @@ async def test_a_grant_stays_with_a_background_job_until_it_ends(line):
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
         assert len(asked) == 1
         assert len(ws.decisions.list("s")) == 1
-        waited = await ws.execute("wait", session_id="s")
+        waited = await ws.shell("wait", session_id="s")
         assert waited.exit_code == 0
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
@@ -578,17 +578,17 @@ async def test_a_grant_stays_with_a_background_job_until_it_ends(line):
 @pytest.mark.asyncio
 async def test_an_out_of_band_grant_stays_with_a_nested_background_job(ws):
     line = "eval 'sleep 0.2 && cat /data/secret.txt > /data/read.txt &'"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.refusal is not None and first.refusal.kind == "pending"
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-    ran = await ws.execute(line, session_id="s")
+    ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert len(ws.decisions.list("s")) == 1
     elsewhere, = await ws.explain("cat /data/secret.txt", "s")
     assert elsewhere.outcome is Outcome.ASK
-    waited = await ws.execute("wait", session_id="s")
+    waited = await ws.shell("wait", session_id="s")
     assert waited.exit_code == 0
-    assert await ws.fs.read("/data/read.txt") == b"s\n"
+    assert await ws.vfs.read("/data/read.txt") == b"s\n"
     assert ws.decisions.list("s") == ()
 
 
@@ -599,17 +599,17 @@ async def test_a_command_spelled_twice_on_a_line_needs_two_answers(ws):
     # wanting, which is the half-line the hold exists to prevent: the
     # retry is held whole until the second spelling has its own answer.
     line = "cat /data/secret.txt && cat /data/secret.txt"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
     assert first.refusal is not None and first.refusal.kind == "pending"
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-    second = await ws.execute(line, session_id="s")
+    second = await ws.shell(line, session_id="s")
     assert second.exit_code == 126
     assert second.stdout == b""
     assert second.refusal is not None and second.refusal.kind == "pending"
     assert len(ws.decisions.list("s")) == 2
     await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
-    ran = await ws.execute(line, session_id="s")
+    ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout == b"s\ns\n"
     assert ws.decisions.list("s") == ()
@@ -622,11 +622,11 @@ async def test_two_lines_judged_at_once_cannot_both_run_on_one_nod(ws):
     # first runs; the other must be held whole, not run its ls and then
     # find the grant gone at its cat.
     line = "ls /data && cat /data/secret.txt"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.refusal is not None and first.refusal.kind == "pending"
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-    ran, held = sorted(await asyncio.gather(ws.execute(line, session_id="s"),
-                                            ws.execute(line, session_id="s")),
+    ran, held = sorted(await asyncio.gather(ws.shell(line, session_id="s"),
+                                            ws.shell(line, session_id="s")),
                        key=lambda r: r.exit_code)
     assert ran.exit_code == 0
     assert ran.stdout == b"a.txt\nprod\nsecret.txt\ns\n"
@@ -643,15 +643,15 @@ async def test_a_grant_given_before_a_refused_line_does_not_outlive_it(ws):
     # next cat is a question again rather than a run on a nod given to
     # a line that never ran.
     line = "cat /data/secret.txt && rm /data/prod/x.txt"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
     assert first.refusal is not None and first.refusal.kind == "pending"
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-    retry = await ws.execute(line, session_id="s")
+    retry = await ws.shell(line, session_id="s")
     assert retry.exit_code != 0
     assert b"production data is protected" in (retry.stderr or b"")
     assert ws.decisions.list("s") == ()
-    again = await ws.execute("cat /data/secret.txt", session_id="s")
+    again = await ws.shell("cat /data/secret.txt", session_id="s")
     assert again.exit_code == 126
     assert again.refusal is not None and again.refusal.kind == "pending"
 
@@ -662,10 +662,10 @@ async def test_a_cd_in_a_subshell_moves_the_commands_inside_it(ws):
     # This one pins the other half: inside it, the cd still applies, so
     # the rule about /data/prod reads x.txt as the file it is. Reading a
     # subshell as "no cd applies" judged the command at the session cwd.
-    ran = await ws.execute("(cd /data/prod && rm x.txt)", session_id="s")
+    ran = await ws.shell("(cd /data/prod && rm x.txt)", session_id="s")
     assert ran.exit_code == 1
     assert ran.stderr == b"rm: x.txt: production data is protected\n"
-    assert "/data/prod/x.txt" in await ws.fs.readdir("/data/prod")
+    assert "/data/prod/x.txt" in await ws.vfs.readdir("/data/prod")
 
 
 @pytest.mark.asyncio
@@ -676,7 +676,7 @@ async def test_a_one_command_line_is_refused_inside_the_shell(ws):
     # inside the shell, so `2>&1` still moves the message, where this
     # pass answers above the redirect layer and would leave it on
     # stderr.
-    ran = await ws.execute("rm /data/prod/x.txt 2>&1", session_id="s")
+    ran = await ws.shell("rm /data/prod/x.txt 2>&1", session_id="s")
     assert ran.exit_code == 1
     assert ran.stdout == (
         b"rm: /data/prod/x.txt: production data is protected\n")
@@ -693,8 +693,8 @@ async def test_a_grant_claimed_for_a_nested_line_is_the_inner_gates():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute("echo $(cat /data/secret.txt) && ls /data",
-                               session_id="s")
+        ran = await ws.shell("echo $(cat /data/secret.txt) && ls /data",
+                             session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout.startswith(b"s\n")
         assert len(asked) == 1
@@ -708,11 +708,11 @@ async def test_a_nested_line_runs_on_the_answer_its_outer_line_was_given(ws):
     # Out of band: the question is the outer pass's, and the answer has
     # to reach the gate inside the substitution on the retry.
     line = "echo $(cat /data/secret.txt) && ls /data"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
     assert first.refusal is not None and first.refusal.kind == "pending"
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-    ran = await ws.execute(line, session_id="s")
+    ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout.startswith(b"s\n")
     assert ws.decisions.list("s") == ()
@@ -727,7 +727,7 @@ async def test_a_nested_line_spelled_twice_costs_two_nods_and_no_more():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(
+        ran = await ws.shell(
             "eval 'cat /data/secret.txt && cat /data/secret.txt' && ls /data",
             session_id="s")
         assert ran.exit_code == 0
@@ -761,25 +761,25 @@ async def test_a_whole_line_keeps_its_first_answer_while_its_second_waits():
     # every retry asked for the cat again; the answers could never
     # accumulate to a line that runs.
     box = _LineBox()
-    ws = Workspace({"/data/": RAMResource()},
+    ws = Workspace({"/data/": RAMVFS()},
                    mode=MountMode.EXEC,
                    profiles={"r": PROFILE},
-                   runtimes=[box, "vfs"])
+                   runtimes=[box, "workspace"])
     try:
-        await ws.fs.write("/data/secret.txt", b"s\n")
+        await ws.vfs.write("/data/secret.txt", b"s\n")
         ws.create_session("s", profile="r")
         line = "cat /data/secret.txt && git push origin main"
-        first = await ws.execute(line, session_id="s")
+        first = await ws.shell(line, session_id="s")
         assert first.exit_code == 126
         assert first.refusal is not None and first.refusal.kind == "pending"
         await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-        second = await ws.execute(line, session_id="s")
+        second = await ws.shell(line, session_id="s")
         assert second.exit_code == 126
         assert second.refusal is not None and second.refusal.kind == "pending"
         assert len(ws.decisions.list("s")) == 2
         assert box.lines == []
         await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
         assert box.lines == [line]
         assert ws.decisions.list("s") == ()
@@ -802,13 +802,12 @@ async def test_a_job_that_cannot_be_submitted_hands_its_borrow_back():
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
         ws.job_table._console_factory = _no_console
-        ran = await ws.execute("cat /data/secret.txt & ls /data",
-                               session_id="s")
+        ran = await ws.shell("cat /data/secret.txt & ls /data", session_id="s")
         assert ran.exit_code != 0
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
         ws.job_table._console_factory = None
-        again = await ws.execute("cat /data/secret.txt", session_id="s")
+        again = await ws.shell("cat /data/secret.txt", session_id="s")
         assert again.exit_code == 0
         assert again.stdout == b"s\n"
         assert len(asked) == 2
@@ -827,17 +826,17 @@ async def test_a_word_that_expands_to_a_judged_command_does_not_run_on_its_nod(
     # alone: the expanded command asks, its question holds the line,
     # and the retry runs both on their own answers.
     line = "F=/data/secret.txt; cat $F && cat /data/secret.txt"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
     assert first.refusal is not None and first.refusal.kind == "pending"
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-    second = await ws.execute(line, session_id="s")
+    second = await ws.shell(line, session_id="s")
     assert second.exit_code == 126
     assert second.stdout == b""
     assert second.refusal is not None and second.refusal.kind == "pending"
     assert len(ws.decisions.list("s")) == 2
     await ws.decisions.answer(second.refusal.ask_id, Outcome.ALLOW)
-    ran = await ws.execute(line, session_id="s")
+    ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout == b"s\ns\n"
     assert ws.decisions.list("s") == ()
@@ -851,7 +850,7 @@ async def test_one_body_under_two_words_is_two_occurrences():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(
+        ran = await ws.shell(
             "echo $(cat /data/secret.txt) $(cat /data/secret.txt) && ls /data",
             session_id="s")
         assert ran.exit_code == 0
@@ -872,9 +871,9 @@ async def test_words_handed_on_by_command_are_one_question():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        await ws.fs.write("/data/secret file", b"s\n")
-        ran = await ws.execute("echo x && command cat '/data/secret file'",
-                               session_id="s")
+        await ws.vfs.write("/data/secret file", b"s\n")
+        ran = await ws.shell("echo x && command cat '/data/secret file'",
+                             session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout == b"x\ns\n"
         assert len(asked) == 1
@@ -892,16 +891,16 @@ async def test_a_held_line_keeps_its_jobs_grant_reserved(ws):
     # ran on it and the job asked again. The grant is the job's own:
     # the other line asks, and the job runs on its nod.
     line = "F=/data/secret.txt; sleep 0.5 && cat /data/secret.txt & cat $F"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.refusal is not None and first.refusal.kind == "pending"
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-    held = await ws.execute(line, session_id="s")
+    held = await ws.shell(line, session_id="s")
     assert held.exit_code == 126
     assert held.refusal is not None and held.refusal.kind == "pending"
-    other = await ws.execute("cat /data/secret.txt", session_id="s")
+    other = await ws.shell("cat /data/secret.txt", session_id="s")
     assert other.exit_code == 126
     assert other.refusal is not None and other.refusal.kind == "pending"
-    waited = await ws.execute("wait", session_id="s")
+    waited = await ws.shell("wait", session_id="s")
     assert waited.exit_code == 0
     assert len(ws.decisions.pending("s")) == len(ws.decisions.list("s"))
 
@@ -915,12 +914,12 @@ async def test_touching_backtick_pairs_hold_the_line_as_the_lines_they_run(ws):
     # Read as the lines the evaluator runs, the pass asks first and
     # holds the whole line.
     line = "echo x && echo `cat /data/secret.txt` `echo ok`"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
     assert first.stdout == b""
     assert first.refusal is not None and first.refusal.kind == "pending"
     await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
-    ran = await ws.execute(line, session_id="s")
+    ran = await ws.shell(line, session_id="s")
     assert ran.exit_code == 0
     assert ran.stdout == b"x\ns ok\n"
     assert ws.decisions.list("s") == ()
@@ -931,7 +930,7 @@ async def test_two_backtick_pairs_of_one_node_are_two_occurrences():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(
+        ran = await ws.shell(
             "echo `cat /data/secret.txt` `cat /data/secret.txt`",
             session_id="s")
         assert ran.exit_code == 0
@@ -951,9 +950,9 @@ async def test_an_operand_holding_a_multibyte_character_is_one_question():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        await ws.fs.write("/data/secrét", b"s\n")
-        ran = await ws.execute("echo x && command cat /data/secrét",
-                               session_id="s")
+        await ws.vfs.write("/data/secrét", b"s\n")
+        ran = await ws.shell("echo x && command cat /data/secrét",
+                             session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout == b"x\ns\n"
         assert len(asked) == 1
@@ -967,8 +966,8 @@ async def test_a_pair_after_a_multibyte_character_runs_on_its_own_nod():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute("echo `echo é` `cat /data/secret.txt`",
-                               session_id="s")
+        ran = await ws.shell("echo `echo é` `cat /data/secret.txt`",
+                             session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout == "é s\n".encode()
         assert len(asked) == 1
@@ -991,7 +990,7 @@ async def test_a_loop_runs_every_visit_of_a_command_on_one_nod(line):
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout == b"s\ns\n"
         assert len(asked) == 1
@@ -1003,12 +1002,12 @@ async def test_a_loop_runs_every_visit_of_a_command_on_one_nod(line):
 @pytest.mark.asyncio
 async def test_a_held_loop_replays_on_the_one_answer_it_was_given(ws):
     line = "for i in 1 2; do touch /data/mark.txt; cat /data/secret.txt; done"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.exit_code == 126
-    assert "/data/mark.txt" not in await ws.fs.readdir("/data")
+    assert "/data/mark.txt" not in await ws.vfs.readdir("/data")
     pending, = ws.decisions.pending()
     await ws.decisions.answer(pending.id, Outcome.ALLOW)
-    again = await ws.execute(line, session_id="s")
+    again = await ws.shell(line, session_id="s")
     assert again.exit_code == 0
     assert again.stdout == b"s\ns\n"
     assert ws.decisions.list("s") == ()
@@ -1039,7 +1038,7 @@ async def test_a_spelling_the_runtime_completes_is_asked_about_at_the_gate(
 
     ws = await _inline_workspace(host, ASK_CAT)
     try:
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout == b"s\n"
         assert seen == [("cat", "/data/secret.txt")]
@@ -1059,10 +1058,10 @@ async def test_a_deny_on_a_spelling_the_runtime_completes_holds_the_line(line):
     # before the touch runs.
     ws = await _inline_workspace(_answering([], Outcome.ALLOW), DENY_CAT)
     try:
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 126
         assert ran.stderr == b"cat: Permission denied\n"
-        assert "/data/mark.txt" not in await ws.fs.readdir("/data")
+        assert "/data/mark.txt" not in await ws.vfs.readdir("/data")
     finally:
         await ws.close()
 
@@ -1076,7 +1075,7 @@ async def test_every_batch_xargs_hands_on_runs_on_one_nod():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(
+        ran = await ws.shell(
             "printf '/data/secret.txt /data/secret.txt' | xargs -n1 cat",
             session_id="s")
         assert ran.exit_code == 0
@@ -1090,11 +1089,11 @@ async def test_every_batch_xargs_hands_on_runs_on_one_nod():
 @pytest.mark.asyncio
 async def test_a_held_xargs_line_replays_every_batch_on_one_answer(ws):
     line = "printf '/data/secret.txt /data/secret.txt' | xargs -n1 cat"
-    first = await ws.execute(line, session_id="s")
+    first = await ws.shell(line, session_id="s")
     assert first.refusal is not None and first.refusal.kind == "pending"
     pending, = ws.decisions.pending()
     await ws.decisions.answer(pending.id, Outcome.ALLOW)
-    again = await ws.execute(line, session_id="s")
+    again = await ws.shell(line, session_id="s")
     assert again.exit_code == 0
     assert again.stdout == b"s\ns\n"
     assert ws.decisions.list("s") == ()
@@ -1109,16 +1108,16 @@ async def test_every_job_a_loop_launches_runs_on_one_nod():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(
+        ran = await ws.shell(
             "for i in 1 2; do eval 'sleep 0.2 && "
             "cat /data/secret.txt >> /data/read.txt &'; done",
             session_id="s")
         assert ran.exit_code == 0
         assert len(asked) == 1
         assert len(ws.decisions.list("s")) == 1
-        waited = await ws.execute("wait", session_id="s")
+        waited = await ws.shell("wait", session_id="s")
         assert waited.exit_code == 0
-        assert await ws.fs.read("/data/read.txt") == b"s\ns\n"
+        assert await ws.vfs.read("/data/read.txt") == b"s\ns\n"
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
     finally:
@@ -1141,10 +1140,10 @@ async def test_a_line_a_job_evaluates_late_stands_under_the_job(line):
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
         assert len(asked) == 1
-        waited = await ws.execute("wait", session_id="s")
+        waited = await ws.shell("wait", session_id="s")
         assert waited.exit_code == 0
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
@@ -1162,11 +1161,11 @@ async def test_what_a_jobs_late_gate_claims_is_the_jobs_to_spend():
     asked: list[str] = []
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
     try:
-        ran = await ws.execute(
+        ran = await ws.shell(
             "sleep 0.2 && echo /data/secret.txt | xargs cat &", session_id="s")
         assert ran.exit_code == 0
         assert asked == []
-        waited = await ws.execute("wait", session_id="s")
+        waited = await ws.shell("wait", session_id="s")
         assert waited.exit_code == 0
         assert len(asked) == 1
         assert ws.decisions.list("s") == ()
@@ -1183,7 +1182,7 @@ async def _aliased(asked: list[str]) -> Workspace:
         asked (list[str]): where each question's id is appended.
     """
     ws = await _inline_workspace(_answering(asked, Outcome.ALLOW))
-    defined = await ws.execute(
+    defined = await ws.shell(
         "shopt -s expand_aliases; alias c='cat /data/secret.txt' d=c",
         session_id="s")
     assert defined.exit_code == 0
@@ -1202,7 +1201,7 @@ async def test_each_invocation_of_an_alias_is_a_place_of_its_own(line):
     asked: list[str] = []
     ws = await _aliased(asked)
     try:
-        ran = await ws.execute(line, session_id="s")
+        ran = await ws.shell(line, session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout == b"s\ns\n"
         assert len(asked) == 2
@@ -1220,7 +1219,7 @@ async def test_one_alias_invocation_reached_twice_runs_on_one_nod():
     asked: list[str] = []
     ws = await _aliased(asked)
     try:
-        ran = await ws.execute("for i in 1 2; do c; done", session_id="s")
+        ran = await ws.shell("for i in 1 2; do c; done", session_id="s")
         assert ran.exit_code == 0
         assert ran.stdout == b"s\ns\n"
         assert len(asked) == 1
@@ -1238,9 +1237,9 @@ async def test_an_alias_a_job_runs_late_hands_its_claim_to_the_job():
     asked: list[str] = []
     ws = await _aliased(asked)
     try:
-        ran = await ws.execute("sleep 0.2 && c &", session_id="s")
+        ran = await ws.shell("sleep 0.2 && c &", session_id="s")
         assert ran.exit_code == 0
-        waited = await ws.execute("wait", session_id="s")
+        waited = await ws.shell("wait", session_id="s")
         assert waited.exit_code == 0
         assert waited.stdout == b"s\n"
         assert len(asked) == 1
@@ -1265,7 +1264,7 @@ async def test_a_mapfile_callback_is_asked_about_at_the_gate():
 
     ws = await _inline_workspace(host, ASK_CAT)
     try:
-        await ws.execute(
+        await ws.shell(
             "touch /data/mark.txt && "
             "printf 'x\\n' | mapfile -t -c 1 -C 'cat /data/secret.txt'",
             session_id="s")

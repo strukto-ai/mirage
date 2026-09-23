@@ -3,9 +3,9 @@ import errno
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.utils.errors import ReadOnlyError
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.dispatcher.lineage import (BARE_PREFIX,
                                                  require_turf_writable,
@@ -14,7 +14,7 @@ from mirage.workspace.mount.mount import MountEntry
 
 
 def _entry(prefix: str, mode: MountMode) -> MountEntry:
-    return MountEntry(prefix, RAMResource(), mode=mode)
+    return MountEntry(prefix, RAMVFS(), mode=mode)
 
 
 def _path(virtual: str) -> PathSpec:
@@ -50,7 +50,7 @@ async def test_a_session_grant_narrows_an_owned_turf():
     # The grant is what binds: it says what this session may do, which
     # covers the namespace plane as well as the backend one, so a grant
     # that stops a file write at /extra stops the table write too.
-    ws = Workspace({"/extra": (RAMResource(), MountMode.WRITE)})
+    ws = Workspace({"/extra": (RAMVFS(), MountMode.WRITE)})
     entry = ws.namespace.try_mount_for("/extra/lk")
     sess = ws.create_session("agent", mounts={"/extra/": "read"})
     token = set_current_session(sess)
@@ -66,7 +66,7 @@ async def test_a_session_grant_narrows_an_owned_turf():
 async def test_a_root_statement_governs_bare_turf():
     # "Above every mount" is governed by "/": a profile that caps the
     # root to read refuses the table write there, with no mount at /.
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)})
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)})
     sess = ws.create_session("agent", mounts={"/": "read"})
     token = set_current_session(sess)
     try:

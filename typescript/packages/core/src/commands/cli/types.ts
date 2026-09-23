@@ -79,7 +79,7 @@ export interface CLIDoors {
  * view (`argv`, `stdin`, `env`) and the parsed view (`config`, `paths`,
  * `texts`, `flags`), so every handler tier renders whichever its
  * substrate can express. Narrower than CommandOpts on purpose: a CLI
- * consults no mount, so there is no resource, no mount prefix, and no
+ * consults no mount, so there is no VFS, no mount prefix, and no
  * filetype cascade; the config carries whatever the handler needs, and a
  * verb whose subject is files reads `doors`.
  */
@@ -154,7 +154,7 @@ export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, un
  * grammar fields (options, positional, rest, description, epilog) and adds
  * identity, behavior, and nesting. A leaf carries `fn`; a group carries
  * `subcommands`; the root of an installable program may carry
- * `configModel` (the zod-backed `normalize*Config` shape resources already
+ * `configModel` (the zod-backed `normalize*Config` shape mounts already
  * use, doubling as the redaction schema). A script's config is opaque, so a
  * script cannot declare `configModel`. Every level of the tree parses with
  * the ordinary spec machinery because every level is a CommandSpec.

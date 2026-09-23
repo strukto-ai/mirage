@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.gmail import GmailConfig, GmailResource
+from mirage.vfs.gmail import GmailConfig, GmailVFS
 
 load_dotenv(".env.development")
 
@@ -27,12 +27,11 @@ config = GmailConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-resource = GmailResource(config=config)
+vfs = GmailVFS(config=config)
 
-with Workspace({
-        "/gmail/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/gmail/": Mount(vfs, mode=MountMode.READ,
+                      backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -87,6 +86,6 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

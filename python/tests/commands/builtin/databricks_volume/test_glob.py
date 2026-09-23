@@ -22,7 +22,7 @@ async def test_resolve_glob_pattern(accessor, files, index, remote_root):
         file_entry(f"{remote_root}/src/data.json"),
     ]
     scope = PathSpec(
-        resource_path=mount_key("/volume/src/*.py", "/volume"),
+        vfs_path=mount_key("/volume/src/*.py", "/volume"),
         virtual="/volume/src/*.py",
         directory="/volume/src",
         pattern="*.py",
@@ -36,7 +36,7 @@ async def test_resolve_glob_pattern(accessor, files, index, remote_root):
 @pytest.mark.asyncio
 async def test_resolve_directory_path(accessor, index):
     scope = PathSpec(
-        resource_path=mount_key("/volume/src", "/volume"),
+        vfs_path=mount_key("/volume/src", "/volume"),
         virtual="/volume/src",
         directory="/volume/src",
         resolved=False,

@@ -1,12 +1,12 @@
 ---
 title: S3
 icon: aws
-description: Set up AWS S3 credentials for the S3 resource.
+description: Set up AWS S3 credentials for the S3 VFS.
 ---
 
 ## Credentials
 
-The S3 resource needs an AWS access key pair with read (and optionally write) access to your bucket.
+The S3 VFS needs an AWS access key pair with read (and optionally write) access to your bucket.
 
 ### 1. Create an IAM User
 
@@ -30,16 +30,16 @@ AWS_SECRET_ACCESS_KEY=wJal...
 
 If you have `~/.aws/credentials` configured, you can use a profile name instead of explicit access keys.
 
-For the Python resource API, see the [S3 resource doc](/python/resource/s3).
+For the Python VFS API, see the [S3 VFS doc](/python/vfs/s3).
 
-## Scoping a resource to a key prefix
+## Scoping a VFS to a key prefix
 
 Both runtimes support a key prefix option that transparently scopes every operation to a subpath of the bucket, so agents see clean paths while the underlying S3 keys carry the full prefix.
 
 <CodeGroup>
 
 ```ts TypeScript
-const s3 = new S3Resource({
+const s3 = new S3VFS({
   bucket: 'app-data',
   region: 'eu-west-1',
   keyPrefix: `users/${userId}/`,
@@ -47,7 +47,7 @@ const s3 = new S3Resource({
 ```
 
 ```python Python
-S3Resource(S3Config(
+S3VFS(S3Config(
     bucket="app-data",
     region="eu-west-1",
     key_prefix=f"users/{user_id}/",

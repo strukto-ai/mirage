@@ -19,8 +19,8 @@ import {
   normalizeGoogleConfig,
   redactGoogleConfig,
 } from './config.ts'
-import { GCalConfigSchema, normalizeGCalConfig } from '../../resource/gcal/config.ts'
-import { REDACTED_SECRET } from '../../resource/secrets.ts'
+import { GCalConfigSchema, normalizeGCalConfig } from '../../vfs/gcal/config.ts'
+import { REDACTED_SECRET } from '../../vfs/secrets.ts'
 
 describe('GoogleConfig', () => {
   it('accepts the refresh-token grant from snake_case', () => {

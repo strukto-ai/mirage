@@ -45,13 +45,13 @@ export interface MirageOperationsBundle {
 
 async function ensureParent(ws: Workspace, dir: string): Promise<void> {
   const norm = rstripSlash(dir) || '/'
-  if (norm === '/' || (await ws.fs.exists(norm))) return
+  if (norm === '/' || (await ws.vfs.exists(norm))) return
   const parent = norm.substring(0, norm.lastIndexOf('/')) || '/'
   await ensureParent(ws, parent)
   try {
-    await ws.fs.mkdir(norm)
+    await ws.vfs.mkdir(norm)
   } catch (err) {
-    if (await ws.fs.isDir(norm)) return
+    if (await ws.vfs.isDir(norm)) return
     throw err
   }
 }
@@ -70,12 +70,12 @@ async function walkDirectory(
   results: string[],
 ): Promise<void> {
   if (results.length >= opts.limit) return
-  const entries = await ws.fs.readdir(dir)
+  const entries = await ws.vfs.readdir(dir)
   for (const full of entries) {
     if (results.length >= opts.limit) return
     const rel = full.startsWith(cwdPrefix) ? full.slice(cwdPrefix.length) : full
     if (opts.ignoreMatchers.some((m) => m(rel))) continue
-    const isDir = await ws.fs.isDir(full)
+    const isDir = await ws.vfs.isDir(full)
     if (matcher(rel)) results.push(full)
     if (isDir) await walkDirectory(ws, full, cwdPrefix, matcher, opts, results)
   }
@@ -89,7 +89,7 @@ export function mirageOperations(
   const read: ReadOperations = {
     readFile: (absolutePath: string) => versions.read(absolutePath),
     access: async (absolutePath: string) => {
-      await ws.fs.stat(absolutePath)
+      await ws.vfs.stat(absolutePath)
     },
   }
 
@@ -97,8 +97,8 @@ export function mirageOperations(
     writeFile: (absolutePath: string, content: string) => versions.write(absolutePath, content),
     mkdir: async (dir: string) => {
       await ensureParent(ws, dir)
-      if (!(await ws.fs.exists(dir))) {
-        await ws.fs.mkdir(dir)
+      if (!(await ws.vfs.exists(dir))) {
+        await ws.vfs.mkdir(dir)
       }
     },
   }
@@ -123,8 +123,8 @@ export function mirageOperations(
       try {
         result =
           signal === undefined
-            ? await ws.execute(command, { cwd })
-            : await ws.execute(command, { cwd, signal })
+            ? await ws.shell(command, { cwd })
+            : await ws.shell(command, { cwd, signal })
       } catch (error) {
         if (options.signal?.aborted === true) {
           throw new Error('aborted')
@@ -149,12 +149,12 @@ export function mirageOperations(
   }
 
   const grep: GrepOperations = {
-    isDirectory: async (absolutePath: string) => ws.fs.isDir(absolutePath),
+    isDirectory: async (absolutePath: string) => ws.vfs.isDir(absolutePath),
     readFile: async (absolutePath: string) => (await versions.read(absolutePath)).toString('utf-8'),
   }
 
   const find: FindOperations = {
-    exists: async (absolutePath: string) => ws.fs.exists(absolutePath),
+    exists: async (absolutePath: string) => ws.vfs.exists(absolutePath),
     glob: async (pattern, cwd, options) => {
       const matcher = picomatch(pattern, { dot: false })
       const ignoreMatchers = options.ignore.map((p) => picomatch(p, { dot: false }))
@@ -174,13 +174,13 @@ export function mirageOperations(
   }
 
   const ls: LsOperations = {
-    exists: async (absolutePath: string) => ws.fs.exists(absolutePath),
+    exists: async (absolutePath: string) => ws.vfs.exists(absolutePath),
     stat: async (absolutePath: string) => {
-      const isDir = await ws.fs.isDir(absolutePath)
+      const isDir = await ws.vfs.isDir(absolutePath)
       return { isDirectory: () => isDir }
     },
     readdir: async (absolutePath: string) => {
-      const entries = await ws.fs.readdir(absolutePath)
+      const entries = await ws.vfs.readdir(absolutePath)
       const prefix = absolutePath === '/' ? '/' : `${rstripSlash(absolutePath)}/`
       return entries.map((e) => (e.startsWith(prefix) ? e.slice(prefix.length) : e))
     },

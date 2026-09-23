@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { parseSessionProfile } from '../../../policy/profile.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
-import { Session } from '../../../workspace/session/session.ts'
+import { SessionState } from '../../../workspace/session/session.ts'
 import { sessionView } from '../../../workspace/session/state.ts'
 import type { WorkspaceOptions } from '../../../workspace/workspace/types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -23,7 +23,7 @@ describe('identity', () => {
   })
 
   it('reads the name plane and the session plane', () => {
-    const session = new Session({ sessionId: 's', profile: 'admin' })
+    const session = new SessionState({ sessionId: 's', profile: 'admin' })
     const view = sessionView(session)
     const ns = { user: 'alice' }
     expect(identityFrom(ns, view)).toEqual({ user: 'alice', profile: 'admin' })
@@ -39,18 +39,15 @@ describe('identity', () => {
 })
 
 async function run(ws: Workspace, line: string, sessionId?: string): Promise<[number, string]> {
-  const io = await ws.execute(line, sessionId === undefined ? {} : { sessionId })
+  const io = await ws.shell(line, sessionId === undefined ? {} : { sessionId })
   return [io.exitCode, io.stdoutText]
 }
 
 async function makeWs(options: Partial<WorkspaceOptions> = {}): Promise<Workspace> {
   const parser = await getTestParser()
-  const resource = new RAMResource()
-  resource.store.files.set('/f.txt', new TextEncoder().encode('hello'))
-  return new Workspace(
-    { '/data': resource },
-    { mode: MountMode.WRITE, shellParser: parser, ...options },
-  )
+  const vfs = new RAMVFS()
+  vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
+  return new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, shellParser: parser, ...options })
 }
 
 describe('identity in a workspace', () => {

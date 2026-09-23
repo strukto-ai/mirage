@@ -28,7 +28,7 @@ from mirage.utils.key_prefix import mount_key
 def _concrete_paths(n: int = 7):
     return [
         PathSpec(
-            resource_path=mount_key(
+            vfs_path=mount_key(
                 f"/slack/channels/general__C1/2026-01-{d:02d}/chat.jsonl",
                 "/slack"),
             virtual=(
@@ -99,7 +99,7 @@ async def test_grep_second_channel_operand_defers_to_scan():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     channels = [
-        PathSpec(resource_path=mount_key(f"/slack/channels/{name}", "/slack"),
+        PathSpec(vfs_path=mount_key(f"/slack/channels/{name}", "/slack"),
                  virtual=f"/slack/channels/{name}",
                  directory=f"/slack/channels/{name}")
         for name in ("general__C1", "random__C2")
@@ -131,8 +131,7 @@ async def test_grep_shaping_flag_defers_to_scan():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     channel = [
-        PathSpec(resource_path=mount_key("/slack/channels/general__C1",
-                                         "/slack"),
+        PathSpec(vfs_path=mount_key("/slack/channels/general__C1", "/slack"),
                  virtual="/slack/channels/general__C1",
                  directory="/slack/channels/general__C1")
     ]
@@ -163,14 +162,14 @@ async def test_grep_falls_back_when_native_search_raises():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     paths = [
-        PathSpec(resource_path=mount_key("/slack/channels/general__C1/*.jsonl",
-                                         "/slack"),
+        PathSpec(vfs_path=mount_key("/slack/channels/general__C1/*.jsonl",
+                                    "/slack"),
                  virtual="/slack/channels/general__C1/*.jsonl",
                  directory="/slack/channels/general__C1/",
                  pattern="*.jsonl"),
     ]
     resolved = [
-        PathSpec(resource_path=mount_key(
+        PathSpec(vfs_path=mount_key(
             "/slack/channels/general__C1/2026-04-10/chat.jsonl", "/slack"),
                  virtual="/slack/channels/general__C1/2026-04-10/chat.jsonl",
                  directory="/slack/channels/general__C1/2026-04-10/"),
@@ -207,8 +206,7 @@ async def test_grep_native_empty_does_not_trigger_fallback():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     channel = [
-        PathSpec(resource_path=mount_key("/slack/channels/general__C1",
-                                         "/slack"),
+        PathSpec(vfs_path=mount_key("/slack/channels/general__C1", "/slack"),
                  virtual="/slack/channels/general__C1",
                  directory="/slack/channels/general__C1")
     ]

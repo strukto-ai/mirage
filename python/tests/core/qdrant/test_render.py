@@ -1,7 +1,7 @@
 import json
 
 from mirage.core.qdrant.render import render_json, render_text
-from mirage.resource.qdrant.config import QdrantConfig
+from mirage.vfs.qdrant.config import QdrantConfig
 
 
 def _cfg() -> QdrantConfig:

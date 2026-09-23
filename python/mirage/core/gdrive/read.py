@@ -106,8 +106,8 @@ async def read(
         size (int | None): how many bytes, or None for the rest.
     """
     virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    key = path.resource_path
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    key = path.vfs_path
     virtual_key = prefix + "/" + key if prefix else "/" + key
     parent_key = posixpath.dirname(virtual_key) or "/"
     parent_path = PathSpec.from_str_path(parent_key,

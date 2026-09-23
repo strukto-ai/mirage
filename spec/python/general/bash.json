@@ -1,11 +1,11 @@
 {
   "_meta": {
-    "by_resource": {},
+    "by_vfs": {},
     "filetypes": [],
     "has_aggregate": false,
     "has_provision": false,
     "has_write": false,
-    "resources": []
+    "vfs_names": []
   },
   "description": "Run a command string through Mirage's shell. Only `-c` is meaningful; other flags are accepted and ignored. `bash` and `sh` are aliases.",
   "options": [

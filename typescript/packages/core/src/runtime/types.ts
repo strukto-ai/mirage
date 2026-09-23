@@ -34,11 +34,11 @@ export type RuntimeLanguage = 'python' | 'js'
  * The workspace dispatch is a gate: it checks mount modes, session
  * grants, and policy, records the op, and only then touches the real
  * backend behind the mount (S3, disk, an API). Reach states whether
- * that gate is avoidable, not where bytes physically end up; a 'vfs'
+ * that gate is avoidable, not where bytes physically end up; a 'workspace'
  * write to an S3 mount still lands in real S3, but only after the
  * gate said yes.
  *
- * - 'vfs': the gate is the code's only door. The engine runs as an
+ * - 'workspace': the gate is the code's only door. The engine runs as an
  *   in-process guest with no syscalls, so its I/O can only travel the
  *   VFS bridge (or the workspace executor itself) and a mount-mode or
  *   policy refusal is final.
@@ -49,7 +49,7 @@ export type RuntimeLanguage = 'python' | 'js'
  * - 'remote': the code runs on another machine and acts on that
  *   machine's world; the gate never sees those effects.
  */
-export type RuntimeReach = 'vfs' | 'process' | 'remote'
+export type RuntimeReach = 'workspace' | 'process' | 'remote'
 
 /**
  * The workspace op dispatch: run `op` against the mount owning `path`
@@ -71,19 +71,26 @@ export type DispatchFn = (
 
 /**
  * Per-op modifiers riding the bridge's attrs slot: setattr's fields,
- * stat's `nofollow` (the caller's lstat), and mkdir's `parents`
+ * stat's `nofollow` (the caller's lstat), mkdir's `parents`
  * (pathlib's mkdir(parents=True), forwarded to the backend op the way
- * python forwards it as a dispatch kwarg).
+ * python forwards it as a dispatch kwarg), and setxattr's `create` and
+ * `replace` (XATTR_CREATE and XATTR_REPLACE).
  */
-export type BridgeOpAttrs = SetAttrFields & { parents?: boolean }
+export type BridgeOpAttrs = SetAttrFields & {
+  parents?: boolean
+  create?: boolean
+  replace?: boolean
+}
 
 /**
  * The narrow bridge a sandboxed guest's file I/O rides: fixed op names,
  * string paths, positional payloads (the guest cannot build PathSpecs).
  *
- * `dst` carries a rename's destination and a symlink's target: both are
- * the op's second string, and a link target is stored verbatim rather
- * than resolved, so there is nothing a second slot would say.
+ * `dst` carries a rename's destination, a symlink's target and an
+ * extended attribute's name: each is the op's second string, and a link
+ * target is stored verbatim rather than resolved, so there is nothing a
+ * second slot would say. `bytes` carries setxattr's value and `attrs`
+ * its create/replace flags beside every op's `nofollow`.
  */
 export type BridgeDispatchFn = (
   op:
@@ -100,7 +107,11 @@ export type BridgeDispatchFn = (
     | 'rename'
     | 'symlink'
     | 'readlink'
-    | 'setattr',
+    | 'setattr'
+    | 'getxattr'
+    | 'listxattr'
+    | 'setxattr'
+    | 'removexattr',
   path: string,
   bytes?: Uint8Array,
   dst?: string,

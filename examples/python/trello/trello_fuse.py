@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.trello import TrelloConfig, TrelloResource
+from mirage.vfs.trello import TrelloConfig, TrelloVFS
 
 load_dotenv(".env.development")
 
@@ -26,12 +26,11 @@ config = TrelloConfig(
     api_key=os.environ["TRELLO_API_KEY"],
     api_token=os.environ["TRELLO_API_TOKEN"],
 )
-resource = TrelloResource(config=config)
+vfs = TrelloVFS(config=config)
 
-with Workspace({
-        "/trello/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/trello/": Mount(vfs, mode=MountMode.READ,
+                       backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -63,6 +62,6 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes")

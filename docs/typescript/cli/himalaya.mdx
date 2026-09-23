@@ -17,7 +17,7 @@ independent implementation uses
 ## Install
 
 ```typescript
-import { EmailResource, HIMALAYA, Workspace } from '@struktoai/mirage-node'
+import { EmailVFS, HIMALAYA, Workspace } from '@struktoai/mirage-node'
 
 const config = {
   imapHost: 'imap.example.com',
@@ -25,7 +25,7 @@ const config = {
   username: 'agent@example.com',
   password: 'app-password',
 }
-const ws = new Workspace({ '/mail': new EmailResource(config) })
+const ws = new Workspace({ '/mail': new EmailVFS(config) })
 ws.registerCli('himalaya', HIMALAYA, config)
 ```
 

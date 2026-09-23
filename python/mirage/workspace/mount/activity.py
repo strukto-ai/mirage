@@ -19,8 +19,8 @@ from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource
 
 
-class ResourceActivity:
-    """Calls and streams sharing a resource, including removed aliases."""
+class VFSActivity:
+    """Calls and streams sharing a VFS, including removed aliases."""
 
     def __init__(self) -> None:
         self._count = 0
@@ -59,7 +59,7 @@ class ResourceActivity:
 
 
 class ActivityStream:
-    """Release a stream's resource on EOF, error, or explicit close."""
+    """Release a stream's VFS on EOF, error, or explicit close."""
 
     def __init__(self, source: AsyncIterator[bytes],
                  release: Callable[[], None]) -> None:

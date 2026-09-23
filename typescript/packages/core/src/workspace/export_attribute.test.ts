@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { VarAttr } from '../shell/variable.ts'
 import { makeWorkspace, stderrStr, stdoutStr } from './fixtures/workspace_fixture.ts'
-import { Session } from './session/session.ts'
+import { SessionState } from './session/session.ts'
 import { envSnapshot } from './session/state.ts'
 
 // Every case pinned against GNU bash 5.2.37 on debian:stable-slim.
@@ -70,7 +70,7 @@ const EXPORT_P_CASES: [string, string][] = [
 describe('env carries only exported names', () => {
   it.each(ENV_CASES)('%s', async (cmd, want) => {
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute(cmd))).toBe(want)
+    expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
 })
@@ -78,7 +78,7 @@ describe('env carries only exported names', () => {
 describe('declare -p renders the attributes', () => {
   it.each(DECLARE_CASES)('%s', async (cmd, want) => {
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute(cmd))).toBe(want)
+    expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
 })
@@ -86,7 +86,7 @@ describe('declare -p renders the attributes', () => {
 describe('export -p lists the exported set', () => {
   it.each(EXPORT_P_CASES)('%s', async (cmd, want) => {
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute(cmd))).toBe(want)
+    expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
 })
@@ -96,10 +96,10 @@ describe('the process view is not the shell view', () => {
     // printenv is a separate binary in GNU, so the only names it can
     // possibly see are exported ones; a plain variable exits 1.
     const { ws } = await makeWorkspace()
-    const plain = await ws.execute('X=plain; printenv X')
+    const plain = await ws.shell('X=plain; printenv X')
     expect(plain.exitCode).toBe(1)
     expect(stdoutStr(plain)).toBe('')
-    expect(stdoutStr(await ws.execute('export X=e; printenv X'))).toBe('e\n')
+    expect(stdoutStr(await ws.shell('export X=e; printenv X'))).toBe('e\n')
     await ws.close()
   })
 
@@ -108,14 +108,14 @@ describe('the process view is not the shell view', () => {
     // the same function as `envSnapshot` in TS, so narrowing one would
     // have stopped `$X` resolving a plain assignment.
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute('X=hello; echo $X'))).toBe('hello\n')
-    expect(stdoutStr(await ws.execute('X=hello; set'))).toContain('X=hello\n')
+    expect(stdoutStr(await ws.shell('X=hello; echo $X'))).toBe('hello\n')
+    expect(stdoutStr(await ws.shell('X=hello; set'))).toContain('X=hello\n')
     await ws.close()
   })
 
   it('exports PWD from startup', async () => {
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute('env'))).toContain('PWD=')
+    expect(stdoutStr(await ws.shell('env'))).toContain('PWD=')
     await ws.close()
   })
 
@@ -126,10 +126,10 @@ describe('the process view is not the shell view', () => {
     // value rather than the record.
     const { ws } = await makeWorkspace()
     const out = stdoutStr(
-      await ws.execute('mkdir -p /ram/d; cd /ram/d; cd /ram; declare -p PWD OLDPWD'),
+      await ws.shell('mkdir -p /ram/d; cd /ram/d; cd /ram; declare -p PWD OLDPWD'),
     )
     expect(out).toBe('declare -x PWD="/ram"\ndeclare -x OLDPWD="/ram/d"\n')
-    const env = stdoutStr(await ws.execute('env | grep -E "^(PWD|OLDPWD)=" | sort'))
+    const env = stdoutStr(await ws.shell('env | grep -E "^(PWD|OLDPWD)=" | sort'))
     expect(env).toBe('OLDPWD=/ram/d\nPWD=/ram\n')
     await ws.close()
   })
@@ -138,7 +138,7 @@ describe('the process view is not the shell view', () => {
     // `fork({cwd})` rebuilds $PWD to name where the fork is, and has to
     // rebuild the attribute with it: a fresh record would drop the mark
     // and the forked session's env would lose PWD entirely.
-    const session = new Session({ sessionId: 's1', cwd: '/' })
+    const session = new SessionState({ sessionId: 's1', cwd: '/' })
     const forked = session.fork({ cwd: '/data' })
     expect(forked.vars.PWD?.attrs.has(VarAttr.Export)).toBe(true)
     expect(envSnapshot(forked).PWD).toBe('/data')
@@ -152,7 +152,7 @@ describe('declare -p reports an unknown name', () => {
     // `line N:` (GNU says `bash: line 1: declare: NOPE: not found`),
     // matching how every other mirage builtin words its errors.
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('G=good; declare -p G NOPE')
+    const io = await ws.shell('G=good; declare -p G NOPE')
     expect(io.exitCode).toBe(1)
     expect(stdoutStr(io)).toBe('declare -- G="good"\n')
     expect(stderrStr(io)).toBe('bash: declare: NOPE: not found\n')
@@ -180,7 +180,7 @@ describe('an array is exportable like anything else', () => {
   ]
   it.each(CASES)('%s', async (cmd, want) => {
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute(cmd))).toBe(want)
+    expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
 
@@ -188,7 +188,7 @@ describe('an array is exportable like anything else', () => {
     // Marked, listed by `export -p`, and still absent from `env`: bash
     // puts no array in a child's environment.
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('export ARR=(a b); env | grep -c ARR || true')
+    const io = await ws.shell('export ARR=(a b); env | grep -c ARR || true')
     expect(stdoutStr(io)).toBe('0\n')
     await ws.close()
   })
@@ -207,17 +207,17 @@ describe('a bare local declares without assigning', () => {
   ]
   it.each(CASES)('%s', async (cmd, want) => {
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute(cmd))).toBe(want)
+    expect(stdoutStr(await ws.shell(cmd))).toBe(want)
     await ws.close()
   })
 
   it('refuses `local` outside a function', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('local x=1; echo rc=$?')
+    const io = await ws.shell('local x=1; echo rc=$?')
     expect(stderrStr(io)).toBe('bash: local: can only be used in a function\n')
     expect(stdoutStr(io)).toBe('rc=1\n')
     // `declare` is the spelling that is legal at top level.
-    expect(stdoutStr(await ws.execute('declare x=1; declare -p x'))).toBe('declare -- x="1"\n')
+    expect(stdoutStr(await ws.shell('declare x=1; declare -p x'))).toBe('declare -- x="1"\n')
     await ws.close()
   })
 })

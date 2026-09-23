@@ -16,8 +16,8 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.du import size
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 @pytest.fixture
@@ -32,23 +32,23 @@ def store():
 
 @pytest.mark.asyncio
 async def test_size_root(store):
-    total = await size(store,
-                       PathSpec(resource_path="", virtual="/", directory="/"))
+    total = await size(store, PathSpec(vfs_path="", virtual="/",
+                                       directory="/"))
     assert total == 5 + 6 + 4
 
 
 @pytest.mark.asyncio
 async def test_size_subdir(store):
     total = await size(
-        store, PathSpec(resource_path="sub", virtual="/sub", directory="/sub"))
+        store, PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"))
     assert total == 6 + 4
 
 
 @pytest.mark.asyncio
 async def test_size_single_file(store):
     total = await size(
-        store,
-        PathSpec(resource_path="a.txt", virtual="/a.txt", directory="/a.txt"))
+        store, PathSpec(vfs_path="a.txt", virtual="/a.txt",
+                        directory="/a.txt"))
     assert total == 5
 
 
@@ -56,7 +56,5 @@ async def test_size_single_file(store):
 async def test_size_empty():
     s = RAMStore()
     a = RAMAccessor(s)
-    total = await size(a, PathSpec(resource_path="",
-                                   virtual="/",
-                                   directory="/"))
+    total = await size(a, PathSpec(vfs_path="", virtual="/", directory="/"))
     assert total == 0

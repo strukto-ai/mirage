@@ -30,8 +30,8 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-function spec(virtual: string, resourcePath: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath })
+function spec(virtual: string, vfsPath: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath })
 }
 
 describe('DiskEventHook', () => {
@@ -48,7 +48,7 @@ describe('DiskEventHook', () => {
     expect(events).toHaveLength(1)
     expect(events[0]?.kind).toBe(FileChangeKind.CREATE)
     expect(events[0]?.path.virtual).toBe('/d/data/a.txt')
-    expect(events[0]?.path.resourcePath).toBe('data/a.txt')
+    expect(events[0]?.path.vfsPath).toBe('data/a.txt')
   })
 
   it('maps modified and deleted', async () => {
@@ -103,7 +103,7 @@ describe('DiskEventHook', () => {
   it('normalizes the mount root', async () => {
     const events = await map('modified', { src_path: root })
     expect(events[0]?.path.virtual).toBe('/d')
-    expect(events[0]?.path.resourcePath).toBe('')
+    expect(events[0]?.path.vfsPath).toBe('')
   })
 
   it('ignores a payload without a path', async () => {

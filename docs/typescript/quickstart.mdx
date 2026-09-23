@@ -18,16 +18,16 @@ pnpm add -D tsx typescript
 
 ## Create a Workspace
 
-Start with the RAM resource so you can try Mirage without credentials.
+Start with the RAM VFS so you can try Mirage without credentials.
 
 ```ts
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
 
-  await ws.execute('echo "hello mirage" | tee /data/hello.txt')
-  const result = await ws.execute('cat /data/hello.txt')
+  await ws.shell('echo "hello mirage" | tee /data/hello.txt')
+  const result = await ws.shell('cat /data/hello.txt')
   process.stdout.write(result.stdoutText)
 
   await ws.close()
@@ -44,23 +44,23 @@ pnpm tsx quickstart.ts
 
 ## Run Commands
 
-Once a resource is mounted, you can use Mirage like a shell over your virtual filesystem:
+Once a VFS is mounted, you can use Mirage like a shell over your virtual filesystem:
 
 ```ts
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
 
-  await ws.execute(`echo '{"name": "alice"}' | tee /data/user.json`)
+  await ws.shell(`echo '{"name": "alice"}' | tee /data/user.json`)
 
-  const files = await ws.execute('ls /data/')
+  const files = await ws.shell('ls /data/')
   process.stdout.write(files.stdoutText)
 
-  const name = await ws.execute('jq ".name" /data/user.json')
+  const name = await ws.shell('jq ".name" /data/user.json')
   process.stdout.write(name.stdoutText)
 
-  const match = await ws.execute('grep alice /data/user.json')
+  const match = await ws.shell('grep alice /data/user.json')
   process.stdout.write(match.stdoutText)
 
   await ws.close()
@@ -78,7 +78,7 @@ of running the command: network/cache bytes, read ops, and a
 `&&`/`||`, `if`/`case`, loops, and subshells aggregate automatically.
 
 ```ts
-const plan = await ws.execute('cat /data/user.json | wc -l', { provision: true })
+const plan = await ws.shell('cat /data/user.json | wc -l', { provision: true })
 console.log(plan.networkRead, plan.readOps, plan.precision)
 ```
 
@@ -113,12 +113,12 @@ import {
   Limit,
   MountMode,
   OnExceed,
-  RAMResource,
+  RAMVFS,
   Workspace,
 } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
-  { '/data': new RAMResource() },
+  { '/data': new RAMVFS() },
   {
     mode: MountMode.WRITE,
     commandLimits: {
@@ -138,4 +138,4 @@ The same limits are available to the CLI as a `command_limits` block in the work
 
 - See [TypeScript Installation](/typescript/install) for optional native peers (FUSE, Redis, Postgres, MongoDB, SSH, Email).
 - Browse [TypeScript Agents](/typescript/agents/index) to wire Mirage into OpenAI Agents SDK, Vercel AI SDK, LangChain, Mastra, and more.
-- Pick a real backend from the Resources section, such as [S3](/typescript/setup/s3), [Slack](/typescript/slack), or [Discord](/typescript/discord).
+- Pick a real backend from the VFS section, such as [S3](/typescript/setup/s3), [Slack](/typescript/slack), or [Discord](/typescript/discord).

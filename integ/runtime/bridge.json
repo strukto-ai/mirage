@@ -17,11 +17,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/redis": {
-            "resource": "redis"
+            "vfs": "redis"
           }
         }
       },
@@ -43,11 +43,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/s3": {
-            "resource": "s3"
+            "vfs": "s3"
           }
         }
       },
@@ -66,11 +66,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/mongodb": {
-            "resource": "mongodb"
+            "vfs": "mongodb"
           }
         }
       },
@@ -103,18 +103,18 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "hello from ram\n",
               "analyze.py": "from pathlib import Path\nram = Path('/ram/data.txt').read_text().strip()\ns3 = Path('/s3/greeting.txt').read_text().strip()\nprint('ram:', ram)\nprint('s3:', s3)\nprint('argv sum:', int(argv[1]) + int(argv[2]))\n"
             }
           },
           "/s3": {
-            "resource": "s3"
+            "vfs": "s3"
           }
         }
       },
@@ -133,11 +133,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/s3": {
-            "resource": "s3"
+            "vfs": "s3"
           }
         }
       },
@@ -169,11 +169,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/s3": {
-            "resource": "s3"
+            "vfs": "s3"
           }
         }
       },
@@ -211,11 +211,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "limits": {
               "read": {
                 "max_bytes": 8
@@ -223,7 +223,7 @@
             }
           },
           "/r": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -248,14 +248,14 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/a": {
-            "resource": "ram"
+            "vfs": "ram"
           },
           "/b": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -301,11 +301,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/redis": {
-            "resource": "redis"
+            "vfs": "redis"
           }
         }
       },
@@ -345,11 +345,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/redis": {
-            "resource": "redis"
+            "vfs": "redis"
           }
         }
       },
@@ -380,11 +380,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/s3": {
-            "resource": "s3"
+            "vfs": "s3"
           }
         }
       },
@@ -418,11 +418,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/s3": {
-            "resource": "s3"
+            "vfs": "s3"
           }
         }
       },
@@ -453,7 +453,7 @@
       "world": {
         "mounts": {
           "/s3": {
-            "resource": "s3"
+            "vfs": "s3"
           }
         }
       },

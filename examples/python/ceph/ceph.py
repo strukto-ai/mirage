@@ -18,8 +18,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.ceph import CephConfig, CephResource
 from mirage.types import PathSpec
+from mirage.vfs.ceph import CephConfig, CephVFS
 
 load_dotenv(".env.development")
 
@@ -29,26 +29,26 @@ config = CephConfig(
     access_key_id=os.environ["CEPH_ACCESS_KEY_ID"],
     secret_access_key=os.environ["CEPH_SECRET_ACCESS_KEY"],
 )
-resource = CephResource(config)
-ws = Workspace({"/ceph/": resource}, mode=MountMode.READ)
+vfs = CephVFS(config)
+ws = Workspace({"/ceph/": vfs}, mode=MountMode.READ)
 
 
 def ops_summary() -> str:
-    records = ws.fs.records
+    records = ws.vfs.records
     return f"{len(records)} ops, {sum(r.bytes for r in records)} bytes"
 
 
 async def main():
     print(f"=== Ceph RGW at {config.endpoint_url} ===")
 
-    r = await ws.execute("ls /ceph/")
+    r = await ws.shell("ls /ceph/")
     print("ls /ceph/:\n" + await r.stdout_str())
 
-    r = await ws.execute("find /ceph/ -name '*.json' | head -n 5")
+    r = await ws.shell("find /ceph/ -name '*.json' | head -n 5")
     print("find *.json:\n" + await r.stdout_str())
 
-    r = await ws.execute("grep -m 1 mirage /ceph/data/example.jsonl",
-                         provision=True)
+    r = await ws.shell("grep -m 1 mirage /ceph/data/example.jsonl",
+                       provision=True)
     print(f"plan grep -m 1: network_read={r.network_read} "
           f"precision={r.precision}")
 
@@ -58,7 +58,7 @@ async def main():
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print("=== metadata overlay on /ceph/data/example.jsonl ===")
-    meta_res = await ws.execute(
+    meta_res = await ws.shell(
         'chmod 640 "/ceph/data/example.jsonl"'
         ' && chown 500:dev "/ceph/data/example.jsonl"'
         ' && touch -t 202601021530 "/ceph/data/example.jsonl"')

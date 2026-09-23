@@ -1,7 +1,7 @@
 ---
 title: Backblaze B2
 icon: /images/backblaze-logo.svg
-description: Set up Backblaze B2 as a MIRAGE resource from Node or the browser.
+description: Set up Backblaze B2 as a MIRAGE VFS from Node or the browser.
 ---
 
 Backblaze B2 uses the S3 API with AWS Signature V4 against `https://s3.<region>.backblazeb2.com`. MIRAGE derives this endpoint from your region automatically.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { BackblazeResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { BackblazeVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const b2 = new BackblazeResource({
+const b2 = new BackblazeVFS({
   bucket: process.env.B2_BUCKET!,
   region: process.env.B2_REGION!,
   accessKeyId: process.env.B2_ACCESS_KEY_ID!,
@@ -25,7 +25,7 @@ const b2 = new BackblazeResource({
 })
 
 const ws = new Workspace({ '/bucket/': b2 }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `BackblazeResource` is secret-free, your backend signs each operation using your B2 application key and returns a URL. B2 accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the B2 endpoint.
+The browser `BackblazeVFS` is secret-free, your backend signs each operation using your B2 application key and returns a URL. B2 accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the B2 endpoint.
 
 ### 1. Server: sign URLs with the B2 endpoint
 
@@ -92,9 +92,9 @@ app.post('/presign/b2', async (req, res) => {
 ### 2. Browser: wire it up
 
 ```ts
-import { BackblazeResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { BackblazeVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const b2 = new BackblazeResource({
+const b2 = new BackblazeVFS({
   bucket: 'my-bucket',
   region: 'us-west-004',
   presignedUrlProvider: async (path, op, opts) => {
@@ -124,4 +124,4 @@ b2 bucket update my-bucket \
   --cors-rules '[{"corsRuleName":"mirage","allowedOrigins":["http://localhost:5173","https://app.example.com"],"allowedOperations":["s3_get","s3_put","s3_head","s3_delete","s3_post"],"allowedHeaders":["*"],"exposeHeaders":["etag","content-length","content-type","last-modified"],"maxAgeSeconds":3000}]'
 ```
 
-See the [Backblaze resource](/python/resource/backblaze) docs for the equivalent Python wiring.
+See the [Backblaze VFS](/python/vfs/backblaze) docs for the equivalent Python wiring.

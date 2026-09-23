@@ -14,14 +14,14 @@
 
 import asyncio
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _make_ws():
-    ram1 = RAMResource()
-    ram2 = RAMResource()
+    ram1 = RAMVFS()
+    ram2 = RAMVFS()
     ram1._store.files["/file.txt"] = b"line1\nline2\nline3\nline4\nline5\n"
     ram2._store.files["/file.txt"] = b"aaa\nbbb\nccc\n"
     return Workspace(
@@ -34,7 +34,7 @@ def _make_ws():
 def _run(ws, cmd):
 
     async def _inner():
-        io = await ws.execute(cmd)
+        io = await ws.shell(cmd)
         return await io.stdout_str(), await io.stderr_str(), io.exit_code
 
     return asyncio.run(_inner())
@@ -133,8 +133,8 @@ def test_cross_mount_cmp_missing_has_strerror():
 
 
 def _make_readonly_src_ws():
-    ro = RAMResource()
-    rw = RAMResource()
+    ro = RAMVFS()
+    rw = RAMVFS()
     ro._store.files["/report.csv"] = b"name,age\nalice,30\n"
     return Workspace(
         {
@@ -161,8 +161,8 @@ def test_cross_mount_relay_mv_expands_glob():
     # RELAY bypasses the mount command wrappers that expand globs for
     # single-mount runs, so the executor expands relay operands itself.
     ws = _make_ws()
-    ws.mount("/a/").resource._store.files["/g1.txt"] = b"g1\n"
-    ws.mount("/a/").resource._store.files["/g2.txt"] = b"g2\n"
+    ws.mount("/a/").vfs._store.files["/g1.txt"] = b"g1\n"
+    ws.mount("/a/").vfs._store.files["/g2.txt"] = b"g2\n"
     out, err, code = _run(ws, "mv /a/g*.txt /b/")
     assert (err, code) == ("", 0)
     out, err, code = _run(ws, "cat /b/g1.txt /b/g2.txt")

@@ -59,8 +59,8 @@ async def test_resolve_glob_files_pdf(accessor, index):
                     })),
     ])
     spec = PathSpec(
-        resource_path=mount_key(
-            "/channels/general__C001/2026-04-10/files/*.pdf", ""),
+        vfs_path=mount_key("/channels/general__C001/2026-04-10/files/*.pdf",
+                           ""),
         virtual="/channels/general__C001/2026-04-10/files/*.pdf",
         directory="/channels/general__C001/2026-04-10/files/",
         pattern="*.pdf",

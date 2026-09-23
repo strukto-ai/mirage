@@ -23,11 +23,11 @@ from openai import AsyncOpenAI
 
 from mirage import MountMode, Workspace
 from mirage.agents.openai_agents import MirageRunner, MirageSandboxClient
-from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
 
-slack = SlackResource(config=SlackConfig(
+slack = SlackVFS(config=SlackConfig(
     token=os.environ["SLACK_BOT_TOKEN"],
     search_token=os.environ.get("SLACK_USER_TOKEN"),
 ))
@@ -126,7 +126,7 @@ async def main():
 #   rendered pages.
 # - input_text: any non-binary content the agent might want pre-loaded.
 #
-# Resource-agnostic: ws.fs.read(path) routes via the workspace mount
+# VFS-agnostic: ws.vfs.read(path) routes via the workspace mount
 # registry, so the same flow works for /s3/...png, /disk/...pdf,
 # /slack/.../files/..., etc.
 

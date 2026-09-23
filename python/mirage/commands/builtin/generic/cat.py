@@ -6,7 +6,8 @@ from mirage.commands.builtin.utils.limit import truncate_stream
 from mirage.commands.builtin.utils.operands import (normalized_read,
                                                     operands_io,
                                                     split_readable)
-from mirage.commands.builtin.utils.stream import resolve_source
+from mirage.commands.builtin.utils.stream import (is_stdin, resolve_source,
+                                                  stdin_stat, stdin_stream)
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -88,6 +89,8 @@ async def cat_generic(
             ``stream(path)``.
         local (bool): Whether backend streams are cheap to re-open.
     """
+    stat = stdin_stat(stat)
+    stream = stdin_stream(stream, opts.stdin)
     parsed = parse_flags(opts.flags)
     read = normalized_read(stream)
     if paths:
@@ -113,8 +116,9 @@ async def cat_generic(
         if len(readable) == 1:
             p = readable[0]
             cachable = CachableAsyncIterator(await source_for(p))
-            io.reads[p.mount_path] = cachable
-            io.cache.append(p.mount_path)
+            if not is_stdin(p):
+                io.reads[p.mount_path] = cachable
+                io.cache.append(p.mount_path)
             source: ByteSource = cachable
         elif local:
             cachables = [
@@ -122,16 +126,17 @@ async def cat_generic(
             ]
             io.reads.update({
                 p.mount_path: c
-                for p, c in zip(readable, cachables)
+                for p, c in zip(readable, cachables) if not is_stdin(p)
             })
-            io.cache.extend(p.mount_path for p in readable)
+            io.cache.extend(p.mount_path for p in readable if not is_stdin(p))
             source = chain_cachables(*cachables)
         else:
             reads: dict[str, ByteSource] = {}
             parts: list[bytes] = []
             for p in readable:
                 data = await materialize(await source_for(p))
-                reads[p.mount_path] = data
+                if not is_stdin(p):
+                    reads[p.mount_path] = data
                 parts.append(data)
             io.reads.update(reads)
             io.cache.extend(reads)

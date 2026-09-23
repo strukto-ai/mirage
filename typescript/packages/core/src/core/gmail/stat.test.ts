@@ -33,7 +33,7 @@ function spec(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: mountKey(virtual, PREFIX),
+    vfsPath: mountKey(virtual, PREFIX),
   })
 }
 

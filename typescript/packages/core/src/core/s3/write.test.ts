@@ -22,7 +22,7 @@ vi.mock('./client.ts', async () => {
 
 import { S3Accessor } from '../../accessor/s3.ts'
 import { runWithCacheManager } from '../../cache/context.ts'
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { PathSpec } from '../../types.ts'
 import * as clientMod from './client.ts'
 import { write } from './write.ts'
@@ -44,6 +44,10 @@ class FakeManager {
   }
 
   cachedBytes(_path: PathSpec): Promise<Uint8Array | null> {
+    return Promise.resolve(null)
+  }
+
+  cachedSize(_path: PathSpec): Promise<number | null> {
     return Promise.resolve(null)
   }
 }
@@ -70,7 +74,7 @@ async function runWrite(mountPath: string): Promise<{ manager: FakeManager; keys
   const manager = new FakeManager()
   const accessor = new S3Accessor({ bucket: 'b' } as S3Config)
   const spec = new PathSpec({
-    resourcePath: mountPath.replace(/^\//, ''),
+    vfsPath: mountPath.replace(/^\//, ''),
     virtual: `/mnt${mountPath}`,
     directory: '/mnt/',
   })

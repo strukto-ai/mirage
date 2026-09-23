@@ -25,7 +25,7 @@ from mirage.workspace.executor.control import (BreakSignal, ContinueSignal,
                                                handle_case, handle_cfor,
                                                handle_for, handle_if,
                                                handle_until, handle_while)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.types import ExecutionNode
 
@@ -51,8 +51,8 @@ def bg(text: str) -> FakeNode:
                     next_sibling=FakeNode(text="&", type="&"))
 
 
-def session(**kwargs) -> Session:
-    return Session(session_id="test", **kwargs)
+def session(**kwargs) -> SessionState:
+    return SessionState(session_id="test", **kwargs)
 
 
 async def text_of(stdout) -> str:

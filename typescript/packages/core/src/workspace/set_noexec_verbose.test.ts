@@ -56,7 +56,7 @@ const VERBOSE: [string, string, string][] = [
 describe('set -n noexec', () => {
   it.each(NOEXEC)('%s', async (cmd, out) => {
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute(cmd))).toBe(out)
+    expect(stdoutStr(await ws.shell(cmd))).toBe(out)
     await ws.close()
   })
 })
@@ -64,7 +64,7 @@ describe('set -n noexec', () => {
 describe('set -v verbose', () => {
   it.each(VERBOSE)('%s', async (cmd, out, err) => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(cmd)
+    const io = await ws.shell(cmd)
     expect(stdoutStr(io)).toBe(out)
     expect(stderrStr(io)).toBe(err)
     await ws.close()
@@ -74,7 +74,7 @@ describe('set -v verbose', () => {
 describe('set -o listing', () => {
   it('matches the GNU defaults', async () => {
     const { ws } = await makeWorkspace()
-    const text = stdoutStr(await ws.execute('set -o'))
+    const text = stdoutStr(await ws.shell('set -o'))
     // The three GNU turns on for a non-interactive shell, and nothing else.
     const on = text
       .split('\n')
@@ -88,7 +88,7 @@ describe('set -o listing', () => {
 
   it('is re-readable under +o', async () => {
     const { ws } = await makeWorkspace()
-    const text = stdoutStr(await ws.execute('set +o'))
+    const text = stdoutStr(await ws.shell('set +o'))
     expect(text.startsWith('set +o allexport\nset -o braceexpand\n')).toBe(true)
     expect(text).toContain('set +o xtrace\n')
     await ws.close()
@@ -98,9 +98,9 @@ describe('set -o listing', () => {
 describe('brace expansion follows its option', () => {
   it('expands by default and not under +B', async () => {
     const { ws } = await makeWorkspace()
-    expect(stdoutStr(await ws.execute('echo {a,b}'))).toBe('a b\n')
-    expect(stdoutStr(await ws.execute('set +B; echo {a,b}'))).toBe('{a,b}\n')
-    expect(stdoutStr(await ws.execute('set -o'))).toContain('braceexpand    \toff\n')
+    expect(stdoutStr(await ws.shell('echo {a,b}'))).toBe('a b\n')
+    expect(stdoutStr(await ws.shell('set +B; echo {a,b}'))).toBe('{a,b}\n')
+    expect(stdoutStr(await ws.shell('set -o'))).toContain('braceexpand    \toff\n')
     await ws.close()
   })
 })
@@ -124,7 +124,7 @@ describe('noexec stops a nested statement runner', () => {
   ]
   it.each(CASES)('%s', async (cmd) => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(cmd)
+    const io = await ws.shell(cmd)
     expect(stdoutStr(io)).toBe('')
     expect(stderrStr(io)).toBe('')
     await ws.close()

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
@@ -29,7 +29,7 @@ describe('newWorkspaceId', () => {
 describe('WorkspaceRegistry', () => {
   it('add/get/list/remove', async () => {
     const r = new WorkspaceRegistry()
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     const entry = r.add(ws)
     expect(r.has(entry.id)).toBe(true)
     expect(r.list()).toHaveLength(1)
@@ -39,9 +39,9 @@ describe('WorkspaceRegistry', () => {
 
   it('rejects duplicate ids', () => {
     const r = new WorkspaceRegistry()
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     r.add(ws, 'fixed')
-    const ws2 = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws2 = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     expect(() => r.add(ws2, 'fixed')).toThrow(/already exists/)
   })
 
@@ -54,7 +54,7 @@ describe('WorkspaceRegistry', () => {
         tripped = true
       },
     })
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     const entry = r.add(ws)
     await r.remove(entry.id)
     await vi.advanceTimersByTimeAsync(60)

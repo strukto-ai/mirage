@@ -14,8 +14,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OpsRegistry } from '../../../ops/registry.ts'
-import { BaseResource } from '../../../resource/base.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { BaseVFS } from '../../../vfs/base.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -37,7 +37,7 @@ function mockFetch(): void {
   ) as typeof fetch
 }
 
-class StubResource extends BaseResource {
+class StubVFS extends BaseVFS {
   readonly kind = 'stub'
   open(): Promise<void> {
     return Promise.resolve()
@@ -49,11 +49,11 @@ class StubResource extends BaseResource {
 
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ramRw = new RAMResource()
-  const ramRo = new RAMResource()
-  const stub = new StubResource()
+  const ramRw = new RAMVFS()
+  const ramRo = new RAMVFS()
+  const stub = new StubVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(ramRw)
+  registry.registerVfs(ramRw)
   const ws = new Workspace(
     { '/ram': ramRw },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
@@ -74,9 +74,9 @@ describe('curl -o persists to mount', () => {
 
   it('writes the body to a writable mount', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('curl -s https://x.test/file -o /ram/foo.bin')
+    const io = await ws.shell('curl -s https://x.test/file -o /ram/foo.bin')
     expect(io.exitCode).toBe(0)
-    const cat = await ws.execute('cat /ram/foo.bin')
+    const cat = await ws.shell('cat /ram/foo.bin')
     expect(cat.exitCode).toBe(0)
     expect(cat.stdoutText).toBe(DEC.decode(PAYLOAD))
     await ws.close()
@@ -84,7 +84,7 @@ describe('curl -o persists to mount', () => {
 
   it('fails with non-zero exit on a read-only mount', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('curl -sS https://x.test/file -o /readonly/foo.bin')
+    const io = await ws.shell('curl -sS https://x.test/file -o /readonly/foo.bin')
     expect(io.exitCode).toBe(23)
     expect(io.stderrText).toMatch(/Read-only/)
     expect(io.stderrText).toContain('/readonly/foo.bin')
@@ -96,16 +96,16 @@ describe('curl -o persists to mount', () => {
     // routes to the empty root mount and fails because the parent is missing
     // (the catch-all root never silently swallows an unmounted path).
     const ws = await makeWs()
-    const io = await ws.execute('curl -sS https://x.test/file -o /nope/foo.bin')
+    const io = await ws.shell('curl -sS https://x.test/file -o /nope/foo.bin')
     expect(io.exitCode).toBe(23)
     expect(io.stderrText).toMatch(/No such file or directory/)
     expect(io.stderrText).toContain('/nope/foo.bin')
     await ws.close()
   })
 
-  it('fails when target resource has no write op', async () => {
+  it('fails when target VFS has no write op', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('curl -sS https://x.test/file -o /nowrite/foo.bin')
+    const io = await ws.shell('curl -sS https://x.test/file -o /nowrite/foo.bin')
     expect(io.exitCode).toBe(23)
     expect(io.stderrText).toMatch(/no op|write/)
     expect(io.stderrText).toContain('/nowrite/foo.bin')
@@ -124,9 +124,9 @@ describe('wget -O persists to mount', () => {
 
   it('writes the body to a writable mount', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('wget -q -O /ram/wget.bin https://x.test/file')
+    const io = await ws.shell('wget -q -O /ram/wget.bin https://x.test/file')
     expect(io.exitCode).toBe(0)
-    const cat = await ws.execute('cat /ram/wget.bin')
+    const cat = await ws.shell('cat /ram/wget.bin')
     expect(cat.exitCode).toBe(0)
     expect(cat.stdoutText).toBe(DEC.decode(PAYLOAD))
     await ws.close()
@@ -134,7 +134,7 @@ describe('wget -O persists to mount', () => {
 
   it('fails with non-zero exit on a read-only mount', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('wget -O /readonly/wget.bin https://x.test/file')
+    const io = await ws.shell('wget -O /readonly/wget.bin https://x.test/file')
     expect(io.exitCode).toBe(1)
     expect(io.stderrText).toMatch(/read-only/)
     await ws.close()

@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.hf_spaces import HfSpacesConfig, HfSpacesResource
+from mirage.vfs.hf_spaces import HfSpacesConfig, HfSpacesVFS
 
 load_dotenv(".env.development")
 
@@ -26,12 +26,12 @@ config = HfSpacesConfig(
     repo_id=os.environ.get("HF_SPACE_REPO", "HuggingFaceBio/carbon-demo"),
     token=os.environ.get("HF_TOKEN"),
 )
-resource = HfSpacesResource(config)
+vfs = HfSpacesVFS(config)
 
 
 async def main():
-    with Workspace({"/s/": resource}, mode=MountMode.READ) as ws:
-        print(f"=== VFS: {resource.accessor.bucket_uri} ===")
+    with Workspace({"/s/": vfs}, mode=MountMode.READ) as ws:
+        print(f"=== VFS: {vfs.accessor.bucket_uri} ===")
 
         print("\n--- os.listdir('/s') ---")
         root_entries = os.listdir("/s")
@@ -52,7 +52,7 @@ async def main():
                 print(f.read().rstrip())
 
         print("\n--- shell view ---")
-        r = await ws.execute("find /s/ -name '*.py' | head -n 5")
+        r = await ws.shell("find /s/ -name '*.py' | head -n 5")
         print(f"  python files: {(await r.stdout_str()).strip()}")
 
 

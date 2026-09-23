@@ -27,7 +27,7 @@ from mirage.ops.namespace_view import namespace_names
 from mirage.ops.types import LinkView, MountView, NamespaceView
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision
-from mirage.runtime.table import VFSRuntime
+from mirage.runtime.table import WorkspaceRuntime
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
 from mirage.utils.errors import format_fs_error
@@ -39,7 +39,7 @@ from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
-from mirage.workspace.session import Session, env_snapshot, session_view
+from mirage.workspace.session import SessionState, env_snapshot, session_view
 from mirage.workspace.types import ExecutionNode
 
 
@@ -80,21 +80,22 @@ def line_runtime_for(
     With no decision, the workspace's static bindings apply. With one,
     the command's runtime is looked up in the decision: its binding,
     or the decision's fallback when no entry captures it. A resolved
-    VFSRuntime means the executor serves the command itself (the vfs
-    runtime has no interpreter door); None means no runtime accepted
-    it: exit 126, like a shell refusing to exec.
+    WorkspaceRuntime means the executor serves the command itself (the
+    workspace runtime has no interpreter door); None means no runtime
+    accepted it: exit 126, like a shell refusing to exec.
 
     Args:
         cmd_name (str): the command being dispatched.
         registry (MountRegistry): registry holding static bindings and
-            the world's vfs runtime.
+            the world's workspace runtime.
         routing (RouteDecision | None): the typed line's decision.
     """
     if routing is None:
-        vfs = registry.vfs_runtime
-        restricted = isinstance(vfs, VFSRuntime) and vfs.restricted
+        fallback = registry.workspace_runtime
+        restricted = isinstance(fallback,
+                                WorkspaceRuntime) and fallback.restricted
         runtime = registry.runtime_bindings.get(cmd_name)
-        if runtime is vfs and vfs is not None:
+        if runtime is fallback and fallback is not None:
             return None, None
         if runtime is None and restricted:
             return None, admission_denial(cmd_name)
@@ -102,7 +103,7 @@ def line_runtime_for(
     runtime = routing.bindings.get(cmd_name, routing.fallback)
     if runtime is None:
         return None, admission_denial(cmd_name)
-    if isinstance(runtime, VFSRuntime):
+    if isinstance(runtime, WorkspaceRuntime):
         return None, None
     return runtime, None
 
@@ -290,15 +291,15 @@ async def drop_mount_caches(registry: MountRegistry) -> None:
     at: after `gws sheets spreadsheets create` the new file has no cache
     entry to expire, which is exactly the case that matters. Which
     mounts that service backs is not the CLI's business either (a CLI
-    and a resource are separate tiers, and a user's own CLI knows
-    nothing about a user's own resource), so the executor says the one
+    and a VFS are separate tiers, and a user's own CLI knows
+    nothing about a user's own VFS), so the executor says the one
     thing it knows: a write happened, and every mount may be stale. A
     write verb is rare next to reads, and the cost is one cold listing
     on a mount's next read, never a wrong answer.
 
     Both caches go, because the two hide different writes. A stale
     listing hides a create or a delete; a stale body hides an edit, and
-    these resources cache reads, so a `cat` after `gws docs documents
+    these mounts cache reads, so a `cat` after `gws docs documents
     batchUpdate` would otherwise keep serving the pre-edit content
     without ever reaching Google.
 
@@ -336,7 +337,7 @@ def namespace_stat_overlay(namespace: Namespace, virtual: str,
 
 async def run_on_mount(
     registry: MountRegistry,
-    session: Session,
+    session: SessionState,
     dispatch: DispatchFn,
     namespace: Namespace | None,
     cmd_name: str,
@@ -359,7 +360,7 @@ async def run_on_mount(
 
     Args:
         registry (MountRegistry): Mount registry.
-        session (Session): Session providing cwd/env/session_id.
+        session (SessionState): Session providing cwd/env/session_id.
         dispatch (Callable): Workspace operation dispatcher.
         namespace (Namespace | None): Addressing authority for ls symlinks.
         cmd_name (str): Command name.

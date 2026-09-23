@@ -2,11 +2,11 @@ import pytest
 
 from mirage.io.stream import materialize
 from mirage.workspace.executor.builtins.shift import handle_shift
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
 @pytest.mark.asyncio

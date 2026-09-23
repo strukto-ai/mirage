@@ -49,7 +49,7 @@ async def find(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
-        raise ValueError("find: no resource")
+        raise ValueError("find: no VFS")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
     overlay = opts.ns.stat_overlay if opts.ns is not None else None
     # A native find op classifies on the raw backend tree, so under

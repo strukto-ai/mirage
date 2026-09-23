@@ -16,7 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { ReadonlyVariableError } from '../../../session/errors.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { isValidName, requireView } from '../shared.ts'
@@ -24,7 +24,7 @@ import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
 
 async function getoptsFinish(
-  session: Session,
+  session: SessionState,
   view: SessionView,
   name: string,
   optValue: string,
@@ -76,7 +76,7 @@ async function getoptsFinish(
 /** Parse one option per call, with bash's getopts semantics. */
 export async function handleGetopts(
   args: readonly string[],
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null = null,
   state: SessionView | null = null,
 ): Promise<Result> {

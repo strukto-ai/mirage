@@ -111,7 +111,7 @@ class DiskWalk:
         Args:
             root (PathSpec): Watch root (mount-virtual path).
         """
-        prefix = mount_prefix_of(root.virtual, root.resource_path)
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         try:
             found = await asyncio.to_thread(walk_sync, self._accessor.root,
                                             root.mount_path)

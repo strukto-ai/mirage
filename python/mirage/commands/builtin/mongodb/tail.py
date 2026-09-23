@@ -29,7 +29,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tail", resource="mongodb", spec=SPECS["tail"])
+@command("tail", vfs="mongodb", spec=SPECS["tail"])
 async def tail(accessor: MongoDBAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

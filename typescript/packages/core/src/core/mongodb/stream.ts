@@ -102,7 +102,7 @@ export async function* readStream(
 ): AsyncIterableIterator<Uint8Array> {
   const ps =
     typeof path === 'string'
-      ? new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory: path })
+      ? new PathSpec({ vfsPath: stripSlash(path), virtual: path, directory: path })
       : path
   const scope = detectScope(ps)
   if (scope.kind !== 'documents') {
@@ -130,7 +130,7 @@ export async function* watchStream(
 ): AsyncIterableIterator<Uint8Array> {
   const ps =
     typeof path === 'string'
-      ? new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory: path })
+      ? new PathSpec({ vfsPath: stripSlash(path), virtual: path, directory: path })
       : path
   const scope = detectScope(ps)
   if (scope.kind !== 'documents') {

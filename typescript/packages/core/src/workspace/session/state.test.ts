@@ -22,7 +22,7 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import { Policies } from '../../policy/policies.ts'
 import type { Action, SessionContext } from '../../policy/types.ts'
 import { ReadonlyVariableError } from './errors.ts'
-import { Session } from './session.ts'
+import { SessionState } from './session.ts'
 import {
   elementIndex,
   envSnapshot,
@@ -48,8 +48,8 @@ class DenySecrets {
   }
 }
 
-function makeView(policies: Policies | null = null): [SessionView, Session] {
-  const session = new Session({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
+function makeView(policies: Policies | null = null): [SessionView, SessionState] {
+  const session = new SessionState({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
   return [sessionView(session, policies), session]
 }
 
@@ -194,7 +194,7 @@ describe('sessionView', () => {
   })
 
   it('envSnapshot is a copy', () => {
-    const session = new Session({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
+    const session = new SessionState({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
     const snap = envSnapshot(session)
     expect(snap).toEqual({ ...session.env })
     expect(snap).not.toBe(session.env)
@@ -208,8 +208,8 @@ describe('sessionView', () => {
   })
 })
 
-function makeHiddenView(): [SessionView, Session] {
-  const session = new Session({
+function makeHiddenView(): [SessionView, SessionState] {
+  const session = new SessionState({
     sessionId: 's',
     cwd: '/',
     vars: varsFromEnv({ PUBLIC: '1', SLACK_TOKEN: 'xoxb', AWS_SECRET_KEY: 'k' }),
@@ -265,7 +265,7 @@ describe('hidden vars in the session door', () => {
   })
 
   it('visibleEnv matches the scalars when nothing is hidden', () => {
-    const session = new Session({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
+    const session = new SessionState({ sessionId: 's', cwd: '/', vars: varsFromEnv({ A: '1' }) })
     expect(visibleEnv(session)).toEqual({ ...session.env })
   })
 
@@ -279,8 +279,8 @@ describe('hidden vars in the session door', () => {
   })
 })
 
-function elementSession(): Session {
-  const session = new Session({ sessionId: 's', cwd: '/' })
+function elementSession(): SessionState {
+  const session = new SessionState({ sessionId: 's', cwd: '/' })
   seedVar(session, 'm', { a: '1', k5: '9', '0': 'z' })
   seedVar(session, 'arr', ['10', '20', '30'])
   seedVar(session, 's5', '5')
@@ -311,7 +311,7 @@ describe('elementIndex', () => {
 
 describe('subscriptIndex', () => {
   it('lands the assignments a subscript makes and seeds RANDOM', async () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     seedVar(s, 'i', '1')
     s.vars[RANDOM] = makeVar('1')
     expect(await subscriptIndex(s, '3')).toBe(3)

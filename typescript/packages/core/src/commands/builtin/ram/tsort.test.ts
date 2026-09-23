@@ -15,17 +15,17 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 const RAM_TSORT = RAM_COMMANDS.filter((c) => c.name === 'tsort' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runTsort(stdin: Uint8Array | null): Promise<{ out: string; exitCode: number }> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = RAM_TSORT[0]
   if (cmd === undefined) throw new Error('tsort not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin,
     flags: {},
     filetypeFns: null,

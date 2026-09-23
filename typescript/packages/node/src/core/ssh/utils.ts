@@ -22,10 +22,10 @@ const S_IFREG = 0o100000
 
 export function stripPrefix(p: PathSpec): string {
   if (
-    mountPrefixOf(p.virtual, p.resourcePath) &&
-    p.virtual.startsWith(mountPrefixOf(p.virtual, p.resourcePath))
+    mountPrefixOf(p.virtual, p.vfsPath) &&
+    p.virtual.startsWith(mountPrefixOf(p.virtual, p.vfsPath))
   ) {
-    return p.virtual.slice(mountPrefixOf(p.virtual, p.resourcePath).length) || '/'
+    return p.virtual.slice(mountPrefixOf(p.virtual, p.vfsPath).length) || '/'
   }
   return p.virtual
 }

@@ -14,14 +14,14 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
-import { BaseResource, type Resource } from '../../resource/base.ts'
+import { BaseVFS, type VFS } from '../../vfs/base.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { handleCrossMount, isCrossMount } from './cross_mount.ts'
 import type { RunSingle } from '../../commands/builtin/generic/crossmount/index.ts'
 
-class Stub extends BaseResource implements Resource {
+class Stub extends BaseVFS implements VFS {
   readonly kind = 'stub'
   open(): Promise<void> {
     return Promise.resolve()
@@ -198,6 +198,12 @@ describe('handleCrossMount — cp / mv', () => {
     >((op, p) => {
       if (op === 'stat') {
         if (p.virtual === '/disk/b') return Promise.reject(enoent(p))
+        // The destination's parent is a mount root, which every mount
+        // answers as a directory; mv walks the chain of a missing target
+        // and a file there would refuse the move as `Not a directory`.
+        if (p.virtual === '/disk') {
+          return Promise.resolve<[unknown, IOResult]>([dirStat('disk'), new IOResult()])
+        }
         return Promise.resolve<[unknown, IOResult]>([fileStat('a'), new IOResult()])
       }
       if (op === 'read')

@@ -15,8 +15,10 @@
 import pytest
 
 from mirage import MountMode, Workspace
-from tests.resource.databricks_volume.test_databricks_volume import (
-    FakeFiles, make_resource, seed_directory, seed_file)
+from tests.vfs.databricks_volume.test_databricks_volume import (FakeFiles,
+                                                                make_vfs,
+                                                                seed_directory,
+                                                                seed_file)
 
 ROOT = "/Volumes/main/default/agent_files/root"
 
@@ -31,17 +33,17 @@ def dbx_files() -> FakeFiles:
 
 @pytest.fixture
 def write_ws(dbx_files: FakeFiles) -> Workspace:
-    return Workspace({"/dbx/": make_resource(dbx_files)}, mode=MountMode.WRITE)
+    return Workspace({"/dbx/": make_vfs(dbx_files)}, mode=MountMode.WRITE)
 
 
 @pytest.fixture
 def read_ws(dbx_files: FakeFiles) -> Workspace:
-    return Workspace({"/dbx/": make_resource(dbx_files)}, mode=MountMode.READ)
+    return Workspace({"/dbx/": make_vfs(dbx_files)}, mode=MountMode.READ)
 
 
 @pytest.mark.asyncio
 async def test_mv_file_moves_bytes(write_ws, dbx_files):
-    io = await write_ws.execute("mv /dbx/src.txt /dbx/dst.txt")
+    io = await write_ws.shell("mv /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code == 0
     assert dbx_files.downloads[f"{ROOT}/dst.txt"] == b"data"
@@ -50,7 +52,7 @@ async def test_mv_file_moves_bytes(write_ws, dbx_files):
 
 @pytest.mark.asyncio
 async def test_mv_writes_both_parents_mount_relative(write_ws):
-    io = await write_ws.execute("mv /dbx/src.txt /dbx/dst.txt")
+    io = await write_ws.shell("mv /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code == 0
     assert "/dbx/src.txt" in io.writes
@@ -63,7 +65,7 @@ async def test_mv_writes_both_parents_mount_relative(write_ws):
 async def test_mv_no_clobber_skips_existing(write_ws, dbx_files):
     seed_file(dbx_files, f"{ROOT}/dst.txt", b"keep")
 
-    io = await write_ws.execute("mv -n /dbx/src.txt /dbx/dst.txt")
+    io = await write_ws.shell("mv -n /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code == 0
     assert dbx_files.downloads[f"{ROOT}/dst.txt"] == b"keep"
@@ -72,7 +74,7 @@ async def test_mv_no_clobber_skips_existing(write_ws, dbx_files):
 
 @pytest.mark.asyncio
 async def test_mv_read_only_mount_rejected(read_ws, dbx_files):
-    io = await read_ws.execute("mv /dbx/src.txt /dbx/dst.txt")
+    io = await read_ws.shell("mv /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code != 0
     assert b"read-only" in io.stderr
@@ -81,7 +83,7 @@ async def test_mv_read_only_mount_rejected(read_ws, dbx_files):
 
 @pytest.mark.asyncio
 async def test_ops_rename(write_ws, dbx_files):
-    await write_ws.fs.rename("/dbx/src.txt", "/dbx/renamed.txt")
+    await write_ws.vfs.rename("/dbx/src.txt", "/dbx/renamed.txt")
 
     assert dbx_files.downloads[f"{ROOT}/renamed.txt"] == b"data"
     assert f"{ROOT}/src.txt" not in dbx_files.downloads
@@ -90,7 +92,7 @@ async def test_ops_rename(write_ws, dbx_files):
 @pytest.mark.asyncio
 async def test_mv_onto_same_path_errors_and_preserves_file(
         write_ws, dbx_files):
-    io = await write_ws.execute("mv /dbx/src.txt /dbx/src.txt")
+    io = await write_ws.shell("mv /dbx/src.txt /dbx/src.txt")
 
     assert io.exit_code != 0
     assert b"are the same file" in io.stderr
@@ -101,7 +103,7 @@ async def test_mv_onto_same_path_errors_and_preserves_file(
 @pytest.mark.asyncio
 async def test_mv_into_dir_where_file_already_lives_errors_and_preserves_file(
         write_ws, dbx_files):
-    io = await write_ws.execute("mv /dbx/src.txt /dbx/")
+    io = await write_ws.shell("mv /dbx/src.txt /dbx/")
 
     assert io.exit_code != 0
     assert b"are the same file" in io.stderr
@@ -110,7 +112,7 @@ async def test_mv_into_dir_where_file_already_lives_errors_and_preserves_file(
 
 @pytest.mark.asyncio
 async def test_ops_rename_onto_same_path_is_noop(write_ws, dbx_files):
-    await write_ws.fs.rename("/dbx/src.txt", "/dbx/src.txt")
+    await write_ws.vfs.rename("/dbx/src.txt", "/dbx/src.txt")
 
     assert dbx_files.downloads[f"{ROOT}/src.txt"] == b"data"
     assert f"{ROOT}/src.txt" not in dbx_files.delete_calls
@@ -122,7 +124,7 @@ async def test_mv_multiple_sources_require_directory(write_ws, dbx_files):
     seed_file(dbx_files, f"{ROOT}/b.txt", b"BBB")
     seed_file(dbx_files, f"{ROOT}/target.txt", b"target")
 
-    io = await write_ws.execute("mv /dbx/a.txt /dbx/b.txt /dbx/target.txt")
+    io = await write_ws.shell("mv /dbx/a.txt /dbx/b.txt /dbx/target.txt")
 
     assert io.exit_code != 0
     assert io.stderr == b"mv: target '/dbx/target.txt': Not a directory\n"
@@ -135,7 +137,7 @@ async def test_mv_multiple_sources_require_directory(write_ws, dbx_files):
 
 @pytest.mark.asyncio
 async def test_mv_missing_source_reports_cannot_stat(write_ws, dbx_files):
-    io = await write_ws.execute("mv /dbx/missing /dbx/missing")
+    io = await write_ws.shell("mv /dbx/missing /dbx/missing")
 
     assert io.exit_code != 0
     assert b"cannot stat" in io.stderr
@@ -147,7 +149,7 @@ async def test_mv_into_itself_errors_and_preserves_source(write_ws, dbx_files):
     seed_directory(dbx_files, f"{ROOT}/d")
     seed_file(dbx_files, f"{ROOT}/d/a.txt", b"aaa")
 
-    io = await write_ws.execute("mv /dbx/d /dbx/d")
+    io = await write_ws.shell("mv /dbx/d /dbx/d")
 
     assert io.exit_code != 0
     assert b"subdirectory of itself" in io.stderr

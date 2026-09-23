@@ -72,13 +72,13 @@ jobs:
           import mirage
 
           async def main():
-              ws = mirage.Workspace({"/ram": mirage.RAMResource()},
+              ws = mirage.Workspace({"/ram": mirage.RAMVFS()},
                                     mode=mirage.MountMode.WRITE)
-              out = await ws.execute("echo hello | wc -c")
+              out = await ws.shell("echo hello | wc -c")
               assert out.exit_code == 0 and out.stdout == b"6\n", out
-              out = await ws.execute("echo hi > /ram/a.txt")
+              out = await ws.shell("echo hi > /ram/a.txt")
               assert out.exit_code == 0, out
-              out = await ws.execute("cat /ram/a.txt")
+              out = await ws.shell("cat /ram/a.txt")
               assert out.exit_code == 0 and out.stdout == b"hi\n", out
               print("OK: core smoke passed on base install")
 
@@ -95,21 +95,21 @@ jobs:
           # extra:module[:python] — each gets its own venv so an extra that
           # silently depends on another extra's packages fails here.
           entries=(
-            "s3:mirage.resource.s3"
-            "ssh:mirage.resource.ssh"
-            "mongodb:mirage.resource.mongodb"
-            "gridfs:mirage.resource.gridfs"
-            "postgres:mirage.resource.postgres"
-            "redis:mirage.resource.redis"
-            "email:mirage.resource.email"
+            "s3:mirage.vfs.s3"
+            "ssh:mirage.vfs.ssh"
+            "mongodb:mirage.vfs.mongodb"
+            "gridfs:mirage.vfs.gridfs"
+            "postgres:mirage.vfs.postgres"
+            "redis:mirage.vfs.redis"
+            "email:mirage.vfs.email"
             "fuse:mirage.fuse.mount"
-            "nextcloud:mirage.resource.nextcloud"
-            "hf-buckets:mirage.resource.hf_buckets"
-            "langfuse:mirage.resource.langfuse"
-            "chroma:mirage.resource.chroma"
-            "lancedb:mirage.resource.lancedb"
-            "qdrant:mirage.resource.qdrant"
-            "databricks:mirage.resource.databricks_volume"
+            "nextcloud:mirage.vfs.nextcloud"
+            "hf-buckets:mirage.vfs.hf_buckets"
+            "langfuse:mirage.vfs.langfuse"
+            "chroma:mirage.vfs.chroma"
+            "lancedb:mirage.vfs.lancedb"
+            "qdrant:mirage.vfs.qdrant"
+            "databricks:mirage.vfs.databricks_volume"
             "pydantic-ai:mirage.agents.pydantic_ai"
             "openai:mirage.agents.openai_agents"
             "agno:mirage.agents.agno"
@@ -194,16 +194,16 @@ jobs:
           import assert from 'node:assert/strict'
           import { QuickJsRuntime } from '@struktoai/mirage-core/runtime/js/quickjs'
           import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide'
-          import { Workspace, RAMResource, MountMode } from '@struktoai/mirage-node'
+          import { Workspace, RAMVFS, MountMode } from '@struktoai/mirage-node'
           assert.equal(new QuickJsRuntime().name, 'quickjs')
           assert.equal(new PyodideRuntime().name, 'pyodide')
           const dec = new TextDecoder()
-          const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.WRITE })
-          let out = await ws.execute('echo hello | wc -c')
+          const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.WRITE })
+          let out = await ws.shell('echo hello | wc -c')
           if (out.exitCode !== 0 || dec.decode(out.stdout).trim() !== '6') throw new Error('pipe smoke failed')
-          out = await ws.execute('echo hi > /ram/a.txt')
+          out = await ws.shell('echo hi > /ram/a.txt')
           if (out.exitCode !== 0) throw new Error('write smoke failed')
-          out = await ws.execute('cat /ram/a.txt')
+          out = await ws.shell('cat /ram/a.txt')
           if (out.exitCode !== 0 || dec.decode(out.stdout) !== 'hi\n') throw new Error('read smoke failed')
           console.log('OK: core smoke passed on bare install')
           JS

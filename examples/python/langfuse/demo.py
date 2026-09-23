@@ -19,8 +19,8 @@ import time
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
 from mirage.types import PathSpec
+from mirage.vfs.langfuse import LangfuseConfig, LangfuseVFS
 
 load_dotenv(".env.development")
 
@@ -30,12 +30,12 @@ config = LangfuseConfig(
     host=os.environ["LANGFUSE_HOST"],
     default_trace_limit=20,
 )
-resource = LangfuseResource(config=config)
+vfs = LangfuseVFS(config=config)
 
 
 async def _run(ws, cmd):
     print(f"\n>>> {cmd}")
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     out = (await r.stdout_str()).strip()
     err = await r.stderr_str()
     if out:
@@ -53,18 +53,18 @@ async def _run(ws, cmd):
 
 async def _timed(ws, cmd):
     start = time.perf_counter()
-    out = await (await ws.execute(cmd)).stdout_str()
+    out = await (await ws.shell(cmd)).stdout_str()
     return (time.perf_counter() - start) * 1000, out
 
 
 async def main():
-    ws = Workspace({"/langfuse": resource}, mode=MountMode.READ)
+    ws = Workspace({"/langfuse": vfs}, mode=MountMode.READ)
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /langfuse/__nf_missing__.txt",
                 "head /langfuse/__nf_missing__.txt",
                 "stat /langfuse/__nf_missing__.txt"):
-        result = await ws.execute(cmd)
+        result = await ws.shell(cmd)
         print(f"$ {cmd}")
         print(f"  exit={result.exit_code}  "
               f"{(await result.stderr_str()).strip()}")
@@ -83,7 +83,7 @@ async def main():
     print("CAT across different resource types")
     print("=" * 60)
 
-    r = await ws.execute("ls /langfuse/traces/")
+    r = await ws.shell("ls /langfuse/traces/")
     traces_out = (await r.stdout_str()).strip()
     trace_files = [f for f in traces_out.splitlines() if f.strip()]
     if trace_files:
@@ -149,7 +149,7 @@ async def main():
 
     await _run(ws, "ls /langfuse/sessions/chat-session-001/")
 
-    r = await ws.execute("ls /langfuse/sessions/chat-session-001/", )
+    r = await ws.shell("ls /langfuse/sessions/chat-session-001/", )
     session_traces = (await r.stdout_str()).strip().splitlines()
     if session_traces:
         st = session_traces[0].strip()
@@ -171,7 +171,7 @@ async def main():
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print("=== metadata overlay on /langfuse/prompts/summarize ===")
-    meta_res = await ws.execute(
+    meta_res = await ws.shell(
         'chmod 640 "/langfuse/prompts/summarize"'
         ' && chown 500:dev "/langfuse/prompts/summarize"'
         ' && touch -t 202601021530 "/langfuse/prompts/summarize"')
@@ -196,14 +196,14 @@ async def main():
     await _run(ws, 'find "/langfuse/" -maxdepth 1 -size +0c')
     await _run(ws, 'find "/langfuse/" -maxdepth 1 -size -1k')
 
-    await ws.execute('cd "/langfuse/prompts"')
+    await ws.shell('cd "/langfuse/prompts"')
     await _run(ws, "pwd")
     await _run(ws, "ls")
 
     print("\n" + "=" * 60)
     print("CACHING: warm reads served from cache (no backend fetch)")
     print("=" * 60)
-    r = await ws.execute('find "/langfuse/prompts/" -name "*.json"')
+    r = await ws.shell('find "/langfuse/prompts/" -name "*.json"')
     prompt_files = (await r.stdout_str()).strip().splitlines()
     if prompt_files:
         cache_file = prompt_files[0].strip()
@@ -224,14 +224,14 @@ async def main():
     print("\n" + "=" * 60)
     print("GLOB: mid-path patterns walk segment by segment")
     print("=" * 60)
-    r = await ws.execute("echo /langfuse/prom*/*")
+    r = await ws.shell("echo /langfuse/prom*/*")
     out = (await r.stdout_str()).strip()
     print(f"  echo /langfuse/prom*/* -> {out[:200]}")
     assert "/langfuse/prompts/" in out, "mid-path glob did not expand"
 
     # A glob that matches nothing stays the literal word, so the
     # command reports it like GNU coreutils.
-    r = await ws.execute("cat /langfuse/zz-none-*/x.json")
+    r = await ws.shell("cat /langfuse/zz-none-*/x.json")
     err = (await r.stderr_str()).strip()
     print(f"  cat /langfuse/zz-none-*/x.json -> exit={r.exit_code} "
           f"{err[:120]}")

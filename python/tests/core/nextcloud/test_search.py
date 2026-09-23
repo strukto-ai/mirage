@@ -11,8 +11,8 @@ from mirage.core.nextcloud.search import (Bounds, FilesSearchQuery,
 from mirage.core.nextcloud.search.constants import SEARCH_PAGE_SIZE
 from mirage.core.nextcloud.search.query import glob_to_like, request_body
 from mirage.core.nextcloud.search.target import relative_path, search_target
-from mirage.resource.nextcloud import NextcloudConfig
 from mirage.types import FindType, PathSpec
+from mirage.vfs.nextcloud import NextcloudConfig
 
 _DAV_NAMESPACE = "DAV:"
 _OWNCLOUD_NAMESPACE = "http://owncloud.org/ns"
@@ -62,7 +62,7 @@ def test_search_target_preserves_webroot_and_configured_subroot():
         "team%20docs/")
     assert target is not None
     assert target.endpoint == "https://cloud.example/nextcloud/remote.php/dav/"
-    assert target.resource_scope == "/files/alice/team docs"
+    assert target.vfs_scope == "/files/alice/team docs"
 
 
 def test_search_target_rejects_non_nextcloud_url():
@@ -74,7 +74,7 @@ def test_relative_path_preserves_literal_percent_in_subroot():
         "https://cloud.example/nextcloud/remote.php/dav/files/alice/"
         "team%2520docs/")
     assert target is not None
-    assert target.resource_scope == "/files/alice/team%20docs"
+    assert target.vfs_scope == "/files/alice/team%20docs"
     assert relative_path(
         "/nextcloud/remote.php/dav/files/alice/team%2520docs/report.pdf",
         target,

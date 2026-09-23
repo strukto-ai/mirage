@@ -31,7 +31,7 @@ class SessionAccessor(Accessor):
 
     Owns the connection pool its backend's calls ride (see
     ``SessionPool`` for why per-call sessions are not an option), so a
-    resource drains it through the ordinary ``close`` chain. A one-shot
+    VFS drains it through the ordinary ``close`` chain. A one-shot
     accessor, which is what a CLI verb builds per invocation, is used
     as an async context manager instead. Callers thread the inert
     ``pool``; ``resolve_session`` materializes it at the request.

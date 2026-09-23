@@ -22,16 +22,16 @@ import {
   OBJECT_STORE_OVERRIDES,
 } from '@struktoai/mirage-core/commands/builtin/object_store/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { GridFSAccessor } from '../../../accessor/gridfs.ts'
 import { GRIDFS_IO } from './io.ts'
 
 export const GRIDFS_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GridFSAccessor>(ResourceName.GRIDFS, GRIDFS_IO, {
+  ...makeGenericCommands<GridFSAccessor>(VFSName.GRIDFS, GRIDFS_IO, {
     overrides: OBJECT_STORE_OVERRIDES,
   }),
   ...withDefaultProvisions(
-    makeObjectStoreCommands(ResourceName.GRIDFS, GRIDFS_IO),
+    makeObjectStoreCommands(VFSName.GRIDFS, GRIDFS_IO),
     GRIDFS_IO.stat,
     resolveGlobOf(GRIDFS_IO),
     GRIDFS_IO.readdir,

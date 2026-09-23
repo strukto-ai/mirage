@@ -20,7 +20,7 @@ import { fsStrerror, isEnoent, isFsError, isMissingOp } from '../../../../utils/
 import { CycleError, resolvePath } from '../../../../utils/path.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, fail, finish, readOnlyError, splitValueFlags } from '../shared.ts'
 import { isReadOnlyError, nowIso, parseTouchStamp, setattrLink, setattrVia } from './metadata.ts'
 import type { Result } from '../types.ts'
@@ -32,7 +32,7 @@ import type { Result } from '../types.ts'
 export async function handleTouch(
   namespace: Namespace,
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   args: readonly (string | PathSpec)[],
 ): Promise<Result> {
   const { flags, values, operands, bad } = splitValueFlags(args, 'acmh', 'tdr')

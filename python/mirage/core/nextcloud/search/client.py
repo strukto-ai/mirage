@@ -12,8 +12,8 @@ from mirage.core.nextcloud.search.query import request_body, supports_query
 from mirage.core.nextcloud.search.response import parse_page
 from mirage.core.nextcloud.search.target import search_target
 from mirage.core.nextcloud.search.types import FilesSearchQuery, SearchEntry
-from mirage.resource.secrets import reveal_secret
 from mirage.types import PathSpec
+from mirage.vfs.secrets import reveal_secret
 
 logger = logging.getLogger(__name__)
 

@@ -19,8 +19,8 @@ import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.observe.store import RAMObserverStore
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.store.base import WorkspaceFields
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
@@ -58,7 +58,7 @@ class YieldingStore(RAMWorkspaceStateStore):
 @pytest.mark.asyncio
 async def test_workspace_closes_owned_passed_store():
     store = ClosingStore()
-    ws = Workspace({"/data": RAMResource()}, store=store, owns_store=True)
+    ws = Workspace({"/data": RAMVFS()}, store=store, owns_store=True)
     await ws.close()
     assert store.closed
 
@@ -66,7 +66,7 @@ async def test_workspace_closes_owned_passed_store():
 @pytest.mark.asyncio
 async def test_workspace_does_not_close_shared_passed_store():
     store = ClosingStore()
-    ws = Workspace({"/data": RAMResource()}, store=store)
+    ws = Workspace({"/data": RAMVFS()}, store=store)
     await ws.close()
     assert not store.closed
 
@@ -75,7 +75,7 @@ async def test_workspace_does_not_close_shared_passed_store():
 async def test_workspace_closes_its_cache_once(monkeypatch):
     monkeypatch.setattr("mirage.workspace.workspace.cache.RAMFileCacheStore",
                         ClosingCache)
-    ws = Workspace({"/data": RAMResource()})
+    ws = Workspace({"/data": RAMVFS()})
     cache = ws.cache
 
     await ws.close()
@@ -87,11 +87,11 @@ async def test_workspace_closes_its_cache_once(monkeypatch):
 @pytest.mark.asyncio
 async def test_meta_written_on_first_execute():
     store = RAMWorkspaceStateStore()
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.EXEC,
                    workspace_id="ws-a",
                    store=store)
-    await ws.execute("echo hi")
+    await ws.shell("echo hi")
     meta = await store.load_meta("ws-a")
     assert meta is not None
     assert meta["workspace_id"] == "ws-a"
@@ -103,10 +103,10 @@ async def test_meta_written_on_first_execute():
 
 @pytest.mark.asyncio
 async def test_bare_workspace_mints_uuid7_ids():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
     assert uuid.UUID(ws.workspace_id).version == 7
     assert uuid.UUID(ws.default_session_id).version == 7
-    sibling = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
+    sibling = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
     assert sibling.workspace_id != ws.workspace_id
     await ws.close()
     await sibling.close()
@@ -117,14 +117,14 @@ async def test_attach_adopts_stored_default_session():
     """A minted default session id yields to the discovery record's
     pointer, so a fresh attach lands on the writer's default session."""
     store = RAMWorkspaceStateStore()
-    ws_a = Workspace({"/data": RAMResource()},
+    ws_a = Workspace({"/data": RAMVFS()},
                      mode=MountMode.EXEC,
                      workspace_id="shared",
                      store=store)
-    await ws_a.execute("export MARK=1")
+    await ws_a.shell("export MARK=1")
     await ws_a.flush_sessions()
 
-    ws_b = Workspace({"/data": RAMResource()},
+    ws_b = Workspace({"/data": RAMVFS()},
                      mode=MountMode.EXEC,
                      workspace_id="shared",
                      store=store)
@@ -140,16 +140,16 @@ async def test_attach_adopts_stored_default_session():
 
 @pytest.mark.asyncio
 async def test_the_op_door_adopts_the_stored_default_before_binding():
-    # The first ``ws.fs`` call on a fresh attach used to hydrate the
+    # The first ``ws.vfs`` call on a fresh attach used to hydrate the
     # session store alone, so it ran as the minted default rather than
     # the writer's, whose hides the discovery record points at.
     store = RAMWorkspaceStateStore()
-    ram = RAMResource()
+    ram = RAMVFS()
     ws_a = Workspace({"/data": ram},
                      mode=MountMode.WRITE,
                      workspace_id="shared",
                      store=store)
-    await ws_a.execute("mkdir -p /data/vault && echo top > /data/vault/secret")
+    await ws_a.shell("mkdir -p /data/vault && echo top > /data/vault/secret")
     await ws_a.set_session_profile(ws_a.default_session_id,
                                    {"paths": {
                                        "hide": ["/data/vault"]
@@ -162,7 +162,7 @@ async def test_the_op_door_adopts_the_stored_default_before_binding():
                      store=store)
     minted = ws_b.default_session_id
     with pytest.raises(FileNotFoundError):
-        await ws_b.fs.read("/data/vault/secret")
+        await ws_b.vfs.read("/data/vault/secret")
     assert ws_b.default_session_id == ws_a.default_session_id
     assert ws_b.default_session_id != minted
     await ws_a.close()
@@ -172,13 +172,13 @@ async def test_the_op_door_adopts_the_stored_default_before_binding():
 @pytest.mark.asyncio
 async def test_explicit_session_id_is_not_adopted_away():
     store = RAMWorkspaceStateStore()
-    ws_a = Workspace({"/data": RAMResource()},
+    ws_a = Workspace({"/data": RAMVFS()},
                      mode=MountMode.EXEC,
                      workspace_id="shared",
                      store=store)
-    await ws_a.execute("echo hi")
+    await ws_a.shell("echo hi")
 
-    ws_b = Workspace({"/data": RAMResource()},
+    ws_b = Workspace({"/data": RAMVFS()},
                      mode=MountMode.EXEC,
                      workspace_id="shared",
                      session_id="pinned",
@@ -260,11 +260,11 @@ async def test_existing_meta_wins():
         "default_session_id": "sess_x",
         "created_at": 1.0
     })
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.EXEC,
                    workspace_id="ws-a",
                    store=store)
-    await ws.execute("echo hi")
+    await ws.shell("echo hi")
     meta = await ws.workspace_meta()
     assert meta["default_session_id"] == "sess_x"
     assert meta["created_at"] == 1.0
@@ -277,7 +277,7 @@ async def test_concurrent_attach_single_discovery_record():
     CAS create admits exactly one discovery record and the loser adopts
     the winner's default session instead of clobbering the pointer."""
     store = YieldingStore()
-    ram = RAMResource()
+    ram = RAMVFS()
     ws_a = Workspace({"/data": ram},
                      mode=MountMode.EXEC,
                      workspace_id="ws-a",
@@ -300,7 +300,7 @@ async def test_concurrent_attach_single_discovery_record():
 @pytest.mark.asyncio
 async def test_same_workspace_id_shares_sessions():
     store = RAMWorkspaceStateStore()
-    ram = RAMResource()
+    ram = RAMVFS()
     ws_a = Workspace({"/data": ram},
                      mode=MountMode.EXEC,
                      workspace_id="shared",
@@ -312,8 +312,8 @@ async def test_same_workspace_id_shares_sessions():
                      mode=MountMode.EXEC,
                      workspace_id="shared",
                      store=store)
-    result = await ws_b.execute("echo blocked > /data/x.txt",
-                                session_id="narrow")
+    result = await ws_b.shell("echo blocked > /data/x.txt",
+                              session_id="narrow")
     assert result.exit_code != 0
     await ws_a.close()
     await ws_b.close()
@@ -322,14 +322,14 @@ async def test_same_workspace_id_shares_sessions():
 @pytest.mark.asyncio
 async def test_different_workspace_ids_are_isolated():
     store = RAMWorkspaceStateStore()
-    ws_a = Workspace({"/data": RAMResource()},
+    ws_a = Workspace({"/data": RAMVFS()},
                      mode=MountMode.EXEC,
                      workspace_id="a",
                      store=store)
     ws_a.create_session("narrow", mounts={"/data": "read"})
     await ws_a.flush_sessions()
 
-    ws_b = Workspace({"/data": RAMResource()},
+    ws_b = Workspace({"/data": RAMVFS()},
                      mode=MountMode.EXEC,
                      workspace_id="b",
                      store=store)
@@ -343,18 +343,18 @@ async def test_different_workspace_ids_are_isolated():
 async def test_shared_history_through_provider():
     """Two workspaces on one provider + workspace id see one history."""
     store = RAMWorkspaceStateStore()
-    ram = RAMResource()
+    ram = RAMVFS()
     ws_a = Workspace({"/data": ram},
                      mode=MountMode.EXEC,
                      workspace_id="shared",
                      store=store)
-    await ws_a.execute("echo one")
+    await ws_a.shell("echo one")
 
     ws_b = Workspace({"/data": ram},
                      mode=MountMode.EXEC,
                      workspace_id="shared",
                      store=store)
-    result = await ws_b.execute("history")
+    result = await ws_b.shell("history")
     assert b"echo one" in result.stdout
     await ws_a.close()
     await ws_b.close()
@@ -366,18 +366,18 @@ async def test_plane_override_param_beats_provider():
     the command never reaches the provider's history."""
     direct = RAMObserverStore()
     store = RAMWorkspaceStateStore()
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.EXEC,
                    workspace_id="ws-a",
                    store=store,
                    observe=direct)
-    await ws.execute("echo hi")
+    await ws.shell("echo hi")
 
-    sibling = Workspace({"/data": RAMResource()},
+    sibling = Workspace({"/data": RAMVFS()},
                         mode=MountMode.EXEC,
                         workspace_id="ws-a",
                         store=store)
-    result = await sibling.execute("history")
+    result = await sibling.shell("history")
     assert b"echo hi" not in result.stdout
     await ws.close()
     await sibling.close()

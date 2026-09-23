@@ -19,11 +19,11 @@ from mirage.commands.cli.types import CLISpec
 from mirage.commands.registry import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.types import IOResult
-from mirage.resource.base import BaseResource
-from mirage.resource.ram import RAMResource
-from mirage.resource.ssh import SSHConfig, SSHResource
 from mirage.types import MountMode, PathSpec
-from mirage.utils.errors import NoMountError
+from mirage.utils.errors import NoMountError, ebusy
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 
 # ── mount_for ──────────────────────────────────
@@ -72,7 +72,7 @@ def test_nested_prefix_outer(nested_registry):
 
 def _register_cmd(mount, name):
 
-    @command(name, resource="ram", spec=CommandSpec())
+    @command(name, vfs="ram", spec=CommandSpec())
     async def _fn(accessor, paths, *texts, **flags):
         return None, IOResult()
 
@@ -208,19 +208,19 @@ def test_resolve_no_match(registry):
 def test_multi_mount_resolves_s3(multi_registry):
     mount = multi_registry.mount_for("/s3/data/report.csv")
     assert mount.prefix == "/s3/"
-    assert mount.resource.name == "s3"
+    assert mount.vfs.name == "s3"
 
 
 def test_multi_mount_resolves_disk(multi_registry):
     mount = multi_registry.mount_for("/disk/readme.txt")
     assert mount.prefix == "/disk/"
-    assert mount.resource.name == "disk"
+    assert mount.vfs.name == "disk"
 
 
 def test_multi_mount_resolves_ram(multi_registry):
     mount = multi_registry.mount_for("/ram/hello.txt")
     assert mount.prefix == "/ram/"
-    assert mount.resource.name == "ram"
+    assert mount.vfs.name == "ram"
 
 
 def test_multi_mount_modes(multi_registry):
@@ -232,7 +232,7 @@ def test_multi_mount_modes(multi_registry):
     assert ram_mode == MountMode.WRITE
 
 
-def test_multi_mount_resource_paths(multi_registry):
+def test_multi_mount_vfs_paths(multi_registry):
     _, pp_s3, _ = multi_registry.resolve("/s3/data/report.csv")
     _, pp_disk, _ = multi_registry.resolve("/disk/readme.txt")
     _, pp_ram, _ = multi_registry.resolve("/ram/hello.txt")
@@ -246,21 +246,21 @@ def test_multi_mount_resource_paths(multi_registry):
 
 def test_mount_returns_mount_object():
     reg = MountRegistry()
-    p = RAMResource()
+    p = RAMVFS()
     m = reg.mount("/test/", p, MountMode.READ)
     assert m.prefix == "/test/"
-    assert m.resource is p
+    assert m.vfs is p
 
 
 def test_mount_normalizes_prefix():
     reg = MountRegistry()
-    m = reg.mount("/test/", RAMResource(), MountMode.READ)
+    m = reg.mount("/test/", RAMVFS(), MountMode.READ)
     assert m.prefix == "/test/"
 
 
 def test_mount_duplicate_raises(registry):
     with pytest.raises(ValueError, match="duplicate"):
-        registry.mount("/data/", RAMResource())
+        registry.mount("/data/", RAMVFS())
 
 
 # ── mounts listing ─────────────────────────────
@@ -319,32 +319,32 @@ def test_get_resource_type_unknown(multi_registry):
     assert multi_registry.get_resource_type("/unknown/f") is None
 
 
-# ── find_resource_by_name ──────────────────────
+# ── find_vfs_by_name ──────────────────────
 
 
-def test_find_resource_s3(multi_registry):
-    prov = multi_registry.find_resource_by_name("s3")
+def test_find_vfs_s3(multi_registry):
+    prov = multi_registry.find_vfs_by_name("s3")
     assert prov is not None
     assert prov.name == "s3"
 
 
-def test_find_resource_disk(multi_registry):
-    prov = multi_registry.find_resource_by_name("disk")
+def test_find_vfs_disk(multi_registry):
+    prov = multi_registry.find_vfs_by_name("disk")
     assert prov is not None
     assert prov.name == "disk"
 
 
-def test_find_resource_ram(multi_registry):
-    prov = multi_registry.find_resource_by_name("ram")
+def test_find_vfs_ram(multi_registry):
+    prov = multi_registry.find_vfs_by_name("ram")
     assert prov is not None
 
 
-def test_find_resource_none(multi_registry):
-    assert multi_registry.find_resource_by_name(None) is None
+def test_find_vfs_none(multi_registry):
+    assert multi_registry.find_vfs_by_name(None) is None
 
 
-def test_find_resource_missing(multi_registry):
-    assert multi_registry.find_resource_by_name("nonexistent") is None
+def test_find_vfs_missing(multi_registry):
+    assert multi_registry.find_vfs_by_name("nonexistent") is None
 
 
 # ── mount_for_command ──────────────────────────
@@ -369,7 +369,7 @@ def test_mount_for_command_grep(multi_registry):
 
 def _remote_registry_with_cache():
     reg = MountRegistry()
-    reg.mount("/ssh/", SSHResource(SSHConfig(host="example", root="/srv")),
+    reg.mount("/ssh/", SSHVFS(SSHConfig(host="example", root="/srv")),
               MountMode.WRITE)
     cache = RAMFileCacheStore()
     reg.attach_file_cache(cache)
@@ -383,7 +383,7 @@ async def test_resolve_mount_keeps_cached_read_on_real_mount():
     # custom handlers) instead of being redirected to the cache mount.
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")
-    scope = PathSpec(resource_path="ssh/a.txt",
+    scope = PathSpec(vfs_path="ssh/a.txt",
                      virtual="/ssh/a.txt",
                      directory="/ssh",
                      resolved=True)
@@ -395,7 +395,7 @@ async def test_resolve_mount_keeps_cached_read_on_real_mount():
 async def test_resolve_mount_keeps_cached_write_on_remote():
     reg, cache = _remote_registry_with_cache()
     await cache.set("/ssh/a.txt", b"hi")
-    scope = PathSpec(resource_path="ssh/a.txt",
+    scope = PathSpec(vfs_path="ssh/a.txt",
                      virtual="/ssh/a.txt",
                      directory="/ssh",
                      resolved=True)
@@ -403,23 +403,23 @@ async def test_resolve_mount_keeps_cached_write_on_remote():
     assert mount.prefix == "/ssh/"
 
 
-class _LimitedResource(BaseResource):
+class _LimitedVFS(BaseVFS):
     name = "limited"
 
 
-class _FallbackResource(BaseResource):
+class _FallbackVFS(BaseVFS):
     name = "fallback"
 
 
-@command("fallback-only", resource="fallback", spec=CommandSpec())
+@command("fallback-only", vfs="fallback", spec=CommandSpec())
 async def _fallback_only(_store, paths, *texts, **kw):
     return b"fallback", IOResult()
 
 
 def _path_bound_registry_with_default():
     reg = MountRegistry()
-    reg.mount("/limited/", _LimitedResource(), MountMode.WRITE)
-    fallback = _FallbackResource()
+    reg.mount("/limited/", _LimitedVFS(), MountMode.WRITE)
+    fallback = _FallbackVFS()
     fallback.register(_fallback_only)
     reg.mount("/", fallback, MountMode.WRITE)
     return reg
@@ -428,7 +428,7 @@ def _path_bound_registry_with_default():
 @pytest.mark.asyncio
 async def test_resolve_mount_rejects_path_bound_unsupported_command():
     reg = _path_bound_registry_with_default()
-    scope = PathSpec(resource_path="limited/file.txt",
+    scope = PathSpec(vfs_path="limited/file.txt",
                      virtual="/limited/file.txt",
                      directory="/limited",
                      resolved=True)
@@ -492,7 +492,94 @@ def test_mount_for_command_never_answers_dev():
     # claim command routing (mirrors the TS scan).
     reg = MountRegistry()
     assert reg.mount_for_command("seq") is None
-    reg.mount("/d/", RAMResource(), MountMode.WRITE)
+    reg.mount("/d/", RAMVFS(), MountMode.WRITE)
     mount = reg.mount_for_command("seq")
     assert mount is not None
     assert mount.prefix == "/d/"
+
+
+class _StubReconciler:
+    """Records what the registry's gate asked, and answers as told."""
+
+    def __init__(self, answer=None, raises=None) -> None:
+        self.answer = answer
+        self.raises = raises
+        self.asked: list[str] = []
+
+    async def reconcile_read(self, mount, path) -> None:
+        return None
+
+    async def may_serve_cached(self, mount, path: str) -> bool:
+        self.asked.append(path)
+        if self.raises is not None:
+            raise self.raises
+        return bool(self.answer)
+
+
+def _gated_registry(reconciler=None):
+    registry = MountRegistry()
+    registry.attach_file_cache(RAMFileCacheStore())
+    mount = registry.mount("/data/", RAMVFS(), MountMode.WRITE)
+    if reconciler is not None:
+        registry.set_reconciler(reconciler)
+    return registry, mount
+
+
+@pytest.mark.asyncio
+async def test_gate_trusts_the_cache_with_no_reconciler():
+    """A manager built before the reconciler is wired answers True.
+
+    Workspace attaches the file cache before it sets the reconciler, so
+    the closure has to read it at call time and fall back to trusting the
+    cache rather than refusing every read.
+    """
+    registry, mount = _gated_registry()
+    assert await registry._may_serve_cached(mount, "/data/f.txt") is True
+
+
+@pytest.mark.asyncio
+async def test_gate_consults_the_reconciler():
+    rec = _StubReconciler(answer=True)
+    registry, mount = _gated_registry(rec)
+    assert await registry._may_serve_cached(mount, "/data/f.txt") is True
+    assert rec.asked == ["/data/f.txt"]
+
+
+@pytest.mark.asyncio
+async def test_gate_refuses_a_retiring_mount_without_probing():
+    """Teardown answers False rather than probing into EBUSY."""
+    rec = _StubReconciler(answer=True)
+    registry, mount = _gated_registry(rec)
+    mount.retiring = True
+    assert await registry._may_serve_cached(mount, "/data/f.txt") is False
+    assert rec.asked == []
+
+
+@pytest.mark.asyncio
+async def test_gate_absorbs_ebusy_from_the_probe():
+    """The flag can flip mid-probe, so the error is caught as well."""
+    rec = _StubReconciler(raises=ebusy("/data/"))
+    registry, mount = _gated_registry(rec)
+    assert await registry._may_serve_cached(mount, "/data/f.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_gate_propagates_any_other_oserror():
+    """The safety valve: a real stat failure must not read as 'serve cold'.
+
+    Widening the EBUSY catch would turn every backend outage into a
+    silent cache bypass, which is the failure this whole change removes.
+    """
+    rec = _StubReconciler(raises=OSError("backend down"))
+    registry, mount = _gated_registry(rec)
+    with pytest.raises(OSError, match="backend down"):
+        await registry._may_serve_cached(mount, "/data/f.txt")
+
+
+@pytest.mark.asyncio
+async def test_gate_propagates_a_missing_path():
+    """GONE is an OSError subclass with no errno; it must still escape."""
+    rec = _StubReconciler(raises=FileNotFoundError("/data/f.txt"))
+    registry, mount = _gated_registry(rec)
+    with pytest.raises(FileNotFoundError):
+        await registry._may_serve_cached(mount, "/data/f.txt")

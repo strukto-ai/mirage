@@ -1,0 +1,239 @@
+---
+title: Linear
+description: Mount Linear workspaces, teams, projects, issues, and comments as a Mirage filesystem for Python agents.
+icon: /images/linear-logo.svg
+---
+The Linear VFS exposes Linear workspace data as a virtual filesystem
+mounted at some prefix such as `/linear/`.
+
+For API key setup, see [Linear Setup](/home/setup/linear).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.vfs.linear import LinearConfig, LinearVFS
+
+config = LinearConfig(api_key=os.environ["LINEAR_API_KEY"])
+vfs = LinearVFS(config=config)
+ws = Workspace({"/linear": vfs}, mode=MountMode.READ)
+```
+
+## Filesystem Layout
+
+```text
+/linear/
+  teams/
+    <team-key>__<team-name>__<team-id>/
+      team.json
+      members/
+        <display-name>__<user-id>.json
+        ...
+      issues/
+        <issue-key>__<issue-id>/
+          issue.json
+          comments.jsonl
+        ...
+      projects/
+        <name>__<project-id>.json
+        ...
+      cycles/
+        <name>__<cycle-id>.json
+        ...
+      documents/
+        <title>__<document-id>.json
+        ...
+```
+
+Example:
+
+```text
+/linear/
+  teams/
+    ENG__Engineering__abc123def/
+      team.json
+      members/
+        alice__usr_001.json
+        bob__usr_002.json
+      issues/
+        ENG-123__iss_001/
+          issue.json
+          comments.jsonl
+        ENG-124__iss_002/
+          issue.json
+          comments.jsonl
+      projects/
+        Mirage__proj_001.json
+      cycles/
+        Sprint-12__cyc_001.json
+      documents/
+        Search-Architecture__doc_001.json
+```
+
+Directory and file names embed the Linear ID after `__` so that
+VFS-specific commands can reference the correct VFS without
+extra lookups.
+
+### Teams
+
+Each team directory is named:
+
+```text
+<team-key>__<team-name>__<team-id>
+```
+
+Inside the team directory:
+
+- `team.json` is the normalized team metadata
+- `members/` contains one JSON file per member
+- `issues/` contains one directory per issue
+- `projects/` contains one JSON file per project, including lightweight
+  related issue references
+- `cycles/` contains one JSON file per cycle
+
+### Issues
+
+Each issue directory is named:
+
+```text
+<issue-key>__<issue-id>
+```
+
+Each issue directory contains:
+
+- `issue.json` -- normalized issue metadata with command-aligned fields such as
+  `issue_id`, `issue_key`, `team_id`, `state_id`, and `assignee_id`
+- `comments.jsonl` -- normalized comment stream ordered by `created_at`
+
+`comments.jsonl` is a Mirage representation chosen for shell-friendly
+workflows. It is not a native Linear file format.
+
+### Members
+
+Each member file is named:
+
+```text
+<display-name>__<user-id>.json
+```
+
+Member JSON includes command-aligned identifiers such as `user_id` and `email`
+so the value can be reused directly in commands like `linear issue assign`.
+
+### Projects and Cycles
+
+Project and cycle files are named:
+
+```text
+<name>__<id>.json
+```
+
+Project JSON includes lightweight related issue references. Cycle JSON
+includes cycle metadata such as start and end dates.
+
+### Documents
+
+Each team has a `documents/` folder with one JSON file per Linear document:
+
+```text
+<title>__<document-id>.json
+```
+
+Document JSON includes the title, markdown content, the linked project, and
+the creator.
+
+## Cache
+
+The Linear VFS uses `IndexCacheStore` (same as Discord and other
+mounts). There is no separate content cache -- file content caching
+is handled by the workspace `IOResult` mechanism.
+
+## Example
+
+See `examples/linear/linear.py` for the full working example.
+
+```bash
+# List teams
+ls /linear/teams/
+
+# Read team metadata
+cat /linear/teams/ENG__Engineering__abc123/team.json
+
+# List issues
+ls /linear/teams/ENG__Engineering__abc123/issues/
+
+# Read an issue
+cat /linear/teams/ENG__Engineering__abc123/issues/ENG-123__iss_001/issue.json
+
+# Read issue comments
+cat /linear/teams/ENG__Engineering__abc123/issues/ENG-123__iss_001/comments.jsonl
+
+# Extract issue ID with jq
+cat /linear/teams/ENG__Engineering__abc123/issues/ENG-123__iss_001/issue.json \
+  | jq '.issue_id'
+
+# Read last 5 comments
+tail -n 5 /linear/teams/ENG__Engineering__abc123/issues/ENG-123__iss_001/comments.jsonl
+
+# List members
+ls /linear/teams/ENG__Engineering__abc123/members/
+
+# Read a project with its issues
+cat /linear/teams/ENG__Engineering__abc123/projects/Mirage__proj_001.json \
+  | jq '.issues'
+
+# Tree view
+tree -L 2 /linear/teams/
+```
+
+## Finding IDs
+
+IDs are embedded in directory and file names after `__`:
+
+```bash
+# Team ID -- embedded in directory name
+ls /linear/teams/
+# -> ENG__Engineering__abc123   <- team_id = abc123
+
+# Issue ID -- embedded in issue directory name
+ls /linear/teams/ENG__Engineering__abc123/issues/
+# -> ENG-123__iss_001   <- issue_id = iss_001
+
+# Member ID -- embedded in member file name
+ls /linear/teams/ENG__Engineering__abc123/members/
+# -> alice__usr_001.json   <- user_id = usr_001
+
+# Use stat for structured metadata
+stat /linear/teams/ENG__Engineering__abc123/issues/ENG-123__iss_001/issue.json
+
+# Extract fields with jq
+cat /linear/teams/ENG__Engineering__abc123/issues/ENG-123__iss_001/issue.json \
+  | jq '{issue_id, issue_key, team_id, state_id, assignee_id}'
+```
+
+## Shell Commands
+
+Standard commands available on the mounted Linear tree:
+
+| Command         | Notes                                      |
+| --------------- | ------------------------------------------ |
+| `ls`            | List teams, issues, members, projects      |
+| `cat`           | Read .json metadata or .jsonl comments     |
+| `head` / `tail` | First/last N lines                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
+| `wc`            | Line/word/byte counts                      |
+| `stat`          | File metadata (name, size, type)           |
+| `find`          | Recursive search with `-name`, `-maxdepth` |
+| `tree`          | Directory tree view                        |
+| `basename`      | Extract file name from path                |
+| `dirname`       | Extract directory from path                |
+| `realpath`      | Resolve path to absolute form              |
+
+## Acting on Linear
+
+Reads and writes on Linear entities (issues, comments, projects,
+cycles, labels, users, documents, search) go through the
+[linear CLI](/python/cli/linear) when installed; the mounted tree
+serves the same entities as normalized JSON files.

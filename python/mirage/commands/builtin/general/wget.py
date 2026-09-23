@@ -38,7 +38,7 @@ USAGE = ("wget: missing URL\n"
          "Try `wget --help' for more options.")
 
 
-@command("wget", resource=None, spec=SPECS["wget"])
+@command("wget", vfs=None, spec=SPECS["wget"])
 async def wget(
     accessor: Accessor,
     paths: list[PathSpec],

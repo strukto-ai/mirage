@@ -19,13 +19,13 @@ import pytest
 from mirage.commands.builtin.generic.expand import (TabStops, next_tab_stop,
                                                     parse_flags,
                                                     parse_tab_stops)
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _ws():
-    mem = RAMResource()
+    mem = RAMVFS()
     ws = Workspace(
         {"/data": (mem, MountMode.WRITE)},
         mode=MountMode.WRITE,
@@ -35,7 +35,7 @@ def _ws():
 
 def _run_raw(ws, cmd, cwd="/", stdin=None):
     ws._cwd = cwd
-    io = asyncio.run(ws.execute(cmd, stdin=stdin))
+    io = asyncio.run(ws.shell(cmd, stdin=stdin))
     return io.stdout, io
 
 

@@ -98,7 +98,7 @@ def _parent_reference(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
 
 def _virt_spec(loc: DriveLoc) -> PathSpec:
     # Cache invalidation takes a PathSpec; DriveLoc carries the
-    # mount-relative spelling, which is exactly the resource_path.
+    # mount-relative spelling, which is exactly the vfs_path.
     stripped = loc.virt.strip("/")
     return PathSpec.from_str_path("/" + stripped if stripped else "/",
                                   stripped)

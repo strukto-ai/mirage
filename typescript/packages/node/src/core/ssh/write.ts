@@ -14,7 +14,7 @@
 
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { joinRoot, stripPrefix } from './utils.ts'
@@ -34,6 +34,6 @@ export async function writeBytes(
       else resolveFn()
     })
   })
-  record('write', virtual, ResourceName.SSH, data.byteLength, timer)
+  record('write', virtual, VFSName.SSH, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

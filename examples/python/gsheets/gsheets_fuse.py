@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.gsheets import GSheetsConfig, GSheetsResource
+from mirage.vfs.gsheets import GSheetsConfig, GSheetsVFS
 
 load_dotenv(".env.development")
 
@@ -27,12 +27,11 @@ config = GSheetsConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-resource = GSheetsResource(config=config)
+vfs = GSheetsVFS(config=config)
 
-with Workspace({
-        "/gsheets/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/gsheets/": Mount(vfs, mode=MountMode.READ,
+                        backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -70,6 +69,6 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

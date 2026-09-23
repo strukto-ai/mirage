@@ -15,13 +15,13 @@
 import asyncio
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 
 async def run(ws: Workspace, cmd: str) -> None:
     print(f"\n$ {cmd}")
     try:
-        result = await ws.execute(cmd)
+        result = await ws.shell(cmd)
         out = (await result.stdout_str()).rstrip()
         if out:
             print(out)
@@ -35,11 +35,11 @@ async def run(ws: Workspace, cmd: str) -> None:
 
 
 async def main() -> None:
-    resource = RAMResource()
-    ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
+    vfs = RAMVFS()
+    ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
 
     def seed(path: str, data: bytes) -> None:
-        resource._store.files[path] = data
+        vfs._store.files[path] = data
 
     seed("/dup.txt", b"banana\napple\ncherry\napple\n")
     seed("/sorted1.txt", b"apple\nbanana\ndate\n")

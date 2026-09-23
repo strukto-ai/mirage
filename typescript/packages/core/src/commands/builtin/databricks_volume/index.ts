@@ -13,14 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../../accessor/databricks_volume.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DATABRICKS_VOLUME_IO } from './io.ts'
 
 export const DATABRICKS_VOLUME_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DatabricksVolumeAccessor>(
-    ResourceName.DATABRICKS_VOLUME,
-    DATABRICKS_VOLUME_IO,
-  ),
+  ...makeGenericCommands<DatabricksVolumeAccessor>(VFSName.DATABRICKS_VOLUME, DATABRICKS_VOLUME_IO),
 ]

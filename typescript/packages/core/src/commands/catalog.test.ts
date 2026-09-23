@@ -23,7 +23,7 @@ const REPLACEMENT_FN = () => Promise.resolve([null, { exitCode: 1 } as never] as
 const PROVISION = () => null
 
 function registered(name: string, filetype: string | null = null): RegisteredCommand {
-  return new RegisteredCommand({ name, spec: SPEC, resource: 's3', filetype, fn: FN })
+  return new RegisteredCommand({ name, spec: SPEC, vfs: 's3', filetype, fn: FN })
 }
 
 describe('CommandCatalog', () => {
@@ -87,7 +87,7 @@ describe('RegisteredCommand.withOverrides', () => {
     const original = new RegisteredCommand({
       name: 'cat',
       spec: SPEC,
-      resource: 's3',
+      vfs: 's3',
       fn: FN,
       provisionFn: PROVISION,
     })
@@ -103,6 +103,6 @@ it('S3 commands expose static lookup', () => {
   const cat = S3_COMMANDS.require('cat')
 
   expect(cat.name).toBe('cat')
-  expect(cat.resource).toBe('s3')
+  expect(cat.vfs).toBe('s3')
   expect(cat.filetype).toBeNull()
 })

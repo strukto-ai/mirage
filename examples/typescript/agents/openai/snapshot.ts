@@ -18,7 +18,7 @@ import { dirname, resolve } from 'node:path'
 import {
   MountMode,
   OpsRegistry,
-  RAMResource,
+  RAMVFS,
   Workspace,
   toStateDict,
 } from '@struktoai/mirage-node'
@@ -31,7 +31,7 @@ loadEnv({
 })
 
 function makeWorkspace(): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -54,7 +54,7 @@ const agent = new Agent({
 const result = await run(agent, 'Create the report.')
 console.log('Agent output:', result.finalOutput)
 
-const findOrig = await ws.execute('find / -type f')
+const findOrig = await ws.shell('find / -type f')
 const origFiles = findOrig.stdoutText.trim().split('\n').filter(Boolean)
 
 console.log('\n--- Original files ---')
@@ -66,7 +66,7 @@ console.log(`snapshot mounts: ${state.mounts.length}`)
 
 console.log('\n--- Restoring into fresh workspace ---')
 const fresh = await Workspace.fromState(state)
-const findFresh = await fresh.execute('find / -type f')
+const findFresh = await fresh.shell('find / -type f')
 const freshFiles = findFresh.stdoutText.trim().split('\n').filter(Boolean)
 console.log(freshFiles.join('\n'))
 
@@ -74,8 +74,8 @@ console.log('\n--- Per-file content match ---')
 let matched = 0
 let differ = 0
 for (const path of origFiles) {
-  const a = await ws.fs.readFileText(path)
-  const b = await fresh.fs.readFileText(path)
+  const a = await ws.vfs.readFileText(path)
+  const b = await fresh.vfs.readFileText(path)
   if (a === b) {
     console.log(`  ✓ ${path}  (${a.length} chars match)`)
     matched += 1

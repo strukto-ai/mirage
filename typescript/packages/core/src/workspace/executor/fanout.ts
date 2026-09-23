@@ -15,14 +15,21 @@
 import { pathAllowed } from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import { FileType, PathSpec } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { keep } from '../../commands/builtin/find_eval.ts'
+import {
+  bindTree,
+  dropPruned,
+  keep,
+  settlePrunes,
+  type FindEntry,
+  type PredNode,
+} from '../../commands/builtin/find_eval.ts'
 import { parseFindExpression, type FindExpr } from '../../commands/builtin/find_parse.ts'
 import { FindParseError } from '../../commands/errors.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
@@ -190,32 +197,65 @@ function adjustDepthTexts(
   return out
 }
 
+function dirEntry(path: string, depth: number, mtime: number | null = null): FindEntry {
+  const segs = pathSegments(path)
+  return { key: path, name: segs[segs.length - 1] ?? path, kind: 'd', depth, mtime }
+}
+
+// Whether the fan-out's own evaluation pruned a directory above `path`. A
+// descendant mount is walked by its own find, which never learns what the
+// walk above it skipped, so the fan-out asks the ledger before walking it.
+function prunedAway(path: string, tree: PredNode | null): boolean {
+  return tree !== null && dropPruned([path], tree).length === 0
+}
+
 // Entries print in the operand's typed spelling (`raw`) like every
 // other line of the walk. The namespace-only ancestors between the
 // start and each mount root (`/ghost` above a mount at `/ghost/deep`)
 // get a row too: no backend walk covers them, yet `ls` lists them
 // through the door's structure merge, so find must agree.
+//
+// The start point is evaluated first, for its ledger alone: a `-prune`
+// reaching it or a namespace-only ancestor is recorded on the tree, which
+// skips the candidates beneath before they are statted and comes back with
+// the entries so the caller can hold the descendant mounts to it, since
+// each of those is walked on its own and never learns what the walk above
+// it skipped (`find /data -type d -prune` is one row). The tree is null
+// when the expression does not parse.
 async function synthesizeFindMountEntries(
   targetPath: string,
   descendants: readonly MountEntry[],
   texts: readonly string[],
   raw: string,
   statPath: StatPath | null,
-): Promise<PathSpec[]> {
+): Promise<[PathSpec[], PredNode | null]> {
   let expr: FindExpr
   try {
     expr = parseFindExpression([...texts])
   } catch (err) {
-    if (err instanceof FindParseError) return []
+    if (err instanceof FindParseError) return [[], null]
     throw err
   }
-  const tree = expr.tree
+  const tree = bindTree(expr.tree, '', targetPath, raw)
   const maxDepth = expr.maxDepth
   const minDepth = expr.minDepth ?? 0
   const parentDepth = pathSegments(targetPath).length
   const parentBase = rstripSlash(targetPath)
+  const windowed = expr.mtimeMin !== null || expr.mtimeMax !== null
+  const learned = new Map<string, number | null>()
+  // Fetched ahead of the tree, so a time test answers on the entry itself
+  // and a -prune after it fires only where GNU's would.
+  const mtimeOf = async (path: string): Promise<number | null> => {
+    if (!windowed || statPath === null) return null
+    const st = await statPath(path)
+    const mtime = st === null ? null : modifiedTs(st.modified)
+    learned.set(path, mtime)
+    return mtime
+  }
+  const start = parentBase || '/'
+  keep(dirEntry(start, 0, await mtimeOf(start)), tree, minDepth)
   const seen = new Set<string>()
-  const out: PathSpec[] = []
+  const kept: string[] = []
   for (const m of descendants) {
     const prefixNoSlash = rstripSlash(m.prefix)
     const ancestors: string[] = []
@@ -229,30 +269,32 @@ async function synthesizeFindMountEntries(
       seen.add(candidate)
       const depth = pathSegments(candidate).length - parentDepth
       if (maxDepth !== null && depth > maxDepth) continue
-      const segs = pathSegments(candidate)
-      const base = segs[segs.length - 1] ?? candidate
-      if (!keep({ key: candidate, name: base, kind: 'd', depth }, tree, minDepth)) continue
-      // A time window (-newermt, -newer) lives beside the tree: the
-      // candidate is statted and held to it the way the generic holds every
-      // real row, a future cutoff excluding the mount points too.
-      if ((expr.mtimeMin !== null || expr.mtimeMax !== null) && statPath !== null) {
-        const st = await statPath(candidate)
-        if (st === null || !inMtimeWindow(modifiedTs(st.modified), expr.mtimeMin, expr.mtimeMax)) {
-          continue
-        }
+      // GNU never visits it, so it is neither statted nor judged: a backend
+      // that refuses the probe must not fail the line.
+      if (prunedAway(candidate, tree)) continue
+      const mtime = await mtimeOf(candidate)
+      if (!keep(dirEntry(candidate, depth, mtime), tree, minDepth)) continue
+      // The flat window (-newermt, -newer) also holds the candidate the way
+      // the generic holds every real row, a future cutoff excluding the
+      // mount points too.
+      if (windowed && statPath !== null && !inMtimeWindow(mtime, expr.mtimeMin, expr.mtimeMax)) {
+        continue
       }
-      out.push(
-        new PathSpec({
-          virtual: candidate,
-          directory: candidate,
-          resourcePath: '',
-          resolved: true,
-          rawPath: respellOne(candidate, targetPath, raw),
-        }),
-      )
+      kept.push(candidate)
     }
   }
-  return out
+  settlePrunes(tree, learned)
+  const out = dropPruned(kept, tree).map(
+    (candidate) =>
+      new PathSpec({
+        virtual: candidate,
+        directory: candidate,
+        vfsPath: '',
+        resolved: true,
+        rawPath: respellOne(candidate, targetPath, raw),
+      }),
+  )
+  return [out, tree]
 }
 
 // Drop whole `ls -R` groups whose header names a nested mount.
@@ -345,7 +387,7 @@ export async function fanOutTraversal(
   cwd: string,
   cmdStr: string,
   stdin: ByteSource | null,
-  ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
+  ensureOpen: ((vfs: VFS) => Promise<void>) | undefined,
   // The name plane's facts, offered whole to every sub-run. The mount
   // boundaries, because a rollup total cannot be repaired by line
   // filtering: du must exclude a shadowed subtree while it is
@@ -389,6 +431,19 @@ export async function fanOutTraversal(
     flags = { ...rest, a: true, s: false, c: false, h: false, separate_dirs: false }
   }
 
+  const synthesized =
+    cmdName === 'find'
+      ? await synthesizeFindMountEntries(
+          targetPath,
+          descendants,
+          texts,
+          paths[0]?.rawPath ?? targetPath,
+          statPath,
+        )
+      : null
+  const synthetic = synthesized?.[0] ?? []
+  const tree = synthesized?.[1] ?? null
+
   const allStdout: Uint8Array[] = []
   let findMatches: PathSpec[][] = []
   let findMatchesComplete = true
@@ -414,7 +469,7 @@ export async function fanOutTraversal(
               new PathSpec({
                 virtual: head.virtual,
                 directory: head.directory,
-                resourcePath: head.resourcePath,
+                vfsPath: head.vfsPath,
                 resolved: head.resolved,
                 rawPath: targetPath,
               }),
@@ -424,8 +479,9 @@ export async function fanOutTraversal(
       subFlags = { ...flags }
       subTexts = [...texts]
     } else {
+      const mountRoot = rstripSlash(mount.prefix) || '/'
       const adjusted = adjustDepthFlags(flags, targetPath, mount.prefix)
-      if (adjusted === null) continue
+      if (adjusted === null || prunedAway(mountRoot, tree)) continue
       subFlags = adjusted
       if (cmdName === 'rg') {
         // A tree search labels every hit; a descendant mount whose root
@@ -434,7 +490,6 @@ export async function fanOutTraversal(
         subFlags = { ...subFlags, H: true }
       }
       subTexts = adjustDepthTexts(texts, targetPath, mount.prefix)
-      const mountRoot = rstripSlash(mount.prefix) || '/'
       // The descendant operand keeps the traversal root's typed spelling
       // (grep -r . -> ./ram/...; the synthetic bare no-operand form ->
       // ram/...); an absolute root leaves it absolute, the pre-existing
@@ -443,7 +498,7 @@ export async function fanOutTraversal(
         new PathSpec({
           virtual: mountRoot,
           directory: mountRoot,
-          resourcePath: mountKey(mountRoot, rstripSlash(mount.prefix)),
+          vfsPath: mountKey(mountRoot, rstripSlash(mount.prefix)),
           rawPath: duMerge
             ? mountRoot
             : respellOne(mountRoot, targetPath, paths[0]?.rawPath ?? targetPath),
@@ -454,7 +509,7 @@ export async function fanOutTraversal(
     // whose command raises is a real failure, never a silently missing
     // slice of the aggregate. Unserved commands return 127 (below).
     if (ensureOpen !== undefined) {
-      await ensureOpen(mount.resource)
+      await ensureOpen(mount.vfs)
     }
     // The child-mount names and the dispatcher-backed start-point stat.
     // A start point only the namespace serves (a nested mount's
@@ -519,13 +574,6 @@ export async function fanOutTraversal(
 
   let rows: PathSpec[] = []
   if (cmdName === 'find') {
-    const synthetic = await synthesizeFindMountEntries(
-      targetPath,
-      descendants,
-      texts,
-      paths[0]?.rawPath ?? targetPath,
-      statPath,
-    )
     // The mount points a walk cannot see belong to the first operand's
     // run, the one that holds them.
     if (synthetic.length > 0) {
@@ -603,7 +651,7 @@ export function runWithFanout(
   registry: MountRegistry,
   cwd: string,
   ns: NamespaceView | undefined,
-  ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
+  ensureOpen: ((vfs: VFS) => Promise<void>) | undefined,
   statPath: StatPath | null = null,
   signal?: AbortSignal,
 ): RunSingle {

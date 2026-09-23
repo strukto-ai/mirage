@@ -27,7 +27,6 @@ from mirage.io import IOResult
 from mirage.policy import Ask
 from mirage.policy.match import Outcome
 from mirage.policy.types import Decision, Scope
-from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult, ScriptSource
@@ -38,6 +37,7 @@ from mirage.secrets.types import ResolvedSecret
 from mirage.shell.parse import parse
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import HiddenVars
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.snapshot.state import to_state_dict
 
 FetchFn = Callable[[Any, str], Coroutine[Any, Any, ResolvedSecret]]
@@ -71,7 +71,7 @@ def dead_source() -> FetchFn:
 
 
 def _ws(env, **kw) -> Workspace:
-    return Workspace({"/": RAMResource()},
+    return Workspace({"/": RAMVFS()},
                      mode=kw.pop("mode", MountMode.WRITE),
                      env=env,
                      **kw)
@@ -83,12 +83,12 @@ async def test_lazy_fetches_only_when_referenced_and_only_once():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("echo hi")).exit_code == 0
+        assert (await ws.shell("echo hi")).exit_code == 0
         assert calls == []
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -101,9 +101,9 @@ async def test_whole_env_command_fetches_an_unspelled_name():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("ls /")).exit_code == 0
+        assert (await ws.shell("ls /")).exit_code == 0
         assert calls == []
-        io = await ws.execute("env")
+        io = await ws.shell("env")
         assert "TOKEN=t0" in (await io.stdout_str())
         assert calls == ["r"]
     finally:
@@ -126,7 +126,7 @@ async def test_eager_joins_every_line_a_lazy_sibling_waits():
         },
     })
     try:
-        assert (await ws.execute("echo hi")).exit_code == 0
+        assert (await ws.shell("echo hi")).exit_code == 0
         assert calls == ["re"]
         session = ws.get_session(ws.default_session_id)
         assert session.vars["E"].value == "ev"
@@ -152,7 +152,7 @@ async def test_two_names_one_secret_is_one_fetch():
         },
     })
     try:
-        io = await ws.execute("echo $DB_USER:$DB_PASS")
+        io = await ws.shell("echo $DB_USER:$DB_PASS")
         assert (await io.stdout_str()) == "u:p\n"
         assert calls == ["db"]
     finally:
@@ -165,7 +165,7 @@ async def test_key_defaults_to_the_variable_name():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"API": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("echo $API")
+        io = await ws.shell("echo $API")
         assert (await io.stdout_str()) == "v\n"
     finally:
         await ws.close()
@@ -177,7 +177,7 @@ async def test_missing_key_names_both_sides():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"T": {"from": "fake", "ref": "r", "key": "c"}})
     try:
-        io = await ws.execute("echo $T")
+        io = await ws.shell("echo $T")
         assert io.exit_code == 1
         err = io.stderr.decode()
         assert "T" in err and "'c'" in err and "a, b" in err
@@ -192,7 +192,7 @@ async def test_per_session_env_is_that_sessions_alone():
     ws = _ws(None)
     try:
         ws._session_mgr.create("s2", env={"S": {"from": "fake", "ref": "r"}})
-        io = await ws.execute("echo $S", session_id="s2")
+        io = await ws.shell("echo $S", session_id="s2")
         assert (await io.stdout_str()) == "sv\n"
         assert calls == ["r"]
         assert "S" not in ws.get_session(ws.default_session_id).vars
@@ -210,7 +210,7 @@ async def test_guest_runtime_reads_the_fetched_value():
     }},
              mode=MountMode.EXEC)
     try:
-        io = await ws.execute(
+        io = await ws.shell(
             "python3 -c 'import os; print(os.environ[\"GITHUB_TOKEN\"])'")
         assert io.exit_code == 0
         assert (await io.stdout_str()) == "gt\n"
@@ -223,14 +223,14 @@ async def test_guest_runtime_reads_the_fetched_value():
 async def test_readonly_preset_refuses_with_bash_wording():
     ws = _ws({"EDITOR": {"value": "vi", "readonly": True}})
     try:
-        io = await ws.execute("EDITOR=x")
+        io = await ws.shell("EDITOR=x")
         assert io.exit_code == 1
         assert io.stderr == b"bash: EDITOR: readonly variable\n"
-        io = await ws.execute("unset EDITOR")
+        io = await ws.shell("unset EDITOR")
         assert io.exit_code == 1
         assert io.stderr == (b"bash: unset: EDITOR: cannot unset: "
                              b"readonly variable\n")
-        io = await ws.execute("echo $EDITOR")
+        io = await ws.shell("echo $EDITOR")
         assert (await io.stdout_str()) == "vi\n"
     finally:
         await ws.close()
@@ -247,7 +247,7 @@ async def test_export_p_renders_an_unfetched_managed_name_unset():
                                      frozenset({VarAttr.EXPORT}),
                                      managed=ManagedRef(
                                          "fake", "r", "T", False))
-        io = await ws.execute("export -p")
+        io = await ws.shell("export -p")
         assert "declare -x T\n" in (await io.stdout_str())
     finally:
         await ws.close()
@@ -259,7 +259,7 @@ async def test_cmdsub_fetches_through_the_inner_fill():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("x=$(echo $TOKEN); echo $x")
+        io = await ws.shell("x=$(echo $TOKEN); echo $x")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -272,11 +272,11 @@ async def test_subshell_export_detaches_only_the_fork():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("(export TOKEN=y; echo $TOKEN)")
+        io = await ws.shell("(export TOKEN=y; echo $TOKEN)")
         assert (await io.stdout_str()) == "y\n"
         parent = ws.get_session(ws.default_session_id).vars["TOKEN"]
         assert parent.managed is not None
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
     finally:
         await ws.close()
@@ -288,9 +288,9 @@ async def test_write_then_read_detaches_and_serializes_the_value():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("export TOKEN=mine")).exit_code == 0
+        assert (await ws.shell("export TOKEN=mine")).exit_code == 0
         after_write = len(calls)
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "mine\n"
         assert len(calls) == after_write
         d = ws.get_session(ws.default_session_id).to_dict()
@@ -305,12 +305,12 @@ async def test_dead_source_fails_only_the_command_that_needs_it():
     register_secrets("fake", FakeConfig, dead_source())
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert io.exit_code == 1
         # The source's own words stay host-side: the agent learns the
         # variable and the source name, never the exception text.
         assert io.stderr == b"TOKEN: cannot fetch from fake\n"
-        assert (await ws.execute("ls /")).exit_code == 0
+        assert (await ws.shell("ls /")).exit_code == 0
     finally:
         await ws.close()
 
@@ -320,9 +320,9 @@ async def test_failed_fetch_sets_the_exit_status():
     register_secrets("fake", FakeConfig, dead_source())
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("true")).exit_code == 0
-        assert (await ws.execute("echo $TOKEN")).exit_code == 1
-        io = await ws.execute("echo $?")
+        assert (await ws.shell("true")).exit_code == 0
+        assert (await ws.shell("echo $TOKEN")).exit_code == 1
+        io = await ws.shell("echo $?")
         assert (await io.stdout_str()) == "1\n"
     finally:
         await ws.close()
@@ -338,9 +338,9 @@ async def test_mutating_export_detaches_without_fetching():
     register_secrets("fake", FakeConfig, dead_source())
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("export TOKEN=local")
+        io = await ws.shell("export TOKEN=local")
         assert io.exit_code == 0
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "local\n"
     finally:
         await ws.close()
@@ -354,9 +354,9 @@ async def test_mutating_forms_do_not_render_the_environment():
     try:
         for line in ("set -u", "set +u", "declare -x OTHER=1",
                      "export OTHER=2", "printenv PATH"):
-            await ws.execute(line)
+            await ws.shell(line)
         assert calls == []
-        io = await ws.execute("declare -p TOKEN")
+        io = await ws.shell("declare -p TOKEN")
         assert "t0" in (await io.stdout_str())
         assert calls == ["r"]
     finally:
@@ -369,7 +369,7 @@ async def test_printenv_of_the_name_fetches_it():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("printenv TOKEN")
+        io = await ws.shell("printenv TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -384,10 +384,10 @@ async def test_hidden_managed_name_never_fetches():
     try:
         session = ws.get_session(ws.default_session_id)
         session.hidden_vars = HiddenVars(names=("TOKEN", ))
-        io = await ws.execute("env")
+        io = await ws.shell("env")
         assert io.exit_code == 0
         assert "TOKEN" not in (await io.stdout_str())
-        io = await ws.execute("echo [$TOKEN]")
+        io = await ws.shell("echo [$TOKEN]")
         assert (await io.stdout_str()) == "[]\n"
         assert calls == []
     finally:
@@ -400,9 +400,9 @@ async def test_stored_function_body_fills_across_lines():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute('f() { echo "t:$TOKEN"; }')).exit_code == 0
+        assert (await ws.shell('f() { echo "t:$TOKEN"; }')).exit_code == 0
         assert calls == []
-        io = await ws.execute("f")
+        io = await ws.shell("f")
         assert (await io.stdout_str()) == "t:t0\n"
         assert calls == ["r"]
     finally:
@@ -415,10 +415,10 @@ async def test_function_calling_function_fills_transitively():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        await ws.execute('inner() { echo "i:$TOKEN"; }')
-        await ws.execute("outer() { inner; }")
+        await ws.shell('inner() { echo "i:$TOKEN"; }')
+        await ws.shell("outer() { inner; }")
         assert calls == []
-        io = await ws.execute("outer")
+        io = await ws.shell("outer")
         assert (await io.stdout_str()) == "i:t0\n"
         assert calls == ["r"]
     finally:
@@ -431,11 +431,11 @@ async def test_alias_body_fills_on_invocation():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("shopt -s expand_aliases")).exit_code == 0
+        assert (await ws.shell("shopt -s expand_aliases")).exit_code == 0
         line = "alias show='echo \"a:$TOKEN\"'"
-        assert (await ws.execute(line)).exit_code == 0
+        assert (await ws.shell(line)).exit_code == 0
         assert calls == []
-        io = await ws.execute("show")
+        io = await ws.shell("show")
         assert (await io.stdout_str()) == "a:t0\n"
         assert calls == ["r"]
     finally:
@@ -454,9 +454,9 @@ async def test_alias_rest_is_not_a_managed_read():
         },
     })
     try:
-        await ws.execute("shopt -s expand_aliases")
-        await ws.execute("alias ll='echo hi'")
-        io = await ws.execute("ll")
+        await ws.shell("shopt -s expand_aliases")
+        await ws.shell("alias ll='echo hi'")
+        io = await ws.shell("ll")
         assert (await io.stdout_str()) == "hi\n"
         assert calls == []
     finally:
@@ -469,8 +469,8 @@ async def test_alias_never_fetches_while_expansion_is_off():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        await ws.execute("alias show='echo $TOKEN'")
-        io = await ws.execute("show")
+        await ws.shell("alias show='echo $TOKEN'")
+        io = await ws.shell("show")
         assert io.exit_code != 0
         assert calls == []
     finally:
@@ -483,9 +483,9 @@ async def test_invocation_before_redefinition_fills_the_stored_body():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute('f() { echo "t:$TOKEN"; }')).exit_code == 0
+        assert (await ws.shell('f() { echo "t:$TOKEN"; }')).exit_code == 0
         assert calls == []
-        io = await ws.execute("f; f() { :; }")
+        io = await ws.shell("f; f() { :; }")
         assert (await io.stdout_str()) == "t:t0\n"
         assert calls == ["r"]
     finally:
@@ -498,7 +498,7 @@ async def test_every_same_line_redefinition_body_fills():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute('f() { :; }; f; f() { echo "e:$TOKEN"; }; f')
+        io = await ws.shell('f() { :; }; f; f() { echo "e:$TOKEN"; }; f')
         assert (await io.stdout_str()) == "e:t0\n"
         assert calls == ["r"]
     finally:
@@ -511,8 +511,7 @@ async def test_body_local_mask_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute(
-            'f() { local TOKEN=shadow; echo "in:$TOKEN"; }; f')
+        io = await ws.shell('f() { local TOKEN=shadow; echo "in:$TOKEN"; }; f')
         assert (await io.stdout_str()) == "in:shadow\n"
         assert calls == []
     finally:
@@ -525,8 +524,7 @@ async def test_body_mask_leaves_the_line_read_fetching():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute('f() { local TOKEN=shadow; }; f; echo "g:$TOKEN"'
-                              )
+        io = await ws.shell('f() { local TOKEN=shadow; }; f; echo "g:$TOKEN"')
         assert (await io.stdout_str()) == "g:t0\n"
         assert calls == ["r"]
     finally:
@@ -539,8 +537,8 @@ async def test_body_read_before_its_mask_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute(
-            'f() { echo "pre:$TOKEN"; local TOKEN=shadow; }; f')
+        io = await ws.shell('f() { echo "pre:$TOKEN"; local TOKEN=shadow; }; f'
+                            )
         assert (await io.stdout_str()) == "pre:t0\n"
         assert calls == ["r"]
     finally:
@@ -553,7 +551,7 @@ async def test_body_assignment_masks_its_own_read():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute('f() { TOKEN=w; echo "in:$TOKEN"; }; f')
+        io = await ws.shell('f() { TOKEN=w; echo "in:$TOKEN"; }; f')
         assert (await io.stdout_str()) == "in:w\n"
         assert calls == []
     finally:
@@ -566,8 +564,7 @@ async def test_body_mask_reading_the_standing_value_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute(
-            'f() { local TOKEN=$TOKEN; echo "in:$TOKEN"; }; f')
+        io = await ws.shell('f() { local TOKEN=$TOKEN; echo "in:$TOKEN"; }; f')
         assert (await io.stdout_str()) == "in:t0\n"
         assert calls == ["r"]
     finally:
@@ -584,8 +581,8 @@ async def test_stored_body_mask_holds_across_lines():
         # leading local masks its later reads on a later line exactly
         # as it does when the definition and the call share one.
         line = 'fshadow() { local TOKEN=shadow; echo "s:$TOKEN"; }'
-        assert (await ws.execute(line)).exit_code == 0
-        io = await ws.execute("fshadow")
+        assert (await ws.shell(line)).exit_code == 0
+        io = await ws.shell("fshadow")
         assert (await io.stdout_str()) == "s:shadow\n"
         assert calls == []
     finally:
@@ -599,8 +596,8 @@ async def test_stored_body_read_before_its_mask_fetches():
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
         line = 'fread() { echo "r:$TOKEN"; local TOKEN=shadow; }'
-        assert (await ws.execute(line)).exit_code == 0
-        io = await ws.execute("fread")
+        assert (await ws.shell(line)).exit_code == 0
+        io = await ws.shell("fread")
         assert (await io.stdout_str()) == "r:t0\n"
         assert calls == ["r"]
     finally:
@@ -613,7 +610,7 @@ async def test_top_level_declaration_masks():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("export TOKEN=local; printenv TOKEN")
+        io = await ws.shell("export TOKEN=local; printenv TOKEN")
         assert (await io.stdout_str()) == "local\n"
         assert calls == []
     finally:
@@ -626,7 +623,7 @@ async def test_top_level_local_is_not_a_mask():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute('local TOKEN=x; echo "t:$TOKEN"')
+        io = await ws.shell('local TOKEN=x; echo "t:$TOKEN"')
         assert (await io.stdout_str()) == "t:t0\n"
         assert calls == ["r"]
     finally:
@@ -639,7 +636,7 @@ async def test_tilde_expansion_fetches_home():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"HOME": {"from": "fake", "ref": "h"}})
     try:
-        io = await ws.execute("echo ~/logs")
+        io = await ws.shell("echo ~/logs")
         assert (await io.stdout_str()) == "/hh/logs\n"
         assert calls == ["h"]
     finally:
@@ -652,8 +649,8 @@ async def test_bare_cd_fetches_home():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"HOME": {"from": "fake", "ref": "h"}})
     try:
-        assert (await ws.execute("mkdir /d")).exit_code == 0
-        io = await ws.execute("cd; pwd")
+        assert (await ws.shell("mkdir /d")).exit_code == 0
+        io = await ws.shell("cd; pwd")
         assert (await io.stdout_str()) == "/d\n"
         assert calls == ["h"]
     finally:
@@ -666,8 +663,8 @@ async def test_cd_dash_fetches_oldpwd():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"OLDPWD": {"from": "fake", "ref": "o"}})
     try:
-        assert (await ws.execute("mkdir /d")).exit_code == 0
-        io = await ws.execute("cd -")
+        assert (await ws.shell("mkdir /d")).exit_code == 0
+        io = await ws.shell("cd -")
         assert (await io.stdout_str()) == "/d\n"
         assert calls == ["o"]
     finally:
@@ -680,8 +677,8 @@ async def test_relative_cd_fetches_cdpath():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"CDPATH": {"from": "fake", "ref": "c"}})
     try:
-        assert (await ws.execute("mkdir -p /pp/sub")).exit_code == 0
-        io = await ws.execute("cd sub")
+        assert (await ws.shell("mkdir -p /pp/sub")).exit_code == 0
+        io = await ws.shell("cd sub")
         assert (await io.stdout_str()) == "/pp/sub\n"
         assert calls == ["c"]
     finally:
@@ -694,7 +691,7 @@ async def test_read_fetches_ifs():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"IFS": {"from": "fake", "ref": "i"}})
     try:
-        io = await ws.execute("echo 'a b' | read v")
+        io = await ws.shell("echo 'a b' | read v")
         assert io.exit_code == 0
         assert calls == ["i"]
     finally:
@@ -707,7 +704,7 @@ async def test_getopts_fetches_optind():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"OPTIND": {"from": "fake", "ref": "g"}})
     try:
-        io = await ws.execute("getopts ab o")
+        io = await ws.shell("getopts ab o")
         assert io.exit_code == 1
         assert calls == ["g"]
     finally:
@@ -720,7 +717,7 @@ async def test_line_mask_beats_an_implicit_read():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"HOME": {"from": "fake", "ref": "h"}})
     try:
-        io = await ws.execute("HOME=/d; echo ~")
+        io = await ws.shell("HOME=/d; echo ~")
         assert (await io.stdout_str()) == "/d\n"
         assert calls == []
     finally:
@@ -733,9 +730,9 @@ async def test_arith_read_chases_an_earlier_value():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("name=TOKEN")).exit_code == 0
+        assert (await ws.shell("name=TOKEN")).exit_code == 0
         assert calls == []
-        io = await ws.execute("echo $((name))")
+        io = await ws.shell("echo $((name))")
         assert (await io.stdout_str()) == "7\n"
         assert calls == ["r"]
     finally:
@@ -748,7 +745,7 @@ async def test_arith_read_chases_a_same_line_assignment():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("name=TOKEN; echo $((name))")
+        io = await ws.shell("name=TOKEN; echo $((name))")
         assert (await io.stdout_str()) == "7\n"
         assert calls == ["r"]
     finally:
@@ -761,7 +758,7 @@ async def test_arith_chase_respects_a_body_mask():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("f() { local TOKEN=5; echo $((TOKEN)); }; f")
+        io = await ws.shell("f() { local TOKEN=5; echo $((TOKEN)); }; f")
         assert (await io.stdout_str()) == "5\n"
         assert calls == []
     finally:
@@ -774,7 +771,7 @@ async def test_arith_chase_follows_a_body_masks_value():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("f() { local n=TOKEN; echo $((n)); }; f")
+        io = await ws.shell("f() { local n=TOKEN; echo $((n)); }; f")
         assert (await io.stdout_str()) == "7\n"
         assert calls == ["r"]
     finally:
@@ -787,8 +784,8 @@ async def test_test_command_numeric_comparison_chases():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("name=TOKEN")).exit_code == 0
-        io = await ws.execute("[[ name -gt 5 ]]; echo $?")
+        assert (await ws.shell("name=TOKEN")).exit_code == 0
+        io = await ws.shell("[[ name -gt 5 ]]; echo $?")
         assert (await io.stdout_str()) == "0\n"
         assert calls == ["r"]
     finally:
@@ -801,8 +798,8 @@ async def test_let_operand_chases():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("name=TOKEN")).exit_code == 0
-        io = await ws.execute("let y=name+1; echo $y")
+        assert (await ws.shell("name=TOKEN")).exit_code == 0
+        io = await ws.shell("let y=name+1; echo $y")
         assert (await io.stdout_str()) == "8\n"
         assert calls == ["r"]
     finally:
@@ -815,8 +812,8 @@ async def test_arith_chase_follows_a_dynamic_assignment():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("other=TOKEN")).exit_code == 0
-        io = await ws.execute("n=$other; echo $((n))")
+        assert (await ws.shell("other=TOKEN")).exit_code == 0
+        io = await ws.shell("n=$other; echo $((n))")
         assert (await io.stdout_str()) == "7\n"
         assert calls == ["r"]
     finally:
@@ -842,7 +839,7 @@ async def test_arith_chase_replans_after_a_fetch():
     try:
         # A's fetched value names B, unknowable before the fetch: the
         # second planning pass is what reaches B.
-        io = await ws.execute("echo $((A + 1))")
+        io = await ws.shell("echo $((A + 1))")
         assert (await io.stdout_str()) == "8\n"
         assert calls == ["ra", "rb"]
     finally:
@@ -855,7 +852,7 @@ async def test_numeric_arithmetic_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("echo $((2 + 2))")
+        io = await ws.shell("echo $((2 + 2))")
         assert (await io.stdout_str()) == "4\n"
         assert calls == []
     finally:
@@ -868,9 +865,9 @@ async def test_dynamic_head_fetches_everything_pending():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("h=echo")).exit_code == 0
+        assert (await ws.shell("h=echo")).exit_code == 0
         assert calls == []
-        io = await ws.execute("$h hi")
+        io = await ws.shell("$h hi")
         assert (await io.stdout_str()) == "hi\n"
         assert calls == ["r"]
     finally:
@@ -886,7 +883,7 @@ async def test_copy_carries_the_env_template_to_new_sessions():
         twin = await ws.copy()
         try:
             twin.create_session("later")
-            io = await twin.execute("echo $MODE:$TOKEN", session_id="later")
+            io = await twin.shell("echo $MODE:$TOKEN", session_id="later")
             assert (await io.stdout_str()) == "prod:t0\n"
             assert calls == ["r"]
         finally:
@@ -901,9 +898,9 @@ async def test_indirect_expansion_fetches_the_target():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("name=TOKEN")).exit_code == 0
+        assert (await ws.shell("name=TOKEN")).exit_code == 0
         assert calls == []
-        io = await ws.execute("echo ${!name}")
+        io = await ws.shell("echo ${!name}")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -920,7 +917,7 @@ async def test_prior_line_nameref_fetches_its_target():
         # Written straight into the session so the declaring line's own
         # opaque-read fetch cannot mask the deref path.
         session.vars["r2"] = ShellVar("TOKEN", frozenset({VarAttr.NAMEREF}))
-        io = await ws.execute("echo $r2")
+        io = await ws.shell("echo $r2")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -939,7 +936,7 @@ class DenyNamed(Policy):
 
 
 def _policed_ws(deny: str, env) -> Workspace:
-    return Workspace({"/": RAMResource()},
+    return Workspace({"/": RAMVFS()},
                      mode=MountMode.WRITE,
                      env=env,
                      policies=[DenyNamed(deny)])
@@ -951,12 +948,12 @@ async def test_denied_literal_line_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _policed_ws("printenv", {"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("printenv TOKEN")
+        io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
         assert io.refusal is not None
         assert "printenv is off" in io.refusal.reason
         assert calls == []
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -974,7 +971,7 @@ async def test_dynamic_word_deny_fetches_before_the_value_gate():
     register_secrets("fake", FakeConfig, fetch)
     ws = _policed_ws("echo", {"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert io.exit_code == 126
         assert io.refusal is not None and "echo is off" in io.refusal.reason
         assert calls == ["r"]
@@ -994,7 +991,7 @@ class AskNamed(Policy):
 
 
 def _asking_ws(name: str, env, on_ask=None) -> Workspace:
-    return Workspace({"/": RAMResource()},
+    return Workspace({"/": RAMVFS()},
                      mode=MountMode.WRITE,
                      env=env,
                      policies=[AskNamed(name)],
@@ -1018,7 +1015,7 @@ async def test_asked_literal_line_fetches_only_after_approval():
         "ref": "r"
     }}, approve)
     try:
-        io = await ws.execute("printenv TOKEN")
+        io = await ws.shell("printenv TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["ask", "r"]
         assert ws.decisions.pending() == ()
@@ -1042,7 +1039,7 @@ async def test_asked_literal_line_denied_never_fetches():
         "ref": "r"
     }}, refuse)
     try:
-        io = await ws.execute("printenv TOKEN")
+        io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
         assert io.refusal is not None
         assert "printenv needs sign-off" in io.refusal.reason
@@ -1059,14 +1056,14 @@ async def test_asked_literal_line_left_pending_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _asking_ws("printenv", {"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("printenv TOKEN")
+        io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
         assert io.stderr == b"printenv: Permission denied\n"
         assert io.refusal is not None and io.refusal.kind == "pending"
         assert calls == []
         pending, = ws.decisions.pending()
         await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.ONCE)
-        again = await ws.execute("printenv TOKEN")
+        again = await ws.shell("printenv TOKEN")
         assert (await again.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -1083,13 +1080,13 @@ async def test_denied_function_body_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _policed_ws("printenv", {"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        assert (await ws.execute("f() { printenv TOKEN; }")).exit_code == 0
-        io = await ws.execute("f")
+        assert (await ws.shell("f() { printenv TOKEN; }")).exit_code == 0
+        io = await ws.shell("f")
         assert io.exit_code == 126
         assert io.refusal is not None
         assert "printenv is off" in io.refusal.reason
         assert calls == []
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -1102,9 +1099,9 @@ async def test_denied_transitive_body_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _policed_ws("printenv", {"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        await ws.execute("inner() { printenv TOKEN; }")
-        await ws.execute("outer() { inner; }")
-        io = await ws.execute("outer")
+        await ws.shell("inner() { printenv TOKEN; }")
+        await ws.shell("outer() { inner; }")
+        io = await ws.shell("outer")
         assert io.exit_code == 126
         assert calls == []
     finally:
@@ -1127,7 +1124,7 @@ async def test_denied_body_statement_keeps_a_sibling_reader_fetching():
         session.functions["f"] = [
             node for node in tree.named_children if node.type == "command"
         ]
-        io = await ws.execute("f")
+        io = await ws.shell("f")
         assert (await io.stdout_str()) == "e:t0\n"
         assert io.refusal is not None
         assert "printenv is off" in io.refusal.reason
@@ -1144,8 +1141,8 @@ async def test_denied_invocation_skips_the_body_reads():
     register_secrets("fake", FakeConfig, fetch)
     ws = _policed_ws("f", {"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        await ws.execute("f() { printenv TOKEN; }")
-        io = await ws.execute("f")
+        await ws.shell("f() { printenv TOKEN; }")
+        io = await ws.shell("f")
         assert io.exit_code == 126
         assert calls == []
     finally:
@@ -1173,7 +1170,7 @@ async def test_defining_a_denied_body_is_not_judged():
             },
         })
     try:
-        io = await ws.execute("g() { printenv TOKEN; }")
+        io = await ws.shell("g() { printenv TOKEN; }")
         assert io.exit_code == 0
         assert calls == ["re"]
     finally:
@@ -1194,8 +1191,8 @@ async def test_asked_function_body_fetches_only_after_approval():
         "ref": "r"
     }}, approve)
     try:
-        await ws.execute("f() { printenv TOKEN; }")
-        io = await ws.execute("f")
+        await ws.shell("f() { printenv TOKEN; }")
+        io = await ws.shell("f")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["ask", "r"]
         assert ws.decisions.pending() == ()
@@ -1217,8 +1214,8 @@ async def test_asked_function_body_denied_never_fetches():
         "ref": "r"
     }}, refuse)
     try:
-        await ws.execute("f() { printenv TOKEN; }")
-        io = await ws.execute("f")
+        await ws.shell("f() { printenv TOKEN; }")
+        io = await ws.shell("f")
         assert io.exit_code == 126
         assert io.refusal is not None
         assert "printenv needs sign-off" in io.refusal.reason
@@ -1237,14 +1234,14 @@ async def test_env_ignore_environment_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("env -i")
+        io = await ws.shell("env -i")
         assert io.exit_code == 0
         assert (await io.stdout_str()) == ""
-        inner = await ws.execute("env -i printenv TOKEN")
+        inner = await ws.shell("env -i printenv TOKEN")
         assert inner.exit_code == 1
         assert (await inner.stdout_str()) == ""
         assert calls == []
-        whole = await ws.execute("env printenv TOKEN")
+        whole = await ws.shell("env printenv TOKEN")
         assert (await whole.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -1316,7 +1313,7 @@ async def test_cli_fetches_only_the_invoked_verb_path():
     })
     try:
         ws.register_cli("mycli", _cli_spec())
-        await ws.execute("mycli alpha")
+        await ws.shell("mycli alpha")
         assert sorted(calls) == ["alpha", "root"]
     finally:
         await ws.close()
@@ -1340,9 +1337,9 @@ async def test_supplied_cli_option_skips_its_env():
         ws.register_cli("mycli", _cli_spec())
         # Typed outranks environment: the parser never reads CLI_ROOT
         # when --token is on the line, so nothing may fetch it.
-        await ws.execute("mycli --token explicit alpha")
+        await ws.shell("mycli --token explicit alpha")
         assert calls == ["alpha"]
-        await ws.execute("mycli --token explicit alpha --a explicit2")
+        await ws.shell("mycli --token explicit alpha --a explicit2")
         assert calls == ["alpha"]
     finally:
         await ws.close()
@@ -1366,7 +1363,7 @@ async def test_abbreviated_option_still_fetches():
         ws.register_cli("mycli", _cli_spec())
         # An abbreviation is never claimed as supplied: the scan stops
         # and the fetch keeps today's shape, over-fetching only.
-        await ws.execute("mycli --tok explicit alpha")
+        await ws.shell("mycli --tok explicit alpha")
         assert sorted(calls) == ["alpha", "root"]
     finally:
         await ws.close()
@@ -1385,7 +1382,7 @@ async def test_group_env_option_reaches_the_leaf():
                     options=(Option(long="--token", type="str",
                                     env="CLI_ROOT"), ),
                     subcommands=(CLISpec(name="alpha", fn=_cli_probe), )))
-        io = await ws.execute("mycli alpha")
+        io = await ws.shell("mycli alpha")
         assert io.exit_code == 0
         assert calls == ["root"]
         # The walk fills the group level from the same environment the
@@ -1405,7 +1402,7 @@ async def test_shared_env_with_an_unsupplied_reader_still_fetches():
         ws.register_cli("mycli", _shared_cli_spec())
         # --token is typed, but --a still falls back to the variable
         # the two declare, so it must fetch.
-        io = await ws.execute("mycli --token typed alpha")
+        io = await ws.shell("mycli --token typed alpha")
         assert io.exit_code == 0
         assert calls == ["shared"]
         assert _PROBE_FLAGS == [{"token": "typed", "a": "s0"}]
@@ -1421,7 +1418,7 @@ async def test_shared_env_with_every_reader_supplied_skips_the_fetch():
     try:
         _PROBE_FLAGS.clear()
         ws.register_cli("mycli", _shared_cli_spec())
-        io = await ws.execute("mycli --token typed alpha --a typed2")
+        io = await ws.shell("mycli --token typed alpha --a typed2")
         assert io.exit_code == 0
         assert calls == []
         assert _PROBE_FLAGS == [{"token": "typed", "a": "typed2"}]
@@ -1437,9 +1434,9 @@ async def test_append_assignment_fetches_before_extending():
     try:
         # The append alone on its line is a read: it starts from the
         # value it extends, then the write detaches the name.
-        assert (await ws.execute("TOKEN+=x")).exit_code == 0
+        assert (await ws.shell("TOKEN+=x")).exit_code == 0
         assert calls == ["r"]
-        io = await ws.execute("echo $TOKEN")
+        io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0x\n"
         assert calls == ["r"]
     finally:
@@ -1452,7 +1449,7 @@ async def test_getopts_consults_a_managed_opterr():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"OPTERR": {"from": "fake", "ref": "oe"}})
     try:
-        io = await ws.execute("getopts a opt -z")
+        io = await ws.shell("getopts a opt -z")
         assert calls == ["oe"]
         assert (await io.stderr_str()) == ""
         assert io.exit_code == 0
@@ -1479,10 +1476,10 @@ async def test_alias_invoked_cli_fetches_its_env():
     })
     try:
         ws.register_cli("mycli", _cli_spec())
-        await ws.execute("shopt -s expand_aliases")
-        await ws.execute("alias n='mycli'")
+        await ws.shell("shopt -s expand_aliases")
+        await ws.shell("alias n='mycli'")
         assert calls == []
-        await ws.execute("n alpha")
+        await ws.shell("n alpha")
         assert "alpha" in calls and "root" in calls
     finally:
         await ws.close()
@@ -1495,12 +1492,12 @@ async def test_shadowed_cli_head_does_not_fetch():
     ws = _ws({"CLI_ROOT": {"from": "fake", "ref": "root"}})
     try:
         ws.register_cli("mycli", _cli_spec())
-        await ws.execute("mycli() { echo shadowed; }")
-        io = await ws.execute("mycli")
+        await ws.shell("mycli() { echo shadowed; }")
+        io = await ws.shell("mycli")
         assert (await io.stdout_str()) == "shadowed\n"
         assert calls == []
-        await ws.execute("unset -f mycli")
-        await ws.execute("mycli")
+        await ws.shell("unset -f mycli")
+        await ws.shell("mycli")
         assert calls == ["root"]
     finally:
         await ws.close()
@@ -1514,10 +1511,10 @@ async def test_masked_assignment_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("TOKEN=local; printenv TOKEN")
+        io = await ws.shell("TOKEN=local; printenv TOKEN")
         assert (await io.stdout_str()) == "local\n"
         assert calls == []
-        later = await ws.execute("printenv TOKEN")
+        later = await ws.shell("printenv TOKEN")
         assert (await later.stdout_str()) == "local\n"
         assert calls == []
     finally:
@@ -1530,7 +1527,7 @@ async def test_masked_unset_never_fetches():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("unset TOKEN; printenv TOKEN")
+        io = await ws.shell("unset TOKEN; printenv TOKEN")
         assert io.exit_code == 1
         assert (await io.stdout_str()) == ""
         assert calls == []
@@ -1548,13 +1545,13 @@ async def test_env_removal_and_override_never_fetch():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        removed = await ws.execute("env -u TOKEN printenv TOKEN")
+        removed = await ws.shell("env -u TOKEN printenv TOKEN")
         assert removed.exit_code == 1
         assert (await removed.stdout_str()) == ""
-        overridden = await ws.execute("env TOKEN=local printenv TOKEN")
+        overridden = await ws.shell("env TOKEN=local printenv TOKEN")
         assert (await overridden.stdout_str()) == "local\n"
         assert calls == []
-        real = await ws.execute("printenv TOKEN")
+        real = await ws.shell("printenv TOKEN")
         assert (await real.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -1570,10 +1567,10 @@ async def test_prefix_override_never_fetches_and_keeps_the_pointer():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("TOKEN=local printenv TOKEN")
+        io = await ws.shell("TOKEN=local printenv TOKEN")
         assert (await io.stdout_str()) == "local\n"
         assert calls == []
-        real = await ws.execute("echo $TOKEN")
+        real = await ws.shell("echo $TOKEN")
         assert (await real.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -1589,7 +1586,7 @@ async def test_conditional_and_background_masks_do_not_hold():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("A=1 && printenv TOKEN")
+        io = await ws.shell("A=1 && printenv TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -1598,7 +1595,7 @@ async def test_conditional_and_background_masks_do_not_hold():
     register_secrets("fake2", FakeConfig, fetch2)
     ws2 = _ws({"TOKEN": {"from": "fake2", "ref": "r"}})
     try:
-        await ws2.execute("TOKEN=local & printenv TOKEN")
+        await ws2.shell("TOKEN=local & printenv TOKEN")
         assert calls2 == ["r"]
     finally:
         await ws2.close()
@@ -1612,7 +1609,7 @@ async def test_self_read_in_the_prefix_keeps_the_fetch():
     register_secrets("fake", FakeConfig, fetch)
     ws = _ws({"TOKEN": {"from": "fake", "ref": "r"}})
     try:
-        io = await ws.execute("TOKEN=$TOKEN; printenv TOKEN")
+        io = await ws.shell("TOKEN=$TOKEN; printenv TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
     finally:
@@ -1641,7 +1638,7 @@ async def test_session_write_policy_disables_masking():
     }},
              policies=[DenyUnrelatedWrite()])
     try:
-        io = await ws.execute("TOKEN=local; printenv TOKEN")
+        io = await ws.shell("TOKEN=local; printenv TOKEN")
         assert (await io.stdout_str()) == "local\n"
         assert calls == ["r"]
     finally:
@@ -1680,7 +1677,7 @@ async def test_a_declared_instance_carries_its_config_to_the_fetch():
                  }
              }})
     try:
-        out = await ws.execute('echo "$TOKEN"')
+        out = await ws.shell('echo "$TOKEN"')
         assert out.stdout == b"a1:r:none\n"
     finally:
         await ws.close()
@@ -1717,7 +1714,7 @@ async def test_two_instances_of_one_source_stay_apart():
             },
         })
     try:
-        out = await ws.execute('echo "$A"; echo "$B"')
+        out = await ws.shell('echo "$A"; echo "$B"')
         assert out.stdout == b"a1:r:none\na2:r:none\n"
     finally:
         await ws.close()
@@ -1744,7 +1741,7 @@ async def test_an_instance_config_reads_its_bootstrap_source(monkeypatch):
                  }
              })
     try:
-        out = await ws.execute('echo "$TOKEN"')
+        out = await ws.shell('echo "$TOKEN"')
         assert out.stdout == b"default:r:s3cr3t\n"
     finally:
         await ws.close()
@@ -1765,7 +1762,7 @@ async def test_a_bare_source_name_still_uses_ambient_defaults():
                  }
              }})
     try:
-        out = await ws.execute('echo "$TOKEN"')
+        out = await ws.shell('echo "$TOKEN"')
         assert out.stdout == b"default:r:none\n"
     finally:
         await ws.close()
@@ -1799,9 +1796,9 @@ async def test_a_whole_line_with_nothing_pending_resolves_nothing():
     register_secrets("env", FakeConfig, await slow_bootstrap(calls))
     register_secrets("acct-whole", AccountConfig, account_source())
     ws = Workspace(
-        {"/ram": RAMResource()},
+        {"/ram": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[LineBox(), "vfs"],
+        runtimes=[LineBox(), "workspace"],
         secrets={
             "prod": {
                 "source": "acct-whole",
@@ -1821,7 +1818,7 @@ async def test_a_whole_line_with_nothing_pending_resolves_nothing():
     try:
         session = ws.get_session(ws.default_session_id)
         session.hidden_vars = HiddenVars(names=("TOKEN", ))
-        io = await ws.execute("nvidia-smi -L")
+        io = await ws.shell("nvidia-smi -L")
         assert io.exit_code == 0
         assert calls == []
     finally:
@@ -1836,7 +1833,7 @@ async def test_a_denied_line_never_resolves_the_block():
     register_secrets("env", FakeConfig, await slow_bootstrap(calls))
     register_secrets("acct-denied", AccountConfig, account_source())
     ws = Workspace(
-        {"/": RAMResource()},
+        {"/": RAMVFS()},
         mode=MountMode.WRITE,
         policies=[DenyNamed("printenv")],
         secrets={
@@ -1856,10 +1853,10 @@ async def test_a_denied_line_never_resolves_the_block():
             "key": "credential"
         }})
     try:
-        io = await ws.execute("printenv TOKEN")
+        io = await ws.shell("printenv TOKEN")
         assert io.exit_code == 126
         assert calls == []
-        io = await ws.execute('echo "$TOKEN"')
+        io = await ws.shell('echo "$TOKEN"')
         assert (await io.stdout_str()) == "default:r:t\n"
         assert calls == [""]
     finally:
@@ -1892,10 +1889,9 @@ async def test_a_cancelled_waiter_leaves_the_shared_resolution_alone():
     ws.create_session("a")
     ws.create_session("b")
     try:
-        doomed = asyncio.create_task(
-            ws.execute('echo "$TOKEN"', session_id="a"))
+        doomed = asyncio.create_task(ws.shell('echo "$TOKEN"', session_id="a"))
         survivor = asyncio.create_task(
-            ws.execute('echo "$TOKEN"', session_id="b"))
+            ws.shell('echo "$TOKEN"', session_id="b"))
         await asyncio.sleep(0)
         doomed.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -1923,7 +1919,7 @@ async def test_an_instance_aliasing_env_redacts_like_env():
                  "source": "env"
              }})
     try:
-        result = await ws.execute('echo "$TOKEN"')
+        result = await ws.shell('echo "$TOKEN"')
         assert result.exit_code == 1
         message = await result.stderr_str()
         assert "1 fields" in message
@@ -1969,8 +1965,8 @@ async def test_concurrent_first_lines_resolve_the_block_once():
     ws.create_session("b")
     try:
         first, second = await asyncio.gather(
-            ws.execute('echo "$TOKEN"', session_id="a"),
-            ws.execute('echo "$TOKEN"', session_id="b"))
+            ws.shell('echo "$TOKEN"', session_id="a"),
+            ws.shell('echo "$TOKEN"', session_id="b"))
         assert (await first.stdout_str()) == "default:r:t\n"
         assert (await second.stdout_str()) == "default:r:t\n"
         assert calls == [""]
@@ -1999,7 +1995,7 @@ async def test_a_copy_keeps_the_declared_instances():
     try:
         copy = await ws.copy()
         try:
-            result = await copy.execute('echo "$TOKEN"')
+            result = await copy.shell('echo "$TOKEN"')
             assert result.exit_code == 0
             assert (await result.stdout_str()) == "a1:r:none\n"
         finally:
@@ -2029,7 +2025,7 @@ async def test_from_state_takes_the_block_the_deployment_supplies():
     finally:
         await ws.close()
     restored = await Workspace.from_state(state,
-                                          resources={"/": RAMResource()},
+                                          mounts={"/": RAMVFS()},
                                           secrets={
                                               "prod": {
                                                   "source": "acct-state",
@@ -2039,7 +2035,7 @@ async def test_from_state_takes_the_block_the_deployment_supplies():
                                               }
                                           })
     try:
-        result = await restored.execute('echo "$TOKEN"')
+        result = await restored.shell('echo "$TOKEN"')
         assert result.exit_code == 0
         assert (await result.stdout_str()) == "a2:r:none\n"
     finally:
@@ -2103,8 +2099,8 @@ async def test_a_bad_instance_config_fails_the_lines_that_read_it():
                  }
              }})
     try:
-        assert (await ws.execute("echo hi")).exit_code == 0
-        out = await ws.execute('echo "$TOKEN"')
+        assert (await ws.shell("echo hi")).exit_code == 0
+        out = await ws.shell('echo "$TOKEN"')
         assert out.exit_code == 1
         assert b"secrets.prod" in out.stderr
     finally:
@@ -2148,7 +2144,7 @@ async def test_a_profile_policy_at_the_session_door_drops_the_masks():
     register_secrets("fake", FakeConfig, fetch)
     ws = _scripted_ws({"TOKEN": {"from": "fake", "ref": "r"}}, SESSION_GATE)
     try:
-        io = await ws.execute("TOKEN=local; printenv TOKEN")
+        io = await ws.shell("TOKEN=local; printenv TOKEN")
         assert (await io.stdout_str()) == "local\n"
         assert calls == ["r"]
     finally:
@@ -2164,7 +2160,7 @@ async def test_a_profile_policy_away_from_the_session_door_keeps_the_masks():
     register_secrets("fake", FakeConfig, fetch)
     ws = _scripted_ws({"TOKEN": {"from": "fake", "ref": "r"}}, COMMAND_JUDGE)
     try:
-        io = await ws.execute("TOKEN=local; printenv TOKEN")
+        io = await ws.shell("TOKEN=local; printenv TOKEN")
         assert (await io.stdout_str()) == "local\n"
         assert calls == []
     finally:

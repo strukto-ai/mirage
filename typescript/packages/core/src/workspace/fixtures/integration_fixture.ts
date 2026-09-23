@@ -14,7 +14,7 @@
 
 import { materialize } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { ancestors } from '../../utils/path.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -25,10 +25,10 @@ const DEC = new TextDecoder()
 
 export interface IntegrationWS {
   ws: Workspace
-  data: RAMResource
+  data: RAMVFS
 }
 
-function put(res: RAMResource, path: string, data: string | Uint8Array): void {
+function put(res: RAMVFS, path: string, data: string | Uint8Array): void {
   res.store.files.set(path, typeof data === 'string' ? ENC.encode(data) : data)
   // RAM keeps directories explicitly, so seeding a file without them builds a
   // store no write could produce: readdir and stat both refuse a parent that
@@ -40,18 +40,18 @@ function put(res: RAMResource, path: string, data: string | Uint8Array): void {
 
 /**
  * Mirrors the `FILES` + `ws` fixture in tests/integration/test_shell_patterns.py.
- * All test data lives under /data/... in a single RAMResource.
+ * All test data lives under /data/... in a single RAMVFS.
  */
 export async function makeIntegrationWS(
   files: Record<string, string | Uint8Array> = {},
 ): Promise<IntegrationWS> {
   const parser = await getTestParser()
-  const data = new RAMResource()
+  const data = new RAMVFS()
   for (const [relPath, body] of Object.entries(files)) {
     put(data, `/${relPath}`, body)
   }
   const registry = new OpsRegistry()
-  registry.registerResource(data)
+  registry.registerVfs(data)
   const ws = new Workspace(
     { '/data': data },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
@@ -60,17 +60,17 @@ export async function makeIntegrationWS(
 }
 
 export async function run(ws: Workspace, cmd: string): Promise<string> {
-  const io = await ws.execute(cmd)
+  const io = await ws.shell(cmd)
   return DEC.decode(io.stdout)
 }
 
 export async function runExit(ws: Workspace, cmd: string): Promise<number> {
-  const io = await ws.execute(cmd)
+  const io = await ws.shell(cmd)
   return io.exitCode
 }
 
 export async function runResult(ws: Workspace, cmd: string): Promise<[number, string, string]> {
-  const io = await ws.execute(cmd)
+  const io = await ws.shell(cmd)
   return [io.exitCode, DEC.decode(io.stdout), DEC.decode(await materialize(io.stderr))]
 }
 

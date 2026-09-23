@@ -60,7 +60,7 @@ export class QuickJsRuntime extends JsRuntime implements Evaluator {
   readonly name = 'quickjs'
   // The engine is a WASI guest whose `std.open`/`os.readdir` suspend
   // into the workspace bridge: guest I/O has no door around the gate.
-  override readonly reach = 'vfs'
+  override readonly reach = 'workspace'
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
   readonly [EVALUATOR] = true as const
   private newAsyncModule: NewAsyncModule | null = null

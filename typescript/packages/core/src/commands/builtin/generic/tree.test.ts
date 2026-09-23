@@ -32,7 +32,7 @@ function spec(path: string): PathSpec {
     virtual: path,
     directory: path,
     resolved: false,
-    resourcePath: mountKey(path, ''),
+    vfsPath: mountKey(path, ''),
   })
 }
 
@@ -42,7 +42,7 @@ function opts(flags: Record<string, string | boolean | number | string[]>): Comm
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null,
+    vfs: null,
   } as unknown as CommandOpts
 }
 
@@ -115,7 +115,7 @@ describe('treeGeneric operand that is not a directory', () => {
       flags,
       filetypeFns: null,
       cwd: '/',
-      resource: null,
+      vfs: null,
       statPath: () => Promise.resolve(start),
     } as unknown as CommandOpts
   }

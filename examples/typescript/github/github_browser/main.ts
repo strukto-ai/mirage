@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GitHubResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GitHubVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
@@ -31,7 +31,7 @@ function buildConfig(): { token: string; owner: string; repo: string; ref?: stri
 
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   if (r.exitCode !== 0 && r.stderrText !== '') {
     console.log(`  STDERR: ${r.stderrText.slice(0, 200)}`)
   }
@@ -45,10 +45,10 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 async function main(): Promise<void> {
   const cfg = buildConfig()
   console.log(`Loading ${cfg.owner}/${cfg.repo} via @struktoai/mirage-browser …`)
-  const resource = await GitHubResource.create(cfg)
-  const ws = new Workspace({ '/github': resource }, { mode: MountMode.READ })
+  const vfs = await GitHubVFS.create(cfg)
+  const ws = new Workspace({ '/github': vfs }, { mode: MountMode.READ })
   try {
-    console.log('=== BROWSER MODE: GitHubResource → api.github.com (direct, CORS) ===\n')
+    console.log('=== BROWSER MODE: GitHubVFS → api.github.com (direct, CORS) ===\n')
 
     await run(ws, 'ls /github/')
 
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     await run(ws, 'head -n 5 /github/python/pyproject.toml')
 
     console.log('')
-    await run(ws, "grep 'BaseResource' /github/python/mirage/resource/base.py")
+    await run(ws, "grep 'BaseVFS' /github/python/mirage/vfs/base.py")
 
     console.log('')
     await run(ws, 'wc -l /github/python/mirage/types.py')

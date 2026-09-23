@@ -65,7 +65,7 @@ def _root() -> PathSpec:
     return PathSpec(virtual="/mnt",
                     directory="/mnt",
                     resolved=False,
-                    resource_path="")
+                    vfs_path="")
 
 
 async def _lines(ops: CommandIO) -> list[str]:
@@ -94,11 +94,11 @@ async def test_walk_honors_multiple_start_points():
         PathSpec(virtual="/mnt/table1",
                  directory="/mnt/table1",
                  resolved=False,
-                 resource_path="table1"),
+                 vfs_path="table1"),
         PathSpec(virtual="/mnt/notes.txt",
                  directory="/mnt",
                  resolved=False,
-                 resource_path="notes.txt"),
+                 vfs_path="notes.txt"),
     ]
     stdout, _io = await find(ops, None, roots, [], CommandOpts())
     data = stdout if isinstance(stdout, bytes) else b""
@@ -115,7 +115,7 @@ async def test_native_find_honors_multiple_start_points():
     stat_calls: list[str] = []
 
     async def find_op(_accessor, path, **_kw):
-        key = "/" + path.resource_path.strip("/") if path.resource_path \
+        key = "/" + path.vfs_path.strip("/") if path.vfs_path \
             else "/"
         if key == "/table1":
             return ["/table1/rows.jsonl"]
@@ -128,11 +128,11 @@ async def test_native_find_honors_multiple_start_points():
         PathSpec(virtual="/mnt/table1",
                  directory="/mnt/table1",
                  resolved=False,
-                 resource_path="table1"),
+                 vfs_path="table1"),
         PathSpec(virtual="/mnt/notes.txt",
                  directory="/mnt",
                  resolved=False,
-                 resource_path="notes.txt"),
+                 vfs_path="notes.txt"),
     ]
     stdout, _io = await find(ops, None, roots, [], CommandOpts())
     data = stdout if isinstance(stdout, bytes) else b""

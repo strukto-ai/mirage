@@ -15,7 +15,7 @@
 import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -31,7 +31,7 @@ loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),
 })
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -72,12 +72,12 @@ await session.prompt(task)
 console.log()
 
 console.log('\n--- Files in workspace ---')
-const findAll = await ws.execute("find / -type f | grep -v '^/dev/'")
+const findAll = await ws.shell("find / -type f | grep -v '^/dev/'")
 const findOut = findAll.stdoutText
 console.log(findOut)
 
 for (const path of findOut.trim().split('\n').filter(Boolean)) {
-  const content = await ws.fs.readFileText(path)
+  const content = await ws.vfs.readFileText(path)
   console.log(`cat ${path}:\n${content}`)
 }
 

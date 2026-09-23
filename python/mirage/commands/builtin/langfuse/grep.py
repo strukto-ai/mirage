@@ -148,10 +148,7 @@ async def grep_provision(accessor: LangfuseAccessor, paths: list[PathSpec],
                                      replace(opts, command=line))
 
 
-@command("grep",
-         resource="langfuse",
-         spec=SPECS["grep"],
-         provision=grep_provision)
+@command("grep", vfs="langfuse", spec=SPECS["grep"], provision=grep_provision)
 async def grep(accessor: LangfuseAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

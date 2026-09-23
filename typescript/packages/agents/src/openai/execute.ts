@@ -33,7 +33,7 @@ function formatExecuteOutput(
 
 async function executeOutput(ws: Workspace, command: string): Promise<string> {
   try {
-    const result = await ws.execute(command)
+    const result = await ws.shell(command)
     return formatExecuteOutput(
       result.stdoutText,
       result.stderrText,

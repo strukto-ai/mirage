@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { Precision, ProvisionResult } from '../../provision/types.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { handleForProvision, handleIfProvision, handleWhileProvision } from './control.ts'
 
 const COSTS: Record<string, () => ProvisionResult> = {
@@ -48,7 +48,7 @@ const node = (n: unknown): Promise<ProvisionResult> => {
   return Promise.resolve(make())
 }
 
-const SESSION = null as unknown as Session
+const SESSION = null as unknown as SessionState
 
 describe('handleIfProvision', () => {
   it('sums the condition with each branch', async () => {

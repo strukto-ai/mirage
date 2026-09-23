@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 from itertools import cycle, zip_longest
 
 from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.stream import read_stdin_async
+from mirage.commands.builtin.utils.stream import is_stdin, read_stdin_async
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -55,8 +55,9 @@ async def paste(
 ) -> tuple[ByteSource | None, IOResult]:
     file_lines: list[list[str]] = []
     remaining_stdin = stdin
+    stdin_slots = [i for i, p in enumerate(paths) if is_stdin(p)]
     for p in paths:
-        if p.virtual == "-":
+        if is_stdin(p):
             raw = await read_stdin_async(remaining_stdin)
             data = raw.decode(errors="replace") if raw else ""
             remaining_stdin = None
@@ -65,6 +66,11 @@ async def paste(
         file_lines.append(
             data.rstrip("\0").
             split("\0") if zero_terminated else split_lines(data))
+
+    if not serial and len(stdin_slots) > 1:
+        records = file_lines[stdin_slots[0]]
+        for column, slot in enumerate(stdin_slots):
+            file_lines[slot] = records[column::len(stdin_slots)]
 
     if not file_lines:
         raw = await read_stdin_async(remaining_stdin)
@@ -79,7 +85,6 @@ async def paste(
     if serial:
         out_lines = [
             _join_fields(lines, delimiter_chars) for lines in file_lines
-            if lines
         ]
     else:
         out_lines = [

@@ -64,7 +64,7 @@ async def test_read_message(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                resource_path=mount_key(
+                vfs_path=mount_key(
                     "/gmail/INBOX/2026-04-12"
                     "/Test_Email__msg1.gmail.json", "/gmail"),
                 virtual="/gmail/INBOX/2026-04-12"
@@ -84,8 +84,8 @@ async def test_read_not_found(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(resource_path=mount_key(
-                "/gmail/INBOX/nonexistent.gmail.json", "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/nonexistent.gmail.json",
+                                        "/gmail"),
                      virtual="/gmail/INBOX/nonexistent.gmail.json",
                      directory="/gmail/INBOX/nonexistent.gmail.json"),
             index,
@@ -109,7 +109,7 @@ async def test_read_is_directory(accessor, index):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX", "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX", "/gmail"),
                      virtual="/gmail/INBOX",
                      directory="/gmail/INBOX"),
             index,
@@ -164,7 +164,7 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                resource_path=mount_key(
+                vfs_path=mount_key(
                     "/gmail/INBOX/2026-04-27"
                     "/Hello_World__msg-1.gmail.json", "/gmail"),
                 virtual="/gmail/INBOX/2026-04-27"
@@ -217,7 +217,7 @@ async def test_read_attachment(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                resource_path=mount_key(
+                vfs_path=mount_key(
                     "/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
                     "/gmail"),
                 virtual="/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",

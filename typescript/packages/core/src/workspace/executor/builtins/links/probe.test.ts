@@ -35,7 +35,7 @@ function dispatcher(
 }
 
 function spec(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: '' })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: '' })
 }
 
 function enoent(path: string): Error {

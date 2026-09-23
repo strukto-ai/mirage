@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { Invalidation } from '../invalidation.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry } from './entry.ts'
 import { type FileCache, validateMaxDrainBytes } from './mixin.ts'
-import { defaultFingerprintAsync, parseLimit } from './utils.ts'
+import { parseLimit, tokenOrNull } from './utils.ts'
 
-export class RAMFileCacheStore extends RAMResource implements FileCache {
+export class RAMFileCacheStore extends RAMVFS implements FileCache {
   private readonly entries = new Map<string, CacheEntry>()
   private readonly lock = new KeyLock()
   private readonly limit: number
@@ -94,7 +94,6 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
     const stamp = this.invalidation.enter(key)
     try {
       await this.lock.withLock(key, async () => {
-        const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
         if (this.invalidation.stale(key, stamp)) return
         const existing = this.entries.get(key)
         if (existing !== undefined) {
@@ -104,7 +103,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
         const entry = new CacheEntry({
           size: data.byteLength,
           cachedAt: Math.floor(Date.now() / 1000),
-          fingerprint: fp,
+          fingerprint: tokenOrNull(options.fingerprint),
           ttl: options.ttl ?? null,
         })
         this.entries.set(key, entry)
@@ -129,7 +128,6 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
       placed = await this.lock.withLock(key, async () => {
         const existing = this.entries.get(key)
         if (existing !== undefined && !existing.expired) return Promise.resolve(false)
-        const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
         if (this.invalidation.stale(key, stamp)) return false
         if (existing !== undefined) {
           this.size -= existing.size
@@ -138,7 +136,7 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
         const entry = new CacheEntry({
           size: data.byteLength,
           cachedAt: Math.floor(Date.now() / 1000),
-          fingerprint: fp,
+          fingerprint: tokenOrNull(options.fingerprint),
           ttl: options.ttl ?? null,
         })
         this.entries.set(key, entry)
@@ -205,7 +203,18 @@ export class RAMFileCacheStore extends RAMResource implements FileCache {
   isFresh(key: string, remoteFingerprint: string): Promise<boolean> {
     const entry = this.entries.get(key)
     if (entry === undefined) return Promise.resolve(false)
-    return Promise.resolve(entry.fingerprint === remoteFingerprint)
+    // An entry that carries no token verifies against nothing, and says
+    // so here rather than relying on the caller to ask only when it holds
+    // one. Without the first clause a caller arriving with no remote
+    // token compares null to null and is told the copy is fresh; the
+    // redis store, whose meta key is simply absent, would answer false
+    // for the same pair.
+    return Promise.resolve(entry.fingerprint !== null && entry.fingerprint === remoteFingerprint)
+  }
+
+  isUnbounded(key: string): Promise<boolean> {
+    const entry = this.entries.get(key)
+    return Promise.resolve(entry?.ttl === null)
   }
 
   clear(): Promise<void> {

@@ -31,7 +31,7 @@ async def realpath(
     for p in paths:
         resolved_display = posixpath.normpath(p.virtual)
         if e:
-            prefix = mount_prefix_of(p.virtual, p.resource_path)
+            prefix = mount_prefix_of(p.virtual, p.vfs_path)
             resolved = to_pathspec(resolved_display, prefix)
             if not await _exists(stat_fn, resolved):
                 # Fully GNU-formatted (quoted path), emitted verbatim by

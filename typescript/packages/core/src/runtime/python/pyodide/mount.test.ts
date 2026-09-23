@@ -172,7 +172,7 @@ describe('PyodideRuntime mount visibility', () => {
     // `/` is already MEMFS's mount root, so Emscripten answers EBUSY;
     // the empty mountpoint it used to compute mounts a detached
     // filesystem, and the guest then reads and writes MEMFS while a
-    // write reports success the resource never sees.
+    // write reports success the VFS never sees.
     const { dispatch, calls } = makeBridge()
     const warnings: string[] = []
     const warn = console.warn

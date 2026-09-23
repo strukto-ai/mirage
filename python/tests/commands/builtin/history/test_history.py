@@ -17,8 +17,8 @@ import asyncio
 from mirage.commands.config import ExecContext
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
-from mirage.resource.history import HistoryViewResource
 from mirage.types import MountMode
+from mirage.vfs.history import HistoryViewVFS
 from mirage.workspace.mount.registry import MountRegistry
 
 
@@ -39,7 +39,7 @@ def _observer_with(commands: list[tuple[str, str]]) -> Observer:
 
 def _mounted(obs: Observer):
     registry = MountRegistry()
-    registry.mount("/.bash_history", HistoryViewResource(obs), MountMode.READ)
+    registry.mount("/.bash_history", HistoryViewVFS(obs), MountMode.READ)
     return registry.mount_for("/.bash_history")
 
 

@@ -24,13 +24,13 @@ from mirage.workspace.executor.builtins.alias.types import AliasMark
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_alias(
     args: list[str],
-    session: Session,
+    session: SessionState,
     mark: AliasMark,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Define or print aliases.
@@ -43,7 +43,7 @@ async def handle_alias(
 
     Args:
         args (list[str]): the words after `alias`.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         mark (AliasMark): the parse and row this definition sits on,
             which is what decides whether a later use on the same line
             sees it (bash expands aliases as it reads a line, so a use
@@ -92,7 +92,7 @@ async def handle_alias(
 
 async def handle_unalias(
     args: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Remove aliases: the named ones, or all of them under `-a`.
 
@@ -101,7 +101,7 @@ async def handle_unalias(
 
     Args:
         args (list[str]): the words after `unalias`.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     scan = scan_options(args, "a")
     if scan.bad is not None:
@@ -130,7 +130,8 @@ async def handle_unalias(
                                                  stderr=err or b"")
 
 
-def alias_value(session: Session, name: str, mark: AliasMark) -> str | None:
+def alias_value(session: SessionState, name: str,
+                mark: AliasMark) -> str | None:
     """The alias text a command word expands to, or None.
 
     None when aliases are not being expanded (`shopt -s expand_aliases`
@@ -140,7 +141,7 @@ def alias_value(session: Session, name: str, mark: AliasMark) -> str | None:
     or when it was defined on the very parse and row that uses it.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         name (str): the command word.
         mark (AliasMark): the parse and row of the use.
     """
@@ -155,7 +156,7 @@ def alias_value(session: Session, name: str, mark: AliasMark) -> str | None:
     return value
 
 
-def alias_command_text(session: Session, name: str, rest: str,
+def alias_command_text(session: SessionState, name: str, rest: str,
                        mark: AliasMark) -> str | None:
     """The command line an aliased head word rewrites to, or None.
 
@@ -166,7 +167,7 @@ def alias_command_text(session: Session, name: str, rest: str,
     pipe or a redirection.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         name (str): the head word.
         rest (str): the source text after the head word, as typed.
         mark (AliasMark): the parse and row of the use.

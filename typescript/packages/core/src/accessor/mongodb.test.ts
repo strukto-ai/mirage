@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { stubMongoDriver } from '../core/mongodb/_test_util.ts'
-import { resolveMongoDBConfig } from '../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../vfs/mongodb/config.ts'
 import { MongoDBAccessor } from './mongodb.ts'
 
 const STUB_DRIVER = stubMongoDriver()

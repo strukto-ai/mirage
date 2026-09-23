@@ -27,10 +27,10 @@ vi.mock('./stat.ts', async () => {
 })
 
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
-import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
+import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import { walkFind } from '../generic/find.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
@@ -95,7 +95,7 @@ const TREE: Record<string, string[]> = {
   '/col/grp': ['/col/grp/c.json'],
 }
 
-const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
 describe('qdrant core find', () => {
   beforeEach(() => {

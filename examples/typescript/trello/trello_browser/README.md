@@ -1,6 +1,6 @@
 # Browser Trello demo
 
-Demonstrates the browser `TrelloResource` calling `api.trello.com` directly — no proxy server. Trello's REST API supports CORS and uses URL-param auth, so the browser can talk to it directly (mirroring how the browser `S3Resource` signs requests with credentials it holds).
+Demonstrates the browser `TrelloVFS` calling `api.trello.com` directly — no proxy server. Trello's REST API supports CORS and uses URL-param auth, so the browser can talk to it directly (mirroring how the browser `S3VFS` signs requests with credentials it holds).
 
 ## Run
 

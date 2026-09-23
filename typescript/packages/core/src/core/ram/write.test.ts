@@ -14,12 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import { RAMStore } from '../../resource/ram/store.ts'
+import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { appendBytes } from './append.ts'
 import { create } from './create.ts'
 import { mkdir } from './mkdir.ts'
+import { truncate } from './truncate.ts'
 import { writeBytes } from './write.ts'
 
 const ENC = new TextEncoder()
@@ -28,7 +29,7 @@ function mkPath(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: stripSlash(virtual),
+    vfsPath: stripSlash(virtual),
     resolved: true,
   })
 }
@@ -95,6 +96,27 @@ describe('core/ram writeBytes destination parents', () => {
       expect((err as { virtualPath?: string }).virtualPath).toBe('/missing/f.txt')
       expect((err as Error).message).not.toContain('parent directory does not exist')
     }
+  })
+})
+
+describe('core/ram write target is a directory', () => {
+  it('writeBytes onto a directory is EISDIR and leaves the directory alone', async () => {
+    const acc = mkAccessor()
+    expect(await codeOf(() => writeBytes(acc, mkPath('/d'), ENC.encode('hi')))).toBe('EISDIR')
+    expect(acc.store.files.has('/d')).toBe(false)
+    expect(acc.store.dirs.has('/d')).toBe(true)
+  })
+
+  it('appendBytes onto a directory is EISDIR', async () => {
+    const acc = mkAccessor()
+    expect(await codeOf(() => appendBytes(acc, mkPath('/d'), ENC.encode('hi')))).toBe('EISDIR')
+    expect(acc.store.files.has('/d')).toBe(false)
+  })
+
+  it('truncate onto a directory is EISDIR', async () => {
+    const acc = mkAccessor()
+    expect(await codeOf(() => truncate(acc, mkPath('/d'), 0))).toBe('EISDIR')
+    expect(acc.store.files.has('/d')).toBe(false)
   })
 })
 

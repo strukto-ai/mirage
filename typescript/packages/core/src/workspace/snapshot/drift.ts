@@ -12,13 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { OpRecord } from '../../observe/record.ts'
+import {
+  CONTENT_CHANGING_OPS,
+  RETRACT_FINGERPRINT_OPS,
+  STAMP_FINGERPRINT_OPS,
+  SUBTREE_RETRACT_OPS,
+  type OpRecord,
+} from '../../observe/record.ts'
 import type { FileStat } from '../../types.ts'
 import { DriftPolicy } from '../../types.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import type { MountEntry } from '../mount/mount.ts'
 
 /**
- * Raised at load time when a remote resource's live fingerprint differs
+ * Raised at load time when a remote VFS's live fingerprint differs
  * from what was recorded in the snapshot.
  *
  * Indicates the underlying source has been modified since the snapshot
@@ -69,7 +76,7 @@ export interface MountLookup {
  * `Workspace.load` records one entry per read whose snapshot manifest
  * carried a fingerprint but no stable revision (a pinned read needs no
  * check: the pin guarantees the bytes). The first `dispatch` or
- * `execute` drains them, so downstream code can rely on consistent
+ * `shell` drains them, so downstream code can rely on consistent
  * state. Mirrors the Python `DriftQueue` in `snapshot/drift.py`.
  */
 export class DriftQueue {
@@ -164,42 +171,104 @@ export function installDriftState(
 }
 
 /**
- * Walk recorded ops and emit one entry per distinct read on a
- * snapshot-capable mount.
+ * Drop the pin at `path` and every pin beneath it.
  *
- * Pure aggregation over `records`. Each read carries the `fingerprint`
- * and/or `revision` the backend returned at the moment the agent read
- * the bytes (populated from the GET response, not a fresh stat at
- * snapshot time). This avoids the race where the upstream changes
- * between read and snapshot.
+ * Normalizes the probe, never the stored key: a mount-root op is spelled
+ * `/s3` here and `/s3/` in python, and an unnormalized prefix test would
+ * drop nothing in one language and a whole mount in the other. The stored
+ * keys stay as recorded, so the snapshot's `path` values are unchanged.
+ */
+function dropPin(
+  out: Map<string, FingerprintEntry>,
+  path: string,
+  subtree: boolean,
+  owner: string | null,
+): void {
+  const base = rstripSlash(path)
+  out.delete(base)
+  if (!subtree) return
+  // A nested mount's keys live in a different backend, so an op on the
+  // parent never touched them. That matters most for a mount at '/',
+  // where `base` is '' and every virtual path is "under" it: an
+  // unbounded sweep there would drop every other mount's pins and
+  // silently lose their drift check.
+  const prefix = `${base}/`
+  for (const [key, entry] of [...out.entries()]) {
+    if (!key.startsWith(prefix)) continue
+    if (owner !== null && entry.mount_prefix !== owner) continue
+    out.delete(key)
+  }
+}
+
+/**
+ * Walk recorded ops and emit one pin per path still worth checking.
  *
- * Skips paths whose owning mount has `supportsSnapshot=false` (live-only
- * backends like Gmail/Slack/Linear) and reads where the backend returned
- * neither marker.
+ * A single forward pass over the time-ordered records, so the last word on
+ * a path wins. Three things can be that last word:
+ *
+ * - an op that removed or replaced the object (`RETRACT_FINGERPRINT_OPS`)
+ *   drops the pin, and every pin beneath it — `rm -r` and a prefix rename
+ *   take a subtree with them;
+ * - an op that changed the bytes without describing them — a write whose
+ *   backend returned no token, or any `append` — drops the pin too,
+ *   because the token on file no longer names what is there;
+ * - an op carrying a token (`STAMP_FINGERPRINT_OPS`) replaces the pin
+ *   whole, never field-merging, so a read's revision cannot survive onto a
+ *   later write's fingerprint and pin replay to pre-write bytes.
+ *
+ * A read that reported no token changes nothing and leaves the pin alone.
+ * Each token is what the backend returned at the moment the agent moved
+ * the bytes, not a fresh stat at snapshot time.
+ *
+ * Paths on a mount that opts out of snapshot replay are never pinned; a
+ * retraction still applies to them, because dropping a pin is the safe
+ * direction and the mount a retraction names may no longer be the one that
+ * set the pin.
  */
 export function captureFingerprints(
   records: readonly OpRecord[],
   registry: RegistryLike,
 ): FingerprintEntry[] {
-  const seen = new Set<string>()
-  const out: FingerprintEntry[] = []
-  for (const rec of records) {
-    if (rec.op !== 'read' || seen.has(rec.path)) continue
+  const out = new Map<string, FingerprintEntry>()
+  // By timestamp, not by position: a backend record reaches this list
+  // only when its line ends, while an `Ops` facade record appends as it
+  // happens, so the list is flush-ordered and a retraction can otherwise
+  // sit before the write it retracts. The sort is stable, so
+  // same-millisecond records keep their order.
+  for (const rec of [...records].sort((a, b) => a.timestamp - b.timestamp)) {
+    if (RETRACT_FINGERPRINT_OPS.has(rec.op)) {
+      // Resolved to bound the sweep, never to gate the drop: a
+      // retraction whose mount has since gone still applies.
+      const retracted = registry.tryMountFor(rec.path)
+      dropPin(out, rec.path, SUBTREE_RETRACT_OPS.has(rec.op), retracted?.prefix ?? null)
+      continue
+    }
+    if (
+      CONTENT_CHANGING_OPS.has(rec.op) &&
+      (!STAMP_FINGERPRINT_OPS.has(rec.op) || !(rec.fingerprint || rec.revision))
+    ) {
+      // Dropped unless the token can actually be used below: an op
+      // outside STAMP never reaches the stamping arm, so keeping its pin
+      // would leave the pre-change token describing bytes that changed.
+      // `append` is the live member of that shape.
+      dropPin(out, rec.path, false, null)
+      continue
+    }
+    if (!STAMP_FINGERPRINT_OPS.has(rec.op)) continue
     if (rec.fingerprint === null && rec.revision === null) continue
     const mount = registry.tryMountFor(rec.path)
     if (mount === null || (rec.mountId !== null && rec.mountId !== mount.mountId)) continue
-    seen.add(rec.path)
-    if (mount.resource.supportsSnapshot !== true) continue
+    if (mount.vfs.supportsSnapshot !== true) continue
     const entry: FingerprintEntry = { path: rec.path, mount_prefix: mount.prefix }
     if (rec.fingerprint !== null) entry.fingerprint = rec.fingerprint
     if (rec.revision !== null) entry.revision = rec.revision
-    out.push(entry)
+    out.set(rec.path, entry)
   }
-  return out
+  return [...out.values()]
 }
 
 /**
- * Return mount prefixes whose resource opts out of snapshot replay.
+ * Return mount prefixes whose VFS opts out of snapshot replay.
  *
  * These mounts will serve current state at load time with no drift
  * detection. Surfaced in the snapshot manifest so the load layer can
@@ -209,7 +278,7 @@ export function liveOnlyMountPrefixes(registry: RegistryLike): string[] {
   const out: string[] = []
   for (const m of registry.allMounts()) {
     if (m.prefix === '/dev/' || m.prefix === '/.bash_history/') continue
-    if (m.resource.supportsSnapshot !== true) out.push(m.prefix)
+    if (m.vfs.supportsSnapshot !== true) out.push(m.prefix)
   }
   return out
 }
@@ -217,7 +286,7 @@ export function liveOnlyMountPrefixes(registry: RegistryLike): string[] {
 /**
  * Stat `path` and throw {@link ContentDriftError} if the live fingerprint
  * does not match `recorded`. No-op if the mount cannot be resolved or the
- * resource cannot fingerprint.
+ * VFS cannot fingerprint.
  *
  * The caller provides `statFn` (typically a thin wrapper over
  * {@link Workspace.dispatch}) so that drift.ts stays decoupled from the
@@ -232,7 +301,7 @@ export async function checkDrift(
 ): Promise<void> {
   const mount = registry.tryMountFor(path)
   if (mount === null || (mountId !== null && mount.mountId !== mountId)) return
-  if (mount.resource.supportsSnapshot !== true) return
+  if (mount.vfs.supportsSnapshot !== true) return
   let stat: FileStat
   try {
     stat = (await statFn(path)) as FileStat

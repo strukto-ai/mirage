@@ -79,10 +79,10 @@ async def _channel_proven(accessor: DiscordAccessor, path: PathSpec,
     virtual = path.virtual.rstrip("/")
     for _ in range(up):
         virtual = virtual.rsplit("/", 1)[0]
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     spec = PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=mount_key(virtual, prefix))
+                    vfs_path=mount_key(virtual, prefix))
     if await resolve_entry(readdir, accessor, spec, index) is None:
         raise enoent(path.virtual)
 

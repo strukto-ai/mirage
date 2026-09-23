@@ -111,7 +111,7 @@ export async function loadPyodideRuntime(
   // js` still resolves, but the host globalThis (js.process, js.fetch,
   // js.process.env) is not reachable through it, so guest code has no
   // host-environment or network door around the workspace bridge. This
-  // is what makes the runtime's reach='vfs' claim true and matches the
+  // is what makes the runtime's reach='workspace' claim true and matches the
   // docstring's "no network" promise; pyodide's own internals capture
   // the globals they need at load time, not through this object.
   const opts: Record<string, unknown> = {

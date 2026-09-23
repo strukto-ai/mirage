@@ -29,7 +29,7 @@ async def run(ws, line: str) -> tuple[int, bytes, bytes]:
         ws (Workspace): workspace with the repository and CLI.
         line (str): the command line, without the leading directory.
     """
-    result = await ws.execute(f"git -C /repo {line}")
+    result = await ws.shell(f"git -C /repo {line}")
     return result.exit_code, result.stdout or b"", result.stderr or b""
 
 
@@ -133,7 +133,7 @@ async def test_leaving_a_detached_head_names_where_it_was(git_rw):
 @pytest.mark.asyncio
 async def test_switch_refuses_to_lose_an_edit(git_rw, repo_path: Path):
     await run(git_rw, "branch older HEAD~1")
-    await git_rw.execute("echo precious > /repo/a.txt")
+    await git_rw.shell("echo precious > /repo/a.txt")
     code, _out, err = await run(git_rw, "switch older")
     assert code == 1
     assert err.startswith(
@@ -363,7 +363,7 @@ async def test_an_invalid_name_on_an_unborn_head_is_refused(
 @pytest.mark.asyncio
 async def test_a_staged_addition_survives_the_switch(git_rw):
     await run(git_rw, "branch other")
-    await git_rw.execute("echo new > /repo/added.txt")
+    await git_rw.shell("echo new > /repo/added.txt")
     await run(git_rw, "add added.txt")
     assert await run(git_rw,
                      "switch other") == (0, b"A\tadded.txt\n",
@@ -385,7 +385,7 @@ async def test_a_staged_deletion_survives_the_switch(git_rw):
 @pytest.mark.asyncio
 async def test_a_carried_edit_is_lettered_by_where_it_stands(git_rw):
     await run(git_rw, "branch other")
-    await git_rw.execute("echo edited > /repo/a.txt")
+    await git_rw.shell("echo edited > /repo/a.txt")
     assert await run(git_rw,
                      "switch other") == (0, b"M\ta.txt\n",
                                          b"Switched to branch 'other'\n")

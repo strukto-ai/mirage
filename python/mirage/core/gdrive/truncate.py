@@ -23,7 +23,7 @@ from mirage.utils.errors import eisdir
 @eacces_on_denied
 async def truncate(accessor: GDriveAccessor, path: PathSpec,
                    length: int) -> None:
-    node = await resolve_key(accessor, path.resource_path)
+    node = await resolve_key(accessor, path.vfs_path)
     if node is not None and node.is_folder:
         raise eisdir(path.virtual)
     if node is None or node.is_native:

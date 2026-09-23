@@ -7,11 +7,11 @@
         "runtimes": [
           "monty",
           "local",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -49,11 +49,11 @@
             "script": "'use-local' not in ctx['line']"
           },
           "local",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -82,11 +82,11 @@
             "name": "monty",
             "script": "False"
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -113,11 +113,11 @@
         "runtimes": [
           "monty",
           "local",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "route_policy": "'local' if 'go-local' in ctx['line'] else None"
@@ -144,11 +144,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -181,11 +181,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -218,11 +218,11 @@
             "name": "monty",
             "script": "ctx['command'] == 'python3'"
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "pipe.py": "print('came-through-pipe')"
             }
@@ -247,7 +247,7 @@
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "a.txt": "hello\n"
             }
@@ -299,7 +299,7 @@
       "steps": [
         {
           "command": "echo hi",
-          "runtime": "vfs",
+          "runtime": "workspace",
           "expect": {
             "throws_contains": "not a runtime you can select"
           }
@@ -314,7 +314,7 @@
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "route_policy": "'nope'"
@@ -341,7 +341,7 @@
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -366,7 +366,7 @@
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -400,7 +400,7 @@
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -419,11 +419,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "route_policy": "{'deny': 'python3 is blocked here'} if ctx['command'] == 'python3' else None"
@@ -450,11 +450,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "route_policy": "{'runtime': 'monty'}"
@@ -474,11 +474,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "route_policy": "{'runtme': 'monty'}"
@@ -500,11 +500,11 @@
             "name": "monty",
             "script": "{'deny': 'nope'}"
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -522,7 +522,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "a.txt": "hello\n"
             }
@@ -561,7 +561,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "open.txt": "free\n"
             }
@@ -606,7 +606,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "x.sealed": "nope\n",
               "y.txt": "yes\n"
@@ -640,7 +640,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "clean.txt": "hello\n",
               "secret.txt": "TOPSECRET plans\n"
@@ -674,7 +674,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "big.log": "abcdefghij\n",
               "note.txt": "abcdefghij\n",
@@ -720,7 +720,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "1\n2\n3\n4\n5\n"
             },
@@ -762,7 +762,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "1\n2\n3\n4\n5\n"
             }
@@ -800,7 +800,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "policies": [
@@ -826,7 +826,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "a.txt": "hello\n"
             }
@@ -867,7 +867,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "open.txt": "free\n"
             }
@@ -914,7 +914,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "clean.txt": "hello\n",
               "secret.txt": "TOPSECRET plans\n"
@@ -950,7 +950,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "1\n2\n3\n4\n5\n"
             },
@@ -994,7 +994,7 @@
       "world": {
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "policies": [

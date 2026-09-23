@@ -13,16 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import hashlib
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from unittest.mock import patch
 
 from mirage.core.ram.mkdir import mkdir as mem_mkdir
 from mirage.core.ram.write import write_bytes as mem_write
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 
 LAST_MODIFIED = datetime(2026, 3, 31, tzinfo=timezone.utc)
@@ -118,8 +119,9 @@ class AsyncMockS3Client:
             "CommonPrefixes": page.get("CommonPrefixes", [])[:MaxKeys],
         }
 
-    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:
+    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> dict:
         self.objects[Key] = Body
+        return {"ETag": f'"{hashlib.md5(Body).hexdigest()}"'}
 
     async def delete_object(self, Bucket: str, Key: str) -> None:
         self.objects.pop(Key, None)
@@ -212,35 +214,35 @@ def make_s3_ws(objects: dict[str, bytes]) -> Workspace:
         aws_access_key_id="fake",
         aws_secret_access_key="fake",
     )
-    resource = S3Resource(config)
+    vfs = S3VFS(config)
     return Workspace(
-        {"/data": (resource, MountMode.WRITE)},
+        {"/data": (vfs, MountMode.WRITE)},
         mode=MountMode.WRITE,
     )
 
 
-def make_memory_ws() -> tuple[Workspace, RAMResource]:
-    resource = RAMResource()
+def make_memory_ws() -> tuple[Workspace, RAMVFS]:
+    vfs = RAMVFS()
     ws = Workspace(
-        {"/data": (resource, MountMode.WRITE)},
+        {"/data": (vfs, MountMode.WRITE)},
         mode=MountMode.WRITE,
     )
-    return ws, resource
+    return ws, vfs
 
 
 def make_disk_ws(tmp_path) -> tuple[Workspace, object]:
     disk_root = tmp_path / "disk_root"
     disk_root.mkdir()
-    resource = DiskResource(root=str(disk_root))
+    vfs = DiskVFS(root=str(disk_root))
     ws = Workspace(
-        {"/data": (resource, MountMode.WRITE)},
+        {"/data": (vfs, MountMode.WRITE)},
         mode=MountMode.WRITE,
     )
     return ws, disk_root
 
 
-def memory_create_file(resource: RAMResource, path: str, content: bytes):
-    accessor = resource.accessor
+def memory_create_file(vfs: RAMVFS, path: str, content: bytes):
+    accessor = vfs.accessor
     parts = path.strip("/").split("/")
     for i in range(1, len(parts)):
         d = "/" + "/".join(parts[:i])
@@ -255,18 +257,18 @@ def memory_create_file(resource: RAMResource, path: str, content: bytes):
 def run(ws: Workspace, cmd: str) -> str:
 
     async def _run():
-        io = await ws.execute(cmd)
+        io = await ws.shell(cmd)
         return await io.stdout_str()
 
     return asyncio.run(_run())
 
 
 def run_exit(ws: Workspace, cmd: str) -> int:
-    io = asyncio.run(ws.execute(cmd))
+    io = asyncio.run(ws.shell(cmd))
     return io.exit_code
 
 
-def make_resource_ws(request, tmp_path, files: dict[str, bytes]):
+def make_vfs_ws(request, tmp_path, files: dict[str, bytes]):
     if request.param == "s3":
         objects: dict[str, bytes] = {}
         for path, content in files.items():
@@ -275,9 +277,9 @@ def make_resource_ws(request, tmp_path, files: dict[str, bytes]):
         with patch_async_session(objects):
             yield ws
     elif request.param == "ram":
-        ws, resource = make_memory_ws()
+        ws, vfs = make_memory_ws()
         for path, content in files.items():
-            memory_create_file(resource, "/" + path, content)
+            memory_create_file(vfs, "/" + path, content)
         yield ws
     else:
         ws, disk_root = make_disk_ws(tmp_path)

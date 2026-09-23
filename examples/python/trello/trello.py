@@ -19,8 +19,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.trello import TrelloConfig, TrelloResource
 from mirage.types import PathSpec
+from mirage.vfs.trello import TrelloConfig, TrelloVFS
 
 load_dotenv(".env.development")
 
@@ -28,23 +28,23 @@ config = TrelloConfig(
     api_key=os.environ["TRELLO_API_KEY"],
     api_token=os.environ["TRELLO_API_TOKEN"],
 )
-resource = TrelloResource(config=config)
+vfs = TrelloVFS(config=config)
 
 
 async def main() -> None:
-    ws = Workspace({"/trello": resource}, mode=MountMode.WRITE)
+    ws = Workspace({"/trello": vfs}, mode=MountMode.WRITE)
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /trello/__nf_missing__.txt",
                 "head /trello/__nf_missing__.txt",
                 "stat /trello/__nf_missing__.txt"):
-        result = await ws.execute(cmd)
+        result = await ws.shell(cmd)
         print(f"$ {cmd}")
         print(f"  exit={result.exit_code}  "
               f"{(await result.stderr_str()).strip()}")
 
     print("=== ls /trello/workspaces/ ===")
-    result = await ws.execute("ls /trello/workspaces/")
+    result = await ws.shell("ls /trello/workspaces/")
     print(await result.stdout_str())
 
     first_ws = (await result.stdout_str()).strip().splitlines()[0] if (
@@ -54,8 +54,8 @@ async def main() -> None:
         return
 
     print(f"=== cat /trello/workspaces/{first_ws}/workspace.json ===")
-    result = await ws.execute(
-        f"cat /trello/workspaces/{first_ws}/workspace.json")
+    result = await ws.shell(f"cat /trello/workspaces/{first_ws}/workspace.json"
+                            )
     print(await result.stdout_str())
 
     # chmod/chown/touch never hit the Trello API: attrs land in the
@@ -63,23 +63,22 @@ async def main() -> None:
     # dispatch-level stat.
     ws_json = f"/trello/workspaces/{first_ws}/workspace.json"
     print(f"=== metadata overlay on {ws_json} ===")
-    meta_res = await ws.execute(f'chmod 640 "{ws_json}"'
-                                f' && chown 500:dev "{ws_json}"'
-                                f' && touch -t 202601021530 "{ws_json}"')
+    meta_res = await ws.shell(f'chmod 640 "{ws_json}"'
+                              f' && chown 500:dev "{ws_json}"'
+                              f' && touch -t 202601021530 "{ws_json}"')
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(ws_json))
     print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
           f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print(f"=== ls /trello/workspaces/{first_ws}/boards/ ===")
-    board_result = await ws.execute(f"ls /trello/workspaces/{first_ws}/boards/"
-                                    )
+    board_result = await ws.shell(f"ls /trello/workspaces/{first_ws}/boards/")
     print(await board_result.stdout_str())
 
     # ── glob expansion: the workspace segment is the pattern, the
     # literal tail keeps walking (lists workspaces once, then filters).
     print("=== echo /trello/workspaces/*/boards (mid-path glob) ===")
-    result = await ws.execute("echo /trello/workspaces/*/boards")
+    result = await ws.shell("echo /trello/workspaces/*/boards")
     glob_out = (await result.stdout_str()).strip()
     print(f"  {glob_out[:200]}")
     assert glob_out.endswith("/boards"), "mid-path glob did not expand"
@@ -87,16 +86,15 @@ async def main() -> None:
     # A glob that matches nothing stays the literal word, so the
     # command reports it like GNU coreutils.
     print("=== cat /trello/workspaces/zz-none-*/workspace.json ===")
-    result = await ws.execute("cat /trello/workspaces/zz-none-*/workspace.json"
-                              )
+    result = await ws.shell("cat /trello/workspaces/zz-none-*/workspace.json")
     glob_err = (await result.stderr_str()).strip()
     print(f"  exit={result.exit_code}  {glob_err[:120]}")
     assert result.exit_code == 1 and "zz-none-*" in glob_err
 
     print(f"=== ls -l /trello/workspaces/{first_ws}/boards/ "
           "(mtime from dateLastActivity) ===")
-    long_boards = await ws.execute(
-        f"ls -l /trello/workspaces/{first_ws}/boards/")
+    long_boards = await ws.shell(f"ls -l /trello/workspaces/{first_ws}/boards/"
+                                 )
     print(await long_boards.stdout_str())
 
     first_board = (await
@@ -109,29 +107,29 @@ async def main() -> None:
     board_path = f"/trello/workspaces/{first_ws}/boards/{first_board}"
 
     print(f"=== cat {board_path}/board.json ===")
-    result = await ws.execute(f"cat {board_path}/board.json")
+    result = await ws.shell(f"cat {board_path}/board.json")
     print(await result.stdout_str())
     board_payload = json.loads(await result.stdout_str())
     board_id = board_payload.get("board_id", "")
 
     print("=== trello board list ===")
-    result = await ws.execute("trello board list")
+    result = await ws.shell("trello board list")
     print(await result.stdout_str())
 
     print(f"=== trello board show {board_id} ===")
-    result = await ws.execute(f"trello board show {board_id}")
+    result = await ws.shell(f"trello board show {board_id}")
     print(await result.stdout_str())
 
     print(f"=== ls {board_path}/members/ ===")
-    member_result = await ws.execute(f"ls {board_path}/members/")
+    member_result = await ws.shell(f"ls {board_path}/members/")
     print(await member_result.stdout_str())
 
     print(f"=== ls {board_path}/labels/ ===")
-    label_result = await ws.execute(f"ls {board_path}/labels/")
+    label_result = await ws.shell(f"ls {board_path}/labels/")
     print(await label_result.stdout_str())
 
     print(f"=== ls {board_path}/lists/ ===")
-    list_result = await ws.execute(f"ls {board_path}/lists/")
+    list_result = await ws.shell(f"ls {board_path}/lists/")
     print(await list_result.stdout_str())
 
     all_lists = (await list_result.stdout_str()).strip().splitlines()
@@ -144,7 +142,7 @@ async def main() -> None:
     list_id = ""
     for lst in all_lists:
         lp = f"{board_path}/lists/{lst}"
-        r = await ws.execute(f"ls {lp}/cards/")
+        r = await ws.shell(f"ls {lp}/cards/")
         cards = (await r.stdout_str()).strip().splitlines()
         if cards and cards[0]:
             list_path = lp
@@ -152,14 +150,14 @@ async def main() -> None:
             break
 
     print(f"=== cat {list_path}/list.json ===")
-    result = await ws.execute(f"cat {list_path}/list.json")
+    result = await ws.shell(f"cat {list_path}/list.json")
     print(await result.stdout_str())
 
     list_payload = json.loads(await result.stdout_str())
     list_id = list_payload.get("list_id", "")
 
     print(f"=== ls {list_path}/cards/ ===")
-    card_result = await ws.execute(f"ls {list_path}/cards/")
+    card_result = await ws.shell(f"ls {list_path}/cards/")
     print(await card_result.stdout_str())
 
     if not first_card:
@@ -169,111 +167,110 @@ async def main() -> None:
     card_path = f"{list_path}/cards/{first_card}"
 
     print("=== cat card.json ===")
-    result = await ws.execute(f"cat {card_path}/card.json")
+    result = await ws.shell(f"cat {card_path}/card.json")
     print(await result.stdout_str())
 
     card_payload = json.loads(await result.stdout_str())
     card_payload.get("card_id", "")
 
     print("=== head -n 3 comments.jsonl ===")
-    result = await ws.execute(f"head -n 3 {card_path}/comments.jsonl")
+    result = await ws.shell(f"head -n 3 {card_path}/comments.jsonl")
     print(await result.stdout_str())
 
     print("=== tail -n 1 comments.jsonl ===")
-    result = await ws.execute(f"tail -n 1 {card_path}/comments.jsonl")
+    result = await ws.shell(f"tail -n 1 {card_path}/comments.jsonl")
     print(await result.stdout_str())
 
     print("=== wc -l comments.jsonl ===")
-    result = await ws.execute(f"wc -l {card_path}/comments.jsonl")
+    result = await ws.shell(f"wc -l {card_path}/comments.jsonl")
     print(await result.stdout_str())
 
     print("=== stat card.json ===")
-    result = await ws.execute(f"stat {card_path}/card.json")
+    result = await ws.shell(f"stat {card_path}/card.json")
     print(await result.stdout_str())
 
     print("=== jq .card_id card.json ===")
-    result = await ws.execute(f'jq ".card_id" {card_path}/card.json')
+    result = await ws.shell(f'jq ".card_id" {card_path}/card.json')
     print(await result.stdout_str())
 
     print("=== jq .list_id card.json ===")
-    result = await ws.execute(f'jq ".list_id" {card_path}/card.json')
+    result = await ws.shell(f'jq ".list_id" {card_path}/card.json')
     print(await result.stdout_str())
 
     print("=== tree -L 1 /trello/ ===")
-    result = await ws.execute("tree -L 1 /trello/")
+    result = await ws.shell("tree -L 1 /trello/")
     print(await result.stdout_str())
 
     print(f"=== tree -L 1 {board_path}/ ===")
-    result = await ws.execute(f"tree -L 1 {board_path}/")
+    result = await ws.shell(f"tree -L 1 {board_path}/")
     print(await result.stdout_str())
 
     print("=== find cards -name '*.json' ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f'find {list_path}/cards/ -name "*.json" | head -n 5')
     print(await result.stdout_str())
 
     # -path matches the display path; -size counts dirs and sizeless
     # rendered files as 0 (so +0c drops them, -1k keeps them).
     print("=== find board -path '*cards*' ===")
-    result = await ws.execute(f'find {board_path}/ -path "*cards*" | head -n 5'
-                              )
+    result = await ws.shell(f'find {board_path}/ -path "*cards*" | head -n 5')
     print(await result.stdout_str())
 
     print("=== find board -maxdepth 1 -size +0c (dirs drop out) ===")
-    result = await ws.execute(f"find {board_path}/ -maxdepth 1 -size +0c")
+    result = await ws.shell(f"find {board_path}/ -maxdepth 1 -size +0c")
     print(f"  exit={result.exit_code}")
     print(await result.stdout_str())
 
     print("=== find board -type d (directory filter) ===")
-    result = await ws.execute(f"find {board_path}/ -type d | head -n 5")
+    result = await ws.shell(f"find {board_path}/ -type d | head -n 5")
     print(await result.stdout_str())
 
     print("=== du -s board (walk fallback) ===")
-    result = await ws.execute(f"du -s {board_path}/")
+    result = await ws.shell(f"du -s {board_path}/")
     print(await result.stdout_str())
 
     ws_path = f"/trello/workspaces/{first_ws}"
     print("=== grep -r wawa across workspace ===")
-    result = await ws.execute(f"grep -r wawa {ws_path}/")
+    result = await ws.shell(f"grep -r wawa {ws_path}/")
     print(await result.stdout_str())
 
     print("=== grep on card.json ===")
-    result = await ws.execute(f"grep card_id {card_path}/card.json")
+    result = await ws.shell(f"grep card_id {card_path}/card.json")
     print(await result.stdout_str())
 
     print("=== rg on board.json ===")
-    result = await ws.execute(f"rg board_id {board_path}/board.json")
+    result = await ws.shell(f"rg board_id {board_path}/board.json")
     print(await result.stdout_str())
 
     print("=== basename ===")
-    result = await ws.execute(f"basename {card_path}/card.json")
+    result = await ws.shell(f"basename {card_path}/card.json")
     print(await result.stdout_str())
 
     print("=== dirname ===")
-    result = await ws.execute(f"dirname {card_path}/card.json")
+    result = await ws.shell(f"dirname {card_path}/card.json")
     print(await result.stdout_str())
 
     print("=== realpath ===")
-    result = await ws.execute(f"realpath {card_path}/card.json")
+    result = await ws.shell(f"realpath {card_path}/card.json")
     print(await result.stdout_str())
 
     print("=== trello card create ===")
-    result = await ws.execute(f'trello card create --list_id {list_id}'
-                              ' --name "Test card from MIRAGE"'
-                              ' --desc "Created by example script"')
+    result = await ws.shell(f'trello card create --list_id {list_id}'
+                            ' --name "Test card from MIRAGE"'
+                            ' --desc "Created by example script"')
     print(await result.stdout_str())
 
     new_card = json.loads(await result.stdout_str())
     new_card_id = new_card.get("card_id", "")
 
     print("=== trello card update ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f'trello card update --card_id {new_card_id}'
         ' --name "Updated test card" --desc "Updated description"')
     print(await result.stdout_str())
 
     print("=== trello card move ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f"trello card move --card_id {new_card_id} --list_id {list_id}")
     print(await result.stdout_str())
 
@@ -282,20 +279,20 @@ async def main() -> None:
         first_member_name = members[0]
         member_id = first_member_name.rsplit("__", 1)[-1].replace(".json", "")
         print("=== trello card assign ===")
-        result = await ws.execute(f"trello card assign --card_id {new_card_id}"
-                                  f" --member_id {member_id}")
+        result = await ws.shell(f"trello card assign --card_id {new_card_id}"
+                                f" --member_id {member_id}")
         print(await result.stdout_str())
 
     print("=== trello card comment ===")
-    result = await ws.execute(f'trello card comment --card_id {new_card_id}'
-                              ' --text "Test comment from MIRAGE"')
+    result = await ws.shell(f'trello card comment --card_id {new_card_id}'
+                            ' --text "Test comment from MIRAGE"')
     print(await result.stdout_str())
 
     comment_payload = json.loads(await result.stdout_str())
     comment_id = comment_payload.get("comment_id", "")
 
     print("=== trello card comment-update ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f"trello card comment-update --comment_id {comment_id}"
         f' --card_id {new_card_id} --text "Updated comment"')
     print(await result.stdout_str())
@@ -305,18 +302,17 @@ async def main() -> None:
         first_label_name = labels[0]
         label_id = first_label_name.rsplit("__", 1)[-1].replace(".json", "")
         print("=== trello card label ===")
-        result = await ws.execute(f"trello card label --card_id {new_card_id}"
-                                  f" --label_id {label_id}")
+        result = await ws.shell(f"trello card label --card_id {new_card_id}"
+                                f" --label_id {label_id}")
         print(await result.stdout_str())
 
         print("=== trello card unlabel ===")
-        result = await ws.execute(
-            f"trello card unlabel --card_id {new_card_id}"
-            f" --label_id {label_id}")
+        result = await ws.shell(f"trello card unlabel --card_id {new_card_id}"
+                                f" --label_id {label_id}")
         print(await result.stdout_str())
 
     print("=== trello card update (archive) ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f"trello card update --card_id {new_card_id} --closed true")
     print(await result.stdout_str())
 

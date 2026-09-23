@@ -21,8 +21,8 @@ from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.postgres import COMMANDS
 from mirage.commands.config import CommandOpts
-from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
+from mirage.vfs.postgres.config import PostgresConfig
 
 MOUNT = "/pg"
 
@@ -51,7 +51,7 @@ def _find_command():
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual[len(MOUNT):].strip("/"))
+                    vfs_path=virtual[len(MOUNT):].strip("/"))
 
 
 def _fake_client(mc) -> None:

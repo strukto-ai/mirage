@@ -48,23 +48,23 @@ async def assert_listed(readdir: ReaddirFn[A], accessor: A, path: PathSpec,
     Args:
         readdir (ReaddirFn): the backend's readdir.
         accessor (Accessor): backend accessor.
-        path (PathSpec): resource-relative path being stat'd.
+        path (PathSpec): VFS-relative path being stat'd.
         index (IndexCacheStore): index cache.
 
     Raises:
         FileNotFoundError: the entry is absent from its parent listing.
     """
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     parent_virtual = path.virtual.rstrip("/").rsplit("/", 1)[0] or "/"
     entries = await readdir(
         accessor,
         PathSpec(virtual=parent_virtual,
                  directory=parent_virtual,
-                 resource_path=mount_key(parent_virtual, prefix)),
+                 vfs_path=mount_key(parent_virtual, prefix)),
         index=index,
     )
     names = {entry.rstrip("/").rsplit("/", 1)[-1] for entry in entries}
-    if path.resource_path.rstrip("/").rsplit("/", 1)[-1] not in names:
+    if path.vfs_path.rstrip("/").rsplit("/", 1)[-1] not in names:
         raise enoent(path.virtual)
 
 
@@ -73,12 +73,12 @@ async def listed_size(index: IndexCacheStore, path: PathSpec) -> int | None:
 
     Args:
         index (IndexCacheStore): index cache.
-        path (PathSpec): resource-relative path being stat'd.
+        path (PathSpec): VFS-relative path being stat'd.
     """
     # assert_listed has just populated the parent directory, so any size
     # the listing computed is already in the index.
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    lookup = await index.get(prefix + "/" + path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    lookup = await index.get(prefix + "/" + path.vfs_path)
     return lookup.entry.size if lookup.entry is not None else None
 
 
@@ -94,11 +94,11 @@ async def resolve_entry(readdir: ReaddirFn[A], accessor: A, path: PathSpec,
     Args:
         readdir (ReaddirFn): the backend's readdir.
         accessor (Accessor): backend accessor.
-        path (PathSpec): resource-relative path being resolved.
+        path (PathSpec): VFS-relative path being resolved.
         index (IndexCacheStore): index cache.
     """
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    key = path.resource_path.strip("/")
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    key = path.vfs_path.strip("/")
     virtual_key = prefix + "/" + key if key else prefix or "/"
     parent_virtual = virtual_key.rsplit("/", 1)[0] or "/"
     warm = None
@@ -108,7 +108,7 @@ async def resolve_entry(readdir: ReaddirFn[A], accessor: A, path: PathSpec,
             accessor,
             PathSpec(virtual=parent_virtual,
                      directory=parent_virtual,
-                     resource_path=mount_key(parent_virtual, prefix)),
+                     vfs_path=mount_key(parent_virtual, prefix)),
             index=index,
         )
     return await entry_or_warm(index, virtual_key, warm)

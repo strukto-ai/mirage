@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-"""Mount one RAM resource over macFUSE's FSKit backend and read it back.
+"""Mount one RAM VFS over macFUSE's FSKit backend and read it back.
 
 Separate from integ/fuse/fuse.py because neither scenario there can run here:
 the sizeless probe is refused by the fskit size guard by design, and the
@@ -28,20 +28,20 @@ import time
 from typing import Callable
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 CONTENT = b'{"messages": 2}\n'
 EXISTING = b"old\n"
 
 
-def wait_store(resource: RAMResource, path: str, want: bytes) -> bool:
+def wait_store(vfs: RAMVFS, path: str, want: bytes) -> bool:
     """Poll the backing store until it holds the expected bytes.
 
     The FSKit shim flushes kernel writes lazily (WRITE arrives after close,
     with no FLUSH), so the store lags the kernel view briefly.
 
     Args:
-        resource (RAMResource): the mounted resource.
+        vfs (RAMVFS): the mounted VFS.
         path (str): store path to watch.
         want (bytes): expected content.
 
@@ -49,7 +49,7 @@ def wait_store(resource: RAMResource, path: str, want: bytes) -> bool:
         bool: True when the store matched within the window.
     """
     for _ in range(50):
-        if resource._store.files.get(path) == want:
+        if vfs._store.files.get(path) == want:
             return True
         time.sleep(0.2)
     return False
@@ -142,7 +142,7 @@ def sh(script: str) -> str:
 
 
 def main() -> None:
-    data = RAMResource()
+    data = RAMVFS()
     data._store.dirs.add("/")
     data._store.files["/api.json"] = CONTENT
     data._store.files["/existing.txt"] = EXISTING

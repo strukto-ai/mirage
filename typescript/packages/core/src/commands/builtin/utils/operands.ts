@@ -177,7 +177,7 @@ export function resolveScript(name: string, cwd: string): PathSpec {
   const path = resolvePath(name, cwd)
   const lastSlash = path.lastIndexOf('/')
   const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
+  return new PathSpec({ vfsPath: stripSlash(path), virtual: path, directory, resolved: true })
 }
 
 // Partition operands into readable paths and GNU stderr lines. Read-family

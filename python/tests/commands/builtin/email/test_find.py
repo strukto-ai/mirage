@@ -27,7 +27,7 @@ from mirage.types import PathSpec
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.strip("/"))
+                    vfs_path=virtual.strip("/"))
 
 
 def _accessor() -> EmailAccessor:

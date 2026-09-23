@@ -57,7 +57,7 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             ),
     ):
         path = PathSpec(
-            resource_path=mount_key(
+            vfs_path=mount_key(
                 "/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json",
                 "/gsheets"),
             virtual="/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json",
@@ -82,8 +82,8 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
             ),
     ):
         path = PathSpec(
-            resource_path=mount_key("/gsheets/owned/Missing__xyz.gsheet.json",
-                                    "/gsheets"),
+            vfs_path=mount_key("/gsheets/owned/Missing__xyz.gsheet.json",
+                               "/gsheets"),
             virtual="/gsheets/owned/Missing__xyz.gsheet.json",
             directory="/gsheets/owned/Missing__xyz.gsheet.json",
         )

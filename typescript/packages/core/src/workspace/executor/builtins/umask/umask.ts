@@ -14,7 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import { parseChmod } from '../../../../utils/mode.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { scanOptions } from '../getopt.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { fail } from '../shared.ts'
@@ -79,7 +79,7 @@ export function parseUmask(text: string, current: number): number | string {
  * operands are ignored, an unknown option is exit 2, a bad mode exit 1
  * with the mask unchanged.
  */
-export function handleUmask(args: string[], session: Session): Result {
+export function handleUmask(args: string[], session: SessionState): Result {
   const scan = scanOptions(args, 'Sp')
   if (scan.bad !== null)
     return fail('umask', `bash: umask: ${scan.bad}: invalid option\n${USAGE}\n`, 2)

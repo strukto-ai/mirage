@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeSlackTransport, makeFakeResource, seedChannel } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs, seedChannel } from './_test_util.ts'
 import { SLACK_RG } from './rg.ts'
 
 const DEC = new TextDecoder()
@@ -31,8 +31,8 @@ async function runRg(
   const cmd = SLACK_RG[0]
   if (cmd === undefined) throw new Error('rg not registered')
   const transport = options.transport ?? new FakeSlackTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, texts, {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -78,7 +78,7 @@ describe('slack rg', () => {
           virtual: '/mnt/slack/channels/general__C1',
           directory: '/mnt/slack/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
         }),
       ],
       ['hello'],
@@ -101,7 +101,7 @@ describe('slack rg', () => {
           virtual: '/mnt/slack/channels/general__C1',
           directory: '/mnt/slack/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
         }),
       ],
       ['hello'],

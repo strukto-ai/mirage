@@ -37,7 +37,7 @@ async def search_provision(accessor: LanceDBAccessor, paths: list[PathSpec],
 
 
 @command("search",
-         resource="lancedb",
+         vfs="lancedb",
          spec=SPECS["search"],
          provision=search_provision)
 async def search(
@@ -55,7 +55,7 @@ async def search(
     target_paths = default_paths(paths, opts.cwd)
     mount_prefix = mount_prefix_of(
         target_paths[0].virtual,
-        target_paths[0].resource_path) if target_paths else ""
+        target_paths[0].vfs_path) if target_paths else ""
     top_k = fl.as_int("top_k")
     limit = top_k if top_k is not None else accessor.config.search_limit
     output = await search_rows_output(accessor,

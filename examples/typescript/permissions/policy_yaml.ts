@@ -16,7 +16,6 @@ import {
   Workspace,
   configToWorkspaceArgs,
   loadWorkspaceConfigFile,
-  type MountSpec,
 } from '@struktoai/mirage-node'
 
 // The reviewer's policy as a document. workspace.yaml names the program
@@ -62,17 +61,15 @@ function pad(text: string, width: number): string {
 
 async function main(): Promise<void> {
   const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(CONFIG))
-  const resources: Record<string, MountSpec> = {}
-  for (const [prefix, [resource, mode]] of Object.entries(args.resources)) {
-    resources[prefix] = [resource, mode]
-  }
-  const ws = new Workspace(resources, args.options)
+  // The config door hands back `Mount` objects, which `new Workspace`
+  // takes as-is; this used to rebuild them from [vfs, mode] tuples.
+  const ws = new Workspace(args.mounts, args.options)
   try {
-    for (const line of SEED) await ws.execute(line)
+    for (const line of SEED) await ws.shell(line)
     ws.createSession('reviewer', { profile: 'reviewer' })
 
     for (const [who, line, note] of LINES) {
-      const res = await (who === 'host' ? ws.execute(line) : ws.execute(line, { sessionId: who }))
+      const res = await (who === 'host' ? ws.shell(line) : ws.shell(line, { sessionId: who }))
       const out = res.stdout === null ? '' : dec.decode(res.stdout)
       const err = res.stderr === null ? '' : dec.decode(res.stderr)
       console.log(`${pad(who, 9)} ${pad(line, 30)} ${answer(out, err, res.exitCode)}`)

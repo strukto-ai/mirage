@@ -14,33 +14,35 @@
 
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
-import { Session } from './session.ts'
+import { SessionState } from './session.ts'
 import { changeDir, homeDir, logicalCwd, setCwd } from './shell_dirs.ts'
 
 describe('shell_dirs', () => {
   it('homeDir is null when $HOME unset', () => {
-    expect(homeDir(new Session({ sessionId: 's' }))).toBeNull()
+    expect(homeDir(new SessionState({ sessionId: 's' }))).toBeNull()
   })
 
   it('homeDir reads $HOME', () => {
-    expect(homeDir(new Session({ sessionId: 's', vars: varsFromEnv({ HOME: '/data' }) }))).toBe(
-      '/data',
-    )
+    expect(
+      homeDir(new SessionState({ sessionId: 's', vars: varsFromEnv({ HOME: '/data' }) })),
+    ).toBe('/data')
   })
 
   it('homeDir is null for empty $HOME', () => {
-    expect(homeDir(new Session({ sessionId: 's', vars: varsFromEnv({ HOME: '' }) }))).toBeNull()
+    expect(
+      homeDir(new SessionState({ sessionId: 's', vars: varsFromEnv({ HOME: '' }) })),
+    ).toBeNull()
   })
 
   it('changeDir sets cwd and $OLDPWD', () => {
-    const s = new Session({ sessionId: 's', cwd: '/data' })
+    const s = new SessionState({ sessionId: 's', cwd: '/data' })
     changeDir(s, '/data/sub')
     expect(s.cwd).toBe('/data/sub')
     expect(s.env.OLDPWD).toBe('/data')
   })
 
   it('changeDir overwrites $OLDPWD', () => {
-    const s = new Session({ sessionId: 's', cwd: '/a' })
+    const s = new SessionState({ sessionId: 's', cwd: '/a' })
     changeDir(s, '/b')
     changeDir(s, '/c')
     expect(s.cwd).toBe('/c')
@@ -48,11 +50,11 @@ describe('shell_dirs', () => {
   })
 
   it('logicalCwd falls back to the physical cwd', () => {
-    expect(logicalCwd(new Session({ sessionId: 's', cwd: '/data' }))).toBe('/data')
+    expect(logicalCwd(new SessionState({ sessionId: 's', cwd: '/data' }))).toBe('/data')
   })
 
   it('changeDir records a logical name that differs', () => {
-    const s = new Session({ sessionId: 's', cwd: '/data' })
+    const s = new SessionState({ sessionId: 's', cwd: '/data' })
     changeDir(s, '/data/deep/real', '/data/lk')
     expect(s.cwd).toBe('/data/deep/real')
     expect(logicalCwd(s)).toBe('/data/lk')
@@ -61,7 +63,7 @@ describe('shell_dirs', () => {
   // Storing the two names as one collapsed field keeps `logicalCwd` from
   // reporting a stale spelling after a `-P` move.
   it('changeDir collapses the pair when the names agree', () => {
-    const s = new Session({ sessionId: 's', cwd: '/data' })
+    const s = new SessionState({ sessionId: 's', cwd: '/data' })
     changeDir(s, '/data/deep/real', '/data/lk')
     changeDir(s, '/data/deep/real', '/data/deep/real')
     expect(s.logicalCwd).toBeUndefined()
@@ -69,7 +71,7 @@ describe('shell_dirs', () => {
   })
 
   it('$OLDPWD records the logical name, which is what `cd -` returns to', () => {
-    const s = new Session({ sessionId: 's', cwd: '/data' })
+    const s = new SessionState({ sessionId: 's', cwd: '/data' })
     changeDir(s, '/data/deep/real', '/data/lk')
     changeDir(s, '/tmp')
     expect(s.env.OLDPWD).toBe('/data/lk')
@@ -79,7 +81,7 @@ describe('shell_dirs', () => {
   // typed spelling behind it. Leaving the old logical name would make
   // `pwd` describe a directory the session is no longer in.
   it('setCwd drops a stale logical name', () => {
-    const s = new Session({ sessionId: 's', cwd: '/data' })
+    const s = new SessionState({ sessionId: 's', cwd: '/data' })
     changeDir(s, '/data/deep/real', '/data/lk')
     setCwd(s, '/elsewhere')
     expect(s.logicalCwd).toBeUndefined()
@@ -87,7 +89,7 @@ describe('shell_dirs', () => {
   })
 
   it('setCwd leaves $OLDPWD alone', () => {
-    const s = new Session({ sessionId: 's', cwd: '/data' })
+    const s = new SessionState({ sessionId: 's', cwd: '/data' })
     setCwd(s, '/elsewhere')
     expect(s.env.OLDPWD).toBeUndefined()
   })

@@ -1,7 +1,7 @@
 ---
 title: Supabase Storage
 icon: /images/supabase-logo.svg
-description: Set up Supabase Storage as a MIRAGE resource from Node or the browser.
+description: Set up Supabase Storage as a MIRAGE VFS from Node or the browser.
 ---
 
 Supabase Storage exposes an S3-compatible API at `https://<project-ref>.storage.supabase.co/storage/v1/s3`, signed with AWS Signature V4 using Supabase **S3 Access Keys** (not your project anon / service-role JWT). MIRAGE derives the endpoint from your `project_ref` automatically and forces path-style URLs.
@@ -36,9 +36,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { MountMode, SupabaseResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, SupabaseVFS, Workspace } from '@struktoai/mirage-node'
 
-const sb = new SupabaseResource({
+const sb = new SupabaseVFS({
   bucket: process.env.SUPABASE_BUCKET!,
   region: process.env.SUPABASE_REGION!,
   projectRef: process.env.SUPABASE_PROJECT_REF!,
@@ -47,7 +47,7 @@ const sb = new SupabaseResource({
 })
 
 const ws = new Workspace({ '/bucket/': sb }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -120,9 +120,9 @@ Supabase requires **path-style** URLs (`forcePathStyle: true`). Virtual-hosted s
 ### 2. Browser: wire it up
 
 ```ts
-import { MountMode, SupabaseResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, SupabaseVFS, Workspace } from '@struktoai/mirage-browser'
 
-const sb = new SupabaseResource({
+const sb = new SupabaseVFS({
   bucket: 'my-bucket',
   projectRef: 'abcdefghijklmnop',
   presignedUrlProvider: async (path, op, opts) => {
@@ -149,4 +149,4 @@ Supabase Storage's S3 API respects the bucket's CORS configuration, which is set
 4. Headers: `*`
 5. Exposed headers: `ETag, Content-Length, Content-Type, Last-Modified`
 
-See the [Supabase resource](/python/resource/supabase) docs for the equivalent Python wiring.
+See the [Supabase VFS](/python/vfs/supabase) docs for the equivalent Python wiring.

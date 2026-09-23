@@ -15,7 +15,7 @@
 import type { ChromaClient, Collection } from 'chromadb'
 import { Accessor } from './base.ts'
 import { loadOptionalPeer } from '../utils/optional_peer.ts'
-import type { ChromaConfigResolved } from '../resource/chroma/config.ts'
+import type { ChromaConfigResolved } from '../vfs/chroma/config.ts'
 
 export class ChromaAccessor extends Accessor {
   readonly config: ChromaConfigResolved
@@ -31,7 +31,7 @@ export class ChromaAccessor extends Accessor {
     if (this.client === null) {
       const spec = 'chromadb'
       const mod = (await loadOptionalPeer(() => import(/* @vite-ignore */ spec), {
-        feature: 'ChromaResource',
+        feature: 'ChromaVFS',
         packageName: 'chromadb',
       })) as { ChromaClient: new (o: { host: string; port: number; ssl: boolean }) => ChromaClient }
       this.client = new mod.ChromaClient({

@@ -84,8 +84,7 @@ async def test_readdir_root(accessor, index):
          )),
     ])
     result = await readdir(
-        accessor,
-        PathSpec(resource_path="", virtual="/gmail", directory="/gmail"),
+        accessor, PathSpec(vfs_path="", virtual="/gmail", directory="/gmail"),
         index)
     assert "/gmail/INBOX" in result
     assert "/gmail/SENT" in result
@@ -113,7 +112,7 @@ async def test_readdir_label(accessor, index):
     ])
     result = await readdir(
         accessor,
-        PathSpec(resource_path=mount_key("/gmail/INBOX", "/gmail"),
+        PathSpec(vfs_path=mount_key("/gmail/INBOX", "/gmail"),
                  virtual="/gmail/INBOX",
                  directory="/gmail/INBOX"), index)
     assert "/gmail/INBOX/2026-04-12" in result
@@ -132,8 +131,7 @@ async def test_readdir_not_found(accessor, index):
         with pytest.raises(FileNotFoundError):
             await readdir(
                 accessor,
-                PathSpec(resource_path=mount_key("/gmail/NONEXISTENT",
-                                                 "/gmail"),
+                PathSpec(vfs_path=mount_key("/gmail/NONEXISTENT", "/gmail"),
                          virtual="/gmail/NONEXISTENT",
                          directory="/gmail/NONEXISTENT"), index)
 
@@ -148,7 +146,7 @@ async def test_readdir_date_dir_uses_after_before_query(accessor, index):
                }]):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail", "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail", "/gmail"),
                      virtual="/gmail",
                      directory="/gmail"), index)
 
@@ -169,8 +167,7 @@ async def test_readdir_date_dir_uses_after_before_query(accessor, index):
                new=fake_list_messages):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-05-03",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-05-03", "/gmail"),
                      virtual="/gmail/INBOX/2026-05-03",
                      directory="/gmail/INBOX/2026-05-03"), index)
 
@@ -229,8 +226,7 @@ async def test_readdir_date_dir_returns_msg_files_not_date_strings(
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-04-27", "/gmail"),
                      virtual="/gmail/INBOX/2026-04-27",
                      directory="/gmail/INBOX/2026-04-27"), index)
 
@@ -278,14 +274,12 @@ async def test_readdir_date_dir_warm_cache_matches_cold(accessor, index):
     ):
         cold = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-04-27", "/gmail"),
                      virtual="/gmail/INBOX/2026-04-27",
                      directory="/gmail/INBOX/2026-04-27"), index)
         warm = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-04-27", "/gmail"),
                      virtual="/gmail/INBOX/2026-04-27",
                      directory="/gmail/INBOX/2026-04-27"), index)
 
@@ -343,15 +337,14 @@ async def test_readdir_date_dir_lists_msg_file_and_attachment_dir(
     ):
         date_listing = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-04-27", "/gmail"),
                      virtual="/gmail/INBOX/2026-04-27",
                      directory="/gmail/INBOX/2026-04-27"), index)
         att_listing = await readdir(
             accessor,
             PathSpec(
-                resource_path=mount_key("/gmail/INBOX/2026-04-27/Quote__m1",
-                                        "/gmail"),
+                vfs_path=mount_key("/gmail/INBOX/2026-04-27/Quote__m1",
+                                   "/gmail"),
                 virtual="/gmail/INBOX/2026-04-27/Quote__m1",
                 directory="/gmail/INBOX/2026-04-27/Quote__m1",
             ),
@@ -403,8 +396,7 @@ async def test_readdir_date_dir_without_attachments_omits_dir(accessor, index):
     ):
         date_listing = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-04-27", "/gmail"),
                      virtual="/gmail/INBOX/2026-04-27",
                      directory="/gmail/INBOX/2026-04-27"), index)
 
@@ -442,8 +434,7 @@ async def test_readdir_message_entry_rendered_size_estimate_in_extra(
     ):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-27",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-04-27", "/gmail"),
                      virtual="/gmail/INBOX/2026-04-27",
                      directory="/gmail/INBOX/2026-04-27"), index)
 
@@ -481,8 +472,7 @@ async def test_label_glob_pushes_its_span_into_the_query(accessor, index):
                new=fake_list_messages):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-01-*",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-01-*", "/gmail"),
                      virtual="/gmail/INBOX/2026-01-*",
                      directory="/gmail/INBOX/",
                      pattern="2026-01-*"), index)
@@ -526,8 +516,7 @@ async def test_a_globbed_label_listing_is_not_cached_as_the_label(
                 new=AsyncMock(return_value=raw))):
         globbed = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX/2026-01-*",
-                                             "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-01-*", "/gmail"),
                      virtual="/gmail/INBOX/2026-01-*",
                      directory="/gmail/INBOX/",
                      pattern="2026-01-*"), index)
@@ -537,7 +526,7 @@ async def test_a_globbed_label_listing_is_not_cached_as_the_label(
         assert (await index.list_dir("/gmail/INBOX")).entries is None
         plain = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/INBOX", "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/INBOX", "/gmail"),
                      virtual="/gmail/INBOX",
                      directory="/gmail/INBOX"), index)
     assert plain == []

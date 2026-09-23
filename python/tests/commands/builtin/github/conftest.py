@@ -14,7 +14,7 @@
 
 import pytest_asyncio
 
-from mirage.resource.github.github import GitHubResource
+from mirage.vfs.github.github import GitHubVFS
 from tests.fixtures.github_mock import github_config, mock_github_api
 
 __all__ = ["github_config", "mock_github_api"]
@@ -26,10 +26,10 @@ REF = "main"
 
 @pytest_asyncio.fixture()
 async def github_env(mock_github_api, github_config):
-    resource = GitHubResource(
+    vfs = GitHubVFS(
         config=github_config,
         owner=OWNER,
         repo=REPO,
         ref=REF,
     )
-    return resource.accessor, resource._index
+    return vfs.accessor, vfs._index

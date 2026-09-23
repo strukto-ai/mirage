@@ -12,36 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.EXEC })
+  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC })
 
   console.log('python3 + session env (os.environ passthrough)\n')
 
   console.log('=== export FOO=bar; python3 reads os.environ ===')
-  await ws.execute('export FOO=bar')
-  const r1 = await ws.execute("python3 -c \"import os; print(os.environ.get('FOO', 'missing'))\"")
+  await ws.shell('export FOO=bar')
+  const r1 = await ws.shell("python3 -c \"import os; print(os.environ.get('FOO', 'missing'))\"")
   console.log(`stdout: ${r1.stdoutText.trim()}  (expected: bar)\n`)
 
   console.log('=== mutations inside python3 do NOT flow back to session.env ===')
-  await ws.execute("python3 -c \"import os; os.environ['FOO'] = 'mutated_inside_python'\"")
-  const r2 = await ws.execute('python3 -c "import os; print(os.environ[\'FOO\'])"')
+  await ws.shell("python3 -c \"import os; os.environ['FOO'] = 'mutated_inside_python'\"")
+  const r2 = await ws.shell('python3 -c "import os; print(os.environ[\'FOO\'])"')
   console.log(
     `stdout: ${r2.stdoutText.trim()}  (expected: bar — previous mutation died with the call)\n`,
   )
 
   console.log('=== isolation across workspaces — each has its own Pyodide ===')
-  const wsA = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.EXEC })
-  const wsB = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.EXEC })
-  await wsA.execute('export NAME=alice')
-  await wsB.execute('export NAME=bob')
+  const wsA = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC })
+  const wsB = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC })
+  await wsA.shell('export NAME=alice')
+  await wsB.shell('export NAME=bob')
 
   // Fire python3 in both workspaces concurrently — each has its own Pyodide,
   // so envs are strictly isolated even while they run in parallel.
   const [aliceOut, bobOut] = await Promise.all([
-    wsA.execute('python3 -c "import os; print(os.environ.get(\'NAME\'))"'),
-    wsB.execute('python3 -c "import os; print(os.environ.get(\'NAME\'))"'),
+    wsA.shell('python3 -c "import os; print(os.environ.get(\'NAME\'))"'),
+    wsB.shell('python3 -c "import os; print(os.environ.get(\'NAME\'))"'),
   ])
   console.log(`wsA:  ${aliceOut.stdoutText.trim()}  (expected: alice)`)
   console.log(`wsB:  ${bobOut.stdoutText.trim()}  (expected: bob)`)
@@ -55,9 +55,9 @@ async function main(): Promise<void> {
   process.env[key] = 'host-marker'
   try {
     const command = `python3 -c "import os; print(os.environ.get('${key}', 'missing'))"`
-    const isolated = await ws.execute(command)
+    const isolated = await ws.shell(command)
     console.log(`host-only value: ${isolated.stdoutText.trim()}  (expected: missing)`)
-    const explicit = await ws.execute(command, {
+    const explicit = await ws.shell(command, {
       env: { [key]: 'guest-marker' },
     })
     console.log(`explicit command value: ${explicit.stdoutText.trim()}  (expected: guest-marker)\n`)

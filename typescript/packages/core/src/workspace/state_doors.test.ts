@@ -29,11 +29,11 @@ import type {
   SessionContext,
 } from '../policy/index.ts'
 import { Outcome, Scope, type AskHandler } from '../policy/index.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Runtime } from '../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
 import type { RunResult } from '../runtime/types.ts'
-import { MountMode, ResourceName } from '../types.ts'
+import { MountMode, VFSName } from '../types.ts'
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
 import { getTestParser, stdoutStr, voicedStderr } from './fixtures/workspace_fixture.ts'
@@ -53,7 +53,7 @@ class DenyOp implements Policy {
   }
 }
 
-// Ops resolve by resource kind in the workspace registry, so an
+// Ops resolve by VFS kind in the workspace registry, so an
 // overlay-backend simulation blocks registration itself.
 class NoSetattrRegistry extends OpsRegistry {
   override register(ro: RegisteredOp): void {
@@ -66,9 +66,9 @@ const open: Workspace[] = []
 
 async function makeWs(policies?: Policy[]): Promise<Workspace> {
   const parser = await getTestParser()
-  const a = new RAMResource()
+  const a = new RAMVFS()
   a.store.files.set('/x.txt', ENC.encode('public\n'))
-  const b = new RAMResource()
+  const b = new RAMVFS()
   b.store.files.set('/y.txt', ENC.encode('other\n'))
   const ws = new Workspace(
     { '/a': a, '/b': b },
@@ -85,7 +85,7 @@ afterEach(async () => {
 describe('name-plane writes go through the door', () => {
   it('ln fires the op gates', async () => {
     const ws = await makeWs([new DenyOp('symlink')])
-    const io = await ws.execute('ln -s x.txt /a/lk')
+    const io = await ws.shell('ln -s x.txt /a/lk')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('Permission denied')
     expect(ws.namespace.isLink('/a/lk')).toBe(false)
@@ -95,7 +95,7 @@ describe('name-plane writes go through the door', () => {
     // The op ledger must not say a workspace with ln traffic did
     // nothing: the door records the namespace write like any other op.
     const ws = await makeWs()
-    const io = await ws.execute('ln -s x.txt /a/lk')
+    const io = await ws.shell('ln -s x.txt /a/lk')
     expect(io.exitCode).toBe(0)
     expect(ws.records.some((r) => r.op === 'symlink' && r.path === '/a/lk')).toBe(true)
   })
@@ -103,7 +103,7 @@ describe('name-plane writes go through the door', () => {
   it('scoped shell ln onto hidden turf is refused', async () => {
     const ws = await makeWs()
     ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
-    const io = await ws.execute('ln -s /a/x.txt /b/lk', { sessionId: 'agent' })
+    const io = await ws.shell('ln -s /a/x.txt /b/lk', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(ws.namespace.isLink('/b/lk')).toBe(false)
   })
@@ -115,10 +115,10 @@ describe('name-plane writes go through the door', () => {
     // the directory the hidden link points at.
     const ws = await makeWs()
     for (const line of ['mkdir -p /a/d', 'ln -s /a/d /a/hl']) {
-      expect((await ws.execute(line)).exitCode).toBe(0)
+      expect((await ws.shell(line)).exitCode).toBe(0)
     }
     ws.createSession('agent', { profile: { paths: { hide: ['/a/hl'] } } })
-    const io = await ws.execute('ln -s /a/x.txt /a/hl', { sessionId: 'agent' })
+    const io = await ws.shell('ln -s /a/x.txt /a/hl', { sessionId: 'agent' })
     expect(io.exitCode).toBe(1)
     expect(voicedStderr(io)).toBe("ln: failed to create symbolic link '/a/hl': Permission denied\n")
     expect(ws.namespace.isLink('/a/d/x.txt')).toBe(false)
@@ -128,10 +128,10 @@ describe('name-plane writes go through the door', () => {
     // A hard link of a link copies the link, and -L copies its target's
     // bytes; a hidden link has neither to give.
     const ws = await makeWs()
-    expect((await ws.execute('ln -s /a/x.txt /a/hl')).exitCode).toBe(0)
+    expect((await ws.shell('ln -s /a/x.txt /a/hl')).exitCode).toBe(0)
     ws.createSession('agent', { profile: { paths: { hide: ['/a/hl'] } } })
     for (const line of ['ln /a/hl /a/copy', 'ln -L /a/hl /a/copy2']) {
-      const io = await ws.execute(line, { sessionId: 'agent' })
+      const io = await ws.shell(line, { sessionId: 'agent' })
       expect(io.exitCode).toBe(1)
       expect(voicedStderr(io)).toBe("ln: failed to access '/a/hl': No such file or directory\n")
     }
@@ -141,23 +141,23 @@ describe('name-plane writes go through the door', () => {
   it('scoped shell ln onto a hidden mount root does not say it exists', async () => {
     const ws = await makeWs()
     ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
-    const io = await ws.execute('ln -sT /a/x.txt /b', { sessionId: 'agent' })
+    const io = await ws.shell('ln -sT /a/x.txt /b', { sessionId: 'agent' })
     expect(io.exitCode).toBe(1)
     expect(voicedStderr(io)).toBe("ln: failed to create symbolic link '/b': Permission denied\n")
   })
 
-  it('symlink and readlink answer on the fs facade', async () => {
+  it('symlink and readlink answer on the op facade', async () => {
     // readlink is the read twin: guests and CLIs ask through the same
     // door instead of a bespoke channel.
     const ws = await makeWs()
-    await ws.fs.symlink('/a/lk', 'x.txt')
-    expect(await ws.fs.readlink('/a/lk')).toBe('x.txt')
+    await ws.vfs.symlink('/a/lk', 'x.txt')
+    expect(await ws.vfs.readlink('/a/lk')).toBe('x.txt')
     expect(ws.namespace.readlink('/a/lk')).toBe('x.txt')
   })
 
   it('readlink on a non-link reports EINVAL', async () => {
     const ws = await makeWs()
-    await expect(ws.fs.readlink('/a/x.txt')).rejects.toMatchObject({ code: 'EINVAL' })
+    await expect(ws.vfs.readlink('/a/x.txt')).rejects.toMatchObject({ code: 'EINVAL' })
   })
 
   it('scoped shell readlink on hidden turf is refused', async () => {
@@ -166,9 +166,9 @@ describe('name-plane writes go through the door', () => {
     // used to read the node table directly instead of dispatching.
     const ws = await makeWs()
     ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
-    const made = await ws.execute('ln -s /b/y.txt /b/lk')
+    const made = await ws.shell('ln -s /b/y.txt /b/lk')
     expect(made.exitCode).toBe(0)
-    const io = await ws.execute('readlink /b/lk', { sessionId: 'agent' })
+    const io = await ws.shell('readlink /b/lk', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(stdoutStr(io)).not.toContain('y.txt')
   })
@@ -178,18 +178,18 @@ describe('name-plane writes go through the door', () => {
     // gate they printed the resolved target of a hidden link.
     const ws = await makeWs()
     ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
-    const made = await ws.execute('ln -s /b/y.txt /b/lk')
+    const made = await ws.shell('ln -s /b/y.txt /b/lk')
     expect(made.exitCode).toBe(0)
-    const io = await ws.execute('readlink -m /b/lk', { sessionId: 'agent' })
+    const io = await ws.shell('readlink -m /b/lk', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(stdoutStr(io)).not.toContain('y.txt')
   })
 
   it('shell readlink fires the op gates', async () => {
     const ws = await makeWs([new DenyOp('readlink')])
-    const made = await ws.execute('ln -s x.txt /a/lk')
+    const made = await ws.shell('ln -s x.txt /a/lk')
     expect(made.exitCode).toBe(0)
-    const io = await ws.execute('readlink /a/lk')
+    const io = await ws.shell('readlink /a/lk')
     expect(io.exitCode).not.toBe(0)
     expect(stdoutStr(io)).not.toContain('x.txt')
   })
@@ -198,11 +198,11 @@ describe('name-plane writes go through the door', () => {
     const ws = await makeWs()
     const sess = ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
     await runWithSession(sess, async () => {
-      await ws.fs.symlink('/a/lk', 'x.txt')
+      await ws.vfs.symlink('/a/lk', 'x.txt')
       // The hidden mount does not exist for the session, so a create
       // under it answers ENOENT as every read does; only a create at a
       // hidden name inside a visible directory is EACCES.
-      await expect(ws.fs.symlink('/b/lk', 'y.txt')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(ws.vfs.symlink('/b/lk', 'y.txt')).rejects.toMatchObject({ code: 'ENOENT' })
     })
     expect(ws.namespace.isLink('/a/lk')).toBe(true)
     expect(ws.namespace.isLink('/b/lk')).toBe(false)
@@ -212,9 +212,9 @@ describe('name-plane writes go through the door', () => {
     // chown -h writes the link's own attrs; that overlay write used to
     // bypass the door entirely, so no policy could bound it.
     const ws = await makeWs([new DenyOp('setattr')])
-    const made = await ws.execute('ln -s x.txt /a/lk')
+    const made = await ws.shell('ln -s x.txt /a/lk')
     expect(made.exitCode).toBe(0)
-    const io = await ws.execute('chown -h alice /a/lk')
+    const io = await ws.shell('chown -h alice /a/lk')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('refused by policy')
     expect(ws.namespace.metaFor('/a/lk')?.uid).toBeUndefined()
@@ -224,10 +224,10 @@ describe('name-plane writes go through the door', () => {
     // A backend with no native setattr op stores attrs in the namespace
     // overlay; that write must clear the same gates as a native one.
     const parser = await getTestParser()
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', ENC.encode('body\n'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', ENC.encode('body\n'))
     const ws = new Workspace(
-      { '/o': resource },
+      { '/o': vfs },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -236,7 +236,7 @@ describe('name-plane writes go through the door', () => {
       },
     )
     open.push(ws)
-    const io = await ws.execute('chmod 600 /o/f.txt')
+    const io = await ws.shell('chmod 600 /o/f.txt')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('refused by policy')
     expect(ws.namespace.metaFor('/o/f.txt')?.mode).toBeUndefined()
@@ -244,14 +244,14 @@ describe('name-plane writes go through the door', () => {
 
   it('overlay setattr still lands without policies', async () => {
     const parser = await getTestParser()
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', ENC.encode('body\n'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', ENC.encode('body\n'))
     const ws = new Workspace(
-      { '/o': resource },
+      { '/o': vfs },
       { mode: MountMode.WRITE, shellParser: parser, ops: new NoSetattrRegistry() },
     )
     open.push(ws)
-    const io = await ws.execute('chmod 600 /o/f.txt')
+    const io = await ws.shell('chmod 600 /o/f.txt')
     expect(io.exitCode).toBe(0)
     expect(ws.namespace.metaFor('/o/f.txt')?.mode).toBe(0o600)
   })
@@ -274,11 +274,11 @@ describe('session-state writes go through the view', () => {
     // The session plane's gate: an env write clears preSession exactly
     // as a VFS write clears preOps, whichever tier asked.
     const ws = await makeWs([new DenySecretEnv()])
-    const denied = await ws.execute('export SECRET_X=1')
+    const denied = await ws.shell('export SECRET_X=1')
     expect(denied.exitCode).not.toBe(0)
     expect(voicedStderr(denied)).toContain('refused by policy')
     expect('SECRET_X' in ws.env).toBe(false)
-    const allowed = await ws.execute('export PUBLIC_X=1')
+    const allowed = await ws.shell('export PUBLIC_X=1')
     expect(allowed.exitCode).toBe(0)
     expect(ws.env.PUBLIC_X).toBe('1')
   })
@@ -290,12 +290,12 @@ describe('session-state writes go through the view', () => {
     // and the seeding goes through the ungated door, so the secret
     // reached the command and printed.
     const ws = await makeWs([new DenySecretEnv()])
-    const denied = await ws.execute('SECRET_K=leak printenv SECRET_K')
+    const denied = await ws.shell('SECRET_K=leak printenv SECRET_K')
     expect(denied.exitCode).not.toBe(0)
     expect(voicedStderr(denied)).toContain('refused by policy')
     expect(stdoutStr(denied)).toBe('')
     // A name no rule covers still reaches the command.
-    const allowed = await ws.execute('OPEN_K=fine printenv OPEN_K')
+    const allowed = await ws.shell('OPEN_K=fine printenv OPEN_K')
     expect(stdoutStr(allowed)).toBe('fine\n')
   })
 
@@ -307,7 +307,7 @@ describe('session-state writes go through the view', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const sess = ws.getSession(ws.defaultSessionId)
     seedVar(sess, 'SECRET_TOKEN', 'hunter2')
-    const io = await ws.execute('declare -x SECRET_TOKEN')
+    const io = await ws.shell('declare -x SECRET_TOKEN')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('refused by policy')
     expect(sess.vars.SECRET_TOKEN?.attrs.has(VarAttr.Export)).toBe(false)
@@ -320,10 +320,10 @@ describe('session-state writes go through the view', () => {
     // `declare -x GOOD="1"`. Gating the stamp on the aggregate status
     // left GOOD unexported. Pinned on bash 5.2.37.
     const ws = await makeWs([])
-    const bad = await ws.execute('declare -x QGOOD=1 1BAD=x')
+    const bad = await ws.shell('declare -x QGOOD=1 1BAD=x')
     expect(bad.exitCode).toBe(1)
     expect(voicedStderr(bad)).toContain('not a valid identifier')
-    const shown = await ws.execute('declare -p QGOOD')
+    const shown = await ws.shell('declare -p QGOOD')
     expect(stdoutStr(shown)).toBe('declare -x QGOOD="1"\n')
   })
 
@@ -334,7 +334,7 @@ describe('session-state writes go through the view', () => {
     const rc = new RegisteredCommand({
       name: 'envpoke',
       spec: CMD_SPEC,
-      resource: ResourceName.RAM,
+      vfs: VFSName.RAM,
       fn: (_accessor, _paths, _texts, opts) => {
         expect(opts.env).toBeDefined()
         if (opts.env !== undefined) opts.env.INJECTED = '1'
@@ -342,7 +342,7 @@ describe('session-state writes go through the view', () => {
       },
     })
     ws.registry.mountForPrefix('/a').register(rc)
-    const io = await ws.execute('envpoke /a/x.txt')
+    const io = await ws.shell('envpoke /a/x.txt')
     expect(io.exitCode).toBe(0)
     expect('INJECTED' in ws.env).toBe(false)
   })
@@ -354,15 +354,15 @@ describe('session-state writes go through the view', () => {
     const rc = new RegisteredCommand({
       name: 'envread',
       spec: CMD_SPEC,
-      resource: ResourceName.RAM,
+      vfs: VFSName.RAM,
       fn: (_accessor, _paths, _texts, opts) => {
         const value = opts.sessionView?.get('MARKER') ?? 'none'
         return [ENC.encode(value), new IOResult()]
       },
     })
     ws.registry.mountForPrefix('/a').register(rc)
-    await ws.execute('export MARKER=yes')
-    const io = await ws.execute('envread /a/x.txt')
+    await ws.shell('export MARKER=yes')
+    const io = await ws.shell('envread /a/x.txt')
     expect(stdoutStr(io).trim()).toBe('yes')
   })
 })
@@ -372,23 +372,23 @@ describe('the remaining session writers clear the same gate', () => {
     // `export NAME` writes no value, but marking a name is still a
     // session write, so it clears the same gate an assignment does.
     const ws = await makeWs([new DenySecretEnv()])
-    const denied = await ws.execute('export SECRET_BARE')
+    const denied = await ws.shell('export SECRET_BARE')
     expect(denied.exitCode).not.toBe(0)
     expect(voicedStderr(denied)).toContain('refused by policy')
     expect('SECRET_BARE' in ws.env).toBe(false)
-    const allowed = await ws.execute('export PUBLIC_BARE')
+    const allowed = await ws.shell('export PUBLIC_BARE')
     expect(allowed.exitCode).toBe(0)
     // Marked but unset, which is bash's third state: `export -p` lists
     // it bare while the environment does not carry it at all.
     expect(ws.env.PUBLIC_BARE).toBeUndefined()
-    const listed = stdoutStr(await ws.execute('export -p'))
+    const listed = stdoutStr(await ws.shell('export -p'))
     expect(listed).toContain('declare -x PUBLIC_BARE\n')
     expect(listed).not.toContain('SECRET_BARE')
   })
 
   it('local fires the gate', async () => {
     const ws = await makeWs([new DenySecretEnv()])
-    const io = await ws.execute('f() { local SECRET_L=1; }; f')
+    const io = await ws.shell('f() { local SECRET_L=1; }; f')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('refused by policy')
     expect('SECRET_L' in ws.env).toBe(false)
@@ -408,7 +408,7 @@ describe('the remaining session writers clear the same gate', () => {
       'readonly SECRET_D=1',
       'declare SECRET_E',
     ]) {
-      const io = await ws.execute(line)
+      const io = await ws.shell(line)
       expect(io.exitCode, line).not.toBe(0)
       expect(voicedStderr(io), line).toContain('refused by policy')
     }
@@ -423,18 +423,18 @@ describe('the remaining session writers clear the same gate', () => {
     // `SECRET_X=1`. Denial mirrors the readonly case: a fatal
     // variable-assignment error that abandons the rest of the line.
     const ws = await makeWs([new DenySecretEnv()])
-    const denied = await ws.execute('SECRET_P=1; echo after')
+    const denied = await ws.shell('SECRET_P=1; echo after')
     expect(denied.exitCode).not.toBe(0)
     expect(voicedStderr(denied)).toContain('refused by policy')
     expect('SECRET_P' in ws.env).toBe(false)
-    const allowed = await ws.execute('PUBLIC_P=1')
+    const allowed = await ws.shell('PUBLIC_P=1')
     expect(allowed.exitCode).toBe(0)
     expect(ws.env.PUBLIC_P).toBe('1')
   })
 
   it('an append assignment fires the gate', async () => {
     const ws = await makeWs([new DenySecretEnv()])
-    const io = await ws.execute('SECRET_A+=x')
+    const io = await ws.shell('SECRET_A+=x')
     expect(io.exitCode).not.toBe(0)
     expect('SECRET_A' in ws.env).toBe(false)
   })
@@ -443,7 +443,7 @@ describe('the remaining session writers clear the same gate', () => {
     // A denied name must not be writable by switching to array syntax:
     // SECRET=(a b) lands on the same session plane as SECRET=x.
     const ws = await makeWs([new DenySecretEnv()])
-    const io = await ws.execute('SECRET_V=(a b); echo after')
+    const io = await ws.shell('SECRET_V=(a b); echo after')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('refused by policy')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
@@ -452,7 +452,7 @@ describe('the remaining session writers clear the same gate', () => {
 
   it('an array append assignment fires the gate', async () => {
     const ws = await makeWs([new DenySecretEnv()])
-    const io = await ws.execute('SECRET_VA+=(a)')
+    const io = await ws.shell('SECRET_VA+=(a)')
     expect(io.exitCode).not.toBe(0)
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('SECRET_VA' in sess.arrays).toBe(false)
@@ -460,7 +460,7 @@ describe('the remaining session writers clear the same gate', () => {
 
   it('a subscript assignment fires the gate', async () => {
     const ws = await makeWs([new DenySecretEnv()])
-    const io = await ws.execute('SECRET_S[0]=x')
+    const io = await ws.shell('SECRET_S[0]=x')
     expect(io.exitCode).not.toBe(0)
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     expect('SECRET_S' in sess.arrays).toBe(false)
@@ -474,7 +474,7 @@ describe('the remaining session writers clear the same gate', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     seedVar(sess, 'SECRET_E', ['a'])
-    const io = await ws.execute('SECRET_E+=x')
+    const io = await ws.shell('SECRET_E+=x')
     expect(io.exitCode).not.toBe(0)
     expect(sess.arrays.SECRET_E).toEqual(['a'])
   })
@@ -483,7 +483,7 @@ describe('the remaining session writers clear the same gate', () => {
     // export/declare with an array literal store through the staged
     // path, not handleExport, so the gate has to fire there too.
     const ws = await makeWs([new DenySecretEnv()])
-    const io = await ws.execute('export SECRET_D=(a)')
+    const io = await ws.shell('export SECRET_D=(a)')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('refused by policy')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
@@ -494,8 +494,8 @@ describe('the remaining session writers clear the same gate', () => {
     // The staged-array store is the builtin's own; the shell's readonly
     // rule is pre-checked there, before the door is asked.
     const ws = await makeWs()
-    await ws.execute('readonly LOCKED')
-    const io = await ws.execute('export LOCKED=(a)')
+    await ws.shell('readonly LOCKED')
+    const io = await ws.shell('export LOCKED=(a)')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('readonly variable')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
@@ -508,19 +508,19 @@ describe('the remaining session writers clear the same gate', () => {
     // dead (status 1) and the next line runs. Pinned on bash 5.2
     // (debian:stable-slim); the scalar spelling below continues.
     const ws = await makeWs()
-    await ws.execute('readonly LOCKED')
-    const denied = await ws.execute('export LOCKED=(a); echo unreached')
+    await ws.shell('readonly LOCKED')
+    const denied = await ws.shell('export LOCKED=(a); echo unreached')
     expect(denied.exitCode).toBe(1)
     expect(stdoutStr(denied)).toBe('')
     expect(voicedStderr(denied)).toBe('bash: LOCKED: readonly variable\n')
-    const after = await ws.execute('echo after')
+    const after = await ws.shell('echo after')
     expect(after.exitCode).toBe(0)
   })
 
   it('a readonly declare array is fatal at top level', async () => {
     const ws = await makeWs()
-    await ws.execute('readonly LOCKED')
-    const denied = await ws.execute('declare LOCKED=(a); echo unreached')
+    await ws.shell('readonly LOCKED')
+    const denied = await ws.shell('declare LOCKED=(a); echo unreached')
     expect(denied.exitCode).toBe(1)
     expect(stdoutStr(denied)).toBe('')
   })
@@ -529,8 +529,8 @@ describe('the remaining session writers clear the same gate', () => {
     // The asymmetry is GNU's: `export LOCKED=v` fails with 1 in the
     // builtin's voice and the same line keeps going.
     const ws = await makeWs()
-    await ws.execute('readonly LOCKED')
-    const io = await ws.execute('export LOCKED=v; echo rc=$?')
+    await ws.shell('readonly LOCKED')
+    const io = await ws.shell('export LOCKED=v; echo rc=$?')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('rc=1\n')
   })
@@ -539,8 +539,8 @@ describe('the remaining session writers clear the same gate', () => {
     // `local LOCKED=(a)` on a readonly global refuses without killing
     // the function body (GNU prints the refusal and runs `echo in-f`).
     const ws = await makeWs()
-    await ws.execute('readonly LOCKED')
-    const io = await ws.execute('f() { local LOCKED=(a); echo in-f; }; f')
+    await ws.shell('readonly LOCKED')
+    const io = await ws.shell('f() { local LOCKED=(a); echo in-f; }; f')
     expect(stdoutStr(io)).toContain('in-f')
     expect(voicedStderr(io)).toContain('readonly variable')
   })
@@ -549,7 +549,7 @@ describe('the remaining session writers clear the same gate', () => {
     // `export ARR=(x y)` used to fall through to the bare-export print
     // branch because the handler never learned arrays were on the line.
     const ws = await makeWs()
-    const io = await ws.execute('export ARR=(x y)')
+    const io = await ws.shell('export ARR=(x y)')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
@@ -560,8 +560,8 @@ describe('the remaining session writers clear the same gate', () => {
     // bash refuses a readonly loop variable and never runs the body;
     // the loop writes go through the view now, same as any assignment.
     const ws = await makeWs()
-    await ws.execute('readonly LV')
-    const denied = await ws.execute('for LV in a b; do echo ran; done')
+    await ws.shell('readonly LV')
+    const denied = await ws.shell('for LV in a b; do echo ran; done')
     expect(denied.exitCode).not.toBe(0)
     expect(stdoutStr(denied)).not.toContain('ran')
   })
@@ -571,7 +571,7 @@ describe('the remaining session writers clear the same gate', () => {
     // clothing; the element branch used to skip the view entirely.
     const ws = await makeWs([new DenySecretEnv()])
     seedVar(ws.getSession(ws.defaultSessionId), 'SECRET_U', 'v')
-    const io = await ws.execute("unset 'SECRET_U[0]'")
+    const io = await ws.shell("unset 'SECRET_U[0]'")
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('refused by policy')
     expect(ws.env.SECRET_U).toBe('v')
@@ -581,7 +581,7 @@ describe('the remaining session writers clear the same gate', () => {
     const ws = await makeWs([new DenySecretEnv()])
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
     seedVar(sess, 'SECRET_W', ['a', 'b'])
-    const io = await ws.execute("unset 'SECRET_W[1]'")
+    const io = await ws.shell("unset 'SECRET_W[1]'")
     expect(io.exitCode).not.toBe(0)
     expect(sess.arrays.SECRET_W).toEqual(['a', 'b'])
   })
@@ -590,11 +590,11 @@ describe('the remaining session writers clear the same gate', () => {
     // The loop variable is a session write per iteration; a denied
     // write aborts the loop before its body runs.
     const ws = await makeWs([new DenySecretEnv()])
-    const denied = await ws.execute('for SECRET_I in a b; do echo ran; done')
+    const denied = await ws.shell('for SECRET_I in a b; do echo ran; done')
     expect(denied.exitCode).not.toBe(0)
     expect(stdoutStr(denied)).not.toContain('ran')
     expect('SECRET_I' in ws.env).toBe(false)
-    const allowed = await ws.execute('for PUB_I in a b; do echo ok; done')
+    const allowed = await ws.shell('for PUB_I in a b; do echo ok; done')
     expect(allowed.exitCode).toBe(0)
     expect(stdoutStr(allowed).match(/ok/g)?.length).toBe(2)
   })
@@ -638,13 +638,13 @@ async function makeSealedWs(policies: Policy[]): Promise<Workspace> {
   // implicit /a/prod directory, then the policies join, mirroring the
   // python twin's setup order.
   const parser = await getTestParser()
-  const resource = new RAMResource()
-  resource.store.files.set('/secret.txt', ENC.encode('sealed\n'))
-  resource.store.files.set('/ok.txt', ENC.encode('has sealed word\n'))
-  const ws = new Workspace({ '/a': resource }, { mode: MountMode.WRITE, shellParser: parser })
+  const vfs = new RAMVFS()
+  vfs.store.files.set('/secret.txt', ENC.encode('sealed\n'))
+  vfs.store.files.set('/ok.txt', ENC.encode('has sealed word\n'))
+  const ws = new Workspace({ '/a': vfs }, { mode: MountMode.WRITE, shellParser: parser })
   open.push(ws)
-  await ws.execute('mkdir -p /a/prod')
-  await ws.fs.writeFile('/a/prod/keep.txt', ENC.encode('keep\n'))
+  await ws.shell('mkdir -p /a/prod')
+  await ws.vfs.writeFile('/a/prod/keep.txt', ENC.encode('keep\n'))
   for (const p of policies) ws.policies.add(p)
   return ws
 }
@@ -657,21 +657,21 @@ describe('op hooks bind at the op doors and the command tier', () => {
     // the boundary is loud.
     const ws = await makeSealedWs([new SealedPaths()])
 
-    // The doors hold: the fs facade, and a dispatcher-routed redirect
+    // The doors hold: the op facade, and a dispatcher-routed redirect
     // write.
-    await expect(ws.fs.readFile('/a/secret.txt')).rejects.toThrow('secret is sealed')
-    const redirect = await ws.execute('echo hi > /a/prod/new.txt')
+    await expect(ws.vfs.readFile('/a/secret.txt')).rejects.toThrow('secret is sealed')
+    const redirect = await ws.shell('echo hi > /a/prod/new.txt')
     expect(redirect.exitCode).not.toBe(0)
 
     // The command tier consults the same hooks: the read refuses in
     // the command's own voice and the deletion never lands.
-    const leak = await ws.execute('cat /a/secret.txt')
+    const leak = await ws.shell('cat /a/secret.txt')
     expect(leak.exitCode).not.toBe(0)
     expect(stdoutStr(leak)).toBe('')
     expect(voicedStderr(leak)).toContain('cat: /a/secret.txt: Permission denied')
-    const removed = await ws.execute('rm /a/prod/keep.txt')
+    const removed = await ws.shell('rm /a/prod/keep.txt')
     expect(removed.exitCode).not.toBe(0)
-    const kept = await ws.execute('cat /a/prod/keep.txt')
+    const kept = await ws.shell('cat /a/prod/keep.txt')
     expect(kept.exitCode).toBe(0)
     expect(stdoutStr(kept)).toBe('keep\n')
   })
@@ -682,16 +682,16 @@ describe('op hooks bind at the op doors and the command tier', () => {
     // the output pipeline drains after dispatch (head binds a lazy
     // stream) still answers through the wrap-time capture.
     const ws = await makeSealedWs([new SealedPaths()])
-    const walked = await ws.execute('grep -r sealed /a')
+    const walked = await ws.shell('grep -r sealed /a')
     expect(walked.exitCode).toBe(2)
     expect(stdoutStr(walked)).toContain('/a/ok.txt:has sealed word')
     expect(stdoutStr(walked)).not.toContain('sealed\n')
     expect(voicedStderr(walked)).toContain('grep: /a/secret.txt: Permission denied')
 
-    const lazy = await ws.execute('head -c 3 /a/secret.txt')
+    const lazy = await ws.shell('head -c 3 /a/secret.txt')
     expect(lazy.exitCode).not.toBe(0)
     expect(voicedStderr(lazy)).toContain('head: /a/secret.txt: Permission denied')
-    const fine = await ws.execute('head -c 3 /a/ok.txt')
+    const fine = await ws.shell('head -c 3 /a/ok.txt')
     expect(fine.exitCode).toBe(0)
     expect(stdoutStr(fine)).toBe('has')
   })
@@ -701,10 +701,10 @@ describe('op hooks bind at the op doors and the command tier', () => {
     // shape): a read-denied entry lists and stats, the read of it is
     // what fails.
     const ws = await makeSealedWs([new SealedPaths()])
-    const listing = await ws.execute('ls -l /a')
+    const listing = await ws.shell('ls -l /a')
     expect(listing.exitCode).toBe(0)
     expect(stdoutStr(listing)).toContain('secret.txt')
-    const found = await ws.execute('find /a -type f')
+    const found = await ws.shell('find /a -type f')
     expect(found.exitCode).toBe(0)
     expect(stdoutStr(found)).toContain('/a/secret.txt')
   })
@@ -716,16 +716,16 @@ describe('op hooks bind at the op doors and the command tier', () => {
     // the subtree write-deny refuses it outright.
     const recorder = new OpRecorder()
     const ws = await makeSealedWs([recorder])
-    const removed = await ws.execute('rm -r /a/prod')
+    const removed = await ws.shell('rm -r /a/prod')
     expect(removed.exitCode).toBe(0)
     expect(
       recorder.asked.some(([op, path, write]) => write && path === '/a/prod' && op === 'rm_r'),
     ).toBe(true)
 
     const sealed = await makeSealedWs([new SealedPaths()])
-    const refused = await sealed.execute('rm -r /a/prod')
+    const refused = await sealed.shell('rm -r /a/prod')
     expect(refused.exitCode).not.toBe(0)
-    const survives = await sealed.execute('cat /a/prod/keep.txt')
+    const survives = await sealed.shell('cat /a/prod/keep.txt')
     expect(survives.exitCode).toBe(0)
   })
 
@@ -735,9 +735,9 @@ describe('op hooks bind at the op doors and the command tier', () => {
     // budget policy sees one deletion once, not twice.
     const recorder = new OpRecorder()
     const ws = await makeSealedWs([recorder])
-    const removed = await ws.execute('find /a/prod -name keep.txt -delete')
+    const removed = await ws.shell('find /a/prod -name keep.txt -delete')
     expect(removed.exitCode).toBe(0)
-    const gone = await ws.execute('cat /a/prod/keep.txt')
+    const gone = await ws.shell('cat /a/prod/keep.txt')
     expect(gone.exitCode).not.toBe(0)
     const writes = recorder.asked.filter(([, path, write]) => path === '/a/prod/keep.txt' && write)
     expect(writes).toEqual([['unlink', '/a/prod/keep.txt', true]])
@@ -750,8 +750,8 @@ describe('op hooks bind at the op doors and the command tier', () => {
     // binds a lazy stream); both ride the wrap-time capture.
     const recorder = new IdentityRecorder()
     const ws = await makeSealedWs([recorder])
-    expect((await ws.execute('cat /a/ok.txt')).exitCode).toBe(0)
-    expect((await ws.execute('head -c 3 /a/ok.txt')).exitCode).toBe(0)
+    expect((await ws.shell('cat /a/ok.txt')).exitCode).toBe(0)
+    expect((await ws.shell('head -c 3 /a/ok.txt')).exitCode).toBe(0)
     const reads = recorder.asked.filter(([, path]) => path === '/a/ok.txt')
     expect(reads.length).toBeGreaterThan(0)
     for (const [, , prefix, sessionId] of reads) {
@@ -773,7 +773,7 @@ async function makeHiddenVarsWs(): Promise<Workspace> {
 describe('hidden vars across the shell tier', () => {
   it('assign-default writes the raw env under hidden vars', async () => {
     const ws = await makeHiddenVarsWs()
-    const io = await ws.execute('echo "${NEWVAR:=seeded}" && echo "$NEWVAR"', {
+    const io = await ws.shell('echo "${NEWVAR:=seeded}" && echo "$NEWVAR"', {
       sessionId: 'agent',
     })
     expect(io.exitCode).toBe(0)
@@ -787,7 +787,7 @@ describe('hidden vars across the shell tier', () => {
     // the host's wiring still reads; the door refuses like any denied
     // assignment.
     const ws = await makeHiddenVarsWs()
-    const io = await ws.execute('echo "${SLACK_TOKEN:=fake}"', { sessionId: 'agent' })
+    const io = await ws.shell('echo "${SLACK_TOKEN:=fake}"', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
   })
@@ -796,23 +796,23 @@ describe('hidden vars across the shell tier', () => {
     // $((X=5)) and ((X=5)) write the raw env on purpose, but a hidden
     // name is not theirs to clobber; both spellings refuse.
     const ws = await makeHiddenVarsWs()
-    const expansion = await ws.execute('echo "$((SLACK_TOKEN=5))"', { sessionId: 'agent' })
+    const expansion = await ws.shell('echo "$((SLACK_TOKEN=5))"', { sessionId: 'agent' })
     expect(expansion.exitCode).not.toBe(0)
-    const command = await ws.execute('((SLACK_TOKEN=7))', { sessionId: 'agent' })
+    const command = await ws.shell('((SLACK_TOKEN=7))', { sessionId: 'agent' })
     expect(command.exitCode).not.toBe(0)
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
   })
 
   it('printf -v of a hidden var is refused', async () => {
     const ws = await makeHiddenVarsWs()
-    const io = await ws.execute('printf -v SLACK_TOKEN fake', { sessionId: 'agent' })
+    const io = await ws.shell('printf -v SLACK_TOKEN fake', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
   })
 
   it('expansion reads a hidden var as unset', async () => {
     const ws = await makeHiddenVarsWs()
-    const io = await ws.execute('echo "[$SLACK_TOKEN][$PUBLIC]"', { sessionId: 'agent' })
+    const io = await ws.shell('echo "[$SLACK_TOKEN][$PUBLIC]"', { sessionId: 'agent' })
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('[][ok]\n')
   })
@@ -820,7 +820,7 @@ describe('hidden vars across the shell tier', () => {
   it('env and set listings omit hidden vars', async () => {
     const ws = await makeHiddenVarsWs()
     for (const line of ['env', 'set', 'export -p']) {
-      const io = await ws.execute(line, { sessionId: 'agent' })
+      const io = await ws.shell(line, { sessionId: 'agent' })
       expect(stdoutStr(io)).not.toContain('SLACK_TOKEN')
     }
   })
@@ -829,14 +829,14 @@ describe('hidden vars across the shell tier', () => {
     // A landed write would clobber the real value the host's wiring
     // still reads; a swallowed one would gaslight the agent.
     const ws = await makeHiddenVarsWs()
-    const io = await ws.execute('export SLACK_TOKEN=fake', { sessionId: 'agent' })
+    const io = await ws.shell('export SLACK_TOKEN=fake', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
   })
 
   it('unset of a hidden var is quiet and preserves it', async () => {
     const ws = await makeHiddenVarsWs()
-    const io = await ws.execute('unset SLACK_TOKEN', { sessionId: 'agent' })
+    const io = await ws.shell('unset SLACK_TOKEN', { sessionId: 'agent' })
     expect(io.exitCode).toBe(0)
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
   })
@@ -849,11 +849,11 @@ describe('hidden vars across the shell tier', () => {
     const sess = ws.getSession('agent')
     seedVar(sess, 'HOME', '/a/homedir')
     sess.hiddenVars = { names: ['SLACK_TOKEN', 'HOME'] }
-    const home = await ws.execute('echo "[$HOME]"', { sessionId: 'agent' })
+    const home = await ws.shell('echo "[$HOME]"', { sessionId: 'agent' })
     expect(stdoutStr(home)).toBe('[]\n')
-    const tilde = await ws.execute('echo ~', { sessionId: 'agent' })
+    const tilde = await ws.shell('echo ~', { sessionId: 'agent' })
     expect(stdoutStr(tilde)).toBe('~\n')
-    const cd = await ws.execute('cd', { sessionId: 'agent' })
+    const cd = await ws.shell('cd', { sessionId: 'agent' })
     expect(cd.exitCode).toBe(1)
   })
 
@@ -862,13 +862,13 @@ describe('hidden vars across the shell tier', () => {
     // hidden name can hold an array; every expansion spelling must
     // read it the way the scalar case does: as unset.
     const ws = await makeHiddenArrayWs()
-    const io = await ws.execute(
+    const io = await ws.shell(
       'echo "[$SLACK_TOKEN][${SLACK_TOKEN[0]}][${SLACK_TOKEN[@]}][${#SLACK_TOKEN[@]}]"',
       { sessionId: 'agent' },
     )
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('[][][][0]\n')
-    const splat = await ws.execute(
+    const splat = await ws.shell(
       'for el in "${SLACK_TOKEN[@]}"; do echo "el=$el"; done; echo end',
       { sessionId: 'agent' },
     )
@@ -881,12 +881,12 @@ describe('hidden vars across the shell tier', () => {
     // function-call prefix deliberately never restores, so without a
     // gate a narrowed session permanently clobbers the host value.
     const ws = await makeHiddenVarsWs()
-    await ws.execute('f() { echo ran; }', { sessionId: 'agent' })
-    const fn = await ws.execute('SLACK_TOKEN=fake f', { sessionId: 'agent' })
+    await ws.shell('f() { echo ran; }', { sessionId: 'agent' })
+    const fn = await ws.shell('SLACK_TOKEN=fake f', { sessionId: 'agent' })
     expect(fn.exitCode).not.toBe(0)
-    const cmd = await ws.execute('SLACK_TOKEN=fake echo hi', { sessionId: 'agent' })
+    const cmd = await ws.shell('SLACK_TOKEN=fake echo hi', { sessionId: 'agent' })
     expect(cmd.exitCode).not.toBe(0)
-    const bare = await ws.execute('SLACK_TOKEN=fake OTHER=x', { sessionId: 'agent' })
+    const bare = await ws.shell('SLACK_TOKEN=fake OTHER=x', { sessionId: 'agent' })
     expect(bare.exitCode).not.toBe(0)
     const sess = ws.getSession('agent')
     expect(sess.env.SLACK_TOKEN).toBe('xoxb-real')
@@ -898,7 +898,7 @@ describe('hidden vars across the shell tier', () => {
     // element 0 with raw writes, which would move the hidden value
     // into array storage; the door refuses instead.
     const ws = await makeHiddenVarsWs()
-    const io = await ws.execute('declare -a SLACK_TOKEN', { sessionId: 'agent' })
+    const io = await ws.shell('declare -a SLACK_TOKEN', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     const sess = ws.getSession('agent')
     expect(sess.env.SLACK_TOKEN).toBe('xoxb-real')
@@ -910,9 +910,9 @@ describe('hidden vars across the shell tier', () => {
     // they would for an unset name: exit 0, nothing said, nothing
     // written, in either spelling.
     const ws = await makeHiddenArrayWs()
-    const element = await ws.execute('unset "SLACK_TOKEN[1]"', { sessionId: 'agent' })
+    const element = await ws.shell('unset "SLACK_TOKEN[1]"', { sessionId: 'agent' })
     expect(element.exitCode).toBe(0)
-    const whole = await ws.execute('unset SLACK_TOKEN', { sessionId: 'agent' })
+    const whole = await ws.shell('unset SLACK_TOKEN', { sessionId: 'agent' })
     expect(whole.exitCode).toBe(0)
     expect(ws.getSession('agent').arrays.SLACK_TOKEN).toEqual(['xoxb-real', 'xoxb-two'])
   })
@@ -923,7 +923,7 @@ describe('hidden vars across the shell tier', () => {
     // deciding from raw membership would quietly re-mark the hidden
     // name instead.
     const ws = await makeHiddenVarsWs()
-    const io = await ws.execute('export SLACK_TOKEN', { sessionId: 'agent' })
+    const io = await ws.shell('export SLACK_TOKEN', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(ws.getSession('agent').env.SLACK_TOKEN).toBe('xoxb-real')
   })
@@ -936,8 +936,8 @@ describe('hidden vars across the shell tier', () => {
     const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
     seedVar(sess, 'SECRET_IDX', '1')
     sess.hiddenVars = { names: ['SECRET_IDX'] }
-    await ws.execute('b=(x y)', { sessionId: 'agent' })
-    const io = await ws.execute('b[SECRET_IDX]=z', { sessionId: 'agent' })
+    await ws.shell('b=(x y)', { sessionId: 'agent' })
+    const io = await ws.shell('b[SECRET_IDX]=z', { sessionId: 'agent' })
     expect(io.exitCode).toBe(0)
     expect(ws.getSession('agent').arrays.b).toEqual(['z', 'y'])
   })
@@ -954,7 +954,7 @@ async function makeHiddenArrayWs(): Promise<Workspace> {
 
 async function makeHiddenPathsWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const a = new RAMResource()
+  const a = new RAMVFS()
   a.store.files.set('/x.txt', ENC.encode('public\n'))
   a.store.files.set('/secrets/token.txt', ENC.encode('s3cr3t\n'))
   a.store.files.set('/note.key', ENC.encode('kkk\n'))
@@ -969,7 +969,7 @@ async function makeHiddenPathsWs(): Promise<Workspace> {
 describe('hidden paths across the tiers', () => {
   it('the shell reads a hidden path as missing', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('cat /a/secrets/token.txt', { sessionId: 'agent' })
+    const io = await ws.shell('cat /a/secrets/token.txt', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(stdoutStr(io)).not.toContain('s3cr3t')
     expect(voicedStderr(io)).toContain('No such file')
@@ -977,14 +977,14 @@ describe('hidden paths across the tiers', () => {
 
   it('a pattern-hidden file reads as missing', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('cat /a/note.key', { sessionId: 'agent' })
+    const io = await ws.shell('cat /a/note.key', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(stdoutStr(io)).not.toContain('kkk')
   })
 
   it('ls drops hidden names', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('ls /a', { sessionId: 'agent' })
+    const io = await ws.shell('ls /a', { sessionId: 'agent' })
     const out = stdoutStr(io)
     expect(out).toContain('x.txt')
     expect(out).not.toContain('secrets')
@@ -998,7 +998,7 @@ describe('hidden paths across the tiers', () => {
     // unseen child exists. Under hidden paths the generic must walk
     // through the guarded readdir instead.
     const parser = await getTestParser()
-    const a = new RAMResource()
+    const a = new RAMVFS()
     a.store.files.set('/x.txt', ENC.encode('public\n'))
     a.store.files.set('/vault/only.key', ENC.encode('kkk\n'))
     a.store.dirs.add('/vault')
@@ -1006,7 +1006,7 @@ describe('hidden paths across the tiers', () => {
     open.push(ws)
     const sess = ws.createSession('agent')
     sess.hiddenPaths = { patterns: ['*.key'] }
-    const io = await ws.execute('find /a -empty', { sessionId: 'agent' })
+    const io = await ws.shell('find /a -empty', { sessionId: 'agent' })
     const out = stdoutStr(io)
     expect(out).toContain('/a/vault')
     expect(out).not.toContain('only.key')
@@ -1014,14 +1014,14 @@ describe('hidden paths across the tiers', () => {
 
   it('ls of a hidden dir is no such file', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('ls /a/secrets', { sessionId: 'agent' })
+    const io = await ws.shell('ls /a/secrets', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(stdoutStr(io)).not.toContain('token')
   })
 
   it('find never reports hidden rows', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('find /a', { sessionId: 'agent' })
+    const io = await ws.shell('find /a', { sessionId: 'agent' })
     const out = stdoutStr(io)
     expect(out).toContain('/a/x.txt')
     expect(out).not.toContain('secrets')
@@ -1030,7 +1030,7 @@ describe('hidden paths across the tiers', () => {
 
   it('du never counts hidden leaves', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('du -a /a', { sessionId: 'agent' })
+    const io = await ws.shell('du -a /a', { sessionId: 'agent' })
     const out = stdoutStr(io)
     expect(out).toContain('x.txt')
     expect(out).not.toContain('secrets')
@@ -1039,36 +1039,36 @@ describe('hidden paths across the tiers', () => {
 
   it('a glob never matches a hidden name', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('cat /a/*.key', { sessionId: 'agent' })
+    const io = await ws.shell('cat /a/*.key', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     expect(stdoutStr(io)).not.toContain('kkk')
   })
 
   it('a redirect into hidden space fails and writes nothing', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('echo hi > /a/secrets/new.txt', { sessionId: 'agent' })
+    const io = await ws.shell('echo hi > /a/secrets/new.txt', { sessionId: 'agent' })
     expect(io.exitCode).not.toBe(0)
     const a = ws.namespace.mountFor('/a/x.txt')
-    const resource = a.resource as RAMResource
-    expect(resource.store.files.has('/secrets/new.txt')).toBe(false)
+    const vfs = a.vfs as RAMVFS
+    expect(vfs.store.files.has('/secrets/new.txt')).toBe(false)
   })
 
   it('the unscoped session sees everything', async () => {
     const ws = await makeHiddenPathsWs()
-    const io = await ws.execute('ls /a')
+    const io = await ws.shell('ls /a')
     const out = stdoutStr(io)
     expect(out).toContain('secrets')
     expect(out).toContain('note.key')
   })
 
-  it('the fs facade agrees with the shell', async () => {
+  it('the op facade agrees with the shell', async () => {
     const ws = await makeHiddenPathsWs()
     const sess = ws.getSession('agent')
     await runWithSession(sess, async () => {
-      await expect(ws.fs.readFile('/a/secrets/token.txt')).rejects.toMatchObject({
+      await expect(ws.vfs.readFile('/a/secrets/token.txt')).rejects.toMatchObject({
         code: 'ENOENT',
       })
-      const names = await ws.fs.readdir('/a')
+      const names = await ws.vfs.readdir('/a')
       expect(names.some((n) => n.includes('secrets'))).toBe(false)
     })
   })
@@ -1077,7 +1077,7 @@ describe('hidden paths across the tiers', () => {
 describe('session profiles', () => {
   it('a profile applies every narrowing field end to end', async () => {
     const parser = await getTestParser()
-    const a = new RAMResource()
+    const a = new RAMVFS()
     a.store.files.set('/x.txt', ENC.encode('public\n'))
     a.store.files.set('/secrets/token.txt', ENC.encode('s3cr3t\n'))
     a.store.dirs.add('/secrets')
@@ -1096,9 +1096,9 @@ describe('session profiles', () => {
     expect(s2.hiddenPaths).toEqual(s1.hiddenPaths)
     expect(s1.hiddenVars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
     expect(s1.env.ROLE).toBe('analyst')
-    const listing = await ws.execute('ls /a', { sessionId: 'agent1' })
+    const listing = await ws.shell('ls /a', { sessionId: 'agent1' })
     expect(stdoutStr(listing)).not.toContain('secrets')
-    const profile = await ws.execute('echo "$ROLE"', { sessionId: 'agent1' })
+    const profile = await ws.shell('echo "$ROLE"', { sessionId: 'agent1' })
     expect(stdoutStr(profile)).toBe('analyst\n')
   })
 
@@ -1108,7 +1108,7 @@ describe('session profiles', () => {
     // narrowed from whatever the workspace gave it, never raised.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/a': new RAMResource(), '/b': new RAMResource() },
+      { '/a': new RAMVFS(), '/b': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: parser },
     )
     open.push(ws)
@@ -1132,7 +1132,7 @@ describe('session profiles', () => {
     // inheritance, so reading one is reading everything it may do.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/a': new RAMResource(), '/b': new RAMResource() },
+      { '/a': new RAMVFS(), '/b': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1184,7 +1184,7 @@ describe('session profiles', () => {
     ).toThrow('not an allow list')
     expect(inline.hiddenVars).toEqual({ names: [], patterns: ['AWS_*'] })
     expect(inline.cwd).toBe('/a')
-    const pwd = await ws.execute('pwd', { sessionId: 'r' })
+    const pwd = await ws.shell('pwd', { sessionId: 'r' })
     expect(stdoutStr(pwd)).toBe('/b\n')
   })
 
@@ -1198,7 +1198,7 @@ describe('session profiles', () => {
     // something the profile cannot see.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/a': new RAMResource(), '/b': new RAMResource() },
+      { '/a': new RAMVFS(), '/b': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1208,10 +1208,10 @@ describe('session profiles', () => {
       },
     )
     open.push(ws)
-    const listed = await ws.execute('ls /a')
+    const listed = await ws.shell('ls /a')
     expect(listed.exitCode).not.toBe(0)
     expect(voicedStderr(listed)).toContain('No such file or directory')
-    const root = stdoutStr(await ws.execute('ls /'))
+    const root = stdoutStr(await ws.shell('ls /'))
     expect(root).toContain('b')
     expect(root.split(/\s+/)).not.toContain('a')
   })
@@ -1225,13 +1225,13 @@ describe('session profiles', () => {
       reviewer: parseSessionProfile({ mounts: { '/a': 'r' } }),
     }
     const ws = new Workspace(
-      { '/a': new RAMResource() },
+      { '/a': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: parser, profiles, profile: 'reviewer' },
     )
     open.push(ws)
     expect(ws.getSession(ws.defaultSessionId).mountModes?.get('/a')).toBe(MountMode.READ)
     expect(ws.createSession('agent').mountModes?.get('/a')).toBe(MountMode.READ)
-    expect(() => new Workspace({ '/a': new RAMResource() }, { profiles, profile: 'gone' })).toThrow(
+    expect(() => new Workspace({ '/a': new RAMVFS() }, { profiles, profile: 'gone' })).toThrow(
       'unknown profile "gone"',
     )
   })
@@ -1243,7 +1243,7 @@ describe('session profiles', () => {
     // cannot see what it hides. No default profile leaves it as it was.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/a': new RAMResource(), '/b': new RAMResource() },
+      { '/a': new RAMVFS(), '/b': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1263,13 +1263,13 @@ describe('session profiles', () => {
     expect(dflt.mountModes?.has('/a')).toBe(false)
     expect(dflt.hiddenPaths).toEqual({ paths: ['/b/vault'], patterns: [] })
     expect(dflt.cwd).toBe('/b')
-    expect(stdoutStr(await ws.execute('pwd'))).toBe('/b\n')
-    expect(stdoutStr(await ws.execute('echo "$PAGER"'))).toBe('cat\n')
+    expect(stdoutStr(await ws.shell('pwd'))).toBe('/b\n')
+    expect(stdoutStr(await ws.shell('echo "$PAGER"'))).toBe('cat\n')
     // A mount the profile does not name is reachable at its own mode: the
     // `mounts` mapping narrows, it is not an allowlist.
-    expect((await ws.execute('ls /a')).exitCode).toBe(0)
-    expect((await ws.execute('mkdir /b/vault')).exitCode).not.toBe(0)
-    const plain = new Workspace({ '/a': new RAMResource() }, { shellParser: parser })
+    expect((await ws.shell('ls /a')).exitCode).toBe(0)
+    expect((await ws.shell('mkdir /b/vault')).exitCode).not.toBe(0)
+    const plain = new Workspace({ '/a': new RAMVFS() }, { shellParser: parser })
     open.push(plain)
     const own = plain.getSession(plain.defaultSessionId)
     expect(own.mountModes).toBeNull()
@@ -1280,9 +1280,9 @@ describe('session profiles', () => {
     // One document: `paths.hide` at the top and `mounts./repo`'s own,
     // compiled into the one hidden-paths spec every session carries.
     const parser = await getTestParser()
-    const repo = new RAMResource()
+    const repo = new RAMVFS()
     const ws = new Workspace(
-      { '/repo': repo, '/other': new RAMResource() },
+      { '/repo': repo, '/other': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1298,12 +1298,12 @@ describe('session profiles', () => {
       },
     )
     open.push(ws)
-    await ws.execute('mkdir -p /repo/certs /other/finance /other/pub')
-    await ws.execute(
+    await ws.shell('mkdir -p /repo/certs /other/finance /other/pub')
+    await ws.shell(
       "printf 'S=1\\n' > /repo/.env; printf p > /repo/certs/k.pem; printf r > /repo/README",
     )
-    await ws.execute('printf v > /other/.env; printf v > /other/x.pem; printf k > /other/pub/b.key')
-    const listing = stdoutStr(await ws.execute('ls -a /repo /repo/certs /other /other/pub'))
+    await ws.shell('printf v > /other/.env; printf v > /other/x.pem; printf k > /other/pub/b.key')
+    const listing = stdoutStr(await ws.shell('ls -a /repo /repo/certs /other /other/pub'))
     expect(listing).toContain('README')
     expect(listing).not.toContain('k.pem')
     expect(listing).not.toContain('finance')
@@ -1312,10 +1312,10 @@ describe('session profiles', () => {
     const repoPart = listing.split('/other:')[0]
     expect(repoPart).not.toContain('.env')
     expect(listing.split('/other:')[1]).toContain('.env')
-    expect((await ws.execute('cat /repo/.env')).exitCode).not.toBe(0)
-    expect(stdoutStr(await ws.execute('cat /other/.env'))).toBe('v')
+    expect((await ws.shell('cat /repo/.env')).exitCode).not.toBe(0)
+    expect(stdoutStr(await ws.shell('cat /other/.env'))).toBe('v')
     const late = ws.createSession('late')
-    expect((await ws.execute('cat /other/pub/b.key', { sessionId: 'late' })).exitCode).not.toBe(0)
+    expect((await ws.shell('cat /other/pub/b.key', { sessionId: 'late' })).exitCode).not.toBe(0)
     // The profile is the session's own document now, so its hides are on
     // the session rather than bound beside it.
     expect(late.hiddenPaths?.paths).toContain('/other/finance')
@@ -1370,13 +1370,13 @@ describe('command permissions end to end', () => {
 
   async function commandsWs(): Promise<Workspace> {
     const parser = await getTestParser()
-    // The frozen subtree is seeded on the resource: the pure path rule
-    // holds at every op door, the host's `ws.fs` included.
-    const repo = new RAMResource()
+    // The frozen subtree is seeded on the VFS: the pure path rule
+    // holds at every op door, the host's `ws.vfs` included.
+    const repo = new RAMVFS()
     repo.store.dirs.add('/locked')
     repo.store.files.set('/locked/y', ENC.encode('y\n'))
     const ws = new Workspace(
-      { '/repo': repo, '/scratch': new RAMResource() },
+      { '/repo': repo, '/scratch': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1393,13 +1393,13 @@ describe('command permissions end to end', () => {
     text: string,
     sessionId?: string,
   ): Promise<[number, string, string]> {
-    const r = await ws.execute(text, sessionId === undefined ? {} : { sessionId })
+    const r = await ws.shell(text, sessionId === undefined ? {} : { sessionId })
     return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 
   it('an allow list hides unlisted tools from dispatch and the enumerators', async () => {
     const ws = await commandsWs()
-    await ws.execute('mkdir -p /repo/d && touch /repo/d/x')
+    await ws.shell('mkdir -p /repo/d && touch /repo/d/x')
     // An unlisted tool is not a command for the session: 127 before any
     // admission hook, and every enumerator agrees.
     expect(await line(ws, 'sort /repo/d/x')).toEqual([127, '', 'sort: command not found\n'])
@@ -1427,7 +1427,7 @@ describe('command permissions end to end', () => {
   it("a profile's allow list is the only one a session reads", async () => {
     const ws = await commandsWs()
     ws.createSession('rev', { profile: 'reviewer' })
-    await ws.execute('mkdir -p /repo/d && touch /repo/d/x')
+    await ws.shell('mkdir -p /repo/d && touch /repo/d/x')
     // The reviewer profile lists `cat` and not python3, whatever the
     // default profile lists; it lists `git log`, so `git` is visible but a
     // `git commit` line is covered by nothing (a refusal that names the
@@ -1482,15 +1482,15 @@ describe('command permissions end to end', () => {
 
   it('deny rules by scope, voice and where they were written', async () => {
     const ws = await commandsWs()
-    await ws.execute('mkdir -p /repo/d && touch /repo/d/x /scratch/z')
+    await ws.shell('mkdir -p /repo/d && touch /repo/d/x /scratch/z')
     // Operand-scoped: the GNU voice at 1, the operand as typed.
     expect(await line(ws, 'cd /repo/d && rm x')).toEqual([1, '', 'rm: x: no deletes in the repo\n'])
     expect((await line(ws, 'rm /scratch/z'))[0]).toBe(0)
     // A pure path rule holds at the command plane for any command and
     // at the op door for every op, whatever door.
     expect(await line(ws, 'cat /repo/locked/y')).toEqual([1, '', 'cat: /repo/locked/y: frozen\n'])
-    await expect(ws.fs.writeFile('/repo/locked/y', 'changed')).rejects.toThrow()
-    await expect(ws.fs.readFile('/repo/locked/y')).rejects.toThrow()
+    await expect(ws.vfs.writeFile('/repo/locked/y', 'changed')).rejects.toThrow()
+    await expect(ws.vfs.readFile('/repo/locked/y')).rejects.toThrow()
     // A mount section's rule applies when the line works inside the
     // mount (cwd under it, or a path under it), whole command; the verb
     // walk reads `-C /repo reset --hard` as `git reset --hard`.
@@ -1514,8 +1514,8 @@ describe('command permissions end to end', () => {
     // honest limit as a guest's os.remove), while a pure path rule does,
     // at the op door the removal clears.
     const ws = await commandsWs()
-    await ws.execute('mkdir -p /repo/d && touch /repo/d/x')
-    await ws.execute('find /repo/d -name x -delete')
+    await ws.shell('mkdir -p /repo/d && touch /repo/d/x')
+    await ws.shell('find /repo/d -name x -delete')
     expect((await line(ws, 'cat /repo/d/x'))[0]).not.toBe(0)
     expect(await line(ws, 'find /repo/locked -name y -delete')).toEqual([
       1,
@@ -1532,7 +1532,7 @@ describe('command permissions end to end', () => {
     // that acts on the link itself (rm, lstat(2)) it is the link.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1549,7 +1549,7 @@ describe('command permissions end to end', () => {
       },
     )
     open.push(ws)
-    await ws.execute(
+    await ws.shell(
       'echo top > /data/secret && ln -s /data/secret /data/link && ln -s /data/secret /data/other',
     )
     expect(await line(ws, 'cat /data/secret')).toEqual([1, '', 'cat: /data/secret: sealed\n'])
@@ -1570,7 +1570,7 @@ describe('command permissions end to end', () => {
     // write never truncates.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1587,7 +1587,7 @@ describe('command permissions end to end', () => {
       },
     )
     open.push(ws)
-    await ws.execute("echo top > /data/secret && printf 'one\\n' > /data/audit.log")
+    await ws.shell("echo top > /data/secret && printf 'one\\n' > /data/audit.log")
     expect(await line(ws, 'cat < /data/secret')).toEqual([1, '', 'cat: /data/secret: sealed\n'])
     expect(await line(ws, 'echo two > /data/audit.log')).toEqual([
       1,
@@ -1609,9 +1609,9 @@ describe('command permissions end to end', () => {
     const parser = await getTestParser()
     const ws = new Workspace(
       {
-        '/scratch': new RAMResource(),
-        '/scratch/child': new RAMResource(),
-        '/elsewhere': new RAMResource(),
+        '/scratch': new RAMVFS(),
+        '/scratch/child': new RAMVFS(),
+        '/elsewhere': new RAMVFS(),
       },
       {
         mode: MountMode.WRITE,
@@ -1628,7 +1628,7 @@ describe('command permissions end to end', () => {
       },
     )
     open.push(ws)
-    await ws.execute('echo x > /scratch/a && echo x > /elsewhere/a && echo x > /scratch/child/c')
+    await ws.shell('echo x > /scratch/a && echo x > /elsewhere/a && echo x > /scratch/child/c')
     expect(await line(ws, 'grep -r x /scratch')).toEqual([
       126,
       '',
@@ -1655,12 +1655,12 @@ describe('command permissions end to end', () => {
     const parser = await getTestParser()
     const box = new Box()
     const ws = new Workspace(
-      { '/repo': new RAMResource() },
+      { '/repo': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
         profiles: { default: COMMANDS_DOC, reviewer: REVIEWER },
-        runtimes: [box, 'vfs'],
+        runtimes: [box, 'workspace'],
       },
     )
     open.push(ws)
@@ -1694,7 +1694,7 @@ describe('command permissions end to end', () => {
     const parser = await getTestParser()
     const box = new Box()
     const ws = new Workspace(
-      { '/repo': new RAMResource() },
+      { '/repo': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1709,7 +1709,7 @@ describe('command permissions end to end', () => {
             },
           }),
         },
-        runtimes: [box, 'vfs'],
+        runtimes: [box, 'workspace'],
       },
     )
     open.push(ws)
@@ -1778,7 +1778,7 @@ describe('command permissions end to end', () => {
     // gate, so the gate supplies it itself, typed as `.`.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/repo': new RAMResource() },
+      { '/repo': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1801,7 +1801,7 @@ describe('command permissions end to end', () => {
       },
     )
     open.push(ws)
-    await ws.execute('mkdir -p /repo/sealed && echo x > /repo/sealed/f')
+    await ws.shell('mkdir -p /repo/sealed && echo x > /repo/sealed/f')
     expect(await line(ws, 'ls /repo/sealed')).toEqual([1, '', 'ls: /repo/sealed: sealed\n'])
     expect(await line(ws, 'cd /repo/sealed && ls')).toEqual([1, '', 'ls: .: sealed\n'])
     expect(await line(ws, 'cd /repo/sealed && find -name f')).toEqual([1, '', 'find: .: sealed\n'])
@@ -1824,7 +1824,7 @@ describe('command permissions end to end', () => {
     // the rules as usual.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/repo': new RAMResource() },
+      { '/repo': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1844,7 +1844,7 @@ describe('command permissions end to end', () => {
       },
     )
     open.push(ws)
-    await ws.execute(
+    await ws.shell(
       'mkdir -p /repo/private /repo/shared && echo k > /repo/private/k && touch /repo/shared/a',
     )
     ws.createSession('veiled', {
@@ -1929,7 +1929,7 @@ describe('ask end to end', () => {
   async function askWs(options: { onAsk?: AskHandler } = {}): Promise<Workspace> {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/repo': new RAMResource(), '/scratch': new RAMResource() },
+      { '/repo': new RAMVFS(), '/scratch': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -1947,7 +1947,7 @@ describe('ask end to end', () => {
     text: string,
     sessionId?: string,
   ): Promise<[number, string, string]> {
-    const r = await ws.execute(text, sessionId === undefined ? {} : { sessionId })
+    const r = await ws.shell(text, sessionId === undefined ? {} : { sessionId })
     return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 
@@ -1961,7 +1961,7 @@ describe('ask end to end', () => {
 
   it('an asked line is refused until the host answers', async () => {
     const ws = await askWs()
-    await ws.execute('mkdir -p /repo/d && touch /repo/d/x /scratch/z')
+    await ws.shell('mkdir -p /repo/d && touch /repo/d/x /scratch/z')
     // Asked: 126 in the requires-approval voice, quoting an id; the
     // request is on ws.decisions with what was asked; a retry quotes the
     // same id and adds nothing.
@@ -1982,7 +1982,7 @@ describe('ask end to end', () => {
     // workspace's constructor agent, so a shared workspace attributes
     // an approval to whoever raised it.
     expect(request.agentId).toBe('')
-    const byBob = await ws.execute('rm /scratch/z2', { agentId: 'bob' })
+    const byBob = await ws.shell('rm /scratch/z2', { agentId: 'bob' })
     expect(byBob.exitCode).toBe(126)
     expect(ws.decisions.pending().map((r) => r.agentId)).toEqual(['', 'bob'])
     // The agent rides with the execution, not the workspace: a line
@@ -1992,11 +1992,11 @@ describe('ask end to end', () => {
     // line is refused whole rather than running `echo` over an empty
     // substitution and exiting 0, which used to leave the agent reading
     // success for a removal that never happened.
-    const nested = await ws.execute('echo $(rm /scratch/z3)', { agentId: 'carol' })
+    const nested = await ws.shell('echo $(rm /scratch/z3)', { agentId: 'carol' })
     expect(nested.exitCode).toBe(126)
     await Promise.all([
-      ws.execute('rm /scratch/z4', { agentId: 'dan' }),
-      ws.execute("eval 'rm /scratch/z5'", { agentId: 'eve' }),
+      ws.shell('rm /scratch/z4', { agentId: 'dan' }),
+      ws.shell("eval 'rm /scratch/z5'", { agentId: 'eve' }),
     ])
     const byAgent = Object.fromEntries(
       ws.decisions.pending().map((r) => [[r.command, ...r.argv].join(' '), r.agentId]),
@@ -2043,7 +2043,7 @@ describe('ask end to end', () => {
 
   it('a session grant covers the rule and a deny is never re-opened', async () => {
     const ws = await askWs()
-    await ws.execute('mkdir -p /repo/d && touch /repo/d/x /scratch/y /scratch/z')
+    await ws.shell('mkdir -p /repo/d && touch /repo/d/x /scratch/y /scratch/z')
     expect((await line(ws, 'rm /scratch/y'))[0]).toBe(126)
     await ws.decisions.answer(pendingRequest(ws).id, Outcome.ALLOW, Scope.SESSION)
     // Every rm line passes now, in any directory of the session ...
@@ -2062,7 +2062,7 @@ describe('ask end to end', () => {
     }
     expect(record.decisions[0]?.scope).toBe('session')
     ws.createSession('other')
-    await ws.execute('touch /scratch/w', { sessionId: 'other' })
+    await ws.shell('touch /scratch/w', { sessionId: 'other' })
     const other = await line(ws, 'rm /scratch/w', 'other')
     expect(other[0]).toBe(126)
     expect(other[2]).toContain('requires approval')
@@ -2070,7 +2070,7 @@ describe('ask end to end', () => {
 
   it('a coded ask routes to the same door', async () => {
     const ws = await askWs()
-    await ws.execute('touch /scratch/z')
+    await ws.shell('touch /scratch/z')
     const [code, , err] = await line(ws, 'wc -c /scratch/z')
     expect(code).toBe(126)
     const request = pendingRequest(ws)
@@ -2085,13 +2085,13 @@ describe('ask end to end', () => {
 
   it('a grant is consumed through a fork', async () => {
     const ws = await askWs()
-    await ws.execute('touch /scratch/z')
+    await ws.shell('touch /scratch/z')
     expect((await line(ws, 'rm /scratch/z'))[0]).toBe(126)
     await ws.decisions.answer(pendingRequest(ws).id, Outcome.ALLOW)
     // execute({env}) runs the line in a fork of the session: the once
     // grant is read and consumed through the manager, so the fork
     // spends it for the session it forked from.
-    const forked = await ws.execute('rm /scratch/z', { env: { X: '1' } })
+    const forked = await ws.shell('rm /scratch/z', { env: { X: '1' } })
     expect(forked.exitCode).toBe(0)
     const again = await line(ws, 'rm /scratch/z')
     expect(again[0]).toBe(126)
@@ -2107,11 +2107,11 @@ describe('ask end to end', () => {
     const denyIt = (r: Decision): Promise<Decision> =>
       Promise.resolve({ ...r, outcome: Outcome.DENY })
     const yes = await askWs({ onAsk: allowOnce })
-    await yes.execute('touch /scratch/z')
+    await yes.shell('touch /scratch/z')
     expect((await line(yes, 'rm /scratch/z'))[0]).toBe(0)
     expect(yes.decisions.pending()).toEqual([])
     const no = await askWs({ onAsk: denyIt })
-    await no.execute('touch /scratch/z')
+    await no.shell('touch /scratch/z')
     expect(await line(no, 'rm /scratch/z')).toEqual([
       126,
       '',
@@ -2154,12 +2154,12 @@ describe('a walk below the operand meets the rule guard', () => {
   async function walkWs(): Promise<Workspace> {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: parser, profiles: { guarded: WALK_DOC } },
     )
     open.push(ws)
     ws.createSession('g', { profile: 'guarded' })
-    await ws.execute(
+    await ws.shell(
       'mkdir -p /data/t/private /data/t/sealed/deep /data/t/locked ' +
         '/data/t/open /data/t/asked /data/t/ghost && ' +
         'echo k > /data/t/private/k && echo s > /data/t/sealed/s && ' +
@@ -2171,7 +2171,7 @@ describe('a walk below the operand meets the rule guard', () => {
   }
 
   async function line(ws: Workspace, text: string): Promise<[number, string, string]> {
-    const r = await ws.execute(text, { sessionId: 'g' })
+    const r = await ws.shell(text, { sessionId: 'g' })
     return [r.exitCode, stdoutStr(r), voicedStderr(r)]
   }
 

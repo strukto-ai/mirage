@@ -2,8 +2,8 @@ from mirage.accessor.qdrant import QdrantAccessor
 from mirage.core.hierarchy.scope import INVALID, ROOT, make_detect_scope
 from mirage.core.qdrant.scope import (detect_for, filters_of, scopes_for,
                                       table_of)
-from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import PathSpec
+from mirage.vfs.qdrant.config import QdrantConfig
 
 
 def _cfg(**kw) -> QdrantConfig:
@@ -18,9 +18,7 @@ def _cfg(**kw) -> QdrantConfig:
 
 
 def _ps(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory=path,
-                    resource_path=path.strip("/"))
+    return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
 def _detect(config: QdrantConfig):

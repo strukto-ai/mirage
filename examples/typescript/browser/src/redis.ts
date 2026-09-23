@@ -1,4 +1,4 @@
-import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, RedisVFS, Workspace } from '@struktoai/mirage-browser'
 
 const logEl = document.getElementById('log')!
 
@@ -11,7 +11,7 @@ function line(text: string, cls?: string): void {
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   const out = r.stdoutText.replace(/\s+$/, '')
   if (out !== '') line(out)
   const err = r.stderrText.replace(/\s+$/, '')
@@ -29,12 +29,12 @@ async function main(): Promise<void> {
   // __UPSTASH_REDIS_URL__ is a Vite define, so the password lands in the served
   // JavaScript: this page is a local demo for a trusted machine, not something to
   // build or host. A page for other people needs a server-side proxy instead.
-  const resource = new RedisResource({
+  const vfs = new RedisVFS({
     url: __UPSTASH_REDIS_URL__,
     keyPrefix: 'mirage:browser-demo:',
   })
-  await resource.open()
-  const ws = new Workspace({ '/redis': resource }, { mode: MountMode.WRITE })
+  await vfs.open()
+  const ws = new Workspace({ '/redis': vfs }, { mode: MountMode.WRITE })
   try {
     await run(ws, 'mkdir -p /redis/notes')
     await run(ws, 'echo "hello from the browser" | tee /redis/notes/hello.txt')

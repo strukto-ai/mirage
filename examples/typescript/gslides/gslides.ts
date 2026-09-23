@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GSlidesResource, GWS, MountMode, Workspace, type FileStat, type GSlidesConfig } from '@struktoai/mirage-node'
+import { GSlidesVFS, GWS, MountMode, Workspace, type FileStat, type GSlidesConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -32,7 +32,7 @@ function buildConfig(): GSlidesConfig {
 
 async function run(ws: Workspace, cmd: string): Promise<{ out: string; err: string; code: number }> {
   try {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
   } catch (err) {
     return { out: '', err: err instanceof Error ? err.message : String(err), code: 1 }
@@ -47,8 +47,8 @@ function printOut(label: string, out: string, err: string, max = 500): void {
 
 async function main(): Promise<void> {
   const config = buildConfig()
-  const resource = new GSlidesResource(config)
-  const ws = new Workspace({ '/gslides': resource }, { mode: MountMode.WRITE })
+  const vfs = new GSlidesVFS(config)
+  const ws = new Workspace({ '/gslides': vfs }, { mode: MountMode.WRITE })
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })
   try {
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /gslides/owned/${first} ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/gslides/owned/${first}" && chown 500:dev "/gslides/owned/${first}" && touch -t 202601021530 "/gslides/owned/${first}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

@@ -76,7 +76,7 @@ class WasiRuntime(PythonRuntime):
     # host surface is the interpreter's own build directory, served
     # read-only (mutations raise PermissionError in WasmVFS), so
     # nothing goes around the gate.
-    reach: RuntimeReach = "vfs"
+    reach: RuntimeReach = "workspace"
     filesystem: ClassVar[tuple[FilesystemOperation,
                                ...]] = ('read', 'write', 'list', 'stat',
                                         'glob')

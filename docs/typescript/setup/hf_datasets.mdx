@@ -4,15 +4,15 @@ icon: /images/huggingface-logo.svg
 description: Mount a Hugging Face Dataset repo as a Mirage filesystem in TypeScript.
 ---
 
-`HfDatasetsResource` mounts a [Hugging Face Dataset](https://huggingface.co/datasets)
+`HfDatasetsVFS` mounts a [Hugging Face Dataset](https://huggingface.co/datasets)
 repo at a prefix such as `/ds/`. All reads are lazy: only the bytes you actually
 `cat`/`head` get transferred. The TypeScript backend mirrors the
-[Python one](/python/resource/hf_datasets) and returns identical results.
+[Python one](/python/vfs/hf_datasets) and returns identical results.
 
 For credential setup, see [HF Datasets Setup](/home/setup/hf_datasets).
 
 <Note>
-Node only: the resource ships in `@struktoai/mirage-node`. It needs no native
+Node only: the VFS ships in `@struktoai/mirage-node`. It needs no native
 binding, though, because it speaks the Hub API over the runtime's own `fetch`.
 The [opendal](https://www.npmjs.com/package/opendal) binding belongs to
 [HF Buckets](/typescript/setup/hf_buckets), which is a different product.
@@ -25,9 +25,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { HfDatasetsResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { HfDatasetsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const dataset = new HfDatasetsResource({
+const dataset = new HfDatasetsVFS({
   repoId: 'AlienKevin/SWE-ZERO-12M-trajectories', // "namespace/dataset-name"
   token: process.env.HF_TOKEN, // optional for public datasets
   // Optional:
@@ -38,12 +38,12 @@ const dataset = new HfDatasetsResource({
 
 const ws = new Workspace({ '/ds/': dataset }, { mode: MountMode.READ })
 
-console.log((await ws.execute('ls -lh /ds/')).stdoutText)
-console.log((await ws.execute("find /ds/ -name '*.parquet' | wc -l")).stdoutText)
-console.log((await ws.execute('cat /ds/README.md | head -n 20')).stdoutText)
+console.log((await ws.shell('ls -lh /ds/')).stdoutText)
+console.log((await ws.shell("find /ds/ -name '*.parquet' | wc -l")).stdoutText)
+console.log((await ws.shell('cat /ds/README.md | head -n 20')).stdoutText)
 ```
 
-`HfDatasetsResource` takes `repoId` in `namespace/dataset-name` form plus an
+`HfDatasetsVFS` takes `repoId` in `namespace/dataset-name` form plus an
 optional access token. Public datasets need no token.
 
 ## Reading, not writing

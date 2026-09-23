@@ -83,7 +83,7 @@ async def _walk(
     if info.type != FileType.DIRECTORY:
         size = info.size or 0
         if entries is not None:
-            prefix = mount_prefix_of(path.virtual, path.resource_path)
+            prefix = mount_prefix_of(path.virtual, path.vfs_path)
             entries.append(("/" + mount_key(path.virtual, prefix), size))
         return size
     try:
@@ -100,8 +100,8 @@ async def _walk(
         child_spec = PathSpec(virtual=child,
                               directory=child,
                               resolved=False,
-                              resource_path=rekey(path.virtual,
-                                                  path.resource_path, child))
+                              vfs_path=rekey(path.virtual, path.vfs_path,
+                                             child))
         total += await _walk(ops, accessor, index, child_spec, budget, entries)
     return total
 
@@ -169,7 +169,7 @@ async def du(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
-        raise ValueError("du: no resource")
+        raise ValueError("du: no VFS")
     budget = WalkBudget(ops.max_du_entries)
     native = ops.du
     compute_size: ComputeSize

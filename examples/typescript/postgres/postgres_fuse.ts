@@ -18,7 +18,7 @@ import {
   Mount,
   MountBackend,
   MountMode,
-  PostgresResource,
+  PostgresVFS,
   Workspace,
 } from "@struktoai/mirage-node";
 
@@ -38,13 +38,13 @@ const dsn = requireDsn();
 const DEC = new TextDecoder();
 
 async function main(): Promise<void> {
-  const resource = new PostgresResource({
+  const vfs = new PostgresVFS({
     dsn,
     maxReadRows: 1_000_000,
     maxReadBytes: 512 * 1024 * 1024,
   });
   const ws = new Workspace({
-    "/pg/": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/pg/": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;
@@ -55,8 +55,8 @@ async function main(): Promise<void> {
     console.log("--- fs.readdir() root ---");
     for (const e of (await readdir(mp)).sort()) console.log(`  ${e}`);
 
-    console.log("\n--- ws.execute(cat database.json | jq .schemas) ---");
-    const r1 = await ws.execute('cat /pg/database.json | jq ".schemas"');
+    console.log("\n--- ws.shell(cat database.json | jq .schemas) ---");
+    const r1 = await ws.shell('cat /pg/database.json | jq ".schemas"');
     process.stdout.write(DEC.decode(r1.stdout));
 
     const tables = (await readdir(`${mp}/public/tables`)).sort();
@@ -77,17 +77,17 @@ async function main(): Promise<void> {
       `  size=${String(st.size)} type=${st.isFile() ? "file" : "dir"}`,
     );
 
-    console.log(`\n--- ws.execute(jq .name ${dir}/schema.json) ---`);
-    const r2 = await ws.execute(`jq ".name" ${dir}/schema.json`);
+    console.log(`\n--- ws.shell(jq .name ${dir}/schema.json) ---`);
+    const r2 = await ws.shell(`jq ".name" ${dir}/schema.json`);
     process.stdout.write(DEC.decode(r2.stdout));
 
-    console.log(`\n--- ws.execute(head -n 1 ${dir}/rows.jsonl) ---`);
-    const r3 = await ws.execute(`head -n 1 ${dir}/rows.jsonl`);
+    console.log(`\n--- ws.shell(head -n 1 ${dir}/rows.jsonl) ---`);
+    const r3 = await ws.shell(`head -n 1 ${dir}/rows.jsonl`);
     process.stdout.write(DEC.decode(r3.stdout).slice(0, 200));
     console.log("...");
 
-    console.log(`\n--- ws.execute(wc -l ${dir}/rows.jsonl) ---`);
-    const r4 = await ws.execute(`wc -l ${dir}/rows.jsonl`);
+    console.log(`\n--- ws.shell(wc -l ${dir}/rows.jsonl) ---`);
+    const r4 = await ws.shell(`wc -l ${dir}/rows.jsonl`);
     process.stdout.write(DEC.decode(r4.stdout));
 
     console.log(`\n>>> FUSE mounted at: ${mp}`);
@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     );
   } finally {
     await ws.close();
-    await resource.close();
+    await vfs.close();
   }
 }
 

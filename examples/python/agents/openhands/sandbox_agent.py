@@ -19,9 +19,9 @@ from openhands.sdk import LLM, Agent, Conversation, Tool
 
 from mirage import MountMode, Workspace
 from mirage.agents.openhands import MirageWorkspace, register_mirage_terminal
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
 
@@ -35,20 +35,20 @@ TASK = (
 
 
 def build_workspace() -> Workspace:
-    s3 = S3Resource(
+    s3 = S3VFS(
         S3Config(
             bucket=os.environ["AWS_S3_BUCKET"],
             region=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
             aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
             aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         ))
-    slack = SlackResource(config=SlackConfig(
+    slack = SlackVFS(config=SlackConfig(
         token=os.environ["SLACK_BOT_TOKEN"],
         search_token=os.environ.get("SLACK_USER_TOKEN"),
     ))
     return Workspace(
         {
-            "/": (RAMResource(), MountMode.WRITE),
+            "/": (RAMVFS(), MountMode.WRITE),
             "/s3": (s3, MountMode.READ),
             "/slack": (slack, MountMode.READ),
         },

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import type { Resource } from '../resource/base.ts'
+import type { VFS } from '../vfs/base.ts'
 import type { DiscordTransport } from '../core/discord/client.ts'
 
 export class DiscordAccessor extends Accessor {
@@ -22,6 +22,6 @@ export class DiscordAccessor extends Accessor {
   }
 }
 
-export interface DiscordResourceLike extends Resource {
+export interface DiscordResourceLike extends VFS {
   readonly accessor: DiscordAccessor
 }

@@ -74,7 +74,7 @@ def _make_coro_factory(runner, kwargs: dict[str, Any]):
 
 
 async def _invoke_execute(runner, kwargs: dict[str, Any]):
-    return await runner.ws.execute(**kwargs)
+    return await runner.ws.shell(**kwargs)
 
 
 def _schedule_on_runner(runner, coro):

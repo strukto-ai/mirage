@@ -15,11 +15,11 @@
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
 import { read as coreRead } from '../../core/postgres/read.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 
 export const readOp: RegisteredOp = {
   name: 'read',
-  resource: ResourceName.POSTGRES,
+  vfs: VFSName.POSTGRES,
   filetype: null,
   write: false,
   fn: (accessor, path, _args, kwargs: OpKwargs) => {

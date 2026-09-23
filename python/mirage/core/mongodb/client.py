@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from pymongo import AsyncMongoClient
 
 from mirage.core.mongodb.types import EntityKind
-from mirage.resource.mongodb.config import MongoDBConfig
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 if TYPE_CHECKING:
     from mirage.accessor.mongodb import MongoDBAccessor

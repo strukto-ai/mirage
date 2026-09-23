@@ -1,10 +1,10 @@
 ---
 title: Dropbox
 icon: dropbox
-description: Mount Dropbox as a read/write MIRAGE resource from Node or the browser via OAuth2.
+description: Mount Dropbox as a read/write MIRAGE VFS from Node or the browser via OAuth2.
 ---
 
-Mirage ships `DropboxResource` in **two runtimes**:
+Mirage ships `DropboxVFS` in **two runtimes**:
 
 - `@struktoai/mirage-node`, uses `client_id` + `client_secret` + long-lived refresh token to fetch
   short-lived access tokens server-side.
@@ -15,7 +15,7 @@ Both runtimes hit the same [Dropbox v2 HTTP API](https://www.dropbox.com/develop
 `/2/files/upload` / `create_folder_v2` / `delete_v2` / `move_v2` / `copy_v2` for writes
 (single-call uploads cap at ~150 MB). Credentials are obtained the same way in both runtimes, see
 [Dropbox Credentials](/home/setup/dropbox). The Python package ships the same
-backend, see [Dropbox (Python)](/python/resource/dropbox).
+backend, see [Dropbox (Python)](/python/vfs/dropbox).
 
 ## Node (server-side)
 
@@ -24,16 +24,16 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { DropboxResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { DropboxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const dropbox = new DropboxResource({
+const dropbox = new DropboxVFS({
   clientId: process.env.DROPBOX_APP_KEY!,
   clientSecret: process.env.DROPBOX_APP_SECRET!,
   refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
 })
 
 const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
-const res = await ws.execute('ls /dropbox/')
+const res = await ws.shell('ls /dropbox/')
 console.log(res.stdoutText)
 ```
 
@@ -47,7 +47,7 @@ account. Every command and FUSE/VFS op is scoped to that folder; paths outside i
 unreachable.
 
 ```ts
-const dropbox = new DropboxResource({
+const dropbox = new DropboxVFS({
   clientId: process.env.DROPBOX_APP_KEY!,
   clientSecret: process.env.DROPBOX_APP_SECRET!,
   refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
@@ -55,11 +55,11 @@ const dropbox = new DropboxResource({
 })
 
 const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
-await ws.execute('ls /dropbox/') // lists the contents of /Team/data
+await ws.shell('ls /dropbox/') // lists the contents of /Team/data
 ```
 
 `rootPath` accepts `Team/data`, `/Team/data`, or `/Team/data/` (all normalized the same way);
-`..` segments are rejected. Config dictionaries (e.g. via the resource registry) may spell it
+`..` segments are rejected. Config dictionaries (e.g. via the VFS registry) may spell it
 `root_path`. Omitting it (or passing `/`) mounts the account root as before.
 
 ## Search push-down
@@ -75,7 +75,7 @@ walk, as do file operands and multi-pattern (`-e`/`-f`) runs. An empty or failed
 also falls back to the full walk.
 
 ```ts
-const dropbox = new DropboxResource({
+const dropbox = new DropboxVFS({
   clientId: process.env.DROPBOX_APP_KEY!,
   clientSecret: process.env.DROPBOX_APP_SECRET!,
   refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
@@ -89,7 +89,7 @@ matches file names only, so a narrowed scan would miss content matches), and Dro
 search index lags recent writes by a short delay, so a push-down may miss files written
 moments earlier. Only enable it when the account's plan includes full-text search and
 slightly stale results are acceptable. See
-[Dropbox (Python) — Search push-down](/python/resource/dropbox#search-push-down) for the
+[Dropbox (Python) — Search push-down](/python/vfs/dropbox#search-push-down) for the
 mirrored Python knob.
 
 ## Browser (PKCE, no client secret)
@@ -99,16 +99,16 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { DropboxResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { DropboxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 // Refresh token obtained via the PKCE flow, see examples/typescript/browser/src/dropbox_pkce.ts.
-const dropbox = new DropboxResource({
+const dropbox = new DropboxVFS({
   clientId: import.meta.env.VITE_DROPBOX_APP_KEY,
   refreshToken: refreshTokenFromLocalStorage,
 })
 
 const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
-await ws.execute('ls /dropbox/')
+await ws.shell('ls /dropbox/')
 ```
 
 Set the redirect URI on your Dropbox app's **Settings** tab to your dev/prod origin
@@ -124,7 +124,7 @@ without code changes.
 
 ```ts
 import { createRequire } from 'node:module'
-import { DropboxResource, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage-node'
+import { DropboxVFS, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
@@ -148,7 +148,7 @@ For tools that need a real filesystem path (CLI tools, editors, system utilities
 workspace under FUSE:
 
 ```ts
-import { DropboxResource, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
+import { DropboxVFS, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace({ '/dropbox': new Mount(dropbox, { mode: MountMode.READ, backend: MountBackend.FUSE }) })
 await ws.fuseReady()
@@ -167,7 +167,7 @@ Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux. See
 
 ## Available commands
 
-`DropboxResource` ships the same shell command set as the GDrive resource:
+`DropboxVFS` ships the same shell command set as the GDrive VFS:
 
 - **Filesystem**: `ls`, `cat`, `head`, `tail`, `nl`, `wc`, `stat`, `find`, `tree`, `du`, `file`,
   `realpath`, `basename`, `dirname`
@@ -181,7 +181,7 @@ Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux. See
 End-to-end runnable scripts are in
 [`examples/typescript/dropbox/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/dropbox):
 
-- [`dropbox.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox.ts), `Workspace.execute('ls/stat/cat/tree …')` shell demo
+- [`dropbox.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox.ts), `Workspace.shell('ls/stat/cat/tree …')` shell demo
 - [`dropbox_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
 - [`dropbox_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_fuse.ts), FUSE mount with shell access in another terminal
 

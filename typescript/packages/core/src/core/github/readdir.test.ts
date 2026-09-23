@@ -58,7 +58,7 @@ async function seeded(): Promise<RAMIndexCacheStore> {
 }
 
 function spec(p: string): PathSpec {
-  return new PathSpec({ resourcePath: p.slice(1), virtual: p, directory: p })
+  return new PathSpec({ vfsPath: p.slice(1), virtual: p, directory: p })
 }
 
 describe('github readdir freshness', () => {
@@ -138,7 +138,7 @@ for (const backend of ['ram', 'redis']) {
           ])
           await index.setDir('/repo/src/nested', [], new Date(Date.now() - 1000))
           const path = new PathSpec({
-            resourcePath: 'src/nested',
+            vfsPath: 'src/nested',
             virtual: '/repo/src/nested',
             directory: '/repo/src/nested',
           })
@@ -205,7 +205,7 @@ for (const backend of ['ram', 'redis']) {
           defaultBranch: 'main',
         })
         const path = new PathSpec({
-          resourcePath: 'src',
+          vfsPath: 'src',
           virtual: '/repo/src',
           directory: '/repo/src',
         })
@@ -275,10 +275,10 @@ for (const backend of ['ram', 'redis']) {
                 defaultBranch: 'main',
               })
               const root = prefix || '/'
-              const rootPath = new PathSpec({ resourcePath: '', virtual: root, directory: root })
+              const rootPath = new PathSpec({ vfsPath: '', virtual: root, directory: root })
               const docs = `${prefix}/docs`
               const docsPath = new PathSpec({
-                resourcePath: 'docs',
+                vfsPath: 'docs',
                 virtual: docs,
                 directory: docs,
               })

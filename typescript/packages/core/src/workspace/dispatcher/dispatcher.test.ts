@@ -16,10 +16,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
-import { Limit, MountMode, PathSpec } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -28,8 +28,8 @@ const DEC = new TextDecoder()
 describe('dispatch applies limits on the executing mount', () => {
   it('a symlink into a limited mount gets the target mount limit', async () => {
     const parser = await getTestParser()
-    const data = new RAMResource()
-    const plain = new RAMResource()
+    const data = new RAMVFS()
+    const plain = new RAMVFS()
     const ws = new Workspace(
       {
         '/data': [data, MountMode.EXEC, { read: new Limit({ maxBytes: 8 }) }],
@@ -38,8 +38,8 @@ describe('dispatch applies limits on the executing mount', () => {
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('echo 0123456789abcdef > /data/big.txt')
-      await ws.execute('ln -s /data/big.txt /r/link')
+      await ws.shell('echo 0123456789abcdef > /data/big.txt')
+      await ws.shell('ln -s /data/big.txt /r/link')
       const direct = (await ws.dispatch('read', '/data/big.txt')) as Uint8Array
       const viaLink = (await ws.dispatch('read', '/r/link')) as Uint8Array
       // The link lives on the unlimited mount, but the read executes
@@ -56,11 +56,11 @@ describe('dispatch rename addresses dst against the source mount', () => {
   it('cross-mount dst is refused like Python refuses it (EXDEV is a follow-up)', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/a': new RAMResource(), '/b': new RAMResource() },
+      { '/a': new RAMVFS(), '/b': new RAMVFS() },
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('echo moved-bytes > /a/x.txt')
+      await ws.shell('echo moved-bytes > /a/x.txt')
       // Both languages execute the rename on the source backend and address
       // the dst key against it, so '/b/y.txt' means 'b/y.txt' inside /a, a
       // directory that does not exist there. The store-backed backends
@@ -69,9 +69,9 @@ describe('dispatch rename addresses dst against the source mount', () => {
       await expect(
         ws.dispatch('rename', '/a/x.txt', [PathSpec.fromStrPath('/b/y.txt')]),
       ).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(DEC.decode((await ws.execute('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
-      expect((await ws.execute('cat /a/b/y.txt')).exitCode).not.toBe(0)
-      expect((await ws.execute('cat /b/y.txt')).exitCode).not.toBe(0)
+      expect(DEC.decode((await ws.shell('cat /a/x.txt')).stdout)).toBe('moved-bytes\n')
+      expect((await ws.shell('cat /a/b/y.txt')).exitCode).not.toBe(0)
+      expect((await ws.shell('cat /b/y.txt')).exitCode).not.toBe(0)
     } finally {
       await ws.close()
     }
@@ -86,12 +86,12 @@ describe('dispatch resolves filetype-registered ops by path extension', () => {
     // dispatcher must stamp it the same way or every dispatch-based path
     // (crossmount relay, FUSE) misses the op.
     const parser = await getTestParser()
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const registry = new OpsRegistry()
-    registry.registerResource(ram)
+    registry.registerVfs(ram)
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: '.gdoc.json',
       write: false,
       fn: () => Promise.resolve(ENC.encode('rendered')),
@@ -101,7 +101,7 @@ describe('dispatch resolves filetype-registered ops by path extension', () => {
       { mode: MountMode.EXEC, ops: registry, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('echo raw > /m/doc.gdoc.json')
+      await ws.shell('echo raw > /m/doc.gdoc.json')
       const bytes = (await ws.dispatch('read', '/m/doc.gdoc.json')) as Uint8Array
       expect(DEC.decode(bytes)).toBe('rendered')
     } finally {
@@ -118,16 +118,16 @@ describe('unlink of a namespace link', () => {
     // in place. That is what left `git checkout` unable to drop a link the
     // other branch does not have.
     const parser = await getTestParser()
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const ws = new Workspace(
       { '/ram': ram },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('echo hi > /ram/a.txt')
-      await ws.execute('ln -s a.txt /ram/link')
+      await ws.shell('echo hi > /ram/a.txt')
+      await ws.shell('ln -s a.txt /ram/link')
       await ws.dispatch('unlink', '/ram/link')
-      const listing = await ws.execute('ls /ram')
+      const listing = await ws.shell('ls /ram')
       expect(DEC.decode(listing.stdout)).not.toContain('link')
     } finally {
       await ws.close()
@@ -136,15 +136,15 @@ describe('unlink of a namespace link', () => {
 
   it('still reaches the backend for an ordinary file', async () => {
     const parser = await getTestParser()
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const ws = new Workspace(
       { '/ram': ram },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('echo hi > /ram/a.txt')
+      await ws.shell('echo hi > /ram/a.txt')
       await ws.dispatch('unlink', '/ram/a.txt')
-      const listing = await ws.execute('ls /ram')
+      const listing = await ws.shell('ls /ram')
       expect(DEC.decode(listing.stdout).trim()).toBe('')
     } finally {
       await ws.close()
@@ -155,14 +155,14 @@ describe('unlink of a namespace link', () => {
 describe('the node table answers every verb that names a link', () => {
   async function linkWorkspace(): Promise<Workspace> {
     const parser = await getTestParser()
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const ws = new Workspace(
       { '/ram': ram },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
-    await ws.execute('echo hi > /ram/a.txt')
-    await ws.execute('mkdir /ram/d')
-    await ws.execute('ln -s a.txt /ram/link')
+    await ws.shell('echo hi > /ram/a.txt')
+    await ws.shell('mkdir /ram/d')
+    await ws.shell('ln -s a.txt /ram/link')
     return ws
   }
 
@@ -173,8 +173,8 @@ describe('the node table answers every verb that names a link', () => {
     const ws = await linkWorkspace()
     try {
       await ws.dispatch('rename', '/ram/link', [PathSpec.fromStrPath('/ram/moved')])
-      expect(DEC.decode((await ws.execute('readlink /ram/moved')).stdout)).toBe('a.txt\n')
-      expect((await ws.execute('readlink /ram/link')).exitCode).toBe(1)
+      expect(DEC.decode((await ws.shell('readlink /ram/moved')).stdout)).toBe('a.txt\n')
+      expect((await ws.shell('readlink /ram/link')).exitCode).toBe(1)
     } finally {
       await ws.close()
     }
@@ -187,11 +187,11 @@ describe('the node table answers every verb that names a link', () => {
     // the old name still answered readlink.
     const ws = await linkWorkspace()
     try {
-      await ws.execute('echo hi > /ram/d/a.txt')
-      await ws.execute('ln -s a.txt /ram/d/inner')
+      await ws.shell('echo hi > /ram/d/a.txt')
+      await ws.shell('ln -s a.txt /ram/d/inner')
       await ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')])
-      expect(DEC.decode((await ws.execute('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
-      expect((await ws.execute('readlink /ram/d/inner')).exitCode).toBe(1)
+      expect(DEC.decode((await ws.shell('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
+      expect((await ws.shell('readlink /ram/d/inner')).exitCode).toBe(1)
     } finally {
       await ws.close()
     }
@@ -206,16 +206,16 @@ describe('the node table answers every verb that names a link', () => {
     // where the kernel refuses.
     const ws = await linkWorkspace()
     try {
-      await ws.execute('echo hi > /ram/d/a.txt')
-      await ws.execute('ln -s a.txt /ram/d/inner')
-      await ws.execute('mkdir /ram/e')
-      await ws.execute('ln -s gone /ram/e/stale')
+      await ws.shell('echo hi > /ram/d/a.txt')
+      await ws.shell('ln -s a.txt /ram/d/inner')
+      await ws.shell('mkdir /ram/e')
+      await ws.shell('ln -s gone /ram/e/stale')
       await expect(
         ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')]),
       ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
       // Nothing moved: both ends are as they were.
-      expect(DEC.decode((await ws.execute('readlink /ram/e/stale')).stdout)).toBe('gone\n')
-      expect(DEC.decode((await ws.execute('readlink /ram/d/inner')).stdout)).toBe('a.txt\n')
+      expect(DEC.decode((await ws.shell('readlink /ram/e/stale')).stdout)).toBe('gone\n')
+      expect(DEC.decode((await ws.shell('readlink /ram/d/inner')).stdout)).toBe('a.txt\n')
     } finally {
       await ws.close()
     }
@@ -226,12 +226,12 @@ describe('the node table answers every verb that names a link', () => {
     // replaced, and the subtree re-anchors onto the new name.
     const ws = await linkWorkspace()
     try {
-      await ws.execute('echo hi > /ram/d/a.txt')
-      await ws.execute('ln -s a.txt /ram/d/inner')
-      await ws.execute('mkdir /ram/e')
+      await ws.shell('echo hi > /ram/d/a.txt')
+      await ws.shell('ln -s a.txt /ram/d/inner')
+      await ws.shell('mkdir /ram/e')
       await ws.dispatch('rename', '/ram/d', [PathSpec.fromStrPath('/ram/e')])
-      expect(DEC.decode((await ws.execute('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
-      expect((await ws.execute('readlink /ram/d/inner')).exitCode).toBe(1)
+      expect(DEC.decode((await ws.shell('readlink /ram/e/inner')).stdout)).toBe('a.txt\n')
+      expect((await ws.shell('readlink /ram/d/inner')).exitCode).toBe(1)
     } finally {
       await ws.close()
     }
@@ -265,8 +265,8 @@ describe('the node table answers every verb that names a link', () => {
     const ws = await linkWorkspace()
     try {
       await ws.dispatch('rename', '/ram/a.txt', [PathSpec.fromStrPath('/ram/link')])
-      expect(DEC.decode((await ws.execute('cat /ram/link')).stdout)).toBe('hi\n')
-      expect((await ws.execute('readlink /ram/link')).exitCode).toBe(1)
+      expect(DEC.decode((await ws.shell('cat /ram/link')).stdout)).toBe('hi\n')
+      expect((await ws.shell('readlink /ram/link')).exitCode).toBe(1)
     } finally {
       await ws.close()
     }
@@ -284,7 +284,7 @@ describe('the node table answers every verb that names a link', () => {
           ws.dispatch('symlink', occupied, [], { target: 'elsewhere' }),
         ).rejects.toMatchObject({ code: 'EEXIST' })
       }
-      expect(DEC.decode((await ws.execute('cat /ram/a.txt')).stdout)).toBe('hi\n')
+      expect(DEC.decode((await ws.shell('cat /ram/a.txt')).stdout)).toBe('hi\n')
     } finally {
       await ws.close()
     }
@@ -301,16 +301,16 @@ describe('the fenced remnant cascade rides the mount revisions', () => {
     // one public trigger: an rmdir whose only remnants the session
     // cannot see.
     const parser = await getTestParser()
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const registry = new OpsRegistry()
-    registry.registerResource(ram)
+    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/ram': ram },
       { mode: MountMode.WRITE, ops: registry, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('mkdir /ram/d && echo x > /ram/d/h.txt')
-      // Mounting re-registers the resource's ops (workspace.ts), so the
+      await ws.shell('mkdir /ram/d && echo x > /ram/d/h.txt')
+      // Mounting re-registers the VFS's ops (workspace.ts), so the
       // probe wraps readdir only after construction, or it is clobbered.
       const original = registry.find('readdir', 'ram')
       if (original === null) throw new Error('ram readdir op missing')
@@ -327,7 +327,7 @@ describe('the fenced remnant cascade rides the mount revisions', () => {
         registry: { mountFor(path: string): { revisions: Map<string, string> } }
       }
       internals.registry.mountFor('/ram/d').revisions.set('/ram/d/h.txt', 'r1')
-      const sess = new Session({
+      const sess = new SessionState({
         sessionId: 'agent',
         hiddenPaths: { paths: ['/ram/d/h.txt'] },
       })
@@ -348,12 +348,12 @@ describe('the turf mode gates the node table', () => {
     // mount except its names.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/extra': new RAMResource() },
+      { '/extra': new RAMVFS() },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('echo b > /extra/plain.txt')
-      await ws.execute('ln -s plain.txt /extra/lk')
+      await ws.shell('echo b > /extra/plain.txt')
+      await ws.shell('ln -s plain.txt /extra/lk')
       const sess = ws.createSession('agent', { mounts: { '/extra/': 'read' } })
       await runWithSession(sess, async () => {
         await expect(ws.dispatch('unlink', '/extra/lk')).rejects.toMatchObject({
@@ -366,8 +366,8 @@ describe('the turf mode gates the node table', () => {
           ws.dispatch('rename', '/extra/lk', [PathSpec.fromStrPath('/extra/mv')]),
         ).rejects.toMatchObject({ code: 'EROFS' })
       })
-      expect(DEC.decode((await ws.execute('readlink /extra/lk')).stdout)).toBe('plain.txt\n')
-      expect((await ws.execute('readlink /extra/lk2')).exitCode).toBe(1)
+      expect(DEC.decode((await ws.shell('readlink /extra/lk')).stdout)).toBe('plain.txt\n')
+      expect((await ws.shell('readlink /extra/lk2')).exitCode).toBe(1)
     } finally {
       await ws.close()
     }
@@ -378,8 +378,8 @@ describe('the turf mode gates the node table', () => {
     // backend cannot write, and a symlink is namespace state needing no
     // write capability from it -- which is why a link above postgres,
     // mongodb, chroma and qdrant (all mounted read) is pinned working in
-    // integ/resources/<svc>/sym.json. Only a session grant binds here.
-    const ws = new Workspace({ '/ro': [new RAMResource(), MountMode.READ] })
+    // integ/vfs/<svc>/sym.json. Only a session grant binds here.
+    const ws = new Workspace({ '/ro': [new RAMVFS(), MountMode.READ] })
     try {
       await ws.dispatch('symlink', '/ro/lk', [], { target: 't' })
       expect(ws.namespace.isLink('/ro/lk')).toBe(true)
@@ -401,11 +401,11 @@ describe('the turf mode gates the node table', () => {
     // and the session is the only thing narrowing either.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/rw': new RAMResource(), '/ro': new RAMResource() },
+      { '/rw': new RAMVFS(), '/ro': new RAMVFS() },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('ln -s t /rw/lk')
+      await ws.shell('ln -s t /rw/lk')
       const sess = ws.createSession('agent', {
         mounts: { '/rw/': 'write', '/ro/': 'read' },
       })
@@ -429,11 +429,11 @@ describe('a rename moves what the node table holds', () => {
     // the old name next inherited it.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/a': new RAMResource() },
+      { '/a': new RAMVFS() },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('printf one > /a/f.txt')
+      await ws.shell('printf one > /a/f.txt')
       await ws.namespace.setAttrs('/a/f.txt', { mode: 0o400 })
       await ws.dispatch('rename', '/a/f.txt', [PathSpec.fromStrPath('/a/g.txt')])
       expect(ws.namespace.metaFor('/a/f.txt')).toBeNull()
@@ -448,11 +448,11 @@ describe('a rename moves what the node table holds', () => {
     // goes with it rather than staying to shadow what just landed.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/a': new RAMResource() },
+      { '/a': new RAMVFS() },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute('printf one > /a/f.txt && printf two > /a/g.txt')
+      await ws.shell('printf one > /a/f.txt && printf two > /a/g.txt')
       await ws.namespace.setAttrs('/a/g.txt', { mode: 0o400 })
       await ws.dispatch('rename', '/a/f.txt', [PathSpec.fromStrPath('/a/g.txt')])
       expect(ws.namespace.metaFor('/a/g.txt')).toBeNull()
@@ -471,11 +471,11 @@ describe('a hide answers a create by what its parent answers', () => {
     // same refusal an ordinary missing directory does.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/ram': new RAMResource() },
+      { '/ram': new RAMVFS() },
       { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
-      await ws.execute(
+      await ws.shell(
         'mkdir -p /ram/vault /ram/open && echo s > /ram/vault/secret && echo p > /ram/open/pub.txt && echo q > /ram/open/q.txt',
       )
       const sess = ws.createSession('agent', {
@@ -507,11 +507,11 @@ describe('a hide answers a create by what its parent answers', () => {
           ws.dispatch('rename', '/ram/open/q.txt', [PathSpec.fromStrPath('/ram/open/pub.txt')]),
         ).rejects.toMatchObject({ code: 'EACCES' })
       })
-      const under = await ws.execute('echo x > /ram/vault/new.txt', { sessionId: 'agent' })
+      const under = await ws.shell('echo x > /ram/vault/new.txt', { sessionId: 'agent' })
       expect(DEC.decode(under.stderr)).toBe('/ram/vault/new.txt: No such file or directory\n')
-      const control = await ws.execute('echo x > /ram/ghost/new.txt', { sessionId: 'agent' })
+      const control = await ws.shell('echo x > /ram/ghost/new.txt', { sessionId: 'agent' })
       expect(DEC.decode(control.stderr)).toBe('/ram/ghost/new.txt: No such file or directory\n')
-      expect(DEC.decode((await ws.execute('cat /ram/vault/secret')).stdout)).toBe('s\n')
+      expect(DEC.decode((await ws.shell('cat /ram/vault/secret')).stdout)).toBe('s\n')
     } finally {
       await ws.close()
     }
@@ -521,10 +521,10 @@ describe('a hide answers a create by what its parent answers', () => {
 describe('a failed backend open is not evidence of absence', () => {
   it('symlink refuses a name whose backend could not be opened', async () => {
     const parser = await getTestParser()
-    const broken = new RAMResource()
+    const broken = new RAMVFS()
     vi.spyOn(broken, 'open').mockRejectedValue(new Error('401 bad credentials'))
     const ws = new Workspace(
-      { '/r': new RAMResource(), '/data': broken },
+      { '/r': new RAMVFS(), '/data': broken },
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
@@ -541,14 +541,14 @@ describe('a failed backend open is not evidence of absence', () => {
 
   it('a failing parent listing propagates out of the parent-listing probe', async () => {
     const parser = await getTestParser()
-    const listing = new RAMResource()
+    const listing = new RAMVFS()
     // The store's key iteration is reached only by the parent readdir, not
     // by the stat probe ahead of it, so this fails exactly the one channel.
     vi.spyOn(listing.store.files, 'keys').mockImplementation(() => {
       throw new Error('backend listing failed')
     })
     const ws = new Workspace(
-      { '/r': new RAMResource(), '/data': listing },
+      { '/r': new RAMVFS(), '/data': listing },
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
@@ -567,7 +567,7 @@ describe('a failed backend open is not evidence of absence', () => {
   it('readlink still answers ENOENT where no mount serves the path', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/r': new RAMResource() },
+      { '/r': new RAMVFS() },
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
@@ -576,4 +576,110 @@ describe('a failed backend open is not evidence of absence', () => {
       await ws.close()
     }
   }, 30_000)
+})
+
+describe('the door answers extended attributes from the node table', () => {
+  const open = async (): Promise<Workspace> => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/r': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    await ws.shell('printf x > /r/f && ln -s f /r/lk')
+    return ws
+  }
+
+  it('stores them on the node and lists them sorted', async () => {
+    const ws = await open()
+    try {
+      await ws.vfs.setxattr('/r/f', 'user.b', ENC.encode('two'))
+      await ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('one'))
+      expect(await ws.vfs.listxattr('/r/f')).toEqual(['user.a', 'user.b'])
+      expect(DEC.decode(await ws.vfs.getxattr('/r/f', 'user.b'))).toBe('two')
+      await ws.vfs.removexattr('/r/f', 'user.b')
+      expect(await ws.vfs.listxattr('/r/f')).toEqual(['user.a'])
+      await expect(ws.vfs.getxattr('/r/f', 'user.b')).rejects.toMatchObject({ code: 'ENODATA' })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses the way setxattr(2) does for its flags', async () => {
+    const ws = await open()
+    try {
+      await ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('one'))
+      await expect(
+        ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('two'), { create: true }),
+      ).rejects.toMatchObject({ code: 'EEXIST' })
+      await expect(
+        ws.vfs.setxattr('/r/f', 'user.q', ENC.encode('x'), { replace: true }),
+      ).rejects.toMatchObject({ code: 'ENODATA' })
+      await ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('two'), { replace: true })
+      expect(DEC.decode(await ws.vfs.getxattr('/r/f', 'user.a'))).toBe('two')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('answers ENOENT for a missing path and stores nothing there', async () => {
+    const ws = await open()
+    try {
+      await expect(ws.vfs.listxattr('/r/nope')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(ws.vfs.setxattr('/r/nope', 'user.a', ENC.encode('x'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+      expect(ws.namespace.metaFor('/r/nope')).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('drops them with the file and carries them through a rename', async () => {
+    // Removed through the door rather than the shell's rm, the node
+    // stayed, and a file created at the name next read back the old
+    // file's attributes.
+    const ws = await open()
+    try {
+      await ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('one'))
+      await ws.vfs.rename('/r/f', '/r/g')
+      expect(DEC.decode(await ws.vfs.getxattr('/r/g', 'user.a'))).toBe('one')
+      expect(ws.namespace.metaFor('/r/f')).toBeNull()
+      await ws.vfs.unlink('/r/g')
+      await ws.shell('printf y > /r/g')
+      expect(await ws.vfs.listxattr('/r/g')).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads a link node itself under nofollow', async () => {
+    const ws = await open()
+    try {
+      await ws.vfs.setxattr('/r/lk', 'user.target', ENC.encode('t'))
+      await ws.vfs.setxattr('/r/lk', 'user.own', ENC.encode('o'), { nofollow: true })
+      expect(await ws.vfs.listxattr('/r/lk')).toEqual(['user.target'])
+      expect(await ws.vfs.listxattr('/r/lk', { nofollow: true })).toEqual(['user.own'])
+      expect(ws.namespace.readlink('/r/lk')).toBe('f')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("keeps a backend stat's extra out of the attributes", async () => {
+    const ws = await open()
+    const stat = vi.spyOn(ws.opsRegistry, 'call')
+    stat.mockImplementation(async (op, ...rest) => {
+      if (op === 'stat') {
+        return new FileStat({ name: 'd', type: FileType.DIRECTORY, extra: { file_id: '1AbC' } })
+      }
+      return OpsRegistry.prototype.call.call(ws.opsRegistry, op, ...rest)
+    })
+    try {
+      await ws.vfs.setxattr('/r/f', 'user.tag', ENC.encode('t'))
+      expect(await ws.vfs.listxattr('/r/f')).toEqual(['user.tag'])
+    } finally {
+      stat.mockRestore()
+      await ws.close()
+    }
+  })
 })

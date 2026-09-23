@@ -13,11 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { LANGFUSE_IO } from '../../commands/builtin/langfuse/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const LANGFUSE_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.LANGFUSE,
-  LANGFUSE_IO,
-)
+export const LANGFUSE_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.LANGFUSE, LANGFUSE_IO)

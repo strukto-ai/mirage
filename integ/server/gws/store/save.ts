@@ -29,7 +29,7 @@ import type { DocTab } from './types.ts'
 // integrity into the client, which refuses to delete a row a required relation
 // still points at.
 //
-// Everything below is `createMany`, which is only possible because no table
+// Writes are batched, which is only possible because no table
 // here is keyed by an autoincrement the next table has to read back. That is
 // what SheetCell naming its tab by (spreadsheet, sheetId) and SlideElement
 // naming its slide by (presentation, objectId) buy; see integ/prisma/gws.prisma.
@@ -41,42 +41,72 @@ import type { DocTab } from './types.ts'
 // real.
 export async function saveState(db: C, dmmf: Dmmf, tenant: string, st: GwsState): Promise<void> {
   const rows = buildRows(tenant, st)
-  await db.$transaction(async (tx) => {
-    await clearTenants(tx, dmmf, [tenant])
-    await tx.meta.create({
-      data: { tenant, epochMs: BigInt(st.epochMs), ticks: st.ticks },
-    })
-    if (rows.counters.length > 0) await tx.counter.createMany({ data: rows.counters })
-    if (rows.drives.length > 0) await tx.drive.createMany({ data: rows.drives })
-    if (rows.files.length > 0) await tx.driveFile.createMany({ data: rows.files })
-    if (rows.parents.length > 0) await tx.driveParent.createMany({ data: rows.parents })
-    if (rows.revisions.length > 0) await tx.revision.createMany({ data: rows.revisions })
-    if (rows.permissions.length > 0) await tx.permission.createMany({ data: rows.permissions })
-    if (rows.docs.length > 0) await tx.doc.createMany({ data: rows.docs })
-    if (rows.docTabs.length > 0) await tx.docTab.createMany({ data: rows.docTabs })
-    if (rows.spreadsheets.length > 0) await tx.spreadsheet.createMany({ data: rows.spreadsheets })
-    if (rows.tabs.length > 0) await tx.sheetTab.createMany({ data: rows.tabs })
-    if (rows.cells.length > 0) await tx.sheetCell.createMany({ data: rows.cells })
-    if (rows.presentations.length > 0) {
-      await tx.presentation.createMany({ data: rows.presentations })
-    }
-    if (rows.slides.length > 0) await tx.slide.createMany({ data: rows.slides })
-    if (rows.elements.length > 0) await tx.slideElement.createMany({ data: rows.elements })
-    if (rows.labels.length > 0) await tx.label.createMany({ data: rows.labels })
-    if (rows.messages.length > 0) await tx.message.createMany({ data: rows.messages })
-    if (rows.headers.length > 0) await tx.messageHeader.createMany({ data: rows.headers })
-    if (rows.messageLabels.length > 0) {
-      await tx.messageLabel.createMany({ data: rows.messageLabels })
-    }
-    if (rows.attachments.length > 0) await tx.attachment.createMany({ data: rows.attachments })
-    if (rows.calendars.length > 0) await tx.calendar.createMany({ data: rows.calendars })
-    if (rows.events.length > 0) await tx.event.createMany({ data: rows.events })
-    if (rows.forms.length > 0) await tx.form.createMany({ data: rows.forms })
-    if (rows.formItems.length > 0) await tx.formItem.createMany({ data: rows.formItems })
-    if (rows.formResponses.length > 0) {
-      await tx.formResponse.createMany({ data: rows.formResponses })
-    }
-  })
+  await db.$transaction(
+    async (tx) => {
+      // Cells are leaves. Clear them before Prisma emulates the tab relations;
+      // otherwise a large workbook is read back just to delete its cells.
+      await tx.$executeRaw`DELETE FROM "SheetCell" WHERE "tenant" = ${tenant}`
+      await clearTenants(tx, dmmf, [tenant])
+      await tx.meta.create({
+        data: { tenant, epochMs: BigInt(st.epochMs), ticks: st.ticks },
+      })
+      if (rows.counters.length > 0) await tx.counter.createMany({ data: rows.counters })
+      if (rows.drives.length > 0) await tx.drive.createMany({ data: rows.drives })
+      if (rows.files.length > 0) await tx.driveFile.createMany({ data: rows.files })
+      if (rows.parents.length > 0) await tx.driveParent.createMany({ data: rows.parents })
+      if (rows.revisions.length > 0) await tx.revision.createMany({ data: rows.revisions })
+      if (rows.permissions.length > 0) await tx.permission.createMany({ data: rows.permissions })
+      if (rows.docs.length > 0) await tx.doc.createMany({ data: rows.docs })
+      if (rows.docTabs.length > 0) await tx.docTab.createMany({ data: rows.docTabs })
+      if (rows.spreadsheets.length > 0) await tx.spreadsheet.createMany({ data: rows.spreadsheets })
+      if (rows.tabs.length > 0) await tx.sheetTab.createMany({ data: rows.tabs })
+      for (let offset = 0; offset < rows.cells.length; offset += 10_000) {
+        const cells = JSON.stringify(
+          rows.cells
+            .slice(offset, offset + 10_000)
+            .map((cell) => [
+              cell.tenant,
+              cell.spreadsheetId,
+              cell.sheetId,
+              cell.row,
+              cell.col,
+              cell.text,
+              cell.props,
+            ]),
+        )
+        // One bound JSON value avoids constructing a Prisma query node for
+        // each field of every cell. SQLite still enforces the composite key.
+        await tx.$executeRaw`
+        INSERT INTO "SheetCell" ("tenant", "spreadsheetId", "sheetId", "row", "col", "text", "props")
+        SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'),
+               json_extract(value, '$[2]'), json_extract(value, '$[3]'),
+               json_extract(value, '$[4]'), json_extract(value, '$[5]'),
+               json_extract(value, '$[6]')
+        FROM json_each(${cells})`
+      }
+      if (rows.presentations.length > 0) {
+        await tx.presentation.createMany({ data: rows.presentations })
+      }
+      if (rows.slides.length > 0) await tx.slide.createMany({ data: rows.slides })
+      if (rows.elements.length > 0) await tx.slideElement.createMany({ data: rows.elements })
+      if (rows.labels.length > 0) await tx.label.createMany({ data: rows.labels })
+      if (rows.messages.length > 0) await tx.message.createMany({ data: rows.messages })
+      if (rows.headers.length > 0) await tx.messageHeader.createMany({ data: rows.headers })
+      if (rows.messageLabels.length > 0) {
+        await tx.messageLabel.createMany({ data: rows.messageLabels })
+      }
+      if (rows.attachments.length > 0) await tx.attachment.createMany({ data: rows.attachments })
+      if (rows.calendars.length > 0) await tx.calendar.createMany({ data: rows.calendars })
+      if (rows.events.length > 0) await tx.event.createMany({ data: rows.events })
+      if (rows.forms.length > 0) await tx.form.createMany({ data: rows.forms })
+      if (rows.formItems.length > 0) await tx.formItem.createMany({ data: rows.formItems })
+      if (rows.formResponses.length > 0) {
+        await tx.formResponse.createMany({ data: rows.formResponses })
+      }
+    },
+    // Large workbooks can outlive Prisma's five-second interactive default.
+    { timeout: 120_000 },
+  )
 }
 
 interface Rows {
@@ -131,8 +161,11 @@ interface Rows {
     title: string
     rows: number
     cols: number
-    rowPixels: string
-    columnPixels: string
+    rowMeta: string
+    columnMeta: string
+    bandedRanges: string
+    basicFilter: string | null
+    conditionalFormats: string
     seq: number
   }[]
   cells: {
@@ -141,7 +174,8 @@ interface Rows {
     sheetId: number
     row: number
     col: number
-    text: string
+    text: string | null
+    props: string
   }[]
   presentations: { tenant: string; id: string; title: string }[]
   slides: { tenant: string; presentationId: string; objectId: string; seq: number }[]
@@ -348,11 +382,14 @@ function buildRows(tenant: string, st: GwsState): Rows {
         title: tab.title,
         rows: tab.rows,
         cols: tab.cols,
-        rowPixels: JSON.stringify(tab.rowPixels ?? {}),
-        columnPixels: JSON.stringify(tab.columnPixels ?? {}),
+        rowMeta: JSON.stringify(tab.rowMeta),
+        columnMeta: JSON.stringify(tab.columnMeta),
+        bandedRanges: JSON.stringify(tab.bandedRanges),
+        basicFilter: tab.basicFilter === null ? null : JSON.stringify(tab.basicFilter),
+        conditionalFormats: JSON.stringify(tab.conditionalFormats),
         seq: (tabSeq += 1),
       })
-      for (const [key, text] of tab.cells) {
+      for (const key of new Set([...tab.cells.keys(), ...tab.props.keys()])) {
         const [row, col] = key.split(',')
         rows.cells.push({
           tenant,
@@ -360,7 +397,8 @@ function buildRows(tenant: string, st: GwsState): Rows {
           sheetId: tab.sheetId,
           row: Number(row),
           col: Number(col),
-          text,
+          text: tab.cells.get(key) ?? null,
+          props: JSON.stringify(tab.props.get(key) ?? {}),
         })
       }
     }

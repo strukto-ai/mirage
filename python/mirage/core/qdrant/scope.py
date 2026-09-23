@@ -17,9 +17,9 @@ from mirage.core.hierarchy.bind import per_accessor
 from mirage.core.hierarchy.codec import JSON_NAME, PATH_SAFE, RAW, Codec
 from mirage.core.hierarchy.scope import (DetectFn, Scope, ScopeMatch, Segment,
                                          Slot, make_detect_scope)
-from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import ContentType
 from mirage.utils.filetype import content_type_for_extension
+from mirage.vfs.qdrant.config import QdrantConfig
 
 TXT = Codec(suffix=".txt")
 

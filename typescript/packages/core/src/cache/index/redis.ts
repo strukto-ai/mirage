@@ -224,29 +224,29 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     return entries
   }
 
-  async get(resourcePath: string): Promise<LookupResult> {
+  async get(vfsPath: string): Promise<LookupResult> {
     await this.flushSeed()
     const c = await this.client()
-    const raw = await c.get(this.entryKey(resourcePath))
+    const raw = await c.get(this.entryKey(vfsPath))
     if (raw === null) return { status: LookupStatus.NOT_FOUND }
     return { entry: IndexEntry.fromJSON(raw) }
   }
 
-  async put(resourcePath: string, entry: IndexEntry): Promise<void> {
+  async put(vfsPath: string, entry: IndexEntry): Promise<void> {
     await this.flushSeed()
     const c = await this.client()
     const stored =
       entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
-    await c.set(this.entryKey(resourcePath), JSON.stringify(stored))
+    await c.set(this.entryKey(vfsPath), JSON.stringify(stored))
   }
 
-  async listDir(resourcePath: string): Promise<ListResult> {
+  async listDir(vfsPath: string): Promise<ListResult> {
     await this.flushSeed()
     const c = await this.client()
     const [raw, current, directory] = await c.mGet([
-      this.childrenKey(resourcePath),
+      this.childrenKey(vfsPath),
       this.generationKey,
-      `${this.generationKey}:${resourcePath}`,
+      `${this.generationKey}:${vfsPath}`,
     ])
     if (raw == null) return { status: LookupStatus.NOT_FOUND }
     const listing = IndexDirectorySchema.parse(JSON.parse(raw))
@@ -261,7 +261,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   }
 
   async setDir(
-    resourcePath: string,
+    vfsPath: string,
     entries: readonly [string, IndexEntry][],
     expiredAt?: Date | null,
   ): Promise<void> {
@@ -269,9 +269,9 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const c = await this.client()
     const now = new Date()
     const nowIso = toIsoZ(now)
-    const prefix = resourcePath === '/' ? '/' : `${resourcePath}/`
+    const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
     const generation = await this.generation(c, this.generationKey)
-    const directory = await this.generation(c, `${this.generationKey}:${resourcePath}`)
+    const directory = await this.generation(c, `${this.generationKey}:${vfsPath}`)
     const pipe = c.multi()
     const childKeys: string[] = []
     for (const [name, entry] of entries) {
@@ -285,43 +285,43 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       generation: `${generation}:${directory}`,
       expires_at: (expiredAt?.getTime() ?? now.getTime() + this.ttl * 1000) / 1000,
     }
-    pipe.set(this.childrenKey(resourcePath), JSON.stringify(listing))
+    pipe.set(this.childrenKey(vfsPath), JSON.stringify(listing))
     await pipe.exec()
   }
 
-  async invalidateDir(resourcePath: string): Promise<void> {
+  async invalidateDir(vfsPath: string): Promise<void> {
     await this.flushSeed()
     const c = await this.client()
-    const raw = await c.get(this.childrenKey(resourcePath))
+    const raw = await c.get(this.childrenKey(vfsPath))
     const childPaths = raw === null ? [] : IndexDirectorySchema.parse(JSON.parse(raw)).entries
     const pipe = c.multi()
     for (const child of childPaths) {
       pipe.del(this.entryKey(child))
     }
-    pipe.del(this.childrenKey(resourcePath))
-    pipe.del(`${this.generationKey}:${resourcePath}`)
+    pipe.del(this.childrenKey(vfsPath))
+    pipe.del(`${this.generationKey}:${vfsPath}`)
     await pipe.exec()
   }
 
-  private async scanDelete(prefix: string, resourcePath: string): Promise<void> {
+  private async scanDelete(prefix: string, vfsPath: string): Promise<void> {
     const c = await this.client()
-    const pattern = `${globEscape(prefix + rstripSlash(resourcePath))}*`
+    const pattern = `${globEscape(prefix + rstripSlash(vfsPath))}*`
     const keys: string[] = []
     for await (const k of c.scanIterator({ MATCH: pattern })) {
       const batch = Array.isArray(k) ? k : [k]
       for (const key of batch) {
         const path = key.slice(prefix.length)
-        if (underPath(path, resourcePath)) keys.push(key)
+        if (underPath(path, vfsPath)) keys.push(key)
       }
     }
     if (keys.length > 0) await c.del(keys)
   }
 
-  async invalidatePrefix(resourcePath: string): Promise<void> {
+  async invalidatePrefix(vfsPath: string): Promise<void> {
     await this.flushSeed()
-    await this.scanDelete(this.entryPrefix, resourcePath)
-    await this.scanDelete(this.childrenPrefix, resourcePath)
-    await this.scanDelete(`${this.generationKey}:`, resourcePath)
+    await this.scanDelete(this.entryPrefix, vfsPath)
+    await this.scanDelete(this.childrenPrefix, vfsPath)
+    await this.scanDelete(`${this.generationKey}:`, vfsPath)
   }
 
   async invalidate(): Promise<void> {

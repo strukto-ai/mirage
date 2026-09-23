@@ -63,8 +63,8 @@ def make_unlink(
         if entry is None:
             raise enoent(path)
         await deleter(accessor, match, entry)
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
-        key = path.resource_path.strip("/")
+        prefix = mount_prefix_of(path.virtual, path.vfs_path)
+        key = path.vfs_path.strip("/")
         virtual_key = prefix + "/" + key if key else prefix or "/"
         parent_dir = virtual_key.rsplit("/", 1)[0] or "/"
         await index.invalidate_dir(parent_dir)

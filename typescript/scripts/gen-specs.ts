@@ -40,7 +40,7 @@ import {
   commandIoFacts,
   configFacts,
   registryClasses,
-} from './resource_facts.ts'
+} from './vfs_facts.ts'
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..')
 const SPEC_ROOT = resolve(__dirname, '..', '..', 'spec', 'typescript')
@@ -48,7 +48,7 @@ const PACKAGES = resolve(__dirname, '..', 'packages')
 
 // Bespoke Google Workspace API passthroughs. They register command names that
 // are not in SPECS, so they contribute nothing to the spec dump and stay
-// internal to the gws resource rather than being re-exported.
+// internal to the gws VFS rather than being re-exported.
 const UNEXPORTED_COMMAND_GROUPS: ReadonlySet<string> = new Set([
   'GWS_DOCS_API_COMMANDS',
   'GWS_DRIVE_API_COMMANDS',
@@ -135,17 +135,17 @@ function collectRegistrations(modules: ModuleBag[]): Record<string, RegisteredCo
   return out
 }
 
-// The union flags below cannot say *which* resource carries a provision, an
+// The union flags below cannot say *which* VFS carries a provision, an
 // aggregate, the write flag or a filetype, so dropping one backend's
 // provision while another keeps it leaves every union unchanged. Key the same
-// facts by resource so the parity check sees that difference.
-function byResource(rcs: RegisteredCommand[]): Record<string, unknown> {
+// facts by VFS so the parity check sees that difference.
+function byVfs(rcs: RegisteredCommand[]): Record<string, unknown> {
   const out: Record<
     string,
     { has_provision: boolean; has_aggregate: boolean; has_write: boolean; filetypes: Set<string> }
   > = {}
   for (const rc of rcs) {
-    const key = rc.resource ?? ''
+    const key = rc.vfs ?? ''
     const entry = (out[key] ??= {
       has_provision: false,
       has_aggregate: false,
@@ -166,19 +166,19 @@ function byResource(rcs: RegisteredCommand[]): Record<string, unknown> {
 }
 
 function metaFor(rcs: RegisteredCommand[]): Record<string, unknown> {
-  const resources = [
-    ...new Set(rcs.map((r) => r.resource).filter((r): r is string => r !== null)),
-  ].sort(compareCodePoints)
+  const vfsNames = [...new Set(rcs.map((r) => r.vfs).filter((r): r is string => r !== null))].sort(
+    compareCodePoints,
+  )
   const filetypes = [
     ...new Set(rcs.map((r) => r.filetype).filter((f): f is string => f !== null)),
   ].sort(compareCodePoints)
   return {
-    by_resource: byResource(rcs),
+    by_vfs: byVfs(rcs),
     filetypes,
     has_aggregate: rcs.some((r) => r.aggregate !== null),
     has_provision: rcs.some((r) => r.provisionFn !== null),
     has_write: rcs.some((r) => r.write),
-    resources,
+    vfs_names: vfsNames,
   }
 }
 
@@ -299,10 +299,10 @@ function sortedStringify(value: unknown): string {
   )
 }
 
-// The two resource-name sets the parity gate compares. `registry` is what
-// `buildResource` can construct by name — the hand-maintained table that
-// workspace YAML and snapshots go through. `command_resources` is what the
-// spec tree already knew: every resource registering at least one builtin
+// The two VFS-name sets the parity gate compares. `registry` is what
+// `buildVfs` can construct by name — the hand-maintained table that
+// workspace YAML and snapshots go through. `command_vfs_names` is what the
+// spec tree already knew: every VFS registering at least one builtin
 // command. A name in the second but not the first registers commands yet
 // cannot be mounted by name, which is how chroma/dify/lancedb/qdrant stayed
 // unconstructible in typescript while appearing in every command's `_meta`.
@@ -313,26 +313,26 @@ function sortedStringify(value: unknown): string {
 // served ten-minute-stale listings of a live postgres schema because its
 // `index_ttl` kept the 600 s default where typescript pinned 0, and box's
 // `du` slot is wired on one side and absent on the other.
-function emitResources(
+function emitVfsNames(
   name: string,
-  knownResources: string[],
+  knownVfsNames: string[],
   registry: Record<string, RegisteredCommand[]>,
   capabilities: Record<string, Capabilities | null>,
   commandIo: Record<string, CommandIoFacts>,
   configs: Record<string, ConfigFacts | null>,
 ): void {
-  const commandResources = new Set<string>()
+  const commandVfsNames = new Set<string>()
   for (const rcs of Object.values(registry)) {
-    for (const rc of rcs) if (rc.resource !== null) commandResources.add(rc.resource)
+    for (const rc of rcs) if (rc.vfs !== null) commandVfsNames.add(rc.vfs)
   }
   const payload = {
-    registry: [...knownResources].sort(compareCodePoints),
-    command_resources: [...commandResources].sort(compareCodePoints),
+    registry: [...knownVfsNames].sort(compareCodePoints),
+    command_vfs_names: [...commandVfsNames].sort(compareCodePoints),
     capabilities,
     command_io: commandIo,
     configs,
   }
-  const path = resolve(SPEC_ROOT, name, 'resources.json')
+  const path = resolve(SPEC_ROOT, name, 'vfs.json')
   writeFileSync(path, sortedStringify(payload) + '\n')
   console.log(`emitted ${payload.registry.length} registry names to ${path}`)
 }
@@ -345,10 +345,10 @@ function capabilitiesFor(
   variantPkg: string,
 ): Record<string, Capabilities | null> {
   const classes = collectClasses(PACKAGES, pkgs)
-  const names = registryClasses(resolve(PACKAGES, variantPkg, 'src', 'resource', 'registry.ts'))
+  const names = registryClasses(resolve(PACKAGES, variantPkg, 'src', 'vfs', 'registry.ts'))
   const out: Record<string, Capabilities | null> = {}
-  for (const [resource, className] of [...names].sort(([a], [b]) => compareCodePoints(a, b))) {
-    out[resource] = className === null ? null : capabilitiesOf(className, classes)
+  for (const [vfs, className] of [...names].sort(([a], [b]) => compareCodePoints(a, b))) {
+    out[vfs] = className === null ? null : capabilitiesOf(className, classes)
   }
   return out
 }
@@ -357,7 +357,7 @@ function emitVariant(
   name: string,
   pkgs: readonly string[],
   modules: ModuleBag[],
-  knownResources: string[],
+  knownVfsNames: string[],
 ): void {
   // core is in `pkgs` because its source is scanned for capabilities and
   // CommandIO facts, but only the runtime package is asserted reachable:
@@ -377,9 +377,9 @@ function emitVariant(
     writeFileSync(resolve(outDir, `${cmd}.json`), sortedStringify(payload) + '\n')
   }
   console.log(`emitted ${entries.length} specs to ${outDir}`)
-  emitResources(
+  emitVfsNames(
     name,
-    knownResources,
+    knownVfsNames,
     registry,
     capabilitiesFor(pkgs, pkgs[pkgs.length - 1] as string),
     commandIoFacts(PACKAGES, pkgs, {
@@ -387,7 +387,7 @@ function emitVariant(
       maxDuEntries: DEFAULT_MAX_DU_ENTRIES,
     }),
     configFacts(
-      resolve(PACKAGES, pkgs[pkgs.length - 1] as string, 'src', 'resource', 'registry.ts'),
+      resolve(PACKAGES, pkgs[pkgs.length - 1] as string, 'src', 'vfs', 'registry.ts'),
       PACKAGES,
     ),
   )
@@ -395,12 +395,12 @@ function emitVariant(
 
 async function main(): Promise<void> {
   const core = await coreCommandGroups()
-  emitVariant('node', ['core', 'node'], [core, Node as unknown as ModuleBag], Node.knownResources())
+  emitVariant('node', ['core', 'node'], [core, Node as unknown as ModuleBag], Node.knownVfsNames())
   emitVariant(
     'browser',
     ['core', 'browser'],
     [core, Browser as unknown as ModuleBag],
-    Browser.knownResources(),
+    Browser.knownVfsNames(),
   )
 }
 

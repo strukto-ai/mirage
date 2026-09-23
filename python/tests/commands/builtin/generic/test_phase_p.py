@@ -10,7 +10,7 @@ from mirage.types import PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(resource_path=(path).strip("/"),
+    return PathSpec(vfs_path=(path).strip("/"),
                     virtual=path,
                     directory=path,
                     resolved=True)

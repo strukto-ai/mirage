@@ -28,7 +28,7 @@
 import {
   MountMode,
   ProvisionResult,
-  S3Resource,
+  S3VFS,
   Workspace,
   type S3Config,
 } from '@struktoai/mirage-node'
@@ -86,7 +86,7 @@ async function seed(): Promise<void> {
 
 async function main(): Promise<void> {
   await seed()
-  const ws = new Workspace({ '/s3/': new S3Resource(config) }, { mode: MountMode.READ })
+  const ws = new Workspace({ '/s3/': new S3VFS(config) }, { mode: MountMode.READ })
   try {
     console.log('=== PROVISION: estimate bytes before running ===\n')
     for (const cmd of [
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
       'wc -l /s3/data/shards/2023.csv',
       'stat /s3/data/shards/2023.csv',
     ]) {
-      const p = await ws.execute(cmd, { provision: true })
+      const p = await ws.shell(cmd, { provision: true })
       if (!(p instanceof ProvisionResult)) throw new Error('expected ProvisionResult')
       const low = p.networkReadLow
       const high = p.networkReadHigh
@@ -104,16 +104,16 @@ async function main(): Promise<void> {
     }
 
     console.log('\n=== LISTING: ls + find pipelines ===\n')
-    const ls = await ws.execute('ls /s3/data/shards/')
+    const ls = await ws.shell('ls /s3/data/shards/')
     process.stdout.write(ls.stdoutText)
 
     console.log('\n--- find *.csv then head each ---')
-    const find = await ws.execute(`find /s3/data/shards -name '*.csv'`)
+    const find = await ws.shell(`find /s3/data/shards -name '*.csv'`)
     process.stdout.write(find.stdoutText)
 
     console.log('\n=== FILTERED READS: head + awk across shards ===\n')
     for (const year of [2020, 2023]) {
-      const head = await ws.execute(`head -n 3 /s3/data/shards/${String(year)}.csv`)
+      const head = await ws.shell(`head -n 3 /s3/data/shards/${String(year)}.csv`)
       console.log(`--- ${String(year)} (first 3 rows) ---`)
       process.stdout.write(head.stdoutText)
     }
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     // mirage's awk doesn't yet support "str"var concatenation or inline
     // arithmetic in print, so we keep the program minimal: sum into s,
     // count into n, then use print with commas (OFS-separated).
-    const agg = await ws.execute(
+    const agg = await ws.shell(
       `awk -F, 'NR>1 { s += $3; n += 1 } END { print s, n }' /s3/data/shards/2023.csv`,
     )
     const [sum, n] = agg.stdoutText.trim().split(/\s+/).map(Number)
@@ -132,10 +132,10 @@ async function main(): Promise<void> {
 
     console.log('\n=== CLEANUP ===')
     const cleanupWs = new Workspace(
-      { '/s3/': new S3Resource(config) },
+      { '/s3/': new S3VFS(config) },
       { mode: MountMode.WRITE },
     )
-    await cleanupWs.execute('rm -rf /s3/data')
+    await cleanupWs.shell('rm -rf /s3/data')
     await cleanupWs.close()
     console.log('  data/ removed')
   } finally {

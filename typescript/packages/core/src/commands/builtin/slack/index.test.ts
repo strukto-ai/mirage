@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 describe('SLACK_COMMANDS', () => {
@@ -39,9 +39,9 @@ describe('SLACK_COMMANDS', () => {
     }
   })
 
-  it('every command targets ResourceName.SLACK', () => {
+  it('every command targets VFSName.SLACK', () => {
     for (const cmd of SLACK_COMMANDS) {
-      expect(cmd.resource).toBe(ResourceName.SLACK)
+      expect(cmd.vfs).toBe(VFSName.SLACK)
     }
   })
 

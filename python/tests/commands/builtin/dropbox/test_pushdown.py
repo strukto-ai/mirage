@@ -20,8 +20,8 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.dropbox.pushdown import narrow_scope
 from mirage.core.dropbox.client import DropboxTokenManager
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.vfs.dropbox.config import DropboxConfig
 
 _NGLOBALS = narrow_scope.__globals__
 
@@ -40,11 +40,11 @@ def make_accessor(content_search: bool = True) -> DropboxAccessor:
 
 
 def scope() -> PathSpec:
-    return PathSpec(resource_path="", virtual="/data", directory="/data")
+    return PathSpec(vfs_path="", virtual="/data", directory="/data")
 
 
 def spec(virtual: str) -> PathSpec:
-    return PathSpec(resource_path=virtual.removeprefix("/data/"),
+    return PathSpec(vfs_path=virtual.removeprefix("/data/"),
                     virtual=virtual,
                     directory="",
                     resolved=True)

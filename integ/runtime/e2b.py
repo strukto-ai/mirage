@@ -30,10 +30,10 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError
 
 from mirage import Limit, MountMode, Workspace
-from mirage.resource.ram import RAMResource
-from mirage.resource.ssh import SSHConfig, SSHResource
 from mirage.runtime.sandbox.e2b import E2BRuntime
 from mirage.runtime.sandbox.ssh import SSHRuntime
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.ssh import SSHVFS, SSHConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -126,12 +126,12 @@ async def wait_for_remote(runtime, command):
 async def exercise_cancellation(runtime):
     workspace = Workspace(
         {
-            '/home/user': (RAMResource(), MountMode.EXEC, {
+            '/home/user': (RAMVFS(), MountMode.EXEC, {
                 'exec': Limit(timeout_seconds=5)
             })
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, 'vfs'])
+        runtimes=[runtime, 'workspace'])
     try:
         for mode in ('caller', 'timeout'):
             path = f'/home/user/mirage-cancel-{uuid.uuid4().hex}.pid'
@@ -139,8 +139,8 @@ async def exercise_cancellation(runtime):
                     f'Path("{path}").write_text(str(os.getpid())); '
                     'time.sleep(60)')
             task = asyncio.create_task(
-                workspace.execute(f'exec python3 -c {shlex.quote(code)}',
-                                  cwd='/home/user'))
+                workspace.shell(f'exec python3 -c {shlex.quote(code)}',
+                                cwd='/home/user'))
             try:
                 await wait_for_remote(runtime, f'test -s {path}')
                 survivor = asyncio.create_task(
@@ -238,25 +238,25 @@ async def main():
             await runtime.run_line('true', None, {}, '/home/user')
             assert runtime._conn is conn
             passed('python_ssh_connection_reused')
-            resource = SSHResource(SSHConfig(root='/home/user/work', **cfg))
-            workspace = Workspace({'/home/user/work': resource},
+            vfs = SSHVFS(SSHConfig(root='/home/user/work', **cfg))
+            workspace = Workspace({'/home/user/work': vfs},
                                   mode=MountMode.EXEC,
-                                  runtimes=[runtime, 'vfs'])
-            result = await workspace.execute(
-                'cat > /home/user/work/output.txt', stdin=b'old')
+                                  runtimes=[runtime, 'workspace'])
+            result = await workspace.shell('cat > /home/user/work/output.txt',
+                                           stdin=b'old')
             assert result.exit_code == 0
-            result = await workspace.execute('cat /home/user/work/output.txt')
+            result = await workspace.shell('cat /home/user/work/output.txt')
             assert await result.stdout_str() == 'old'
-            result = await workspace.execute('cat > /home/user/work/input.txt',
-                                             stdin=b'from vfs')
+            result = await workspace.shell('cat > /home/user/work/input.txt',
+                                           stdin=b'from vfs')
             assert result.exit_code == 0, await result.stderr_str()
             code = ('from pathlib import Path; p=Path("/home/user/work"); '
                     'assert (p/"input.txt").read_text()=="from vfs"; '
                     '(p/"output.txt").write_text("from ssh")')
-            result = await workspace.execute(f'python3 -c {shlex.quote(code)}',
-                                             cwd='/home/user/work')
+            result = await workspace.shell(f'python3 -c {shlex.quote(code)}',
+                                           cwd='/home/user/work')
             assert result.exit_code == 0, await result.stderr_str()
-            result = await workspace.execute('cat /home/user/work/output.txt')
+            result = await workspace.shell('cat /home/user/work/output.txt')
             assert await result.stdout_str() == 'from ssh'
             passed('python_router_shared_sftp_files')
             await sandbox.commands.run('python3 -m pip install -q mcp==1.26.0',

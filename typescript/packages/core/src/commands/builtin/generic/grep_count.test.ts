@@ -35,7 +35,7 @@ function spec(path: string): PathSpec {
     virtual: path,
     directory: path,
     resolved: true,
-    resourcePath: mountKey(path, ''),
+    vfsPath: mountKey(path, ''),
   })
 }
 
@@ -48,7 +48,7 @@ function opts(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null,
+    vfs: null,
   } as unknown as CommandOpts
 }
 

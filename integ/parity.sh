@@ -21,7 +21,7 @@ YAML=/tmp/parity-ws.yaml
 cat > "$YAML" <<'YML'
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE
 YML
 
@@ -30,7 +30,7 @@ cat > "$FUSE_YAML" <<'YML'
 mode: WRITE
 mounts:
   /:
-    resource: ram
+    vfs: ram
     backend: fuse
 YML
 
@@ -39,11 +39,11 @@ cat > "$MODES_YAML" <<'YML'
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
   /side:
-    resource: ram
+    vfs: ram
   /ro:
-    resource: ram
+    vfs: ram
     mode: READ
 profiles:
   blind:
@@ -57,7 +57,7 @@ cat > "$ASKS_YAML" <<'YML'
 mode: WRITE
 mounts:
   /:
-    resource: ram
+    vfs: ram
 profiles:
   default:
     commands:
@@ -73,7 +73,7 @@ cat > "$EXEC_YAML" <<'YML'
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
     mode: EXEC
 YML
 

@@ -207,7 +207,7 @@ async def test_read_project_json_includes_issue_refs(accessor, index):
     issues = [{
         "id": "ISSUE1",
         "identifier": "ENG-123",
-        "title": "Wire resource",
+        "title": "Wire VFS",
         "url": "https://linear.app/issue",
         "project": {
             "id": "PROJ1",

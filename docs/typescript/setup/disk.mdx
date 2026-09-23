@@ -1,10 +1,10 @@
 ---
 title: Disk
 icon: hard-drive
-description: Mount a directory on the host filesystem as a Mirage resource (Node only).
+description: Mount a directory on the host filesystem as a Mirage VFS (Node only).
 ---
 
-`DiskResource` mounts a directory on the host filesystem. Reads and writes go through `node:fs` against the configured `root`.
+`DiskVFS` mounts a directory on the host filesystem. Reads and writes go through `node:fs` against the configured `root`.
 
 <Note>
   Node only. The browser SDK has no kernel filesystem; use [OPFS](/typescript/setup/opfs) instead.
@@ -19,13 +19,13 @@ pnpm add @struktoai/mirage-node
 ## Config
 
 ```ts
-import { DiskResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { DiskVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const disk = new DiskResource({ root: '/Users/me/data' })
+const disk = new DiskVFS({ root: '/Users/me/data' })
 const ws = new Workspace({ '/disk': disk }, { mode: MountMode.WRITE })
 
-await ws.execute('echo hello | tee /disk/note.txt')
-await ws.execute('cat /disk/note.txt')
+await ws.shell('echo hello | tee /disk/note.txt')
+await ws.shell('cat /disk/note.txt')
 ```
 
 | Field | Default | Notes |
@@ -38,6 +38,6 @@ await ws.execute('cat /disk/note.txt')
 
 ## Snapshot behavior
 
-`DiskResource.toState()` captures the file tree as bytes. Loading a snapshot back doesn't re-create the directory; pass a config file with a fresh `root` if the original location changed.
+`DiskVFS.toState()` captures the file tree as bytes. Loading a snapshot back doesn't re-create the directory; pass a config file with a fresh `root` if the original location changed.
 
-For behavior shared with Python (filesystem layout, supported shell commands), see the [Python Disk docs](/python/resource/disk).
+For behavior shared with Python (filesystem layout, supported shell commands), see the [Python Disk docs](/python/vfs/disk).

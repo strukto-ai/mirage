@@ -38,7 +38,7 @@ def index():
 async def test_stat_root(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gslides", "/gslides"),
+        PathSpec(vfs_path=mount_key("/gslides", "/gslides"),
                  virtual="/gslides",
                  directory="/gslides"), index)
     assert result.type == FileType.DIRECTORY
@@ -49,7 +49,7 @@ async def test_stat_root(accessor, index):
 async def test_stat_owned_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+        PathSpec(vfs_path=mount_key("/gslides/owned", "/gslides"),
                  virtual="/gslides/owned",
                  directory="/gslides/owned"), index)
     assert result.type == FileType.DIRECTORY
@@ -70,7 +70,7 @@ async def test_stat_deck_from_cache(accessor, index):
     target = "/gslides/owned/2026-04-01_My_Deck__d1.gslide.json"
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key(target, "/gslides"),
+        PathSpec(vfs_path=mount_key(target, "/gslides"),
                  virtual=target,
                  directory=target),
         index,
@@ -99,7 +99,7 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     ) as mock_list:
         result = await stat(
             accessor,
-            PathSpec(resource_path=mount_key(target, "/gslides"),
+            PathSpec(vfs_path=mount_key(target, "/gslides"),
                      virtual=target,
                      directory=target), index)
     assert result.content == ContentType.JSON
@@ -125,7 +125,7 @@ async def test_stat_not_found_after_fallback(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(resource_path=mount_key(
-                    "/gslides/owned/nope.gslide.json", "/gslides"),
+                PathSpec(vfs_path=mount_key("/gslides/owned/nope.gslide.json",
+                                            "/gslides"),
                          virtual="/gslides/owned/nope.gslide.json",
                          directory="/gslides/owned/nope.gslide.json"), index)

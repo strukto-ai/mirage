@@ -1,7 +1,7 @@
 ---
 title: SeaweedFS
 icon: /images/seaweedfs-logo.svg
-description: Set up SeaweedFS as a MIRAGE resource from Node or the browser.
+description: Set up SeaweedFS as a MIRAGE VFS from Node or the browser.
 ---
 
 SeaweedFS speaks the S3 API with AWS Signature V4 against its S3 gateway endpoint (e.g. `http://localhost:8333`). The gateway is self-hosted, so the endpoint is required and path-style addressing is used by default.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { SeaweedFSResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { SeaweedFSVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const seaweedfs = new SeaweedFSResource({
+const seaweedfs = new SeaweedFSVFS({
   bucket: process.env.SEAWEEDFS_BUCKET!,
   endpoint: process.env.SEAWEEDFS_ENDPOINT!,
   accessKeyId: process.env.SEAWEEDFS_ACCESS_KEY!,
@@ -25,7 +25,7 @@ const seaweedfs = new SeaweedFSResource({
 })
 
 const ws = new Workspace({ '/bucket/': seaweedfs }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `SeaweedFSResource` is secret-free, your backend signs each operation using your SeaweedFS keys and returns a URL. SeaweedFS accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your gateway endpoint.
+The browser `SeaweedFSVFS` is secret-free, your backend signs each operation using your SeaweedFS keys and returns a URL. SeaweedFS accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your gateway endpoint.
 
 ### 1. Server: sign URLs with the SeaweedFS endpoint
 
@@ -95,9 +95,9 @@ SeaweedFS uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted styl
 ### 2. Browser: wire it up
 
 ```ts
-import { SeaweedFSResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { SeaweedFSVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const seaweedfs = new SeaweedFSResource({
+const seaweedfs = new SeaweedFSVFS({
   bucket: 'my-bucket',
   endpoint: 'http://localhost:8333',
   presignedUrlProvider: async (path, op, opts) => {
@@ -118,4 +118,4 @@ const ws = new Workspace({ '/bucket/': seaweedfs }, { mode: MountMode.READ })
 `endpoint` on the browser config is only used for display/logging; the actual endpoint is baked into the presigned URLs your backend returns.
 </Tip>
 
-See the [SeaweedFS resource](/python/resource/seaweedfs) docs for the equivalent Python wiring.
+See the [SeaweedFS VFS](/python/vfs/seaweedfs) docs for the equivalent Python wiring.

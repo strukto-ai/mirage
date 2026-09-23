@@ -27,7 +27,7 @@ async function runSearch(texts: string[]): Promise<[ByteSource | null, IOResult]
   if (cmd === undefined) throw new Error('search not registered')
   const opts: CommandOpts = { stdin: null, flags: {}, filetypeFns: null, cwd: '/' }
   const accessor = new Mem0Accessor({ apiKey: 'key', userId: 'alex' })
-  const scope = new PathSpec({ virtual: '/memories', directory: '/memories', resourcePath: '' })
+  const scope = new PathSpec({ virtual: '/memories', directory: '/memories', vfsPath: '' })
   const result = await cmd.fn(accessor, [scope], texts, opts)
   if (result === null) throw new Error('search returned no result')
   return result

@@ -29,7 +29,7 @@ def format_grep_results(
         messages (list[dict]): Discord message dicts from search_guild.
         prefix (str): mount prefix, e.g. ``"/discord"``.
         guild_dirname (str): vfs-safe guild dir name.
-        channel_names (dict[str, str] | None): channel_id → vfs name.
+        channel_names (dict[str, str] | None): channel_id → workspace name.
 
     Returns:
         list[str]: grep-style lines, one per matched message.

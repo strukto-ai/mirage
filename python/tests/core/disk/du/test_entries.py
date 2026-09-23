@@ -33,7 +33,7 @@ async def test_entries_returns_pairs(tmp_path):
     (tmp_path / "sub" / "b.txt").write_bytes(b"bb")
     accessor = DiskAccessor(tmp_path)
     found, total = await entries(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"))
+        accessor, PathSpec(vfs_path="", virtual="/", directory="/"))
     paths = [p for p, _ in found]
     assert "/a.txt" in paths
     assert "/sub/b.txt" in paths
@@ -50,6 +50,6 @@ async def test_entries_normalizes_native_separator(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "sep", "\\")
     accessor = DiskAccessor(tmp_path)
     found, total = await entries(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"))
+        accessor, PathSpec(vfs_path="", virtual="/", directory="/"))
     assert [p for p, _ in found] == ["/sub/b.txt"]
     assert total == 2

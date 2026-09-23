@@ -17,11 +17,11 @@ import json
 
 from mirage import MountMode, Workspace
 from mirage.observe.store import RAMObserverStore
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 
 def test_workspace_creates_default_observer():
-    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     assert ws.observer is not None
     assert isinstance(ws.observer.store, RAMObserverStore)
 
@@ -29,7 +29,7 @@ def test_workspace_creates_default_observer():
 def test_workspace_custom_observe_store():
     obs_store = RAMObserverStore()
     ws = Workspace(
-        {"/data/": RAMResource()},
+        {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
         observe=obs_store,
     )
@@ -38,10 +38,10 @@ def test_workspace_custom_observe_store():
 
 def test_logs_populated_after_execute():
     obs_store = RAMObserverStore()
-    ws = Workspace({"/data/": RAMResource()},
+    ws = Workspace({"/data/": RAMVFS()},
                    mode=MountMode.WRITE,
                    observe=obs_store)
-    asyncio.run(ws.execute("echo hello > /data/test.txt"))
+    asyncio.run(ws.shell("echo hello > /data/test.txt"))
     session_files = [k for k in obs_store.files if k.endswith(".jsonl")]
     assert len(session_files) >= 1
     data = obs_store.files[session_files[0]]
@@ -53,11 +53,11 @@ def test_logs_populated_after_execute():
 
 def test_logs_contain_op_records():
     obs_store = RAMObserverStore()
-    ws = Workspace({"/data/": RAMResource()},
+    ws = Workspace({"/data/": RAMVFS()},
                    mode=MountMode.WRITE,
                    observe=obs_store)
-    asyncio.run(ws.execute("echo hello > /data/test.txt"))
-    asyncio.run(ws.execute("cat /data/test.txt"))
+    asyncio.run(ws.shell("echo hello > /data/test.txt"))
+    asyncio.run(ws.shell("cat /data/test.txt"))
     session_files = [k for k in obs_store.files if k.endswith(".jsonl")]
     data = obs_store.files[session_files[0]]
     lines = data.decode().strip().split("\n")
@@ -67,9 +67,9 @@ def test_logs_contain_op_records():
 
 
 def test_observer_store_not_mounted():
-    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
-    asyncio.run(ws.execute("echo hi > /data/f.txt"))
-    result = asyncio.run(ws.execute("ls /.sessions"))
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    asyncio.run(ws.shell("echo hi > /data/f.txt"))
+    result = asyncio.run(ws.shell("ls /.sessions"))
     assert result.exit_code != 0
     prefixes = {m.prefix for m in ws._registry.mounts()}
     assert prefixes == {"/", "/data/", "/dev/", "/.bash_history/"}
@@ -80,9 +80,9 @@ def test_observer_store_not_mounted():
 # wiring from a command to its event would not be caught there, and the
 # /.bash_history and `history` views render fine without these fields.
 def test_execute_records_exit_code_and_cwd():
-    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
-    asyncio.run(ws.execute("echo hello > /data/test.txt"))
-    asyncio.run(ws.execute("cat /data/missing.txt"))
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    asyncio.run(ws.shell("echo hello > /data/test.txt"))
+    asyncio.run(ws.shell("cat /data/missing.txt"))
     commands = asyncio.run(ws.history())
     assert len(commands) == 2
     assert all("exit_code" in e for e in commands)
@@ -91,9 +91,9 @@ def test_execute_records_exit_code_and_cwd():
 
 
 def test_execute_records_op_source():
-    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
-    asyncio.run(ws.execute("echo hello > /data/test.txt"))
-    asyncio.run(ws.execute("cat /data/test.txt"))
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    asyncio.run(ws.shell("echo hello > /data/test.txt"))
+    asyncio.run(ws.shell("cat /data/test.txt"))
     events = asyncio.run(ws.observer.events())
     ops = [e for e in events if e["type"] == "op"]
     assert ops
@@ -102,15 +102,11 @@ def test_execute_records_op_source():
 
 
 def test_execute_records_op_path_per_mount():
-    ws = Workspace({
-        "/s3/": RAMResource(),
-        "/db/": RAMResource()
-    },
-                   mode=MountMode.WRITE)
+    ws = Workspace({"/s3/": RAMVFS(), "/db/": RAMVFS()}, mode=MountMode.WRITE)
     for line in ("echo one > /s3/report.json", "echo two > /db/report.json",
                  "cat /s3/report.json", "cat /db/report.json",
                  "cp /s3/report.json /db/copy.json"):
-        asyncio.run(ws.execute(line))
+        asyncio.run(ws.shell(line))
     events = asyncio.run(ws.observer.events())
     ops = [(e["op"], e["path"]) for e in events if e["type"] == "op"]
     assert ops == [
@@ -124,10 +120,10 @@ def test_execute_records_op_path_per_mount():
 
 
 def test_execute_records_every_event_type():
-    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
-    asyncio.run(ws.execute("echo hello > /data/test.txt"))
-    asyncio.run(ws.execute("history -s synthetic"))
-    asyncio.run(ws.execute("history -d 1"))
-    asyncio.run(ws.execute("history -c"))
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    asyncio.run(ws.shell("echo hello > /data/test.txt"))
+    asyncio.run(ws.shell("history -s synthetic"))
+    asyncio.run(ws.shell("history -d 1"))
+    asyncio.run(ws.shell("history -c"))
     events = asyncio.run(ws.observer.events())
     assert {"clear", "command", "delete", "op"} <= {e["type"] for e in events}

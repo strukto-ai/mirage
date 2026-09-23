@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.gslides import GSlidesConfig, GSlidesResource
+from mirage.vfs.gslides import GSlidesConfig, GSlidesVFS
 
 load_dotenv(".env.development")
 
@@ -28,11 +28,11 @@ config = GSlidesConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-resource = GSlidesResource(config=config)
+vfs = GSlidesVFS(config=config)
 
 
 async def main() -> None:
-    with Workspace({"/gslides/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/gslides/": vfs}, mode=MountMode.READ) as ws:
         print(
             "=== VFS MODE: open() reads from Google Slides transparently ===\n"
         )
@@ -72,7 +72,7 @@ async def main() -> None:
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

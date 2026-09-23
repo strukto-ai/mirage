@@ -15,17 +15,17 @@ The Upstash console prints a `redis-cli` line for the database. Its URL is the w
 configuration, in Node and in the browser alike.
 
 ```ts
-import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-browser'
-// or: import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RedisVFS, Workspace } from '@struktoai/mirage-browser'
+// or: import { MountMode, RedisVFS, Workspace } from '@struktoai/mirage-node'
 
-const redis = new RedisResource({
+const redis = new RedisVFS({
   url: process.env.UPSTASH_REDIS_URL!, // rediss://default:<token>@<name>.upstash.io:6379
   keyPrefix: 'mirage/',
 })
 
 const ws = new Workspace({ '/r': redis }, { mode: MountMode.WRITE })
-await ws.execute('echo "hello" | tee /r/greet')
-await ws.execute('cat /r/greet')
+await ws.shell('echo "hello" | tee /r/greet')
+await ws.shell('cat /r/greet')
 ```
 
 | Field | Default | Notes |
@@ -54,7 +54,7 @@ as raw request bodies and reads come back base64-encoded. A page over REST and a
 Redis protocol can therefore share one database at the same time, and the
 [Node example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/redis/redis_browser.ts)
 shows the two reading each other's files. Python reaches the same database with the same URL
-through its [`RedisResource`](/python/resource/redis).
+through its [`RedisVFS`](/python/vfs/redis).
 
 ## Tokens and billing
 

@@ -132,7 +132,7 @@ async function evalSource(
  * The context as one runtime's script sees it: command/builtin become
  * the first stage the runtime captures, so `ctx.command === 'python3'`
  * means what it reads as even on `cat x | python3`. A runtime with no
- * captured stage on the line (including the catch-all vfs) keeps the
+ * captured stage on the line (including the catch-all workspace) keeps the
  * line's first stage.
  */
 function ctxForRuntime(
@@ -254,7 +254,7 @@ async function evaluatePolicy(
  * bindings (an affirmative choice, never a refusal). With no verdict,
  * per-runtime scripts filter the entry list: an entry with no script
  * is always willing, and the willing entries re-bind in list order.
- * The vfs runtime is filtered exactly like the others; a command left
+ * The workspace runtime is filtered exactly like the others; a command left
  * without a willing runtime is an admission failure at dispatch.
  * Config-borne scripts run on the world's evaluator (evaluatorOf),
  * never on a hardcoded interpreter.

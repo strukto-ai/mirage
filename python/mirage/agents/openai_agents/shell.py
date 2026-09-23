@@ -30,6 +30,6 @@ class MirageShellExecutor:
         commands = request.data.action.commands
         outputs: list[str] = []
         for cmd in commands:
-            io = await self._ws.execute(cmd)
+            io = await self._ws.shell(cmd)
             outputs.append(io_to_str(io))
         return "\n".join(outputs)

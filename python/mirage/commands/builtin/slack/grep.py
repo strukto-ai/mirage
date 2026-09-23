@@ -70,10 +70,7 @@ async def grep_provision(accessor: SlackAccessor, paths: list[PathSpec],
                                      replace(opts, command=line))
 
 
-@command("grep",
-         resource="slack",
-         spec=SPECS["grep"],
-         provision=grep_provision)
+@command("grep", vfs="slack", spec=SPECS["grep"], provision=grep_provision)
 async def grep(accessor: SlackAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
@@ -88,7 +85,7 @@ async def grep(accessor: SlackAccessor, paths: list[PathSpec],
         if match.kind in NATIVE_KINDS and search_available(accessor.config):
             target = search_target(match)
             file_prefix = mount_prefix_of(operand.virtual,
-                                          operand.resource_path) or ""
+                                          operand.vfs_path) or ""
             query = build_query(pattern, target)
             # Every kind that reaches here searches messages, and each of
             # them (the root, the containers, a channel, a date dir)

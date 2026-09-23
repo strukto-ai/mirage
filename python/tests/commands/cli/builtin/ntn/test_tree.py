@@ -131,8 +131,7 @@ async def test_installed_tree_dispatches_pages_create(monkeypatch):
                         fake_create)
     ws = Workspace({})
     ws.register_cli("ntn", NTN, CONFIG)
-    io = await ws.execute(
-        "ntn pages create --content '# Hi' --parent page:root")
+    io = await ws.shell("ntn pages create --content '# Hi' --parent page:root")
     assert io.exit_code == 0
     assert (await materialize(io.stdout)) == b"P1\n"
     await ws.close()
@@ -150,7 +149,7 @@ async def test_page_id_is_taken_from_the_operand(monkeypatch):
         verb("pages", "trash").__globals__, "update_page", fake_update)
     ws = Workspace({})
     ws.register_cli("ntn", NTN, CONFIG)
-    io = await ws.execute("ntn pages trash P9 --yes")
+    io = await ws.shell("ntn pages trash P9 --yes")
     assert io.exit_code == 0
     assert seen == [("P9", {"in_trash": True})]
     await ws.close()
@@ -160,7 +159,7 @@ async def test_page_id_is_taken_from_the_operand(monkeypatch):
 async def test_malformed_filter_is_a_usage_error():
     ws = Workspace({})
     ws.register_cli("ntn", NTN, CONFIG)
-    io = await ws.execute("ntn datasources query S1 --filter '{not json'")
+    io = await ws.shell("ntn datasources query S1 --filter '{not json'")
     assert io.exit_code == 2
     assert (await materialize(io.stderr)) == b"--filter must be valid JSON\n"
     await ws.close()

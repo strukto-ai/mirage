@@ -19,7 +19,7 @@ from mirage.policy import PolicyDenied
 from mirage.shell.array import (array_count, array_extent, array_get,
                                 array_has, array_with)
 from mirage.shell.variable import ShellValue
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import (conversion_scalar, deref,
                                             ensure_var_visible, env_get,
                                             seed_var, strip_key_quotes,
@@ -29,7 +29,7 @@ from mirage.workspace.session.state import (conversion_scalar, deref,
 _ELEMENT_REF = re.compile(r"([A-Za-z_]\w*)(?:\[(.+)\])?\Z", re.DOTALL)
 
 
-async def element_is_set(session: Session,
+async def element_is_set(session: SessionState,
                          ref: str,
                          view: SessionView | None = None) -> bool:
     """Whether a ``name`` / ``name[sub]`` reference names a set value.
@@ -42,7 +42,7 @@ async def element_is_set(session: Session,
     (``[[ -v a[x=2] ]]`` leaves x at 2, as bash does).
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         ref (str): the reference as the operand spelled it.
         view (SessionView | None): the gated door the subscript's
             assignments land through; None outside a workspace.
@@ -84,7 +84,7 @@ async def element_is_set(session: Session,
     return array_has(held, idx)
 
 
-async def assign_element(session: Session,
+async def assign_element(session: SessionState,
                          view: SessionView | None,
                          name: str,
                          subscript: str | None,
@@ -100,7 +100,7 @@ async def assign_element(session: Session,
     an indexed one evaluates it as arithmetic.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         view (SessionView | None): the session plane's gated door;
             None seeds directly (a writer outside a workspace).
         name (str): the target's base variable name.

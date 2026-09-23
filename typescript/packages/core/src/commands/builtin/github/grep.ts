@@ -18,7 +18,7 @@ import { readdir as githubReaddir } from '../../../core/github/readdir.ts'
 import { stat as githubStat } from '../../../core/github/stat.ts'
 import { stream as githubStream } from '../../../core/github/read.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
+import { type FileStat, VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { prefixAggregate } from '../aggregators.ts'
@@ -77,7 +77,7 @@ async function grepCommand(
 
 export const GITHUB_GREP = command({
   name: 'grep',
-  resource: ResourceName.GITHUB,
+  vfs: VFSName.GITHUB,
   spec: specOf('grep'),
   fn: grepCommand,
   aggregate: prefixAggregate,

@@ -16,7 +16,7 @@ import asyncio
 import dataclasses
 
 from mirage import Decision, MountMode, Outcome, Scope, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 # One profile, one rule. `allow` is what the session may run at all;
 # `ask` puts one of those commands to a person before it runs.
@@ -48,14 +48,14 @@ async def reviewer(record: Decision) -> Decision:
 
 
 async def run(ws: Workspace, line: str) -> None:
-    await ws.fs.write("/data/a.txt", b"a\n")
-    res = await ws.execute(line, session_id="agent")
+    await ws.vfs.write("/data/a.txt", b"a\n")
+    res = await ws.shell(line, session_id="agent")
     how = "ran" if res.refusal is None else f"refused ({res.refusal.kind})"
     print(f"{line}: {how}, exit {res.exit_code}")
 
 
 async def main() -> None:
-    ws = Workspace({"/data/": RAMResource()},
+    ws = Workspace({"/data/": RAMVFS()},
                    mode=MountMode.WRITE,
                    profiles={"agent": ROLE},
                    on_ask=reviewer)

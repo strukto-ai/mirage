@@ -3,7 +3,7 @@ from pydantic import SecretStr
 
 from mirage.accessor.mem0 import Mem0Accessor
 from mirage.core.mem0.search import search_memories_rendered
-from mirage.resource.mem0.config import Mem0Config
+from mirage.vfs.mem0.config import Mem0Config
 
 
 class FakeClient:

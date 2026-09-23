@@ -18,19 +18,19 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
+from mirage.errors import FsCondition, posix_errno
 from mirage.policy import (Action, CommandRule, Deny, OpsContext, Policies,
                            Policy, PolicyDenied)
 from mirage.policy.rule import RulePolicy
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
-from mirage.types import (ConsistencyPolicy, FileType, HiddenPaths, MountMode,
-                          PathSpec)
+from mirage.types import FileStat, FileType, HiddenPaths, MountMode, PathSpec
 from mirage.utils.errors import ReadOnlyError
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.dispatcher.dispatcher import _MountChannel
 from mirage.workspace.mount.mount import MountEntry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 class DenyLocked(Policy):
@@ -60,7 +60,7 @@ class DenyRemnantUnlink(Policy):
 def _path(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0] or "/",
-                    resource_path="",
+                    vfs_path="",
                     raw_path=virtual,
                     resolved=True)
 
@@ -73,13 +73,13 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     mount.prefix = "/data/"
     mount.retiring = False
     mount.ensure_ready = AsyncMock()
-    mount.resource.caches_reads = True
+    mount.vfs.caches_reads = True
     mount.execute_op = AsyncMock(return_value=b"cold")
     namespace.try_mount_for = MagicMock(return_value=mount)
     namespace.registry.policies = policies
     cache = MagicMock()
     cache.get = AsyncMock(return_value=b"warm")
-    dispatcher = Dispatcher(namespace, cache, ConsistencyPolicy.LAZY)
+    dispatcher = Dispatcher(namespace, cache)
     reconciler = MagicMock()
     reconciler.may_serve_cached = AsyncMock(return_value=True)
     dispatcher._reconciler = reconciler
@@ -204,9 +204,10 @@ async def test_structure_fallback_serves_when_no_policy_objects():
 def scoped_session():
     """Bind a session whose profile hides the parent mount's own content,
     leaving the mount nested below it reachable."""
-    session = Session(session_id="agent",
-                      hidden_paths=HiddenPaths(paths=("/data/locked/other",
-                                                      "/data/locked/f.txt")))
+    session = SessionState(
+        session_id="agent",
+        hidden_paths=HiddenPaths(paths=("/data/locked/other",
+                                        "/data/locked/f.txt")))
     token = set_current_session(session)
     yield session
     reset_current_session(token)
@@ -287,22 +288,22 @@ async def test_unlink_removes_a_namespace_link():
     # backend that has never heard of the name and answers ENOENT,
     # leaving the link in place. That is what left `git checkout` unable
     # to drop a link the other branch does not have.
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("echo hi > /ram/a.txt")
-        await ws.execute("ln -s a.txt /ram/link")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
+        await ws.shell("ln -s a.txt /ram/link")
         assert ws._namespace.is_link("/ram/link")
         await ws.dispatch("unlink", PathSpec.from_str_path("/ram/link"))
         assert not ws._namespace.is_link("/ram/link")
-        listing = await ws.execute("ls /ram")
+        listing = await ws.shell("ls /ram")
         assert b"link" not in (listing.stdout or b"")
 
 
 @pytest.mark.asyncio
 async def test_unlink_of_an_ordinary_file_still_reaches_the_backend():
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("echo hi > /ram/a.txt")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
         await ws.dispatch("unlink", PathSpec.from_str_path("/ram/a.txt"))
-        listing = await ws.execute("ls /ram")
+        listing = await ws.shell("ls /ram")
         assert (listing.stdout or b"").strip() == b""
 
 
@@ -311,9 +312,9 @@ async def test_rename_moves_a_namespace_link():
     # Same fact as the unlink above, one verb along: a guest's os.rename
     # of a link forwarded to a backend that had never heard of the name,
     # so it answered ENOENT with the link still under the old one.
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("echo hi > /ram/a.txt")
-        await ws.execute("ln -s a.txt /ram/link")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
+        await ws.shell("ln -s a.txt /ram/link")
         await ws.dispatch("rename",
                           PathSpec.from_str_path("/ram/link"),
                           dst=PathSpec.from_str_path("/ram/moved"))
@@ -327,9 +328,9 @@ async def test_rename_carries_the_nodes_below_a_directory():
     # can see has to move with it: the link below the source used to
     # stay at a name the rename had emptied, so the moved directory was
     # missing it and the old name still answered readlink.
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("mkdir -p /ram/d && echo hi > /ram/d/a.txt")
-        await ws.execute("ln -s a.txt /ram/d/link")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d && echo hi > /ram/d/a.txt")
+        await ws.shell("ln -s a.txt /ram/d/link")
         await ws.dispatch("rename",
                           PathSpec.from_str_path("/ram/d"),
                           dst=PathSpec.from_str_path("/ram/e"))
@@ -345,10 +346,10 @@ async def test_rename_refuses_a_destination_holding_a_link():
     # holding one broken symlink refuses the rename). Letting the
     # backend decide replaced the directory and deleted the link with
     # it, which loses namespace state where the kernel refuses.
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
-        await ws.execute("ln -s a.txt /ram/d/link")
-        await ws.execute("ln -s gone /ram/e/stale")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
+        await ws.shell("ln -s a.txt /ram/d/link")
+        await ws.shell("ln -s gone /ram/e/stale")
         with pytest.raises(OSError) as caught:
             await ws.dispatch("rename",
                               PathSpec.from_str_path("/ram/d"),
@@ -363,9 +364,9 @@ async def test_rename_refuses_a_destination_holding_a_link():
 async def test_rename_replaces_an_empty_destination():
     # The other half of rename(2): a destination with nothing in it is
     # replaced, and the subtree re-anchors onto the new name.
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
-        await ws.execute("ln -s a.txt /ram/d/link")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("mkdir -p /ram/d /ram/e && echo hi > /ram/d/a.txt")
+        await ws.shell("ln -s a.txt /ram/d/link")
         await ws.dispatch("rename",
                           PathSpec.from_str_path("/ram/d"),
                           dst=PathSpec.from_str_path("/ram/e"))
@@ -378,9 +379,9 @@ async def test_a_no_follow_stat_answers_a_links_own_row():
     # lstat asks for the row only the node table holds. Without it every
     # surface rebuilt the row from the target string and reported epoch
     # zero, so a no-follow utime persisted and stayed invisible.
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("echo hi > /ram/a.txt")
-        await ws.execute("ln -s a.txt /ram/link")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
+        await ws.shell("ln -s a.txt /ram/link")
         link = PathSpec.from_str_path("/ram/link")
         row, _ = await ws.dispatch("stat", link, nofollow=True)
         assert row.type == FileType.SYMLINK
@@ -408,15 +409,15 @@ async def test_a_rename_replaces_a_link_at_the_destination():
     # reachable under no name at all. mv did this right at the command
     # tier, so only the surfaces below it (a guest, a kernel mount) saw
     # the broken state.
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("echo hi > /ram/a.txt")
-        await ws.execute("echo tgt > /ram/t.txt")
-        await ws.execute("ln -s t.txt /ram/link")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt")
+        await ws.shell("echo tgt > /ram/t.txt")
+        await ws.shell("ln -s t.txt /ram/link")
         await ws.dispatch("rename",
                           PathSpec.from_str_path("/ram/a.txt"),
                           dst=PathSpec.from_str_path("/ram/link"))
         assert not ws._namespace.is_link("/ram/link")
-        assert (await ws.execute("cat /ram/link")).stdout == b"hi\n"
+        assert (await ws.shell("cat /ram/link")).stdout == b"hi\n"
 
 
 @pytest.mark.asyncio
@@ -426,9 +427,9 @@ async def test_a_read_grant_refuses_link_writes_like_file_writes():
     # renamed its sibling link: the table verbs ran no mode check at
     # all, so `mounts: {"/extra": "read"}` protected everything on the
     # mount except its names.
-    with Workspace({"/extra/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("echo b > /extra/plain.txt")
-        await ws.execute("ln -s plain.txt /extra/lk")
+    with Workspace({"/extra/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo b > /extra/plain.txt")
+        await ws.shell("ln -s plain.txt /extra/lk")
         sess = ws.create_session("agent", mounts={"/extra/": "read"})
         token = set_current_session(sess)
         try:
@@ -456,8 +457,8 @@ async def test_a_read_mount_still_takes_a_link_sessionless():
     # backend cannot write, and a symlink is namespace state needing no
     # write capability from it -- which is why a link above postgres,
     # mongodb, chroma and qdrant (all mounted read) is pinned working in
-    # integ/resources/<svc>/sym.json. Only a session grant binds here.
-    with Workspace({"/ro/": (RAMResource(), MountMode.READ)}) as ws:
+    # integ/vfs/<svc>/sym.json. Only a session grant binds here.
+    with Workspace({"/ro/": (RAMVFS(), MountMode.READ)}) as ws:
         await ws.dispatch("symlink",
                           PathSpec.from_str_path("/ro/lk"),
                           target="t")
@@ -478,11 +479,10 @@ async def test_a_rename_destination_is_judged_on_its_own_turf():
     # of a rename. The grant is what binds, so both mounts are writable
     # and the session is the only thing narrowing either.
     with Workspace({
-            "/rw/": RAMResource(),
-            "/ro/": RAMResource()
-    },
-                   mode=MountMode.WRITE) as ws:
-        await ws.execute("ln -s t /rw/lk")
+            "/rw/": RAMVFS(),
+            "/ro/": RAMVFS()
+    }, mode=MountMode.WRITE) as ws:
+        await ws.shell("ln -s t /rw/lk")
         sess = ws.create_session("agent",
                                  mounts={
                                      "/rw/": "write",
@@ -508,14 +508,14 @@ async def test_symlink_refuses_an_occupied_name(occupied):
     # tell: a file and a directory are the backend's, a link is the node
     # table's, and a mount root is the registry's. Unchecked, the node
     # went on top and buried whatever was there.
-    with Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.execute("echo hi > /ram/a.txt; mkdir /ram/d")
-        await ws.execute("ln -s a.txt /ram/link")
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo hi > /ram/a.txt; mkdir /ram/d")
+        await ws.shell("ln -s a.txt /ram/link")
         with pytest.raises(FileExistsError):
             await ws.dispatch("symlink",
                               PathSpec.from_str_path(occupied),
                               target="elsewhere")
-        assert (await ws.execute("cat /ram/a.txt")).stdout == b"hi\n"
+        assert (await ws.shell("cat /ram/a.txt")).stdout == b"hi\n"
 
 
 @pytest.mark.asyncio
@@ -557,14 +557,14 @@ async def test_the_remnant_channel_invalidates_each_deletion():
 
 @pytest.mark.asyncio
 async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
-    # A direct dispatcher caller (FUSE, ws.fs) establishes no
+    # A direct dispatcher caller (FUSE, ws.vfs) establishes no
     # cache-manager context, so the cores' own invalidation cannot land
     # during the remnant cascade; every deletion must reach the
     # dispatcher's write invalidation, not only the rmdir target, or
     # the cached listings and bodies below the directory survive its
     # deletion.
-    ws = Workspace({"/a": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+    ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
     assert io.exit_code == 0, io.stderr
     sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
     recorded: list[str] = []
@@ -577,13 +577,13 @@ async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
     monkeypatch.setattr(Dispatcher, "invalidate_after_write", spy)
     token = set_current_session(sess)
     try:
-        await ws.fs.rmdir("/a/d")
+        await ws.vfs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     assert "/a/d/sec/k" in recorded
     assert "/a/d/sec" in recorded
     assert "/a/d" in recorded
-    gone = await ws.execute("test -e /a/d")
+    gone = await ws.shell("test -e /a/d")
     assert gone.exit_code == 1
 
 
@@ -594,20 +594,20 @@ async def test_a_policy_denied_remnant_keeps_the_refusal():
     # policy that protects the hidden file refuses its unlink, the
     # cascade folds the denial into the original not-empty refusal,
     # and the protected content survives.
-    ws = Workspace({"/a": RAMResource()},
+    ws = Workspace({"/a": RAMVFS()},
                    mode=MountMode.WRITE,
                    policies=[DenyRemnantUnlink()])
-    io = await ws.execute("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
     assert io.exit_code == 0, io.stderr
     sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
     token = set_current_session(sess)
     try:
         with pytest.raises(OSError) as exc:
-            await ws.fs.rmdir("/a/d")
+            await ws.vfs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
-    kept = await ws.execute("cat /a/d/sec/k")
+    kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
 
 
@@ -616,9 +616,9 @@ async def test_ops_rmdir_takes_hidden_namespace_links_with_it():
     # A hidden link is invisible to every backend, so the cascade walk
     # cannot take it; left in the node table it synthesizes /a/d right
     # back once the hide lifts, resurfacing the removed tree.
-    ws = Workspace({"/a": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k"
-                          " && ln -s /a/t /a/d/lnk")
+    ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k"
+                        " && ln -s /a/t /a/d/lnk")
     assert io.exit_code == 0, io.stderr
     sess = ws.create_session(
         "rev", profile={"paths": {
@@ -626,13 +626,13 @@ async def test_ops_rmdir_takes_hidden_namespace_links_with_it():
         }})
     token = set_current_session(sess)
     try:
-        await ws.fs.rmdir("/a/d")
+        await ws.vfs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     # No session, no hides: the tree must be gone, link included.
-    linkless = await ws.execute("readlink /a/d/lnk")
+    linkless = await ws.shell("readlink /a/d/lnk")
     assert linkless.exit_code != 0
-    gone = await ws.execute("test -e /a/d")
+    gone = await ws.shell("test -e /a/d")
     assert gone.exit_code == 1
 
 
@@ -641,21 +641,21 @@ async def test_a_visible_link_below_keeps_the_rmdir_refusal():
     # A visible link joins the merged emptiness judgment, so the
     # refusal stands and nothing (backend remnant or node table) is
     # destroyed.
-    ws = Workspace({"/a": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k"
-                          " && ln -s /a/t /a/d/lnk")
+    ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k"
+                        " && ln -s /a/t /a/d/lnk")
     assert io.exit_code == 0, io.stderr
     sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
     token = set_current_session(sess)
     try:
         with pytest.raises(OSError) as exc:
-            await ws.fs.rmdir("/a/d")
+            await ws.vfs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
-    kept = await ws.execute("cat /a/d/sec/k")
+    kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
-    link = await ws.execute("readlink /a/d/lnk")
+    link = await ws.shell("readlink /a/d/lnk")
     assert link.exit_code == 0
 
 
@@ -664,8 +664,8 @@ async def test_a_non_oserror_cascade_failure_keeps_the_refusal(monkeypatch):
     # An API backend's failure is not always an errno (box raises its
     # own error type); a raw backend exception escaping the fold would
     # reveal exactly what the refusal exists to hide.
-    ws = Workspace({"/a": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
+    ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
     assert io.exit_code == 0, io.stderr
     sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
     real = MountEntry.execute_op
@@ -679,11 +679,11 @@ async def test_a_non_oserror_cascade_failure_keeps_the_refusal(monkeypatch):
     token = set_current_session(sess)
     try:
         with pytest.raises(OSError) as exc:
-            await ws.fs.rmdir("/a/d")
+            await ws.vfs.rmdir("/a/d")
     finally:
         reset_current_session(token)
     assert exc.value.errno in (errno.ENOTEMPTY, errno.EEXIST)
-    kept = await ws.execute("cat /a/d/sec/k")
+    kept = await ws.shell("cat /a/d/sec/k")
     assert (kept.stdout or b"") == b"k\n"
 
 
@@ -694,18 +694,17 @@ async def test_a_directory_rename_drops_the_listing_cached_below_it(tmp_path):
     # longer there and landed the source inside it.
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "readme.md").write_text("notes\n", encoding="utf-8")
-    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+    with Workspace({"/disk/": DiskVFS(root=str(tmp_path))},
                    mode=MountMode.WRITE) as ws:
-        listed = await ws.execute("ls /disk/docs")
+        listed = await ws.shell("ls /disk/docs")
         assert listed.stdout == b"readme.md\n"
         await ws.dispatch("rename",
                           PathSpec.from_str_path("/disk/docs"),
                           dst=PathSpec.from_str_path("/disk/moved"))
-        gone = await ws.execute("test -d /disk/docs && echo stale || echo gone"
-                                )
+        gone = await ws.shell("test -d /disk/docs && echo stale || echo gone")
         assert gone.stdout == b"gone\n"
-        assert (await ws.execute("ls /disk/docs")).exit_code != 0
-        assert (await ws.execute("ls /disk/moved")).stdout == b"readme.md\n"
+        assert (await ws.shell("ls /disk/docs")).exit_code != 0
+        assert (await ws.shell("ls /disk/moved")).stdout == b"readme.md\n"
 
 
 @pytest.mark.asyncio
@@ -715,9 +714,9 @@ async def test_a_rename_carries_the_node_at_the_source(tmp_path):
     # name: the landing read as the unclamped file and whatever was
     # created at the old name next inherited the overlay.
     (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
-    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+    with Workspace({"/disk/": DiskVFS(root=str(tmp_path))},
                    mode=MountMode.WRITE) as ws:
-        assert (await ws.execute("chmod 400 /disk/a.txt")).exit_code == 0
+        assert (await ws.shell("chmod 400 /disk/a.txt")).exit_code == 0
         assert ws.namespace.meta_for("/disk/a.txt").mode == 0o400
         await ws.dispatch("rename",
                           PathSpec.from_str_path("/disk/a.txt"),
@@ -732,10 +731,105 @@ async def test_a_rename_replaces_the_node_at_the_landing(tmp_path):
     # with it rather than staying to shadow what just landed.
     (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
     (tmp_path / "b.txt").write_text("two\n", encoding="utf-8")
-    with Workspace({"/disk/": DiskResource(root=str(tmp_path))},
+    with Workspace({"/disk/": DiskVFS(root=str(tmp_path))},
                    mode=MountMode.WRITE) as ws:
-        assert (await ws.execute("chmod 400 /disk/b.txt")).exit_code == 0
+        assert (await ws.shell("chmod 400 /disk/b.txt")).exit_code == 0
         await ws.dispatch("rename",
                           PathSpec.from_str_path("/disk/a.txt"),
                           dst=PathSpec.from_str_path("/disk/b.txt"))
         assert ws.namespace.meta_for("/disk/b.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_xattrs_are_stored_on_the_node_and_listed_sorted():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f")
+        await ws.vfs.setxattr("/r/f", "user.b", b"two")
+        await ws.vfs.setxattr("/r/f", "user.a", b"one")
+        assert await ws.vfs.listxattr("/r/f") == ["user.a", "user.b"]
+        assert await ws.vfs.getxattr("/r/f", "user.b") == b"two"
+        await ws.vfs.removexattr("/r/f", "user.b")
+        assert await ws.vfs.listxattr("/r/f") == ["user.a"]
+        with pytest.raises(OSError) as missing:
+            await ws.vfs.getxattr("/r/f", "user.b")
+        assert missing.value.errno == posix_errno(FsCondition.NO_XATTR)
+
+
+@pytest.mark.asyncio
+async def test_xattr_flags_refuse_the_way_setxattr_2_does():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f")
+        await ws.vfs.setxattr("/r/f", "user.a", b"one")
+        with pytest.raises(FileExistsError):
+            await ws.vfs.setxattr("/r/f", "user.a", b"two", create=True)
+        with pytest.raises(OSError) as absent:
+            await ws.vfs.setxattr("/r/f", "user.q", b"x", replace=True)
+        assert absent.value.errno == posix_errno(FsCondition.NO_XATTR)
+        await ws.vfs.setxattr("/r/f", "user.a", b"two", replace=True)
+        assert await ws.vfs.getxattr("/r/f", "user.a") == b"two"
+
+
+@pytest.mark.asyncio
+async def test_a_backend_stat_extra_is_not_an_attribute():
+    dispatcher, _ = _dispatcher(Policies())
+    dispatcher._namespace.is_link = MagicMock(return_value=False)
+    dispatcher._namespace.xattrs = MagicMock(return_value={"user.tag": b"t"})
+    dispatcher._namespace.try_mount_for.return_value.execute_op = AsyncMock(
+        return_value=FileStat(
+            name="d", type=FileType.DIRECTORY, extra={"file_id": "1AbC"}))
+    listed, _ = await dispatcher.dispatch("listxattr", _path("/data/d"))
+    assert listed == ["user.tag"]
+
+
+@pytest.mark.asyncio
+async def test_setxattr_and_removexattr_classify_as_writes():
+    policies = Policies()
+    policies.add(DenyWrites())
+    dispatcher, _ = _dispatcher(policies)
+    for op in ("setxattr", "removexattr"):
+        with pytest.raises(PolicyDenied):
+            await dispatcher.dispatch(op, _path("/data/a.txt"), name="user.a")
+
+
+@pytest.mark.asyncio
+async def test_an_xattr_op_on_a_missing_path_is_enoent():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.listxattr("/r/nope")
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.setxattr("/r/nope", "user.a", b"x")
+        assert ws.namespace.meta_for("/r/nope") is None
+
+
+@pytest.mark.asyncio
+async def test_a_removed_file_takes_its_xattrs_with_it():
+    # Removed through the door rather than the shell's rm, the node
+    # stayed, and a file created at the name next read back the old
+    # file's attributes.
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f")
+        await ws.vfs.setxattr("/r/f", "user.a", b"one")
+        await ws.vfs.unlink("/r/f")
+        await ws.shell("echo y > /r/f")
+        assert await ws.vfs.listxattr("/r/f") == []
+
+
+@pytest.mark.asyncio
+async def test_a_rename_carries_xattrs():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f")
+        await ws.vfs.setxattr("/r/f", "user.a", b"one")
+        await ws.vfs.rename("/r/f", "/r/g")
+        assert await ws.vfs.getxattr("/r/g", "user.a") == b"one"
+        assert ws.namespace.meta_for("/r/f") is None
+
+
+@pytest.mark.asyncio
+async def test_nofollow_reads_the_links_own_xattrs():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f && ln -s f /r/lk")
+        await ws.vfs.setxattr("/r/lk", "user.target", b"t")
+        await ws.vfs.setxattr("/r/lk", "user.own", b"o", nofollow=True)
+        assert await ws.vfs.listxattr("/r/lk") == ["user.target"]
+        assert await ws.vfs.listxattr("/r/lk", nofollow=True) == ["user.own"]
+        assert ws.namespace.readlink("/r/lk") == "f"

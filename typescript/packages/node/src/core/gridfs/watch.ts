@@ -41,7 +41,7 @@ class GridFSWalk {
 
   async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
     const config = this.accessor.config
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const pfx = gridfsPrefix(rawPathOf(root), config)
     const files: string[] = []
     const markers: string[] = []

@@ -16,7 +16,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import { describe, expect, it } from 'vitest'
 import { runWithRecording } from '../../observe/context.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import { RAMStore } from '../../resource/ram/store.ts'
+import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
 import { stream } from './stream.ts'
 
@@ -28,7 +28,7 @@ function mkPath(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: stripSlash(virtual),
+    vfsPath: stripSlash(virtual),
     resolved: true,
   })
 }

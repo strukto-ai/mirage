@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QdrantAccessor } from '../../../accessor/qdrant.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { QDRANT_IO } from './io.ts'
@@ -22,7 +22,7 @@ import { QDRANT_SEARCH } from './search.ts'
 const QDRANT_OVERRIDES = new Set(['search'])
 
 export const QDRANT_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<QdrantAccessor>(ResourceName.QDRANT, QDRANT_IO, {
+  ...makeGenericCommands<QdrantAccessor>(VFSName.QDRANT, QDRANT_IO, {
     overrides: QDRANT_OVERRIDES,
   }),
   ...QDRANT_SEARCH,

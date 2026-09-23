@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { resolvePath } from '../../../../utils/path.ts'
+import { PathSpec } from '../../../../types.ts'
 import { mktempGeneric } from '../../generic/mktemp.ts'
 import type { Builder } from '../adapter.ts'
 
@@ -27,8 +29,18 @@ export const MKTEMP_BUILDER: Builder = {
     return mktempGeneric(
       texts,
       opts,
-      (p, parents) => mkdir(accessor, p, parents),
-      (p, d) => write(accessor, p, d),
+      async (p, parents) => {
+        if (opts.dispatch !== undefined)
+          await opts.dispatch('mkdir', PathSpec.fromStrPath(resolvePath(p.virtual, opts.cwd)), [], {
+            parents: parents ?? false,
+          })
+        else await mkdir(accessor, p, parents)
+      },
+      async (p, d) => {
+        if (opts.dispatch !== undefined)
+          await opts.dispatch('write', PathSpec.fromStrPath(resolvePath(p.virtual, opts.cwd)), [d])
+        else await write(accessor, p, d)
+      },
     )
   },
 }

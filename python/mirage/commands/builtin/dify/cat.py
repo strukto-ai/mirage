@@ -19,7 +19,7 @@ def make_cat(ops: CommandIO):
             ``read_stream`` already serve cached bytes when warm.
     """
 
-    @command("cat", resource="dify", spec=SPECS["cat"])
+    @command("cat", vfs="dify", spec=SPECS["cat"])
     async def cat(
         accessor: DifyAccessor,
         paths: list[PathSpec],

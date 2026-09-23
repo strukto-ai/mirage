@@ -98,15 +98,15 @@ export function mountKey(virtual: string, prefix: string): string {
  *
  * A child shares the parent's mount prefix, so its key is the child
  * virtual path with the same prefix removed. The prefix length is
- * recovered from the parent's `virtual`/`resourcePath` pair, so no mount
+ * recovered from the parent's `virtual`/`vfsPath` pair, so no mount
  * context is needed.
  *
  * Example:
  *   rekey('/data/sub', 'sub', '/data/sub/x.txt')  -> 'sub/x.txt'
  *   rekey('/data', '', '/data/x.txt')             -> 'x.txt'
  */
-export function rekey(parentVirtual: string, parentResourcePath: string, child: string): string {
-  const prefixLen = rstripSlash(parentVirtual).length - parentResourcePath.length
+export function rekey(parentVirtual: string, parentVfsPath: string, child: string): string {
+  const prefixLen = rstripSlash(parentVirtual).length - parentVfsPath.length
   return stripSlash(child.slice(prefixLen))
 }
 
@@ -121,8 +121,8 @@ export function rekey(parentVirtual: string, parentResourcePath: string, child: 
  *   mountPrefixOf('/data', '')         -> '/data'
  *   mountPrefixOf('/x.txt', 'x.txt')   -> ''
  */
-export function mountPrefixOf(virtual: string, resourcePath: string): string {
-  const prefixLen = rstripSlash(virtual).length - resourcePath.length
+export function mountPrefixOf(virtual: string, vfsPath: string): string {
+  const prefixLen = rstripSlash(virtual).length - vfsPath.length
   return rstripSlash(virtual.slice(0, prefixLen))
 }
 
@@ -131,7 +131,7 @@ export function mountPrefixOf(virtual: string, resourcePath: string): string {
 // only a key (an ancestor it walked to, say) can name it the way the user
 // would see it. Mirrors Python's mounted_path.
 export function mountedPath(root: PathSpec, mountPath: string): PathSpec {
-  const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+  const prefix = mountPrefixOf(root.virtual, root.vfsPath)
   const virtual = prefix !== '' ? prefix + mountPath : mountPath
   return PathSpec.fromStrPath(virtual, stripSlash(mountPath))
 }

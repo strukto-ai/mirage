@@ -63,7 +63,7 @@ async def test_metadata_probes_preserve_both_paths(prefix, root):
                                   root.lstrip("/"))
     assert await build(ops)(object(), path, type="f",
                             min_size=1) == ["/api/reference"]
-    assert {(p.virtual, p.resource_path)
+    assert {(p.virtual, p.vfs_path)
             for p in ops.probes} == {((prefix + key).rstrip("/")
                                       or "/", key.lstrip("/"))
                                      for key in keys}

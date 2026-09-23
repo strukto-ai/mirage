@@ -19,7 +19,7 @@
               "machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -45,7 +45,7 @@
               "machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -70,7 +70,7 @@
               "machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -100,7 +100,7 @@
               }
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -126,7 +126,7 @@
               "machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -152,11 +152,11 @@
               "machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"
             }
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "limits": {
               "sleep": {
                 "timeout_seconds": 1
@@ -187,7 +187,7 @@
               "machine": "${MIRAGE_INTEG_SMOLVM_MACHINE}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [

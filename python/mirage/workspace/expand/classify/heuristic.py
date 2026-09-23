@@ -57,7 +57,7 @@ def classify_word(word: str, registry: MountRegistry,
         path = posixpath.normpath(word)
         if not is_dir and path + "/" == mount.prefix:
             is_dir = True
-        resource_path = mount_key(path, mount.prefix.rstrip("/"))
+        vfs_path = mount_key(path, mount.prefix.rstrip("/"))
         # `raw_path` keeps the spelling as typed, the way `relative_spec`
         # does: `virtual` has already lost any `..`, and `cd -P` has to
         # resolve the link a `..` follows before applying it.
@@ -66,7 +66,7 @@ def classify_word(word: str, registry: MountRegistry,
             return PathSpec(
                 virtual=path,
                 directory=path[:last_slash + 1],
-                resource_path=resource_path,
+                vfs_path=vfs_path,
                 pattern=path[last_slash + 1:],
                 raw_path=word,
                 resolved=False,
@@ -74,14 +74,14 @@ def classify_word(word: str, registry: MountRegistry,
         if is_dir:
             return PathSpec(virtual=path,
                             directory=path + "/",
-                            resource_path=resource_path,
+                            vfs_path=vfs_path,
                             raw_path=word,
                             resolved=False)
         last_slash = path.rfind("/")
         return PathSpec(
             virtual=path,
             directory=path[:last_slash + 1],
-            resource_path=resource_path,
+            vfs_path=vfs_path,
             raw_path=word,
             resolved=True,
         )

@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { OpsRegistry } from '../../ops/registry.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../shell/parse/index.ts'
 import { MountMode, type Refusal } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -37,24 +37,24 @@ const DEC = new TextDecoder()
 
 export interface TestWorkspace {
   ws: Workspace
-  s3: RAMResource
-  disk: RAMResource
-  ram: RAMResource
+  s3: RAMVFS
+  disk: RAMVFS
+  ram: RAMVFS
 }
 
-function putFile(res: RAMResource, path: string, data: string | Uint8Array): void {
+function putFile(res: RAMVFS, path: string, data: string | Uint8Array): void {
   res.store.files.set(path, typeof data === 'string' ? ENC.encode(data) : data)
 }
 
-function putDir(res: RAMResource, path: string): void {
+function putDir(res: RAMVFS, path: string): void {
   res.store.dirs.add(path)
 }
 
 export async function makeWorkspace(extra: { agentId?: string } = {}): Promise<TestWorkspace> {
   const parser = await getTestParser()
-  const s3 = new RAMResource()
-  const disk = new RAMResource()
-  const ram = new RAMResource()
+  const s3 = new RAMVFS()
+  const disk = new RAMVFS()
+  const ram = new RAMVFS()
 
   putFile(s3, '/report.csv', 'name,age\nalice,30\nbob,25\n')
   putFile(s3, '/data.txt', 'hello from s3\n')
@@ -76,9 +76,9 @@ export async function makeWorkspace(extra: { agentId?: string } = {}): Promise<T
   putFile(ram, '/words.txt', 'banana\napple\ncherry\napple\n')
 
   const registry = new OpsRegistry()
-  registry.registerResource(s3)
-  registry.registerResource(disk)
-  registry.registerResource(ram)
+  registry.registerVfs(s3)
+  registry.registerVfs(disk)
+  registry.registerVfs(ram)
 
   const ws = new Workspace(
     { '/s3': s3, '/disk': disk, '/ram': ram },

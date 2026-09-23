@@ -54,7 +54,7 @@ export async function narrowPaths(
 ): Promise<PathSpec[] | null> {
   const first = paths[0]
   if (first === undefined) return []
-  const mountPrefix = mountPrefixOf(first.virtual, first.resourcePath)
+  const mountPrefix = mountPrefixOf(first.virtual, first.vfsPath)
   const root = accessor.rootPath
   const narrowed: PathSpec[] = []
   for (const p of paths) {
@@ -82,7 +82,7 @@ export async function narrowPaths(
         new PathSpec({
           virtual,
           directory: '',
-          resourcePath: mountKey(virtual, mountPrefix),
+          vfsPath: mountKey(virtual, mountPrefix),
           resolved: true,
           rawPath: respellRaw([virtual], p.virtual, p.rawPath)[0] ?? virtual,
         }),

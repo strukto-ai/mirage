@@ -28,7 +28,7 @@ mode: EXEC
 
 mounts:
   /data:
-    resource: s3
+    vfs: s3
     config:
       bucket: ${AWS_S3_BUCKET}
       region: ${AWS_DEFAULT_REGION}
@@ -42,4 +42,4 @@ runtimes:
     config:
       sandbox_id: ${DAYTONA_SANDBOX_ID} # a sandbox you created and provisioned
       api_key: ${DAYTONA_API_KEY}
-  - vfs
+  - workspace

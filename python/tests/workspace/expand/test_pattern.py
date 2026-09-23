@@ -21,7 +21,7 @@ from mirage.shell.parse import parse
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
 from mirage.workspace.expand.pattern import _unquoted_pattern, expand_pattern
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
 
@@ -33,7 +33,7 @@ def _expand(snippet: str, env: dict[str, str] | None = None) -> str:
     root = parse(f"case x in {snippet}) :;; esac")
     patterns = get_case_items(root.children[0])[0][0]
     assert len(patterns) == 1
-    session = Session(session_id="t", vars=vars_from_env(env or {}))
+    session = SessionState(session_id="t", vars=vars_from_env(env or {}))
     return asyncio.run(expand_pattern(patterns[0], session, _fail_exec))
 
 

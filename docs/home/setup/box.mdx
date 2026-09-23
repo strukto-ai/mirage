@@ -6,7 +6,7 @@ description: Set up Box OAuth2 credentials and obtain a refresh token (Python, N
 
 ## Overview
 
-The Box resource uses OAuth2 against the [Box v2 API](https://developer.box.com/reference/) to:
+The Box VFS uses OAuth2 against the [Box v2 API](https://developer.box.com/reference/) to:
 
 - **`/folders/{id}/items`**, list folder items (root id is `0`)
 - **`/files/{id}/content`**, download file bytes
@@ -36,7 +36,7 @@ want to persist it across restarts (the browser example does this with `localSto
 
 ## Quick Start: Developer Token (60 minutes, no OAuth)
 
-If you just want to try the resource against your own Box account, the developer token is the
+If you just want to try the VFS against your own Box account, the developer token is the
 fastest path, no redirect URI, no client secret, no curl exchange:
 
 1. Go to https://app.box.com/developers/console -> **Create New App** -> **Custom App** ->
@@ -52,7 +52,7 @@ fastest path, no redirect URI, no client secret, no curl exchange:
 The token expires in **60 minutes** and there is no programmatic way to renew it; you regenerate
 by hand. For long-running processes, use the OAuth flow below instead.
 
-When `BOX_DEVELOPER_TOKEN` is set, the `BoxResource` skips the OAuth refresh path entirely and
+When `BOX_DEVELOPER_TOKEN` is set, the `BoxVFS` skips the OAuth refresh path entirely and
 calls Box directly with the token in the `Authorization: Bearer` header.
 
 ## Setup (long-running OAuth flow)
@@ -190,9 +190,9 @@ slash; protocol matters).
 For TypeScript usage:
 
 ```ts
-import { BoxResource } from '@struktoai/mirage-node'
+import { BoxVFS } from '@struktoai/mirage-node'
 
-const box = new BoxResource({
+const box = new BoxVFS({
   clientId: process.env.BOX_CLIENT_ID!,
   clientSecret: process.env.BOX_CLIENT_SECRET!,
   refreshToken: process.env.BOX_REFRESH_TOKEN!,
@@ -202,21 +202,21 @@ const box = new BoxResource({
 Or browser (PKCE):
 
 ```ts
-import { BoxResource } from '@struktoai/mirage-browser'
+import { BoxVFS } from '@struktoai/mirage-browser'
 
-const box = new BoxResource({
+const box = new BoxVFS({
   clientId: 'YOUR_CLIENT_ID',
   refreshToken: refreshTokenFromLocalStorage,
   onRefreshTokenRotated: (next) => localStorage.setItem('box-refresh', next),
 })
 ```
 
-For Python usage (same credentials), see [Box (Python)](/python/resource/box):
+For Python usage (same credentials), see [Box (Python)](/python/vfs/box):
 
 ```python
-from mirage.resource.box import BoxConfig, BoxResource
+from mirage.vfs.box import BoxConfig, BoxVFS
 
-resource = BoxResource(BoxConfig(
+vfs = BoxVFS(BoxConfig(
     client_id=os.environ["BOX_CLIENT_ID"],
     client_secret=os.environ["BOX_CLIENT_SECRET"],
     refresh_token=os.environ["BOX_REFRESH_TOKEN"],

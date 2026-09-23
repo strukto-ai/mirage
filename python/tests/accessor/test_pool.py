@@ -204,10 +204,10 @@ def test_a_failed_release_keeps_the_entry_retryable():
 def test_close_reports_a_failed_release_instead_of_logging_it():
     """A swallowed failure makes the caller record itself as closed.
 
-    `Resource.close` sets `_closed` once this returns and then returns early
+    `VFS.close` sets `_closed` once this returns and then returns early
     forever after, so logging here would mean the retained entry is never
     reachable again: retryable in this class and permanently leaked in the
-    resource above it.
+    VFS above it.
     """
     opened, released, counter = [], [], [0]
     cache = LoopClientCache("test")

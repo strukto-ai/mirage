@@ -71,7 +71,9 @@ describe('scriptEngine', () => {
   })
 
   it('refuses a runtime that cannot evaluate', () => {
-    expect(() => scriptEngine(new ScriptSource('...', 'js'), 'vfs')).toThrow(/cannot evaluate one/)
+    expect(() => scriptEngine(new ScriptSource('...', 'js'), 'workspace')).toThrow(
+      /cannot evaluate one/,
+    )
   })
 
   it('refuses an unknown runtime', () => {

@@ -37,7 +37,7 @@ export function relativeSpec(
   const lastSlash = path.lastIndexOf('/')
   if (hasGlob(word)) {
     return new PathSpec({
-      resourcePath: stripSlash(path),
+      vfsPath: stripSlash(path),
       virtual: path,
       directory: path.slice(0, lastSlash + 1),
       pattern: path.slice(lastSlash + 1),
@@ -46,7 +46,7 @@ export function relativeSpec(
     })
   }
   return new PathSpec({
-    resourcePath: stripSlash(path),
+    vfsPath: stripSlash(path),
     virtual: path,
     directory: path.slice(0, lastSlash + 1),
     resolved: true,

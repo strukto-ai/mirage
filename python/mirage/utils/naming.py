@@ -63,7 +63,7 @@ def make_id_name(
 ) -> str:
     """Build a name with embedded ID for VFS paths.
 
-    Used by resources that encode resource IDs in filenames
+    Used by mounts that encode resource IDs in filenames
     for reverse lookups (Discord, Slack, gcal calendars, Linear, Trello).
 
     By default applies the full ``sanitize_name`` transform: replaces
@@ -83,7 +83,7 @@ def make_id_name(
 
     Args:
         display_name (str): human-readable name from the API.
-        resource_id (str): resource-specific unique ID.
+        resource_id (str): VFS-specific unique ID.
         path_safe (bool): if True, preserve spelling and only escape
             the path separator. Otherwise apply full sanitization.
         suffix (str): file extension to append; pass it here rather than

@@ -24,7 +24,7 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 async def _check_cache_hits(
@@ -82,7 +82,7 @@ def _mount_groups(registry: MountRegistry,
 async def handle_command_provision(
     registry: MountRegistry,
     parts: list[str | PathSpec],
-    session: Session,
+    session: SessionState,
     namespace: Namespace | None = None,
 ) -> ProvisionResult:
     """Estimate cost of a simple command.
@@ -152,14 +152,14 @@ async def handle_command_provision(
                                    precision=Precision.UNKNOWN)
 
         mount_prefix = mount.prefix.rstrip("/")
-        resource_scopes = []
+        vfs_scopes = []
         for i, p in enumerate(parts[1:], start=1):
             if isinstance(p, PathSpec):
                 scoped = dataclasses.replace(p,
-                                             resource_path=mount_key(
+                                             vfs_path=mount_key(
                                                  p.virtual, mount_prefix))
                 parts[i] = scoped
-                resource_scopes.append(scoped)
+                vfs_scopes.append(scoped)
 
         # Parse flags so plan functions receive them as kwargs (e.g. r=True)
         argv = [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]]
@@ -184,15 +184,15 @@ async def handle_command_provision(
                 virtual=session.cwd,
                 directory=session.cwd,
                 resolved=False,
-                resource_path=mount_key(session.cwd, mount_prefix),
+                vfs_path=mount_key(session.cwd, mount_prefix),
             ),
             mount_prefix=mount_prefix,
             command=cmd_str,
             spec=spec,
             index=mount.index,
         )
-        result = await cmd.provision_fn(mount.resource.accessor,
-                                        resource_scopes, text_args, opts)
+        result = await cmd.provision_fn(mount.vfs.accessor, vfs_scopes,
+                                        text_args, opts)
         if not result.command:
             result.command = cmd_str
 

@@ -63,7 +63,7 @@ describe('readSnapshotTar path-traversal defense', () => {
         {
           index: 0,
           prefix: '/m',
-          resource_state: {
+          vfs_state: {
             type: 'ram',
             files: { '/x': { [BLOB_REF_KEY]: '../../etc/passwd' } },
           },
@@ -85,7 +85,7 @@ describe('readSnapshotTar path-traversal defense', () => {
         {
           index: 0,
           prefix: '/m',
-          resource_state: {
+          vfs_state: {
             type: 'ram',
             files: { '/x': { [BLOB_REF_KEY]: '/abs/path' } },
           },

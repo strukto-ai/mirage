@@ -19,9 +19,9 @@ from mirage.fuse.backend import (FSKIT_MOUNT_ROOT, MountBackend,
                                  check_mountpoint, check_platform, check_sizes,
                                  check_writes, prepare_backend,
                                  require_kernel_backend, resolve_backend)
-from mirage.resource.notion import NotionConfig, NotionResource
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.notion import NotionConfig, NotionVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.spec import Mount
 
@@ -30,13 +30,13 @@ def _notion():
     # Notion page.json is class N in the size rollout (a per-file block
     # fetch would be needed), so it stays size-unknown permanently and is
     # the stable guinea pig for the fskit size guard.
-    return NotionResource(config=NotionConfig(api_key=SecretStr("k")))
+    return NotionVFS(config=NotionConfig(api_key=SecretStr("k")))
 
 
 @pytest.mark.parametrize("value,expected", [
-    (None, MountBackend.VFS),
-    ("", MountBackend.VFS),
-    ("vfs", MountBackend.VFS),
+    (None, MountBackend.WORKSPACE),
+    ("", MountBackend.WORKSPACE),
+    ("workspace", MountBackend.WORKSPACE),
     ("fuse", MountBackend.FUSE),
     ("fskit", MountBackend.FSKIT),
     ("FSKIT", MountBackend.FSKIT),
@@ -54,25 +54,25 @@ def test_resolve_backend_rejects_unknown():
 def test_no_auto_backend():
     # Deliberate: auto-selecting fskit would silently break every API-backed
     # mount, so the only safe value is also the default.
-    assert [b.value for b in MountBackend] == ["vfs", "fuse", "fskit"]
+    assert [b.value for b in MountBackend] == ["workspace", "fuse", "fskit"]
 
 
 def test_missing_backend_is_vfs_everywhere():
     # One meaning for "absent": the Mount dataclass default, an absent YAML
     # key, and None here all land on VFS. resolve_backend never reinterprets
     # a missing value as a kernel mount.
-    assert resolve_backend(None) is MountBackend.VFS
-    assert Mount(RAMResource()).backend is MountBackend.VFS
+    assert resolve_backend(None) is MountBackend.WORKSPACE
+    assert Mount(RAMVFS()).backend is MountBackend.WORKSPACE
 
 
 def test_require_kernel_backend_rejects_vfs():
     with pytest.raises(ValueError, match="does not register a mountpoint"):
-        require_kernel_backend(MountBackend.VFS)
+        require_kernel_backend(MountBackend.WORKSPACE)
 
 
 def test_prepare_backend_rejects_vfs():
     with pytest.raises(ValueError, match="does not register a mountpoint"):
-        prepare_backend("vfs")
+        prepare_backend("workspace")
 
 
 def test_prepare_backend_asserts_macos_for_fskit(monkeypatch):
@@ -91,12 +91,12 @@ def test_prepare_backend_runs_every_fskit_guard(monkeypatch, caplog):
         prepare_backend("fskit", mountpoint="/tmp/x")
     # size guard: warns but the mount proceeds
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        assert prepare_backend("fskit", ops=ws.fs,
+        assert prepare_backend("fskit", ops=ws.vfs,
                                mountpoint="/Volumes/m") is MountBackend.FSKIT
     assert "will read as empty" in caplog.text
     # both satisfied
-    ram = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    assert prepare_backend("fskit", ops=ram.fs,
+    ram = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    assert prepare_backend("fskit", ops=ram.vfs,
                            mountpoint="/Volumes/m") is MountBackend.FSKIT
 
 
@@ -136,75 +136,75 @@ def test_check_mountpoint_ignores_fuse_backend():
 
 
 def test_check_writes_warns_for_writable_mount(caplog):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_writes(MountBackend.FSKIT, ws.fs, "")
+        check_writes(MountBackend.FSKIT, ws.vfs, "")
     assert "zeroed pages" in caplog.text
     assert "/ (ram)" in caplog.text
 
 
 def test_check_writes_silent_for_read_mounts(caplog):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.READ)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.READ)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_writes(MountBackend.FSKIT, ws.fs, "")
+        check_writes(MountBackend.FSKIT, ws.vfs, "")
     assert caplog.text == ""
 
 
 def test_check_writes_ignores_other_backends(caplog):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_writes(MountBackend.FUSE, ws.fs, "")
+        check_writes(MountBackend.FUSE, ws.vfs, "")
     assert caplog.text == ""
 
 
 def test_check_sizes_passes_for_byte_stores(caplog):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    assert ws.fs.unsized_mounts() == []
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    assert ws.vfs.unsized_mounts() == []
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_sizes(MountBackend.FSKIT, ws.fs, "")
+        check_sizes(MountBackend.FSKIT, ws.vfs, "")
     assert caplog.text == ""
 
 
-def test_check_sizes_warns_for_size_unknown_resource(caplog):
+def test_check_sizes_warns_for_size_unknown_vfs(caplog):
     ws = Workspace({"/notion/": _notion()}, mode=MountMode.READ)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_sizes(MountBackend.FSKIT, ws.fs, "")
+        check_sizes(MountBackend.FSKIT, ws.vfs, "")
     assert "will read as empty" in caplog.text
 
 
 def test_check_sizes_names_the_offending_mount(caplog):
     ws = Workspace({
-        "/ram/": RAMResource(),
+        "/ram/": RAMVFS(),
         "/notion/": _notion()
     },
                    mode=MountMode.READ)
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_sizes(MountBackend.FSKIT, ws.fs, "")
+        check_sizes(MountBackend.FSKIT, ws.vfs, "")
     assert "/notion/ (notion)" in caplog.text
     assert "/ram/" not in caplog.text
 
 
 def test_check_sizes_respects_the_root_prefix(caplog):
     ws = Workspace({
-        "/ram/": RAMResource(),
+        "/ram/": RAMVFS(),
         "/notion/": _notion()
     },
                    mode=MountMode.READ)
     # Scoping the mount to the byte-store subtree keeps the warning quiet
-    # for a workspace that also holds API resources.
+    # for a workspace that also holds API-backed mounts.
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
-        check_sizes(MountBackend.FSKIT, ws.fs, "/ram/")
+        check_sizes(MountBackend.FSKIT, ws.vfs, "/ram/")
     assert caplog.text == ""
 
 
 def test_check_sizes_ignores_fuse_backend():
     ws = Workspace({"/notion/": _notion()}, mode=MountMode.READ)
-    check_sizes(MountBackend.FUSE, ws.fs, "")
+    check_sizes(MountBackend.FUSE, ws.vfs, "")
 
 
 def test_history_mount_does_not_block_a_root_fskit_mount():
     # /.bash_history is mounted into every workspace; it renders from
     # in-memory events, so it must not be treated as size-unknown.
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    prefixes = [p for p, _ in ws.fs.unsized_mounts()]
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    prefixes = [p for p, _ in ws.vfs.unsized_mounts()]
     assert "/.bash_history/" not in prefixes

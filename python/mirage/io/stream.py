@@ -89,7 +89,7 @@ async def drain(stream: ByteSource | None) -> None:
 async def close_quietly(stream: ByteSource | None) -> None:
     """Best-effort close on an async generator stream.
 
-    Calls the underlying Python `aclose()` protocol. Ensures resource
+    Calls the underlying Python `aclose()` protocol. Ensures VFS
     cleanup (HTTP connections, file handles) fires promptly instead of
     waiting for GC. Harmless on exhausted streams and on bytes/None.
     """

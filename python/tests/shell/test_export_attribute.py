@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.shell.variable import VarAttr
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import env_snapshot
 
 # Every case pinned against GNU bash 5.2.37 on debian:stable-slim.
@@ -124,7 +124,7 @@ def test_fork_keeps_pwd_exported():
     # `fork(cwd=...)` rebuilds $PWD to name where the fork is, and has to
     # rebuild the attribute with it: a fresh record would drop the mark
     # and the forked session's env would lose PWD entirely.
-    session = Session(session_id="s1", cwd="/")
+    session = SessionState(session_id="s1", cwd="/")
     forked = session.fork(cwd="/data")
     assert VarAttr.EXPORT in forked.vars["PWD"].attrs
     assert env_snapshot(forked)["PWD"] == "/data"

@@ -19,8 +19,8 @@ import time
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.github import GitHubConfig, GitHubResource
 from mirage.types import PathSpec
+from mirage.vfs.github import GitHubConfig, GitHubVFS
 
 load_dotenv(".env.development")
 
@@ -29,61 +29,60 @@ config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
 
 async def _timed(ws, cmd):
     start = time.perf_counter()
-    out = await (await ws.execute(cmd)).stdout_str()
+    out = await (await ws.shell(cmd)).stdout_str()
     return (time.perf_counter() - start) * 1000, out
 
 
 async def main() -> None:
-    resource = GitHubResource(
+    vfs = GitHubVFS(
         config=config,
         owner="strukto-ai",
         repo="mirage",
         ref="main",
     )
-    ws = Workspace({"/github": resource}, mode=MountMode.READ)
+    ws = Workspace({"/github": vfs}, mode=MountMode.READ)
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /github/__nf_missing__.txt",
                 "head /github/__nf_missing__.txt",
                 "stat /github/__nf_missing__.txt"):
-        result = await ws.execute(cmd)
+        result = await ws.shell(cmd)
         print(f"$ {cmd}")
         print(f"  exit={result.exit_code}  "
               f"{(await result.stderr_str()).strip()}")
 
-    r = await ws.execute("ls /github")
+    r = await ws.shell("ls /github")
     print(await r.stdout_str())
 
-    r = await ws.execute("ls /github/python/mirage/core")
+    r = await ws.shell("ls /github/python/mirage/core")
     print(await r.stdout_str())
 
-    r = await ws.execute("cat /github/python/pyproject.toml")
+    r = await ws.shell("cat /github/python/pyproject.toml")
     print(await r.stdout_str())
 
-    r = await ws.execute(
-        "grep 'BaseResource' /github/python/mirage/resource/base.py")
+    r = await ws.shell("grep 'BaseVFS' /github/python/mirage/vfs/base.py")
     print(await r.stdout_str())
 
-    r = await ws.execute("grep 'import' /github/python/mirage/*")
+    r = await ws.shell("grep 'import' /github/python/mirage/*")
     print(await r.stdout_str())
 
-    r = await ws.execute("grep 'import' /github/python/mirage/core/s3/*.py")
+    r = await ws.shell("grep 'import' /github/python/mirage/core/s3/*.py")
     print(await r.stdout_str())
 
-    r = await ws.execute("grep -r 'async def' /github/python/mirage/core/s3/")
+    r = await ws.shell("grep -r 'async def' /github/python/mirage/core/s3/")
     print(await r.stdout_str())
 
-    r = await ws.execute("find /github/mirage -name '*.py'")
+    r = await ws.shell("find /github/mirage -name '*.py'")
     print(await r.stdout_str())
 
-    r = await ws.execute("stat /github/python/mirage/types.py")
+    r = await ws.shell("stat /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     # chmod/chown/touch never hit the GitHub API: attrs land in the
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print("=== metadata overlay on /github/python/mirage/types.py ===")
-    meta_res = await ws.execute(
+    meta_res = await ws.shell(
         'chmod 640 "/github/python/mirage/types.py"'
         ' && chown 500:dev "/github/python/mirage/types.py"'
         ' && touch -t 202601021530 "/github/python/mirage/types.py"')
@@ -93,40 +92,39 @@ async def main() -> None:
     print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
           f"gid={meta_st.gid} mtime={meta_st.modified}")
 
-    r = await ws.execute("du /github/python/mirage/core")
+    r = await ws.shell("du /github/python/mirage/core")
     print(await r.stdout_str())
 
     print("=== head -n 5 ===")
-    r = await ws.execute("head -n 5 /github/python/pyproject.toml")
+    r = await ws.shell("head -n 5 /github/python/pyproject.toml")
     print(await r.stdout_str())
 
     print("=== tail -n 3 ===")
-    r = await ws.execute("tail -n 3 /github/python/pyproject.toml")
+    r = await ws.shell("tail -n 3 /github/python/pyproject.toml")
     print(await r.stdout_str())
 
     print("=== wc ===")
-    r = await ws.execute("wc /github/python/pyproject.toml")
+    r = await ws.shell("wc /github/python/pyproject.toml")
     print(await r.stdout_str())
 
     print("=== wc -l ===")
-    r = await ws.execute("wc -l /github/python/pyproject.toml")
+    r = await ws.shell("wc -l /github/python/pyproject.toml")
     print(await r.stdout_str())
 
     print("=== grep -n (line numbers) ===")
-    r = await ws.execute("grep -n 'def ' /github/python/mirage/types.py")
+    r = await ws.shell("grep -n 'def ' /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== grep -c (count) ===")
-    r = await ws.execute("grep -c 'import' /github/python/mirage/types.py")
+    r = await ws.shell("grep -c 'import' /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== grep -i (case insensitive) ===")
-    r = await ws.execute("grep -i 'filestat' /github/python/mirage/types.py")
+    r = await ws.shell("grep -i 'filestat' /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== grep -l (files with matches) ===")
-    r = await ws.execute(
-        "grep -rl 'BaseResource' /github/python/mirage/resource/")
+    r = await ws.shell("grep -rl 'BaseVFS' /github/python/mirage/vfs/")
     print(await r.stdout_str())
 
     # ── native search dispatch (GitHub code search narrows files) ──
@@ -141,7 +139,7 @@ async def main() -> None:
          "grep -r GitHubAccessor /github/ | sort"),
     ]:
         print(f"\n=== {label} ===")
-        r = await ws.execute(cmd)
+        r = await ws.shell(cmd)
         out = (await r.stdout_str()).strip()
         err = (await r.stderr_str()).strip()
         lines = out.splitlines() if out else []
@@ -155,9 +153,9 @@ async def main() -> None:
     # A large subdir (>100 files) is what makes the per-file fallback slow;
     # these cases narrow via GitHub code search instead of fetching each file.
     big_dir = "/github/python/mirage/"
-    print(f"\n=== grep -rln BaseResource {big_dir} "
+    print(f"\n=== grep -rln BaseVFS {big_dir} "
           "(subdir narrowing, -l short-circuit) ===")
-    ms, out = await _timed(ws, f"grep -rln BaseResource {big_dir}")
+    ms, out = await _timed(ws, f"grep -rln BaseVFS {big_dir}")
     files = out.strip().splitlines() if out.strip() else []
     print(f"  {ms:.0f}ms  files-with-matches: {len(files)}")
     for line in files[:3]:
@@ -196,118 +194,118 @@ async def main() -> None:
         print(f"  {line}")
 
     print("=== find -type d ===")
-    r = await ws.execute("find /github/python/mirage/core -type d")
+    r = await ws.shell("find /github/python/mirage/core -type d")
     print(await r.stdout_str())
 
     print("=== ls -l ===")
-    r = await ws.execute("ls -l /github/python/mirage/core/s3/")
+    r = await ws.shell("ls -l /github/python/mirage/core/s3/")
     print(await r.stdout_str())
 
     print("=== find | sort ===")
-    r = await ws.execute(
-        "find /github/python/mirage/core/s3 -name '*.py' | sort")
+    r = await ws.shell("find /github/python/mirage/core/s3 -name '*.py' | sort"
+                       )
     print(await r.stdout_str())
 
     print("=== diff ===")
-    r = await ws.execute("diff /github/python/mirage/core/s3/stat.py"
-                         " /github/python/mirage/core/s3/read.py")
+    r = await ws.shell("diff /github/python/mirage/core/s3/stat.py"
+                       " /github/python/mirage/core/s3/read.py")
     print(await r.stdout_str())
 
     print("=== cat + pipe to wc ===")
-    r = await ws.execute("cat /github/python/mirage/types.py | wc -l")
+    r = await ws.shell("cat /github/python/mirage/types.py | wc -l")
     print(await r.stdout_str())
 
     print("=== grep + cut ===")
-    r = await ws.execute(
+    r = await ws.shell(
         "grep -n 'class ' /github/python/mirage/types.py | cut -d: -f1")
     print(await r.stdout_str())
 
     print("=== grep + awk ===")
-    r = await ws.execute(
+    r = await ws.shell(
         "grep 'class ' /github/python/mirage/types.py | awk '{print $2}'")
     print(await r.stdout_str())
 
     print("=== md5 ===")
-    r = await ws.execute("md5 /github/python/mirage/types.py")
+    r = await ws.shell("md5 /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== tree ===")
-    r = await ws.execute("tree /github/python/mirage/core/s3/")
+    r = await ws.shell("tree /github/python/mirage/core/s3/")
     print(await r.stdout_str())
 
     print("=== find workspace.py ===")
-    r = await ws.execute("find /github -name 'workspace.py'")
+    r = await ws.shell("find /github -name 'workspace.py'")
     print(await r.stdout_str())
 
     print("=== wc -l (lines) ===")
-    r = await ws.execute("wc -l /github/python/mirage/workspace/workspace.py")
+    r = await ws.shell("wc -l /github/python/mirage/workspace/workspace.py")
     print(await r.stdout_str())
 
     print("=== wc -w (words) ===")
-    r = await ws.execute("wc -w /github/python/mirage/workspace/workspace.py")
+    r = await ws.shell("wc -w /github/python/mirage/workspace/workspace.py")
     print(await r.stdout_str())
 
     print("=== jq ===")
-    r = await ws.execute('jq ".name" /github/python/pyproject.toml')
+    r = await ws.shell('jq ".name" /github/python/pyproject.toml')
     print(await r.stdout_str())
 
     print("=== nl ===")
-    r = await ws.execute("nl /github/python/mirage/types.py")
+    r = await ws.shell("nl /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== tr ===")
-    r = await ws.execute("cat /github/python/mirage/types.py | tr 'a-z' 'A-Z'")
+    r = await ws.shell("cat /github/python/mirage/types.py | tr 'a-z' 'A-Z'")
     print(await r.stdout_str())
 
     print("=== sort | uniq ===")
-    r = await ws.execute(
+    r = await ws.shell(
         "grep 'import' /github/python/mirage/types.py | sort | uniq")
     print(await r.stdout_str())
 
     print("=== uniq (file path, streams via github read) ===")
-    r = await ws.execute("uniq /github/python/mirage/types.py")
+    r = await ws.shell("uniq /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== sha256sum ===")
-    r = await ws.execute("sha256sum /github/python/mirage/types.py")
+    r = await ws.shell("sha256sum /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== file ===")
-    r = await ws.execute("file /github/python/mirage/types.py")
+    r = await ws.shell("file /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== basename ===")
-    r = await ws.execute("basename /github/python/mirage/core/s3/read.py")
+    r = await ws.shell("basename /github/python/mirage/core/s3/read.py")
     print(await r.stdout_str())
 
     print("=== dirname ===")
-    r = await ws.execute("dirname /github/python/mirage/core/s3/read.py")
+    r = await ws.shell("dirname /github/python/mirage/core/s3/read.py")
     print(await r.stdout_str())
 
     print("=== realpath ===")
-    r = await ws.execute("realpath /github/python/mirage/../mirage/types.py")
+    r = await ws.shell("realpath /github/python/mirage/../mirage/types.py")
     print(await r.stdout_str())
 
     print("=== sed -n (line range) ===")
-    r = await ws.execute("sed -n '1,3p' /github/python/mirage/types.py")
+    r = await ws.shell("sed -n '1,3p' /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== sed s/// (file) ===")
-    r = await ws.execute(
+    r = await ws.shell(
         "sed 's/import/IMPORT/' /github/python/mirage/core/s3/read.py")
     print(await r.stdout_str())
 
     print("=== awk (file) ===")
-    r = await ws.execute(
-        "awk '{print $1}' /github/python/mirage/core/s3/read.py")
+    r = await ws.shell("awk '{print $1}' /github/python/mirage/core/s3/read.py"
+                       )
     print(await r.stdout_str())
 
     print("=== cut -c (file) ===")
-    r = await ws.execute("cut -c1-10 /github/python/mirage/types.py")
+    r = await ws.shell("cut -c1-10 /github/python/mirage/types.py")
     print(await r.stdout_str())
 
     print("=== grep dir operands (POSIX warn) ===")
-    r = await ws.execute("grep 'import' /github/python/mirage/*")
+    r = await ws.shell("grep 'import' /github/python/mirage/*")
     out = (await r.stdout_str()).strip()
     err = (await r.stderr_str()).strip()
     print(
@@ -317,16 +315,16 @@ async def main() -> None:
     print()
 
     print("=== diff -u ===")
-    r = await ws.execute("diff -u /github/python/mirage/core/s3/stat.py"
-                         " /github/python/mirage/core/s3/read.py")
+    r = await ws.shell("diff -u /github/python/mirage/core/s3/stat.py"
+                       " /github/python/mirage/core/s3/read.py")
     print(await r.stdout_str())
 
     print("=== tree -L ===")
-    r = await ws.execute("tree -L 2 /github/python/mirage/")
+    r = await ws.shell("tree -L 2 /github/python/mirage/")
     print(await r.stdout_str())
 
     print("=== rg ===")
-    r = await ws.execute("rg 'BaseResource' /github/python/mirage/resource/")
+    r = await ws.shell("rg 'BaseVFS' /github/python/mirage/vfs/")
     print(await r.stdout_str())
 
     print(

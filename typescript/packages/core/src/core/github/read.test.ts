@@ -75,7 +75,7 @@ async function seeded(sha: string): Promise<RAMIndexCacheStore> {
 }
 
 function spec(p: string): PathSpec {
-  return new PathSpec({ resourcePath: p.slice(1), virtual: p, directory: '/src' })
+  return new PathSpec({ vfsPath: p.slice(1), virtual: p, directory: '/src' })
 }
 
 describe('github read freshness', () => {

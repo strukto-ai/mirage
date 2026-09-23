@@ -23,7 +23,7 @@ def _minimal_config() -> dict:
         "config": {
             "mounts": {
                 "/": {
-                    "resource": "ram",
+                    "vfs": "ram",
                     "mode": "WRITE"
                 }
             },

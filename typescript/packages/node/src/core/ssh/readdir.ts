@@ -54,7 +54,7 @@ export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<strin
   const sftp = await accessor.sftp()
   const virtual =
     p.pattern !== null
-      ? p.directory.slice(mountPrefixOf(p.virtual, p.resourcePath).length) || '/'
+      ? p.directory.slice(mountPrefixOf(p.virtual, p.vfsPath).length) || '/'
       : stripPrefix(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   const list = await new Promise<FileEntryWithStats[] | null>((resolveFn, rejectFn) => {
@@ -77,7 +77,7 @@ export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<strin
   }
   const base = `/${stripSlash(virtual)}`
   const dirPrefix = base === '/' ? '/' : `${base}/`
-  const mountPrefix = mountPrefixOf(p.virtual, p.resourcePath)
+  const mountPrefix = mountPrefixOf(p.virtual, p.vfsPath)
   const names: string[] = []
   for (const entry of list) {
     if (entry.filename === '.' || entry.filename === '..') continue

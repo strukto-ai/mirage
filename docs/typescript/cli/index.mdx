@@ -14,12 +14,12 @@ dispatches a line to a CLI when its first word matches an installed
 name.
 
 ```typescript
-import { EmailResource, HIMALAYA, Workspace } from '@struktoai/mirage-node'
+import { EmailVFS, HIMALAYA, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/mail': new EmailResource(config) })
+const ws = new Workspace({ '/mail': new EmailVFS(config) })
 ws.registerCli('himalaya', HIMALAYA, config)
 
-await ws.execute('himalaya envelope list --unseen --max 5')
+await ws.shell('himalaya envelope list --unseen --max 5')
 ```
 
 In YAML the same install rides the `clis:` section:
@@ -27,7 +27,7 @@ In YAML the same install rides the `clis:` section:
 ```yaml
 mounts:
   /mail:
-    resource: email
+    vfs: email
     config: { ... }
 clis:
   himalaya:

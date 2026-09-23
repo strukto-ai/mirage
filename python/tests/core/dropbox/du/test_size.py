@@ -20,8 +20,8 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.du import size
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
+from mirage.vfs.dropbox.config import DropboxConfig
 
 _TREE = {
     "": [{
@@ -80,9 +80,8 @@ def index():
 async def test_size_walks_directory_tree(accessor, index):
     with patch("mirage.core.dropbox.readdir.list_folder", new=_fake_list):
         total = await size(
-            accessor,
-            PathSpec(resource_path="data", virtual="/data", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="data", virtual="/data",
+                               directory="/"), index)
     assert total == 39
 
 
@@ -91,8 +90,7 @@ async def test_size_missing_path_is_zero(accessor, index):
     with patch("mirage.core.dropbox.readdir.list_folder", new=_fake_list):
         total = await size(
             accessor,
-            PathSpec(resource_path="ghost", virtual="/ghost", directory="/"),
-            index)
+            PathSpec(vfs_path="ghost", virtual="/ghost", directory="/"), index)
     assert total == 0
 
 
@@ -104,5 +102,5 @@ async def test_size_propagates_server_error(accessor, index):
         with pytest.raises(DropboxApiError):
             await size(
                 accessor,
-                PathSpec(resource_path="data", virtual="/data", directory="/"),
+                PathSpec(vfs_path="data", virtual="/data", directory="/"),
                 index)

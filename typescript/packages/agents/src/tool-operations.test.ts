@@ -13,20 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { MirageToolOperations } from './tool-operations.ts'
 
 let ws: Workspace
 let ops: MirageToolOperations
 
 beforeEach(() => {
-  ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+  ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
   ops = new MirageToolOperations(ws)
 })
 
 describe('grep', () => {
   it('reports matches as a success', async () => {
-    await ws.fs.writeFile('/search.txt', 'hello world\ngoodbye world\n')
+    await ws.vfs.writeFile('/search.txt', 'hello world\ngoodbye world\n')
     const result = await ops.grep('hello', '/')
     expect(result.content[0]).toMatchObject({ text: expect.stringContaining('hello') as string })
     expect(result.isError).toBeUndefined()
@@ -35,7 +35,7 @@ describe('grep', () => {
   it('reports no match as a success', async () => {
     // grep exits 1 when nothing matched. That is the empty answer, not
     // a broken search, so the agent must not be told the call failed.
-    await ws.fs.writeFile('/search.txt', 'hello world\n')
+    await ws.vfs.writeFile('/search.txt', 'hello world\n')
     const result = await ops.grep('nothing-matches-this', '/')
     expect(result.isError).toBeUndefined()
   })
@@ -50,21 +50,21 @@ describe('grep', () => {
 
 describe('edit', () => {
   it('refuses an edit to a file that changed since it was read', async () => {
-    await ws.fs.writeFile('/a.txt', 'hello world')
+    await ws.vfs.writeFile('/a.txt', 'hello world')
     await ops.read('/a.txt')
-    await ws.fs.writeFile('/a.txt', 'hello there')
+    await ws.vfs.writeFile('/a.txt', 'hello there')
     const result = await ops.edit('/a.txt', 'hello', 'goodbye')
     expect(result.isError).toBe(true)
-    expect(await ws.fs.readFileText('/a.txt')).toBe('hello there')
+    expect(await ws.vfs.readFileText('/a.txt')).toBe('hello there')
   })
 
   it('overwrites when stale-write protection is off', async () => {
     const unchecked = new MirageToolOperations(ws, { staleWriteProtection: false })
-    await ws.fs.writeFile('/a.txt', 'hello world')
+    await ws.vfs.writeFile('/a.txt', 'hello world')
     await unchecked.read('/a.txt')
-    await ws.fs.writeFile('/a.txt', 'hello there')
+    await ws.vfs.writeFile('/a.txt', 'hello there')
     const result = await unchecked.edit('/a.txt', 'hello', 'goodbye')
     expect(result.isError).toBeUndefined()
-    expect(await ws.fs.readFileText('/a.txt')).toBe('goodbye there')
+    expect(await ws.vfs.readFileText('/a.txt')).toBe('goodbye there')
   })
 })

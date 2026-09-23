@@ -14,8 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpRecord } from '../observe/record.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode, ResourceName } from '../types.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { MountMode, VFSName } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 function record(source: string, bytes: number): OpRecord {
@@ -31,10 +31,10 @@ function record(source: string, bytes: number): OpRecord {
 
 describe('Workspace record accounting', () => {
   it('splits records and bytes by network vs cache', () => {
-    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
-    ws.records.push(record(ResourceName.S3, 100))
-    ws.records.push(record(ResourceName.RAM, 30))
-    ws.records.push(record(ResourceName.S3, 7))
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    ws.records.push(record(VFSName.S3, 100))
+    ws.records.push(record(VFSName.RAM, 30))
+    ws.records.push(record(VFSName.S3, 7))
     expect(ws.networkBytes).toBe(107)
     expect(ws.cacheBytes).toBe(30)
     expect(ws.networkRecords.map((r) => r.bytes)).toEqual([100, 7])
@@ -42,7 +42,7 @@ describe('Workspace record accounting', () => {
   })
 
   it('returns zeros on a fresh workspace', () => {
-    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     expect(ws.networkBytes).toBe(0)
     expect(ws.cacheBytes).toBe(0)
     expect(ws.networkRecords).toEqual([])
@@ -50,11 +50,11 @@ describe('Workspace record accounting', () => {
   })
 
   it('Ops facade ops land in ws.records', async () => {
-    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
-    await ws.fs.writeFile('/data/a.txt', 'hello')
-    await ws.fs.readFile('/data/a.txt')
-    await ws.fs.readdir('/data')
-    await ws.fs.stat('/data/a.txt')
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.writeFile('/data/a.txt', 'hello')
+    await ws.vfs.readFile('/data/a.txt')
+    await ws.vfs.readdir('/data')
+    await ws.vfs.stat('/data/a.txt')
     const ops = ws.records.map((r) => r.op)
     expect(ops).toEqual(['write', 'read', 'readdir', 'stat'])
     expect(ws.records[0]?.bytes).toBe(5)

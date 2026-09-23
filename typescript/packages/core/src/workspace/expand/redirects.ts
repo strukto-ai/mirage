@@ -19,7 +19,7 @@ import { ExitSignal } from '../../shell/errors.ts'
 import { getProcessSubBody, getProcessSubDirection } from '../../shell/helpers.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { visibleEnv } from '../session/state.ts'
 import { classifyBarePath } from './classify/index.ts'
 import { expandNode } from './node.ts'
@@ -38,7 +38,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
  */
 export async function expandRedirects(
   redirects: readonly Redirect[],
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null = null,

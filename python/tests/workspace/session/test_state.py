@@ -23,7 +23,7 @@ from mirage.shell.array import make_array
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import HiddenVars
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.session import vars_from_env
 
@@ -41,8 +41,11 @@ class DenySecrets(Policy):
         return None
 
 
-def _view(policies: Policies | None = None) -> tuple[SessionView, Session]:
-    session = Session(session_id="s", cwd="/", vars=vars_from_env({"A": "1"}))
+def _view(
+        policies: Policies | None = None) -> tuple[SessionView, SessionState]:
+    session = SessionState(session_id="s",
+                           cwd="/",
+                           vars=vars_from_env({"A": "1"}))
     return session_view(session, policies), session
 
 
@@ -145,7 +148,9 @@ def test_pre_session_gate_vetoes_a_write():
 
 
 def test_env_snapshot_is_a_copy():
-    session = Session(session_id="s", cwd="/", vars=vars_from_env({"A": "1"}))
+    session = SessionState(session_id="s",
+                           cwd="/",
+                           vars=vars_from_env({"A": "1"}))
     snap = env_snapshot(session)
     assert snap == session.env
     assert snap is not session.env
@@ -159,16 +164,16 @@ def test_the_view_carries_no_session_handle():
 
 
 def _hidden_view(
-        policies: Policies | None = None) -> tuple[SessionView, Session]:
-    session = Session(session_id="s",
-                      cwd="/",
-                      vars=vars_from_env({
-                          "PUBLIC": "1",
-                          "SLACK_TOKEN": "xoxb",
-                          "AWS_SECRET_KEY": "k"
-                      }),
-                      hidden_vars=HiddenVars(names=("SLACK_TOKEN", ),
-                                             patterns=("AWS_*", )))
+        policies: Policies | None = None) -> tuple[SessionView, SessionState]:
+    session = SessionState(session_id="s",
+                           cwd="/",
+                           vars=vars_from_env({
+                               "PUBLIC": "1",
+                               "SLACK_TOKEN": "xoxb",
+                               "AWS_SECRET_KEY": "k"
+                           }),
+                           hidden_vars=HiddenVars(names=("SLACK_TOKEN", ),
+                                                  patterns=("AWS_*", )))
     return session_view(session, policies), session
 
 
@@ -229,7 +234,9 @@ def test_a_hidden_readonly_var_reports_not_readonly():
 def test_visible_env_matches_the_scalars_when_nothing_is_hidden():
     # $X expansion is the hot path; no hiding means no wrapper and no
     # copy.
-    session = Session(session_id="s", cwd="/", vars=vars_from_env({"A": "1"}))
+    session = SessionState(session_id="s",
+                           cwd="/",
+                           vars=vars_from_env({"A": "1"}))
     assert dict(visible_env(session)) == dict(session.env)
 
 
@@ -300,8 +307,8 @@ def test_integer_coercion_resolves_elements():
     asyncio.run(run())
 
 
-def _element_session() -> Session:
-    session = Session(session_id="s", cwd="/")
+def _element_session() -> SessionState:
+    session = SessionState(session_id="s", cwd="/")
     seed_var(session, "m", {"a": "1", "k5": "9", "0": "z"})
     seed_var(session, "arr", ["10", "20", "30"])
     seed_var(session, "s5", "5")
@@ -327,7 +334,7 @@ def test_element_index_int_arith_and_error():
 
 
 def test_subscript_index_lands_its_assignments_and_seeds_random():
-    session = Session(session_id="s", cwd="/")
+    session = SessionState(session_id="s", cwd="/")
     seed_var(session, "i", "1")
     session.vars["RANDOM"] = ShellVar("1")
 
@@ -441,7 +448,7 @@ def test_profile_reads_the_session_profile():
 def test_a_failing_coercion_lands_what_it_assigned():
     # bash: `declare -i n; x='y=5,1/0'; n=x` refuses the assignment but
     # leaves y at 5, and a RANDOM seed in the expression seeds.
-    session = Session(session_id="s", cwd="/")
+    session = SessionState(session_id="s", cwd="/")
     session.vars["RANDOM"] = ShellVar("1")
     set_attr(session, "n", VarAttr.INTEGER)
     seed_var(session, "x", "y=5,1/0")

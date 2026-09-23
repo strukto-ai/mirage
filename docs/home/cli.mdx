@@ -40,10 +40,10 @@ mode: WRITE
 
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE
   /s3:
-    resource: s3
+    vfs: s3
     mode: READ
     config:
       bucket: ${AWS_S3_BUCKET}
@@ -210,7 +210,7 @@ mirage execute --workspace_id demo_loaded \
   redacted secrets (S3 with inline keys, GDrive, Slack, Discord, Redis,
   ...). The snapshot stores `"<REDACTED>"` in place of those secrets at
   save time. Loading without the config 400s with the list of prefixes
-  that need fresh creds. Local resources (RAM, Disk) restore as-is with
+  that need fresh creds. Local mounts (RAM, Disk) restore as-is with
   no extra config needed.
 </Note>
 
@@ -288,7 +288,7 @@ mirage workspace clone demo --at <version> --id demo_at_v1
 
 | Verb | What it does |
 | --- | --- |
-| `mirage workspace create FILE [--id NAME]` | Build resources from YAML, register a workspace, return its id. |
+| `mirage workspace create FILE [--id NAME]` | Build mounts from YAML, register a workspace, return its id. |
 | `mirage workspace list` | Brief one-line summary per active workspace. |
 | `mirage workspace get ID [--verbose]` | Full detail (mounts, sessions, optionally cache / dirty / history internals). |
 | `mirage workspace delete ID` | Stop the workspace; daemon may exit on the idle timer. |
@@ -324,7 +324,7 @@ with `on_exceed: truncate` (stop, exit 0, add a stderr notice) or
 ```yaml
 mounts:
   /data:
-    resource: ram
+    vfs: ram
     mode: WRITE
     command_limits:
       head:                  # cap output, keep going

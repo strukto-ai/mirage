@@ -30,7 +30,7 @@ class Watcher:
 
     Mirage runs no background loop. Changes enter through ``notify``,
     from whatever detection the consumer runs: a webhook receiver, a
-    queue bridge, or their own poll loop over a resource's
+    queue bridge, or their own poll loop over a VFS's
     ``delta_hook()`` (see ``integ/watch/run.py`` for the ~10-line
     poller). The one guarantee: cache invalidation for a change
     completes before it reaches any subscriber queue, so a consumer
@@ -53,7 +53,7 @@ class Watcher:
     def _frame(self, entry: WatchMount, virtual: str) -> PathSpec:
         """Rebuild a PathSpec with mount-relative framing.
 
-        The caller-supplied virtual path may carry any resource_path;
+        The caller-supplied virtual path may carry any vfs_path;
         cache invalidation needs the real mount-relative one, so it is
         recomputed from the mount prefix.
 
@@ -62,9 +62,9 @@ class Watcher:
             virtual (str): Workspace-virtual path.
         """
         norm = "/" + virtual.strip("/")
-        resource_path = norm[len(entry.prefix):] if norm.startswith(
+        vfs_path = norm[len(entry.prefix):] if norm.startswith(
             entry.prefix) else ""
-        return PathSpec.from_str_path(norm, resource_path=resource_path)
+        return PathSpec.from_str_path(norm, vfs_path=vfs_path)
 
     def _matches(self, sub: Subscriber, change: FileEvent) -> bool:
         """Whether a change falls inside any of a subscriber's scopes.
@@ -196,7 +196,7 @@ class Watcher:
         """Stream changes under ``path`` until the caller stops
         iterating or the watcher closes.
 
-        Works on any mount: delivery is notify-driven, so no resource
+        Works on any mount: delivery is notify-driven, so no VFS
         capability is required to subscribe. Scope matching is done by
         mirage at delivery time, so glob roots need no backend support
         and match files created after the watch started. The root's

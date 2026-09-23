@@ -33,7 +33,7 @@ def _resolve(root: Path, path: str) -> Path:
 async def readdir(accessor: DiskAccessor,
                   path_spec: PathSpec,
                   index: IndexCacheStore = NULL_INDEX) -> list[str]:
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     path = path_spec.directory if path_spec.pattern else path_spec.virtual
     if prefix and path.startswith(prefix):
         rest = path[len(prefix):]

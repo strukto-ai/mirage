@@ -17,7 +17,7 @@ import { CLISpec } from '../../../../commands/cli/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { CLIRegistry } from '../../../cli/registry.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import { Session } from '../../../session/session.ts'
+import { SessionState } from '../../../session/session.ts'
 import { classify, classifyAll } from './classify.ts'
 import { NameKind } from './types.ts'
 
@@ -44,8 +44,8 @@ function makeRegistry(withCli = false): MountRegistry {
   } as unknown as MountRegistry
 }
 
-function makeSession(): Session {
-  return new Session({ sessionId: 's1' })
+function makeSession(): SessionState {
+  return new SessionState({ sessionId: 's1' })
 }
 
 describe('classify', () => {

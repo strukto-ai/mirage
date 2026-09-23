@@ -15,7 +15,7 @@
 import dotenv from 'dotenv'
 import {
   MountMode,
-  ScalewayResource,
+  ScalewayVFS,
   Workspace,
   resolvedScalewayEndpoint,
   type ScalewayConfig,
@@ -37,17 +37,17 @@ function configFromEnv(): ScalewayConfig {
 
 async function main(): Promise<void> {
   const config = configFromEnv()
-  const ws = new Workspace({ '/scw/': new ScalewayResource(config) }, { mode: MountMode.READ })
+  const ws = new Workspace({ '/scw/': new ScalewayVFS(config) }, { mode: MountMode.READ })
   try {
     console.log(`=== Scaleway at ${resolvedScalewayEndpoint(config)} ===`)
 
-    let r = await ws.execute('ls /scw/')
+    let r = await ws.shell('ls /scw/')
     console.log('ls /scw/:\n' + r.stdoutText)
 
-    r = await ws.execute("find /scw/ -name '*.json' | head -n 5")
+    r = await ws.shell("find /scw/ -name '*.json' | head -n 5")
     console.log('find *.json:\n' + r.stdoutText)
 
-    const plan = await ws.execute('grep -m 1 mirage /scw/data/example.jsonl', { provision: true })
+    const plan = await ws.shell('grep -m 1 mirage /scw/data/example.jsonl', { provision: true })
     console.log(`plan grep -m 1: network_read=${plan.networkRead} precision=${plan.precision}`)
 
     const bytes = ws.records.reduce((acc, rec) => acc + rec.bytes, 0)
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /scw/data/example.jsonl ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/scw/data/example.jsonl" && chown 500:dev "/scw/data/example.jsonl" && touch -t 202601021530 "/scw/data/example.jsonl"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

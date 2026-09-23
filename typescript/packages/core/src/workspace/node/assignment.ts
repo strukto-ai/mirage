@@ -36,7 +36,7 @@ import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 
@@ -61,7 +61,11 @@ function arithFatal(err: ArithError): ExitSignal {
 }
 
 /** `subscriptIndex` whose failure ends the line, in bash's words. */
-async function fatalIndex(session: Session, subscript: string, view: SessionView): Promise<number> {
+async function fatalIndex(
+  session: SessionState,
+  subscript: string,
+  view: SessionView,
+): Promise<number> {
   try {
     return await subscriptIndex(session, subscript, view)
   } catch (err) {
@@ -107,7 +111,7 @@ async function assignVar(view: SessionView, key: string, value: ShellValue): Pro
 // (`a=($(cmd) /data/*.txt)`), with zero-match globs kept literal.
 export async function expandArrayItems(
   arrayNode: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   namespace: Namespace,
@@ -146,7 +150,7 @@ const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER
 async function subscriptKeyText(
   subscriptNode: TSNodeLike,
   name: string,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -173,7 +177,7 @@ async function subscriptKeyText(
  */
 export async function executeAssignment(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   namespace: Namespace,

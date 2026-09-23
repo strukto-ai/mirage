@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as s3ClientModule from '../../core/s3/client.ts'
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { FakeConditionalS3Client, currentFakeS3, installFakeS3 } from '../fixtures/s3_fake.ts'
 import { S3SessionStore } from './s3.ts'
 import type { SessionFields } from './store.ts'

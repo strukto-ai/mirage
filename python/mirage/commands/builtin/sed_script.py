@@ -15,6 +15,8 @@
 import re
 from typing import Any, Required, TypedDict
 
+from mirage.utils.posix import translate_classes
+
 _SIMPLE_CMDS = frozenset("dDpPhHgGxNq")
 
 _SedAddr = tuple[str, str]
@@ -394,7 +396,7 @@ def bre_to_ere(pat: str) -> str:
 
 
 def _re_pattern(pat: str, extended: bool) -> str:
-    return pat if extended else bre_to_ere(pat)
+    return translate_classes(pat if extended else bre_to_ere(pat))
 
 
 def _addr_matches(addr: tuple[str, str],

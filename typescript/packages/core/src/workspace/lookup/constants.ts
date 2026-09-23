@@ -27,7 +27,12 @@ export const UNSUPPORTED_BUILTINS: ReadonlySet<string> = new Set([
   'ulimit',
 ])
 
-export const NAMESPACE_COMMANDS: ReadonlySet<string> = new Set(['ln', 'readlink'])
+export const NAMESPACE_COMMANDS: ReadonlySet<string> = new Set([
+  'getfattr',
+  'ln',
+  'readlink',
+  'setfattr',
+])
 
 // Interpreter names select runtime adapters; session builtins stay in Mirage.
 export const INTERPRETER_NAMES: ReadonlySet<string> = new Set(
@@ -259,7 +264,8 @@ export const SLASH_KEEPS_LAST: ReadonlySet<string> = new Set([
 // operand, readlink's whole subject is the link it was handed, and
 // mkdir is naming something that must not exist yet -- resolving its
 // last component would make `mkdir -p dangle` create the link's missing
-// target where GNU answers "File exists".
+// target where GNU answers "File exists". getfattr and setfattr read -h
+// off their own line and hand the door the link or its target.
 // A trailing slash still applies to most of them: these are
 // lstat-by-default, not slash-proof (`touch dlink/` succeeds against the
 // target directory, `touch flink/` is "Not a directory"), which is why
@@ -272,6 +278,8 @@ const SELF_RESOLVING: ReadonlySet<string> = new Set([
   'ln',
   'readlink',
   'mkdir',
+  'getfattr',
+  'setfattr',
 ])
 
 // Whether a command resolves its operand's final component itself. The

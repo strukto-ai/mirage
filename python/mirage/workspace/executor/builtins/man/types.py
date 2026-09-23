@@ -23,7 +23,7 @@ class ManEntry:
     renders from.
 
     A name has one spec however many mounts register it, so the entry
-    carries no mount and no resource; which backend serves the word is
+    carries no mount and no VFS; which backend serves the word is
     dispatch's business, not the manual's.
 
     Args:

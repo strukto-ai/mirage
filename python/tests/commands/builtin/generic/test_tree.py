@@ -7,9 +7,7 @@ from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory=path,
-                    resource_path=path.strip("/"))
+    return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
 def _file(name: str, size: int = 0) -> FileStat:

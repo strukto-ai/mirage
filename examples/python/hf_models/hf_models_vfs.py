@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.hf_models import HfModelsConfig, HfModelsResource
+from mirage.vfs.hf_models import HfModelsConfig, HfModelsVFS
 
 load_dotenv(".env.development")
 
@@ -27,12 +27,12 @@ config = HfModelsConfig(
     repo_id=os.environ.get("HF_MODEL_REPO", "sapientinc/HRM-Text-1B"),
     token=os.environ.get("HF_TOKEN"),
 )
-resource = HfModelsResource(config)
+vfs = HfModelsVFS(config)
 
 
 async def main():
-    with Workspace({"/m/": resource}, mode=MountMode.READ) as ws:
-        print(f"=== VFS: {resource.accessor.bucket_uri} ===")
+    with Workspace({"/m/": vfs}, mode=MountMode.READ) as ws:
+        print(f"=== VFS: {vfs.accessor.bucket_uri} ===")
 
         print("\n--- os.listdir('/m') ---")
         root_entries = os.listdir("/m")
@@ -56,7 +56,7 @@ async def main():
                 print(f"  {wf}: {size:>12,} bytes")
 
         print("\n--- shell view ---")
-        r = await ws.execute("ls -lh /m/")
+        r = await ws.shell("ls -lh /m/")
         print(await r.stdout_str())
 
 

@@ -15,7 +15,7 @@
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../../workspace.ts'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Limit, MountMode } from '@struktoai/mirage-core/types'
 import { E2BRuntime, type E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 
@@ -314,17 +314,17 @@ describe('E2B cancellation and validation', () => {
     })
     const abort = new AbortController()
     const workspace = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: [runtime, 'vfs'],
+        runtimes: [runtime, 'workspace'],
         ...(kind === 'timeout'
           ? { commandLimits: { '/data': { 'native-sleep': new Limit({ timeoutSeconds: 0.05 }) } } }
           : {}),
       },
     )
     try {
-      const run = workspace.execute('native-sleep', { signal: abort.signal })
+      const run = workspace.shell('native-sleep', { signal: abort.signal })
       if (kind === 'caller') {
         const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
         await vi.waitFor(() => {

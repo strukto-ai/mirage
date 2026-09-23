@@ -42,12 +42,12 @@ async function resolveWs(ws: WsLike, ctx: ToolContext): Promise<Workspace> {
 async function ensureParent(ws: Workspace, path: string): Promise<void> {
   const parent = gnuDirname(path)
   if (parent === '/' || parent === '' || parent === '.') return
-  if (await ws.fs.exists(parent)) return
+  if (await ws.vfs.exists(parent)) return
   await ensureParent(ws, parent)
   try {
-    await ws.fs.mkdir(parent)
+    await ws.vfs.mkdir(parent)
   } catch (err) {
-    if (!(await ws.fs.exists(parent))) throw err
+    if (!(await ws.vfs.exists(parent))) throw err
   }
 }
 
@@ -151,7 +151,7 @@ export function mirageTools(
       try {
         current = (await versions.readForEdit(filePath)).toString('utf8')
       } catch (err) {
-        if (await w.fs.exists(filePath)) return `Error: ${errMsg(err)}`
+        if (await w.vfs.exists(filePath)) return `Error: ${errMsg(err)}`
         return `Error: file '${filePath}' not found`
       }
       const count = current.split(oldString).length - 1
@@ -184,13 +184,13 @@ export function mirageTools(
       const w = await resolveWs(ws, ctx)
       let entries: string[]
       try {
-        entries = await w.fs.readdir(path)
+        entries = await w.vfs.readdir(path)
       } catch (err) {
         return `Error: ${errMsg(err)}`
       }
       const lines: string[] = []
       for (const entry of entries) {
-        const isDir = await w.fs.isDir(entry)
+        const isDir = await w.vfs.isDir(entry)
         lines.push(isDir ? `${entry}/` : entry)
       }
       return lines.join('\n')
@@ -204,7 +204,7 @@ export function mirageTools(
     },
     execute: async ({ command }, ctx) => {
       const w = await resolveWs(ws, ctx)
-      const io = await w.execute(command)
+      const io = await w.shell(command)
       const parts: string[] = []
       if (io.stdoutText.length > 0) parts.push(io.stdoutText)
       if (io.stderrText.length > 0) parts.push(io.stderrText)
@@ -221,7 +221,7 @@ export function mirageTools(
     execute: async ({ pattern, path }, ctx) => {
       const w = await resolveWs(ws, ctx)
       const root = path ?? '/'
-      const io = await w.execute(`find ${root} -name '${pattern.replace(/'/g, "'\\''")}'`)
+      const io = await w.shell(`find ${root} -name '${pattern.replace(/'/g, "'\\''")}'`)
       return io.stdoutText.trim()
     },
   })
@@ -236,7 +236,7 @@ export function mirageTools(
       const w = await resolveWs(ws, ctx)
       const root = path ?? '/'
       const escaped = pattern.replace(/'/g, "'\\''")
-      const io = await w.execute(`grep -rn '${escaped}' ${root}`)
+      const io = await w.shell(`grep -rn '${escaped}' ${root}`)
       return io.stdoutText.trim()
     },
   })

@@ -16,7 +16,7 @@ from typing import Any
 
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.core.postgres import client
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 async def build_database_json(accessor: PostgresAccessor) -> dict[str, Any]:

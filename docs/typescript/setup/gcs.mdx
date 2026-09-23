@@ -1,7 +1,7 @@
 ---
 title: Google Cloud Storage
 icon: google
-description: Set up Google Cloud Storage as a MIRAGE resource from Node or the browser.
+description: Set up Google Cloud Storage as a MIRAGE VFS from Node or the browser.
 ---
 
 GCS exposes an S3-compatible API when you use HMAC keys, so MIRAGE signs GCS requests with the same AWS Signature V4 used for S3, against the endpoint `https://storage.googleapis.com`.
@@ -15,16 +15,16 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { GCSResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { GCSVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const gcs = new GCSResource({
+const gcs = new GCSVFS({
   bucket: process.env.GCS_BUCKET!,
   accessKeyId: process.env.GCS_ACCESS_KEY_ID!,
   secretAccessKey: process.env.GCS_SECRET_ACCESS_KEY!,
 })
 
 const ws = new Workspace({ '/bucket/': gcs }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -34,7 +34,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `GCSResource` is secret-free, your backend signs each operation using your HMAC keys and hands back a URL. Since GCS accepts AWS Signature V4, the same `@aws-sdk/s3-request-presigner` code used for S3 works, pointed at the GCS endpoint.
+The browser `GCSVFS` is secret-free, your backend signs each operation using your HMAC keys and hands back a URL. Since GCS accepts AWS Signature V4, the same `@aws-sdk/s3-request-presigner` code used for S3 works, pointed at the GCS endpoint.
 
 ### 1. Server: sign URLs with the GCS endpoint
 
@@ -89,9 +89,9 @@ app.post('/presign/gcs', async (req, res) => {
 ### 2. Browser: wire it up
 
 ```ts
-import { GCSResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GCSVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const gcs = new GCSResource({
+const gcs = new GCSVFS({
   bucket: 'my-gcs-bucket',
   presignedUrlProvider: async (path, op, opts) => {
     const r = await fetch('/presign/gcs', {
@@ -148,4 +148,4 @@ gsutil cors set cors.json gs://$GCS_BUCKET
 GCS's XML API accepts `<CorsConfig><Cors><Origins>…</Origins><Methods>…</Methods><ResponseHeaders>…</ResponseHeaders><MaxAgeSec>…</MaxAgeSec></Cors></CorsConfig>`. There is no `<Headers>` / `<AllowedHeaders>` element, GCS allows all request headers through automatically.
 </Warning>
 
-See the [GCS resource](/python/resource/gcs) docs for the equivalent Python wiring.
+See the [GCS VFS](/python/vfs/gcs) docs for the equivalent Python wiring.

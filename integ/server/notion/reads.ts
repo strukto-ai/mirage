@@ -15,21 +15,24 @@
 import type { Ctx, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { DEFAULT_API_VERSION, MAX_PAGE_SIZE } from './config.ts'
-import { searchResults, databaseRows } from './search.ts'
+import { databaseRows, filterRefusal, keepProperties, searchResults } from './search.ts'
 import { childrenOf, markdownOf, metaOf } from './store.ts'
-import type { BlockRow, DatabaseRow, PageRow } from './types.ts'
+import type { BlockRow, DatabaseRow, Json, PageRow, UserRow } from './types.ts'
 import {
   apiError,
   asObject,
   blockJson,
+  botJson,
   cursorOf,
   dataSourceJson,
   databaseIdOf,
   databaseJson,
   intOr,
+  listTypeOf,
   notFound,
   pageJson,
   pageOf,
+  userJson,
 } from './wire.ts'
 
 // The kit resolves a tenant from the bearer with a FALLBACK to the default
@@ -47,7 +50,7 @@ export function unauthorized(ctx: Ctx<C>): Reply | null {
 // Notion answers each request in the shape of the version it carries, and the
 // two generations disagree about where a database's column schema lives, so
 // the header has to reach the renderer rather than being read once at startup.
-function apiVersion(ctx: Ctx<C>): string {
+export function apiVersion(ctx: Ctx<C>): string {
   const raw = ctx.headers['notion-version']
   const value = Array.isArray(raw) ? raw[0] : raw
   return value === undefined || value === '' ? DEFAULT_API_VERSION : value
@@ -74,27 +77,69 @@ export async function retrievePage(ctx: Ctx<C>): Promise<Reply> {
     where: { tenant: ctx.tenant, id },
   })) as PageRow | null
   if (row === null) return notFound('page', id)
-  return { status: 200, body: pageJson(row) }
+  const body = keepProperties(pageJson(row, apiVersion(ctx)), propertyRefs(ctx))
+  return { status: 200, body }
 }
 
 export async function whoami(ctx: Ctx<C>): Promise<Reply> {
+  return { status: 200, body: botJson(await metaOf(ctx.db, ctx.tenant)) }
+}
+
+// Every member and bot the integration can see, the integration's own bot
+// last, which is where both the MCP-Atlas recording and a live probe
+// (2026-09-22) put it.
+async function allUsers(ctx: Ctx<C>): Promise<Json[]> {
+  const rows = (await ctx.db.notionUser.findMany({
+    where: { tenant: ctx.tenant },
+    orderBy: [{ seq: 'asc' }, { id: 'asc' }],
+  })) as UserRow[]
+  return [...rows.map(userJson), botJson(await metaOf(ctx.db, ctx.tenant))]
+}
+
+export async function listUsers(ctx: Ctx<C>): Promise<Reply> {
+  const size = intOr(ctx.query.get('page_size'), MAX_PAGE_SIZE)
+  return pageOf(await allUsers(ctx), cursorOf(ctx.query.get('start_cursor')), size, 'user')
+}
+
+export async function retrieveUser(ctx: Ctx<C>): Promise<Reply> {
+  const id = ctx.params.id ?? ''
+  const user = (await allUsers(ctx)).find((one) => one.id === id)
+  if (user !== undefined) return { status: 200, body: user }
   const meta = await metaOf(ctx.db, ctx.tenant)
+  // Live wording (probed 2026-09-22), which unlike every other 404 names the
+  // integration, whose id is its bot user's id.
   return {
-    status: 200,
+    status: 404,
     body: {
-      object: 'user',
-      id: meta.botId,
-      name: meta.botName,
-      avatar_url: null,
-      type: 'bot',
-      bot: {
-        owner: { type: 'workspace', workspace: true },
-        workspace_name: meta.workspaceName,
-        workspace_id: meta.workspaceId,
-        workspace_limits: { max_file_upload_size_in_bytes: meta.maxUploadSize },
-      },
+      object: 'error',
+      status: 404,
+      code: 'object_not_found',
+      message: `Could not find user with ID: ${id}. Make sure your integration has capabilities to read user information. With those capabilities, only members and guests in the integration's workspace are visible.`,
+      additional_data: { integration_id: meta.botId },
     },
   }
+}
+
+// `filter_properties` is a repeated query parameter
+// (`?filter_properties=a&filter_properties=b`), which is how the API documents
+// it and how @notionhq/notion-mcp-server sends an array.
+function propertyRefs(ctx: Ctx<C>): string[] {
+  return ctx.query.getAll('filter_properties')
+}
+
+async function queryRows(ctx: Ctx<C>, databaseId: string, body: Json): Promise<Reply> {
+  const refused = filterRefusal(body.filter)
+  if (refused !== null) return refused
+  const version = apiVersion(ctx)
+  const rows = await databaseRows(ctx.db, ctx.tenant, databaseId, body, version)
+  const refs = propertyRefs(ctx)
+  const size = intOr(body.page_size, MAX_PAGE_SIZE)
+  return pageOf(
+    rows.map((row) => keepProperties(row, refs)),
+    cursorOf(body.start_cursor),
+    size,
+    listTypeOf(version),
+  )
 }
 
 export async function pageMarkdown(ctx: Ctx<C>): Promise<Reply> {
@@ -125,9 +170,7 @@ export async function queryDataSource(ctx: Ctx<C>): Promise<Reply> {
   })) as DatabaseRow[]
   const owner = databaseIdOf(wanted, all)
   if (owner === null) return notFound('data source', wanted)
-  const rows = await databaseRows(ctx.db, ctx.tenant, owner, body)
-  const size = intOr(body.page_size, MAX_PAGE_SIZE)
-  return { status: 200, body: pageOf(rows, cursorOf(body.start_cursor), size) }
+  return queryRows(ctx, owner, body)
 }
 
 export async function retrieveDatabase(ctx: Ctx<C>): Promise<Reply> {
@@ -144,18 +187,13 @@ export async function queryDatabase(ctx: Ctx<C>): Promise<Reply> {
   const body = asObject(ctx.json())
   const owner = await ctx.db.notionDatabase.findFirst({ where: { tenant: ctx.tenant, id } })
   if (owner === null) return notFound('database', id)
-  const rows = await databaseRows(ctx.db, ctx.tenant, id, body)
-  const size = intOr(body.page_size, MAX_PAGE_SIZE)
-  return { status: 200, body: pageOf(rows, cursorOf(body.start_cursor), size) }
+  return queryRows(ctx, id, body)
 }
 
 export async function blockChildren(ctx: Ctx<C>): Promise<Reply> {
   const rows = await childrenOf(ctx.db, ctx.tenant, ctx.params.id ?? '')
   const size = intOr(ctx.query.get('page_size'), MAX_PAGE_SIZE)
-  return {
-    status: 200,
-    body: pageOf(rows.map(blockJson), ctx.query.get('start_cursor'), size),
-  }
+  return pageOf(rows.map(blockJson), cursorOf(ctx.query.get('start_cursor')), size, 'block')
 }
 
 // Retrieve one block. The children route existed and this one did not, which
@@ -212,7 +250,8 @@ export async function retrieveBlock(ctx: Ctx<C>): Promise<Reply> {
 
 export async function search(ctx: Ctx<C>): Promise<Reply> {
   const body = asObject(ctx.json())
-  const results = await searchResults(ctx.db, ctx.tenant, body, apiVersion(ctx))
+  const version = apiVersion(ctx)
+  const results = await searchResults(ctx.db, ctx.tenant, body, version)
   const size = intOr(body.page_size, MAX_PAGE_SIZE)
-  return { status: 200, body: pageOf(results, cursorOf(body.start_cursor), size) }
+  return pageOf(results, cursorOf(body.start_cursor), size, listTypeOf(version))
 }

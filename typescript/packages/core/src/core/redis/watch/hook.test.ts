@@ -15,10 +15,10 @@
 import { FileChangeKind, PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { RedisAccessor } from '../../../accessor/redis.ts'
-import type { RedisStoreLike } from '../../../resource/redis/store.ts'
+import type { RedisStoreLike } from '../../../vfs/redis/store.ts'
 import { RedisEventHook } from './hook.ts'
 
-const ROOT = new PathSpec({ virtual: '/r', directory: '/r', resourcePath: '' })
+const ROOT = new PathSpec({ virtual: '/r', directory: '/r', vfsPath: '' })
 
 function map(eventType: string, payload: unknown) {
   const store = { keyPrefix: 'wt:' } as unknown as RedisStoreLike
@@ -32,7 +32,7 @@ describe('RedisEventHook', () => {
     expect(events).toHaveLength(1)
     expect(events[0]?.kind).toBe(FileChangeKind.UPDATE)
     expect(events[0]?.path.virtual).toBe('/r/day/a.txt')
-    expect(events[0]?.path.resourcePath).toBe('day/a.txt')
+    expect(events[0]?.path.vfsPath).toBe('day/a.txt')
   })
 
   it('maps every deletion verb to DELETE', async () => {

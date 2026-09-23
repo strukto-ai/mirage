@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
+import { coerceReadPolicy } from './read_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
@@ -41,10 +42,17 @@ import type { CacheManager } from '../../cache/manager.ts'
 import { mergeSignals } from '../abort.ts'
 import { runWithMountPrefix, runWithRevisions, withMountPrefix } from '../../observe/context.ts'
 import { uuid7 } from '../../utils/ids.ts'
-import { ResourceActivity } from './activity.ts'
+import { VFSActivity } from './activity.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import type { Resource } from '../../resource/base.ts'
-import { type Limit, ConsistencyPolicy, FileType, MountMode, PathSpec } from '../../types.ts'
+import type { VFS } from '../../vfs/base.ts'
+import {
+  type Limit,
+  type ReadSpec,
+  DEFAULT_READ_SPEC,
+  FileType,
+  MountMode,
+  PathSpec,
+} from '../../types.ts'
 import { ebusy, enotsup, erofsReadOnly } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
@@ -78,24 +86,25 @@ function opKey(name: string, filetype: string | null): OpKey {
   return `${name}\u0000${filetype ?? ''}`
 }
 
-function crossKey(name: string, targetResource: string): string {
-  return `${name}\u0000${targetResource}`
+function crossKey(name: string, targetVfs: string): string {
+  return `${name}\u0000${targetVfs}`
 }
 
 export interface MountInit {
   prefix: string
-  resource: Resource
+  vfs: VFS
   mode?: MountMode
-  consistency?: ConsistencyPolicy
+  /** How this mount's cached bytes are revalidated. */
+  read?: ReadSpec
 }
 
 export class MountEntry {
   readonly mountId = uuid7()
   readonly prefix: string
-  readonly resource: Resource
+  readonly vfs: VFS
   mode: MountMode
-  readonly consistency: ConsistencyPolicy
-  activity = new ResourceActivity()
+  readonly read: ReadSpec
+  activity = new VFSActivity()
   retiring = false
   beforeUse: (() => Promise<void>) | null = null
   private readonly readyLock = new KeyLock()
@@ -135,17 +144,31 @@ export class MountEntry {
       throw new Error(`prefix must not contain //: ${prefix}`)
     }
     this.prefix = prefix
-    this.resource = init.resource
+    this.vfs = init.vfs
     this.mode = init.mode ?? MountMode.READ
-    this.consistency = init.consistency ?? ConsistencyPolicy.LAZY
+    // A frozen copy carrying the coerced policy, not the caller's object.
+    //
+    // Frozen because Python's `ReadSpec` is a frozen dataclass, so the
+    // same spec cannot be edited after the mount-time verdict passed it;
+    // a plain JS object can, which would let a caller flip a RAM mount to
+    // `fresh` behind the verdict's back.
+    //
+    // Coerced because `ReadPolicy` is a string-const object: a runtime
+    // spec carrying `'FRESH'` matches no `===` downstream -- the gate, the
+    // routing reconcile -- so the mount would pass its capability check
+    // and then read as `bounded` everywhere, which is the silent
+    // downgrade the policy exists to remove. The Python twin normalizes
+    // at this same point.
+    const spec = init.read ?? DEFAULT_READ_SPEC
+    this.read = Object.freeze({ ...spec, policy: coerceReadPolicy(spec.policy) })
   }
 
-  /** Prepare and retain the resource while its glob hook reads metadata. */
+  /** Prepare and retain the VFS while its glob hook reads metadata. */
   async expandGlob(paths: readonly PathSpec[], prefix: string): Promise<PathSpec[]> {
     return this.use(async () => {
       const call = async (): Promise<PathSpec[]> => {
         await this.ensureReady()
-        return this.resource.glob === undefined ? [...paths] : this.resource.glob(paths, prefix)
+        return this.vfs.glob === undefined ? [...paths] : this.vfs.glob(paths, prefix)
       }
       return this.cacheManager === null ? call() : this.cacheManager.withMutation(call)
     })
@@ -153,7 +176,7 @@ export class MountEntry {
 
   /** Metadata access bound to this mount's ownership. */
   get index(): IndexCacheStore | undefined {
-    const index = this.resource.index
+    const index = this.vfs.index
     return index === undefined ? undefined : (this.cacheManager?.scopeIndex(index) ?? index)
   }
 
@@ -212,8 +235,8 @@ export class MountEntry {
       const specific = this.cmds.get(cmdKey(cmdName, extension))
       if (specific !== undefined) return specific
     }
-    const byResource = this.cmds.get(cmdKey(cmdName, null))
-    if (byResource !== undefined) return byResource
+    const byVfs = this.cmds.get(cmdKey(cmdName, null))
+    if (byVfs !== undefined) return byVfs
     const general = this.generalCmds.get(cmdName)
     if (general !== undefined) return general
     // Fall back to any filetype variant so callers without an extension can
@@ -362,14 +385,14 @@ export class MountEntry {
   /**
    * Batch-register commands and ops. Mirrors Python's
    * `Mount.register_fns(...)`. Each entry is a `RegisteredCommand` or
-   * `RegisteredOp`; commands with `resource: null` go to the general
-   * table, ops with `resource: null` likewise. Multi-resource entries
-   * (sharing the same name across resources) are filtered to this
-   * mount's resource kind; if a name has entries but none match this
+   * `RegisteredOp`; commands with `vfs: null` go to the general
+   * table, ops with `vfs: null` likewise. Multi-VFS entries
+   * (sharing the same name across mounts) are filtered to this
+   * mount's VFS kind; if a name has entries but none match this
    * mount, throw.
    */
   registerFns(items: readonly (RegisteredCommand | RegisteredOp)[]): void {
-    const kind = this.resource.kind
+    const kind = this.vfs.kind
     interface Group<T> {
       toRegister: T[]
       attempted: Set<string>
@@ -383,23 +406,23 @@ export class MountEntry {
           g = { toRegister: [], attempted: new Set() }
           opGroups.set(item.name, g)
         }
-        if (item.resource === null || item.resource === kind) g.toRegister.push(item)
-        else g.attempted.add(item.resource)
+        if (item.vfs === null || item.vfs === kind) g.toRegister.push(item)
+        else g.attempted.add(item.vfs)
       } else {
         let g = cmdGroups.get(item.name)
         if (!g) {
           g = { toRegister: [], attempted: new Set() }
           cmdGroups.set(item.name, g)
         }
-        if (item.resource === null || item.resource === kind) g.toRegister.push(item)
-        else g.attempted.add(item.resource)
+        if (item.vfs === null || item.vfs === kind) g.toRegister.push(item)
+        else g.attempted.add(item.vfs)
       }
     }
     for (const [name, g] of cmdGroups) {
       if (g.toRegister.length === 0) {
         const list = [...g.attempted].sort(compareCodePoints)
         throw new Error(
-          `command '${name}' is for resource(s) [${list.map((r) => `'${r}'`).join(', ')}], not '${kind}'`,
+          `command '${name}' is for VFS(s) [${list.map((r) => `'${r}'`).join(', ')}], not '${kind}'`,
         )
       }
     }
@@ -407,19 +430,19 @@ export class MountEntry {
       if (g.toRegister.length === 0) {
         const list = [...g.attempted].sort(compareCodePoints)
         throw new Error(
-          `op '${name}' is for resource(s) [${list.map((r) => `'${r}'`).join(', ')}], not '${kind}'`,
+          `op '${name}' is for VFS(s) [${list.map((r) => `'${r}'`).join(', ')}], not '${kind}'`,
         )
       }
     }
     for (const g of cmdGroups.values()) {
       for (const cmd of g.toRegister) {
-        if (cmd.resource === null) this.registerGeneral(cmd)
+        if (cmd.vfs === null) this.registerGeneral(cmd)
         else this.register(cmd)
       }
     }
     for (const g of opGroups.values()) {
       for (const o of g.toRegister) {
-        if (o.resource === null) this.registerGeneralOp(o)
+        if (o.vfs === null) this.registerGeneralOp(o)
         else this.registerOp(o)
       }
     }
@@ -436,8 +459,8 @@ export class MountEntry {
       const specific = table.get(cmdKey(name, extension))
       if (specific !== undefined) levels.push(specific)
     }
-    const byResource = table.get(cmdKey(name, null))
-    if (byResource !== undefined) levels.push(byResource)
+    const byVfs = table.get(cmdKey(name, null))
+    if (byVfs !== undefined) levels.push(byVfs)
     const generalEntry = general.get(name)
     if (generalEntry !== undefined) levels.push(generalEntry)
     return levels
@@ -500,7 +523,7 @@ export class MountEntry {
             directory: p.directory,
             pattern: p.pattern,
             resolved: p.resolved,
-            resourcePath: mountKey(p.virtual, mountPrefix),
+            vfsPath: mountKey(p.virtual, mountPrefix),
             rawPath: p.rawPath,
           }),
       )
@@ -508,11 +531,11 @@ export class MountEntry {
       // A pattern operand travels to the handler whole. The handler
       // resolves it once, through the shared adapter, which is where the
       // namespace facts (links, nested mount roots, a trailing slash) are
-      // in view; the resource's glob hook serves the shell tier and cannot
+      // in view; the VFS's glob hook serves the shell tier and cannot
       // see them, so expanding here would lose what the handler needs.
       // Python's dispatcher never expands either.
 
-      const accessor = (this.resource as { accessor?: Accessor }).accessor ?? NOOP_ACCESSOR
+      const accessor = (this.vfs as { accessor?: Accessor }).accessor ?? NOOP_ACCESSOR
       const cmdOpts: CommandOpts = {
         stdin: context.stdin ?? null,
         flags,
@@ -660,7 +683,7 @@ export class MountEntry {
       const filetype = getExtension(path)
       const levels = this.resolveCascade(opName, filetype, this.ops, this.generalOps)
       if (levels.length === 0) {
-        throw enotsup(this.resource.kind, opName, path)
+        throw enotsup(this.vfs.kind, opName, path)
       }
       // Per path, not per mount: a show entry can hold one subtree below
       // `w` on a writable mount, or one writable region on a read mount.
@@ -693,14 +716,14 @@ export class MountEntry {
       const scope = new PathSpec({
         virtual: path,
         directory: lastSlash > 0 ? path.slice(0, lastSlash + 1) : '/',
-        resourcePath: mountKey(path, mountPrefix),
+        vfsPath: mountKey(path, mountPrefix),
       })
       const effectiveKwargs: OpKwargs = {
         ...kwargs,
         ...(kwargs.index === undefined && this.index !== undefined ? { index: this.index } : {}),
         ...(filetype !== null && kwargs.filetype === undefined ? { filetype } : {}),
       }
-      const accessor = this.resource.accessor ?? NOOP_ACCESSOR
+      const accessor = this.vfs.accessor ?? NOOP_ACCESSOR
       // Per-op caps are policy and fire at the op door (postOps); only
       // the timeout stays here, bounding the backend call itself.
       const opOverride = this.commandLimits.get(opName) ?? null
@@ -732,7 +755,7 @@ export function wrapOpStream(
   result: unknown,
   mountPrefix: string,
   mountId: string,
-  activity: ResourceActivity,
+  activity: VFSActivity,
 ): unknown {
   if (result instanceof CachableAsyncIterator) {
     result.wrapSource((source) => withMountPrefix(mountPrefix, source, mountId))
@@ -753,7 +776,7 @@ function wrapMountStreams(
   result: [ByteSource | null, IOResult],
   mountPrefix: string,
   mountId: string,
-  activity: ResourceActivity,
+  activity: VFSActivity,
 ): [ByteSource | null, IOResult] {
   const [stream, io] = result
   const seen = new Map<ByteSource, ByteSource>()

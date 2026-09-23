@@ -19,7 +19,7 @@ import { POSTGRES_IO } from './io.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
-import { type PathSpec, ResourceName } from '../../../types.ts'
+import { type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
@@ -76,7 +76,7 @@ async function wcCommand(
 
 export const POSTGRES_WC = command({
   name: 'wc',
-  resource: ResourceName.POSTGRES,
+  vfs: VFSName.POSTGRES,
   spec: specOf('wc'),
   fn: wcCommand,
 })

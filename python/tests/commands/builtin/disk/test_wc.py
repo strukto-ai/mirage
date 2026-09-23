@@ -14,19 +14,18 @@
 
 import pytest
 
-from mirage import DiskResource, MountMode, Workspace
+from mirage import DiskVFS, MountMode, Workspace
 
 
 @pytest.fixture
 def workspace(tmp_path):
-    return Workspace({"/": DiskResource(root=str(tmp_path))},
-                     mode=MountMode.WRITE)
+    return Workspace({"/": DiskVFS(root=str(tmp_path))}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_wc_default(workspace):
-    await workspace.fs.write("/f.txt", b"hello world\nfoo bar\n")
-    io = await workspace.execute("wc /f.txt")
+    await workspace.vfs.write("/f.txt", b"hello world\nfoo bar\n")
+    io = await workspace.shell("wc /f.txt")
     assert io.exit_code == 0
     parts = io.stdout.decode().rstrip("\n").split()
     assert parts[0] == "2"
@@ -37,48 +36,48 @@ async def test_wc_default(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_l(workspace):
-    await workspace.fs.write("/f.txt", b"a\nb\nc\n")
-    io = await workspace.execute("wc -l /f.txt")
+    await workspace.vfs.write("/f.txt", b"a\nb\nc\n")
+    io = await workspace.shell("wc -l /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "3"
 
 
 @pytest.mark.asyncio
 async def test_wc_w(workspace):
-    await workspace.fs.write("/f.txt", b"hello world\nfoo\n")
-    io = await workspace.execute("wc -w /f.txt")
+    await workspace.vfs.write("/f.txt", b"hello world\nfoo\n")
+    io = await workspace.shell("wc -w /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "3"
 
 
 @pytest.mark.asyncio
 async def test_wc_c(workspace):
-    await workspace.fs.write("/f.txt", b"hello\n")
-    io = await workspace.execute("wc -c /f.txt")
+    await workspace.vfs.write("/f.txt", b"hello\n")
+    io = await workspace.shell("wc -c /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "6"
 
 
 @pytest.mark.asyncio
 async def test_wc_m_multibyte(workspace):
-    await workspace.fs.write("/f.txt", "café".encode())
-    io = await workspace.execute("wc -m /f.txt")
+    await workspace.vfs.write("/f.txt", "café".encode())
+    io = await workspace.shell("wc -m /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "4"
 
 
 @pytest.mark.asyncio
 async def test_wc_L(workspace):
-    await workspace.fs.write("/f.txt", b"short\na much longer line\nmed\n")
-    io = await workspace.execute("wc -L /f.txt")
+    await workspace.vfs.write("/f.txt", b"short\na much longer line\nmed\n")
+    io = await workspace.shell("wc -L /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == str(len("a much longer line"))
 
 
 @pytest.mark.asyncio
 async def test_wc_empty_file(workspace):
-    await workspace.fs.write("/f.txt", b"")
-    io = await workspace.execute("wc /f.txt")
+    await workspace.vfs.write("/f.txt", b"")
+    io = await workspace.shell("wc /f.txt")
     assert io.exit_code == 0
     parts = io.stdout.decode().split()
     assert parts[:3] == ["0", "0", "0"]
@@ -86,9 +85,9 @@ async def test_wc_empty_file(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_multi_file_emits_total(workspace):
-    await workspace.fs.write("/a.txt", b"hello\n")
-    await workspace.fs.write("/b.txt", b"world\nfoo\n")
-    io = await workspace.execute("wc /a.txt /b.txt")
+    await workspace.vfs.write("/a.txt", b"hello\n")
+    await workspace.vfs.write("/b.txt", b"world\nfoo\n")
+    io = await workspace.shell("wc /a.txt /b.txt")
     assert io.exit_code == 0
     lines = io.stdout.decode().splitlines()
     assert any(line.endswith("/a.txt") for line in lines)

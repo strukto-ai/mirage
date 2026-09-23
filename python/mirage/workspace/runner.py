@@ -39,10 +39,10 @@ class WorkspaceRunner:
 
     Example:
 
-        ws = Workspace({"/": (RAMResource(), MountMode.WRITE)})
+        ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
         runner = WorkspaceRunner(ws)
         try:
-            result = await runner.call(runner.ws.execute("ls /"))
+            result = await runner.call(runner.ws.shell("ls /"))
         finally:
             await runner.stop()
     """
@@ -79,7 +79,7 @@ class WorkspaceRunner:
 
         Args:
             coro (Awaitable[T]): a coroutine produced from the
-                workspace's API, e.g. ``runner.ws.execute("ls /")``.
+                workspace's API, e.g. ``runner.ws.shell("ls /")``.
 
         Returns:
             T: whatever ``coro`` resolves to.

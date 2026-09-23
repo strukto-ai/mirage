@@ -139,7 +139,7 @@ def _resolve_check_target(filename: str, cwd: str,
     virtual = resolve_path(filename, cwd)
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=mount_key(virtual, mount_prefix))
+                    vfs_path=mount_key(virtual, mount_prefix))
 
 
 def _count_noun(count: int, singular: str, plural: str) -> str:
@@ -181,7 +181,7 @@ async def _hash_check(
 ) -> tuple[bytes, bytes | None, int]:
     prog = f"{algorithm}sum"
     data = (await read_bytes(path)).decode(errors="replace")
-    mount_prefix = mount_prefix_of(path.virtual, path.resource_path)
+    mount_prefix = mount_prefix_of(path.virtual, path.vfs_path)
     check_label = path.raw_path or path.virtual
     lines: list[str] = []
     stderr_lines: list[str] = []

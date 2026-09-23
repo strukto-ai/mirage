@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeKeyPrefix, type S3Config } from '../../resource/s3/config.ts'
+import { normalizeKeyPrefix, type S3Config } from '../../vfs/s3/config.ts'
 import { S3RecordClient } from '../record/s3.ts'
 import { SessionStore, type SessionFields } from './store.ts'
 

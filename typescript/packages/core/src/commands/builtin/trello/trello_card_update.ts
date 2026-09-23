@@ -17,7 +17,7 @@ import { requireMountWritable } from '../../../context/session_context.ts'
 import { cardUpdate } from '../../../core/trello/client.ts'
 import { normalizeCard } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { CommandSpec, Option } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -83,7 +83,7 @@ async function trelloCardUpdateCommand(
 
 export const TRELLO_CARD_UPDATE = command({
   name: 'trello card update',
-  resource: ResourceName.TRELLO,
+  vfs: VFSName.TRELLO,
   spec: SPEC,
   fn: trelloCardUpdateCommand,
   write: true,

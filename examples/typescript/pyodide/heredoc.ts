@@ -12,38 +12,38 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/ram': new RAMResource() }, { mode: MountMode.EXEC })
+  const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.EXEC })
 
   console.log('python3 heredoc patterns (commonly emitted by AI agents)\n')
 
   console.log("=== python3 << 'PYEOF' — quoted delimiter, $X stays literal ===")
-  await ws.execute('export X=shellval')
-  const quoted = await ws.execute(
+  await ws.shell('export X=shellval')
+  const quoted = await ws.shell(
     "python3 << 'PYEOF'\nx = '$X'  # literal, not expanded\nprint(x)\nPYEOF",
   )
   console.log(`stdout: ${quoted.stdoutText.trim()}  (expected: '$X')\n`)
 
   console.log('=== python3 << PYEOF — unquoted delimiter, $X expanded by shell ===')
-  const unquoted = await ws.execute("python3 << PYEOF\nprint('$X')\nPYEOF")
+  const unquoted = await ws.shell("python3 << PYEOF\nprint('$X')\nPYEOF")
   console.log(`stdout: ${unquoted.stdoutText.trim()}  (expected: 'shellval')\n`)
 
   console.log('=== python3 <<-PYEOF — dash strips leading tabs ===')
-  const dashStripped = await ws.execute(
+  const dashStripped = await ws.shell(
     'python3 <<-PYEOF\n\tfor i in range(3):\n\t    print(f"item-{i}")\n\tPYEOF',
   )
   console.log(`stdout:\n${dashStripped.stdoutText.trim()}\n`)
 
   console.log('=== python3 << EOF | grep keep — heredoc feeding a pipeline ===')
-  const piped = await ws.execute(
+  const piped = await ws.shell(
     "python3 << EOF | grep keep\nfor i in range(5):\n    print('keep' if i % 2 else 'drop', i)\nEOF",
   )
   console.log(`stdout:\n${piped.stdoutText.trim()}\n`)
 
   console.log('=== heredoc inside for-loop — body re-fires per iteration ===')
-  const loop = await ws.execute(
+  const loop = await ws.shell(
     "for name in alice bob carol; do python3 <<-PYEOF\n\tname = '$name'\n\tprint(f'hello, {name}!')\n\tPYEOF\ndone",
   )
   console.log(`stdout:\n${loop.stdoutText.trim()}\n`)

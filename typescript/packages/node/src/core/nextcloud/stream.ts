@@ -23,7 +23,7 @@ export async function* stream(
   chunkSize = DEFAULT_CHUNK_SIZE,
 ): AsyncIterable<Uint8Array> {
   const op = await accessor.operator()
-  const rec = recordStream('read', path.virtual, accessor.resourceName)
+  const rec = recordStream('read', path.virtual, accessor.vfsName)
   let reader
   try {
     reader = await op.reader(nextcloudKey(path))

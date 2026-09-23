@@ -22,8 +22,8 @@ from mirage.commands.builtin.dropbox.rg import _keep_visible, rg
 from mirage.commands.config import CommandOpts
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.io.types import IOResult
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
+from mirage.vfs.dropbox.config import DropboxConfig
 
 _GLOBALS = rg.__wrapped__.__globals__
 
@@ -37,11 +37,11 @@ def make_accessor() -> DropboxAccessor:
 
 
 def scope() -> PathSpec:
-    return PathSpec(resource_path="", virtual="/data", directory="/data")
+    return PathSpec(vfs_path="", virtual="/data", directory="/data")
 
 
 def spec(virtual: str) -> PathSpec:
-    return PathSpec(resource_path=virtual.removeprefix("/data/"),
+    return PathSpec(vfs_path=virtual.removeprefix("/data/"),
                     virtual=virtual,
                     directory="",
                     resolved=True)
@@ -76,7 +76,7 @@ def test_keep_visible_hidden_flag_keeps_everything():
 
 
 def test_keep_visible_ignores_dots_in_the_scope_itself():
-    hidden_scope = PathSpec(resource_path=".cfg",
+    hidden_scope = PathSpec(vfs_path=".cfg",
                             virtual="/data/.cfg",
                             directory="/data/.cfg")
     kept = _keep_visible([spec('/data/.cfg/a.txt')], [hidden_scope],

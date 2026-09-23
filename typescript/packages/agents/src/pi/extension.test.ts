@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import type {
@@ -34,7 +34,7 @@ function extensionFactory(ws: Workspace, opts?: Parameters<typeof mirageExtensio
 }
 
 function mkWs(): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -136,7 +136,7 @@ describe('mirageExtension', () => {
 
   it('routes interactive ! commands through Mirage at the virtual cwd', async () => {
     const ws = mkWs()
-    await ws.fs.mkdir('/data')
+    await ws.vfs.mkdir('/data')
     const pi = fakePi()
     await extensionFactory(ws, { cwd: '/data' })(pi.api)
     expect(pi.userBash).toBeDefined()

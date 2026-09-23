@@ -16,4 +16,4 @@ from mirage.commands.builtin.gcal.io import resolve_glob
 from mirage.commands.builtin.generic.rm_cmd import make_rm
 from mirage.core.gcal.unlink import unlink
 
-rm = make_rm(resource="gcal", glob_fn=resolve_glob, unlink=unlink)
+rm = make_rm(vfs="gcal", glob_fn=resolve_glob, unlink=unlink)

@@ -33,11 +33,11 @@ import type { LinkView, MountView, StatPath } from '../../../ops/types.ts'
 
 const DEC = new TextDecoder()
 
-function spec(virtual: string, resourcePath: string, rawPath?: string): PathSpec {
+function spec(virtual: string, vfsPath: string, rawPath?: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath,
+    vfsPath,
     ...(rawPath === undefined ? {} : { rawPath }),
   })
 }
@@ -48,7 +48,7 @@ function opts(flags: Record<string, string | boolean> = {}, statPath?: StatPath)
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: {} as never,
+    vfs: {} as never,
     statPath,
   } as unknown as CommandOpts
 }
@@ -326,7 +326,7 @@ describe('duGeneric', () => {
 
   it('treats a namespace-only directory as present, not missing', async () => {
     // The parent backend holds nothing at the operand and cannot: the
-    // content lives in the descendant mount's own resource. Only the
+    // content lives in the descendant mount's own VFS. Only the
     // dispatcher-backed probe knows the path is a directory.
     const [size, entries] = backend({})
     const out = await runDu(

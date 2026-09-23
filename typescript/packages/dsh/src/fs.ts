@@ -26,10 +26,11 @@ import type {
   FsWriteIntent,
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
-import { DiskResource } from '@struktoai/mirage-node'
+import { DiskVFS } from '@struktoai/mirage-node'
 import { sessionPathAllowed } from '@struktoai/mirage-core/context/session_context'
 import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
-import type { Session } from '@struktoai/mirage-core/workspace/session/session'
+import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/handle'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -216,7 +217,7 @@ export class MirageFileSystem extends FileSystem {
       await host.ensureSessionsLoaded()
       await host.namespace.ensureLoaded()
       this.host = host
-      this.fsOps = this.sessionId === undefined ? host.fs : host.fs.forSession(this.sessionId)
+      this.fsOps = this.sessionId === undefined ? host.vfs : new Session(host, this.sessionId).vfs
     }
     assertNotAborted(signal, operation)
     return this.fsOps
@@ -233,9 +234,9 @@ export class MirageFileSystem extends FileSystem {
    * The session the op door judges this adapter's ops as, asked of the
    * workspace so it is the one a dispatch from this context will bind:
    * the configured session, unless an ambient one of this workspace is
-   * kept (a callback reaching `ctx.fs` from inside its `execute`).
+   * kept (a callback reaching `ctx.fs` from inside its `shell`).
    */
-  private session(): Session {
+  private session(): SessionState {
     if (this.host === null) {
       throw new Error('mirage: filesystem used before the workspace is ready')
     }
@@ -375,9 +376,9 @@ export class MirageFileSystem extends FileSystem {
     const host = resolve(hostPath)
     const mounts = workspace.mounts()
     for (const entry of mounts) {
-      const { resource } = entry
-      if (!(resource instanceof DiskResource)) continue
-      const rel = relative(resource.root, host)
+      const { vfs } = entry
+      if (!(vfs instanceof DiskVFS)) continue
+      const rel = relative(vfs.root, host)
       if (escapesRoot(rel)) continue
       // `prefix` always carries a trailing slash, and `rel` is empty for
       // the root itself, so the join is a concatenation and the slash is
@@ -387,13 +388,13 @@ export class MirageFileSystem extends FileSystem {
       // A mount nested under this one owns its own subtree, and dispatch
       // routes the path there, so the disk file at this host location is
       // not what the virtual path reads. Keep looking rather than name a
-      // path that answers with another resource's bytes.
+      // path that answers with another VFS's bytes.
       if (ownerPrefixOf(virtual, mounts) !== entry.prefix) continue
       // A namespace symlink at or above this path is followed before
       // dispatch, so a read would land on the link's target rather than
       // the disk file the caller named. Links are namespace state, so the
       // disk mount cannot see one and only this table can say.
-      if (shadowedByLink(workspace.fs.links, virtual)) continue
+      if (shadowedByLink(workspace.vfs.links, virtual)) continue
       return virtual
     }
     return undefined

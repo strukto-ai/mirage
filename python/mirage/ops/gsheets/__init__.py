@@ -16,6 +16,6 @@ from mirage.commands.builtin.gsheets.io import IO
 from mirage.ops.generic import make_generic_ops
 from mirage.ops.gsheets.read import read
 
-# The only read is the dual-resource .gsheet.json filetype op (registered for
+# The only read is the dual-VFS .gsheet.json filetype op (registered for
 # both gsheets and gdrive), so the factory's plain read is overridden.
 OPS = [*make_generic_ops("gsheets", IO, overrides={"read"}), read]

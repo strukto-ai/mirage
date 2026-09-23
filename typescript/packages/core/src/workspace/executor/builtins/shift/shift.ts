@@ -14,7 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { isCountWord } from '../shared.ts'
 import type { BuiltinCall, Result } from '../types.ts'
@@ -28,7 +28,7 @@ import type { BuiltinCall, Result } from '../types.ts'
 export function handleShift(
   args: readonly string[],
   callStack: CallStack | null,
-  session: Session | null = null,
+  session: SessionState | null = null,
 ): Result {
   if (args.length > 1) {
     const err = new TextEncoder().encode('shift: too many arguments\n')

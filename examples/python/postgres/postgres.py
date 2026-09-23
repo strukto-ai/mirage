@@ -18,8 +18,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.postgres import PostgresConfig, PostgresResource
 from mirage.types import PathSpec
+from mirage.vfs.postgres import PostgresConfig, PostgresVFS
 
 load_dotenv(".env.development")
 
@@ -28,12 +28,12 @@ config = PostgresConfig(
     max_read_rows=200,
     max_read_bytes=1024 * 1024,
 )
-resource = PostgresResource(config=config)
+vfs = PostgresVFS(config=config)
 
 
 async def _run(ws, cmd):
     print(f"\n>>> {cmd}")
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     out = (await r.stdout_str()).strip()
     err = await r.stderr_str()
     if out:
@@ -50,7 +50,7 @@ async def _run(ws, cmd):
 
 
 async def main():
-    ws = Workspace({"/pg": resource}, mode=MountMode.READ)
+    ws = Workspace({"/pg": vfs}, mode=MountMode.READ)
 
     print("=" * 60)
     print("LISTING (ls / tree)")
@@ -83,8 +83,8 @@ async def main():
     # namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print(f"=== metadata overlay on {fp} ===")
-    meta_res = await ws.execute(f'chmod 640 "{fp}" && chown 500:dev "{fp}"'
-                                f' && touch -t 202601021530 "{fp}"')
+    meta_res = await ws.shell(f'chmod 640 "{fp}" && chown 500:dev "{fp}"'
+                              f' && touch -t 202601021530 "{fp}"')
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     try:
         meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(fp))
@@ -141,11 +141,11 @@ async def main():
     print("CD + relative paths")
     print("=" * 60)
 
-    await ws.execute("cd /pg/public/tables")
+    await ws.shell("cd /pg/public/tables")
     await _run(ws, "pwd")
     await _run(ws, "ls")
 
-    await resource.accessor.close()
+    await vfs.accessor.close()
 
 
 if __name__ == "__main__":

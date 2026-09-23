@@ -168,7 +168,7 @@ jobs:
           run integ/truth/ask.json
           run integ/truth/ask_pending.json
           run integ/truth/typescript/custom_command.json
-          run integ/truth/custom_resource.json
+          run integ/truth/custom_vfs.json
           run integ/truth/custom_cli.json
           run integ/truth/session.json
           run integ/truth/typescript/filetype.json

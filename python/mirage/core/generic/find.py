@@ -196,7 +196,7 @@ def make_search_backed_find(resolve_path: ResolvePathFn[A], stat: StatFn[A],
         needs_kind = (tree_has_type(node) or min_size is not None
                       or max_size is not None or tree_has_empty(node))
         start_name = start_basename(path)
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
+        prefix = mount_prefix_of(path.virtual, path.vfs_path)
         filtered: list[str] = []
         for item in results:
             if await _matches(resolve_path, stat, accessor, item, prefix,

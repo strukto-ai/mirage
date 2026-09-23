@@ -1,7 +1,7 @@
 ---
 title: QingStor
 icon: cloud
-description: Set up QingStor as a MIRAGE resource from Node or the browser.
+description: Set up QingStor as a MIRAGE VFS from Node or the browser.
 ---
 
 QingStor (QingCloud Object Storage) exposes an S3-compatible API with AWS Signature V4 against `https://s3.<zone>.qingstor.com`. MIRAGE derives this endpoint from your zone automatically (the zone is passed as `region`).
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { MountMode, QingStorResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, QingStorVFS, Workspace } from '@struktoai/mirage-node'
 
-const qs = new QingStorResource({
+const qs = new QingStorVFS({
   bucket: process.env.QINGSTOR_BUCKET!,
   region: process.env.QINGSTOR_ZONE!,
   accessKeyId: process.env.QINGSTOR_ACCESS_KEY_ID!,
@@ -25,7 +25,7 @@ const qs = new QingStorResource({
 })
 
 const ws = new Workspace({ '/bucket/': qs }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `QingStorResource` is secret-free, your backend signs each operation using your QingStor keys and returns a URL. QingStor accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the QingStor endpoint.
+The browser `QingStorVFS` is secret-free, your backend signs each operation using your QingStor keys and returns a URL. QingStor accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the QingStor endpoint.
 
 ### 1. Server: sign URLs with the QingStor endpoint
 
@@ -92,9 +92,9 @@ app.post('/presign/qingstor', async (req, res) => {
 ### 2. Browser: wire it up
 
 ```ts
-import { MountMode, QingStorResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, QingStorVFS, Workspace } from '@struktoai/mirage-browser'
 
-const qs = new QingStorResource({
+const qs = new QingStorVFS({
   bucket: 'my-bucket',
   region: 'pek3a',
   presignedUrlProvider: async (path, op, opts) => {
@@ -119,4 +119,4 @@ const ws = new Workspace({ '/bucket/': qs }, { mode: MountMode.READ })
 
 Configure CORS rules in the QingCloud console: QingStor -> your bucket -> **Basic Settings** -> **CORS**. Allow your dev/production origins with methods `GET, PUT, HEAD, DELETE, POST`, allowed headers `*`, and expose headers `ETag, Content-Length, Content-Type, Last-Modified`.
 
-See the [QingStor resource](/python/resource/qingstor) docs for the equivalent Python wiring.
+See the [QingStor VFS](/python/vfs/qingstor) docs for the equivalent Python wiring.

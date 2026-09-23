@@ -56,7 +56,7 @@ def _resolve_config_arg(path: Path) -> dict[str, Any]:
     """Read a workspace YAML/JSON config and interpolate ``${VAR}`` from
     the CLI's env, then rebase its relative script paths and code refs
     onto the file's directory, exactly as ``create`` does: a
-    ``resource: ./wiki.py:WikiResource`` in a ``load``/``clone`` override
+    ``vfs: ./wiki.py:WikiVFS`` in a ``load``/``clone`` override
     means "next to this file", never "wherever the daemon runs". Skips
     validation because load/clone may only need a subset of mounts.
     Mirrors ``loadConfigArgument`` in the TypeScript CLI.
@@ -91,10 +91,10 @@ def _format_workspace_detail(detail: dict[str, Any]) -> str:
     ]
     mounts = detail.get("mounts") or []
     if mounts:
-        rows = [[m["prefix"], m["resource"], m["mode"]] for m in mounts]
+        rows = [[m["prefix"], m["vfs"], m["mode"]] for m in mounts]
         lines.append("")
         lines.append("Mounts:")
-        table = format_table(["PREFIX", "RESOURCE", "MODE"], rows)
+        table = format_table(["PREFIX", "VFS", "MODE"], rows)
         lines.extend("  " + ln for ln in table.splitlines())
     sessions = detail.get("sessions") or []
     if sessions:

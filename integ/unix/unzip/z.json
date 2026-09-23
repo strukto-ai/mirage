@@ -1,0 +1,808 @@
+{
+  "cases": [
+    {
+      "id": "unzip_Z1_lists_names_only",
+      "seq": 601473,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punzz && echo 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/punzz/m.zip && unzip -Z1 /data/punzz/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir/\ndir/a.txt\nb.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "1"
+      ]
+    },
+    {
+      "id": "unzip_Z_lists_header_rows_totals",
+      "seq": 601474,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z /data/punzz/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzz/m.zip\nZip file size: 297 bytes, number of entries: 3\ndrwxrwxr-x  2.0 unx        0 b- defN 26-Sep-20 07:33 dir/\n?rw-------  2.0 unx      200 b- defN 26-Sep-20 07:33 dir/a.txt\n?rw-------  2.0 unx        1 b- defN 26-Sep-20 07:33 b.txt\n3 files, 201 bytes uncompressed, 11 bytes compressed:  94.5%\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z"
+      ]
+    },
+    {
+      "id": "unzip_Zl_adds_compressed_size",
+      "seq": 601475,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Zl /data/punzz/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzz/m.zip\nZip file size: 297 bytes, number of entries: 3\ndrwxrwxr-x  2.0 unx        0 b-        2 defN 26-Sep-20 07:33 dir/\n?rw-------  2.0 unx      200 b-        6 defN 26-Sep-20 07:33 dir/a.txt\n?rw-------  2.0 unx        1 b-        3 defN 26-Sep-20 07:33 b.txt\n3 files, 201 bytes uncompressed, 11 bytes compressed:  94.5%\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "l"
+      ]
+    },
+    {
+      "id": "unzip_Zh_prints_header_only",
+      "seq": 601476,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Zh /data/punzz/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzz/m.zip\nZip file size: 297 bytes, number of entries: 3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "h"
+      ]
+    },
+    {
+      "id": "unzip_Zt_prints_totals_only",
+      "seq": 601477,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Zt /data/punzz/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "3 files, 201 bytes uncompressed, 11 bytes compressed:  94.5%\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "t"
+      ]
+    },
+    {
+      "id": "unzip_Z1t_names_win_over_totals",
+      "seq": 601478,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z1t /data/punzz/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir/\ndir/a.txt\nb.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "1",
+        "t"
+      ]
+    },
+    {
+      "id": "unzip_Z2h_names_with_header",
+      "seq": 601479,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z2h /data/punzz/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzz/m.zip\nZip file size: 297 bytes, number of entries: 3\ndir/\ndir/a.txt\nb.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "2",
+        "h"
+      ]
+    },
+    {
+      "id": "unzip_Z_member_prints_its_row_alone",
+      "seq": 601480,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z /data/punzz/m.zip b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "?rw-------  2.0 unx        1 b- defN 26-Sep-20 07:33 b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z"
+      ]
+    },
+    {
+      "id": "unzip_Zh_member_keeps_header_drops_totals",
+      "seq": 601481,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Zh /data/punzz/m.zip b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzz/m.zip\nZip file size: 297 bytes, number of entries: 3\n?rw-------  2.0 unx        1 b- defN 26-Sep-20 07:33 b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "h"
+      ]
+    },
+    {
+      "id": "unzip_Z1_member_miss_exits_11",
+      "seq": 601482,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z1 /data/punzz/m.zip nomatch",
+      "expect": {
+        "exit": 11,
+        "stdout": "",
+        "stderr": "caution: filename not matched:  nomatch\n"
+      },
+      "flags": [
+        "Z",
+        "1"
+      ]
+    },
+    {
+      "id": "unzip_Z1_member_hit_and_miss_exits_0",
+      "seq": 601483,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z1 /data/punzz/m.zip 'dir/*' nomatch",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir/\ndir/a.txt\n",
+        "stderr": "caution: filename not matched:  nomatch\n"
+      },
+      "flags": [
+        "Z",
+        "1"
+      ]
+    },
+    {
+      "id": "unzip_1_without_Z_exits_10",
+      "seq": 601484,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -1 /data/punzz/m.zip",
+      "expect": {
+        "exit": 10,
+        "stdout": "",
+        "stderr": "unzip: -1 is a ZipInfo option and needs -Z\n"
+      },
+      "flags": [
+        "1"
+      ]
+    },
+    {
+      "id": "unzip_Z1_prefixed_archive_lists_with_a_warning",
+      "seq": 601485,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '#!/bin/sh\\n' > /data/punzz/p.zip && echo 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d >> /data/punzz/p.zip && unzip -Z1 /data/punzz/p.zip",
+      "expect": {
+        "exit": 1,
+        "stdout": "dir/\ndir/a.txt\nb.txt\n",
+        "stderr": "warning [/data/punzz/p.zip]:  10 extra bytes at beginning or within zipfile\n  (attempting to process anyway)\n"
+      },
+      "flags": [
+        "Z",
+        "1"
+      ]
+    },
+    {
+      "id": "unzip_l_prefixed_archive_warns_and_exits_1",
+      "seq": 601486,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -l /data/punzz/p.zip",
+      "expect": {
+        "exit": 1,
+        "stdout": "  Length      Name\n---------  ----\n        0  dir/\n      200  dir/a.txt\n        1  b.txt\n",
+        "stderr": "warning [/data/punzz/p.zip]:  10 extra bytes at beginning or within zipfile\n  (attempting to process anyway)\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "unzip_Zm_adds_percent_saved",
+      "seq": 601487,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Zm /data/punzz/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzz/m.zip\nZip file size: 297 bytes, number of entries: 3\ndrwxrwxr-x  2.0 unx        0 b-  0% defN 26-Sep-20 07:33 dir/\n?rw-------  2.0 unx      200 b- 97% defN 26-Sep-20 07:33 dir/a.txt\n?rw-------  2.0 unx        1 b--199% defN 26-Sep-20 07:33 b.txt\n3 files, 201 bytes uncompressed, 11 bytes compressed:  94.5%\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "m"
+      ]
+    },
+    {
+      "id": "unzip_Zs_member_row_is_the_default_row",
+      "seq": 601488,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Zs /data/punzz/m.zip b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "?rw-------  2.0 unx        1 b- defN 26-Sep-20 07:33 b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "s"
+      ]
+    },
+    {
+      "id": "unzip_m_without_Z_exits_10",
+      "seq": 601489,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -m /data/punzz/m.zip",
+      "expect": {
+        "exit": 10,
+        "stdout": "",
+        "stderr": "unzip: -m is a ZipInfo option and needs -Z\n"
+      },
+      "flags": [
+        "m"
+      ]
+    },
+    {
+      "id": "unzip_Z1_x_drops_the_excluded_entry",
+      "seq": 601490,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z1 /data/punzz/m.zip -x b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir/\ndir/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "1",
+        "x"
+      ]
+    },
+    {
+      "id": "unzip_Z_x_counts_as_a_filter_for_the_layout",
+      "seq": 601491,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z /data/punzz/m.zip -x b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "drwxrwxr-x  2.0 unx        0 b- defN 26-Sep-20 07:33 dir/\n?rw-------  2.0 unx      200 b- defN 26-Sep-20 07:33 dir/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "x"
+      ]
+    },
+    {
+      "id": "unzip_Z1_x_unmatched_is_a_caution",
+      "seq": 601492,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z1 /data/punzz/m.zip 'dir/*' -x nomatch",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir/\ndir/a.txt\n",
+        "stderr": "caution: excluded filename not matched:  nomatch\n"
+      },
+      "flags": [
+        "Z",
+        "1",
+        "x"
+      ]
+    },
+    {
+      "id": "unzip_l_x_leaving_nothing_exits_11",
+      "seq": 601493,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -l /data/punzz/m.zip -x '*'",
+      "expect": {
+        "exit": 11,
+        "stdout": "  Length      Name\n---------  ----\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l",
+        "x"
+      ]
+    },
+    {
+      "id": "unzip_p_x_excludes_a_subtree",
+      "seq": 601494,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -p /data/punzz/m.zip -x 'dir/*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "b",
+        "stderr": ""
+      },
+      "flags": [
+        "p",
+        "x"
+      ]
+    },
+    {
+      "id": "unzip_t_x_unmatched_caution_on_stdout",
+      "seq": 601495,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -t /data/punzz/m.zip -x nomatch",
+      "expect": {
+        "exit": 0,
+        "stdout": "caution: excluded filename not matched:  nomatch\nNo errors detected in /data/punzz/m.zip\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "x"
+      ]
+    }
+  ]
+}

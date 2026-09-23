@@ -23,7 +23,7 @@ from mirage.utils.errors import eisdir, enoent
 @eacces_on_denied
 async def unlink(accessor: GDriveAccessor, path: PathSpec) -> None:
     virtual = path.virtual
-    key = path.resource_path
+    key = path.vfs_path
     if not key:
         raise eisdir(virtual)
     node = await resolve_key(accessor, key)

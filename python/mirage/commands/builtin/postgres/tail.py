@@ -32,7 +32,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tail", resource="postgres", spec=SPECS["tail"])
+@command("tail", vfs="postgres", spec=SPECS["tail"])
 async def tail(accessor: PostgresAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

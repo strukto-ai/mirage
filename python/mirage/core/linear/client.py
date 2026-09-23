@@ -19,8 +19,8 @@ import aiohttp
 
 from mirage.core.api.client import SessionArg, api_request
 from mirage.core.linear.config import LinearConfig
-from mirage.resource.secrets import reveal_secret
 from mirage.types import JsonValue
+from mirage.vfs.secrets import reveal_secret
 
 from mirage.core.linear.queries import (  # isort: skip
     COMMENT_CREATE_MUTATION, COMMENT_UPDATE_MUTATION, ISSUE_COMMENTS_QUERY,

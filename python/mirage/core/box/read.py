@@ -33,8 +33,8 @@ async def _resolve_entry(
     index: IndexCacheStore,
 ) -> IndexEntry:
     virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    key = path.resource_path
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    key = path.vfs_path
     if not key:
         raise IsADirectoryError(virtual)
     virtual_key = prefix + "/" + key if prefix else "/" + key

@@ -239,7 +239,7 @@ async def decide_line(
     static bindings (an affirmative choice, never a refusal). With no
     verdict, per-runtime scripts filter the entry list: an entry with
     no script is always willing, and the willing entries re-bind in
-    list order. The vfs runtime is filtered exactly like the others;
+    list order. The workspace runtime is filtered exactly like the others;
     a command left without a willing runtime is an admission failure
     at dispatch. Config-borne scripts run on the world's evaluator
     (evaluator_of), never on a hardcoded interpreter.

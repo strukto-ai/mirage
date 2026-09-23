@@ -141,7 +141,7 @@ async def _walk_files(
                 complete = False
                 continue
             queue.extend(
-                PathSpec.from_str_path(e, rekey(p.virtual, p.resource_path, e))
+                PathSpec.from_str_path(e, rekey(p.virtual, p.vfs_path, e))
                 for e in entries)
             continue
         if get_extension(p.virtual) in BINARY_EXTENSIONS:

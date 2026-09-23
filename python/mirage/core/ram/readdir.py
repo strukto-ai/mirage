@@ -16,11 +16,11 @@ from functools import partial
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
 from mirage.utils.errors import readdir_error
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import norm
+from mirage.vfs.ram.store import RAMStore
 
 
 async def _is_file(store: RAMStore, key: str) -> bool:
@@ -35,7 +35,7 @@ async def readdir(accessor: RAMAccessor,
                   path: PathSpec,
                   index: IndexCacheStore = NULL_INDEX) -> list[str]:
     target = path.dir if path.pattern else path
-    prefix = mount_prefix_of(target.virtual, target.resource_path)
+    prefix = mount_prefix_of(target.virtual, target.vfs_path)
     # Canonical key: no trailing slash (except root), or the same dir
     # indexes under two keys and cache hits return doubled-slash entries.
     virtual_key = target.virtual.rstrip("/") or "/"
@@ -43,7 +43,7 @@ async def readdir(accessor: RAMAccessor,
     listing = await index.list_dir(virtual_key)
     if listing.entries is not None:
         return listing.entries
-    p = norm(target.resource_path)
+    p = norm(target.vfs_path)
     if p not in store.dirs:
         raise await readdir_error(path, p, partial(_is_file, store),
                                   partial(_is_dir, store))

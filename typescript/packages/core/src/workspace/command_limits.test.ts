@@ -16,9 +16,10 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed } from '../types.ts'
+import { Mount } from './mount/spec.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const require = createRequire(import.meta.url)
@@ -34,9 +35,9 @@ beforeAll(async () => {
 })
 
 function buildWs(nLines: number): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(ram)
+  registry.registerVfs(ram)
   const body = Array.from({ length: nLines }, (_, i) => `line${String(i)}\n`).join('')
   ram.store.files.set('/big.txt', ENC.encode(body))
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
@@ -51,7 +52,7 @@ async function runCmd(
   cmd: string,
 ): Promise<{ code: number; out: string; err: string }> {
   try {
-    const res = await ws.execute(cmd)
+    const res = await ws.shell(cmd)
     return { code: res.exitCode, out: DEC.decode(res.stdout), err: DEC.decode(res.stderr) }
   } finally {
     await ws.close()
@@ -95,9 +96,9 @@ describe('Workspace command limit', () => {
   })
 
   it('commandLimits constructor option caps below default', async () => {
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const registry = new OpsRegistry()
-    registry.registerResource(ram)
+    registry.registerVfs(ram)
     ram.store.files.set('/big.txt', ENC.encode('line0\nline1\nline2\nline3\nline4\n'))
     const ws = new Workspace(
       { '/': ram },
@@ -115,9 +116,9 @@ describe('Workspace command limit', () => {
   })
 
   it('commandLimits constructor option rejects an unknown prefix', () => {
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const registry = new OpsRegistry()
-    registry.registerResource(ram)
+    registry.registerVfs(ram)
     expect(
       () =>
         new Workspace(
@@ -130,6 +131,36 @@ describe('Workspace command limit', () => {
           },
         ),
     ).toThrow(/unknown mount prefix/)
+  })
+
+  it.each([
+    [
+      'a Mount',
+      (ram: RAMVFS, limits: Record<string, Limit>) => new Mount(ram, { commandLimits: limits }),
+    ],
+    ['a tuple', (ram: RAMVFS, limits: Record<string, Limit>) => [ram, MountMode.WRITE, limits]],
+  ])('merges %s over the workspace-level limits per command', (_name, spell) => {
+    // The two sources used to be spread one whole record over the
+    // other, so whichever lost dropped every command it named: the
+    // workspace-level `ls` limit here vanished the moment the mount
+    // declared a `cat` one. Python reaches the merged shape through
+    // `entry.command_limits.update()`.
+    const ram = new RAMVFS()
+    const registry = new OpsRegistry()
+    registry.registerVfs(ram)
+    const ws = new Workspace(
+      { '/': spell(ram, { cat: new Limit({ maxLines: 3 }) }) as never },
+      {
+        mode: MountMode.WRITE,
+        ops: registry,
+        shellParser: parser,
+        commandLimits: { '/': { cat: new Limit({ maxLines: 9 }), ls: new Limit({ maxLines: 7 }) } },
+      },
+    )
+    const mount = ws.registry.mountForPrefix('/')
+    // The mount's own declaration wins, as it does for `mode` and `read`.
+    expect(mount.commandLimits.get('cat')?.maxLines).toBe(3)
+    expect(mount.commandLimits.get('ls')?.maxLines).toBe(7)
   })
 
   it('onExceed=ERROR drops stdout + exits 1', async () => {

@@ -36,10 +36,7 @@ interface RmOpts {
 }
 
 /** Build the no-real-directories rm override for one keyed store. */
-export function makeRm<A extends Accessor>(
-  resource: string,
-  io: CommandIO<A>,
-): RegisteredCommand[] {
+export function makeRm<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
   const stat = io.stat
   const readdir = io.readdir
   const resolveGlob = resolveGlobOf(io)
@@ -148,7 +145,7 @@ export function makeRm<A extends Accessor>(
 
   return command<A>({
     name: 'rm',
-    resource,
+    vfs,
     spec: specOf('rm'),
     fn: rmCommand,
     write: true,

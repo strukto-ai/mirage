@@ -19,8 +19,8 @@ from mirage.core.qdrant.naming import group_name, row_stem
 from mirage.core.qdrant.payload import field_value
 from mirage.core.qdrant.query import search_rows
 from mirage.core.qdrant.render import render_json, render_text
-from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import PathSpec
+from mirage.vfs.qdrant.config import QdrantConfig
 
 
 def _content_ext(row: dict[str, Any], config: QdrantConfig) -> str:

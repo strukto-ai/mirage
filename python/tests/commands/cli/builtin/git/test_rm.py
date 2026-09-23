@@ -51,7 +51,7 @@ async def run(ws, line: str) -> tuple[int, bytes, bytes]:
         ws (Workspace): workspace with the repository and CLI.
         line (str): the command line, without the leading directory.
     """
-    result = await ws.execute(f"git -C /repo {line}")
+    result = await ws.shell(f"git -C /repo {line}")
     return result.exit_code, result.stdout or b"", result.stderr or b""
 
 
@@ -115,7 +115,7 @@ async def test_cached_keeps_the_file(git_rw, repo_path: Path):
 
 @pytest.mark.asyncio
 async def test_a_local_modification_is_refused(git_rw, repo_path: Path):
-    await git_rw.execute("echo edited > /repo/a.txt")
+    await git_rw.shell("echo edited > /repo/a.txt")
     code, out, err = await run(git_rw, "rm a.txt")
     assert (code, out) == (1, b"")
     assert err == (
@@ -127,7 +127,7 @@ async def test_a_local_modification_is_refused(git_rw, repo_path: Path):
 
 @pytest.mark.asyncio
 async def test_a_staged_change_is_refused_with_its_own_wording(git_rw):
-    await git_rw.execute("echo edited > /repo/a.txt")
+    await git_rw.shell("echo edited > /repo/a.txt")
     await run(git_rw, "add a.txt")
     _code, _out, err = await run(git_rw, "rm a.txt")
     assert err.startswith(b"error: the following file has changes staged "
@@ -136,7 +136,7 @@ async def test_a_staged_change_is_refused_with_its_own_wording(git_rw):
 
 @pytest.mark.asyncio
 async def test_force_removes_over_an_edit(git_rw, repo_path: Path):
-    await git_rw.execute("echo edited > /repo/a.txt")
+    await git_rw.shell("echo edited > /repo/a.txt")
     assert await run(git_rw, "rm -f a.txt") == (0, b"rm 'a.txt'\n", b"")
     assert not (repo_path / "a.txt").exists()
 
@@ -157,7 +157,7 @@ async def test_no_pathspec_is_fatal(git_rw):
 @pytest.mark.asyncio
 async def test_a_directory_is_refused_without_r_and_removed_with_it(
         git_rw, repo_path: Path):
-    await git_rw.execute("mkdir /repo/docs && echo x > /repo/docs/one.md")
+    await git_rw.shell("mkdir /repo/docs && echo x > /repo/docs/one.md")
     await run(git_rw, "add docs")
     await run(git_rw, "commit -m docs")
     code, _out, err = await run(git_rw, "rm docs")
@@ -184,8 +184,8 @@ async def test_a_directory_where_a_tracked_file_was_is_refused(
     # unlink cannot empty a tree, and git reports the strerror rather
     # than removing what it never tracked. The index is written last, so
     # the entry is left staged exactly as it stood.
-    await git_rw.execute("rm /repo/b.txt && mkdir /repo/b.txt")
-    await git_rw.execute("echo k > /repo/b.txt/keep")
+    await git_rw.shell("rm /repo/b.txt && mkdir /repo/b.txt")
+    await git_rw.shell("echo k > /repo/b.txt/keep")
     code, out, err = await run(git_rw, "rm b.txt")
     assert code == 128
     assert err == b"fatal: git rm: 'b.txt': Is a directory\n"
@@ -203,8 +203,8 @@ async def test_a_deletion_already_made_tolerates_the_refusal(
     # git's own rule: the failure is fatal only while nothing has been
     # deleted yet. a.txt sorts first and goes, so b.txt's failure is
     # swallowed and the whole line succeeds with both entries unstaged.
-    await git_rw.execute("rm /repo/b.txt && mkdir /repo/b.txt")
-    await git_rw.execute("echo k > /repo/b.txt/keep")
+    await git_rw.shell("rm /repo/b.txt && mkdir /repo/b.txt")
+    await git_rw.shell("echo k > /repo/b.txt/keep")
     code, out, err = await run(git_rw, "rm -f a.txt b.txt")
     assert (code, err) == (0, b"")
     assert out == b"rm 'a.txt'\nrm 'b.txt'\n"
@@ -220,7 +220,7 @@ async def test_the_refusal_stands_when_nothing_has_gone_yet(
     # line is fatal and b.txt is never reached. An empty directory
     # refuses the same way, since unlink is the call that cannot make
     # it either.
-    await git_rw.execute("rm /repo/a.txt && mkdir /repo/a.txt")
+    await git_rw.shell("rm /repo/a.txt && mkdir /repo/a.txt")
     code, _out, err = await run(git_rw, "rm -f a.txt b.txt")
     assert code == 128
     assert err == b"fatal: git rm: 'a.txt': Is a directory\n"
@@ -232,8 +232,8 @@ async def test_cached_unstages_a_directory_without_touching_it(
         git_rw, repo_path: Path):
     # --cached deletes nothing, so the refusal never arises: the entry
     # goes and the directory stays.
-    await git_rw.execute("rm /repo/b.txt && mkdir /repo/b.txt")
-    await git_rw.execute("echo k > /repo/b.txt/keep")
+    await git_rw.shell("rm /repo/b.txt && mkdir /repo/b.txt")
+    await git_rw.shell("echo k > /repo/b.txt/keep")
     assert await run(git_rw, "rm --cached b.txt") == (0, b"rm 'b.txt'\n", b"")
     assert (repo_path / "b.txt" / "keep").exists()
 
@@ -243,8 +243,8 @@ async def test_a_tracked_link_to_a_directory_is_removed_as_a_link(
         git_rw, repo_path: Path):
     # A link is not the directory it points at, and reading it as one
     # would refuse a removal git makes: the namespace is asked first.
-    await git_rw.execute("mkdir /repo/real && echo r > /repo/real/child")
-    await git_rw.execute("ln -s real /repo/slot")
+    await git_rw.shell("mkdir /repo/real && echo r > /repo/real/child")
+    await git_rw.shell("ln -s real /repo/slot")
     await run(git_rw, "add -A")
     await run(git_rw, "commit -m linked")
     assert await run(git_rw, "rm slot") == (0, b"rm 'slot'\n", b"")
@@ -320,12 +320,12 @@ async def test_a_tracked_path_behind_a_link_is_refused_as_a_local_change(
     # reads as deleted, which is what git's own status says too. git
     # rm does not read it that way: its lstat resolves the leading
     # component and finds another file entirely.
-    await git_rw.execute("mkdir /repo/slot && echo t > /repo/slot/child")
-    await git_rw.execute("mkdir /repo/away && echo o > /repo/away/child")
+    await git_rw.shell("mkdir /repo/slot && echo t > /repo/slot/child")
+    await git_rw.shell("mkdir /repo/away && echo o > /repo/away/child")
     await run(git_rw, "add slot/child")
     await run(git_rw, "commit -m slotted")
-    await git_rw.execute("rm -rf /repo/slot")
-    await git_rw.execute("ln -s /repo/away /repo/slot")
+    await git_rw.shell("rm -rf /repo/slot")
+    await git_rw.shell("ln -s /repo/away /repo/slot")
     assert await run(git_rw, "status --short") == (0, b" D slot/child\n"
                                                    b"?? away/\n?? slot\n", b"")
     code, _out, err = await run(git_rw, "rm slot/child")
@@ -342,23 +342,23 @@ async def test_a_link_pointing_past_the_tracked_path_removes_it(
         git_rw, repo_path: Path):
     # Nothing at the other end, so git has nothing to lose and stages
     # the deletion.
-    await git_rw.execute("mkdir /repo/slot && echo t > /repo/slot/child")
-    await git_rw.execute("mkdir /repo/away")
+    await git_rw.shell("mkdir /repo/slot && echo t > /repo/slot/child")
+    await git_rw.shell("mkdir /repo/away")
     await run(git_rw, "add slot/child")
     await run(git_rw, "commit -m slotted")
-    await git_rw.execute("rm -rf /repo/slot")
-    await git_rw.execute("ln -s /repo/away /repo/slot")
+    await git_rw.shell("rm -rf /repo/slot")
+    await git_rw.shell("ln -s /repo/away /repo/slot")
     assert await run(git_rw, "rm slot/child") == (0, b"rm 'slot/child'\n", b"")
 
 
 @pytest.mark.asyncio
 async def test_cached_keeps_the_file_a_link_hides(git_rw):
-    await git_rw.execute("mkdir /repo/slot && echo t > /repo/slot/child")
-    await git_rw.execute("mkdir /repo/away && echo o > /repo/away/child")
+    await git_rw.shell("mkdir /repo/slot && echo t > /repo/slot/child")
+    await git_rw.shell("mkdir /repo/away && echo o > /repo/away/child")
     await run(git_rw, "add slot/child")
     await run(git_rw, "commit -m slotted")
-    await git_rw.execute("rm -rf /repo/slot")
-    await git_rw.execute("ln -s /repo/away /repo/slot")
+    await git_rw.shell("rm -rf /repo/slot")
+    await git_rw.shell("ln -s /repo/away /repo/slot")
     assert await run(git_rw,
                      "rm --cached slot/child") == (0, b"rm 'slot/child'\n",
                                                    b"")

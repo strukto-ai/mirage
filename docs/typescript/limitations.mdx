@@ -26,7 +26,7 @@ Most of Mirage's behavior is identical across Python and TypeScript. The two TS 
 // ✅ Works, this is CJS and goes through require('fs')
 const { readFileSync } = require('fs')
 patchNodeFs(ws)
-readFileSync('/data/x.txt')  // routes through RAM resource
+readFileSync('/data/x.txt')  // routes through RAM VFS
 
 // ❌ Does not work, this is ESM and bypasses the patch
 import { readFileSync } from 'node:fs'
@@ -44,17 +44,17 @@ readFileSync('/data/x.txt')  // hits the real filesystem, throws ENOENT
 
     ```ts
     import { readFile } from 'node:fs/promises'
-    const ws = new Workspace({ '/data': new Mount(new RAMResource(), { backend: MountBackend.FUSE }) })
+    const ws = new Workspace({ '/data': new Mount(new RAMVFS(), { backend: MountBackend.FUSE }) })
     await ws.fuseReady()
     // The `/data` subtree is exposed at the mountpoint root, so paths are relative to it.
     const bytes = await readFile(`${ws.fuseMountpoint}/x.txt`)
     ```
   </Tab>
   <Tab title="Use Mirage's VFS API directly">
-    The most reliable approach: call `ws.execute()` or the resource methods. No magic, no monkey-patching, works from ESM or CJS.
+    The most reliable approach: call `ws.shell()` or the VFS methods. No magic, no monkey-patching, works from ESM or CJS.
 
     ```ts
-    const res = await ws.execute('cat /data/x.txt')
+    const res = await ws.shell('cat /data/x.txt')
     const bytes = res.stdout
     ```
   </Tab>
@@ -77,7 +77,7 @@ readFileSync('/data/x.txt')  // hits the real filesystem, throws ENOENT
 **The problem.** `@zkochan/fuse-native` dispatches every FUSE request (`getattr`, `read`, …) as a callback on the mounting process's Node event loop. Any *synchronous* access to your own mountpoint from that same process (`readFileSync`, `statSync`, `execFileSync('cat', …)`) blocks the loop that must answer the request: the call deadlocks, the kernel eventually times the filesystem out, and later operations fail with `Device not configured` / `ENOTCONN`.
 
 ```ts
-const ws = new Workspace({ '/data': new Mount(new RAMResource(), { backend: MountBackend.FUSE }) })
+const ws = new Workspace({ '/data': new Mount(new RAMVFS(), { backend: MountBackend.FUSE }) })
 await ws.fuseReady()
 const mp = ws.fuseMountpoint
 
@@ -98,7 +98,7 @@ execFileSync('cat', [`${mp}/x.txt`])
 
 ### 3. Size-unknown API files stat as 0 bytes until first open
 
-**The behavior.** API-backed resources (Trello, Linear, Slack, MongoDB, …) return `stat.size = null` because the byte size isn't known until the API has been called. Over the FUSE mount these files behave like Linux `/proc` files: they stat as **0 bytes until first open**, and become fully readable the moment anything opens them. Mirage mounts with `direct_io` (the kernel reads to EOF regardless of the reported size; `@zkochan/fuse-native` doesn't expose the option, so Mirage appends it to the mount option string itself) and `attr_timeout=0` (post-open `fstat` returns the real size of the now-fetched content, kept warm in a 30-second cache).
+**The behavior.** API-backed mounts (Trello, Linear, Slack, MongoDB, …) return `stat.size = null` because the byte size isn't known until the API has been called. Over the FUSE mount these files behave like Linux `/proc` files: they stat as **0 bytes until first open**, and become fully readable the moment anything opens them. Mirage mounts with `direct_io` (the kernel reads to EOF regardless of the reported size; `@zkochan/fuse-native` doesn't expose the option, so Mirage appends it to the mount option string itself) and `attr_timeout=0` (post-open `fstat` returns the real size of the now-fetched content, kept warm in a 30-second cache).
 
 What that means per tool:
 
@@ -121,20 +121,20 @@ The browser SDK runs entirely in-page: no kernel, no subprocesses, no Node `fs`.
 
 ### 1. No FUSE
 
-Browsers can't mount filesystems. The browser `Workspace` takes plain resources: there is no `Mount` backend option and no `addFuseMount`. Use `ws.execute(...)` (virtual executor) and `ws.fs.readFile/writeFile` instead. Every builtin (`cat`, `grep`, `jq`, `awk`, `python3`, etc.) is reimplemented in-process, so most agent code paths work unchanged from Node.
+Browsers can't mount filesystems. The browser `Workspace` takes plain mounts: there is no `Mount` backend option and no `addFuseMount`. Use `ws.shell(...)` (virtual executor) and `ws.vfs.readFile/writeFile` instead. Every builtin (`cat`, `grep`, `jq`, `awk`, `python3`, etc.) is reimplemented in-process, so most agent code paths work unchanged from Node.
 
 ### 2. OPFS quotas and persistence
 
-`OPFSResource` writes through the [Origin Private File System](https://web.dev/articles/origin-private-file-system). Two things to know:
+`OPFSVFS` writes through the [Origin Private File System](https://web.dev/articles/origin-private-file-system). Two things to know:
 
 - **Storage quota.** The browser sets per-origin quotas (typically a fraction of free disk, single-digit GB on most setups). Hitting it raises `QuotaExceededError`. Call `navigator.storage.estimate()` to inspect.
 - **Eviction.** Origins that aren't [persisted](https://web.dev/articles/persistent-storage) can be cleared by the browser under storage pressure. For long-lived workspaces, request `navigator.storage.persist()` early.
 
-### 3. CORS for HTTP-backed resources
+### 3. CORS for HTTP-backed VFS
 
 Mounts that hit third-party APIs (S3, GitHub, Linear, etc.) make `fetch` calls from the page. Anything not configured to allow your origin via CORS will fail with the usual browser error. Workarounds:
 
-- **Browser-native auth flows.** Resources like Box, Dropbox, GDrive, GDocs ship PKCE OAuth examples that work entirely in-browser.
+- **Browser-native auth flows.** mounts like Box, Dropbox, GDrive, GDocs ship PKCE OAuth examples that work entirely in-browser.
 - **Pre-signed URLs.** For S3/R2/GCS, generate pre-signed URLs server-side and pass them in. The Mirage browser examples include a Vite dev-server `presigner` plugin as reference.
 - **Same-origin proxy.** Stand up a tiny proxy on your own domain that forwards to the upstream API with the right auth headers.
 
@@ -143,14 +143,14 @@ Mounts that hit third-party APIs (S3, GitHub, Linear, etc.) make `fetch` calls f
 Pyodide's worker fetches workspace files on access and caches them for that
 execution. An external edit to a cached file is not visible until the next
 run. Without workers or `SharedArrayBuffer`, the fallback collects whole
-mounts before execution, which can be expensive for large resources.
+mounts before execution, which can be expensive for large mounts.
 
 See [Pyodide workspace file access](/typescript/runtime/python#workspace-file-access)
 for browser requirements and limitations.
 
-### 5. Some resource drivers remain Node-only
+### 5. Some VFS drivers remain Node-only
 
-SSH, LanceDB, Email, Disk, and the Hugging Face resources are only exposed by `@struktoai/mirage-node` because their drivers need Node APIs or raw TCP. Importing them from `@struktoai/mirage-browser` is a build error.
+SSH, LanceDB, Email, Disk, and the Hugging Face mounts are only exposed by `@struktoai/mirage-node` because their drivers need Node APIs or raw TCP. Importing them from `@struktoai/mirage-browser` is a build error.
 
 Postgres and MongoDB do have browser implementations:
 
@@ -170,21 +170,21 @@ Those HTTP drivers still need a browser-reachable endpoint with the correct CORS
 | FUSE `cat`/`readFile` of API-backed size-unknown files | Node | ✅ works (stats 0 until opened, like `/proc`) |
 | `tar`/`rsync` of an unopened size-unknown file | Node | ❌ copies 0 bytes (stat-only tools; same in Python) — read the file first or use `cp` |
 | Synchronous access to your own mount from the mounting process | Node | ❌ deadlocks; use async APIs or a child process |
-| `ws.execute(...)` virtual builtins | Browser | ✅ works |
-| `Workspace` with a fuse `Mount` | Browser | ❌ not supported; the browser `Workspace` takes plain resources |
+| `ws.shell(...)` virtual builtins | Browser | ✅ works |
+| `Workspace` with a fuse `Mount` | Browser | ❌ not supported; the browser `Workspace` takes plain mounts |
 | OPFS reads/writes within quota | Browser | ✅ works |
 | OPFS over quota | Browser | ❌ `QuotaExceededError`; check `navigator.storage.estimate()` |
-| HTTP-backed resources without CORS allow-list | Browser | ❌ blocked; use PKCE, presigned URLs, or a same-origin proxy |
+| HTTP-backed mounts without CORS allow-list | Browser | ❌ blocked; use PKCE, presigned URLs, or a same-origin proxy |
 | Python `open()` writes back through mount | Browser | ✅ on any engine |
 | Postgres through `NeonPgDriver` | Browser | ✅ over HTTP; endpoint must allow the browser origin |
 | MongoDB through `HttpMongoDriver` | Browser | ✅ through an HTTP proxy; direct MongoDB sockets are unavailable |
-| Node-only resources (SSH, LanceDB, Email, Disk, Hugging Face, GridFS, FUSE) | Browser | ❌ Node APIs or raw TCP required |
+| Node-only VFS types (SSH, LanceDB, Email, Disk, Hugging Face, GridFS, FUSE) | Browser | ❌ Node APIs or raw TCP required |
 
 The Node limitations are runtime-level, not Mirage design decisions. Python's equivalent behavior is strictly better in each case, so if a workflow absolutely requires ESM-level `fs` patching or large API-backed FUSE reads, consider whether the Python SDK fits better for that specific piece. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.
 
 ## CPU-bound builtin processing
 
-Line readers, cache drains, and `wc` processing periodically yield to the event loop. Large RAM files and warm cache reads therefore allow host timers and I/O callbacks to run. `Workspace.execute(command, { signal })` forwards caller cancellation to builtin input processing; Python provides the corresponding `cancel=asyncio.Event()` path and task cancellation.
+Line readers, cache drains, and `wc` processing periodically yield to the event loop. Large RAM files and warm cache reads therefore allow host timers and I/O callbacks to run. `Workspace.shell(command, { signal })` forwards caller cancellation to builtin input processing; Python provides the corresponding `cancel=asyncio.Event()` path and task cancellation.
 
 File-cache fingerprints use incremental MD5: the Node package installs native hashing with 64 KiB updates, while browser/core uses JavaScript block batches. Both yield on a time budget; Python uses incremental `hashlib` updates.
 

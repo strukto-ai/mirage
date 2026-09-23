@@ -18,7 +18,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_workspace_execute_databricks_volume_tr(
         databricks_text_workspace):
-    io = await databricks_text_workspace.execute(
+    io = await databricks_text_workspace.shell(
         "cat /dbx/words.txt | tr a-z A-Z")
 
     assert io.exit_code == 0

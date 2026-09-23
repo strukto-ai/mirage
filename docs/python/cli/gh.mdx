@@ -7,7 +7,7 @@ icon: github
 Mirage's built-in `gh` implementation uses the vocabulary of the official
 [`cli/cli`](https://github.com/cli/cli) project. A repository is a tree, so
 mirage already reads one as files: the
-[`github` mount](/python/resource/github) is the read half, and `ls`, `cat`
+[`github` mount](/python/vfs/github) is the read half, and `ls`, `cat`
 and `grep` are how an agent explores it. `gh` is the write half, plus the
 account-level operations a filesystem has no shape for.
 
@@ -24,16 +24,16 @@ import os
 from mirage import Workspace
 from mirage.commands.cli.builtin.gh import GH
 from mirage.core.github.config import GhConfig, GitHubConfig
-from mirage.resource.github import GitHubResource
+from mirage.vfs.github import GitHubVFS
 
 token = os.environ["GITHUB_TOKEN"]
-repo = GitHubResource(
+repo = GitHubVFS(
     config=GitHubConfig(token=token), owner="acme", repo="tools", ref="main")
 
 ws = Workspace({"/repo": repo})
 ws.register_cli("gh", GH, GhConfig(token=token, repo="acme/tools"))
 
-await ws.execute("gh repo view")
+await ws.shell("gh repo view")
 ```
 
 In YAML the same install rides the `clis:` section; see the

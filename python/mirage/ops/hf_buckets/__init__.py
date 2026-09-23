@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor._hf import HF_RESOURCES
+from mirage.accessor._hf import HF_VFS_NAMES
 from mirage.commands.builtin.hf_buckets.io import IO
 from mirage.ops.generic import make_generic_ops
 
-OPS = make_generic_ops(HF_RESOURCES, IO)
+OPS = make_generic_ops(HF_VFS_NAMES, IO)

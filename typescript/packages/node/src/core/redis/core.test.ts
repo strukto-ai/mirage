@@ -19,7 +19,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
-import { RedisStore } from '../../resource/redis/store.ts'
+import { RedisStore } from '../../vfs/redis/store.ts'
 import { appendBytes } from '@struktoai/mirage-core/core/redis/append'
 import { SCOPE_ERROR } from '@struktoai/mirage-core/core/redis/constants'
 import { copy } from '@struktoai/mirage-core/core/redis/copy'
@@ -286,7 +286,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       directory: '/',
       pattern: '*.txt',
       resolved: false,
-      resourcePath: '*.txt',
+      vfsPath: '*.txt',
     })
     const expanded = await resolveGlob(acc, [patternSpec])
     const names = expanded.map((p) => p.virtual).sort()

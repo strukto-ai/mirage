@@ -49,7 +49,7 @@ function expandHome(p: string): string {
  * because SSH exec has no docker-style `-w`/`-e`.
  *
  * This is the one provider whose machine usually IS the fileserver:
- * mount the same host's directory over the ssh resource at a prefix
+ * mount the same host's directory over the ssh VFS at a prefix
  * equal to its remote absolute path, and captured lines read and
  * write those files natively, with no FUSE and no mirage installed
  * remotely. Host keys are not verified (ssh2 never does), so treat

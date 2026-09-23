@@ -12,29 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, SlackResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, SlackVFS, Workspace } from '@struktoai/mirage-browser'
 
 const PROXY_URL = process.env.SLACK_PROXY_URL ?? 'http://127.0.0.1:8901/api/slack'
 
 async function main(): Promise<void> {
-  const slack = new SlackResource({ proxyUrl: PROXY_URL })
+  const slack = new SlackVFS({ proxyUrl: PROXY_URL })
   const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
   try {
-    console.log(`=== BROWSER MODE: SlackResource → ${PROXY_URL} ===\n`)
+    console.log(`=== BROWSER MODE: SlackVFS → ${PROXY_URL} ===\n`)
 
     console.log('=== ls /slack/ ===')
-    let r = await ws.execute('ls /slack/')
+    let r = await ws.shell('ls /slack/')
     console.log(r.stdoutText)
 
     console.log('=== ls /slack/channels/ | head -n 3 ===')
-    r = await ws.execute('ls /slack/channels/ | head -n 3')
+    r = await ws.shell('ls /slack/channels/ | head -n 3')
     console.log(r.stdoutText)
 
     console.log('=== ls /slack/users/ | head -n 3 ===')
-    r = await ws.execute('ls /slack/users/ | head -n 3')
+    r = await ws.shell('ls /slack/users/ | head -n 3')
     console.log(r.stdoutText)
 
-    r = await ws.execute('ls /slack/channels/ | head -n 1')
+    r = await ws.shell('ls /slack/channels/ | head -n 1')
     const firstCh = r.stdoutText.trim()
     if (firstCh === '') {
       console.log('no channels found')
@@ -43,15 +43,15 @@ async function main(): Promise<void> {
     const base = `/slack/channels/${firstCh}`
 
     console.log(`=== ls ${base}/ | tail -n 3 ===`)
-    r = await ws.execute(`ls "${base}/" | tail -n 3`)
+    r = await ws.shell(`ls "${base}/" | tail -n 3`)
     console.log(r.stdoutText)
 
-    r = await ws.execute(`ls "${base}/" | tail -n 1`)
+    r = await ws.shell(`ls "${base}/" | tail -n 1`)
     const target = r.stdoutText.trim()
     if (target !== '') {
       const filePath = `${base}/${target}`
       console.log(`=== head -n 2 ${filePath} ===`)
-      r = await ws.execute(`head -n 2 "${filePath}"`)
+      r = await ws.shell(`head -n 2 "${filePath}"`)
       const out = r.stdoutText.trim()
       if (out !== '') {
         for (const line of out.split('\n')) {
@@ -62,12 +62,12 @@ async function main(): Promise<void> {
       }
 
       console.log(`\n=== wc -l ${filePath} ===`)
-      r = await ws.execute(`wc -l "${filePath}"`)
+      r = await ws.shell(`wc -l "${filePath}"`)
       console.log(`  ${r.stdoutText.trim()}`)
     }
 
     console.log('\n=== tree -L 1 /slack/ ===')
-    r = await ws.execute('tree -L 1 /slack/')
+    r = await ws.shell('tree -L 1 /slack/')
     const treeOut = r.stdoutText.trim()
     if (treeOut !== '') {
       for (const line of treeOut.split('\n')) {

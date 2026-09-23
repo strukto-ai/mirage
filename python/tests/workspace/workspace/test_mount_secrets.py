@@ -18,13 +18,13 @@ from pydantic import BaseModel, ConfigDict
 from mirage import Workspace
 from mirage.config import load_config, resolve_secrets
 from mirage.core.slack.config import SlackConfig
-from mirage.resource.slack import SlackResource
 from mirage.secrets import registry
 from mirage.secrets.config import SecretRef, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.sources import resolve_config_secrets, resolve_sources
 from mirage.secrets.types import ResolvedSecret
+from mirage.vfs.slack import SlackVFS
 
 CALLS: list[tuple[str, str]] = []
 
@@ -68,7 +68,7 @@ def yaml_config(**config):
             "mode": "READ",
             "mounts": {
                 "/slack": {
-                    "resource": "slack",
+                    "vfs": "slack",
                     "config": config
                 }
             },
@@ -90,9 +90,9 @@ async def test_the_yaml_door_resolves_a_mount_pointer():
     cfg = await resolve_secrets(
         yaml_config(token=BOT.model_dump(by_alias=True)))
     ws = Workspace(**cfg.to_workspace_kwargs())
-    token = ws._registry.mount_for_prefix("/slack").resource.config.token
+    token = ws._registry.mount_for_prefix("/slack").vfs.config.token
     # The credential field never sees a pointer: it is fetched before
-    # `build_resource`, which is why that door can stay sync.
+    # `build_vfs`, which is why that door can stay sync.
     assert token.get_secret_value() == "xoxb-SLACK_BOT_TOKEN"
     assert CALLS == [("yaml", "op://mirage/SLACK_BOT_TOKEN")]
     await ws.close()
@@ -102,7 +102,7 @@ async def test_the_yaml_door_resolves_a_mount_pointer():
 async def test_a_yaml_literal_needs_no_source_and_no_fetch():
     cfg = await resolve_secrets(yaml_config(token="xoxb-literal"))
     ws = Workspace(**cfg.to_workspace_kwargs())
-    token = ws._registry.mount_for_prefix("/slack").resource.config.token
+    token = ws._registry.mount_for_prefix("/slack").vfs.config.token
     assert token.get_secret_value() == "xoxb-literal"
     assert CALLS == []
     await ws.close()
@@ -115,7 +115,7 @@ async def test_a_config_with_no_sources_declared_needs_no_fetch():
             "mode": "READ",
             "mounts": {
                 "/slack": {
-                    "resource": "slack",
+                    "vfs": "slack",
                     "config": {
                         "token": "xoxb-literal"
                     }
@@ -140,7 +140,7 @@ async def test_a_pointer_needs_no_secrets_block_to_name_a_builtin_source(
                 "mode": "READ",
                 "mounts": {
                     "/slack": {
-                        "resource": "slack",
+                        "vfs": "slack",
                         "config": {
                             "token": {
                                 "from": "env",
@@ -153,7 +153,7 @@ async def test_a_pointer_needs_no_secrets_block_to_name_a_builtin_source(
             env={},
         ))
     ws = Workspace(**cfg.to_workspace_kwargs())
-    token = ws._registry.mount_for_prefix("/slack").resource.config.token
+    token = ws._registry.mount_for_prefix("/slack").vfs.config.token
     assert token.get_secret_value() == "xoxb-ambient"
     await ws.close()
 
@@ -162,8 +162,8 @@ async def test_a_pointer_needs_no_secrets_block_to_name_a_builtin_source(
 async def test_an_application_mixes_a_vanilla_token_and_a_remote_one():
     sources = await demo_sources()
     remote = await resolve_config_secrets({"token": BOT}, sources)
-    from_remote = SlackResource(config=SlackConfig(**remote))
-    from_dotenv = SlackResource(config=SlackConfig(token="xoxb-from-dotenv"))
+    from_remote = SlackVFS(config=SlackConfig(**remote))
+    from_dotenv = SlackVFS(config=SlackConfig(token="xoxb-from-dotenv"))
     assert from_remote.config.token.get_secret_value() == (
         "xoxb-SLACK_BOT_TOKEN")
     assert from_dotenv.config.token.get_secret_value() == "xoxb-from-dotenv"

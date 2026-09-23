@@ -19,7 +19,7 @@ import type { ExecuteFn } from '../../expand/node.ts'
 import type { Argv } from '../../expand/argv.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
-import type { Session } from '../../session/session.ts'
+import type { SessionState } from '../../session/session.ts'
 import type { ExecutionNode } from '../../types.ts'
 
 export type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -46,7 +46,7 @@ export type ExecuteStringFn = (
  */
 export interface BuiltinCall {
   argv: Argv
-  session: Session
+  session: SessionState
   stdin: ByteSource | null
   callStack: CallStack | null
   signal: AbortSignal | undefined

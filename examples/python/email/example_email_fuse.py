@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.email import EmailConfig, EmailResource
+from mirage.vfs.email import EmailConfig, EmailVFS
 
 load_dotenv(".env.development")
 
@@ -29,12 +29,11 @@ config = EmailConfig(
     password=os.environ["EMAIL_PASSWORD"],
     max_messages=20,
 )
-resource = EmailResource(config=config)
+vfs = EmailVFS(config=config)
 
-with Workspace({
-        "/email/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/email/": Mount(vfs, mode=MountMode.READ,
+                      backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -80,6 +79,6 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

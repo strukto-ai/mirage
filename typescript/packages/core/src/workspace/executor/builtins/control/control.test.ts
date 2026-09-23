@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
-import { Session } from '../../../session/session.ts'
+import { SessionState } from '../../../session/session.ts'
 import { ReturnSignal } from '../../../../shell/errors.ts'
 import {
   handleColon,
@@ -54,21 +54,21 @@ describe('control builtins', () => {
   })
 
   it('return outside a function fails with 2 and no signal', () => {
-    const [out, io] = handleReturn([], new Session({ sessionId: 's1' }))
+    const [out, io] = handleReturn([], new SessionState({ sessionId: 's1' }))
     expect(out).toBeNull()
     expect(io.exitCode).toBe(2)
     expect(DEC.decode(io.stderr as Uint8Array)).toContain("can only `return' from a function")
   })
 
   it('return in a function raises the signal with the status', () => {
-    expect(() => handleReturn(['7'], new Session({ sessionId: 's1' }), functionStack())).toThrow(
-      ReturnSignal,
-    )
+    expect(() =>
+      handleReturn(['7'], new SessionState({ sessionId: 's1' }), functionStack()),
+    ).toThrow(ReturnSignal)
   })
 
   it('exit raises the signal, wrapping the status mod 256', () => {
     try {
-      handleExit(['258'], new Session({ sessionId: 's1' }))
+      handleExit(['258'], new SessionState({ sessionId: 's1' }))
       throw new Error('unreachable')
     } catch (err) {
       expect(err).toBeInstanceOf(ExitSignal)

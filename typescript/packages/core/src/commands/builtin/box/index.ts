@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../../accessor/box.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { BOX_GREP } from './grep.ts'
@@ -25,7 +25,7 @@ import { resolveGlobOf } from '../generic_bind/adapter.ts'
 const BOX_OVERRIDES = new Set(['grep', 'rg'])
 
 export const BOX_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<BoxAccessor>(ResourceName.BOX, BOX_IO, {
+  ...makeGenericCommands<BoxAccessor>(VFSName.BOX, BOX_IO, {
     overrides: BOX_OVERRIDES,
   }),
   ...withDefaultProvisions(

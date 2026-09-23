@@ -31,7 +31,7 @@ async def resolve_path(
         accessor: DifyAccessor,
         path: PathSpec,
         index: IndexCacheStore = NULL_INDEX) -> ResolvedDifyPath:
-    mount_prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+    mount_prefix = mount_prefix_of(path.virtual, path.vfs_path) or ""
     await ensure_tree(accessor, index, mount_prefix)
     virtual_key = virtual_key_for(path)
     result = await index.get(virtual_key)
@@ -53,7 +53,7 @@ async def resolve_path(
 
 def virtual_key_for(path: PathSpec) -> str:
     raw = path.directory if path.pattern else path.virtual
-    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+    prefix = mount_prefix_of(path.virtual, path.vfs_path) or ""
     if prefix:
         root = prefix.rstrip("/") or "/"
         if raw == root or raw.startswith(root + "/"):

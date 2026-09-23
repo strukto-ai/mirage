@@ -15,7 +15,7 @@
 import type { FileStat } from '../types.ts'
 
 // Ops with lstat semantics: they act on the entry named by the path, so
-// no stat surface (dispatch, the fs facade, FUSE) may rewrite their
+// no stat surface (dispatch, the op facade, FUSE) may rewrite their
 // operand through the symlink table.
 export const NO_FOLLOW_OPS: ReadonlySet<string> = new Set([
   'unlink',
@@ -37,7 +37,7 @@ export const STAMP_WRITE_OPS: ReadonlySet<string> = new Set([
 ])
 
 // The symlink surface a namespace offers to lower layers. The workspace
-// Namespace satisfies this structurally; the fs facade and FUSE consume
+// Namespace satisfies this structurally; the op facade and FUSE consume
 // it through this seam so the dependency points downward (workspace
 // injects, lower layers never import workspace modules).
 //

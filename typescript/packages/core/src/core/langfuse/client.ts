@@ -31,7 +31,7 @@ export class LangfuseApiError extends Error {
 /**
  * Await a Langfuse fetch, translating a 404 into ENOENT.
  *
- * Every other status stays a LangfuseApiError: only "this resource does not
+ * Every other status stays a LangfuseApiError: only "this VFS does not
  * exist" is a filesystem-level missing file.
  */
 export async function fetchOrEnoent<T>(pending: Promise<T>, path: PathSpec): Promise<T> {

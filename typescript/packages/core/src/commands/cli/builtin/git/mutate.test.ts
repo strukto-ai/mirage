@@ -31,7 +31,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
-import { RAMResource } from '../../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -117,16 +117,16 @@ async function harness(prepare?: (repo: string) => void, nested?: string): Promi
   execFileSync('bash', [BUILDER, repo], { stdio: 'ignore' })
   prepare?.(repo)
 
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(ram)
-  // `nested` mounts a second resource inside the repository, which is the
-  // one shape a verb cannot rename: its keys live in another resource, so
+  registry.registerVfs(ram)
+  // `nested` mounts a second VFS inside the repository, which is the
+  // one shape a verb cannot rename: its keys live in another VFS, so
   // the backend holding the parent path cannot carry them along.
-  const mounts: Record<string, RAMResource> = { '/repo': ram }
+  const mounts: Record<string, RAMVFS> = { '/repo': ram }
   if (nested !== undefined) {
-    const child = new RAMResource()
-    registry.registerResource(child)
+    const child = new RAMVFS()
+    registry.registerVfs(child)
     mounts[nested] = child
   }
   const ws = new Workspace(mounts, {
@@ -160,7 +160,7 @@ async function harness(prepare?: (repo: string) => void, nested?: string): Promi
     dispatch,
     repo,
     async run(line: string) {
-      const result = await ws.execute(`git -C /repo ${line}`)
+      const result = await ws.shell(`git -C /repo ${line}`)
       return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
     },
     async drain() {
@@ -752,7 +752,7 @@ describe('symlinks', () => {
     // the target string. Reading through the link would store a second copy
     // of numbers.txt under mode 100644, which is a file, not a link.
     const h = await harness()
-    await h.ws.execute('ln -s numbers.txt /repo/link')
+    await h.ws.shell('ln -s numbers.txt /repo/link')
     expect((await h.run('add link'))[0]).toBe(0)
     expect((await h.run('commit -m linked'))[0]).toBe(0)
     const out = await h.drain()
@@ -764,14 +764,14 @@ describe('symlinks', () => {
     // git lstats, so a link to nothing is untracked like any other entry; a
     // dereferencing stat answers null and loses it entirely.
     const h = await harness()
-    await h.ws.execute('ln -s nowhere /repo/broken')
+    await h.ws.shell('ln -s nowhere /repo/broken')
     const [, out] = await h.run('status --porcelain')
     expect(out).toContain('?? broken')
   })
 
   it('reports the symlink mode in the commit summary', async () => {
     const h = await harness()
-    await h.ws.execute('ln -s numbers.txt /repo/link')
+    await h.ws.shell('ln -s numbers.txt /repo/link')
     expect((await h.run('add link'))[0]).toBe(0)
     const [, out] = await h.run('commit -m linked')
     expect(out).toContain(' create mode 120000 link')
@@ -779,7 +779,7 @@ describe('symlinks', () => {
 
   it('leaves a staged link unmodified rather than always dirty', async () => {
     const h = await harness()
-    await h.ws.execute('ln -s numbers.txt /repo/link')
+    await h.ws.shell('ln -s numbers.txt /repo/link')
     expect((await h.run('add link'))[0]).toBe(0)
     const [, out] = await h.run('status --porcelain')
     expect(out).toBe('A  link\n')
@@ -790,12 +790,12 @@ describe('symlinks', () => {
     // than a content write.
     const h = await harness()
     expect((await h.run('checkout -b side'))[0]).toBe(0)
-    await h.ws.execute('ln -s numbers.txt /repo/link')
+    await h.ws.shell('ln -s numbers.txt /repo/link')
     expect((await h.run('add link'))[0]).toBe(0)
     expect((await h.run('commit -m linked'))[0]).toBe(0)
     expect((await h.run('checkout main'))[0]).toBe(0)
     expect((await h.run('checkout side'))[0]).toBe(0)
-    const listing = await h.ws.execute('ls -l /repo/link')
+    const listing = await h.ws.shell('ls -l /repo/link')
     expect(DEC.decode(listing.stdout)).toContain('link -> numbers.txt')
   })
 
@@ -806,18 +806,18 @@ describe('symlinks', () => {
     // pointing at the other branch's target.
     const h = await harness()
     expect((await h.run('checkout -b first'))[0]).toBe(0)
-    await h.ws.execute('ln -s numbers.txt /repo/lk')
+    await h.ws.shell('ln -s numbers.txt /repo/lk')
     expect((await h.run('add lk'))[0]).toBe(0)
     expect((await h.run('commit -m first'))[0]).toBe(0)
     expect((await h.run('checkout -b second'))[0]).toBe(0)
     await write(h, 'other.txt', 'other\n')
-    await h.ws.execute('ln -sf other.txt /repo/lk')
+    await h.ws.shell('ln -sf other.txt /repo/lk')
     expect((await h.run('add -A'))[0]).toBe(0)
     expect((await h.run('commit -m second'))[0]).toBe(0)
     expect((await h.run('checkout first'))[0]).toBe(0)
-    expect(DEC.decode((await h.ws.execute('readlink /repo/lk')).stdout)).toBe('numbers.txt\n')
+    expect(DEC.decode((await h.ws.shell('readlink /repo/lk')).stdout)).toBe('numbers.txt\n')
     expect((await h.run('checkout second'))[0]).toBe(0)
-    expect(DEC.decode((await h.ws.execute('readlink /repo/lk')).stdout)).toBe('other.txt\n')
+    expect(DEC.decode((await h.ws.shell('readlink /repo/lk')).stdout)).toBe('other.txt\n')
   })
 
   it('replaces a link with the regular file the other branch records', async () => {
@@ -828,21 +828,21 @@ describe('symlinks', () => {
     // stays in the working tree while HEAD and the index say a file is there.
     const h = await harness()
     expect((await h.run('checkout -b linked'))[0]).toBe(0)
-    await h.ws.execute('ln -s numbers.txt /repo/thing')
+    await h.ws.shell('ln -s numbers.txt /repo/thing')
     expect((await h.run('add thing'))[0]).toBe(0)
     expect((await h.run('commit -m link'))[0]).toBe(0)
     expect((await h.run('checkout -b plain'))[0]).toBe(0)
-    await h.ws.execute('rm /repo/thing')
+    await h.ws.shell('rm /repo/thing')
     await write(h, 'thing', 'PLAIN\n')
     expect((await h.run('add thing'))[0]).toBe(0)
     expect((await h.run('commit -m plain'))[0]).toBe(0)
     expect((await h.run('checkout linked'))[0]).toBe(0)
     expect((await h.run('checkout plain'))[0]).toBe(0)
-    const listing = await h.ws.execute('ls -l /repo/thing')
+    const listing = await h.ws.shell('ls -l /repo/thing')
     expect(DEC.decode(listing.stdout).startsWith('lrwxrwxrwx')).toBe(false)
-    const content = await h.ws.execute('cat /repo/thing')
+    const content = await h.ws.shell('cat /repo/thing')
     expect(DEC.decode(content.stdout)).toBe('PLAIN\n')
-    const kept = await h.ws.execute('cat /repo/numbers.txt')
+    const kept = await h.ws.shell('cat /repo/numbers.txt')
     expect(DEC.decode(kept.stdout)).not.toContain('PLAIN')
   })
 
@@ -855,14 +855,14 @@ describe('symlinks', () => {
     expect((await h.run('add thing'))[0]).toBe(0)
     expect((await h.run('commit -m plain'))[0]).toBe(0)
     expect((await h.run('checkout -b linkedafter'))[0]).toBe(0)
-    await h.ws.execute('rm /repo/thing')
-    await h.ws.execute('ln -s numbers.txt /repo/thing')
+    await h.ws.shell('rm /repo/thing')
+    await h.ws.shell('ln -s numbers.txt /repo/thing')
     expect((await h.run('add thing'))[0]).toBe(0)
     expect((await h.run('commit -m link'))[0]).toBe(0)
     expect((await h.run('checkout plainfirst'))[0]).toBe(0)
     expect((await h.run('checkout linkedafter'))[0]).toBe(0)
-    await h.ws.execute('rm /repo/thing')
-    const listing = await h.ws.execute('ls /repo/thing')
+    await h.ws.shell('rm /repo/thing')
+    const listing = await h.ws.shell('ls /repo/thing')
     expect(DEC.decode(listing.stderr)).toContain('No such file or directory')
   })
 })
@@ -874,7 +874,7 @@ describe('commit identity', () => {
     const h = await harness()
     await write(h, 'numbers.txt', 'changed\n')
     expect((await h.run('add -A'))[0]).toBe(0)
-    const result = await h.ws.execute(
+    const result = await h.ws.shell(
       'GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@x git -C /repo commit -m env',
     )
     expect(result.exitCode).toBe(0)
@@ -886,7 +886,7 @@ describe('commit identity', () => {
     const h = await harness()
     await write(h, 'numbers.txt', 'changed\n')
     expect((await h.run('add -A'))[0]).toBe(0)
-    const result = await h.ws.execute(
+    const result = await h.ws.shell(
       'GIT_AUTHOR_NAME=Ada EMAIL=ada@fallback git -C /repo commit -m env',
     )
     expect(result.exitCode).toBe(0)
@@ -1727,7 +1727,7 @@ describe('a working-tree removal that would take a mount with it', () => {
     // it; dropped again here, because what is committed at this name is a
     // file and only the parent backend can hold it.
     await h.ws.dispatch('rmdir', '/repo/slot')
-    await h.ws.execute("printf 'i am a file\n' > /repo/slot")
+    await h.ws.shell("printf 'i am a file\n' > /repo/slot")
     expect((await h.run('add slot'))[0]).toBe(0)
     expect((await h.run('commit -m slotted'))[0]).toBe(0)
     await h.ws.dispatch('unlink', '/repo/slot')
@@ -1783,7 +1783,7 @@ describe('a gitlink in the tree', () => {
       gitlinkIndex(repo, 'sub')
     })
     await removeTree(h.dispatch, '/repo/sub', null, null)
-    await h.ws.execute("printf 'i am a file\\n' > /repo/sub")
+    await h.ws.shell("printf 'i am a file\\n' > /repo/sub")
     expect(await h.run('restore sub')).toEqual([0, '', ''])
     expect(await readOptional(h.dispatch, '/repo/sub')).toBeNull()
   })
@@ -1872,7 +1872,7 @@ describe('a gitlink in the tree', () => {
     const h = await harness((repo) => {
       gitlinkBranch(repo, 'linked', 'sub')
     })
-    await h.ws.execute("printf 'mine\\n' > /repo/sub")
+    await h.ws.shell("printf 'mine\\n' > /repo/sub")
     const [code, , err] = await h.run('checkout linked')
     expect(code).toBe(1)
     expect(err).toContain('would be overwritten by checkout:\n\tsub\n')
@@ -1945,14 +1945,14 @@ describe('a mount met halfway through a worktree pass', () => {
     expect((await h.run('commit -m ignores'))[0]).toBe(0)
     expect((await h.run('checkout -b slotted'))[0]).toBe(0)
     await write(h, 'numbers.txt', 'edited\n')
-    await h.ws.execute("printf 'v2\\n' > /repo/slot")
+    await h.ws.shell("printf 'v2\\n' > /repo/slot")
     expect((await h.run('add numbers.txt slot'))[0]).toBe(0)
     expect((await h.run('commit -m two'))[0]).toBe(0)
     expect((await h.run('checkout main'))[0]).toBe(0)
     // Only ignored content, so no collision list names the directory and the
     // write loop is what would meet the mount.
     await h.ws.dispatch('mkdir', '/repo/slot')
-    await h.ws.execute("printf 'x\\n' > /repo/slot/ignored.txt")
+    await h.ws.shell("printf 'x\\n' > /repo/slot/ignored.txt")
     const before = await readOptional(h.dispatch, '/repo/numbers.txt')
     const [code, , err] = await h.run('checkout slotted')
     expect([code, err]).toEqual([
@@ -1971,7 +1971,7 @@ describe('a mount met halfway through a worktree pass', () => {
     const h = await harness(undefined, '/repo/slot/data')
     await write(h, 'slot/data/precious.md', 'precious\n')
     await h.ws.dispatch('rmdir', '/repo/slot')
-    await h.ws.execute("printf 'i am a file\\n' > /repo/slot")
+    await h.ws.shell("printf 'i am a file\\n' > /repo/slot")
     expect((await h.run('add slot'))[0]).toBe(0)
     expect((await h.run('commit -m slotted'))[0]).toBe(0)
     await h.ws.dispatch('unlink', '/repo/slot')
@@ -1991,7 +1991,7 @@ describe('a mount met halfway through a worktree pass', () => {
   it('lets --staged through, since it never touches the working tree', async () => {
     const h = await harness(undefined, '/repo/slot/data')
     await h.ws.dispatch('rmdir', '/repo/slot')
-    await h.ws.execute("printf 'i am a file\\n' > /repo/slot")
+    await h.ws.shell("printf 'i am a file\\n' > /repo/slot")
     expect((await h.run('add slot'))[0]).toBe(0)
     expect((await h.run('commit -m slotted'))[0]).toBe(0)
     await h.ws.dispatch('unlink', '/repo/slot')
@@ -2009,14 +2009,14 @@ describe('git rm meeting a link above the tracked path', () => {
     // read it that way: its lstat resolves the leading component and finds
     // another file entirely.
     const h = await harness()
-    await h.ws.execute('mkdir /repo/slot')
+    await h.ws.shell('mkdir /repo/slot')
     await write(h, 'slot/child', 'tracked\n')
-    await h.ws.execute('mkdir /repo/away')
-    await h.ws.execute("printf 'other\n' > /repo/away/child")
+    await h.ws.shell('mkdir /repo/away')
+    await h.ws.shell("printf 'other\n' > /repo/away/child")
     expect((await h.run('add slot/child'))[0]).toBe(0)
     expect((await h.run('commit -m slotted'))[0]).toBe(0)
-    await h.ws.execute('rm -rf /repo/slot')
-    await h.ws.execute('ln -s /repo/away /repo/slot')
+    await h.ws.shell('rm -rf /repo/slot')
+    await h.ws.shell('ln -s /repo/away /repo/slot')
     expect((await h.run('status --short'))[1]).toContain(' D slot/child\n')
     const [code, , err] = await h.run('rm slot/child')
     expect([code, err]).toEqual([
@@ -2032,13 +2032,13 @@ describe('git rm meeting a link above the tracked path', () => {
     // Nothing at the other end, so git has nothing to lose and stages the
     // deletion.
     const h = await harness()
-    await h.ws.execute('mkdir /repo/slot')
+    await h.ws.shell('mkdir /repo/slot')
     await write(h, 'slot/child', 'tracked\n')
-    await h.ws.execute('mkdir /repo/away')
+    await h.ws.shell('mkdir /repo/away')
     expect((await h.run('add slot/child'))[0]).toBe(0)
     expect((await h.run('commit -m slotted'))[0]).toBe(0)
-    await h.ws.execute('rm -rf /repo/slot')
-    await h.ws.execute('ln -s /repo/away /repo/slot')
+    await h.ws.shell('rm -rf /repo/slot')
+    await h.ws.shell('ln -s /repo/away /repo/slot')
     expect(await h.run('rm slot/child')).toEqual([0, "rm 'slot/child'\n", ''])
   })
 })
@@ -2406,7 +2406,7 @@ describe('staged work carried across a switch', () => {
   it('keeps a staged addition staged', async () => {
     const h = await harness()
     expect((await h.run('branch other'))[0]).toBe(0)
-    await h.ws.execute('echo new > /repo/added.txt')
+    await h.ws.shell('echo new > /repo/added.txt')
     expect((await h.run('add added.txt'))[0]).toBe(0)
     expect(await h.run('switch other')).toEqual([
       0,
@@ -2433,7 +2433,7 @@ describe('staged work carried across a switch', () => {
   it('letters a carried worktree edit by where it stands', async () => {
     const h = await harness()
     expect((await h.run('branch other'))[0]).toBe(0)
-    await h.ws.execute('echo edited > /repo/letters.txt')
+    await h.ws.shell('echo edited > /repo/letters.txt')
     expect(await h.run('switch other')).toEqual([
       0,
       'M\tletters.txt\n',
@@ -2445,7 +2445,7 @@ describe('staged work carried across a switch', () => {
 describe('git restore before the first commit', () => {
   it('refuses to restore the index', async () => {
     const h = await harness(unborn)
-    await h.ws.execute('echo hi > /repo/f.txt')
+    await h.ws.shell('echo hi > /repo/f.txt')
     expect((await h.run('add f.txt'))[0]).toBe(0)
     expect(await h.run('restore --staged f.txt')).toEqual([
       128,
@@ -2459,18 +2459,18 @@ describe('git restore before the first commit', () => {
 
   it('refuses both targets together the same way', async () => {
     const h = await harness(unborn)
-    await h.ws.execute('echo hi > /repo/f.txt')
+    await h.ws.shell('echo hi > /repo/f.txt')
     expect((await h.run('add f.txt'))[0]).toBe(0)
     expect(await h.run('restore -SW f.txt')).toEqual([128, '', 'fatal: could not resolve HEAD\n'])
   })
 
   it('still restores the working tree from the index', async () => {
     const h = await harness(unborn)
-    await h.ws.execute('echo hi > /repo/f.txt')
+    await h.ws.shell('echo hi > /repo/f.txt')
     expect((await h.run('add f.txt'))[0]).toBe(0)
-    await h.ws.execute('echo edited > /repo/f.txt')
+    await h.ws.shell('echo edited > /repo/f.txt')
     expect(await h.run('restore f.txt')).toEqual([0, '', ''])
-    expect(DEC.decode((await h.ws.execute('cat /repo/f.txt')).stdout)).toBe('hi\n')
+    expect(DEC.decode((await h.ws.shell('cat /repo/f.txt')).stdout)).toBe('hi\n')
   })
 })
 
@@ -2642,13 +2642,13 @@ describe('a staged path inside a directory the branch replaces', () => {
     expect((await h.run('add slot'))[0]).toBe(0)
     expect((await h.run('commit -m file'))[0]).toBe(0)
     expect((await h.run('checkout main'))[0]).toBe(0)
-    await h.ws.execute('rm /repo/slot')
+    await h.ws.shell('rm /repo/slot')
     await write(h, 'slot/child', 'c\n')
     expect((await h.run('add slot/child'))[0]).toBe(0)
     const [code, , err] = await h.run('checkout filebranch')
     expect(code).toBe(1)
     expect(err).toContain('slot/child')
-    expect(DEC.decode((await h.ws.execute('cat /repo/slot/child')).stdout)).toBe('c\n')
+    expect(DEC.decode((await h.ws.shell('cat /repo/slot/child')).stdout)).toBe('c\n')
   })
 })
 
@@ -2808,7 +2808,7 @@ describe('a peel naming the tag type', () => {
 describe('git rm over a directory', () => {
   it('refuses the path and leaves the index as it stood', async () => {
     const h = await harness()
-    await h.ws.execute('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
+    await h.ws.shell('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
     await write(h, 'numbers.txt/keep', 'k\n')
     const [code, out, err] = await h.run('rm numbers.txt')
     expect(code).toBe(128)
@@ -2822,7 +2822,7 @@ describe('git rm over a directory', () => {
 
   it('tolerates the refusal once a deletion has been made', async () => {
     const h = await harness()
-    await h.ws.execute('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
+    await h.ws.shell('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
     await write(h, 'numbers.txt/keep', 'k\n')
     // letters.txt sorts first and goes, so numbers.txt's failure is
     // swallowed and the whole line succeeds with both entries unstaged.
@@ -2835,7 +2835,7 @@ describe('git rm over a directory', () => {
 
   it('stands when nothing has gone yet', async () => {
     const h = await harness()
-    await h.ws.execute('rm /repo/letters.txt && mkdir /repo/letters.txt')
+    await h.ws.shell('rm /repo/letters.txt && mkdir /repo/letters.txt')
     const [code, , err] = await h.run('rm -f letters.txt numbers.txt')
     expect(code).toBe(128)
     expect(err).toBe("fatal: git rm: 'letters.txt': Is a directory\n")
@@ -2845,7 +2845,7 @@ describe('git rm over a directory', () => {
 
   it('unstages a directory under --cached without touching it', async () => {
     const h = await harness()
-    await h.ws.execute('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
+    await h.ws.shell('rm /repo/numbers.txt && mkdir /repo/numbers.txt')
     await write(h, 'numbers.txt/keep', 'k\n')
     expect(await h.run('rm --cached numbers.txt')).toEqual([0, "rm 'numbers.txt'\n", ''])
     expect(await readOptional(h.dispatch, '/repo/numbers.txt/keep')).not.toBeNull()
@@ -2853,7 +2853,7 @@ describe('git rm over a directory', () => {
 
   it('removes a tracked link to a directory as the link it is', async () => {
     const h = await harness()
-    await h.ws.execute('ln -s docs /repo/slot')
+    await h.ws.shell('ln -s docs /repo/slot')
     expect((await h.run('add -A'))[0]).toBe(0)
     expect((await h.run('commit -m linked'))[0]).toBe(0)
     expect(await h.run('rm slot')).toEqual([0, "rm 'slot'\n", ''])
@@ -2865,9 +2865,9 @@ describe('git rm over a directory', () => {
 describe('restore across a symlink ancestor', () => {
   it('replaces a link standing where a directory belongs', async () => {
     const h = await harness()
-    await h.ws.execute('mkdir /repo/elsewhere')
+    await h.ws.shell('mkdir /repo/elsewhere')
     await write(h, 'elsewhere/readme.md', 'old\n')
-    await h.ws.execute('rm -r /repo/docs && ln -s elsewhere /repo/docs')
+    await h.ws.shell('rm -r /repo/docs && ln -s elsewhere /repo/docs')
     expect(await h.run('restore docs/readme.md')).toEqual([0, '', ''])
     // Writing through the link would have landed the content in
     // elsewhere/readme.md, a file no branch named, and left the link.
@@ -2877,14 +2877,14 @@ describe('restore across a symlink ancestor', () => {
     expect(other === null ? '' : DEC.decode(other)).toBe('old\n')
     // A link is namespace state, so whether it is gone is a question
     // for the namespace rather than for the drained copy.
-    expect((await h.ws.execute('readlink /repo/docs')).exitCode).not.toBe(0)
+    expect((await h.ws.shell('readlink /repo/docs')).exitCode).not.toBe(0)
   })
 
   it('attempts no removal through one', async () => {
     const h = await harness()
-    await h.ws.execute('mkdir /repo/elsewhere')
+    await h.ws.shell('mkdir /repo/elsewhere')
     await write(h, 'elsewhere/readme.md', 'old\n')
-    await h.ws.execute('rm -r /repo/docs && ln -s elsewhere /repo/docs')
+    await h.ws.shell('rm -r /repo/docs && ln -s elsewhere /repo/docs')
     // HEAD~2 predates the entry, so restoring from it removes the path;
     // the unlink would resolve past the link and delete a file inside
     // whatever it points at. git checks the leading path and removes
@@ -2892,7 +2892,7 @@ describe('restore across a symlink ancestor', () => {
     expect(await h.run('restore --source=HEAD~2 docs/readme.md')).toEqual([0, '', ''])
     const other = await readOptional(h.dispatch, '/repo/elsewhere/readme.md')
     expect(other === null ? '' : DEC.decode(other)).toBe('old\n')
-    const told = await h.ws.execute('readlink /repo/docs')
+    const told = await h.ws.shell('readlink /repo/docs')
     expect([told.exitCode, DEC.decode(told.stdout)]).toEqual([0, 'elsewhere\n'])
   })
 })
@@ -3017,15 +3017,15 @@ describe('git tag -d naming one tag twice', () => {
 describe('a moved path that the node table knows about', () => {
   it('carries a link below a moved directory', async () => {
     const h = await harness()
-    await h.ws.execute('mkdir /repo/notes && echo t > /repo/t.txt')
-    await h.ws.execute('ln -s /repo/t.txt /repo/notes/link')
+    await h.ws.shell('mkdir /repo/notes && echo t > /repo/t.txt')
+    await h.ws.shell('ln -s /repo/t.txt /repo/notes/link')
     expect((await h.run('add notes'))[0]).toBe(0)
     expect(await h.run('mv notes moved')).toEqual([0, '', ''])
     // A link is namespace state, so the question goes to the namespace
     // rather than to the drained copy, which never holds one.
-    const told = await h.ws.execute('readlink /repo/moved/link')
+    const told = await h.ws.shell('readlink /repo/moved/link')
     expect([told.exitCode, DEC.decode(told.stdout)]).toEqual([0, '/repo/t.txt\n'])
-    expect((await h.ws.execute('readlink /repo/notes/link')).exitCode).not.toBe(0)
+    expect((await h.ws.shell('readlink /repo/notes/link')).exitCode).not.toBe(0)
   })
 })
 
@@ -3036,7 +3036,7 @@ describe('a component on the way that is not a directory', () => {
     // directory, so the restore succeeds and the file is gone. Left
     // unhandled, the write failed with a raw ENOTDIR.
     const h = await harness()
-    await h.ws.execute('rm -r /repo/docs && echo untracked > /repo/docs')
+    await h.ws.shell('rm -r /repo/docs && echo untracked > /repo/docs')
     expect(await h.run('restore docs/readme.md')).toEqual([0, '', ''])
     const back = await readOptional(h.dispatch, '/repo/docs/readme.md')
     expect(back === null ? '' : DEC.decode(back)).toBe('notes\n')
@@ -3046,7 +3046,7 @@ describe('a component on the way that is not a directory', () => {
     // The removal direction takes it the other way, exactly as it takes a
     // link: git checks the leading path and removes nothing.
     const h = await harness()
-    await h.ws.execute('rm -r /repo/docs && echo untracked > /repo/docs')
+    await h.ws.shell('rm -r /repo/docs && echo untracked > /repo/docs')
     expect(await h.run('restore --source=HEAD~2 docs/readme.md')).toEqual([0, '', ''])
     const kept = await readOptional(h.dispatch, '/repo/docs')
     expect(kept === null ? '' : DEC.decode(kept)).toBe('untracked\n')
@@ -3069,14 +3069,14 @@ describe('a switch onto a branch recording a directory', () => {
     expect((await h.run('commit -m child'))[0]).toBe(0)
     expect((await h.run('switch main'))[0]).toBe(0)
     await write(h, 'away/child', 'outside\n')
-    await h.ws.execute('ln -s /repo/away /repo/slot')
+    await h.ws.shell('ln -s /repo/away /repo/slot')
     expect((await h.run('switch other'))[0]).toBe(0)
     const kid = await readOptional(h.dispatch, '/repo/slot/child')
     expect(kid === null ? '' : DEC.decode(kid)).toBe('kid\n')
     // The link's target tree is untouched, and the link itself is gone.
     const other = await readOptional(h.dispatch, '/repo/away/child')
     expect(other === null ? '' : DEC.decode(other)).toBe('outside\n')
-    expect((await h.ws.execute('readlink /repo/slot')).exitCode).not.toBe(0)
+    expect((await h.ws.shell('readlink /repo/slot')).exitCode).not.toBe(0)
   })
 
   it('replaces an ignored regular file the same way', async () => {
@@ -3188,10 +3188,10 @@ describe('the executable bit a tree entry records', () => {
     // modified for ever, since the mode is half of what the index staged.
     const h = await harness()
     await write(h, 's.sh', '#!/bin/sh\n')
-    await h.ws.execute('chmod 755 /repo/s.sh')
+    await h.ws.shell('chmod 755 /repo/s.sh')
     expect((await h.run('add s.sh'))[0]).toBe(0)
     expect((await h.run('commit -m script'))[0]).toBe(0)
-    await h.ws.execute('chmod 644 /repo/s.sh')
+    await h.ws.shell('chmod 644 /repo/s.sh')
     expect((await h.run('status --short'))[1]).toBe(' M s.sh\n')
     expect(await h.run('restore s.sh')).toEqual([0, '', ''])
     expect((await h.run('status --short'))[1]).toBe('')
@@ -3203,7 +3203,7 @@ describe('the executable bit a tree entry records', () => {
     await write(h, 'p.txt', 'plain\n')
     expect((await h.run('add p.txt'))[0]).toBe(0)
     expect((await h.run('commit -m plain'))[0]).toBe(0)
-    await h.ws.execute('chmod 755 /repo/p.txt')
+    await h.ws.shell('chmod 755 /repo/p.txt')
     expect((await h.run('status --short'))[1]).toBe(' M p.txt\n')
     expect(await h.run('restore p.txt')).toEqual([0, '', ''])
     expect((await h.run('status --short'))[1]).toBe('')
@@ -3213,7 +3213,7 @@ describe('the executable bit a tree entry records', () => {
     const h = await harness()
     expect((await h.run('switch -c other'))[0]).toBe(0)
     await write(h, 's.sh', '#!/bin/sh\n')
-    await h.ws.execute('chmod 755 /repo/s.sh')
+    await h.ws.shell('chmod 755 /repo/s.sh')
     expect((await h.run('add s.sh'))[0]).toBe(0)
     expect((await h.run('commit -m script'))[0]).toBe(0)
     expect((await h.run('switch main'))[0]).toBe(0)

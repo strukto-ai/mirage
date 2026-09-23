@@ -16,10 +16,10 @@ import { describe, expect, it } from 'vitest'
 import { REDIS_OPS } from './index.ts'
 
 describe('REDIS_OPS table', () => {
-  it('registers the expected 12 ops with resource=redis', () => {
+  it('registers the expected 12 ops with VFS=redis', () => {
     expect(REDIS_OPS).toHaveLength(12)
     for (const op of REDIS_OPS) {
-      expect(op.resource).toBe('redis')
+      expect(op.vfs).toBe('redis')
     }
   })
 

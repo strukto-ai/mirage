@@ -75,9 +75,8 @@ async def narrow_scope(
     # Both facts below are hydrated on first use, not at construction:
     # the scope count reads the git tree, and the push-down is only
     # offered on the default branch.
-    await ensure_tree(
-        accessor, index,
-        mount_prefix_of(paths[0].virtual, paths[0].resource_path))
+    await ensure_tree(accessor, index,
+                      mount_prefix_of(paths[0].virtual, paths[0].vfs_path))
     file_count = count_scope_files(accessor.tree, key)
     query = search_query(pattern,
                          fixed_string) if pattern is not None else None

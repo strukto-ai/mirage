@@ -157,7 +157,7 @@ describe('OutputCapPolicy', () => {
     )
     const capped = policy.postOps({
       op: 'read',
-      path: new PathSpec({ virtual: '/a/x', directory: '/a', resourcePath: '' }),
+      path: new PathSpec({ virtual: '/a/x', directory: '/a', vfsPath: '' }),
       write: false,
       prefix: '/a/',
       result: null,
@@ -165,7 +165,7 @@ describe('OutputCapPolicy', () => {
     expect(capped).toEqual(new Limit({ maxBytes: 4 }))
     const silent = policy.postOps({
       op: 'write',
-      path: new PathSpec({ virtual: '/a/x', directory: '/a', resourcePath: '' }),
+      path: new PathSpec({ virtual: '/a/x', directory: '/a', vfsPath: '' }),
       write: true,
       prefix: '/a/',
       result: null,

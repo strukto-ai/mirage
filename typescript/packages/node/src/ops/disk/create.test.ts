@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { DiskResource } from '../../resource/disk/disk.ts'
+import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
 
@@ -21,11 +21,11 @@ const createOp = opOf(DISK_OPS, 'create')
 
 let root: string
 let cleanup: () => void
-let res: DiskResource
+let res: DiskVFS
 
 beforeEach(async () => {
   ;({ root, cleanup } = tmpRoot('mirage-disk-create-op-'))
-  res = new DiskResource({ root })
+  res = new DiskVFS({ root })
   await res.open()
 })
 afterEach(() => {

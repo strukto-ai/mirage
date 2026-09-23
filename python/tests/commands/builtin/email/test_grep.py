@@ -26,7 +26,7 @@ grep = _email_grep.grep
 
 
 def _folder(name: str = "INBOX") -> PathSpec:
-    return PathSpec(resource_path=mount_key(f"/email/{name}", "/email"),
+    return PathSpec(vfs_path=mount_key(f"/email/{name}", "/email"),
                     virtual=f"/email/{name}",
                     directory=f"/email/{name}")
 
@@ -127,7 +127,7 @@ async def test_grep_mount_root_defers_to_generic():
     # The root names no folder, so there is nothing to search: it takes the
     # scan rather than answering for whatever folder came first.
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
-    root = PathSpec(resource_path="", virtual="/email", directory="/email")
+    root = PathSpec(vfs_path="", virtual="/email", directory="/email")
     with patch(
             "mirage.commands.builtin.email.grep.search_and_format",
             new=AsyncMock(return_value=[]),

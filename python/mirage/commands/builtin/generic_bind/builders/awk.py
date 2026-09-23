@@ -33,6 +33,8 @@ async def awk(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
         read_bytes=bound_op(ops.read_bytes, accessor, opts.index),
         read_stream=bound_op(ops.read_stream, accessor, opts.index),
         stdin=opts.stdin,
+        dispatch=opts.dispatch,
+        cwd=opts.cwd,
         index=opts.index,
     )
 

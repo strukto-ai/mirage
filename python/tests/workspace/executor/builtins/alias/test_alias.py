@@ -20,17 +20,17 @@ holding a pipe is a pipe, and reports through ``type``/``command -v``.
 """
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _ws() -> Workspace:
-    return Workspace({"data": RAMResource()}, mode=MountMode.WRITE)
+    return Workspace({"data": RAMVFS()}, mode=MountMode.WRITE)
 
 
 async def _run(ws: Workspace, cmd: str) -> tuple[str, int]:
-    io = await ws.execute(cmd)
+    io = await ws.shell(cmd)
     return (await io.stdout_str()), io.exit_code
 
 

@@ -22,13 +22,13 @@ from mirage.commands.builtin.general.expr import (DIGIT_CHUNK, ExprError,
                                                   int_of_digits, is_null,
                                                   to_byte_view)
 from mirage.commands.builtin.utils.bre import translate_bre
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _ws():
-    mem = RAMResource()
+    mem = RAMVFS()
     ws = Workspace(
         {"/data": (mem, MountMode.WRITE)},
         mode=MountMode.WRITE,
@@ -38,7 +38,7 @@ def _ws():
 
 def _run_raw(ws, cmd, cwd="/", stdin=None):
     ws._cwd = cwd
-    io = asyncio.run(ws.execute(cmd, stdin=stdin))
+    io = asyncio.run(ws.shell(cmd, stdin=stdin))
     return io.stdout, io
 
 

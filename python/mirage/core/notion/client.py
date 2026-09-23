@@ -23,8 +23,8 @@ from mirage.core.api.client import SessionArg, api_request
 from mirage.core.api.paginate import cursor_items
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.constants import API_VERSION, MAX_PAGE_SIZE
-from mirage.resource.secrets import reveal_secret
 from mirage.types import JsonValue
+from mirage.vfs.secrets import reveal_secret
 
 
 class NotionAPIError(RuntimeError):

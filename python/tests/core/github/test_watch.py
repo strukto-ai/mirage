@@ -36,7 +36,7 @@ def _accessor(tree: dict[str, TreeEntry]) -> GitHubAccessor:
 
 
 def _root() -> PathSpec:
-    return PathSpec(virtual="/gh", directory="/gh", resource_path="")
+    return PathSpec(virtual="/gh", directory="/gh", vfs_path="")
 
 
 def _entry(path: str, sha: str) -> TreeEntry:

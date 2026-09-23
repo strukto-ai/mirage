@@ -17,8 +17,8 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.mkdir import mkdir
 from mirage.core.ram.mkdir_p import mkdir_p
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 @pytest.mark.asyncio
@@ -27,10 +27,7 @@ async def test_mkdir():
 
     a = RAMAccessor(s)
     await mkdir(
-        a,
-        PathSpec(resource_path="newdir",
-                 virtual="/newdir",
-                 directory="/newdir"))
+        a, PathSpec(vfs_path="newdir", virtual="/newdir", directory="/newdir"))
     assert "/newdir" in s.dirs
     assert "/newdir" in s.modified
 
@@ -45,7 +42,7 @@ async def test_mkdir_parent_not_found():
     with pytest.raises(FileNotFoundError, match="/no/parent"):
         await mkdir(
             a,
-            PathSpec(resource_path="no/parent",
+            PathSpec(vfs_path="no/parent",
                      virtual="/no/parent",
                      directory="/no/parent"))
     assert "/no/parent" not in s.dirs
@@ -60,7 +57,7 @@ async def test_mkdir_under_a_plain_file_is_not_a_directory():
     with pytest.raises(NotADirectoryError):
         await mkdir(
             a,
-            PathSpec(resource_path="plain/sub",
+            PathSpec(vfs_path="plain/sub",
                      virtual="/plain/sub",
                      directory="/plain/sub"))
     assert "/plain/sub" not in s.dirs
@@ -75,7 +72,7 @@ async def test_mkdir_deep_under_a_plain_file_is_not_a_directory():
     with pytest.raises(NotADirectoryError):
         await mkdir(
             a,
-            PathSpec(resource_path="plain/sub/deeper",
+            PathSpec(vfs_path="plain/sub/deeper",
                      virtual="/plain/sub/deeper",
                      directory="/plain/sub/deeper"))
 
@@ -85,7 +82,7 @@ async def test_mkdir_already_exists_needs_parents_to_be_idempotent():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    spec = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
+    spec = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
     await mkdir(a, spec)
     # Only -p is idempotent; plain mkdir refuses an existing target (GNU).
     with pytest.raises(FileExistsError):
@@ -104,7 +101,7 @@ async def test_mkdir_p_across_a_file_names_the_component():
     a = RAMAccessor(s)
     with pytest.raises(NotADirectoryError) as excinfo:
         await mkdir(a,
-                    PathSpec(resource_path="g/a.txt/sub",
+                    PathSpec(vfs_path="g/a.txt/sub",
                              virtual="/g/a.txt/sub",
                              directory="/g/a.txt/sub"),
                     parents=True)
@@ -124,7 +121,7 @@ async def test_mkdir_p_stops_at_the_first_bad_component():
     a = RAMAccessor(s)
     with pytest.raises(NotADirectoryError) as excinfo:
         await mkdir(a,
-                    PathSpec(resource_path="a.txt/x/y/z",
+                    PathSpec(vfs_path="a.txt/x/y/z",
                              virtual="/a.txt/x/y/z",
                              directory="/a.txt/x/y/z"),
                     parents=True)
@@ -140,7 +137,7 @@ async def test_mkdir_p_onto_a_file_target_is_eexist():
     a = RAMAccessor(s)
     with pytest.raises(FileExistsError, match="/a.txt"):
         await mkdir(a,
-                    PathSpec(resource_path="a.txt",
+                    PathSpec(vfs_path="a.txt",
                              virtual="/a.txt",
                              directory="/a.txt"),
                     parents=True)
@@ -155,10 +152,8 @@ async def test_mkdir_refuses_an_existing_file():
     a = RAMAccessor(s)
     with pytest.raises(FileExistsError, match="/a.txt"):
         await mkdir(
-            a,
-            PathSpec(resource_path="a.txt",
-                     virtual="/a.txt",
-                     directory="/a.txt"))
+            a, PathSpec(vfs_path="a.txt", virtual="/a.txt",
+                        directory="/a.txt"))
     assert s.files["/a.txt"] == b"hi"
 
 
@@ -168,7 +163,7 @@ async def test_mkdir_with_parents():
 
     a = RAMAccessor(s)
     await mkdir(a,
-                PathSpec(resource_path="a/b/c",
+                PathSpec(vfs_path="a/b/c",
                          virtual="/a/b/c",
                          directory="/a/b/c"),
                 parents=True)

@@ -18,8 +18,8 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.errors import CommandTimeoutError
-from mirage.resource.ram import RAMResource
 from mirage.types import Limit
+from mirage.vfs.ram import RAMVFS
 
 
 async def _slow_op(accessor, scope, *args, **kwargs):
@@ -33,8 +33,8 @@ async def _slowish_op(accessor, scope, *args, **kwargs):
 
 
 async def _ws_mount():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("echo hi > /data/f.txt")
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo hi > /data/f.txt")
     mount = next(m for m in ws._registry._mounts if m.prefix == "/data/")
     return mount
 

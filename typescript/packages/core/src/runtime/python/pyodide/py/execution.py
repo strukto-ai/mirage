@@ -1,6 +1,7 @@
 import ast
 import base64
 import codeop
+import errno
 import glob
 import importlib
 import io
@@ -10,6 +11,8 @@ import sys
 import traceback
 import types
 import warnings
+
+import _mirage_xattr
 
 
 class OutputCapture(io.RawIOBase):
@@ -45,8 +48,10 @@ class OutputCapture(io.RawIOBase):
         finally:
             self.close()
 
-    def getvalue(self):
-        return bytes(self.data)
+    def to_list(self):
+        # Pyodide's toJs buffer conversion slices with signed wasm32 addresses:
+        # above 2 GiB it reads the wrong bytes. Transfer numeric values.
+        return list(self.data)
 
 
 repl_session_globals = {}
@@ -175,7 +180,7 @@ def run(request, arm_interrupt, disarm_interrupt):
             os.getcwd = saved_getcwd
             saved_chdir(saved_cwd)
 
-    return (out_bytes.getvalue(), err_bytes.getvalue(), exit_code)
+    return (out_bytes.to_list(), err_bytes.to_list(), exit_code)
 
 
 def evaluate(user_code, eval_inputs):
@@ -221,7 +226,7 @@ def evaluate(user_code, eval_inputs):
             finally:
                 sys.stdout, sys.stderr = saved_stdout, saved_stderr
 
-    return (value_json, out_bytes.getvalue(), err_bytes.getvalue(), ok, syntax)
+    return (value_json, out_bytes.to_list(), err_bytes.to_list(), ok, syntax)
 
 
 def repl(user_code, repl_session_id, repl_inputs):
@@ -289,7 +294,7 @@ def repl(user_code, repl_session_id, repl_inputs):
                 sys.stderr = saved_stderr
                 sys.stdin = saved_stdin
 
-    return (out_bytes.getvalue(), err_bytes.getvalue(), exit_code, status)
+    return (out_bytes.to_list(), err_bytes.to_list(), exit_code, status)
 
 
 def seed_sys_path(paths):
@@ -306,3 +311,80 @@ def seed_sys_path(paths):
     sys.path[:0] = [path for path in expanded if path not in sys.path]
     importlib.invalidate_caches()
     return misses
+
+
+# Emscripten builds os without the extended-attribute family CPython has
+# on linux, so a guest asking a mounted path for its attributes got
+# AttributeError. The host
+# registers _mirage_xattr, which answers from the workspace door, and
+# each condition it reports is raised as the errno linux would raise.
+XATTR_ERRNO = {
+    'NO_XATTR': errno.ENODATA,
+    'ENOENT': errno.ENOENT,
+    'ENOTDIR': errno.ENOTDIR,
+    'EEXIST': errno.EEXIST,
+    'EACCES': errno.EACCES,
+    'EPERM': errno.EPERM,
+    'EROFS': errno.EROFS,
+    'EINVAL': errno.EINVAL,
+    'ELOOP': errno.ELOOP,
+    'ENOTSUP': errno.ENOTSUP,
+}
+
+
+def xattr_door(op,
+               path,
+               attribute=None,
+               value=None,
+               flags=0,
+               follow_symlinks=True):
+    if isinstance(path, int):
+        raise OSError(errno.ENOTSUP, os.strerror(errno.ENOTSUP))
+    target = os.path.abspath(os.fsdecode(path))
+    name = None if attribute is None else os.fsdecode(attribute)
+    payload = (None if value is None else base64.b64encode(
+        bytes(value)).decode('ascii'))
+    answer = json.loads(
+        _mirage_xattr.call(op, target, name, payload, bool(flags & 1),
+                           bool(flags & 2), not follow_symlinks))
+    code = answer.get('code')
+    if code is not None:
+        number = XATTR_ERRNO.get(code, errno.EIO)
+        raise OSError(number, os.strerror(number), target)
+    return answer.get('value')
+
+
+def getxattr(path, attribute, *, follow_symlinks=True):
+    found = xattr_door('getxattr',
+                       path,
+                       attribute,
+                       follow_symlinks=follow_symlinks)
+    return base64.b64decode(found)
+
+
+def listxattr(path=None, *, follow_symlinks=True):
+    return list(
+        xattr_door('listxattr',
+                   '.' if path is None else path,
+                   follow_symlinks=follow_symlinks))
+
+
+def setxattr(path, attribute, value, flags=0, *, follow_symlinks=True):
+    xattr_door('setxattr', path, attribute, value, flags, follow_symlinks)
+
+
+def removexattr(path, attribute, *, follow_symlinks=True):
+    xattr_door('removexattr', path, attribute, follow_symlinks=follow_symlinks)
+
+
+def install_xattrs():
+    os.getxattr = getxattr
+    os.listxattr = listxattr
+    os.setxattr = setxattr
+    os.removexattr = removexattr
+    os.XATTR_CREATE = 1
+    os.XATTR_REPLACE = 2
+    os.XATTR_SIZE_MAX = 65536
+
+
+install_xattrs()

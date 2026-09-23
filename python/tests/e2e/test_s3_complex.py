@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,10 +24,10 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.s3 import COMMANDS as _S3_COMMANDS
 from mirage.commands.config import CommandOpts
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
@@ -110,8 +111,9 @@ class AsyncMockS3Client:
         assert name == "list_objects_v2"
         return AsyncMockPaginator(self.objects)
 
-    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:
+    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> dict:
         self.objects[Key] = Body
+        return {"ETag": f'"{hashlib.md5(Body).hexdigest()}"'}
 
     async def delete_object(self, Bucket: str, Key: str) -> None:
         self.objects.pop(Key, None)
@@ -202,14 +204,14 @@ def _s3_objects() -> dict[str, bytes]:
     }
 
 
-def _s3_backend() -> S3Resource:
+def _s3_backend() -> S3VFS:
     config = S3Config(
         bucket="test-bucket",
         region="us-east-1",
         aws_access_key_id="fake",
         aws_secret_access_key="fake",
     )
-    return S3Resource(config)
+    return S3VFS(config)
 
 
 def _patch_async_session(objects):
@@ -228,7 +230,7 @@ def ws():
         yield Workspace(
             {
                 "/s3/": (_s3_backend(), MountMode.READ),
-                "/tmp/": (RAMResource(), MountMode.WRITE),
+                "/tmp/": (RAMVFS(), MountMode.WRITE),
             },
             mode=MountMode.WRITE,
         )
@@ -238,7 +240,7 @@ def ws():
 async def test_find_sort_lists_expected_s3_files(ws):
     objects = _s3_objects()
     with _patch_async_session(objects):
-        io = await ws.execute("find /s3 -maxdepth 2 -type f | sort")
+        io = await ws.shell("find /s3 -maxdepth 2 -type f | sort")
         assert (await io.stdout_str()).strip().splitlines() == [
             "/s3/data/example.json",
             "/s3/data/example.jsonl",
@@ -250,7 +252,7 @@ async def test_find_sort_lists_expected_s3_files(ws):
 async def test_file_report_through_redirect_chain(ws):
     objects = _s3_objects()
     with _patch_async_session(objects):
-        io = await ws.execute(
+        io = await ws.shell(
             "echo '=== /s3/data/example.json ===' > /tmp/file_report.txt && "
             "file /s3/data/example.json >> /tmp/file_report.txt && "
             "echo >> /tmp/file_report.txt && "
@@ -278,7 +280,7 @@ async def test_file_report_through_redirect_chain(ws):
 async def test_wc_report_through_redirect_chain(ws):
     objects = _s3_objects()
     with _patch_async_session(objects):
-        io = await ws.execute(
+        io = await ws.shell(
             "echo -n '/s3/data/example.json ' > /tmp/size_report.txt && "
             "wc -c /s3/data/example.json >> /tmp/size_report.txt && "
             "echo -n '/s3/data/example.jsonl ' >> /tmp/size_report.txt && "
@@ -296,7 +298,7 @@ async def test_wc_report_through_redirect_chain(ws):
 async def test_grep_then_jq_with_and_or_list(ws):
     objects = _s3_objects()
     with _patch_async_session(objects):
-        io = await ws.execute(
+        io = await ws.shell(
             "grep -l mirage /s3/data/example.jsonl "
             "> /tmp/search_report.txt && "
             "echo >> /tmp/search_report.txt && "
@@ -311,7 +313,7 @@ async def test_grep_then_jq_with_and_or_list(ws):
 
 
 def _resolved(original: str) -> PathSpec:
-    return PathSpec(resource_path=mount_key(original, "/s3"),
+    return PathSpec(vfs_path=mount_key(original, "/s3"),
                     virtual=original,
                     directory=original,
                     resolved=True)

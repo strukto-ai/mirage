@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
 import { MountMode } from '../types.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -25,22 +25,22 @@ import { Workspace } from './workspace/workspace.ts'
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const a = new RAMResource()
-  const b = new RAMResource()
-  ops.registerResource(a)
-  ops.registerResource(b)
+  const a = new RAMVFS()
+  const b = new RAMVFS()
+  ops.registerVfs(a)
+  ops.registerVfs(b)
   const ws = new Workspace(
     { '/a': a, '/b': b },
     { mode: MountMode.WRITE, ops, shellParser: parser },
   )
-  await ws.execute('echo aaa > /a/f.txt')
+  await ws.shell('echo aaa > /a/f.txt')
   return ws
 }
 
 async function run(cmd: string): Promise<[string, string, number]> {
   const ws = await makeWs()
   try {
-    const result = await ws.execute(cmd)
+    const result = await ws.shell(cmd)
     return [result.stdoutText, result.stderrText, result.exitCode]
   } finally {
     await ws.close()
@@ -120,8 +120,8 @@ describe('cross-mount partial output matches single-mount bytes', () => {
   it('sed keeps partial output across mounts', async () => {
     const ws = await makeWs()
     try {
-      await ws.execute("printf '1\\n2\\n' > /a/n.txt")
-      const result = await ws.execute('sed s/1/X/ /a/n.txt /b/missing.txt')
+      await ws.shell("printf '1\\n2\\n' > /a/n.txt")
+      const result = await ws.shell('sed s/1/X/ /a/n.txt /b/missing.txt')
       expect(result.stdoutText).toBe('X\n2\n')
       expect(result.stderrText).toBe('sed: /b/missing.txt: No such file or directory\n')
       // GNU sed exits 2 when it cannot open an operand, whichever mount it
@@ -136,7 +136,7 @@ describe('cross-mount partial output matches single-mount bytes', () => {
   it('sort aborts across mounts like single-mount', async () => {
     const ws = await makeWs()
     try {
-      const result = await ws.execute('sort /a/f.txt /b/missing.txt')
+      const result = await ws.shell('sort /a/f.txt /b/missing.txt')
       expect(result.stdoutText).toBe('')
       expect(result.stderrText).toBe('sort: /b/missing.txt: No such file or directory\n')
       expect(result.exitCode).toBe(2)
@@ -148,8 +148,8 @@ describe('cross-mount partial output matches single-mount bytes', () => {
   it('nl reports its own name through the stream strategy', async () => {
     const ws = await makeWs()
     try {
-      await ws.execute("printf '1\\n2\\n' > /a/n.txt")
-      const result = await ws.execute('nl /a/n.txt /b/missing.txt')
+      await ws.shell("printf '1\\n2\\n' > /a/n.txt")
+      const result = await ws.shell('nl /a/n.txt /b/missing.txt')
       expect(result.stdoutText).toBe('     1\t1\n     2\t2\n')
       expect(result.stderrText).toBe('nl: /b/missing.txt: No such file or directory\n')
       expect(result.exitCode).toBe(1)
@@ -161,8 +161,8 @@ describe('cross-mount partial output matches single-mount bytes', () => {
   it('md5 keeps partial output across mounts', async () => {
     const ws = await makeWs()
     try {
-      await ws.execute("printf '1\\n2\\n' > /a/n.txt")
-      const result = await ws.execute('md5 /a/n.txt /b/missing.txt')
+      await ws.shell("printf '1\\n2\\n' > /a/n.txt")
+      const result = await ws.shell('md5 /a/n.txt /b/missing.txt')
       expect(result.stdoutText).toBe('6ddb4095eb719e2a9f0a3f95677d24e0  /a/n.txt\n')
       expect(result.stderrText).toBe('md5: /b/missing.txt: No such file or directory\n')
       expect(result.exitCode).toBe(1)
@@ -203,19 +203,19 @@ describe('cross-mount partial output matches single-mount bytes', () => {
 async function makeNumberedWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const a = new RAMResource()
-  ops.registerResource(a)
+  const a = new RAMVFS()
+  ops.registerVfs(a)
   const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE, ops, shellParser: parser })
-  await ws.execute("printf '1\\n2\\n' > /a/f.txt && printf '3\\n4\\n' > /a/g.txt")
-  await ws.execute("printf 'hello\\n' > /a/h.txt")
+  await ws.shell("printf '1\\n2\\n' > /a/f.txt && printf '3\\n4\\n' > /a/g.txt")
+  await ws.shell("printf 'hello\\n' > /a/h.txt")
   return ws
 }
 
 async function runNumbered(cmds: string[]): Promise<[string, string, number]> {
   const ws = await makeNumberedWs()
   try {
-    let result = await ws.execute(cmds[0] ?? '')
-    for (const cmd of cmds.slice(1)) result = await ws.execute(cmd)
+    let result = await ws.shell(cmds[0] ?? '')
+    for (const cmd of cmds.slice(1)) result = await ws.shell(cmd)
     return [result.stdoutText, result.stderrText, result.exitCode]
   } finally {
     await ws.close()

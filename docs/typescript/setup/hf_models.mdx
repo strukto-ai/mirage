@@ -4,16 +4,16 @@ icon: /images/huggingface-logo.svg
 description: Mount a Hugging Face Model repo as a Mirage filesystem in TypeScript.
 ---
 
-`HfModelsResource` mounts a [Hugging Face Model](https://huggingface.co/models)
+`HfModelsVFS` mounts a [Hugging Face Model](https://huggingface.co/models)
 repo at a prefix such as `/m/`. You can inspect configs, tokenizers, and READMEs
 without downloading the weights, weights stream only when you actually `cat` them.
-The TypeScript backend mirrors the [Python one](/python/resource/hf_models) and
+The TypeScript backend mirrors the [Python one](/python/vfs/hf_models) and
 returns identical results.
 
 For credential setup, see [HF Models Setup](/home/setup/hf_models).
 
 <Note>
-Node only: the resource ships in `@struktoai/mirage-node`. It needs no native
+Node only: the VFS ships in `@struktoai/mirage-node`. It needs no native
 binding, though, because it speaks the Hub API over the runtime's own `fetch`.
 The [opendal](https://www.npmjs.com/package/opendal) binding belongs to
 [HF Buckets](/typescript/setup/hf_buckets), which is a different product.
@@ -26,9 +26,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { HfModelsResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { HfModelsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const model = new HfModelsResource({
+const model = new HfModelsVFS({
   repoId: 'sapientinc/HRM-Text-1B', // "namespace/model-name"
   token: process.env.HF_TOKEN, // optional for public repos
   // Optional:
@@ -39,13 +39,13 @@ const model = new HfModelsResource({
 const ws = new Workspace({ '/m/': model }, { mode: MountMode.READ })
 
 // ls is cheap: one HTTP list call
-console.log((await ws.execute('ls -lh /m/')).stdoutText)
+console.log((await ws.shell('ls -lh /m/')).stdoutText)
 
 // Read the config (small, fast)
-console.log((await ws.execute('cat /m/config.json')).stdoutText)
+console.log((await ws.shell('cat /m/config.json')).stdoutText)
 
 // Stat the weights without downloading them
-console.log((await ws.execute('stat /m/model.safetensors')).stdoutText)
+console.log((await ws.shell('stat /m/model.safetensors')).stdoutText)
 ```
 
 ## Reading, not writing

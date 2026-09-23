@@ -1,0 +1,68 @@
+{
+  "runs": {
+    "python": {
+      "command": [
+        "./python/.venv/bin/python",
+        "examples/python/other/custom_vfs.py"
+      ]
+    },
+    "typescript": {
+      "command": [
+        "pnpm",
+        "-C",
+        "examples/typescript",
+        "exec",
+        "tsx",
+        "other/custom_vfs.ts"
+      ]
+    }
+  },
+  "exit": 0,
+  "lines": [
+    "$ ls /wiki/guides",
+    "deploy.md",
+    "quickstart.md",
+    "",
+    "$ cat /wiki/notes.md",
+    "Remember: agents just speak bash.",
+    "",
+    "$ grep -r Quickstart /wiki/",
+    "/wiki/guides/quickstart.md:# Quickstart",
+    "",
+    "$ find /wiki -name '*.md'",
+    "/wiki/guides/deploy.md",
+    "/wiki/guides/quickstart.md",
+    "/wiki/notes.md",
+    "",
+    "$ wc -l /wiki/guides/quickstart.md",
+    "2 /wiki/guides/quickstart.md",
+    "",
+    "$ wiki_titles",
+    "Quickstart",
+    "Deploy",
+    "",
+    "$ cat /wiki/missing.md",
+    "cat: /wiki/missing.md: No such file or directory",
+    "exit 1",
+    "",
+    "$ cat /feed/status.md",
+    "All systems go.",
+    "",
+    "$ echo '# Runbook' > /wiki/runbook.md",
+    "",
+    "$ echo '# Runbook, revised' > /wiki/runbook.md",
+    "",
+    "load: refused, /feed/ must be handed back live",
+    "load: ok with /feed/ handed back",
+    "",
+    "live$ cat /wiki/runbook.md",
+    "# Runbook, revised",
+    "",
+    "restored$ cat /wiki/runbook.md",
+    "# Runbook",
+    "",
+    "restored$ cat /feed/status.md",
+    "All systems go.",
+    ""
+  ]
+}

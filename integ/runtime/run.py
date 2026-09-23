@@ -285,7 +285,7 @@ def _requirement_met(req: str) -> bool:
 
 
 def _s3_config() -> Any:
-    from mirage.resource.s3 import S3Config
+    from mirage.vfs.s3 import S3Config
     endpoint = _ensure_s3()
     return S3Config(bucket=BUCKET,
                     region="us-east-1",
@@ -353,32 +353,32 @@ async def _ensure_mongo() -> None:
     _mongo_seeded = True
 
 
-async def _build_resource(spec: dict[str, Any], run_id: str) -> Any:
-    kind = spec["resource"]
+async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
+    kind = spec["vfs"]
     if kind == "ram":
-        from mirage.resource.ram import RAMResource
-        resource = RAMResource()
+        from mirage.vfs.ram import RAMVFS
+        vfs = RAMVFS()
         if "generated_files" in spec:
-            resource.load_state({
+            vfs.load_state({
                 "files": {
                     f"/file-{i}.txt": b"unused"
                     for i in range(spec["generated_files"])
                 },
             })
-        return resource
+        return vfs
     if kind == "redis":
-        from mirage.resource.redis import RedisResource
-        return RedisResource(url=os.environ["REDIS_URL"],
-                             key_prefix=f"mirage-integ-runtime-{run_id}/")
+        from mirage.vfs.redis import RedisVFS
+        return RedisVFS(url=os.environ["REDIS_URL"],
+                        key_prefix=f"mirage-integ-runtime-{run_id}/")
     if kind == "s3":
-        from mirage.resource.s3 import S3Resource
-        return S3Resource(_s3_config())
+        from mirage.vfs.s3 import S3VFS
+        return S3VFS(_s3_config())
     if kind == "mongodb":
-        from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
+        from mirage.vfs.mongodb import MongoDBConfig, MongoDBVFS
         await _ensure_mongo()
-        return MongoDBResource(config=MongoDBConfig(
-            uri=os.environ["MONGODB_URI"], databases=[DB]))
-    raise ValueError(f"unknown resource kind: {kind!r}")
+        return MongoDBVFS(config=MongoDBConfig(uri=os.environ["MONGODB_URI"],
+                                               databases=[DB]))
+    raise ValueError(f"unknown VFS kind: {kind!r}")
 
 
 def _build_entry(entry: Any) -> Any:
@@ -426,15 +426,14 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     _register_runtimes(world.get("register_runtimes", {}))
     mounts: dict[str, Any] = {}
     seeds: list[tuple[str, str, bytes]] = []
-    mount_specs = world.get("mounts", {"/ram": {"resource": "ram"}})
+    mount_specs = world.get("mounts", {"/ram": {"vfs": "ram"}})
     for prefix, spec in mount_specs.items():
-        resource = await _build_resource(spec, run_id)
+        vfs = await _build_vfs(spec, run_id)
         guards = {
             cmd: Limit(**kwargs)
             for cmd, kwargs in spec.get("limits", {}).items()
         }
-        mounts[prefix] = (resource, MountMode.EXEC,
-                          guards) if guards else resource
+        mounts[prefix] = (vfs, MountMode.EXEC, guards) if guards else vfs
         for name, content in spec.get("files", {}).items():
             seeds.append((prefix, name, content.encode()))
     kwargs: dict[str, Any] = {}
@@ -497,7 +496,7 @@ async def _run_facade(ws: Workspace, expect: dict[str, Any],
         spec (dict[str, Any]): ``method`` (the python facade spelling,
             e.g. ``is_dir``), ``path``, and ``data`` for ``append``.
     """
-    method = getattr(ws.fs, spec["method"])
+    method = getattr(ws.vfs, spec["method"])
     args: list[Any] = [spec["path"]]
     if "data" in spec:
         args.append(spec["data"].encode())
@@ -558,12 +557,12 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
                     step: dict[str, Any]) -> list[str]:
     expect = step.get("expect", {})
     label = f"step[{index}]"
-    # The ledger slice this step adds: ws.fs.records is the one
+    # The ledger slice this step adds: ws.vfs.records is the one
     # workspace-wide account, so the step's own ops are the tail.
-    ledger_before = len(ws.fs.records)
+    ledger_before = len(ws.vfs.records)
     if "facade" in step:
         problems = await _run_facade(ws, expect, step["facade"])
-        seen = [f"{r.op} {r.path}" for r in ws.fs.records[ledger_before:]]
+        seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
         problems.extend(_check_ops(expect, seen))
         return [f"{case_id} {label}: {p}" for p in problems]
     if "s3_put" in step:
@@ -621,7 +620,7 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
         kwargs["stdin"] = step["stdin"].encode()
     if "throws_contains" in expect:
         try:
-            await ws.execute(command, **kwargs)
+            await ws.shell(command, **kwargs)
         except Exception as exc:
             if expect["throws_contains"] in str(exc):
                 return []
@@ -630,11 +629,11 @@ async def _run_step(ws: Workspace, case_id: str, index: int,
                 f"{expect['throws_contains']!r} in the message"
             ]
         return [f"{case_id} {label}: expected an error, none raised"]
-    result = await ws.execute(command, **kwargs)
+    result = await ws.shell(command, **kwargs)
     stdout = await result.stdout_str()
     stderr = await result.stderr_str()
     problems = _check(case_id, label, expect, result.exit_code, stdout, stderr)
-    seen = [f"{r.op} {r.path}" for r in ws.fs.records[ledger_before:]]
+    seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
     problems.extend(f"{case_id} {label}: {p}"
                     for p in _check_ops(expect, seen))
     return problems

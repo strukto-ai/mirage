@@ -32,7 +32,7 @@ function spec(virtual: string): PathSpec {
     virtual,
     directory: virtual,
     resolved: false,
-    resourcePath: virtual,
+    vfsPath: virtual,
   })
 }
 

@@ -14,11 +14,11 @@
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.shell.constants import RANDOM, RANDOM_MAX, RANDOM_UNSET
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (conversion_scalar, next_random,
                                             note_random_kind, random_reader,
                                             restore_locals, seed_from,
@@ -26,7 +26,7 @@ from mirage.workspace.session.state import (conversion_scalar, next_random,
 
 
 def test_seed_from_evaluates_the_word_as_arithmetic():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     s.vars["x"] = ShellVar("42")
     assert seed_from("42", s) == 42
     assert seed_from("-1", s) == (1 << 32) - 1
@@ -49,7 +49,7 @@ def test_seed_from_evaluates_the_word_as_arithmetic():
 async def test_an_unevaluable_word_leaves_the_generator_alone():
     # bash 5.2.37: `RANDOM=0; echo $RANDOM; RANDOM=1.5; echo $RANDOM`
     # prints the error for 1.5 and then 24386, the second draw of seed 0.
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     assert next_random(s, "0") == 20814
     await set_var(s, None, RANDOM, "1.5")
     assert s._diagnostics == ['1.5: syntax error: invalid character "."']
@@ -72,7 +72,7 @@ def test_seeded_sequences_are_bash_5_2s(seed, expected):
     # 32 bits, 4294967338 is 42 past 2**32, seed 32768 renders 0 on its
     # first step, which the no-repeat rule redraws, and the last three
     # are arithmetic words: 3, 16, and an unset name.
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     drawn = [
         next_random(s, seed if i == 0 else s.vars[RANDOM].value)
         for i in range(3)
@@ -81,8 +81,8 @@ def test_seeded_sequences_are_bash_5_2s(seed, expected):
 
 
 def test_seeded_sequence_is_deterministic_and_bounded():
-    a = Session(session_id="a")
-    b = Session(session_id="b")
+    a = SessionState(session_id="a")
+    b = SessionState(session_id="b")
     seq_a = [
         next_random(a, "42" if i == 0 else a.vars[RANDOM].value)
         for i in range(5)
@@ -98,7 +98,7 @@ def test_seeded_sequence_is_deterministic_and_bounded():
 
 
 def test_write_back_reseeds_only_on_a_new_word():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     first = next_random(s, "7")
     stored = s.vars[RANDOM].value
     assert stored == str(first)
@@ -107,13 +107,13 @@ def test_write_back_reseeds_only_on_a_new_word():
 
 
 def test_unset_after_a_read_strips_the_meaning():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     assert next_random(s, None) is not None
     assert next_random(s, None) is None
 
 
 def test_a_child_shell_reseeds_and_the_parent_gets_its_state_back():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     parent = [next_random(s, "42"), next_random(s, s.vars[RANDOM].value)]
     saved = s.snapshot()
     child = next_random(s, s.vars[RANDOM].value)
@@ -124,11 +124,11 @@ def test_a_child_shell_reseeds_and_the_parent_gets_its_state_back():
 
 
 def test_a_child_shell_does_not_replay_a_pending_seed():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     seed_var(s, RANDOM, "42")
     s.snapshot()
     assert s._random_seed == "42" and s._random_state is None
-    unset = Session(session_id="u")
+    unset = SessionState(session_id="u")
     next_random(unset, None)
     assert next_random(unset, None) is None
     unset.snapshot()
@@ -137,22 +137,22 @@ def test_a_child_shell_does_not_replay_a_pending_seed():
 
 @pytest.mark.asyncio
 async def test_random_expands_in_the_shell():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute(
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell(
         'RANDOM=42; a=$RANDOM; RANDOM=42; b=$RANDOM; echo $a $b')
     assert await io.stdout_str() == "17772 17772\n"
-    io = await ws.execute('echo $RANDOM $RANDOM')
+    io = await ws.shell('echo $RANDOM $RANDOM')
     x, y = (await io.stdout_str()).split()
     assert x != y and x.isdigit() and y.isdigit()
-    io = await ws.execute(
+    io = await ws.shell(
         'RANDOM=42; a=$RANDOM; RANDOM=42; (: $RANDOM); b=$RANDOM; echo $a $b')
     assert await io.stdout_str() == "17772 17772\n"
-    io = await ws.execute(
+    io = await ws.shell(
         "RANDOM='1+2'; a=$RANDOM; RANDOM=0x10; b=$RANDOM; x=42; RANDOM=x; "
         "c=$RANDOM; RANDOM=0; d=$RANDOM; RANDOM=1.5; e=$RANDOM; "
         "echo $a $b $c $d $e")
     assert await io.stdout_str() == "17653 6772 17772 20814 24386\n"
-    io = await ws.execute('unset RANDOM; echo "[$RANDOM]"')
+    io = await ws.shell('unset RANDOM; echo "[$RANDOM]"')
     assert await io.stdout_str() == "[]\n"
 
 
@@ -170,10 +170,10 @@ async def test_random_expands_in_the_shell():
 @pytest.mark.parametrize("draw_first", [False, True])
 async def test_child_random_reads_preserve_the_parent_sequence(
         child, draw_first):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         prefix = 'RANDOM=42; ' + (': $RANDOM; ' if draw_first else '')
-        io = await ws.execute(prefix + child + '; echo $RANDOM')
+        io = await ws.shell(prefix + child + '; echo $RANDOM')
         assert io.exit_code == 0
         assert await io.stdout_str() == ('26794\n'
                                          if draw_first else '17772\n')
@@ -201,8 +201,8 @@ async def test_child_random_reads_preserve_the_parent_sequence(
      ''),
 ])
 async def test_random_seed_diagnostics(command, stdout, prefix):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute(command)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell(command)
     assert io.exit_code == 0
     assert await io.stdout_str() == stdout
     err = await io.stderr_str()
@@ -229,9 +229,9 @@ async def test_random_seed_diagnostics(command, stdout, prefix):
      ('RANDOM=42; [[ RANDOM -eq 17772 ]]; echo $? $RANDOM', '0 26794\n'),
      ('unset RANDOM; RANDOM=42; echo $((RANDOM)) $((RANDOM))', '42 42\n')])
 async def test_arithmetic_random_reads_are_lazy(command, stdout):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        io = await ws.execute(command)
+        io = await ws.shell(command)
         assert io.exit_code == 0
         assert await io.stdout_str() == stdout
         assert await io.stderr_str() == ""
@@ -303,9 +303,9 @@ async def test_arithmetic_random_reads_are_lazy(command, stdout):
     ])
 async def test_arithmetic_random_assignment_seeds_within_the_expression(
         command, stdout):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        io = await ws.execute(command)
+        io = await ws.shell(command)
         assert io.exit_code == 0
         assert await io.stdout_str() == stdout
         assert await io.stderr_str() == ""
@@ -364,9 +364,9 @@ async def test_arithmetic_random_assignment_seeds_within_the_expression(
     ])
 @pytest.mark.asyncio
 async def test_subscripts_and_offsets_land_their_assignments(command, stdout):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        io = await ws.execute(command)
+        io = await ws.shell(command)
         assert io.exit_code == 0
         assert await io.stdout_str() == stdout
         assert await io.stderr_str() == ""
@@ -378,7 +378,7 @@ def test_random_reader_draws_from_the_pending_seed_and_settles():
     # The reader is told of the assignment, draws from a scratch
     # generator seeded with it, and replays those draws on the session
     # only once the door has landed the same seed.
-    session = Session(session_id="s")
+    session = SessionState(session_id="s")
     session.vars[RANDOM] = ShellVar("1")
     reader = random_reader(session)
     assert reader.read("X") is None
@@ -411,14 +411,14 @@ def test_random_reader_draws_from_the_pending_seed_and_settles():
 @pytest.mark.asyncio
 async def test_a_subscript_or_operand_that_fails_ends_the_line(
         command, stderr):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        io = await ws.execute(command)
+        io = await ws.shell(command)
         assert io.exit_code == 1
         assert await io.stdout_str() == ""
         assert await io.stderr_str() == stderr
         if "x=3" in command:
-            landed = await ws.execute("echo $x")
+            landed = await ws.shell("echo $x")
             assert await landed.stdout_str() == "3\n"
     finally:
         await ws.close()
@@ -430,10 +430,10 @@ async def test_operand_env_is_a_view_over_the_visible_env():
     # serve as a scalar; the operand's env lays its pending writes over
     # that env as a view, so the reference neither breaks the operand
     # nor hides the write.
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        io = await ws.execute("declare -a nrb=(1); declare -n nrc=nrb; "
-                              'v=abcdef; echo "${v:(x=1):2}" $x')
+        io = await ws.shell("declare -a nrb=(1); declare -n nrc=nrb; "
+                            'v=abcdef; echo "${v:(x=1):2}" $x')
         assert await io.stdout_str() == "bc 1\n"
         assert await io.stderr_str() == ""
     finally:
@@ -458,9 +458,9 @@ async def test_operand_env_is_a_view_over_the_visible_env():
 @pytest.mark.asyncio
 async def test_a_conditional_operators_word_expands_only_when_selected(
         command, stdout, stderr):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        io = await ws.execute(command)
+        io = await ws.shell(command)
         assert io.exit_code == 0
         assert await io.stdout_str() == stdout
         assert await io.stderr_str() == stderr
@@ -512,8 +512,8 @@ async def test_an_array_on_random_ends_its_special_meaning(command, stdout):
     # `declare -a RANDOM` conversion looks the name up more than once
     # there, so element 0 holds a later draw of the same sequence; and a
     # popped local RANDOM reseeds bash's generator where mirage resumes.
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute(command)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell(command)
     assert await io.stderr_str() == ''
     assert io.exit_code == 0
     assert await io.stdout_str() == stdout
@@ -521,34 +521,34 @@ async def test_an_array_on_random_ends_its_special_meaning(command, stdout):
 
 @pytest.mark.asyncio
 async def test_every_store_door_ends_the_meaning_on_a_non_string():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     seed_var(s, RANDOM, ["1", "2"])
     assert next_random(s, None) is None
     assert s.vars[RANDOM].value == ["1", "2"]
-    t = Session(session_id="t")
+    t = SessionState(session_id="t")
     await set_var(t, None, RANDOM, {"k": "v"})
     assert next_random(t, None) is None
     assert t.vars[RANDOM].value == {"k": "v"}
-    u = Session(session_id="u")
+    u = SessionState(session_id="u")
     note_random_kind(u, "other", ["1"])
     assert next_random(u, None) is not None
 
 
 def test_conversion_scalar_draws_once_for_a_live_random():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     seed_var(s, RANDOM, "42")
     assert conversion_scalar(s, RANDOM) == "17772"
     assert s.vars[RANDOM].value == "17772"
     seed_var(s, "x", "5")
     assert conversion_scalar(s, "x") == "5"
     assert conversion_scalar(s, "absent") is None
-    u = Session(session_id="u")
+    u = SessionState(session_id="u")
     u._random_seed = RANDOM_UNSET
     assert conversion_scalar(u, RANDOM) is None
 
 
 def test_a_local_random_parks_the_marker_and_restores_it():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     seed_var(s, RANDOM, "42")
     assert next_random(s, "42") == 17772
     frame: dict[str, ShellVar | None] = {}

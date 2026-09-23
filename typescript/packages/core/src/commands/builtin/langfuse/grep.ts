@@ -21,7 +21,7 @@ import {
 } from '../../../core/langfuse/client.ts'
 import { SEARCH_KINDS, detectScope } from '../../../core/langfuse/scope.ts'
 import type { Searcher, SearchQuery } from '../../../core/hierarchy/search.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { makeSearch } from '../generic_bind/search.ts'
@@ -120,7 +120,7 @@ export const SEARCHERS: Readonly<Record<string, Searcher<LangfuseAccessor>>> = O
 
 export const LANGFUSE_GREP = command({
   name: 'grep',
-  resource: ResourceName.LANGFUSE,
+  vfs: VFSName.LANGFUSE,
   spec: specOf('grep'),
   fn: makeSearch('grep', detectScope, SEARCHERS, LANGFUSE_IO, {
     qualify: pushdownOperand,

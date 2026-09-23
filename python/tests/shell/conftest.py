@@ -17,8 +17,8 @@ import subprocess
 
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -31,7 +31,7 @@ class ShellTestEnv:
 
     def __init__(self, tmp_path):
         self.tmp_path = tmp_path
-        self.mem = RAMResource()
+        self.mem = RAMVFS()
         self.ws = Workspace(
             {"/data": (self.mem, MountMode.WRITE)},
             mode=MountMode.WRITE,
@@ -61,13 +61,13 @@ class ShellTestEnv:
     def mirage(self, cmd: str, stdin: bytes | None = None) -> str:
 
         async def _run():
-            io = await self.ws.execute(cmd, stdin=stdin)
+            io = await self.ws.shell(cmd, stdin=stdin)
             return await io.stdout_str()
 
         return asyncio.run(_run())
 
     def mirage_exit(self, cmd: str, stdin: bytes | None = None) -> int:
-        io = asyncio.run(self.ws.execute(cmd, stdin=stdin))
+        io = asyncio.run(self.ws.shell(cmd, stdin=stdin))
         return io.exit_code
 
     def mirage_result(self,
@@ -75,7 +75,7 @@ class ShellTestEnv:
                       stdin: bytes | None = None) -> tuple[int, str, str]:
 
         async def _run():
-            io = await self.ws.execute(cmd, stdin=stdin)
+            io = await self.ws.shell(cmd, stdin=stdin)
             return io.exit_code, await io.stdout_str(), await io.stderr_str()
 
         return asyncio.run(_run())

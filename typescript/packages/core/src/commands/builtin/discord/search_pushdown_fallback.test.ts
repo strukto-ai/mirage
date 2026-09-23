@@ -19,7 +19,7 @@ import { DiscordApiError, type DiscordTransport } from '../../../core/discord/cl
 import { PathSpec } from '../../../types.ts'
 import { DISCORD_GREP } from './grep.ts'
 import { DISCORD_RG } from './rg.ts'
-import { makeFakeResource, seedChannel, seedGuild } from './_test_util.ts'
+import { makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
 
 const DEC = new TextDecoder()
 
@@ -46,17 +46,17 @@ describe('discord grep push-down fallback', () => {
     const idx = new RAMIndexCacheStore()
     await setupChannel(idx)
     const transport = failingSearchTransport(403, 'Missing Permissions')
-    const resource = makeFakeResource(transport)
+    const vfs = makeFakeVfs(transport)
     const grep = DISCORD_GREP[0]
     if (grep === undefined) throw new Error('grep not registered')
     const result = await grep.fn(
-      resource.accessor,
+      vfs.accessor,
       [
         new PathSpec({
           virtual: '/mnt/discord/My Server__G1/channels/general__C1',
           directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         }),
       ],
       ['hi'],
@@ -81,17 +81,17 @@ describe('discord rg push-down fallback', () => {
     const idx = new RAMIndexCacheStore()
     await setupChannel(idx)
     const transport = failingSearchTransport(429, 'rate_limited')
-    const resource = makeFakeResource(transport)
+    const vfs = makeFakeVfs(transport)
     const rg = DISCORD_RG[0]
     if (rg === undefined) throw new Error('rg not registered')
     const result = await rg.fn(
-      resource.accessor,
+      vfs.accessor,
       [
         new PathSpec({
           virtual: '/mnt/discord/My Server__G1/channels/general__C1',
           directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         }),
       ],
       ['hi'],

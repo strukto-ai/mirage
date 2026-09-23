@@ -34,8 +34,7 @@ async def search_segments(
 ) -> bytes:
     search_method = validate_args(query, method, top_k, threshold)
     if not mount_prefix and paths:
-        mount_prefix = mount_prefix_of(paths[0].virtual,
-                                       paths[0].resource_path)
+        mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     retrieval_model = {
         "search_method": search_method,
         "top_k": min(top_k, 100),
@@ -135,7 +134,7 @@ async def target_entries(
                                   strip_prefix=False)
             for child in children:
                 child_spec = PathSpec.from_str_path(
-                    child, rekey(path.virtual, path.resource_path, child))
+                    child, rekey(path.virtual, path.vfs_path, child))
                 child_resolved = await resolve_path(accessor, child_spec,
                                                     index)
                 if not child_resolved.is_dir:

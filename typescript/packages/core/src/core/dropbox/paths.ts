@@ -19,7 +19,7 @@ import type { DropboxAccessor } from '../../accessor/dropbox.ts'
 
 /** Map a mount path to the Dropbox API path under the configured root. */
 export function dropboxPathOf(accessor: DropboxAccessor, path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
   const key = stripSlash(p)

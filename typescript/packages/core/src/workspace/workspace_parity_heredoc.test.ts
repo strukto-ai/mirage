@@ -18,42 +18,42 @@ import { makeWorkspace, stderrStr, stdoutStr } from './fixtures/workspace_fixtur
 describe('workspace: heredoc / herestring', () => {
   it('heredoc << EOF', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat << EOF\nhello\nworld\nEOF')
+    const io = await ws.shell('cat << EOF\nhello\nworld\nEOF')
     expect(stdoutStr(io)).toBe('hello\nworld\n')
     await ws.close()
   })
 
   it('herestring <<<', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat <<< "hello world"')
+    const io = await ws.shell('cat <<< "hello world"')
     expect(stdoutStr(io)).toBe('hello world\n')
     await ws.close()
   })
 
   it('unquoted heredoc expands variables', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('X=world\ncat << EOF\nhello $X\nEOF')
+    const io = await ws.shell('X=world\ncat << EOF\nhello $X\nEOF')
     expect(stdoutStr(io)).toBe('hello world\n')
     await ws.close()
   })
 
   it("quoted heredoc ('EOF') keeps variables literal", async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("X=world\ncat << 'EOF'\nhello $X\nEOF")
+    const io = await ws.shell("X=world\ncat << 'EOF'\nhello $X\nEOF")
     expect(stdoutStr(io)).toBe('hello $X\n')
     await ws.close()
   })
 
   it('<<- strips leading tabs', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat <<-EOF\n\thello\n\tworld\nEOF')
+    const io = await ws.shell('cat <<-EOF\n\thello\n\tworld\nEOF')
     expect(stdoutStr(io)).toBe('hello\nworld\n')
     await ws.close()
   })
 
   it('heredoc inside for loop', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('for x in a b c; do cat <<EOF\nitem=$x\nEOF\ndone')
+    const io = await ws.shell('for x in a b c; do cat <<EOF\nitem=$x\nEOF\ndone')
     expect(stdoutStr(io)).toBe('item=a\nitem=b\nitem=c\n')
     await ws.close()
   })
@@ -62,8 +62,8 @@ describe('workspace: heredoc / herestring', () => {
 describe('workspace: relative paths', () => {
   it('./file after cd', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('echo test > /disk/out.txt')
-    const io = await ws.execute('cd /disk && cat ./out.txt')
+    await ws.shell('echo test > /disk/out.txt')
+    const io = await ws.shell('cd /disk && cat ./out.txt')
     expect(stdoutStr(io)).toBe('test\n')
     await ws.close()
   })
@@ -72,14 +72,14 @@ describe('workspace: relative paths', () => {
 describe('workspace: set -- positional args', () => {
   it('set -- a b c sets $@', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('set -- a b c; echo $@')
+    const io = await ws.shell('set -- a b c; echo $@')
     expect(stdoutStr(io)).toBe('a b c\n')
     await ws.close()
   })
 
   it('set -- x y sets $1 $2', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('set -- x y; echo $1 $2')
+    const io = await ws.shell('set -- x y; echo $1 $2')
     expect(stdoutStr(io)).toBe('x y\n')
     await ws.close()
   })
@@ -88,14 +88,14 @@ describe('workspace: set -- positional args', () => {
 describe('workspace: glob expansion', () => {
   it('echo /s3/*.csv', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo /s3/*.csv')
+    const io = await ws.shell('echo /s3/*.csv')
     expect(stdoutStr(io)).toContain('report.csv')
     await ws.close()
   })
 
   it('for f in /ram/*.txt', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('for f in /ram/*.txt; do echo $f; done')
+    const io = await ws.shell('for f in /ram/*.txt; do echo $f; done')
     const out = stdoutStr(io)
     expect(out).toContain('notes.txt')
     expect(out).toContain('nums.txt')
@@ -104,7 +104,7 @@ describe('workspace: glob expansion', () => {
 
   it('$(echo a b c) word-splits in for', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('for x in $(echo a b c); do echo item:$x; done')
+    const io = await ws.shell('for x in $(echo a b c); do echo item:$x; done')
     expect(stdoutStr(io)).toBe('item:a\nitem:b\nitem:c\n')
     await ws.close()
   })
@@ -113,14 +113,14 @@ describe('workspace: glob expansion', () => {
 describe('workspace: pipe exit code', () => {
   it('pipe with no match → exit 1', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo hello | grep nope')
+    const io = await ws.shell('echo hello | grep nope')
     expect(io.exitCode).toBe(1)
     await ws.close()
   })
 
   it('pipe with match → exit 0', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo hello | grep hello')
+    const io = await ws.shell('echo hello | grep hello')
     expect(io.exitCode).toBe(0)
     await ws.close()
   })
@@ -129,7 +129,7 @@ describe('workspace: pipe exit code', () => {
 describe('workspace: timeout', () => {
   it('timeout N cmd runs command', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('timeout 5 echo hello')
+    const io = await ws.shell('timeout 5 echo hello')
     expect(stdoutStr(io)).toBe('hello\n')
     await ws.close()
   })
@@ -138,7 +138,7 @@ describe('workspace: timeout', () => {
 describe('workspace: xargs', () => {
   it('echo args | xargs echo', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo "a b c" | xargs echo')
+    const io = await ws.shell('echo "a b c" | xargs echo')
     expect(stdoutStr(io)).toBe('a b c\n')
     await ws.close()
   })
@@ -147,28 +147,28 @@ describe('workspace: xargs', () => {
 describe('workspace: additional fixes', () => {
   it('for over empty list skips body', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('for x in; do echo $x; done; echo done')
+    const io = await ws.shell('for x in; do echo $x; done; echo done')
     expect(stdoutStr(io)).toBe('done\n')
     await ws.close()
   })
 
   it('escaped quotes inside double quotes', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo "hello \\"world\\""')
+    const io = await ws.shell('echo "hello \\"world\\""')
     expect(stdoutStr(io)).toBe('hello "world"\n')
     await ws.close()
   })
 
   it('"$@" in for splits into args', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('f() { for x in "$@"; do echo $x; done; }; f a b c')
+    const io = await ws.shell('f() { for x in "$@"; do echo $x; done; }; f a b c')
     expect(stdoutStr(io)).toBe('a\nb\nc\n')
     await ws.close()
   })
 
   it('echo bg & echo fg', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo bg & echo fg')
+    const io = await ws.shell('echo bg & echo fg')
     expect(stdoutStr(io)).toContain('fg')
     await ws.close()
   })
@@ -177,28 +177,28 @@ describe('workspace: additional fixes', () => {
 describe('workspace: CommandSpec PATH classification (bare filenames)', () => {
   it('cd + cat bare filename', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cd /disk/sub; cat deep.txt')
+    const io = await ws.shell('cd /disk/sub; cat deep.txt')
     expect(stdoutStr(io)).toBe('deep content\n')
     await ws.close()
   })
 
   it('cd + head bare filename', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cd /ram; head -n 2 notes.txt')
+    const io = await ws.shell('cd /ram; head -n 2 notes.txt')
     expect(stdoutStr(io)).toBe('line1\nline2\n')
     await ws.close()
   })
 
   it('cd + wc bare filename', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cd /ram; wc -l notes.txt')
+    const io = await ws.shell('cd /ram; wc -l notes.txt')
     expect(stdoutStr(io)).toContain('3')
     await ws.close()
   })
 
   it('cd + grep bare filename', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cd /s3; grep POST access.log')
+    const io = await ws.shell('cd /s3; grep POST access.log')
     const out = stdoutStr(io)
     expect((out.match(/POST/g) ?? []).length).toBe(2)
     await ws.close()
@@ -206,21 +206,21 @@ describe('workspace: CommandSpec PATH classification (bare filenames)', () => {
 
   it('bare filename in for loop stays text', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('for f in notes.txt; do echo $f; done')
+    const io = await ws.shell('for f in notes.txt; do echo $f; done')
     expect(stdoutStr(io)).toBe('notes.txt\n')
     await ws.close()
   })
 
   it("find -name '*.txt' does not glob-expand", async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("find /s3 -name '*.txt'")
+    const io = await ws.shell("find /s3 -name '*.txt'")
     expect(stdoutStr(io)).toContain('data.txt')
     await ws.close()
   })
 
   it('subshell + cd + cat bare filename', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('(cd /disk/sub; cat deep.txt)')
+    const io = await ws.shell('(cd /disk/sub; cat deep.txt)')
     expect(stdoutStr(io)).toContain('deep content')
     await ws.close()
   })
@@ -231,37 +231,37 @@ describe('workspace: job table cleanup', () => {
     const { ws } = await makeWorkspace()
     // `kill %1` joins the job, so the killed status is already settled
     // when `jobs` lists it. After the listing, popCompleted removes it.
-    const io = await ws.execute('sleep 10 & kill %1; jobs')
+    const io = await ws.shell('sleep 10 & kill %1; jobs')
     expect(stdoutStr(io)).toContain('killed')
-    const io2 = await ws.execute('jobs')
+    const io2 = await ws.shell('jobs')
     expect(stdoutStr(io2)).toBe('')
     await ws.close()
   })
 
   it('wait by id reaps, so jobs is empty after it', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo hi & wait %1; jobs')
+    const io = await ws.shell('echo hi & wait %1; jobs')
     expect(stdoutStr(io)).toBe('hi\n')
     await ws.close()
   })
 
   it('bare wait does not replay a targeted wait output', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo hi & wait %1; wait')
+    const io = await ws.shell('echo hi & wait %1; wait')
     expect(stdoutStr(io)).toBe('hi\n')
     await ws.close()
   })
 
   it('job numbering restarts once the table empties', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo a & wait %1; echo b & wait %1')
+    const io = await ws.shell('echo a & wait %1; echo b & wait %1')
     expect(stdoutStr(io)).toBe('a\nb\n')
     await ws.close()
   })
 
   it('bare wait reaps, so jobs is empty after it', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('echo hi & wait; jobs')
+    const io = await ws.shell('echo hi & wait; jobs')
     expect(stdoutStr(io)).toBe('hi\n')
     await ws.close()
   })
@@ -274,15 +274,15 @@ describe('workspace: job table cleanup', () => {
 describe('workspace: heredoc bodies the lexer would swallow', () => {
   it('keeps a leading backslash line', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<'END'\n\\first\nsecond\nEND")
+    const io = await ws.shell("cat <<'END'\n\\first\nsecond\nEND")
     expect(stdoutStr(io)).toBe('\\first\nsecond\n')
     await ws.close()
   })
 
   it('round-trips a leading backslash line through a file', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute("cat > /disk/HB <<'END'\n\\first\nsecond\nEND")
-    const io = await ws.execute('cat /disk/HB')
+    await ws.shell("cat > /disk/HB <<'END'\n\\first\nsecond\nEND")
+    const io = await ws.shell('cat /disk/HB')
     expect(stdoutStr(io)).toBe('\\first\nsecond\n')
     await ws.close()
   })
@@ -290,35 +290,35 @@ describe('workspace: heredoc bodies the lexer would swallow', () => {
   it('keeps indentation after a backslash line', async () => {
     const { ws } = await makeWorkspace()
     const body = '\\begin{table}[!ht]\n  \\begin{center}\n  \\end{center}\n\\end{table}\n'
-    const io = await ws.execute(`cat <<'END'\n${body}END`)
+    const io = await ws.shell(`cat <<'END'\n${body}END`)
     expect(stdoutStr(io)).toBe(body)
     await ws.close()
   })
 
   it('keeps leading indentation', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<'END'\n  first\nsecond\nEND")
+    const io = await ws.shell("cat <<'END'\n  first\nsecond\nEND")
     expect(stdoutStr(io)).toBe('  first\nsecond\n')
     await ws.close()
   })
 
   it('expands and escapes on an unquoted backslash line', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('hb=val; cat <<END\n\\a $hb\n\\$hb\nsecond\nEND')
+    const io = await ws.shell('hb=val; cat <<END\n\\a $hb\n\\$hb\nsecond\nEND')
     expect(stdoutStr(io)).toBe('\\a val\n$hb\nsecond\n')
     await ws.close()
   })
 
   it('does not let a backslash line reach the pipeline', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<'END' | tr a-z A-Z\n\\first\nsecond\nEND")
+    const io = await ws.shell("cat <<'END' | tr a-z A-Z\n\\first\nsecond\nEND")
     expect(stdoutStr(io)).toBe('\\FIRST\nSECOND\n')
     await ws.close()
   })
 
   it('reads an apostrophe on a backslash line as body text', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<'END'\n\\item Don't stop; echo not-a-command\nsecond\nEND")
+    const io = await ws.shell("cat <<'END'\n\\item Don't stop; echo not-a-command\nsecond\nEND")
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe("\\item Don't stop; echo not-a-command\nsecond\n")
     await ws.close()
@@ -326,7 +326,7 @@ describe('workspace: heredoc bodies the lexer would swallow', () => {
 
   it('keeps a tab-indented backslash line under <<-', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<-'END'\n\t\\first\n\tsecond\n\tEND")
+    const io = await ws.shell("cat <<-'END'\n\t\\first\n\tsecond\n\tEND")
     expect(stdoutStr(io)).toBe('\\first\nsecond\n')
     await ws.close()
   })
@@ -338,57 +338,57 @@ describe('workspace: heredoc bodies the lexer would swallow', () => {
 describe('workspace: heredoc leading empty lines and escaped delimiters', () => {
   it('keeps a leading empty line', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<'END'\n\nfirst\nEND")
+    const io = await ws.shell("cat <<'END'\n\nfirst\nEND")
     expect(stdoutStr(io)).toBe('\nfirst\n')
     await ws.close()
   })
 
   it('keeps a body that is one empty line', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<'END'\n\nEND")
+    const io = await ws.shell("cat <<'END'\n\nEND")
     expect(stdoutStr(io)).toBe('\n')
     await ws.close()
   })
 
   it('keeps an empty line before a backslash line', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<'END'\n\n\\first\nEND")
+    const io = await ws.shell("cat <<'END'\n\n\\first\nEND")
     expect(stdoutStr(io)).toBe('\n\\first\n')
     await ws.close()
   })
 
   it('expands after leading empty lines', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('hb=val; cat <<END\n\n\n$hb\nEND')
+    const io = await ws.shell('hb=val; cat <<END\n\n\n$hb\nEND')
     expect(stdoutStr(io)).toBe('\n\nval\n')
     await ws.close()
   })
 
   it('keeps a leading empty line under <<-', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("cat <<-'END'\n\n\tfirst\n\tEND")
+    const io = await ws.shell("cat <<-'END'\n\n\tfirst\n\tEND")
     expect(stdoutStr(io)).toBe('\nfirst\n')
     await ws.close()
   })
 
   it('reads an escaped dollar in a quoted delimiter', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat <<"E\\$F"\n\\first\nE$F')
+    const io = await ws.shell('cat <<"E\\$F"\n\\first\nE$F')
     expect(stdoutStr(io)).toBe('\\first\n')
     await ws.close()
   })
 
   it('reads an escaped quote in a quoted delimiter', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat <<"E\\"F"\n\\first\nE"F')
+    const io = await ws.shell('cat <<"E\\"F"\n\\first\nE"F')
     expect(stdoutStr(io)).toBe('\\first\n')
     await ws.close()
   })
 
   it('round-trips a leading empty line through a file', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute("cat > /disk/HB7 <<'END'\n\nfirst\nEND")
-    const io = await ws.execute('cat /disk/HB7')
+    await ws.shell("cat > /disk/HB7 <<'END'\n\nfirst\nEND")
+    const io = await ws.shell('cat /disk/HB7')
     expect(stdoutStr(io)).toBe('\nfirst\n')
     await ws.close()
   })
@@ -401,28 +401,28 @@ describe('workspace: heredoc leading empty lines and escaped delimiters', () => 
 describe('workspace: heredoc continued delimiters', () => {
   it('expands the body of a continued delimiter', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('hb=val; cat <<EO\\\nF\n$hb\nEOF\n')
+    const io = await ws.shell('hb=val; cat <<EO\\\nF\n$hb\nEOF\n')
     expect(stdoutStr(io)).toBe('val\n')
     await ws.close()
   })
 
   it('drops the terminator line of a continued delimiter', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat <<EO\\\nF\nbody\nEOF\n')
+    const io = await ws.shell('cat <<EO\\\nF\nbody\nEOF\n')
     expect(stdoutStr(io)).toBe('body\n')
     await ws.close()
   })
 
   it('reads a continued delimiter carrying an escape as quoted', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('hb=val; cat <<EO\\\nF\\G\n$hb\nEOFG\n')
+    const io = await ws.shell('hb=val; cat <<EO\\\nF\\G\n$hb\nEOFG\n')
     expect(stdoutStr(io)).toBe('$hb\n')
     await ws.close()
   })
 
   it('keeps a body that expands to the delimiter', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('hb=END; cat <<END\n$hb\nEND')
+    const io = await ws.shell('hb=END; cat <<END\n$hb\nEND')
     expect(stdoutStr(io)).toBe('END\n')
     await ws.close()
   })
@@ -434,7 +434,7 @@ describe('workspace: heredoc continued delimiters', () => {
 describe('workspace: heredoc operator lines that hold a case or a nested quote', () => {
   it('keeps a backslash line after a case pattern paren', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       'cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n\\first\nsecond\nEOF\n',
     )
     expect(stdoutStr(io)).toBe('\\first\nsecond\n')
@@ -443,7 +443,7 @@ describe('workspace: heredoc operator lines that hold a case or a nested quote',
 
   it('keeps indentation after a case pattern paren', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       'cat <<EOF $(case x in\nx)\n  :\n  ;;\nesac\n)\n  spaced\nsecond\nEOF\n',
     )
     expect(stdoutStr(io)).toBe('  spaced\nsecond\n')
@@ -452,16 +452,16 @@ describe('workspace: heredoc operator lines that hold a case or a nested quote',
 
   it('keeps a backslash line after a quote inside a substitution', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('cat <<EOF >"$( : "a\n  b"; echo /disk/HB8)"\n\\first\nsecond\nEOF\n')
-    const io = await ws.execute('cat /disk/HB8')
+    await ws.shell('cat <<EOF >"$( : "a\n  b"; echo /disk/HB8)"\n\\first\nsecond\nEOF\n')
+    const io = await ws.shell('cat /disk/HB8')
     expect(stdoutStr(io)).toBe('\\first\nsecond\n')
     await ws.close()
   })
 
   it('keeps a backslash line after a quote inside a backtick', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('cat <<EOF >"`  : "a\n  b"; echo /disk/HB9 `"\n\\first\nsecond\nEOF\n')
-    const io = await ws.execute('cat /disk/HB9')
+    await ws.shell('cat <<EOF >"`  : "a\n  b"; echo /disk/HB9 `"\n\\first\nsecond\nEOF\n')
+    const io = await ws.shell('cat /disk/HB9')
     expect(stdoutStr(io)).toBe('\\first\nsecond\n')
     await ws.close()
   })
@@ -497,7 +497,7 @@ describe('workspace: heredoc operator-line list', () => {
   ])('%j', async (line, stdout, exitCode) => {
     const { ws } = await makeWorkspace()
     try {
-      const io = await ws.execute(line)
+      const io = await ws.shell(line)
       expect([stdoutStr(io), stderrStr(io), io.exitCode]).toEqual([stdout, '', exitCode])
     } finally {
       await ws.close()
@@ -507,7 +507,7 @@ describe('workspace: heredoc operator-line list', () => {
   it('a file redirect then a list', async () => {
     const { ws } = await makeWorkspace()
     try {
-      const io = await ws.execute('cat <<EOF > /disk/ho && cat /disk/ho\ninner\nEOF')
+      const io = await ws.shell('cat <<EOF > /disk/ho && cat /disk/ho\ninner\nEOF')
       expect(stdoutStr(io)).toBe('inner\n')
     } finally {
       await ws.close()
@@ -558,7 +558,7 @@ describe('workspace: heredoc operator-line terminators', () => {
   ])('%j', async (line, stdout, exit) => {
     const { ws } = await makeWorkspace()
     try {
-      const io = await ws.execute(line)
+      const io = await ws.shell(line)
       expect([stdoutStr(io), io.exitCode]).toEqual([stdout, exit])
       expect(stderrStr(io)).toBe('')
     } finally {

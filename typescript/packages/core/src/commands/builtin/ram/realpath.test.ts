@@ -15,31 +15,26 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_REALPATH = RAM_COMMANDS.filter((c) => c.name === 'realpath' && c.filetype == null)
 
 const DEC = new TextDecoder()
 
 async function runRealpath(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   cwd = '/',
   texts: string[] = [],
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_REALPATH[0]
   if (cmd === undefined) throw new Error('realpath not registered')
-  const result = await cmd.fn(
-    (resource as { accessor?: unknown }).accessor as never,
-    paths,
-    texts,
-    {
-      stdin: null,
-      flags: {},
-      filetypeFns: null,
-      cwd,
-    },
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
+    stdin: null,
+    flags: {},
+    filetypeFns: null,
+    cwd,
+  })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
@@ -53,15 +48,15 @@ async function runRealpath(
 
 describe('realpath', () => {
   it('resolves parent traversal in absolute path', async () => {
-    const resource = new RAMResource()
-    const r = await runRealpath(resource, [PathSpec.fromStrPath('/data/bar/../baz')])
+    const vfs = new RAMVFS()
+    const r = await runRealpath(vfs, [PathSpec.fromStrPath('/data/bar/../baz')])
     expect(r.exitCode).toBe(0)
     expect(r.out.trim()).toBe('/data/baz')
   })
 
   it('resolves multiple paths', async () => {
-    const resource = new RAMResource()
-    const r = await runRealpath(resource, [
+    const vfs = new RAMVFS()
+    const r = await runRealpath(vfs, [
       PathSpec.fromStrPath('/a/./b'),
       PathSpec.fromStrPath('/x/y/../z'),
     ])
@@ -70,8 +65,8 @@ describe('realpath', () => {
   })
 
   it('resolves relative path against cwd', async () => {
-    const resource = new RAMResource()
-    const r = await runRealpath(resource, [], '/data', ['bar'])
+    const vfs = new RAMVFS()
+    const r = await runRealpath(vfs, [], '/data', ['bar'])
     expect(r.exitCode).toBe(0)
     expect(r.out.trim()).toBe('/data/bar')
   })

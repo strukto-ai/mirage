@@ -22,14 +22,14 @@ from mirage.utils.hidden import var_hidden
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.shared import refusal, require_view
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (deref, env_get, session_view,
                                             subscript_index, visible_arrays,
                                             visible_assocs)
 from mirage.workspace.types import ExecutionNode
 
 
-def _unset_variable(session: Session, name: str) -> None:
+def _unset_variable(session: SessionState, name: str) -> None:
     """Clear what the env door does not own after a whole-variable unset.
 
     The scalar half is the view's (``unset`` popped it, or quietly kept
@@ -40,7 +40,7 @@ def _unset_variable(session: Session, name: str) -> None:
     is as much the host's to keep as the scalar the view protected.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         name (str): a bare variable name (no subscript).
     """
     if not var_hidden(session.hidden_vars, name):
@@ -49,13 +49,13 @@ def _unset_variable(session: Session, name: str) -> None:
         session._getopts_optind = None
 
 
-async def _fatal_index(session: Session, subscript: str,
+async def _fatal_index(session: SessionState, subscript: str,
                        view: SessionView) -> int:
     """``subscript_index`` whose failure ends the line, in bash's words:
     ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
 
     Args:
-        session (Session): the session the subscript reads.
+        session (SessionState): the session the subscript reads.
         subscript (str): the raw subscript text.
         view (SessionView): the gated door.
     """
@@ -66,7 +66,7 @@ async def _fatal_index(session: Session, subscript: str,
                          contained_code=1) from exc
 
 
-async def _unset_element(session: Session, view: SessionView, base: str,
+async def _unset_element(session: SessionState, view: SessionView, base: str,
                          subscript: str) -> str:
     """Clear one array element, or a scalar addressed as ``base[0]``.
 
@@ -86,7 +86,7 @@ async def _unset_element(session: Session, view: SessionView, base: str,
     errors write nothing and so never ask.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         base (str): the variable name without the subscript.
         subscript (str): the subscript text between the brackets.
@@ -135,7 +135,7 @@ async def _unset_element(session: Session, view: SessionView, base: str,
 
 async def handle_unset(
     args: list[str],
-    session: Session,
+    session: SessionState,
     state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Unset shell variables, arrays, or functions, with bash's flags.
@@ -149,7 +149,7 @@ async def handle_unset(
 
     Args:
         args (list[str]): option words followed by names to unset.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     mode = "auto"
     i = 0

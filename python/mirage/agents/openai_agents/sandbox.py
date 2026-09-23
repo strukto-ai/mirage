@@ -50,7 +50,7 @@ class MirageSandboxSession(BaseSandboxSession):
         timeout: float | None = None,
     ) -> ExecResult:
         cmd_str = " ".join(str(c) for c in command)
-        io_result = await self._ws.execute(cmd_str)
+        io_result = await self._ws.shell(cmd_str)
         stdout = await io_result.materialize_stdout()
         stderr = with_refusal_bytes(await io_result.materialize_stderr(),
                                     io_result.refusal)
@@ -66,7 +66,7 @@ class MirageSandboxSession(BaseSandboxSession):
         *,
         user: str | User | None = None,
     ) -> io.IOBase:
-        data = await self._ws.fs.read(str(path))
+        data = await self._ws.vfs.read(str(path))
         return io.BytesIO(data)
 
     async def write(
@@ -82,11 +82,11 @@ class MirageSandboxSession(BaseSandboxSession):
         parent = str(path.parent)
         if parent and parent != ".":
             try:
-                await self._ws.fs.mkdir(parent)
+                await self._ws.vfs.mkdir(parent)
             except (FileExistsError, ValueError):
                 # mkdir -p semantics: an existing parent is success
                 pass
-        await self._ws.fs.write(str(path), content)
+        await self._ws.vfs.write(str(path), content)
 
     def _prepare_exec_command(
         self,
@@ -107,7 +107,7 @@ class MirageSandboxSession(BaseSandboxSession):
 
     async def hydrate_workspace(self, data: io.IOBase) -> None:
         # Restore the snapshot's non-mount state (cache, sessions,
-        # inodes, history, jobs) AND each resource's content (via
+        # inodes, history, jobs) AND each VFS's content (via
         # load_state) into THIS workspace. The workspace must already
         # have the same mount shape that was saved — Workspace.load()
         # is the alternative that constructs a fresh Workspace from

@@ -25,7 +25,7 @@ import { norm } from './utils.ts'
  * Both refusals go through the shared error helpers so they carry an
  * errno. They used to be bare `Error`s whose only signal was the wording,
  * which left the FUSE adapter sniffing message text to recover ENOTEMPTY
- * and left every other caller -- `ws.fs`, the sandbox runtimes -- with an
+ * and left every other caller -- `ws.vfs`, the sandbox runtimes -- with an
  * error `classify` could not name at all. A missing directory is ENOENT,
  * not ENOTDIR: the path resolves to nothing, which is also what python
  * reports here.

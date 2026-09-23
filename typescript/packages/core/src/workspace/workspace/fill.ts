@@ -15,7 +15,7 @@
 import { invokedEnvNames, suppliedEnvNames } from '../../commands/cli/walk.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
-import { VFSRuntime } from '../../runtime/table.ts'
+import { WorkspaceRuntime } from '../../runtime/table.ts'
 import { SecretsError } from '../../secrets/errors.ts'
 import { fieldSummary } from '../../secrets/summary.ts'
 import { fetchSecret } from '../../secrets/registry.ts'
@@ -42,7 +42,7 @@ import { abortable, makeAbortError } from '../abort.ts'
 import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { setSessionEntry, type Session } from '../session/session.ts'
+import { setSessionEntry, type SessionState } from '../session/session.ts'
 import { deref } from '../session/state.ts'
 
 // Appended to an alias value before parsing it for the read walk: the
@@ -98,7 +98,7 @@ function definedBodies(node: TSNodeLike): Map<string, TSNodeLike[]> {
  */
 export function lineNodes(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   reparse: (line: string) => TSNodeLike,
 ): TSNodeLike[] {
   const defined = definedBodies(node)
@@ -136,7 +136,7 @@ export function lineNodes(
  * A guest receives the exported environment as one snapshot, so every
  * managed name may be read whatever the line spells --
  * `python3 -c 'os.environ[...]'` never writes a `$NAME` the walk could
- * see. The vfs runtime is the executor itself, whose commands read
+ * see. The workspace runtime is the executor itself, whose commands read
  * vars one at a time, so it does not count. Keyed on the walked set's
  * own command words (stored function bodies included) because the
  * static table binds every captured command in the workspace, not this
@@ -154,7 +154,7 @@ export function guestBound(
   }
   for (const word of words) {
     const runtime = Object.hasOwn(bindings, word) ? bindings[word] : undefined
-    if (runtime != null && !(runtime instanceof VFSRuntime)) return true
+    if (runtime != null && !(runtime instanceof WorkspaceRuntime)) return true
   }
   return false
 }
@@ -175,7 +175,7 @@ export function guestBound(
  */
 export function cliEnvNames(
   nodes: TSNodeLike[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
 ): ReadonlySet<string> {
   const out = new Set<string>()
@@ -206,7 +206,7 @@ export function cliEnvNames(
  * A hidden name never fetches at all: the snapshot filters it and
  * expansion reads it as unset, so no fetch could ever be visible.
  */
-function pendingOf(session: Session): Map<string, ManagedRef> {
+function pendingOf(session: SessionState): Map<string, ManagedRef> {
   const out = new Map<string, ManagedRef>()
   for (const [name, v] of Object.entries(session.vars)) {
     if (v.managed === undefined || v.value !== null) continue
@@ -347,7 +347,7 @@ function unsetMasks(stmt: TSNodeLike): ReadonlySet<string> | null {
  */
 export function maskedNames(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   writesGated: boolean,
   inBody = false,
   before: TSNodeLike | null = null,
@@ -410,7 +410,11 @@ const BODY_CONTAINERS: ReadonlySet<string> = new Set(['compound_statement', 'sub
  * the prefix that runs before it (`before`) discounts its reads
  * exactly as a same-line body's prefix would.
  */
-function ownMasks(node: TSNodeLike, session: Session, writesGated: boolean): ReadonlySet<string> {
+function ownMasks(
+  node: TSNodeLike,
+  session: SessionState,
+  writesGated: boolean,
+): ReadonlySet<string> {
   let own: ReadonlySet<string> = new Set()
   if (BODY_CONTAINERS.has(node.type)) own = maskedNames(node, session, writesGated, true)
   else if (node.type === 'program') own = maskedNames(node, session, writesGated)
@@ -461,7 +465,7 @@ function assignedReach(nodes: TSNodeLike[]): Map<string, [Set<string>, Set<strin
  * naming another managed variable is reached on the next pass.
  */
 function arithTargets(
-  session: Session,
+  session: SessionState,
   names: ReadonlySet<string>,
   assigned: Map<string, [Set<string>, Set<string>]>,
 ): Set<string> {
@@ -517,7 +521,7 @@ function arithTargets(
  * observes the replacement, eagerness notwithstanding.
  */
 function wanted(
-  session: Session,
+  session: SessionState,
   nodes: TSNodeLike[],
   pending: Map<string, ManagedRef>,
   lineCliEnvNames: ReadonlySet<string>,
@@ -591,7 +595,7 @@ function wanted(
  * land (`maskedNames`).
  */
 export function fillNames(
-  session: Session,
+  session: SessionState,
   nodes: TSNodeLike[],
   whole: boolean,
   lineCliEnvNames: ReadonlySet<string>,
@@ -630,7 +634,7 @@ export function fillNames(
  * falls back to the source of that name, built from ambient defaults.
  */
 export async function fillEnv(
-  session: Session,
+  session: SessionState,
   names: ReadonlySet<string>,
   sources?: Readonly<Record<string, ResolvedSource>>,
   signal?: AbortSignal,

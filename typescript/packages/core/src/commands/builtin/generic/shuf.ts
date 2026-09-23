@@ -364,7 +364,7 @@ export async function shufGeneric(
       : new PathSpec({
           virtual: parsed.output,
           directory: parsed.output,
-          resourcePath: mountKey(parsed.output, opts.mountPrefix ?? ''),
+          vfsPath: mountKey(parsed.output, opts.mountPrefix ?? ''),
           resolved: true,
         })
   const sep = zeroSep ? '\x00' : '\n'

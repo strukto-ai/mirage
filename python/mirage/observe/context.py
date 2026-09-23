@@ -151,7 +151,7 @@ async def with_mount_prefix(
     during each ``__anext__`` of the underlying stream.
 
     Mirrors the side-effect-on-iteration pattern used by
-    ``exit_on_empty``. Lets dispatchers preserve resource backends as
+    ``exit_on_empty``. Lets dispatchers preserve VFS backends as
     ``async def with yield`` while still capturing the correct mount
     prefix in records emitted lazily during stream consumption.
 
@@ -245,7 +245,7 @@ def finish_record(op: str,
         op (str): Operation name ("read", "write").
         path (str): The path to name the record with, as it should be
             stored (callers that need mount prefixing apply it first).
-        source (str): Resource name ("s3", "ram", "disk").
+        source (str): VFS name ("s3", "ram", "disk").
         nbytes (int): Bytes transferred.
         timer (OpTimer): the timer opened when the op started.
         fingerprint (str | None): Content-derived identifier returned by
@@ -279,8 +279,8 @@ def record(op: str,
 
     Args:
         op (str): Operation name ("read", "write").
-        path (str): Resource-relative path.
-        source (str): Resource name ("s3", "ram", "disk").
+        path (str): VFS-relative path.
+        source (str): VFS name ("s3", "ram", "disk").
         nbytes (int): Bytes transferred.
         timer (OpTimer): the timer opened by :func:`start_op` when the
             op started.
@@ -322,8 +322,8 @@ def record_stream(op: str,
 
     Args:
         op (str): Operation name ("read", "write").
-        path (str): Resource-relative path.
-        source (str): Resource name ("s3", "ram", "disk").
+        path (str): VFS-relative path.
+        source (str): VFS name ("s3", "ram", "disk").
         fingerprint (str | None): Initial fingerprint; the caller can
             also set ``rec.fingerprint`` later.
         revision (str | None): Initial revision; the caller can also set

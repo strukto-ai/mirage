@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { BridgeOpAttrs } from '../../../types.ts'
 import type { VFSEntry, VFSStat } from '../../../vfs.ts'
 import type { MirageMutation } from './journal.ts'
 
@@ -27,7 +28,20 @@ export interface SyncVFS {
   readdir(path: string): VFSEntry[]
   readlink(path: string): string
   flush(mutations: MirageMutation[]): FlushFailure | undefined
+  /**
+   * One extended-attribute op, answered by the workspace door before it
+   * returns: the value for getxattr, the names for listxattr.
+   */
+  xattr(
+    op: XattrOp,
+    path: string,
+    name: string | undefined,
+    value: Uint8Array | undefined,
+    attrs: BridgeOpAttrs,
+  ): unknown
 }
+
+export type XattrOp = 'getxattr' | 'listxattr' | 'setxattr' | 'removexattr'
 
 /**
  * Emscripten's errno numbering, which is musl's and not Linux's: EXDEV

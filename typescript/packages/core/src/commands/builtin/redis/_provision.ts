@@ -16,12 +16,12 @@ import type { Accessor } from '../../../accessor/index.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { CommandOpts } from '../../config.ts'
 import { Precision, ProvisionResult } from '../../../provision/types.ts'
-import type { Resource } from '../../../resource/base.ts'
+import type { VFS } from '../../../vfs/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { RedisAccessor } from '../../../accessor/redis.ts'
 import { stat as redisStat } from '../../../core/redis/stat.ts'
 
-export interface RedisResourceLike extends Resource {
+export interface RedisResourceLike extends VFS {
   readonly accessor: RedisAccessor
 }
 

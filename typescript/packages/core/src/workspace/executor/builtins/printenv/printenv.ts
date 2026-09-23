@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 
-export function handlePrintenv(name: string | null, session: Session): Result {
+export function handlePrintenv(name: string | null, session: SessionState): Result {
   // The process view, not the shell view: GNU printenv is a separate
   // binary, so the only names it can possibly see are the exported ones.
   // A plain `X=hello` is invisible to it and exits 1.

@@ -42,7 +42,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import {
   MountMode,
   PathSpec,
-  S3Resource,
+  S3VFS,
   type S3BrowserOperation,
   type S3BrowserSignOptions,
   Workspace,
@@ -129,7 +129,7 @@ async function mockBackendSign(
 }
 
 // ── "BROWSER" CODE ──────────────────────────────────────────────
-const s3 = new S3Resource({
+const s3 = new S3VFS({
   bucket: BUCKET,
   presignedUrlProvider: mockBackendSign,
 })
@@ -139,13 +139,13 @@ const ws = new Workspace({ '/s3/': s3 }, { mode: MountMode.WRITE })
 const decoder = new TextDecoder()
 
 async function runOut(cmd: string): Promise<string> {
-  const result = await ws.execute(cmd)
+  const result = await ws.shell(cmd)
   return decoder.decode(result.stdout).trim()
 }
 
 async function run(cmd: string, label?: string): Promise<void> {
   console.log(`\n--- ${label ?? cmd} ---`)
-  const result = await ws.execute(cmd)
+  const result = await ws.shell(cmd)
   const out = decoder.decode(result.stdout).trim()
   const err = decoder.decode(result.stderr).trim()
   if (out !== '') {
@@ -199,7 +199,7 @@ async function main(): Promise<void> {
   await run(`wc -c /s3/${testKey}`, 'size')
 
   console.log('\n=== APPEND (read + concat + write) ===')
-  await ws.execute(`echo "second line" >> /s3/${testKey}`)
+  await ws.shell(`echo "second line" >> /s3/${testKey}`)
   await run(`cat /s3/${testKey}`, 'after append')
 
   console.log('\n=== LISTING (now supported via LIST signer) ===')
@@ -212,10 +212,10 @@ async function main(): Promise<void> {
   const copyKey = `data/browser-demo/copy-${String(Date.now())}.txt`
   await run(`cp /s3/${testKey} /s3/${copyKey}`, 'cp')
   await run(`cat /s3/${copyKey}`, 'cat copy')
-  await ws.execute(`rm /s3/${copyKey}`)
+  await ws.shell(`rm /s3/${copyKey}`)
 
   console.log('\n=== CLEANUP ===')
-  await ws.execute(`rm /s3/${testKey}`)
+  await ws.shell(`rm /s3/${testKey}`)
   // Verify via direct backend HEAD (bypass any workspace cache)
   try {
     const { HeadObjectCommand } = await import('@aws-sdk/client-s3')

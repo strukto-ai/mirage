@@ -19,7 +19,7 @@ import dotenv from 'dotenv'
 
 import { SecretSourceSchema } from '@struktoai/mirage-core/secrets/config'
 import { resolveSources } from '@struktoai/mirage-core/secrets/sources'
-import { MountMode, Workspace, buildResource } from '@struktoai/mirage-node'
+import { MountMode, Workspace, buildVfs } from '@struktoai/mirage-node'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(HERE, '../../../.env.development') })
@@ -49,7 +49,7 @@ const dec = new TextDecoder()
 
 /** Run one line and print what the agent would see. */
 async function show(ws: Workspace, line: string): Promise<void> {
-  const result = await ws.execute(line)
+  const result = await ws.shell(line)
   console.log(`$ ${line}`)
   console.log(`  exit ${result.exitCode}`)
   const out = result.stdout === null ? '' : dec.decode(result.stdout).trim()
@@ -61,10 +61,10 @@ async function show(ws: Workspace, line: string): Promise<void> {
 
 async function main(): Promise<void> {
   const sources = await resolveSources({ op: OP })
-  const remote = await buildResource('slack', { token: BOT, searchToken: USER }, sources)
+  const remote = await buildVfs('slack', { token: BOT, searchToken: USER }, sources)
   const token = process.env.SLACK_BOT_TOKEN
   if (token === undefined || token === '') throw new Error('SLACK_BOT_TOKEN is required')
-  const local = await buildResource('slack', { token })
+  const local = await buildVfs('slack', { token })
 
   const ws = new Workspace(
     { '/remote': remote, '/local': local },

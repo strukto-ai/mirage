@@ -26,10 +26,10 @@ from mirage.core.api.client import (RetryPolicy, SessionArg, SessionPool,
                                     api_request, header_delay, resolve_session)
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.core.msgraph.constants import MAX_BACKOFF, RETRY_STATUSES
-from mirage.resource.secrets import reveal_secret
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.ranges import ByteWindow
+from mirage.vfs.secrets import reveal_secret
 
 # The characters `encodeURIComponent` leaves alone that `quote` would
 # escape. Keeping the two spellings identical matters beyond neatness:
@@ -53,7 +53,7 @@ def id_segment(value: str) -> str:
 
 
 def split_path(path: PathSpec) -> tuple[str, str]:
-    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+    prefix = mount_prefix_of(path.virtual, path.vfs_path) or ""
     raw = path.virtual
     if prefix and raw.startswith(prefix):
         rest = raw[len(prefix):]

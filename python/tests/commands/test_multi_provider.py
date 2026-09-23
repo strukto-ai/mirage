@@ -16,30 +16,30 @@ from mirage.commands.config import RegisteredCommand, command
 from mirage.commands.spec import CommandSpec
 
 
-def test_command_registers_multiple_resources():
+def test_command_registers_multiple_vfs_names():
     spec = CommandSpec()
 
-    @command(name="cat", resource=["gdocs", "gdrive"], spec=spec)
+    @command(name="cat", vfs=["gdocs", "gdrive"], spec=spec)
     def dummy_fn():
         pass
 
     assert hasattr(dummy_fn, "_registered_commands")
-    resources = [rc.resource for rc in dummy_fn._registered_commands]
-    assert "gdocs" in resources
-    assert "gdrive" in resources
+    mounts = [rc.vfs for rc in dummy_fn._registered_commands]
+    assert "gdocs" in mounts
+    assert "gdrive" in mounts
     assert len(dummy_fn._registered_commands) == 2
     for rc in dummy_fn._registered_commands:
         assert isinstance(rc, RegisteredCommand)
         assert rc.name == "cat"
 
 
-def test_command_single_resource_still_works():
+def test_command_single_vfs_still_works():
     spec = CommandSpec()
 
-    @command(name="ls", resource="disk", spec=spec)
+    @command(name="ls", vfs="disk", spec=spec)
     def dummy_fn():
         pass
 
     assert hasattr(dummy_fn, "_registered_commands")
     assert len(dummy_fn._registered_commands) == 1
-    assert dummy_fn._registered_commands[0].resource == "disk"
+    assert dummy_fn._registered_commands[0].vfs == "disk"

@@ -29,7 +29,7 @@ import {
   IOResult,
   Operand,
   Option,
-  RAMResource,
+  RAMVFS,
   Workspace,
   z,
   type CommandFnResult,
@@ -63,7 +63,7 @@ const PAGER = new CLISpec({
   ],
 })
 
-const ws = new Workspace({ '/workspace': new RAMResource() })
+const ws = new Workspace({ '/workspace': new RAMVFS() })
 ws.registerCli('pager-eng', PAGER, { account: 'engineering' })
 ws.registerCli('pager-support', PAGER, { account: 'support' })
 ```
@@ -202,11 +202,11 @@ as an attachment. That is different from treating a mount as the CLI's service
 client. Such a leaf opts into workspace access through `inv.doors`; do not
 assume those doors exist outside a workspace.
 
-If a CLI and a Mirage resource back the same service, neither names the other.
+If a CLI and a Mirage VFS back the same service, neither names the other.
 A write verb on a CLI with a config model expires every mount's cached reads
 after it runs, and a write that throws may already have reached the service, so
 Mirage also expires on that path. Do not widen `CLISpec`, `Option`, or
-`Operand` to point a CLI at a resource.
+`Operand` to point a CLI at a VFS.
 
 ## Snapshots and credentials
 

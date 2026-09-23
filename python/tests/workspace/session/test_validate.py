@@ -18,8 +18,8 @@ from mirage import Workspace
 from mirage.commands.cli.types import CLISpec
 from mirage.policy.errors import PolicyError
 from mirage.policy.types import AdmissionRules, CommandRule
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session.validate import check_cli_verbs, check_rules
 
 
@@ -176,7 +176,7 @@ def test_create_session_reads_the_verbs_of_an_installed_cli():
     # is the part that broke: the TypeScript twin read the registry with
     # Object.entries over a Map and silently saw no CLIs at all, so the
     # check passed everything.
-    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         ws.register_cli(
             "prog",

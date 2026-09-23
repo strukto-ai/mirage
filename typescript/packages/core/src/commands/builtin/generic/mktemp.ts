@@ -37,7 +37,7 @@ function makePathSpec(virtual: string, mountPrefix: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: mountKey(virtual, mountPrefix),
+    vfsPath: mountKey(virtual, mountPrefix),
     resolved: true,
   })
 }

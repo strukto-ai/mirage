@@ -29,7 +29,7 @@ async function run(kind: string, flags: Record<string, boolean> = {}) {
   const p = new PathSpec({
     virtual: `/drive/${name}`,
     directory: `/drive/${name}`,
-    resourcePath: name,
+    vfsPath: name,
     resolved: true,
   })
   await index.setDir('/drive', [

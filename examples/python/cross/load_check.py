@@ -19,11 +19,11 @@ import sys
 
 from dotenv import load_dotenv
 
-from mirage.resource.discord import DiscordConfig, DiscordResource
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
-from mirage.resource.gmail import GmailConfig, GmailResource
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.vfs.discord import DiscordConfig, DiscordVFS
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.vfs.gmail import GmailConfig, GmailVFS
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.slack import SlackConfig, SlackVFS
 from mirage.workspace import Workspace
 
 load_dotenv(".env.development")
@@ -34,7 +34,7 @@ EXPECTED_JSON = os.environ.get(
 )
 
 
-def _fresh_resources():
+def _fresh_mounts():
     google_kwargs = dict(
         client_id=os.environ["GOOGLE_CLIENT_ID"],
         client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
@@ -42,29 +42,29 @@ def _fresh_resources():
     )
     return {
         "/s3":
-        S3Resource(config=S3Config(
+        S3VFS(config=S3Config(
             bucket=os.environ["AWS_S3_BUCKET"],
             region=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
             aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
             aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         )),
         "/gdrive":
-        GoogleDriveResource(config=GoogleDriveConfig(**google_kwargs)),
+        GoogleDriveVFS(config=GoogleDriveConfig(**google_kwargs)),
         "/gmail":
-        GmailResource(config=GmailConfig(**google_kwargs)),
+        GmailVFS(config=GmailConfig(**google_kwargs)),
         "/slack":
-        SlackResource(config=SlackConfig(
+        SlackVFS(config=SlackConfig(
             token=os.environ["SLACK_BOT_TOKEN"],
             search_token=os.environ.get("SLACK_USER_TOKEN"),
         )),
         "/discord":
-        DiscordResource(config=DiscordConfig(
+        DiscordVFS(config=DiscordConfig(
             token=os.environ["DISCORD_BOT_TOKEN"])),
     }
 
 
 async def _capture(ws, cmd):
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return {
         "command": cmd,
         "exit_code": r.exit_code,
@@ -102,15 +102,15 @@ async def main():
 
     tar_path = expected_doc["tar_path"]
     print(f"=== loading {tar_path} ===")
-    ws = await Workspace.load(tar_path, resources=_fresh_resources())
+    ws = await Workspace.load(tar_path, mounts=_fresh_mounts())
     mounts = sorted(m.prefix for m in ws.mounts())
     print(f"  mounts: {mounts}")
     print(f"  loaded history entries: {len(await ws.history())}")
 
-    # gdrive index belongs to the freshly-supplied resource (override
+    # gdrive index belongs to the freshly-supplied VFS (override
     # drops the saved index). Repopulate it the same way the original
     # script did, so the loader's commands resolve the same paths.
-    await ws.execute("ls /gdrive/")
+    await ws.shell("ls /gdrive/")
 
     # ── re-execute fingerprint commands and compare ─────────────────
     print(f"\n=== re-running {len(expected_doc['fingerprints'])} commands "

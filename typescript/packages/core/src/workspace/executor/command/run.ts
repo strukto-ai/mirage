@@ -14,7 +14,7 @@
 
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { Resource } from '../../../resource/base.ts'
+import type { VFS } from '../../../vfs/base.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { FileStat } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
@@ -33,9 +33,9 @@ import { linkTargetStat, pathExists, pathReaddir, pathStat } from '../builtins/l
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import type { Runtime } from '../../../runtime/base.ts'
-import { VFSRuntime } from '../../../runtime/table.ts'
+import { WorkspaceRuntime } from '../../../runtime/table.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
-import type { Session } from '../../session/session.ts'
+import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { pathAllowed } from '../../../context/session_context.ts'
 import { CommandTimeoutError } from '../../../commands/errors.ts'
@@ -51,10 +51,10 @@ import type { CommandSpec } from '../../../commands/spec/types.ts'
 
 export interface RunOnMountCtx {
   registry: MountRegistry
-  session: Session
+  session: SessionState
   dispatch: DispatchFn
   namespace?: Namespace
-  ensureOpen?: (resource: Resource) => Promise<void>
+  ensureOpen?: (vfs: VFS) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
   signal?: AbortSignal
@@ -94,21 +94,21 @@ function admissionDenial(cmdName: string): IOResult {
  * Resolve a command against the line's routing decision. With no
  * decision, the static bindings apply. With one, the command's runtime
  * is looked up in the decision: its binding, or the decision's
- * fallback when no entry captures it. A resolved VFSRuntime means the
- * executor serves the command itself (the vfs runtime has no
+ * fallback when no entry captures it. A resolved WorkspaceRuntime means the
+ * executor serves the command itself (the workspace runtime has no
  * interpreter door); null means no runtime accepted it: exit 126,
  * "no runtime accepted this line", like a shell refusing to exec.
  */
 function lineRuntimeFor(
   cmdName: string,
   runtimeBindings: Record<string, Runtime> | undefined,
-  vfs: Runtime | null,
+  fallback: Runtime | null,
   routingDecision: RouteDecision | undefined,
 ): [Runtime | undefined, IOResult | null] {
   if (routingDecision === undefined) {
-    const restricted = vfs instanceof VFSRuntime && vfs.restricted
+    const restricted = fallback instanceof WorkspaceRuntime && fallback.restricted
     const runtime = runtimeBindings?.[cmdName]
-    if (runtime !== undefined && runtime === vfs) return [undefined, null]
+    if (runtime !== undefined && runtime === fallback) return [undefined, null]
     if (runtime === undefined && restricted) return [undefined, admissionDenial(cmdName)]
     return [runtime, null]
   }
@@ -116,7 +116,7 @@ function lineRuntimeFor(
     ? routingDecision.bindings[cmdName]
     : routingDecision.fallback
   if (runtime === null || runtime === undefined) return [undefined, admissionDenial(cmdName)]
-  if (runtime instanceof VFSRuntime) return [undefined, null]
+  if (runtime instanceof WorkspaceRuntime) return [undefined, null]
   return [runtime, null]
 }
 
@@ -190,14 +190,14 @@ function mountView(registry: MountRegistry): MountView {
  * the call and per-path invalidation has nothing to aim at: after
  * `gws sheets spreadsheets create` the new file has no cache entry to expire,
  * which is exactly the case that matters. Which mounts that service backs is
- * not the CLI's business either (a CLI and a resource are separate tiers, and
- * a user's own CLI knows nothing about a user's own resource), so the executor
+ * not the CLI's business either (a CLI and a VFS are separate tiers, and
+ * a user's own CLI knows nothing about a user's own VFS), so the executor
  * says the one thing it knows: a write happened, and every mount may be stale.
  * A write verb is rare next to reads, and the cost is one cold listing on a
  * mount's next read, never a wrong answer.
  *
  * Both caches go, because the two hide different writes. A stale listing hides
- * a create or a delete; a stale body hides an edit, and these resources cache
+ * a create or a delete; a stale body hides an edit, and these mounts cache
  * reads, so a `cat` after `gws docs documents batchUpdate` would otherwise keep
  * serving the pre-edit content without ever reaching Google.
  */
@@ -253,7 +253,7 @@ export async function runOnMount(
   if (cmdName === 'find') flags = scalarFindFlags(flags)
 
   if (ensureOpen !== undefined) {
-    await ensureOpen(mount.resource)
+    await ensureOpen(mount.vfs)
   }
 
   // resolveMount may redirect a warm remote read to the cache mount, which
@@ -280,13 +280,13 @@ export async function runOnMount(
   const statPath: StatPath = (path: string) => pathStat(dispatch, path, statOverlay)
   // The same door for a listing: a walker whose output is one document
   // (tree) reads the subtree under a nested mount through here, because
-  // that subtree lives in a resource its own accessor cannot open.
+  // that subtree lives in a VFS its own accessor cannot open.
   const readdirPath: ReaddirPath = (path: string) => pathReaddir(dispatch, path)
 
   const [lineRuntime, denial] = lineRuntimeFor(
     cmdName,
     runtimeBindings,
-    registry.vfsRuntime,
+    registry.workspaceRuntime,
     routingDecision,
   )
   if (denial !== null) return [null, denial]

@@ -28,7 +28,7 @@ import {
 } from './resolve.ts'
 
 async function mkdirImpl(accessor: GDriveAccessor, path: PathSpec, parents = false): Promise<void> {
-  const key = path.resourcePath
+  const key = path.vfsPath
   const tm = accessor.tokenManager
   if (key === '') {
     if (parents) return

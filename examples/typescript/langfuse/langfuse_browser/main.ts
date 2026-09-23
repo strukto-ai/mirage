@@ -16,7 +16,7 @@ import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { LangfuseResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { LangfuseVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
@@ -52,7 +52,7 @@ function buildConfig(): LangfuseCtorConfig {
 
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   if (r.exitCode !== 0 && r.stderrText !== '') {
     console.log(`  STDERR: ${r.stderrText.slice(0, 200)}`)
   }
@@ -64,10 +64,10 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const lf = new LangfuseResource(buildConfig())
+  const lf = new LangfuseVFS(buildConfig())
   const ws = new Workspace({ '/langfuse': lf }, { mode: MountMode.READ })
   try {
-    console.log('=== BROWSER MODE: LangfuseResource → cloud.langfuse.com (direct REST + CORS) ===\n')
+    console.log('=== BROWSER MODE: LangfuseVFS → cloud.langfuse.com (direct REST + CORS) ===\n')
 
     await run(ws, 'ls /langfuse/')
 

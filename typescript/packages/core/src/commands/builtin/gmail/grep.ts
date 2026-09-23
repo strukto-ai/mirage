@@ -23,7 +23,7 @@ import { detectScope, NATIVE_KINDS } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
 import { stat as gmailStat } from '../../../core/gmail/stat.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
+import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
@@ -67,7 +67,7 @@ async function grepCommand(
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
       const labelName = match.slots.label ?? null
-      const filePrefix = mountPrefixOf(operand.virtual, operand.resourcePath)
+      const filePrefix = mountPrefixOf(operand.virtual, operand.vfsPath)
       const rows = await searchMessages(
         accessor.tokenManager,
         pattern,
@@ -96,7 +96,7 @@ async function grepCommand(
 
 export const GMAIL_GREP = command({
   name: 'grep',
-  resource: ResourceName.GMAIL,
+  vfs: VFSName.GMAIL,
   spec: specOf('grep'),
   fn: grepCommand,
   provision: fileReadProvision,

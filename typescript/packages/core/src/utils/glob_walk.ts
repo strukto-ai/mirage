@@ -151,7 +151,7 @@ export function globSpan(pattern: string | null | undefined): [string, string] |
 // word: `'*'?.txt` still globs, on the `?` alone, and matches only a
 // name starting with a literal star. A mark is one character wide, so
 // every length relation between a spec's virtual, directory,
-// resourcePath and rawPath keeps holding, and no mark is a glob
+// vfsPath and rawPath keeps holding, and no mark is a glob
 // character, so `hasGlob` already answers "does this word still glob".
 // The marks are Unicode noncharacters, permanently unassigned and never
 // valid interchange text -- the same impossible input `brace.ts` assumes
@@ -233,7 +233,7 @@ function unmarkSpec(spec: PathSpec): PathSpec {
   return new PathSpec({
     virtual: unmarkGlobs(spec.virtual),
     directory: unmarkGlobs(spec.directory),
-    resourcePath: unmarkGlobs(spec.resourcePath),
+    vfsPath: unmarkGlobs(spec.vfsPath),
     rawPath: unmarkGlobs(spec.rawPath),
     pattern: spec.pattern === null ? null : unmarkGlobs(spec.pattern),
     resolved: spec.resolved,
@@ -259,7 +259,7 @@ export function literalWord(item: string | PathSpec): string | PathSpec {
   return new PathSpec({
     virtual: spec.virtual,
     directory: spec.directory,
-    resourcePath: spec.resourcePath,
+    vfsPath: spec.vfsPath,
     rawPath: spec.rawPath,
     pattern: null,
     resolved: true,
@@ -389,7 +389,7 @@ export async function resolveGlobWith<A, I>(
         ? new PathSpec({
             virtual: p.virtual,
             directory: p.directory,
-            resourcePath: p.resourcePath,
+            vfsPath: p.vfsPath,
             pattern: p.pattern,
             resolved: p.resolved,
             rawPath: rstripSlash(p.rawPath),
@@ -412,7 +412,7 @@ export async function resolveGlobWith<A, I>(
               new PathSpec({
                 virtual: m.virtual,
                 directory: m.directory,
-                resourcePath: m.resourcePath,
+                vfsPath: m.vfsPath,
                 pattern: m.pattern,
                 resolved: m.resolved,
                 rawPath: `${m.rawPath}/`,
@@ -432,7 +432,7 @@ export async function resolveGlobWith<A, I>(
             new PathSpec({
               virtual: p.virtual,
               directory: p.directory,
-              resourcePath: p.resourcePath,
+              vfsPath: p.vfsPath,
               pattern: null,
               resolved: true,
               rawPath: p.rawPath,
@@ -479,8 +479,8 @@ export async function expandPattern<A, I>(
   index?: I,
   children?: ChildMounts,
 ): Promise<PathSpec[]> {
-  const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.resourcePath.length)
-  const segments = path.resourcePath === '' ? [] : path.resourcePath.split('/')
+  const prefix = path.virtual.slice(0, rstripSlash(path.virtual).length - path.vfsPath.length)
+  const segments = path.vfsPath === '' ? [] : path.vfsPath.split('/')
   // Two spec shapes reach resolvers: a full pattern path (classify), where
   // the pattern is already the last segment, and a directory-shaped spec
   // (PathSpec.dir), where the pattern applies to the directory's entries.
@@ -506,7 +506,7 @@ export async function expandPattern<A, I>(
       const spec = new PathSpec({
         virtual: parent,
         directory: parent,
-        resourcePath: rekey(path.virtual, path.resourcePath, parent),
+        vfsPath: rekey(path.virtual, path.vfsPath, parent),
         pattern: hasGlob(seg) ? seg : null,
       })
       let entries: string[]
@@ -536,9 +536,7 @@ export async function expandPattern<A, I>(
     level = [...new Set(nextLevel)].sort(compareCodePoints)
     if (level.length === 0) return []
   }
-  const matches = level.map((e) =>
-    PathSpec.fromStrPath(e, rekey(path.virtual, path.resourcePath, e)),
-  )
+  const matches = level.map((e) => PathSpec.fromStrPath(e, rekey(path.virtual, path.vfsPath, e)))
   // A typed word (raw differs from virtual) spells its matches; the
   // dir-shaped specs internal expansions build (PathSpec.dir) have no typed
   // form and keep the resolved virtual.
@@ -550,7 +548,7 @@ export async function expandPattern<A, I>(
       new PathSpec({
         virtual: m.virtual,
         directory: m.directory,
-        resourcePath: m.resourcePath,
+        vfsPath: m.vfsPath,
         pattern: m.pattern,
         resolved: m.resolved,
         rawPath: spellMatch(raw, m.virtual, walked),

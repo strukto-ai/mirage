@@ -5,7 +5,7 @@ import pytest
 from mirage.workspace.executor.builtins.condition import (CondContext,
                                                           CondError, eval_flat)
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 class _StubNamespace:
@@ -27,7 +27,7 @@ class _StubSession:
 def _ctx() -> CondContext:
     return CondContext(dispatch=None,
                        namespace=cast(Namespace, _StubNamespace()),
-                       session=cast(Session, _StubSession()),
+                       session=cast(SessionState, _StubSession()),
                        name="test")
 
 
@@ -89,19 +89,19 @@ async def test_flat_reports_a_bad_integer_as_an_error():
 async def test_file_pair_operators_match_bash(line, expected):
     # Pinned against GNU bash 5.2: a missing right side makes -nt true,
     # a missing left side makes -ot true, -ef follows symlinks.
-    from mirage import MountMode, RAMResource, Workspace
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("mkdir -p /w/d; printf a > /w/d/a.txt; "
-                     "touch -d '2020-01-01 00:00:00' /w/d/a.txt; "
-                     "printf bb > /w/d/b.txt; ln -s d/a.txt /w/l; cd /w")
-    io = await ws.execute(line)
+    from mirage import RAMVFS, MountMode, Workspace
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /w/d; printf a > /w/d/a.txt; "
+                   "touch -d '2020-01-01 00:00:00' /w/d/a.txt; "
+                   "printf bb > /w/d/b.txt; ln -s d/a.txt /w/l; cd /w")
+    io = await ws.shell(line)
     assert io.exit_code == expected
 
 
 @pytest.mark.asyncio
 async def test_equal_mtimes_are_neither_newer_nor_older():
-    from mirage import MountMode, RAMResource, Workspace
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("mkdir -p /w; touch -d '2020-01-01 00:00:00' /w/a /w/b")
-    assert (await ws.execute("[ /w/a -nt /w/b ]")).exit_code == 1
-    assert (await ws.execute("[ /w/a -ot /w/b ]")).exit_code == 1
+    from mirage import RAMVFS, MountMode, Workspace
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /w; touch -d '2020-01-01 00:00:00' /w/a /w/b")
+    assert (await ws.shell("[ /w/a -nt /w/b ]")).exit_code == 1
+    assert (await ws.shell("[ /w/a -ot /w/b ]")).exit_code == 1

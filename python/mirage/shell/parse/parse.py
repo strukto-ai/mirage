@@ -239,6 +239,30 @@ def _repair_orphaned_dollars(root: tree_sitter.Node,
     return root
 
 
+def _repair_redirect_dashes(root: tree_sitter.Node,
+                            data: bytes) -> tuple[tree_sitter.Node, bytes]:
+    # tree-sitter-bash drops a bare dash immediately before an explicit fd.
+    # Quote only a dash in an uncovered gap, never text inside a word/body.
+    offsets: list[int] = []
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        end = node.start_byte
+        for child in node.children:
+            gap = data[end:child.start_byte]
+            if child.type == "file_redirect" and gap.strip() == b"-":
+                offsets.append(end + gap.index(b"-"))
+            end = child.end_byte
+            stack.append(child)
+    if not offsets:
+        return root, data
+    repaired = data
+    for offset in sorted(set(offsets), reverse=True):
+        repaired = repaired[:offset] + b"'-'" + repaired[offset + 1:]
+    retried = _parse_bytes(repaired)
+    return (root, data) if retried.has_error else (retried, repaired)
+
+
 def parse(command: str) -> TSNodeLike:
     """Parse shell structure after the source reader gathers heredocs.
 
@@ -300,6 +324,7 @@ def parse(command: str) -> TSNodeLike:
             if not retried.has_error:
                 root = retried
                 data = retried_data
+    root, data = _repair_redirect_dashes(root, data)
     if b"$" in data:
         root = _repair_orphaned_dollars(root, data)
     if source is None:

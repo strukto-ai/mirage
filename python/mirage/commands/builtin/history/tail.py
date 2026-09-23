@@ -26,10 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tail",
-         resource="history",
-         spec=SPECS["tail"],
-         aggregate=header_aggregate)
+@command("tail", vfs="history", spec=SPECS["tail"], aggregate=header_aggregate)
 async def tail(accessor: HistoryAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

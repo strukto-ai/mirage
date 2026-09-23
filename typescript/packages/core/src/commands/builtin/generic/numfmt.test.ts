@@ -25,7 +25,7 @@ async function run(value: string, flags: CommandOpts['flags'] = {}): Promise<str
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'ram' } as never,
+    vfs: { kind: 'ram' } as never,
   } as CommandOpts
   const result = await numfmtGeneric([value], opts)
   return DEC.decode(result?.[0] as Uint8Array).replace(/\n$/, '')

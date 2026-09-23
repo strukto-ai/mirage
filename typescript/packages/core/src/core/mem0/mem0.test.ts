@@ -115,9 +115,7 @@ describe('Mem0 filesystem', () => {
 
 describe('mem0 detectScope', () => {
   it('classifies the mount root', () => {
-    const match = detectScope(
-      new PathSpec({ virtual: '/mem', directory: '/mem', resourcePath: '' }),
-    )
+    const match = detectScope(new PathSpec({ virtual: '/mem', directory: '/mem', vfsPath: '' }))
     expect(match.kind).toBe('root')
     expect(match.slots).toEqual({})
   })
@@ -126,7 +124,7 @@ describe('mem0 detectScope', () => {
     const p = new PathSpec({
       virtual: '/mem/abc.json',
       directory: '/mem',
-      resourcePath: 'abc.json',
+      vfsPath: 'abc.json',
     })
     const match = detectScope(p)
     expect(match.kind).toBe('memory')
@@ -137,13 +135,13 @@ describe('mem0 detectScope', () => {
     const p = new PathSpec({
       virtual: '/mem/.secret',
       directory: '/mem',
-      resourcePath: '.secret',
+      vfsPath: '.secret',
     })
     expect(detectScope(p).kind).toBe('invalid')
   })
 
   it('classifies an empty memory id as invalid', () => {
-    const p = new PathSpec({ virtual: '/mem/.json', directory: '/mem', resourcePath: '.json' })
+    const p = new PathSpec({ virtual: '/mem/.json', directory: '/mem', vfsPath: '.json' })
     expect(detectScope(p).kind).toBe('invalid')
   })
 
@@ -151,7 +149,7 @@ describe('mem0 detectScope', () => {
     const p = new PathSpec({
       virtual: '/mem/a.json/b',
       directory: '/mem',
-      resourcePath: 'a.json/b',
+      vfsPath: 'a.json/b',
     })
     expect(detectScope(p).kind).toBe('invalid')
   })

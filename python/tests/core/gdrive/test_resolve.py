@@ -87,9 +87,7 @@ async def test_resolve_dir_root_and_errors(fake_drive, gdrive_accessor):
 @pytest.mark.asyncio
 async def test_resolve_parent(fake_drive, gdrive_accessor):
     folder = fake_drive.folder("a")
-    path = PathSpec(virtual="/a/new.txt",
-                    directory="/a",
-                    resource_path="a/new.txt")
+    path = PathSpec(virtual="/a/new.txt", directory="/a", vfs_path="a/new.txt")
     assert (await resolve_parent(gdrive_accessor, path))[0] == folder
 
 

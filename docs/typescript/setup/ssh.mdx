@@ -4,7 +4,7 @@ icon: server
 description: Mount a remote SSH host as a Mirage filesystem (Node only).
 ---
 
-`SSHResource` opens an SFTP session and mounts the remote root as a filesystem.
+`SSHVFS` opens an SFTP session and mounts the remote root as a filesystem.
 
 <Note>
   Node only. Requires the `ssh2` peer dependency. The browser SDK doesn't ship an SSH client.
@@ -19,9 +19,9 @@ pnpm add @struktoai/mirage-node ssh2
 ## Config
 
 ```ts
-import { MountMode, SSHResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, SSHVFS, Workspace } from '@struktoai/mirage-node'
 
-const ssh = new SSHResource({
+const ssh = new SSHVFS({
   host: 'jump.example.com',
   username: 'me',
   identityFile: '~/.ssh/id_ed25519',
@@ -29,7 +29,7 @@ const ssh = new SSHResource({
 })
 
 const ws = new Workspace({ '/remote': ssh }, { mode: MountMode.READ })
-await ws.execute('ls /remote')
+await ws.shell('ls /remote')
 ```
 
 | Field | Default | Notes |
@@ -49,4 +49,4 @@ await ws.execute('ls /remote')
 
 `read`, `write`. Writes flush via SFTP put.
 
-For the full set of supported shell commands and snapshot behavior see the [Python SSH docs](/python/resource/ssh).
+For the full set of supported shell commands and snapshot behavior see the [Python SSH docs](/python/vfs/ssh).

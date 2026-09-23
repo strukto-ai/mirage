@@ -22,7 +22,7 @@ from lancedb.embeddings import EmbeddingFunction, get_registry
 from lancedb.pydantic import LanceModel, Vector
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.resource.lancedb.config import LanceDBConfig
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 _DIMS = 8
 _STUB_NAME = "stub-lancedb-test"

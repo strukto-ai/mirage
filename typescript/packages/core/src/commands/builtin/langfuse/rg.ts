@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { detectScope } from '../../../core/langfuse/scope.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { makeSearch } from '../generic_bind/search.ts'
@@ -23,7 +23,7 @@ import { LANGFUSE_IO } from './io.ts'
 
 export const LANGFUSE_RG = command({
   name: 'rg',
-  resource: ResourceName.LANGFUSE,
+  vfs: VFSName.LANGFUSE,
   spec: specOf('rg'),
   fn: makeSearch('rg', detectScope, SEARCHERS, LANGFUSE_IO, {
     qualify: pushdownOperand,

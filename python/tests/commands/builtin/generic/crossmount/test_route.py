@@ -11,7 +11,7 @@ CALLS: list[tuple[str, str]] = []
 def _path(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory="/",
-                    resource_path=virtual.lstrip("/"),
+                    vfs_path=virtual.lstrip("/"),
                     raw_path=virtual)
 
 

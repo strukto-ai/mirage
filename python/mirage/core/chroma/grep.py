@@ -52,7 +52,7 @@ async def grep_bytes(
     regex = compile_pattern(pattern, ignore_case, fixed_string, whole_word)
     targets = await target_slugs(accessor, paths, index)
     mount_prefix = mount_prefix_of(paths[0].virtual,
-                                   paths[0].resource_path) if paths else ""
+                                   paths[0].vfs_path) if paths else ""
     lines: list[str] = []
     reads: dict[str, bytes] = {}
     slug_to_path = {slug: path for path, slug in targets.items()}
@@ -118,7 +118,7 @@ async def target_slugs(
                                   strip_prefix=False)
             for child in children:
                 child_spec = PathSpec.from_str_path(
-                    child, rekey(path.virtual, path.resource_path, child))
+                    child, rekey(path.virtual, path.vfs_path, child))
                 child_resolved = await resolve_path(accessor, child_spec,
                                                     index)
                 if not child_resolved.is_dir:

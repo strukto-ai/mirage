@@ -801,7 +801,7 @@ def _expr_eval(args: list[str]) -> tuple[str, int]:
     return value, 1 if is_null(value) else 0
 
 
-@command("expr", resource=None, spec=SPECS["expr"], provision=pure_provision)
+@command("expr", vfs=None, spec=SPECS["expr"], provision=pure_provision)
 async def expr(accessor: Accessor, paths: list[PathSpec] | None,
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

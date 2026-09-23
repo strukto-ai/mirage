@@ -135,7 +135,7 @@ jobs:
             tests/core/redis
             tests/observe/test_redis_store.py
             tests/ops/redis
-            tests/resource/redis
+            tests/vfs/redis
             tests/shell/console/redis/test_store.py
           )
           ignore_args=(--ignore=tests/agents/camel)
@@ -185,7 +185,7 @@ jobs:
             integ/truth/ask.json
             integ/truth/ask_pending.json
             integ/truth/python/custom_command.json
-            integ/truth/custom_resource.json
+            integ/truth/custom_vfs.json
             integ/truth/custom_cli.json
             integ/truth/session.json
             integ/truth/python/filetype.json
@@ -377,24 +377,24 @@ jobs:
           .venv-nomonty/bin/python - <<'PY'
           import asyncio
 
-          from mirage.resource.ram import RAMResource
+          from mirage.vfs.ram import RAMVFS
           from mirage.types import MountMode
           from mirage.workspace import Workspace
 
 
           async def main():
-              ws = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
-              io = await ws.execute("python3 -c 'print(1)'")
+              ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+              io = await ws.shell("python3 -c 'print(1)'")
               assert io.exit_code == 127, io.exit_code
               assert b"monty' extra" in io.stderr, io.stderr
-              ws2 = Workspace({"/data": RAMResource()},
+              ws2 = Workspace({"/data": RAMVFS()},
                               mode=MountMode.EXEC,
                               runtimes=["local"])
-              io2 = await ws2.execute("python3 -c 'print(41 + 1)'")
+              io2 = await ws2.shell("python3 -c 'print(41 + 1)'")
               assert io2.exit_code == 0, io2.stderr
               assert io2.stdout.strip() == b"42", io2.stdout
               try:
-                  Workspace({"/d": RAMResource()}, runtimes=["monty"])
+                  Workspace({"/d": RAMVFS()}, runtimes=["monty"])
               except ImportError:
                   pass
               else:

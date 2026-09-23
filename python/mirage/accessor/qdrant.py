@@ -18,8 +18,8 @@ from typing import Any
 from qdrant_client import AsyncQdrantClient
 
 from mirage.accessor.base import Accessor
-from mirage.resource.qdrant.config import QdrantConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.qdrant.config import QdrantConfig
+from mirage.vfs.secrets import reveal_secret
 
 
 class QdrantAccessor(Accessor):

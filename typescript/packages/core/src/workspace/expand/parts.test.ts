@@ -18,7 +18,7 @@ import { IOResult } from '../../io/types.ts'
 import { getParts } from '../../shell/helpers.ts'
 import { globPattern, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import { expandParts, expandWords } from './parts.ts'
 import type { ExecuteFn } from './node.ts'
 
@@ -28,7 +28,7 @@ async function words(cmd: string, env: Record<string, string> = {}, stdout = '')
   const parser = await getTestParser()
   const root = parser.parse(cmd)
   const parts = getParts(root.namedChildren[0] as never)
-  const session = new Session({ sessionId: 't', cwd: '/', vars: varsFromEnv(env) })
+  const session = new SessionState({ sessionId: 't', cwd: '/', vars: varsFromEnv(env) })
   const executeFn: ExecuteFn = () => Promise.resolve(new IOResult({ stdout: ENC.encode(stdout) }))
   return { parts, session, executeFn, out: await expandWords(parts, session, executeFn) }
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { recordStream } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/utils/errors'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -31,7 +31,7 @@ export async function* stream(accessor: OPFSAccessor, path: PathSpec): AsyncIter
     throw err
   }
   const file = await handle.getFile()
-  const rec = recordStream('read', virtual, ResourceName.OPFS)
+  const rec = recordStream('read', virtual, VFSName.OPFS)
   const reader = file.stream().getReader()
   for (;;) {
     const { value, done } = await reader.read()

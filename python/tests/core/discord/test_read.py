@@ -31,7 +31,7 @@ CHAT = f"/{CHANNEL}/{DAY}/chat.jsonl"
 def spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.lstrip("/"))
+                    vfs_path=virtual.lstrip("/"))
 
 
 async def test_read_jsonl(api, accessor, index):

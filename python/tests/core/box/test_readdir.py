@@ -45,8 +45,7 @@ async def test_readdir_root_lists_folder_zero(accessor, index):
             return_value=items,
     ) as mock_list:
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
     assert result == ["/docs/", "/a.txt"]
     mock_list.assert_awaited_once_with(accessor.token_manager, "0")
     entry = (await index.get("/a.txt")).entry
@@ -74,8 +73,7 @@ async def test_readdir_box_native_files_surface_raw(accessor, index):
             return_value=items,
     ):
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
     assert result == ["/meeting.boxnote"]
     entry = (await index.get("/meeting.boxnote")).entry
     assert entry is not None
@@ -106,7 +104,7 @@ async def test_readdir_subfolder_resolves_id_via_index(accessor, index):
     ) as mock_list:
         result = await readdir(
             accessor,
-            PathSpec(resource_path="docs", virtual="/docs", directory="/docs"),
+            PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
             index)
     assert result == ["/docs/notes.txt"]
     mock_list.assert_awaited_once_with(accessor.token_manager, "100")
@@ -138,7 +136,7 @@ async def test_readdir_repopulates_evicted_parent(accessor, index):
     with patch("mirage.core.box.readdir.list_folder_items", new=fake_list):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="docs", virtual="/docs", directory="/docs"),
+            PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
             index)
     assert result == ["/docs/notes.txt"]
 
@@ -153,7 +151,7 @@ async def test_readdir_missing_folder_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await readdir(
                 accessor,
-                PathSpec(resource_path="ghost",
+                PathSpec(vfs_path="ghost",
                          virtual="/ghost",
                          directory="/ghost"), index)
 
@@ -170,8 +168,7 @@ async def test_readdir_serves_cached_listing_without_api_call(accessor, index):
             new_callable=AsyncMock,
     ) as mock_list:
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
     assert any("cached.txt" in r for r in result)
     mock_list.assert_not_awaited()
 
@@ -185,10 +182,9 @@ async def test_readdir_reads_a_404_listing_as_absence(accessor, index):
                 "Box GET /folders/0/items -> 404 not_found", 404),
     ):
         with pytest.raises(FileNotFoundError):
-            await readdir(
-                accessor, PathSpec(resource_path="",
-                                   virtual="/",
-                                   directory="/"), index)
+            await readdir(accessor,
+                          PathSpec(vfs_path="", virtual="/", directory="/"),
+                          index)
 
 
 @pytest.mark.asyncio
@@ -200,8 +196,7 @@ async def test_readdir_keeps_a_throttled_listing_a_failure(accessor, index):
                 "Box GET /folders/0/items -> 429 rate_limit", 429),
     ):
         with pytest.raises(BoxApiError) as caught:
-            await readdir(
-                accessor, PathSpec(resource_path="",
-                                   virtual="/",
-                                   directory="/"), index)
+            await readdir(accessor,
+                          PathSpec(vfs_path="", virtual="/", directory="/"),
+                          index)
     assert caught.value.status == 429

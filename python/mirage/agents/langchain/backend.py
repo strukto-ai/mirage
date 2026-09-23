@@ -111,7 +111,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     File operations (read, write, edit, ls, upload, download) go through the
     Ops layer directly. Shell operations (execute, grep, glob) go through
-    Workspace.execute() for pipe and flag support.
+    Workspace.shell() for pipe and flag support.
     """
 
     def __init__(
@@ -132,7 +132,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         return self._id
 
     async def _exec(self, command: str) -> IOResult:
-        result = await self._ws.execute(command, session_id=self._session_id)
+        result = await self._ws.shell(command, session_id=self._session_id)
         assert isinstance(result, IOResult)
         return result
 
@@ -187,7 +187,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
                     file_path: str,
                     offset: int = 0,
                     limit: int = 2000) -> ReadResult:
-        ops = self._ws.fs
+        ops = self._ws.vfs
         try:
             data = await ops.read(file_path)
         except (FileNotFoundError, ValueError) as exc:
@@ -200,7 +200,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         return self._run(self.awrite(file_path, content))
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
-        ops = self._ws.fs
+        ops = self._ws.vfs
         try:
             await ops.stat(file_path)
             return WriteResult(
@@ -236,7 +236,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        ops = self._ws.fs
+        ops = self._ws.vfs
         try:
             data = await ops.read(file_path)
         except (FileNotFoundError, ValueError):
@@ -330,7 +330,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     async def aupload_files(
             self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        ops = self._ws.fs
+        ops = self._ws.vfs
         results: list[FileUploadResponse] = []
         for path, data in files:
             parent = "/".join(path.rstrip("/").split("/")[:-1]) or "/"
@@ -348,7 +348,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     async def adownload_files(self,
                               paths: list[str]) -> list[FileDownloadResponse]:
-        ops = self._ws.fs
+        ops = self._ws.vfs
         results: list[FileDownloadResponse] = []
         for path in paths:
             try:

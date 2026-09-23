@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.types import RunArgs
 
@@ -138,10 +138,10 @@ async def test_version_process_uses_only_host_environment(
     baseline = await runtime.version({})
     expected = json.loads(baseline.stdout)
     assert expected["MIRAGE_TEST_VERSION_ENV"] == "host"
-    ws = Workspace({"/": RAMResource()}, mode=mode, runtimes=[runtime, "vfs"])
+    ws = Workspace({"/": RAMVFS()}, mode=mode, runtimes=[runtime, "workspace"])
     try:
         for line in ["python --version", "python3 -V", "python -VV"]:
-            io = await ws.execute(line, env=session)
+            io = await ws.shell(line, env=session)
             assert io.exit_code == 0
             assert json.loads(await io.stdout_str()) == expected
             assert await io.stderr_str() == ""
@@ -156,18 +156,18 @@ async def test_read_only_version_does_not_run_startup_code(tmp_path):
      ).write_text(f"open({str(marker)!r}, 'w').write('ran')\n")
     env = {"PYTHONPATH": str(tmp_path)}
     runtime = LocalRuntime(config={"home": sys.executable})
-    ws = Workspace({"/": RAMResource()},
+    ws = Workspace({"/": RAMVFS()},
                    mode=MountMode.READ,
-                   runtimes=[runtime, "vfs"])
+                   runtimes=[runtime, "workspace"])
     try:
         for line in ["python --version", "python3 -V", "python -VV"]:
-            io = await ws.execute(line, env=env)
+            io = await ws.shell(line, env=env)
             assert io.exit_code == 0
             assert await io.stdout_str(
             ) == f"Python {sys.version.split()[0]}\n"
             assert await io.stderr_str() == ""
             assert not marker.exists()
-        refused = await ws.execute("python -c 'pass'", env=env)
+        refused = await ws.shell("python -c 'pass'", env=env)
         assert refused.exit_code == 126
         assert not marker.exists()
         control = await runtime.run(RunArgs(code="pass", env=env))

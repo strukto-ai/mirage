@@ -1,7 +1,7 @@
 ---
 title: Cloudflare R2
 icon: /images/cloudflare-logo.svg
-description: Set up Cloudflare R2 as a MIRAGE resource from Node or the browser.
+description: Set up Cloudflare R2 as a MIRAGE VFS from Node or the browser.
 ---
 
 R2 uses the S3 API with AWS Signature V4 against `https://<account-id>.r2.cloudflarestorage.com`. MIRAGE derives this endpoint from your account ID automatically.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { MountMode, R2Resource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, R2VFS, Workspace } from '@struktoai/mirage-node'
 
-const r2 = new R2Resource({
+const r2 = new R2VFS({
   bucket: process.env.R2_BUCKET!,
   accountId: process.env.R2_ACCOUNT_ID!,
   accessKeyId: process.env.R2_ACCESS_KEY_ID!,
@@ -25,7 +25,7 @@ const r2 = new R2Resource({
 })
 
 const ws = new Workspace({ '/bucket/': r2 }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `R2Resource` is secret-free, your backend signs each operation using your R2 keys and returns a URL. R2 accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works with `region: 'auto'` pointed at R2's endpoint.
+The browser `R2VFS` is secret-free, your backend signs each operation using your R2 keys and returns a URL. R2 accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works with `region: 'auto'` pointed at R2's endpoint.
 
 ### 1. Server: sign URLs with the R2 endpoint
 
@@ -90,9 +90,9 @@ app.post('/presign/r2', async (req, res) => {
 ### 2. Browser: wire it up
 
 ```ts
-import { MountMode, R2Resource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, R2VFS, Workspace } from '@struktoai/mirage-browser'
 
-const r2 = new R2Resource({
+const r2 = new R2VFS({
   bucket: 'my-r2-bucket',
   accountId: 'abc123...',
   presignedUrlProvider: async (path, op, opts) => {
@@ -139,4 +139,4 @@ npx tsx scripts/configure-cors.ts http://localhost:5173 https://app.example.com
 Object-scoped tokens (`Object Read & Write`) cannot edit CORS. If the script returns `Access Denied` on R2, you're almost certainly using an object token.
 </Warning>
 
-See the [R2 resource](/python/resource/r2) docs for the equivalent Python wiring.
+See the [R2 VFS](/python/vfs/r2) docs for the equivalent Python wiring.

@@ -58,7 +58,7 @@ async def narrow_paths(
     """
     if not paths:
         return []
-    mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].resource_path)
+    mount_prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     root = accessor.root_path
     narrowed: list[PathSpec] = []
     for p in paths:
@@ -88,7 +88,7 @@ async def narrow_paths(
             narrowed.append(
                 PathSpec(virtual=virtual,
                          directory="",
-                         resource_path=mount_key(virtual, mount_prefix),
+                         vfs_path=mount_key(virtual, mount_prefix),
                          resolved=True,
                          raw_path=respell_raw([virtual], p.virtual,
                                               p.raw_path)[0]))

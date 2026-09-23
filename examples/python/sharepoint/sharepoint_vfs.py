@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.sharepoint import SharePointConfig, SharePointResource
+from mirage.vfs.sharepoint import SharePointConfig, SharePointVFS
 
 load_dotenv(".env.development")
 
@@ -14,7 +14,7 @@ token = os.environ["MS_GRAPH_DRIVE_TOKEN"]
 
 
 async def _pick_site_and_drive(ws: Workspace) -> tuple[str, str]:
-    r = await ws.execute("ls /sharepoint/")
+    r = await ws.shell("ls /sharepoint/")
     sites = [
         s.strip() for s in (await r.stdout_str()).strip().splitlines()
         if s.strip()
@@ -22,7 +22,7 @@ async def _pick_site_and_drive(ws: Workspace) -> tuple[str, str]:
     if not sites:
         raise RuntimeError("No SharePoint sites accessible")
     site = sites[0]
-    r = await ws.execute(f'ls "/sharepoint/{site}/"')
+    r = await ws.shell(f'ls "/sharepoint/{site}/"')
     drives = [
         d.strip() for d in (await r.stdout_str()).strip().splitlines()
         if d.strip()
@@ -38,7 +38,7 @@ DIFF_EXIT1_OK = {"diff different", "comm"}
 async def run_test(ws: Workspace, name: str,
                    cmd: str) -> tuple[str, str, bool, str, str]:
     try:
-        r = await ws.execute(cmd)
+        r = await ws.shell(cmd)
         stdout = (await r.stdout_str()) or ""
         stderr = (await r.stderr_str()) or ""
         ok = r.exit_code == 0
@@ -75,7 +75,7 @@ def escape_md(s: str) -> str:
 def write_report(site, drive, all_sections):
     lines = ["# SharePoint VFS Integration Test Results\n"]
     lines.append(f"**Site:** {site}  \n**Drive:** {drive}\n")
-    lines.append("Tests use `ws.execute()` — Mirage VFS layer (in-process).\n")
+    lines.append("Tests use `ws.shell()` — Mirage VFS layer (in-process).\n")
 
     all_results = [r for section in all_sections for r in section[1]]
     total = len(all_results)
@@ -105,10 +105,7 @@ async def main():
     print("Token loaded ✓\n")
 
     ws = Workspace(
-        {
-            "/sharepoint/":
-            SharePointResource(SharePointConfig(access_token=token))
-        },
+        {"/sharepoint/": SharePointVFS(SharePointConfig(access_token=token))},
         mode=MountMode.WRITE,
     )
 
@@ -286,7 +283,7 @@ async def main():
 
     # --- Cleanup ---
     print("\n=== Cleanup ===")
-    await ws.execute(f'rm -r "{d}"')
+    await ws.shell(f'rm -r "{d}"')
     print("  done")
 
     all_sections = [

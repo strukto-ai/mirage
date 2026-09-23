@@ -30,7 +30,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("grep", resource="box", spec=SPECS["grep"])
+@command("grep", vfs="box", spec=SPECS["grep"])
 async def grep(accessor: BoxAccessor, paths: list[PathSpec], texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["grep"])

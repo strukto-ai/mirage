@@ -20,8 +20,8 @@ vi.mock('./client.ts', async () => {
   return { ...actual, loadS3Module: vi.fn(), createS3Client: vi.fn() }
 })
 
-import type { FindOptions } from '../../resource/base.ts'
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { FindOptions } from '../../vfs/base.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { S3Accessor } from '../../accessor/s3.ts'
 import { PathSpec } from '../../types.ts'
 import * as clientMod from './client.ts'
@@ -44,25 +44,25 @@ function mockListing(keys: [string, number][]): void {
   } as never)
 }
 
-function spec(resourcePath: string): PathSpec {
-  if (resourcePath !== '') {
+function spec(vfsPath: string): PathSpec {
+  if (vfsPath !== '') {
     return new PathSpec({
-      resourcePath,
-      virtual: '/mnt/' + resourcePath,
+      vfsPath,
+      virtual: '/mnt/' + vfsPath,
       directory: '/mnt/',
     })
   }
-  return new PathSpec({ resourcePath: '', virtual: '/mnt', directory: '/' })
+  return new PathSpec({ vfsPath: '', virtual: '/mnt', directory: '/' })
 }
 
 function runFind(
   keys: [string, number][],
   options: FindOptions = {},
-  resourcePath = 'data',
+  vfsPath = 'data',
 ): Promise<string[]> {
   mockListing(keys)
   const accessor = new S3Accessor({ bucket: 'b' } as S3Config)
-  return find(accessor, spec(resourcePath), options)
+  return find(accessor, spec(vfsPath), options)
 }
 
 describe('s3 core find', () => {

@@ -16,7 +16,7 @@ import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
@@ -68,7 +68,7 @@ import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.
 import { handleRedirect } from '../executor/redirect.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandDoubleBracket, expandTestExpr } from './test_expr.ts'
@@ -108,7 +108,7 @@ const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 type Recurse = (
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
@@ -161,7 +161,7 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
 async function evalCforExpr(
   exprs: readonly TSNodeLike[],
   dflt: number,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -220,7 +220,7 @@ async function recurseReassociated(
   redirects: readonly Redirect[],
   right: TSNodeLike,
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
@@ -252,7 +252,7 @@ async function recurseReassociated(
 }
 
 type RunLeft = (
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ) => Promise<Result>
@@ -268,7 +268,7 @@ async function runRedirected(
   registry: MountRegistry,
   command: TSNodeLike | null,
   redirects: Redirect[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
@@ -355,7 +355,7 @@ async function runContinuation(
   runLeft: RunLeft,
   left: TSNodeLike,
   steps: readonly (readonly [string, TSNodeLike])[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
@@ -372,7 +372,7 @@ async function recurseContinuation(
   left: TSNodeLike,
   steps: readonly (readonly [string, TSNodeLike])[],
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
@@ -388,7 +388,7 @@ async function recursePipeStderr(
   registry: MountRegistry,
   targets: readonly TSNodeLike[],
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Result> {
@@ -432,7 +432,7 @@ export interface ExecuteNodeDeps {
   agentId: string
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
-  ensureOpen?: (resource: Resource) => Promise<void>
+  ensureOpen?: (vfs: VFS) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
   signal?: AbortSignal
@@ -475,7 +475,7 @@ function isBareExec(command: TSNodeLike | null): boolean {
 export async function executeNode(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
@@ -514,7 +514,7 @@ export async function executeNode(
   }
 }
 
-function diagnosticStderr(node: TSNodeLike, session: Session): Uint8Array {
+function diagnosticStderr(node: TSNodeLike, session: SessionState): Uint8Array {
   const head = getText(node).trimStart().split(/\s+/, 1)[0] ?? ''
   const builtin = ['export', 'declare', 'local', 'readonly', 'read', 'printf', 'let'].includes(head)
     ? head
@@ -535,14 +535,14 @@ function diagnosticStderr(node: TSNodeLike, session: Session): Uint8Array {
 async function executeNodeBody(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
   const { sink, ...captureDeps } = deps
   const recurse = (
     n: TSNodeLike,
-    s: Session,
+    s: SessionState,
     i: ByteSource | null,
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
@@ -552,7 +552,7 @@ async function executeNodeBody(
       ? recurse
       : (
           n: TSNodeLike,
-          s: Session,
+          s: SessionState,
           i: ByteSource | null,
           cs: CallStack | null,
           opts?: ExecuteNodeOpts,
@@ -715,7 +715,7 @@ async function executeNodeBody(
     // sink and signal instead.
     const subRecurse = (
       n: TSNodeLike,
-      s: Session,
+      s: SessionState,
       inp: ByteSource | null,
       cs: CallStack | null,
       opts?: ExecuteNodeOpts,

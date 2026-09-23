@@ -1,0 +1,116 @@
+---
+title: YAML Reference
+description: Every key a workspace config accepts, and what each one does.
+icon: file-code
+---
+
+## What It Does
+
+A workspace can be described entirely in YAML and loaded with one call — `load_config` in Python, `loadWorkspaceConfigFile` in TypeScript. This page is the key-by-key reference. Both languages read the same document and refuse the same things: an unknown key is an error, not a warning, so a typo fails loudly at load rather than silently doing nothing.
+
+## Top level
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `mounts` | map | required | Prefix to mount block. See below. |
+| `mode` | `read` \| `write` \| `exec` | `write` | The mode a mount inherits when it declares none. |
+| `read` | `fresh` \| `bounded` | `bounded` | The read policy a mount inherits when it declares none. There is deliberately no top-level `ttl:` — see [the bound](#the-bound). |
+| `clis` | map | — | Installed CLIs, keyed by head word. |
+| `runtimes` | list | — | The workspace's ordered runtime world. |
+| `profiles` / `profile` | map / string | — | Permission documents, and the default one. |
+| `route_policy` | path | — | A `.py` whose last expression names the runtime for a line. |
+| `cache` / `index` / `store` / `console` | block | — | Where bytes, listings, workspace state and job output live. |
+| `env` / `secrets` | map | — | The environment plane and the source table. |
+| `default_session_id` / `default_agent_id` / `workspace_id` | string | — | Identity. |
+
+## Mount block
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `vfs` | string | required | The registered backend name, or a `./file.py:Class` reference. |
+| `config` | map | `{}` | The backend's own config, validated by that backend's model. |
+| `mode` | `read` \| `write` \| `exec` | top-level `mode` | This mount's mode. |
+| `read` | `fresh` \| `bounded` | top-level `read` | How this mount's cached bytes are served. |
+| `ttl` | integer (seconds) | `600` | The staleness bound `bounded` serves within. |
+| `command_limits` | map | `{}` | Per-command caps for this mount. |
+| `backend` | `workspace` \| `fuse` \| `fskit` | `workspace` | Whether the mount also registers a real mountpoint. |
+| `mountpoint` | path | — | Where, for the kernel backends. |
+
+```yaml
+mode: write
+read: bounded
+
+mounts:
+  /fast:
+    vfs: s3
+    config: {bucket: reports}
+    read: bounded
+    ttl: 600
+  /live:
+    vfs: s3
+    config: {bucket: feed}
+    read: fresh
+  /scratch:
+    vfs: ram
+```
+
+## The read policy
+
+`read: bounded` serves cached bytes without asking the backend, for as long as `ttl:` allows. `read: fresh` revalidates against the backend's content token before serving a cached copy, at the cost of one backend stat per file read.
+
+`fresh` is refused at mount time on a backend that cannot honour it, rather than quietly behaving as `bounded`:
+
+- the backend does not cache reads at all, so the check has no gate to run at (`ram`, `disk`, `redis`, `postgres`, `mongodb`, `chroma`, `qdrant`);
+- or it caches reads but stamps no token the check can compare, because its `stat` and its read return different kinds of value, or its read stamps nothing.
+
+[The VFS matrix](/home/vfs-matrix) lists which backends accept `fresh` today.
+
+### The bound
+
+`ttl:` lives only in a mount block. At the top level it would sit beside `index: {ttl: ...}` and mean a different thing, so the workspace-level default is `read:` alone and a workspace-level `bounded` takes 600 seconds — the same default the index uses, so bodies and listings expire together.
+
+Two shapes are refused, because a `read`/`ttl` pair that disagrees is almost always a typo:
+
+- `ttl:` with no `read:` — the bound pins nothing.
+- `read: bounded` written out with no `ttl:` — an explicit policy with an implicit bound.
+
+An unset `read:` is a different thing and is fine: it takes the default.
+
+### Across a snapshot
+
+A snapshot records each mount's policy and bound, and a restore keeps them --
+but only for a mount the loader rebuilds from the saved state itself. A mount
+handed back through `mounts=` takes the default (`bounded`, 600s) instead.
+
+That is deliberate: a mount saved with redacted credentials *has* to be handed
+back, and what comes back may be a different backend entirely. Replaying a saved
+`fresh` onto one that cannot revalidate would refuse a restore that had nothing
+wrong with it. The saved policy still has to be a policy mirage knows -- a
+snapshot naming an unknown one is refused whether or not the mount is overridden.
+
+Declare `read:` again on an overridden mount if you want it back.
+
+### What the bound promises
+
+The bound is stamped on a cache entry when that entry is written, and the store
+expires it from there. So the bound that applies to an entry is the one the
+mount that *wrote* it declared, not the one the mount reading it declares. Within
+a workspace those are the same mount, so `ttl:` means what it says.
+
+They can differ in three situations, and in each the older bound wins until the
+entry expires on its own:
+
+- two workspaces sharing one Redis cache declare different `ttl:` for the same
+  prefix;
+- `ttl:` is lowered and the process restarts against a surviving shared cache;
+- a snapshot is restored into a mount whose `ttl:` differs from the one that
+  took the snapshot.
+
+Making the reader's bound authoritative would mean recording when each entry was
+written somewhere every store can read it back — Redis keeps no such timestamp
+today. Until then, treat a shared cache as a place where `ttl:` should agree
+across the workspaces that use it.
+
+## Not yet accepted
+
+`read: pinned` is refused, naming the layer it needs: pinning reads to the content a commit records requires a version layer mirage does not have. There is no `write:` key yet. Both are reserved rather than silently ignored, so a config that names one fails at load instead of appearing to work.

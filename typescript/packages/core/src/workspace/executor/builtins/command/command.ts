@@ -17,7 +17,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { classify, describe } from '../lookup/index.ts'
@@ -39,7 +39,7 @@ const USAGE = 'command: usage: command [-pVv] command [arg ...]\n'
 function probe(
   mode: string,
   rest: readonly string[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
 ): Result {
   const outLines: string[] = []
@@ -87,7 +87,7 @@ function probe(
 export async function handleCommandBuiltin(
   executeFn: ExecuteStringFn,
   args: readonly string[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   stdin: ByteSource | null = null,
 ): Promise<Result> {

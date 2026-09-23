@@ -22,10 +22,10 @@ from mirage.workspace.lookup.constants import (INTERPRETER_NAMES,
                                                NAMESPACE_COMMANDS, SHELL_NAMES)
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
-def listed(name: str, session: Session) -> bool:
+def listed(name: str, session: SessionState) -> bool:
     """What the session's allow list says about a tool word.
 
     A profile without a list installs everything; a profile with one installs
@@ -35,12 +35,12 @@ def listed(name: str, session: Session) -> bool:
 
     Args:
         name (str): expanded command name.
-        session (Session): the shell session running the line.
+        session (SessionState): the shell session running the line.
     """
     return head_visible(name, session.commands)
 
 
-def is_tool(name: str, session: Session) -> bool:
+def is_tool(name: str, session: SessionState) -> bool:
     """Whether a command word is a tool the allow lists govern.
 
     Every named command is a subject, shell builtins included: an allow
@@ -54,14 +54,14 @@ def is_tool(name: str, session: Session) -> bool:
 
     Args:
         name (str): expanded command name.
-        session (Session): the shell session running the line.
+        session (SessionState): the shell session running the line.
     """
     if "/" in name:
         return False
     return not (name in session.functions and name not in SHELL_NAMES)
 
 
-def command_visible(name: str, session: Session) -> bool:
+def command_visible(name: str, session: SessionState) -> bool:
     """Whether a session can see a command word at all.
 
     The profile's allow list (``commands.allow``) decides: a tool name no
@@ -71,12 +71,13 @@ def command_visible(name: str, session: Session) -> bool:
 
     Args:
         name (str): expanded command name.
-        session (Session): the shell session running the line.
+        session (SessionState): the shell session running the line.
     """
     return not is_tool(name, session) or listed(name, session)
 
 
-def verb_visible(head: str, path: Sequence[str], session: Session) -> bool:
+def verb_visible(head: str, path: Sequence[str],
+                 session: SessionState) -> bool:
     """Whether a session can see one node of an installed CLI's tree.
 
     ``command_visible`` answers for a word, which is all dispatch needs:
@@ -92,13 +93,13 @@ def verb_visible(head: str, path: Sequence[str], session: Session) -> bool:
         head (str): the installed head word, as typed.
         path (Sequence[str]): canonical verb words after the head,
             empty for the root.
-        session (Session): the shell session running the line.
+        session (SessionState): the shell session running the line.
     """
     return node_visible((head, *path), session.commands)
 
 
 def runtime_refused(name: str,
-                    session: Session,
+                    session: SessionState,
                     registry: MountRegistry,
                     routing: RouteDecision | None = None) -> bool:
     """Whether routing explicitly refused the external runtime for ``name``."""
@@ -111,7 +112,7 @@ def runtime_refused(name: str,
 
 
 def _layers(name: str,
-            session: Session,
+            session: SessionState,
             registry: MountRegistry,
             routing: RouteDecision | None = None) -> Iterator[Consumer]:
     """Yield every layer holding the name, most-preferred first.
@@ -128,7 +129,7 @@ def _layers(name: str,
 
     Args:
         name (str): expanded command name.
-        session (Session): shell session (function table).
+        session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
     """
     installed = listed(name, session)
@@ -169,7 +170,7 @@ def _layers(name: str,
 
 
 def lookup(name: str,
-           session: Session,
+           session: SessionState,
            registry: MountRegistry,
            routing: RouteDecision | None = None) -> Consumer:
     """Route a command name to the layer that consumes it.
@@ -205,13 +206,13 @@ def lookup(name: str,
 
     Args:
         name (str): expanded command name.
-        session (Session): shell session (function table).
+        session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
     """
     return next(_layers(name, session, registry, routing), Consumer.UNKNOWN)
 
 
-def lookup_all(name: str, session: Session,
+def lookup_all(name: str, session: SessionState,
                registry: MountRegistry) -> list[Consumer]:
     """Every layer holding the name, most-preferred first.
 
@@ -221,7 +222,7 @@ def lookup_all(name: str, session: Session,
 
     Args:
         name (str): expanded command name.
-        session (Session): shell session (function table).
+        session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
     """
     return list(_layers(name, session, registry))

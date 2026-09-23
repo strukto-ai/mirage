@@ -37,7 +37,7 @@ const CASES: [string, string][] = [
 
 function spec(mount: string, child: string): PathSpec {
   const virtual = `${mount}/${child}`
-  return new PathSpec({ virtual, directory: virtual, resourcePath: child })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: child })
 }
 
 function stores(): [RAMFileCacheStore, RAMIndexCacheStore] {
@@ -61,11 +61,11 @@ describe.each(CASES)('mount %s holding %s', (mount, child) => {
   })
 
   it('lifts event helpers onto the mount', () => {
-    const root = new PathSpec({ virtual: mount, directory: mount, resourcePath: '' })
+    const root = new PathSpec({ virtual: mount, directory: mount, vfsPath: '' })
     expect(virtualOf(root, child)).toBe(`${mount}/${child}`)
     const event = eventAt(root, child, FileChangeKind.CREATE)
     expect(event.path.virtual).toBe(`${mount}/${child}`)
-    expect(event.path.resourcePath).toBe(child)
+    expect(event.path.vfsPath).toBe(child)
   })
 
   it('drops the real key on an unlink', async () => {
@@ -85,7 +85,7 @@ describe.each(CASES)('mount %s holding %s', (mount, child) => {
       new PathSpec({
         virtual,
         directory: `${mount}/${child}`,
-        resourcePath: `${child}/leaf.txt`,
+        vfsPath: `${child}/leaf.txt`,
       }),
     )
     expect((await index.listDir(`${mount}/${child}`)).entries).toBeUndefined()

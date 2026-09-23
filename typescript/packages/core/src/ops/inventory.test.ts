@@ -42,7 +42,7 @@ import { SHAREPOINT_OPS } from './sharepoint/index.ts'
 import { TRELLO_OPS } from './trello/index.ts'
 
 // Golden snapshot of every backend's registered op surface, taken before
-// the ops-layer refactor. Each row is [name, resource, filetype, write];
+// the ops-layer refactor. Each row is [name, VFS, filetype, write];
 // filetype '' means no filetype binding. Any diff here is a registration
 // regression unless the change is deliberate.
 
@@ -79,6 +79,7 @@ const TABLES = {
 
 const OPS_INVENTORY: Record<string, Row[]> = {
   box: [
+    ['append', 'box', '', true],
     ['create', 'box', '', true],
     ['mkdir', 'box', '', true],
     ['read', 'box', '', false],
@@ -96,6 +97,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'chroma', '', false],
   ],
   databricks_volume: [
+    ['append', 'databricks_volume', '', true],
     ['create', 'databricks_volume', '', true],
     ['mkdir', 'databricks_volume', '', true],
     ['read', 'databricks_volume', '', false],
@@ -112,6 +114,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'discord', '', false],
   ],
   dropbox: [
+    ['append', 'dropbox', '', true],
     ['create', 'dropbox', '', true],
     ['mkdir', 'dropbox', '', true],
     ['read', 'dropbox', '', false],
@@ -129,6 +132,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'gdocs', '', false],
   ],
   gdrive: [
+    ['append', 'gdrive', '', true],
     ['create', 'gdrive', '', true],
     ['mkdir', 'gdrive', '', true],
     ['read', 'gdrive', '', false],
@@ -196,6 +200,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'notion', '', false],
   ],
   onedrive: [
+    ['append', 'onedrive', '', true],
     ['create', 'onedrive', '', true],
     ['mkdir', 'onedrive', '', true],
     ['read', 'onedrive', '', false],
@@ -251,6 +256,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'slack', '', false],
   ],
   sharepoint: [
+    ['append', 'sharepoint', '', true],
     ['create', 'sharepoint', '', true],
     ['mkdir', 'sharepoint', '', true],
     ['read', 'sharepoint', '', false],
@@ -274,7 +280,7 @@ const sortRows = (rows: Row[]): Row[] =>
 
 for (const [backend, ops] of Object.entries(TABLES)) {
   test(`ops inventory: ${backend}`, () => {
-    const actual = sortRows(ops.map((o) => [o.name, o.resource, o.filetype ?? '', o.write] as Row))
+    const actual = sortRows(ops.map((o) => [o.name, o.vfs, o.filetype ?? '', o.write] as Row))
     const expected = OPS_INVENTORY[backend]
     if (!expected) throw new Error(`missing fixture: ${backend}`)
     expect(actual).toEqual(sortRows(expected))

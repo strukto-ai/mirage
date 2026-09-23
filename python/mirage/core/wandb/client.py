@@ -12,7 +12,7 @@ from mirage.core.wandb.errors import WandbAPIError
 from mirage.core.wandb.queries import (FILE, FILES, HISTORY, HISTORY_KEYS,
                                        PROJECTS, RUN, RUNS)
 from mirage.core.wandb.types import FileMetadata, Run, RunFile, RunVariables
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 def response_error(response: aiohttp.ClientResponse, text: str) -> Exception:

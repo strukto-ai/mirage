@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stdinStream } from '../utils/stream.ts'
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { guardInput } from '../utils/limit.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -210,7 +211,7 @@ export async function wcGeneric(
   opts: CommandOpts,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  stream = cacheAwareStreamEager(stream)
+  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]

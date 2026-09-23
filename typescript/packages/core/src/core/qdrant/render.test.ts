@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { resolveQdrantConfig } from '../../resource/qdrant/config.ts'
+import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
 import { renderJson, renderText } from './render.ts'
 
 const DEC = new TextDecoder()

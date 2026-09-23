@@ -29,7 +29,7 @@ class HfRepoConfig(BaseModel):
     One shape for all three repo kinds, because the Hub's own API differs
     between them only by a URL segment. The kind is the accessor's, not
     the config's, so `repo_type` is not a field a caller can set to a
-    value the resource disagrees with.
+    value the VFS disagrees with.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -101,14 +101,14 @@ class HfHubAccessor(SessionAccessor):
     """
 
     REPO_TYPE: str = ""
-    RESOURCE_NAME: str = ""
+    VFS_NAME: str = ""
 
     def __init__(self, config: HfRepoConfig, repo_type: str = "") -> None:
         """Args:
             config (HfRepoConfig): repo id, credential and revision.
             repo_type (str): overrides the class's own kind, for a caller
                 that learns it from a command line rather than from
-                which resource it mounted. The `hf` CLI is the only one:
+                which VFS it mounted. The `hf` CLI is the only one:
                 its `--repo-type` picks the kind per invocation, and
                 letting it build an accessor is what lets the CLI reuse
                 the mount's tree and commit code instead of growing a

@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { getCaseItems } from '../../shell/helpers.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import type { ExecuteFn } from './node.ts'
 import { escapeGlob } from '../../utils/glob_walk.ts'
 import { expandPattern } from './pattern.ts'
@@ -36,7 +36,7 @@ async function expand(snippet: string, env: Record<string, string> = {}): Promis
   expect(patterns).toHaveLength(1)
   const pattern = patterns[0]
   if (pattern === undefined) throw new Error('no pattern parsed')
-  const session = new Session({ sessionId: 'test', vars: varsFromEnv(env) })
+  const session = new SessionState({ sessionId: 'test', vars: varsFromEnv(env) })
   return expandPattern(pattern, session, failExec)
 }
 

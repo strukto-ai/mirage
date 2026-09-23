@@ -19,16 +19,16 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.notion import NotionConfig, NotionResource
+from mirage.vfs.notion import NotionConfig, NotionVFS
 
 load_dotenv(".env.development")
 
 config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
-resource = NotionResource(config=config)
+vfs = NotionVFS(config=config)
 
 
 async def main():
-    with Workspace({"/notion/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/notion/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE ===\n")
 
         print("--- os.listdir() root ---")
@@ -57,7 +57,7 @@ async def main():
                 md = data.get("markdown", "")[:200]
                 print(f"  markdown (first 200 chars): {md}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes")
 

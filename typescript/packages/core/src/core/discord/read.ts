@@ -36,11 +36,11 @@ async function ancestorEntry(
 ): Promise<IndexEntry | null> {
   let virtual = path.virtual.replace(/\/+$/, '')
   for (let i = 0; i < up; i++) virtual = virtual.split('/').slice(0, -1).join('/')
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const spec = new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: mountKey(virtual, prefix),
+    vfsPath: mountKey(virtual, prefix),
   })
   return resolveEntry(readdir, accessor, spec, index)
 }

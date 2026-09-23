@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../accessor/base.ts'
 import { NOOPAccessor } from '../accessor/base.ts'
-import type { Resource } from '../resource/base.ts'
+import type { VFS } from '../vfs/base.ts'
 import { PathSpec } from '../types.ts'
 import { op, OpsRegistry, registerOp } from './registry.ts'
 
@@ -23,28 +23,28 @@ const stubAccessor: Accessor = new NOOPAccessor()
 const stubPath = PathSpec.fromStrPath('/x')
 
 describe('@op decorator', () => {
-  it('accepts a single resource string', () => {
+  it('accepts a single VFS string', () => {
     class R {
-      @op('read', { resource: 'ram' })
+      @op('read', { vfs: 'ram' })
       async read(_a: Accessor, _p: PathSpec): Promise<string> {
         return Promise.resolve('hello')
       }
     }
     const registry = new OpsRegistry()
-    registry.registerResource(new R() as unknown as Resource)
+    registry.registerVfs(new R() as unknown as VFS)
     const fn = registry.resolve('read', 'ram')
     expect(fn).toBeDefined()
   })
 
-  it('accepts an array of resources and registers once per entry', async () => {
+  it('accepts an array of mounts and registers once per entry', async () => {
     class R {
-      @op('read', { resource: ['ram', 'disk'] })
+      @op('read', { vfs: ['ram', 'disk'] })
       async read(_a: Accessor, _p: PathSpec): Promise<string> {
         return Promise.resolve('multi')
       }
     }
     const registry = new OpsRegistry()
-    registry.registerResource(new R() as unknown as Resource)
+    registry.registerVfs(new R() as unknown as VFS)
     const ramFn = registry.resolve('read', 'ram')
     const diskFn = registry.resolve('read', 'disk')
     await expect(ramFn(stubAccessor, stubPath, [], {})).resolves.toBe('multi')
@@ -53,13 +53,13 @@ describe('@op decorator', () => {
 
   it('defaults filetype to null and write to false', () => {
     class R {
-      @op('stat', { resource: 'ram' })
+      @op('stat', { vfs: 'ram' })
       async stat(_a: Accessor, _p: PathSpec): Promise<number> {
         return Promise.resolve(1)
       }
     }
     const registry = new OpsRegistry()
-    registry.registerResource(new R() as unknown as Resource)
+    registry.registerVfs(new R() as unknown as VFS)
     const ro = registry.find('stat', 'ram')
     expect(ro?.filetype).toBeNull()
     expect(ro?.write).toBe(false)
@@ -67,63 +67,63 @@ describe('@op decorator', () => {
 
   it('passes through filetype and write when provided', () => {
     class R {
-      @op('parse', { resource: 'ram', filetype: 'json', write: false })
+      @op('parse', { vfs: 'ram', filetype: 'json', write: false })
       async parse(_a: Accessor, _p: PathSpec): Promise<unknown> {
         return Promise.resolve(null)
       }
-      @op('write', { resource: 'ram', write: true })
+      @op('write', { vfs: 'ram', write: true })
       async doWrite(_a: Accessor, _p: PathSpec): Promise<void> {
         return Promise.resolve()
       }
     }
     const registry = new OpsRegistry()
-    registry.registerResource(new R() as unknown as Resource)
+    registry.registerVfs(new R() as unknown as VFS)
     expect(registry.find('parse', 'ram', 'json')?.filetype).toBe('json')
     expect(registry.find('write', 'ram')?.write).toBe(true)
   })
 })
 
-describe('OpsRegistry.registerResource', () => {
+describe('OpsRegistry.registerVfs', () => {
   it('binds registered methods to the instance so `this` works', async () => {
     class R {
       readonly label = 'ram-store'
-      @op('label', { resource: 'ram' })
+      @op('label', { vfs: 'ram' })
       async getLabel(_a: Accessor, _p: PathSpec): Promise<string> {
         return Promise.resolve(this.label)
       }
     }
     const registry = new OpsRegistry()
-    registry.registerResource(new R() as unknown as Resource)
+    registry.registerVfs(new R() as unknown as VFS)
     const fn = registry.resolve('label', 'ram')
     await expect(fn(stubAccessor, stubPath, [], {})).resolves.toBe('ram-store')
   })
 
   it('walks the prototype chain — subclass methods win over parent', async () => {
     class Base {
-      @op('greet', { resource: 'ram' })
+      @op('greet', { vfs: 'ram' })
       async greet(_a: Accessor, _p: PathSpec): Promise<string> {
         return Promise.resolve('base')
       }
     }
     class Child extends Base {
-      @op('greet', { resource: 'ram' })
+      @op('greet', { vfs: 'ram' })
       override async greet(_a: Accessor, _p: PathSpec): Promise<string> {
         return Promise.resolve('child')
       }
     }
     const registry = new OpsRegistry()
-    registry.registerResource(new Child() as unknown as Resource)
+    registry.registerVfs(new Child() as unknown as VFS)
     const fn = registry.resolve('greet', 'ram')
     await expect(fn(stubAccessor, stubPath, [], {})).resolves.toBe('child')
   })
 })
 
 describe('OpsRegistry.register (imperative)', () => {
-  it('stores a RegisteredOp by (name, filetype, resource)', () => {
+  it('stores a RegisteredOp by (name, filetype, VFS)', () => {
     const registry = new OpsRegistry()
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       fn: () => 'x',
       write: false,
@@ -135,14 +135,14 @@ describe('OpsRegistry.register (imperative)', () => {
     const registry = new OpsRegistry()
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       fn: () => 'first',
       write: false,
     })
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       fn: () => 'second',
       write: false,
@@ -157,14 +157,14 @@ describe('OpsRegistry.resolve fallback chain', () => {
     const registry = new OpsRegistry()
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       fn: () => 'default',
       write: false,
     })
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: 'json',
       fn: () => 'json-specific',
       write: false,
@@ -173,24 +173,24 @@ describe('OpsRegistry.resolve fallback chain', () => {
     expect(fn(stubAccessor, stubPath, [], {})).toBe('json-specific')
   })
 
-  it('falls back to resource-only when filetype-specific missing', () => {
+  it('falls back to VFS-only when filetype-specific missing', () => {
     const registry = new OpsRegistry()
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
-      fn: () => 'resource-default',
+      fn: () => 'VFS-default',
       write: false,
     })
     const fn = registry.resolve('read', 'ram', 'yaml')
-    expect(fn(stubAccessor, stubPath, [], {})).toBe('resource-default')
+    expect(fn(stubAccessor, stubPath, [], {})).toBe('VFS-default')
   })
 
-  it('falls back to global (resource=null) when resource-specific missing', () => {
+  it('falls back to global (VFS=null) when VFS-specific missing', () => {
     const registry = new OpsRegistry()
     registry.register({
       name: 'echo',
-      resource: null,
+      vfs: null,
       filetype: null,
       fn: () => 'global',
       write: false,
@@ -221,7 +221,7 @@ describe('OpsRegistry.call', () => {
     const registry = new OpsRegistry()
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
       fn: async () => Promise.resolve('async-value'),
       write: false,
@@ -233,22 +233,22 @@ describe('OpsRegistry.call', () => {
     const registry = new OpsRegistry()
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: 'json',
       fn: () => null,
       write: false,
     })
     registry.register({
       name: 'read',
-      resource: 'ram',
+      vfs: 'ram',
       filetype: null,
-      fn: () => 'from-resource-default',
+      fn: () => 'from-VFS-default',
       write: false,
     })
     const result = await registry.call('read', 'ram', stubAccessor, stubPath, [], {
       filetype: 'json',
     })
-    expect(result).toBe('from-resource-default')
+    expect(result).toBe('from-VFS-default')
   })
 
   it('throws when nothing matches', async () => {
@@ -271,14 +271,14 @@ describe('OpsRegistry.call', () => {
 describe('registerOp helper', () => {
   it('adds an op to the target registry', () => {
     const registry = new OpsRegistry()
-    registerOp(registry, 'echo', () => 'hello', { resource: 'ram' })
+    registerOp(registry, 'echo', () => 'hello', { vfs: 'ram' })
     const fn = registry.resolve('echo', 'ram')
     expect(fn(stubAccessor, stubPath, [], {})).toBe('hello')
   })
 
-  it('registers one entry per resource when given an array', () => {
+  it('registers one entry per VFS when given an array', () => {
     const registry = new OpsRegistry()
-    registerOp(registry, 'cat', () => 'multi', { resource: ['ram', 'disk', 's3'] })
+    registerOp(registry, 'cat', () => 'multi', { vfs: ['ram', 'disk', 's3'] })
     expect(registry.resolve('cat', 'ram')(stubAccessor, stubPath, [], {})).toBe('multi')
     expect(registry.resolve('cat', 'disk')(stubAccessor, stubPath, [], {})).toBe('multi')
     expect(registry.resolve('cat', 's3')(stubAccessor, stubPath, [], {})).toBe('multi')

@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { DropboxResource, MountMode, Workspace, type FileStat, type DropboxConfig } from '@struktoai/mirage-node'
+import { DropboxVFS, MountMode, Workspace, type FileStat, type DropboxConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -34,7 +34,7 @@ function buildConfig(): DropboxConfig {
 async function show(ws: Workspace, cmd: string, max = 600): Promise<string> {
   console.log(`=== ${cmd} ===`)
   try {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     const out = r.stdoutText
     if (out !== '') console.log(out.length > max ? out.slice(0, max) + '...' : out)
     if (r.stderrText !== '') process.stderr.write(`  STDERR: ${r.stderrText.trim().slice(0, 200)}\n`)
@@ -50,12 +50,12 @@ function quote(p: string): string {
 }
 
 async function main(): Promise<void> {
-  const resource = new DropboxResource(buildConfig())
-  const ws = new Workspace({ '/dropbox': resource }, { mode: MountMode.READ })
+  const vfs = new DropboxVFS(buildConfig())
+  const ws = new Workspace({ '/dropbox': vfs }, { mode: MountMode.READ })
   try {
     console.log('=== not-found errors show the full virtual path ===')
     for (const cmd of ['cat /dropbox/__nf_missing__.txt', 'head /dropbox/__nf_missing__.txt', 'stat /dropbox/__nf_missing__.txt']) {
-      const res = await ws.execute(cmd)
+      const res = await ws.shell(cmd)
       console.log(`$ ${cmd}`)
       console.log(`  exit=${String(res.exitCode)}  ${new TextDecoder().decode(res.stderr).trim()}`)
     }
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${f1} ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "${f1}" && chown 500:dev "${f1}" && touch -t 202601021530 "${f1}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

@@ -24,9 +24,9 @@ EXCEPTIONS = CASE_ROOT / "target_exceptions.json"
 
 # Directories whose files are one scenario each rather than one command
 # family, so the modal set across them means nothing: integ/cli holds a
-# separate program per file and integ/resources holds a separate backend
+# separate program per file and integ/vfs holds a separate backend
 # per file, and in both a file naming fewer targets is the point.
-UNRELATED_DIRS = ("integ/cli", "integ/resources", "integ/runtime")
+UNRELATED_DIRS = ("integ/cli", "integ/vfs", "integ/runtime")
 
 
 def case_files() -> list[Path]:

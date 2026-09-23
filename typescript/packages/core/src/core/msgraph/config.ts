@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { secretSchema } from '../../resource/secrets.ts'
+import { secretSchema } from '../../vfs/secrets.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 export type AccessTokenProvider = () => string | Promise<string>

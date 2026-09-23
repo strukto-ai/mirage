@@ -141,6 +141,6 @@ def make_trello_read_commands() -> list[Callable[..., Any]]:
     commands: list[Callable[..., Any]] = []
     for entry in TRELLO_READS:
         commands.append(
-            command(entry.name, resource="trello",
+            command(entry.name, vfs="trello",
                     spec=entry.spec)(functools.partial(_dispatch, entry)))
     return commands

@@ -16,7 +16,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  GSheetsResource,
+  GSheetsVFS,
   GWS,
   MountMode,
   Workspace,
@@ -45,7 +45,7 @@ async function run(
   cmd: string,
 ): Promise<{ out: string; err: string; code: number }> {
   try {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
   } catch (err) {
     return {
@@ -64,8 +64,8 @@ function printOut(label: string, out: string, err: string, max = 500): void {
 
 async function main(): Promise<void> {
   const config = buildConfig()
-  const resource = new GSheetsResource(config)
-  const ws = new Workspace({ '/gsheets': resource }, { mode: MountMode.WRITE })
+  const vfs = new GSheetsVFS(config)
+  const ws = new Workspace({ '/gsheets': vfs }, { mode: MountMode.WRITE })
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })
   try {
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /gsheets/owned/${first} ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/gsheets/owned/${first}" && chown 500:dev "/gsheets/owned/${first}" && touch -t 202601021530 "/gsheets/owned/${first}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

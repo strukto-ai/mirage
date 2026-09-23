@@ -69,7 +69,7 @@ for (const backend of ['ram', 'redis']) {
               })
               accessor.truncated = truncated
               const path = new PathSpec({
-                resourcePath: 'src/main.py',
+                vfsPath: 'src/main.py',
                 virtual: '/repo/src/main.py',
                 directory: '/repo/src',
               })
@@ -157,7 +157,7 @@ for (const backend of ['ram', 'redis']) {
       const path = new PathSpec({
         virtual: '/repo/a.txt',
         directory: '/repo',
-        resourcePath: 'a.txt',
+        vfsPath: 'a.txt',
       })
       try {
         await populateIndex(

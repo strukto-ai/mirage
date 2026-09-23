@@ -20,8 +20,8 @@ import pytest
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.watch import DropboxDeltaHook, DropboxWalk
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import FileChangeKind, PathSpec
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 def _accessor(root_path: str) -> DropboxAccessor:
@@ -33,7 +33,7 @@ def _accessor(root_path: str) -> DropboxAccessor:
 
 
 def _root() -> PathSpec:
-    return PathSpec(virtual="/m", directory="/m", resource_path="")
+    return PathSpec(virtual="/m", directory="/m", vfs_path="")
 
 
 async def _collect(walk, root):

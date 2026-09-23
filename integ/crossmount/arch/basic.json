@@ -30,6 +30,68 @@
         "stdout": "gzcross\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_zip_dot_into_the_other_mount",
+      "seq": 602021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xmz/sub && printf 'a\\n' > /data/xmz/a.txt && printf 'b\\n' > /data/xmz/sub/b.txt && (cd /data/xmz && zip -r /data2/xmz.zip .) && unzip -Z1 /data2/xmz.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: a.txt\n  adding: sub/\n  adding: sub/b.txt\na.txt\nsub/\nsub/b.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_zip_gathers_operands_from_both_mounts",
+      "seq": 602022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xmza /data2/xmzb && printf 'a\\n' > /data/xmza/a.txt && printf 'b\\n' > /data2/xmzb/b.txt && zip -qr /data2/xmzab.zip /data/xmza /data2/xmzb && unzip -Z1 /data2/xmzab.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "data/xmza/\ndata/xmza/a.txt\ndata2/xmzb/\ndata2/xmzb/b.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }

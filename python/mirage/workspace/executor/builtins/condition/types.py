@@ -18,7 +18,7 @@ from typing import Union
 from mirage.ops.types import SessionView
 from mirage.runtime.types import DispatchFn
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 CondNode = Union["CondWord", "CondUnary", "CondBinary", "CondNot", "CondAnd",
                  "CondOr"]
@@ -91,7 +91,7 @@ class CondError(Exception):
 class CondContext:
     dispatch: DispatchFn
     namespace: Namespace
-    session: Session
+    session: SessionState
     name: str
     # The session plane's gated door, which an assignment inside a
     # numeric operand lands through; None outside a workspace.

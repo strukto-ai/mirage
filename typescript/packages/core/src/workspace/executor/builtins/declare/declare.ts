@@ -21,7 +21,7 @@ import { sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import type { ShellValue, VarAttr } from '../../../../shell/variable.ts'
 import { attrLetters } from '../../../../shell/variable.ts'
 import { conversionScalar, setAttr, shadowLocal, subscriptIndex } from '../../../session/state.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { arithRefusal, isValidName, readonlyRefusal, refusal } from '../shared.ts'
@@ -79,7 +79,7 @@ export async function premark(
  */
 export async function storeStagedArrays(
   cmd: string,
-  session: Session,
+  session: SessionState,
   view: SessionView,
   arrays: { name: string; append: boolean; items: string[] }[],
   mark: VarAttr | null = null,
@@ -293,7 +293,7 @@ export function identifierFailure(cmd: string, errors: string[]): Result {
  * A hidden name answers null, the same way `isReadonly` answers false for
  * one: reporting it as declared would leak it.
  */
-export function declareLine(session: Session, name: string): string | null {
+export function declareLine(session: SessionState, name: string): string | null {
   if (varHidden(session.hiddenVars, name)) return null
   const v = sessionEntry(session.vars, name)
   if (v === undefined) return null
@@ -322,7 +322,7 @@ export function declareLine(session: Session, name: string): string | null {
  * end -- GNU prints the names it knows and refuses only the ones it does
  * not. Bare `declare -p` lists every visible name sorted.
  */
-export function handleDeclarePrint(names: string[], session: Session): Result {
+export function handleDeclarePrint(names: string[], session: SessionState): Result {
   const targets = names.length > 0 ? names : Object.keys(session.vars).sort(compareCodePoints)
   const lines: string[] = []
   const errors: string[] = []
@@ -367,7 +367,7 @@ export function readonlyFunctionUnset(name: string): Result {
  * which mirage does not carry, so the body line is the one deliberate
  * omission.
  */
-export function readonlyFunctions(session: Session, names: readonly string[]): Result {
+export function readonlyFunctions(session: SessionState, names: readonly string[]): Result {
   if (names.length === 0) {
     const lines = [...session.readonlyFunctions]
       .filter((name) => name in session.functions)
@@ -407,7 +407,7 @@ export function readonlyFunctions(session: Session, names: readonly string[]): R
  */
 export function handleDeclareFunctions(
   cmd: string,
-  session: Session,
+  session: SessionState,
   flags: ReadonlySet<string>,
   names: readonly string[],
 ): Result {
@@ -440,7 +440,7 @@ export function handleDeclareFunctions(
  * in `executeCommand`. Returns true when a function scope is active, so
  * the caller should shadow rather than reuse whatever is already there.
  */
-export function noteLocalArray(session: Session, name: string): boolean {
+export function noteLocalArray(session: SessionState, name: string): boolean {
   const locals = session.localVars
   if (locals === null) return false
   shadowLocal(session, locals, name)
@@ -481,7 +481,7 @@ export function namerefRefusal(cmd: string, name: string, target: string): strin
  * through the door with the two swapped for its duration.
  */
 export async function writeGlobal(
-  session: Session,
+  session: SessionState,
   view: SessionView,
   key: string,
   value: ShellValue,

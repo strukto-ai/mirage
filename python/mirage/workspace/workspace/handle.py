@@ -19,16 +19,16 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.ops.ops import Ops
 from mirage.provision import ProvisionResult
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 if TYPE_CHECKING:
     from mirage.workspace.workspace.workspace import Workspace
 
 
-class SessionHandle:
+class Session:
     """One session's two doors, bound together.
 
-    ``execute`` runs a line as the session and ``fs`` is the op facade
+    ``shell`` runs a line as the session and ``vfs`` is the op facade
     run as it, so a host holds one object per agent and both doors
     answer under the same profile: hides, mount modes, grants and
     standing decisions. Nothing is stored here; the session record
@@ -45,54 +45,53 @@ class SessionHandle:
         return self._id
 
     @property
-    def state(self) -> Session:
+    def state(self) -> SessionState:
         """The session record: cwd, env, modes, hides, decisions."""
         return self._ws.get_session(self._id)
 
     @property
-    def fs(self) -> Ops:
+    def vfs(self) -> Ops:
         """The op facade run as this session."""
-        return self._ws.fs.for_session(self._id)
+        return self._ws.vfs._for_session(self._id)
 
     @overload
-    async def execute(self,
-                      command: str,
-                      stdin: ByteSource | None = ...,
-                      provision: Literal[False] = ...,
-                      agent_id: str | None = ...,
-                      cwd: str | None = ...,
-                      env: dict[str, str] | None = ...,
-                      cancel: asyncio.Event | None = ...,
-                      record: bool = ...,
-                      runtime: str | None = ...) -> IOResult:
+    async def shell(self,
+                    command: str,
+                    stdin: ByteSource | None = ...,
+                    provision: Literal[False] = ...,
+                    agent_id: str | None = ...,
+                    cwd: str | None = ...,
+                    env: dict[str, str] | None = ...,
+                    cancel: asyncio.Event | None = ...,
+                    record: bool = ...,
+                    runtime: str | None = ...) -> IOResult:
         ...
 
     @overload
-    async def execute(self,
-                      command: str,
-                      stdin: ByteSource | None = ...,
-                      *,
-                      provision: Literal[True],
-                      agent_id: str | None = ...,
-                      cwd: str | None = ...,
-                      env: dict[str, str] | None = ...,
-                      cancel: asyncio.Event | None = ...,
-                      record: bool = ...,
-                      runtime: str | None = ...) -> ProvisionResult:
+    async def shell(self,
+                    command: str,
+                    stdin: ByteSource | None = ...,
+                    *,
+                    provision: Literal[True],
+                    agent_id: str | None = ...,
+                    cwd: str | None = ...,
+                    env: dict[str, str] | None = ...,
+                    cancel: asyncio.Event | None = ...,
+                    record: bool = ...,
+                    runtime: str | None = ...) -> ProvisionResult:
         ...
 
-    async def execute(
-            self,
-            command: str,
-            stdin: ByteSource | None = None,
-            provision: bool = False,
-            agent_id: str | None = None,
-            cwd: str | None = None,
-            env: dict[str, str] | None = None,
-            cancel: asyncio.Event | None = None,
-            record: bool = True,
-            runtime: str | None = None) -> IOResult | ProvisionResult:
-        """Run a shell line as this session; ``Workspace.execute`` with
+    async def shell(self,
+                    command: str,
+                    stdin: ByteSource | None = None,
+                    provision: bool = False,
+                    agent_id: str | None = None,
+                    cwd: str | None = None,
+                    env: dict[str, str] | None = None,
+                    cancel: asyncio.Event | None = None,
+                    record: bool = True,
+                    runtime: str | None = None) -> IOResult | ProvisionResult:
+        """Run a shell line as this session; ``Workspace.shell`` with
         the session fixed.
 
         Args:
@@ -109,22 +108,22 @@ class SessionHandle:
             runtime (str | None): the runtime to route the line to.
         """
         if provision:
-            return await self._ws.execute(command,
-                                          session_id=self._id,
-                                          stdin=stdin,
-                                          provision=True,
-                                          agent_id=agent_id,
-                                          cwd=cwd,
-                                          env=env,
-                                          cancel=cancel,
-                                          record=record,
-                                          runtime=runtime)
-        return await self._ws.execute(command,
-                                      session_id=self._id,
-                                      stdin=stdin,
-                                      agent_id=agent_id,
-                                      cwd=cwd,
-                                      env=env,
-                                      cancel=cancel,
-                                      record=record,
-                                      runtime=runtime)
+            return await self._ws.shell(command,
+                                        session_id=self._id,
+                                        stdin=stdin,
+                                        provision=True,
+                                        agent_id=agent_id,
+                                        cwd=cwd,
+                                        env=env,
+                                        cancel=cancel,
+                                        record=record,
+                                        runtime=runtime)
+        return await self._ws.shell(command,
+                                    session_id=self._id,
+                                    stdin=stdin,
+                                    agent_id=agent_id,
+                                    cwd=cwd,
+                                    env=env,
+                                    cancel=cancel,
+                                    record=record,
+                                    runtime=runtime)

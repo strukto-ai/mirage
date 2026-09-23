@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_UNIQ = RAM_COMMANDS.filter((c) => c.name === 'uniq' && c.filetype == null)
 
@@ -23,14 +23,14 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runUniq(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ lines: string[]; exitCode: number; stderr: string }> {
   const cmd = RAM_UNIQ[0]
   if (cmd === undefined) throw new Error('uniq not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -53,52 +53,52 @@ async function runUniq(
 
 describe('uniq', () => {
   it('removes consecutive duplicate lines', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc'))
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.exitCode).toBe(0)
     expect(r.lines).toEqual(['aaa', 'bbb', 'ccc'])
   })
 
   it('keeps non-consecutive duplicates', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\nbbb\naaa'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\nbbb\naaa'))
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.lines).toEqual(['aaa', 'bbb', 'aaa'])
   })
 
   it('-c prefixes each line with count', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { count: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc\nccc'))
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { count: true })
     expect(r.lines).toEqual(['      2 aaa', '      1 bbb', '      3 ccc'])
   })
 
   it('-d shows only duplicated lines', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { repeated: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc'))
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { repeated: true })
     expect(r.lines).toEqual(['aaa', 'ccc'])
   })
 
   it('-d with no duplicates produces empty output', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\nbbb\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { repeated: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\nbbb\nccc'))
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { repeated: true })
     expect(r.lines).toEqual([])
   })
 
   it('-u shows only unique lines', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { unique: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc'))
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { unique: true })
     expect(r.lines).toEqual(['bbb'])
   })
 
   it('-c -d combined', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc\nccc'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('aaa\naaa\nbbb\nccc\nccc\nccc'))
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       count: true,
       repeated: true,
     })
@@ -106,35 +106,35 @@ describe('uniq', () => {
   })
 
   it('empty file produces empty output', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', new Uint8Array())
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', new Uint8Array())
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.lines).toEqual([])
   })
 
   it('single line is passed through', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('hello'))
-    const r = await runUniq(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('hello'))
+    const r = await runUniq(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.lines).toEqual(['hello'])
   })
 
   it('reads from stdin when no path', async () => {
-    const resource = new RAMResource()
-    const r = await runUniq(resource, [], {}, ENC.encode('a\na\nb\n'))
+    const vfs = new RAMVFS()
+    const r = await runUniq(vfs, [], {}, ENC.encode('a\na\nb\n'))
     expect(r.lines).toEqual(['a', 'b'])
   })
 
   it('missing stdin and no path uses empty standard input', async () => {
-    const resource = new RAMResource()
-    const r = await runUniq(resource, [])
+    const vfs = new RAMVFS()
+    const r = await runUniq(vfs, [])
     expect(r.exitCode).toBe(0)
     expect(r.lines).toEqual([])
   })
 
   it('rejects trailing text in numeric options', async () => {
-    const resource = new RAMResource()
-    const r = await runUniq(resource, [], { skip_fields: '2junk' })
+    const vfs = new RAMVFS()
+    const r = await runUniq(vfs, [], { skip_fields: '2junk' })
     expect(r.exitCode).toBe(1)
     expect(r.stderr).toBe("uniq: invalid count: '2junk'\n")
   })

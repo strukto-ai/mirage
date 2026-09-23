@@ -20,8 +20,8 @@ import uuid
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
 from mirage.types import PathSpec
+from mirage.vfs.hf_buckets import HfBucketsConfig, HfBucketsVFS
 
 load_dotenv(".env.development")
 
@@ -30,12 +30,12 @@ config = HfBucketsConfig(
     token=os.environ["HF_TOKEN"],
 )
 
-resource = HfBucketsResource(config)
-ws = Workspace({"/hf/": resource}, mode=MountMode.WRITE)
+vfs = HfBucketsVFS(config)
+ws = Workspace({"/hf/": vfs}, mode=MountMode.WRITE)
 
 
 def ops_summary() -> str:
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
@@ -51,198 +51,198 @@ async def main():
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /hf/__nf_missing__.txt", "head /hf/__nf_missing__.txt",
                 "stat /hf/__nf_missing__.txt"):
-        result = await ws.execute(cmd)
+        result = await ws.shell(cmd)
         print(f"$ {cmd}")
         print(f"  exit={result.exit_code}  "
               f"{(await result.stderr_str()).strip()}")
 
     # ── discover structure ────────────────────────────
     print("=== ls /hf/ ===")
-    r = await ws.execute("ls /hf/")
+    r = await ws.shell("ls /hf/")
     print(await r.stdout_str())
 
     # ── tree ──────────────────────────────────────────
     print("=== tree /hf/ ===")
-    r = await ws.execute("tree /hf/")
+    r = await ws.shell("tree /hf/")
     print(await r.stdout_str())
 
     # ── stat (root + file) ──────────────────────────────
     print("=== stat /hf (root) ===")
-    r = await ws.execute("stat /hf")
+    r = await ws.shell("stat /hf")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print("\n=== stat /hf/example.json ===")
-    r = await ws.execute("stat /hf/example.json")
+    r = await ws.shell("stat /hf/example.json")
     print(f"  {(await r.stdout_str()).strip()}")
 
     # ── cat json ──────────────────────────────────────
     print("\n=== cat /hf/example.json | head -n 10 ===")
-    r = await ws.execute("cat /hf/example.json | head -n 10")
+    r = await ws.shell("cat /hf/example.json | head -n 10")
     print(await r.stdout_str())
 
     # ── head / tail on jsonl ──────────────────────────
     print("=== head -n 3 /hf/example.jsonl ===")
-    r = await ws.execute("head -n 3 /hf/example.jsonl")
+    r = await ws.shell("head -n 3 /hf/example.jsonl")
     print((await r.stdout_str())[:300])
 
     print("\n=== tail -n 2 /hf/example.jsonl ===")
-    r = await ws.execute("tail -n 2 /hf/example.jsonl")
+    r = await ws.shell("tail -n 2 /hf/example.jsonl")
     print((await r.stdout_str())[:300])
 
     # ── wc ────────────────────────────────────────────
     print("\n=== wc -l /hf/example.jsonl ===")
-    r = await ws.execute("wc -l /hf/example.jsonl")
+    r = await ws.shell("wc -l /hf/example.jsonl")
     print(f"  {(await r.stdout_str()).strip()}")
 
     # ── grep ──────────────────────────────────────────
     print("\n=== grep -c mirage /hf/example.jsonl ===")
-    r = await ws.execute("grep -c mirage /hf/example.jsonl")
+    r = await ws.shell("grep -c mirage /hf/example.jsonl")
     print(f"  count: {(await r.stdout_str()).strip()}")
 
     print("\n=== grep mirage /hf/example.jsonl | head -n 3 ===")
-    r = await ws.execute("grep mirage /hf/example.jsonl | head -n 3")
+    r = await ws.shell("grep mirage /hf/example.jsonl | head -n 3")
     lines = (await r.stdout_str()).strip().splitlines()
     for ln in lines:
         print(f"  {ln[:100]}...")
 
     # ── find ──────────────────────────────────────────
     print("\n=== find /hf/ -name '*.json' ===")
-    r = await ws.execute("find /hf/ -name '*.json'")
+    r = await ws.shell("find /hf/ -name '*.json'")
     print(await r.stdout_str())
 
     print("=== find /hf/ -name '*.parquet' ===")
-    r = await ws.execute("find /hf/ -name '*.parquet'")
+    r = await ws.shell("find /hf/ -name '*.parquet'")
     print(await r.stdout_str())
 
     # ── jq ────────────────────────────────────────────
     print("=== jq .metadata /hf/example.json ===")
-    r = await ws.execute("jq .metadata /hf/example.json")
+    r = await ws.shell("jq .metadata /hf/example.json")
     print(f"  {(await r.stdout_str()).strip()[:200]}")
 
     print("\n=== jq -r '.departments[].teams[].name'"
           " /hf/example.json ===")
-    r = await ws.execute('jq ".departments[].teams[].name" /hf/example.json')
+    r = await ws.shell('jq ".departments[].teams[].name" /hf/example.json')
     print(f"  {(await r.stdout_str()).strip()}")
 
     # ── pipelines ─────────────────────────────────────
     print("\n=== cat example.jsonl | grep queue-operation"
           " | sort | uniq | wc -l ===")
-    r = await ws.execute("cat /hf/example.jsonl"
-                         " | grep queue-operation | sort | uniq | wc -l")
+    r = await ws.shell("cat /hf/example.jsonl"
+                       " | grep queue-operation | sort | uniq | wc -l")
     print(f"  unique lines: {(await r.stdout_str()).strip()}")
 
     # ── cd + relative paths ───────────────────────────
     print("\n=== pwd ===")
-    r = await ws.execute("pwd")
+    r = await ws.shell("pwd")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print('\n=== cd /hf ===')
-    r = await ws.execute("cd /hf")
+    r = await ws.shell("cd /hf")
     print(f"  exit={r.exit_code}")
 
     print("\n=== pwd (after cd) ===")
-    r = await ws.execute("pwd")
+    r = await ws.shell("pwd")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print("\n=== ls (relative) ===")
-    r = await ws.execute("ls")
+    r = await ws.shell("ls")
     print(await r.stdout_str())
 
     print("=== head -n 3 example.json (relative) ===")
-    r = await ws.execute("head -n 3 example.json")
+    r = await ws.shell("head -n 3 example.json")
     print(await r.stdout_str())
 
     # ── streaming & barrier scenarios ─────────────────
     print("\n=== cat | grep | head (streaming drain) ===")
-    r = await ws.execute("cat /hf/example.jsonl | grep queue | head -n 3")
+    r = await ws.shell("cat /hf/example.jsonl | grep queue | head -n 3")
     lines = (await r.stdout_str()).strip().splitlines()
     print(f"  got {len(lines)} lines (expected 3)")
 
     print("\n=== grep -q && echo (barrier VALUE) ===")
-    r = await ws.execute('grep -q queue /hf/example.jsonl && echo "found"')
+    r = await ws.shell('grep -q queue /hf/example.jsonl && echo "found"')
     print(f"  stdout: {(await r.stdout_str()).strip()}")
     print(f"  exit: {r.exit_code}")
 
     print("\n=== grep -q || echo (barrier OR) ===")
-    r = await ws.execute('grep -q NONEXISTENT_STRING /hf/example.jsonl'
-                         ' || echo "not found"')
+    r = await ws.shell('grep -q NONEXISTENT_STRING /hf/example.jsonl'
+                       ' || echo "not found"')
     print(f"  stdout: {(await r.stdout_str()).strip()}")
     print(f"  exit: {r.exit_code}")
 
     print("\n=== grep ; grep (semicolon materialization) ===")
-    r = await ws.execute("grep -c queue /hf/example.jsonl"
-                         "; grep -c mirage /hf/example.jsonl")
+    r = await ws.shell("grep -c queue /hf/example.jsonl"
+                       "; grep -c mirage /hf/example.jsonl")
     print(f"  stdout: {(await r.stdout_str()).strip()}")
 
     print("\n=== grep missing ; echo $? (semicolon exit code) ===")
-    r = await ws.execute("grep NONEXISTENT_STRING /hf/example.jsonl"
-                         "; echo $?")
+    r = await ws.shell("grep NONEXISTENT_STRING /hf/example.jsonl"
+                       "; echo $?")
     print(f"  stdout: {(await r.stdout_str()).strip()}")
 
     print("\n=== cat nonexistent 2>&1 | head (stderr in pipe) ===")
-    r = await ws.execute("cat /hf/nonexistent_file 2>&1 | head -n 1")
+    r = await ws.shell("cat /hf/nonexistent_file 2>&1 | head -n 1")
     print(f"  stdout: {(await r.stdout_str()).strip()}")
     print(f"  exit: {r.exit_code}")
 
     print("\n=== cat nonexistent | cat (no merge: error in stderr) ===")
-    r = await ws.execute("cat /hf/nonexistent_file | cat")
+    r = await ws.shell("cat /hf/nonexistent_file | cat")
     print(f"  stdout: '{(await r.stdout_str()).strip()}' (expect empty)")
     print(f"  stderr: '{(await r.stderr_str()).strip()[:80]}'")
 
     print("\n=== cat nonexistent 2>&1 | cat (no double-emit) ===")
-    r = await ws.execute("cat /hf/nonexistent_file 2>&1 | cat")
+    r = await ws.shell("cat /hf/nonexistent_file 2>&1 | cat")
     out = (await r.stdout_str()).strip()
     err = (await r.stderr_str()).strip()
     print(f"  stdout: '{out[:80]}'")
     print(f"  stderr: '{err}' (expect empty: no double-emit)")
 
     print("\n=== cat large 2>&1 | wc -l (streams real payload) ===")
-    r = await ws.execute("wc -l /hf/example.jsonl")
+    r = await ws.shell("wc -l /hf/example.jsonl")
     expected = int((await r.stdout_str()).strip().split()[0])
-    r = await ws.execute("cat /hf/example.jsonl 2>&1 | wc -l")
+    r = await ws.shell("cat /hf/example.jsonl 2>&1 | wc -l")
     got = int((await r.stdout_str()).strip())
     print(f"  expected: {expected}  got: {got}  "
           f"{'OK' if got == expected else 'MISMATCH'}")
 
     print("\n=== cat | sort | uniq | wc -l (full pipeline) ===")
-    r = await ws.execute("cat /hf/example.jsonl | sort | uniq | wc -l")
+    r = await ws.shell("cat /hf/example.jsonl | sort | uniq | wc -l")
     print(f"  unique lines: {(await r.stdout_str()).strip()}")
 
     # ── background job scenarios ────────────────────
     print("\n=== grep -c & echo kicked off; wait (bg job) ===")
-    r = await ws.execute("grep -c queue /hf/example.jsonl &"
-                         " echo 'kicked off'; wait")
+    r = await ws.shell("grep -c queue /hf/example.jsonl &"
+                       " echo 'kicked off'; wait")
     print(f"  stdout: {(await r.stdout_str()).strip()}")
 
     print("\n=== sleep 0 & cat (bg doesn't consume stdin) ===")
-    r = await ws.execute("sleep 0 & cat /hf/example.json | head -n 1")
+    r = await ws.shell("sleep 0 & cat /hf/example.json | head -n 1")
     print(f"  stdout: {(await r.stdout_str()).strip()}")
 
     print("\n=== cat nonexistent & echo ok (bg error handled) ===")
-    r = await ws.execute("cat /hf/nonexistent_file & echo ok; wait; echo done")
+    r = await ws.shell("cat /hf/nonexistent_file & echo ok; wait; echo done")
     print(f"  stdout: {(await r.stdout_str()).strip()}")
     print(f"  exit: {r.exit_code}")
 
     print("\n=== multiple bg: grep & wc & wait (parallel) ===")
-    r = await ws.execute("grep -c queue /hf/example.jsonl &"
-                         " wc -l /hf/example.jsonl &"
-                         " wait; echo all done")
+    r = await ws.shell("grep -c queue /hf/example.jsonl &"
+                       " wc -l /hf/example.jsonl &"
+                       " wait; echo all done")
     print(f"  stdout: {(await r.stdout_str()).strip()}")
 
     # ── lazy stdin in loops ───────────────────────────
     print("\n=== head -n 5 | while read; do echo (bounded loop) ===")
-    r = await ws.execute("cat /hf/example.jsonl | head -n 5"
-                         " | while read LINE; do echo got; done | wc -l")
+    r = await ws.shell("cat /hf/example.jsonl | head -n 5"
+                       " | while read LINE; do echo got; done | wc -l")
     print(f"  iterations: {(await r.stdout_str()).strip()} (expected 5)")
 
     print("\n=== while read; break (early exit) ===")
-    r = await ws.execute("cat /hf/example.jsonl | head -n 100"
-                         " | while read LINE; do echo first; break; done")
+    r = await ws.shell("cat /hf/example.jsonl | head -n 100"
+                       " | while read LINE; do echo first; break; done")
     out = (await r.stdout_str()).strip().splitlines()
     print(f"  stdout lines: {len(out)} (expected 1)  exit={r.exit_code}")
 
     print("\n=== for x in a b c; do read LINE (loop reads buffer) ===")
-    r = await ws.execute(
+    r = await ws.shell(
         "cat /hf/example.jsonl | head -n 3"
         " | for x in a b c; do read LINE; echo \"$x:${LINE:0:30}\"; done")
     for line in (await r.stdout_str()).strip().splitlines():
@@ -250,32 +250,32 @@ async def main():
 
     # ── quoting / escaping ────────────────────────────
     print("\n=== echo \"\\$X\" (escaped dollar stays literal) ===")
-    await ws.execute("export X=expanded")
-    r = await ws.execute('echo "\\$X"')
+    await ws.shell("export X=expanded")
+    r = await ws.shell('echo "\\$X"')
     print(f"  stdout: {(await r.stdout_str()).strip()!r} (expect '$X')")
 
     print("\n=== echo \"$X\" (unescaped dollar expands) ===")
-    r = await ws.execute('echo "$X"')
+    r = await ws.shell('echo "$X"')
     print(f"  stdout: {(await r.stdout_str()).strip()!r} (expect 'expanded')")
 
     print("\n=== echo '$X' (single quotes keep $X literal) ===")
-    r = await ws.execute("echo '$X'")
+    r = await ws.shell("echo '$X'")
     print(f"  stdout: {(await r.stdout_str()).strip()!r} (expect '$X')")
 
     print("\n=== cat \"$DIR/example.json\" (env var in path) ===")
-    await ws.execute("export DIR=/hf")
-    r = await ws.execute('cat "$DIR/example.json" | head -n 3')
+    await ws.shell("export DIR=/hf")
+    r = await ws.shell('cat "$DIR/example.json" | head -n 3')
     out = (await r.stdout_str()).strip().splitlines()
     print(f"  first lines: {out}")
 
     print("\n=== cat $(echo /hf/example.json) | head -n 1"
           " (command sub as path) ===")
-    r = await ws.execute("cat $(echo /hf/example.json) | head -n 1")
+    r = await ws.shell("cat $(echo /hf/example.json) | head -n 1")
     print(f"  stdout: {(await r.stdout_str()).strip()}")
 
     print("\n=== grep \"$(echo queue)\" /hf/example.jsonl"
           " | wc -l (sub as pattern) ===")
-    r = await ws.execute('grep "$(echo queue)" /hf/example.jsonl | wc -l')
+    r = await ws.shell('grep "$(echo queue)" /hf/example.jsonl | wc -l')
     print(f"  count: {(await r.stdout_str()).strip()}")
 
     # ── PROVISION: estimate cost without executing ────────────────────
@@ -294,33 +294,33 @@ async def main():
     before_plan = ops_summary()
 
     # ── single-command plans (cache cleared, so network_read shows up) ──
-    dr = await ws.execute("cat /hf/example.json", provision=True)
+    dr = await ws.shell("cat /hf/example.json", provision=True)
     show_plan("cat /hf/example.json (file_read_provision)", dr)
 
-    dr = await ws.execute("wc -l /hf/example.jsonl", provision=True)
+    dr = await ws.shell("wc -l /hf/example.jsonl", provision=True)
     show_plan("wc -l /hf/example.jsonl (file_read_provision)", dr)
 
-    dr = await ws.execute("head -c 100 /hf/example.jsonl", provision=True)
+    dr = await ws.shell("head -c 100 /hf/example.jsonl", provision=True)
     show_plan("head -c 100 /hf/example.jsonl (byte budget, EXACT)", dr)
 
-    dr = await ws.execute("head -n 5 /hf/example.jsonl", provision=True)
+    dr = await ws.shell("head -n 5 /hf/example.jsonl", provision=True)
     show_plan("head -n 5 /hf/example.jsonl (line budget, RANGE)", dr)
     print(f"  range: [{dr.network_read_low}, {dr.network_read_high}]")
 
-    dr = await ws.execute("ls /hf/", provision=True)
+    dr = await ws.shell("ls /hf/", provision=True)
     show_plan("ls /hf/ (metadata_provision, 0 bytes)", dr)
 
-    dr = await ws.execute("stat /hf/example.json", provision=True)
+    dr = await ws.shell("stat /hf/example.json", provision=True)
     show_plan("stat /hf/example.json (metadata_provision)", dr)
 
-    dr = await ws.execute("grep mirage /hf/example.jsonl", provision=True)
+    dr = await ws.shell("grep mirage /hf/example.jsonl", provision=True)
     show_plan("grep mirage /hf/example.jsonl (grep_provision)", dr)
 
-    dr = await ws.execute("jq .metadata /hf/example.json", provision=True)
+    dr = await ws.shell("jq .metadata /hf/example.json", provision=True)
     show_plan("jq .metadata /hf/example.json (jq_provision)", dr)
 
     # ── compound plans ──
-    dr = await ws.execute("cat /hf/example.jsonl | head -n 3", provision=True)
+    dr = await ws.shell("cat /hf/example.jsonl | head -n 3", provision=True)
     print("\n--- plan: cat | head -n 3 (pipeline with children) ---")
     print(f"  op: {dr.op}  children: {len(dr.children)}  "
           f"precision: {dr.precision}")
@@ -329,8 +329,8 @@ async def main():
         print(f"    {c.command}: net={c.network_read}  "
               f"cache={c.cache_read}  {c.precision}")
 
-    dr = await ws.execute("grep mirage /hf/example.jsonl && echo found",
-                          provision=True)
+    dr = await ws.shell("grep mirage /hf/example.jsonl && echo found",
+                        provision=True)
     print("\n--- plan: grep ... && echo found (compound) ---")
     print(f"  op: {dr.op}  network_read: {dr.network_read}")
     for c in dr.children:
@@ -341,10 +341,10 @@ async def main():
 
     # ── cache-aware plan: same command after caching the file ──
     print("\n--- caching: cat /hf/example.json | wc -c ---")
-    r = await ws.execute("cat /hf/example.json | wc -c")
+    r = await ws.shell("cat /hf/example.json | wc -c")
     print(f"  bytes: {(await r.stdout_str()).strip()}")
 
-    dr = await ws.execute("cat /hf/example.json", provision=True)
+    dr = await ws.shell("cat /hf/example.json", provision=True)
     print("\n--- plan after cache: cat /hf/example.json ---")
     print(f"  network_read: {dr.network_read}  "
           f"cache_read: {dr.cache_read}  cache_hits: {dr.cache_hits}")
@@ -353,16 +353,16 @@ async def main():
     # ── chunk-level streaming + multi-stage pipe backpressure ─────────
     print("\n=== STREAMING (single command) ===")
     target = "/hf/example.jsonl"
-    r = await ws.execute(f"stat -c '%s' {target}")
+    r = await ws.shell(f"stat -c '%s' {target}")
     size = int((await r.stdout_str()).strip())
     print(f"  object size: {size:,} bytes")
 
     async def measure(label: str, cmd: str) -> None:
-        before = sum(rec.bytes for rec in ws.fs.records)
+        before = sum(rec.bytes for rec in ws.vfs.records)
         t0 = time.monotonic()
-        r = await ws.execute(cmd)
+        r = await ws.shell(cmd)
         dt = time.monotonic() - t0
-        net = sum(rec.bytes for rec in ws.fs.records) - before
+        net = sum(rec.bytes for rec in ws.vfs.records) - before
         head = (await r.stdout_str()).strip().splitlines()
         first = head[0][:48] if head else ""
         print(f"  {label:42s} bytes={net:>10,}  t={dt:4.2f}s  "
@@ -396,7 +396,7 @@ async def main():
     await measure("non-cancellable: cat | wc -l", f"cat {target} | wc -l")
 
     # WRITE + REMOVE flow. HF Buckets silently drops zero-byte uploads,
-    # so we use ws.fs.write to push non-empty bytes (touch would no-op).
+    # so we use ws.vfs.write to push non-empty bytes (touch would no-op).
     # Demonstrates parent-dir index cache invalidation: without it, `ls`
     # after a write would return stale entries.
     test_file = f"/hf/test-{uuid.uuid4().hex[:8]}.txt"
@@ -404,39 +404,39 @@ async def main():
     print(f"\n=== WRITE + REMOVE FLOW (using {test_file}) ===")
 
     print(f"\n--- write '{test_file}' (14 bytes) ---")
-    await ws.fs.write(test_file, b"Hello, Mirage!")
+    await ws.vfs.write(test_file, b"Hello, Mirage!")
     print("  written")
 
     print(f"\n--- stat {test_file} (should succeed) ---")
-    r = await ws.execute(f"stat {test_file}")
+    r = await ws.shell(f"stat {test_file}")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print(f"\n--- cat {test_file} ---")
-    r = await ws.execute(f"cat {test_file}")
+    r = await ws.shell(f"cat {test_file}")
     print(f"  {(await r.stdout_str()).strip()!r}")
 
     print(f"\n--- rm {test_file} ---")
-    r = await ws.execute(f"rm {test_file}")
+    r = await ws.shell(f"rm {test_file}")
     print(f"  exit: {r.exit_code}")
 
     print(f"\n--- stat {test_file} (should fail: not found) ---")
-    r = await ws.execute(f"stat {test_file}")
+    r = await ws.shell(f"stat {test_file}")
     err = (await r.stderr_str()).strip()[:80]
     print(f"  exit: {r.exit_code}  stderr: {err}")
 
     # touch on an existing file is still tested (no-op when c=False but
     # file exists, since exists() short-circuits).
     print("\n--- touch on existing file (no-op) ---")
-    r = await ws.execute("touch /hf/example.json")
+    r = await ws.shell("touch /hf/example.json")
     print(f"  exit: {r.exit_code}")
 
     # chmod/chown/touch never hit the Hub API: attrs land in the
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print("=== metadata overlay on /hf/example.json ===")
-    meta_res = await ws.execute('chmod 640 "/hf/example.json"'
-                                ' && chown 500:dev "/hf/example.json"'
-                                ' && touch -t 202601021530 "/hf/example.json"')
+    meta_res = await ws.shell('chmod 640 "/hf/example.json"'
+                              ' && chown 500:dev "/hf/example.json"'
+                              ' && touch -t 202601021530 "/hf/example.json"')
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch("stat",
                                    PathSpec.from_str_path("/hf/example.json"))

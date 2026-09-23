@@ -40,7 +40,7 @@
         {
           "op": "mount",
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "mode": "write",
           "expect": {
@@ -94,7 +94,7 @@
         {
           "op": "mount",
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "mode": "write",
           "expect": {
@@ -164,11 +164,11 @@
         "mode": "write",
         "mounts": {
           "/a": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           },
           "/b": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         }
@@ -241,11 +241,11 @@
         "mode": "write",
         "mounts": {
           "/a": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           },
           "/b": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         },
@@ -319,7 +319,7 @@
         {
           "op": "mount",
           "path": "/a",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "mode": "write",
           "expect": {
@@ -377,11 +377,11 @@
         "mode": "write",
         "mounts": {
           "/": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           },
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         }
@@ -432,7 +432,7 @@
         {
           "op": "mount",
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "mode": "write",
           "expect": {
@@ -474,7 +474,7 @@
         {
           "op": "mount",
           "path": "/parent",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "mode": "write",
           "expect": {
@@ -484,7 +484,7 @@
         {
           "op": "mount",
           "path": "/parent/child",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "mode": "write",
           "expect": {
@@ -574,7 +574,7 @@
         {
           "op": "mount",
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "expect": {
             "value": "/data/"
@@ -591,7 +591,7 @@
         {
           "op": "mount",
           "path": "data/",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "expect": {
             "error": "duplicate mount prefix"
@@ -672,7 +672,7 @@
         {
           "op": "mount",
           "path": "/late",
-          "resource": "ram",
+          "vfs": "ram",
           "config": {},
           "expect": {
             "error": "Workspace is closed"
@@ -693,11 +693,11 @@
         "mode": "write",
         "mounts": {
           "/work": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         },
-        "runtimes": ["vfs"]
+        "runtimes": ["workspace"]
       },
       "steps": [
         {
@@ -964,11 +964,11 @@
         "mode": "write",
         "mounts": {
           "/work": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         },
-        "runtimes": ["vfs"]
+        "runtimes": ["workspace"]
       },
       "steps": [
         {
@@ -1140,11 +1140,11 @@
         "mode": "write",
         "mounts": {
           "/work": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         },
-        "runtimes": ["vfs"]
+        "runtimes": ["workspace"]
       },
       "steps": [
         {
@@ -1377,11 +1377,11 @@
         "mode": "write",
         "mounts": {
           "/work": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         },
-        "runtimes": ["monty", "vfs"]
+        "runtimes": ["monty", "workspace"]
       },
       "steps": [
         {
@@ -1583,11 +1583,11 @@
         "mode": "write",
         "mounts": {
           "/work": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         },
-        "runtimes": ["vfs"]
+        "runtimes": ["workspace"]
       },
       "steps": [
         {
@@ -1873,11 +1873,11 @@
         "mode": "write",
         "mounts": {
           "/work": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         },
-        "runtimes": ["vfs"]
+        "runtimes": ["workspace"]
       },
       "steps": [
         {
@@ -1938,12 +1938,12 @@
       ]
     },
     {
-      "id": "remount_evicts_the_previous_resources_cached_bytes",
+      "id": "remount_evicts_the_previous_vfs_cached_bytes",
       "settings": {
         "mode": "write",
         "mounts": {
           "/data": {
-            "resource": "cached-ram",
+            "vfs": "cached-ram",
             "config": {
               "files": {
                 "/file.txt": "old account\n"
@@ -1951,7 +1951,7 @@
             }
           },
           "/database": {
-            "resource": "cached-ram",
+            "vfs": "cached-ram",
             "config": {
               "files": {
                 "/file.txt": "peer\n"
@@ -2018,7 +2018,7 @@
         {
           "op": "mount",
           "path": "/data",
-          "resource": "cached-ram",
+          "vfs": "cached-ram",
           "config": {
             "files": {
               "/file.txt": "new account\n"
@@ -2060,7 +2060,7 @@
         {
           "op": "mount",
           "path": "/data",
-          "resource": "cached-ram",
+          "vfs": "cached-ram",
           "config": {
             "files": {}
           },
@@ -2094,7 +2094,7 @@
         "mode": "write",
         "mounts": {
           "/parent": {
-            "resource": "cached-ram",
+            "vfs": "cached-ram",
             "config": {
               "files": {
                 "/child/file": "ancestor",
@@ -2126,7 +2126,7 @@
         {
           "op": "mount",
           "path": "/parent/child",
-          "resource": "cached-ram",
+          "vfs": "cached-ram",
           "config": {
             "files": {
               "/file": "child"
@@ -2191,7 +2191,7 @@
         "mode": "write",
         "mounts": {
           "/parent": {
-            "resource": "cached-ram",
+            "vfs": "cached-ram",
             "config": {
               "files": {
                 "/child/stale.txt": "ancestor\n"
@@ -2215,7 +2215,7 @@
         {
           "op": "mount",
           "path": "/parent/child",
-          "resource": "cached-ram",
+          "vfs": "cached-ram",
           "mode": "write",
           "config": {
             "files": {
@@ -2304,7 +2304,7 @@
         "mode": "write",
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         }
@@ -2388,7 +2388,7 @@
         "mode": "write",
         "mounts": {
           "/a": {
-            "resource": "ram",
+            "vfs": "ram",
             "config": {}
           }
         }
@@ -2486,6 +2486,85 @@
               "stdout": "1\n",
               "stderr": ""
             }
+          }
+        }
+      ]
+    },
+    {
+      "id": "same_session_lines_run_one_at_a_time",
+      "settings": {
+        "mode": "write",
+        "mounts": {}
+      },
+      "steps": [
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "for f in A1 A2 A3; do sleep 0.01; echo \"A:$f\"; done"
+            },
+            {
+              "op": "exec",
+              "command": "eval 'for f in B1 B2 B3; do sleep 0.01; echo \"B:$f\"; done'"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "A:A1\nA:A2\nA:A3\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "B:B1\nB:B2\nB:B3\n",
+                "stderr": ""
+              }
+            ]
+          }
+        },
+        {
+          "op": "exec",
+          "command": "echo $f",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "B3\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "session",
+          "id": "other"
+        },
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "f=default; sleep 0.05; echo $f"
+            },
+            {
+              "op": "exec",
+              "command": "f=other; echo $f",
+              "session": "other"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "default\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "other\n",
+                "stderr": ""
+              }
+            ]
           }
         }
       ]

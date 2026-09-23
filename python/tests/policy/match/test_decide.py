@@ -28,7 +28,7 @@ class _Registry:
 def _path(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0] or "/",
-                    resource_path=virtual,
+                    vfs_path=virtual,
                     resolved=True,
                     raw_path=virtual)
 

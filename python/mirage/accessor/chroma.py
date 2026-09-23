@@ -3,7 +3,7 @@ from typing import Any
 import chromadb
 
 from mirage.accessor.base import Accessor
-from mirage.resource.chroma.config import ChromaConfig
+from mirage.vfs.chroma.config import ChromaConfig
 
 
 class ChromaAccessor(Accessor):

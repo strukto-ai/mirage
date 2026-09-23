@@ -21,6 +21,12 @@ import { makeGenericOps, type OpsTable } from './factory.ts'
 const PATH = PathSpec.fromStrPath('/x/a.txt', 'a.txt')
 const ACCESSOR = new Accessor()
 
+function appendOp(table: OpsTable): ReturnType<typeof makeGenericOps>[number] {
+  const op = makeGenericOps('x', table).find((o) => o.name === 'append')
+  if (op === undefined) throw new Error('no append op emitted')
+  return op
+}
+
 const makeTable = (extra: Partial<OpsTable> = {}): OpsTable => ({
   readdir: vi.fn(() => Promise.resolve(['/x/a.txt'])),
   readBytes: vi.fn(() => Promise.resolve(new Uint8Array([1, 2, 3, 4]))),
@@ -34,12 +40,7 @@ const rows = (
   ops
     .map(
       (o) =>
-        [o.name, o.resource, o.filetype, o.write] as [
-          string,
-          string | null,
-          string | null,
-          boolean,
-        ],
+        [o.name, o.vfs, o.filetype, o.write] as [string, string | null, string | null, boolean],
     )
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
 
@@ -86,10 +87,10 @@ describe('makeGenericOps', () => {
     expect(ops.filter((o) => o.write).every((o) => o.name !== 'read')).toBe(true)
   })
 
-  it('fans out over multiple resources', () => {
+  it('fans out over multiple mounts', () => {
     const ops = makeGenericOps(['a', 'b'], makeTable())
     expect(ops).toHaveLength(6)
-    expect(new Set(ops.map((o) => o.resource))).toEqual(new Set(['a', 'b']))
+    expect(new Set(ops.map((o) => o.vfs))).toEqual(new Set(['a', 'b']))
   })
 
   it('skips names in overrides', () => {
@@ -166,6 +167,52 @@ describe('makeGenericOps', () => {
     expect(write).toHaveBeenCalledWith(ACCESSOR, PATH, new Uint8Array([1, 2, 3, 4, 0, 0]))
     await truncate?.fn(ACCESSOR, PATH, [2], {})
     expect(write).toHaveBeenLastCalledWith(ACCESSOR, PATH, new Uint8Array([1, 2]))
+  })
+
+  it('emulated append reads current bytes and creates missing files', async () => {
+    const write = vi.fn()
+    const readBytes = vi
+      .fn()
+      .mockResolvedValueOnce(new Uint8Array([1]))
+      .mockResolvedValueOnce(new Uint8Array([1, 2]))
+      .mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    const op = appendOp(makeTable({ write, readBytes }))
+    for (const value of [2, 3, 4]) await op.fn(ACCESSOR, PATH, [new Uint8Array([value])], {})
+    expect(write).toHaveBeenNthCalledWith(1, ACCESSOR, PATH, new Uint8Array([1, 2]))
+    expect(write).toHaveBeenNthCalledWith(2, ACCESSOR, PATH, new Uint8Array([1, 2, 3]))
+    expect(write).toHaveBeenNthCalledWith(3, ACCESSOR, PATH, new Uint8Array([4]))
+  })
+
+  it('forwards the index into the emulated append pre-read', async () => {
+    const table = makeTable({ write: vi.fn() })
+    const op = appendOp(table)
+    const index = {} as never
+    await op.fn(ACCESSOR, PATH, [new Uint8Array([1])], { index })
+    expect(table.readBytes).toHaveBeenCalledWith(ACCESSOR, PATH, index)
+  })
+
+  it('does not overwrite after an append pre-read fails', async () => {
+    const write = vi.fn()
+    const error = Object.assign(new Error('denied'), { code: 'EACCES' })
+    const readBytes = vi.fn().mockRejectedValue(error)
+    const op = appendOp(makeTable({ write, readBytes }))
+    await expect(op.fn(ACCESSOR, PATH, [new Uint8Array([1])], {})).rejects.toBe(error)
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('prefers native append and honors overrides over emulation', async () => {
+    const table = makeTable({ write: vi.fn(), append: vi.fn() })
+    const op = appendOp(table)
+    const data = new Uint8Array([1])
+    await op.fn(ACCESSOR, PATH, [data], {})
+    expect(table.append).toHaveBeenCalledWith(ACCESSOR, PATH, data)
+    expect(table.readBytes).not.toHaveBeenCalled()
+    expect(table.write).not.toHaveBeenCalled()
+    expect(
+      makeGenericOps('x', makeTable({ write: vi.fn() }), { overrides: new Set(['append']) }).some(
+        (o) => o.name === 'append',
+      ),
+    ).toBe(false)
   })
 
   it('native truncate wins over emulation', () => {

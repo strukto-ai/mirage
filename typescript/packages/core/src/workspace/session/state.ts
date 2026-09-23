@@ -34,7 +34,7 @@ import { draw, initialSeed } from './rng.ts'
 import { ownRecord, sessionEntry, setSessionEntry } from './session.ts'
 import type { ShellValue, ShellVar } from '../../shell/variable.ts'
 import { coerceValue, detach, makeVar, VarAttr, withAttr, withValue } from '../../shell/variable.ts'
-import type { Session } from './session.ts'
+import type { SessionState } from './session.ts'
 
 /**
  * The one copy-out of a session's environment.
@@ -53,7 +53,7 @@ import type { Session } from './session.ts'
  * (`export Z`) is absent too, which falls out of the value check
  * rather than needing its own arm.
  */
-export function envSnapshot(session: Session): Record<string, string> {
+export function envSnapshot(session: SessionState): Record<string, string> {
   const out = ownRecord<string>()
   for (const [name, v] of Object.entries(session.vars)) {
     if (
@@ -76,7 +76,7 @@ export function envSnapshot(session: Session): Record<string, string> {
  * read this and the process view reads `envSnapshot`, rather than one
  * of them re-deriving the other's filter.
  */
-export function exportedNames(session: Session): string[] {
+export function exportedNames(session: SessionState): string[] {
   const out: string[] = []
   for (const [name, v] of Object.entries(session.vars)) {
     if (v.attrs.has(VarAttr.Export) && !varHidden(session.hiddenVars, name)) {
@@ -92,7 +92,7 @@ export function exportedNames(session: Session): string[] {
  * before `r=v`): bash treats the first assignment as naming the target,
  * so until then it stands for nothing.
  */
-export function namerefTarget(session: Session, name: string): string | null {
+export function namerefTarget(session: SessionState, name: string): string | null {
   const v = sessionEntry(session.vars, name)
   if (!v?.attrs.has(VarAttr.Nameref)) return null
   return typeof v.value === 'string' && v.value ? v.value : null
@@ -107,7 +107,7 @@ export function namerefTarget(session: Session, name: string): string | null {
  * reference's own record. The warning line is the one part not
  * reproduced.
  */
-export function deref(session: Session, name: string): string {
+export function deref(session: SessionState, name: string): string {
   let current = name
   const seen = new Set<string>()
   for (;;) {
@@ -122,7 +122,7 @@ export function deref(session: Session, name: string): string {
 /** The variable's value, null when unset or hidden. Sync on purpose:
  * `$X` expansion is the hot path, so a read stays a record lookup plus
  * the hidden check. A name reference reads its target. */
-export function envGet(session: Session, name: string): string | null {
+export function envGet(session: SessionState, name: string): string | null {
   const resolved = deref(session, name)
   if (varHidden(session.hiddenVars, resolved)) return null
   const v = sessionEntry(session.vars, resolved)
@@ -136,7 +136,7 @@ export function envGet(session: Session, name: string): string | null {
  * visible world, and calling a name that reads as unset "readonly"
  * would leak it.
  */
-function envIsReadonly(session: Session, name: string): boolean {
+function envIsReadonly(session: SessionState, name: string): boolean {
   const resolved = deref(session, name)
   if (varHidden(session.hiddenVars, resolved)) return false
   const v = sessionEntry(session.vars, resolved)
@@ -162,7 +162,7 @@ function envIsReadonly(session: Session, name: string): boolean {
  * all along (`_VisibleEnv` beside `env_snapshot`); this is TS catching
  * up to it.
  */
-export function visibleEnv(session: Session): Record<string, string> {
+export function visibleEnv(session: SessionState): Record<string, string> {
   const out = ownRecord<string>()
   for (const [name, v] of Object.entries(session.vars)) {
     if (typeof v.value === 'string' && !varHidden(session.hiddenVars, name)) {
@@ -179,7 +179,7 @@ export function visibleEnv(session: Session): Record<string, string> {
  * `session.arrays` before narrowing, so a hidden name can hold an
  * array and array reads need the same filter env reads get.
  */
-export function visibleArrays(session: Session): Record<string, ShellArray> {
+export function visibleArrays(session: SessionState): Record<string, ShellArray> {
   const out = ownRecord<ShellArray>()
   for (const [name, v] of Object.entries(session.vars)) {
     if (Array.isArray(v.value) && !varHidden(session.hiddenVars, name)) {
@@ -202,7 +202,7 @@ export function visibleArrays(session: Session): Record<string, ShellArray> {
  * same reason both exist: the embedder can seed a hidden name with any
  * value shape, so every reader tier filters the same way.
  */
-export function visibleAssocs(session: Session): Record<string, Record<string, string>> {
+export function visibleAssocs(session: SessionState): Record<string, Record<string, string>> {
   const out = ownRecord<Record<string, string>>()
   for (const [name, v] of Object.entries(session.vars)) {
     if (
@@ -302,7 +302,7 @@ export function elementIndex(
  */
 class SessionElements implements ElementOps {
   constructor(
-    private readonly session: Session,
+    private readonly session: SessionState,
     private readonly reader: RandomReader | null = null,
   ) {}
 
@@ -349,7 +349,10 @@ class SessionElements implements ElementOps {
  * is the expression's `RANDOM` reader, so a subscript draws from the
  * same generator as the expression around it; null where nothing
  * draws. */
-export function sessionElements(session: Session, reader: RandomReader | null = null): ElementOps {
+export function sessionElements(
+  session: SessionState,
+  reader: RandomReader | null = null,
+): ElementOps {
   return new SessionElements(session, reader)
 }
 
@@ -358,7 +361,7 @@ export function sessionElements(session: Session, reader: RandomReader | null = 
  * an element is the array it lands in, the way `assignElement` lands
  * one, so a refusal never leaves a write half-applied.
  */
-function writtenValue(session: Session, write: ArithWrite): ShellValue {
+function writtenValue(session: SessionState, write: ArithWrite): ShellValue {
   if (write.key === null) return write.value
   const assoc = visibleAssocs(session)[write.name]
   if (assoc !== undefined) return { ...assoc, [write.key]: write.value }
@@ -383,7 +386,7 @@ function writtenValue(session: Session, write: ArithWrite): ShellValue {
  * value.
  */
 export async function subscriptIndex(
-  session: Session,
+  session: SessionState,
   subscript: string,
   view: SessionView | null = null,
 ): Promise<number> {
@@ -434,7 +437,7 @@ export async function subscriptIndex(
 /** Evaluate a host-supplied seed; invalid arithmetic propagates. Read
  * without the generator on offer: a host word naming `RANDOM` would
  * otherwise draw, and the draw reseed, without end. */
-export function seedFrom(word: string, session: Session): number {
+export function seedFrom(word: string, session: SessionState): number {
   const value = evaluateArith(word, visibleEnv(session), 0, sessionElements(session)).value
   const modulus = BigInt(RANDOM_MODULUS)
   return Number(((value % modulus) + modulus) % modulus)
@@ -444,7 +447,7 @@ export function seedFrom(word: string, session: Session): number {
  * Shell assignments validate and seed at the session door. A host-seeded
  * variable is consumed here on its first read. Reseeding resets repeat
  * suppression to zero independently of the stored word. */
-export function nextRandom(session: Session, stored: string | undefined): number | null {
+export function nextRandom(session: SessionState, stored: string | undefined): number | null {
   if (
     session.randomSeed === RANDOM_UNSET ||
     (stored === undefined && session.randomSeed !== null)
@@ -506,7 +509,7 @@ export class RandomReader {
   private last = 0
   private draws = 0
 
-  constructor(private readonly session: Session) {}
+  constructor(private readonly session: SessionState) {}
 
   private special(name: string): boolean {
     const session = this.session
@@ -561,7 +564,7 @@ export class RandomReader {
  * gated or not, since a host seeding an array onto the name means the
  * same thing.
  */
-export function noteRandomKind(session: Session, name: string, value: ShellValue): void {
+export function noteRandomKind(session: SessionState, name: string, value: ShellValue): void {
   if (name === RANDOM && typeof value !== 'string') session.randomSeed = RANDOM_UNSET
 }
 
@@ -573,7 +576,7 @@ export function noteRandomKind(session: Session, name: string, value: ShellValue
  * `RANDOM[1]=5` leaves `[0]` holding one draw and `declare -a RANDOM` one
  * alone, after which the array is ordinary.
  */
-export function conversionScalar(session: Session, name: string): string | undefined {
+export function conversionScalar(session: SessionState, name: string): string | undefined {
   if (name === RANDOM) {
     const drawn = nextRandom(session, visibleEnv(session)[RANDOM])
     if (drawn !== null) return String(drawn)
@@ -582,7 +585,7 @@ export function conversionScalar(session: Session, name: string): string | undef
 }
 
 /** Bind arithmetic `$RANDOM` reads to a session. */
-export function randomReader(session: Session): RandomReader {
+export function randomReader(session: SessionState): RandomReader {
   return new RandomReader(session)
 }
 
@@ -603,7 +606,7 @@ class IntegerCoercion {
   readonly reader: RandomReader
   readonly writes: ArithWrite[] = []
 
-  constructor(private readonly session: Session) {
+  constructor(private readonly session: SessionState) {
     this.reader = randomReader(session)
   }
 
@@ -635,7 +638,7 @@ class IntegerCoercion {
  * settle its `RANDOM` draws.
  */
 async function landCoercion(
-  session: Session,
+  session: SessionState,
   policies: Policies | null,
   coercion: IntegerCoercion,
 ): Promise<void> {
@@ -645,14 +648,14 @@ async function landCoercion(
   coercion.reader.settle()
 }
 
-export function ensureVarVisible(session: Session, name: string): void {
+export function ensureVarVisible(session: SessionState, name: string): void {
   if (varHidden(session.hiddenVars, name)) {
     throw new PolicyDenied(`${name}: permission denied`, name)
   }
 }
 
 async function setVar(
-  session: Session,
+  session: SessionState,
   policies: Policies | null,
   name: string,
   value: ShellValue,
@@ -739,7 +742,7 @@ async function setVar(
  * PolicyDenied when a preSession policy refuses the write.
  */
 async function unsetVar(
-  session: Session,
+  session: SessionState,
   policies: Policies | null,
   name: string,
   followRef = true,
@@ -772,7 +775,7 @@ async function unsetVar(
  * and `restoreLocals` hands the marker back.
  */
 export function shadowLocal(
-  session: Session,
+  session: SessionState,
   locals: Map<string, ShellVar | null>,
   name: string,
 ): void {
@@ -792,7 +795,7 @@ export function shadowLocal(
  * prints 11074 where 17772 was next); mirage resumes the caller's
  * sequence where it left off.
  */
-export function restoreLocals(session: Session, locals: Map<string, ShellVar | null>): void {
+export function restoreLocals(session: SessionState, locals: Map<string, ShellVar | null>): void {
   for (const [key, old] of locals) {
     if (old === null) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
@@ -822,7 +825,7 @@ export function restoreLocals(session: Session, locals: Map<string, ShellVar | n
  * `SessionView.set` instead, which is the whole point of the store being
  * read-only from outside.
  */
-export function seedVar(session: Session, name: string, value: ShellValue): void {
+export function seedVar(session: SessionState, name: string, value: ShellValue): void {
   const existing = sessionEntry(session.vars, name)
   setSessionEntry(
     session.vars,
@@ -845,7 +848,12 @@ export function seedVar(session: Session, name: string, value: ShellValue): void
  * `declare -- L` and `${L-d}` still expands to `d`, so those two cannot
  * route through a value writer either.
  */
-export function setAttr(session: Session, name: string, attr: VarAttr | null, on = true): void {
+export function setAttr(
+  session: SessionState,
+  name: string,
+  attr: VarAttr | null,
+  on = true,
+): void {
   const existing = sessionEntry(session.vars, name) ?? makeVar()
   setSessionEntry(session.vars, name, attr === null ? existing : withAttr(existing, attr, on))
 }
@@ -868,7 +876,7 @@ export function setAttr(session: Session, name: string, attr: VarAttr | null, on
  * attribute on a name the deployment refused it.
  */
 async function markVar(
-  session: Session,
+  session: SessionState,
   policies: Policies | null,
   name: string,
   attr: VarAttr | null,
@@ -888,7 +896,7 @@ async function markVar(
   setAttr(session, name, attr, on)
 }
 
-export function sessionView(session: Session, policies: Policies | null = null): SessionView {
+export function sessionView(session: SessionState, policies: Policies | null = null): SessionView {
   return {
     get: (name) => envGet(session, name),
     snapshot: () => envSnapshot(session),

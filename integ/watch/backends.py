@@ -29,17 +29,17 @@ from mirage.core.github.client import github_request
 from mirage.core.github.read import read_bytes
 from mirage.core.github.tree import fetch_tree
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.resource.box import BoxConfig, BoxResource
-from mirage.resource.disk import DiskResource
-from mirage.resource.dropbox import DropboxConfig, DropboxResource
-from mirage.resource.gdrive import GoogleDriveResource
-from mirage.resource.gdrive.config import GoogleDriveConfig
-from mirage.resource.github import GitHubConfig, GitHubResource
-from mirage.resource.gridfs import GridFSConfig, GridFSResource
-from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
-from mirage.resource.onedrive import OneDriveConfig, OneDriveResource
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.ssh import SSHConfig, SSHResource
+from mirage.vfs.box import BoxConfig, BoxVFS
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.dropbox import DropboxConfig, DropboxVFS
+from mirage.vfs.gdrive import GoogleDriveVFS
+from mirage.vfs.gdrive.config import GoogleDriveConfig
+from mirage.vfs.github import GitHubConfig, GitHubVFS
+from mirage.vfs.gridfs import GridFSConfig, GridFSVFS
+from mirage.vfs.hf_buckets import HfBucketsConfig, HfBucketsVFS
+from mirage.vfs.onedrive import OneDriveConfig, OneDriveVFS
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.ssh import SSHVFS, SSHConfig
 
 SERVER_DIR = Path(__file__).resolve().parents[1] / "server"
 GITHUB_OWNER = "integ"
@@ -47,7 +47,7 @@ GITHUB_REPO = "watch"
 GITHUB_REF = "main"
 
 Pair = tuple[Workspace, "WorkspaceWriter | GitHubWriter"]
-ResourceFactory = Callable[[], Any]
+VFSFactory = Callable[[], Any]
 
 
 class WorkspaceWriter:
@@ -81,7 +81,7 @@ class WorkspaceWriter:
             path (str): Mount-relative directory, trailing slash
                 optional.
         """
-        await self._ws.execute(f"mkdir -p {self._virtual(path)}")
+        await self._ws.shell(f"mkdir -p {self._virtual(path)}")
 
     async def write(self, path: str, data: bytes) -> None:
         """Args:
@@ -92,14 +92,14 @@ class WorkspaceWriter:
         parent = key.rsplit("/", 1)[0]
         if parent != key:
             await self.create_dir(parent)
-        await self._ws.fs.write(self._virtual(key), data)
+        await self._ws.vfs.write(self._virtual(key), data)
 
     async def delete(self, path: str) -> None:
         """Args:
             path (str): Mount-relative path; a directory goes with its
                 subtree, matching opendal's delete.
         """
-        await self._ws.execute(f"rm -rf {self._virtual(path)}")
+        await self._ws.shell(f"rm -rf {self._virtual(path)}")
 
     async def remove_all(self, path: str) -> None:
         """Args:
@@ -112,7 +112,7 @@ class WorkspaceWriter:
             path (str): Mount-relative source.
             to (str): Mount-relative destination.
         """
-        await self._ws.fs.rename(self._virtual(path), self._virtual(to))
+        await self._ws.vfs.rename(self._virtual(path), self._virtual(to))
 
     async def close(self) -> None:
         await self._ws.close()
@@ -122,7 +122,7 @@ class GitHubWriter:
     """External writer over GitHub's own contents API.
 
     Every other backend here is written through a second workspace,
-    which needs the resource to have write ops. GitHub's has none, and
+    which needs the VFS to have write ops. GitHub's has none, and
     should not: a mount is a read view of one ref, and a ref changes by
     being committed to. So this speaks what a committer speaks, ``PUT``
     and ``DELETE`` on ``/contents/{path}``, each carrying the blob sha
@@ -236,15 +236,15 @@ def _load(path: Path, name: str) -> ModuleType:
     return module
 
 
-def _pair(spec: dict, make: ResourceFactory) -> Pair:
+def _pair(spec: dict, make: VFSFactory) -> Pair:
     """Build the watched workspace and its external writer.
 
-    Each side gets its own resource instance over the same backend, so
+    Each side gets its own VFS instance over the same backend, so
     nothing is shared but the bytes.
 
     Args:
         spec (dict): Parsed case file.
-        make (ResourceFactory): Builds one fresh resource.
+        make (VFSFactory): Builds one fresh VFS.
     """
     mount = spec["mount"]
     watched = Workspace({mount: make()}, mode=MountMode.WRITE)
@@ -259,7 +259,7 @@ async def build_disk(spec: dict) -> Pair | None:
         spec (dict): Parsed case file.
     """
     root = tempfile.mkdtemp(prefix="mirage-watch-disk-")
-    return _pair(spec, lambda: DiskResource(root))
+    return _pair(spec, lambda: DiskVFS(root))
 
 
 async def build_ssh(spec: dict) -> Pair | None:
@@ -276,7 +276,7 @@ async def build_ssh(spec: dict) -> Pair | None:
     server = await module.start_server(root)
     port = server.get_port()
     return _pair(
-        spec, lambda: SSHResource(
+        spec, lambda: SSHVFS(
             SSHConfig(host="127.0.0.1",
                       port=port,
                       username="integ",
@@ -308,7 +308,7 @@ async def build_dropbox(spec: dict) -> Pair | None:
     # different accounts, so every poll would see an empty tree.
     account = f"watch-{uuid.uuid4().hex[:8]}"
     return _pair(
-        spec, lambda: DropboxResource(
+        spec, lambda: DropboxVFS(
             DropboxConfig(client_id="integ-client",
                           client_secret="integ-secret",
                           refresh_token=account,
@@ -331,7 +331,7 @@ async def build_s3(spec: dict) -> Pair | None:
         return None
     prefix = f"watch-{uuid.uuid4().hex[:8]}/"
     return _pair(
-        spec, lambda: S3Resource(
+        spec, lambda: S3VFS(
             S3Config(bucket=bucket,
                      region=os.environ.get("S3_REGION", "us-east-1"),
                      endpoint_url=endpoint,
@@ -355,7 +355,7 @@ async def build_gridfs(spec: dict) -> Pair | None:
         return None
     database = f"watch_{uuid.uuid4().hex[:8]}"
     return _pair(
-        spec, lambda: GridFSResource(
+        spec, lambda: GridFSVFS(
             GridFSConfig(uri=uri, database=database, bucket="fs")))
 
 
@@ -379,7 +379,7 @@ async def build_onedrive(spec: dict) -> Pair | None:
     # accounts, so every poll would see an empty tree.
     token = f"watch-{uuid.uuid4().hex[:8]}"
     return _pair(
-        spec, lambda: OneDriveResource(
+        spec, lambda: OneDriveVFS(
             OneDriveConfig(access_token=token, graph_base_url=url)))
 
 
@@ -414,7 +414,7 @@ async def build_box(spec: dict) -> Pair | None:
             resp.raise_for_status()
             folder_id = (await resp.json())["id"]
     return _pair(
-        spec, lambda: BoxResource(
+        spec, lambda: BoxVFS(
             BoxConfig(
                 access_token=token, endpoint=url, root_folder_id=folder_id)))
 
@@ -438,7 +438,7 @@ async def build_hf(spec: dict) -> Pair | None:
         return None
     token = f"watch-hf-{uuid.uuid4().hex[:8]}"
     return _pair(
-        spec, lambda: HfBucketsResource(
+        spec, lambda: HfBucketsVFS(
             HfBucketsConfig(
                 bucket="integ/watch", token=token, endpoint=url.rstrip("/"))))
 
@@ -470,7 +470,7 @@ async def build_gdrive(spec: dict) -> Pair | None:
             resp.raise_for_status()
             folder_id = (await resp.json())["id"]
     return _pair(
-        spec, lambda: GoogleDriveResource(
+        spec, lambda: GoogleDriveVFS(
             GoogleDriveConfig(client_id="integ-client",
                               client_secret="integ-secret",
                               refresh_token="integ-refresh",
@@ -510,8 +510,8 @@ async def build_github(spec: dict) -> Pair | None:
                           repo=GITHUB_REPO,
                           ref=GITHUB_REF,
                           base_url=url)
-    resource = GitHubResource(config)
-    ws = Workspace({spec["mount"]: resource}, mode=MountMode.WRITE)
+    vfs = GitHubVFS(config)
+    ws = Workspace({spec["mount"]: vfs}, mode=MountMode.WRITE)
     return ws, GitHubWriter(config, GITHUB_OWNER, GITHUB_REPO, GITHUB_REF)
 
 

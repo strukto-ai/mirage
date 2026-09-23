@@ -11,7 +11,13 @@ Every `Workspace` ships with a **two-layer cache** so repeated work against remo
 - **Index cache.** Listings and metadata. The first directory walk hits the API; subsequent ones serve from the index until the TTL expires.
 - **File cache.** Object bytes. The first read streams from origin; later pipelines read from cache.
 
-Under `ConsistencyPolicy.ALWAYS`, cached file bytes are checked against live backend metadata, bypassing the index. A changed fingerprint triggers a fresh read; a deleted file is evicted. If the backend cannot supply a fingerprint or its probe fails, the read must fetch current bytes or report an error. `LAZY` continues to trust cached bytes.
+Each mount declares how its cached bytes are served, with `read:` in its mount block. Under `read: fresh`, cached file bytes are checked against live backend metadata before being served, bypassing the index. A changed fingerprint triggers a fresh read; a deleted file is evicted. Under `read: bounded` — the default — cached bytes are trusted without a check, for as long as the mount's `ttl:` allows.
+
+`fresh` is refused at mount time on a backend that cannot honour it: one that does not cache reads has no gate to check at, and one whose `stat` and read stamp different kinds of token could never match. A mount that asked to revalidate and quietly did not is the failure the refusal exists to prevent, so the policy is never silently downgraded. See the [YAML reference](/home/yaml) for the keys and [the VFS matrix](/home/vfs-matrix) for which backends accept `fresh` today.
+
+The check happens wherever cached **bytes** are served, not only for the files a command names: a recursive walk, a glob and a cross-mount fan-out each revalidate every file whose content they read. That costs one backend stat per file, which is the price of the guarantee. One exemption, deliberate: the size a render-dependent backend cannot report for itself is filled from the cache without a check, so a metadata walk (`ls -lR`, `du`) can report a size from a stale render. Content is verified wherever it is served; that one derived number is not.
+
+When the check cannot be made — the backend supplies no fingerprint, registers no `stat` at all, or the probe itself fails — the cached copy is dropped and the read fetches current bytes. Bytes that could not be verified are never served, but a transient probe failure does not fail the command either: the cold read that follows reports any real backend failure in the command's own voice, and one flaky stat during a recursive walk costs that file a refetch rather than ending the walk.
 
 A fresh directory listing proves a child absent only when that child is not listed. If a listed child's metadata has been evicted independently, object-store stat fetches it from the backend.
 
@@ -28,20 +34,20 @@ Each layer is a pluggable store with two built-ins:
 from mirage import Workspace
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index.config import RedisIndexConfig
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.s3 import S3Config, S3VFS
 
 ws = Workspace(
-    {"/s3": S3Resource(S3Config(bucket="my-bucket"))},
+    {"/s3": S3VFS(S3Config(bucket="my-bucket"))},
     cache=RedisCacheConfig(url="redis://localhost:6379/0", limit="8GB"),
     index=RedisIndexConfig(url="redis://localhost:6379/0", ttl=600),
 )
 ```
 
 ```typescript TypeScript
-import { S3Resource, Workspace } from '@struktoai/mirage-node'
+import { S3VFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
-  { '/s3': new S3Resource({ bucket: 'my-bucket' }) },
+  { '/s3': new S3VFS({ bucket: 'my-bucket' }) },
   {
     cache: { type: 'redis', url: 'redis://localhost:6379/0', limit: '8GB' },
     index: { type: 'redis', url: 'redis://localhost:6379/0', ttl: 600 },
@@ -68,39 +74,39 @@ Raising the file limit keeps more bytes warm at the cost of memory; lengthening 
 
 ```python Python
 from mirage import Workspace
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.s3 import S3Config, S3VFS
 
-ws = Workspace({"/s3": S3Resource(S3Config(bucket="my-bucket"))})
+ws = Workspace({"/s3": S3VFS(S3Config(bucket="my-bucket"))})
 
 # 1. Index miss → S3 LIST. Listing stored in index cache.
-await ws.execute("ls /s3/data/")
+await ws.shell("ls /s3/data/")
 
 # 2. Index hit → 0 network calls.
-await ws.execute('find /s3/data/ -name "*.jsonl"')
+await ws.shell('find /s3/data/ -name "*.jsonl"')
 
 # 3. File miss → S3 GET. Bytes stored in file cache.
-await ws.execute("cat /s3/data/log.jsonl | wc -l")
+await ws.shell("cat /s3/data/log.jsonl | wc -l")
 
 # 4. File hit → 0 network calls.
-await ws.execute("grep alert /s3/data/log.jsonl")
+await ws.shell("grep alert /s3/data/log.jsonl")
 ```
 
 ```typescript TypeScript
-import { S3Resource, Workspace } from '@struktoai/mirage-node'
+import { S3VFS, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/s3': new S3Resource({ bucket: 'my-bucket' }) })
+const ws = new Workspace({ '/s3': new S3VFS({ bucket: 'my-bucket' }) })
 
 // 1. Index miss → S3 LIST. Listing stored in index cache.
-await ws.execute('ls /s3/data/')
+await ws.shell('ls /s3/data/')
 
 // 2. Index hit → 0 network calls.
-await ws.execute('find /s3/data/ -name "*.jsonl"')
+await ws.shell('find /s3/data/ -name "*.jsonl"')
 
 // 3. File miss → S3 GET. Bytes stored in file cache.
-await ws.execute('cat /s3/data/log.jsonl | wc -l')
+await ws.shell('cat /s3/data/log.jsonl | wc -l')
 
 // 4. File hit → 0 network calls.
-await ws.execute('grep alert /s3/data/log.jsonl')
+await ws.shell('grep alert /s3/data/log.jsonl')
 ```
 
 </CodeGroup>

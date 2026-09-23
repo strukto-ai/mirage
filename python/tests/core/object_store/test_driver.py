@@ -24,7 +24,7 @@ from tests.core.object_store.conftest import FakeStore, make_driver
 def test_driver_is_frozen():
     driver = make_driver(FakeStore())
     with pytest.raises(dataclasses.FrozenInstanceError):
-        driver.resource = "other"  # type: ignore[misc]
+        driver.vfs = "other"  # type: ignore[misc]
 
 
 def test_find_tree_defaults_to_none():

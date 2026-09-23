@@ -51,7 +51,7 @@ function document(
 
 function pathAt(virtual: string): PathSpec {
   return new PathSpec({
-    resourcePath: mountKey(virtual, '/knowledge'),
+    vfsPath: mountKey(virtual, '/knowledge'),
     virtual,
     directory: virtual,
   })

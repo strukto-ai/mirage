@@ -20,18 +20,18 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.core.slack.watch import SlackEventHook
-from mirage.resource.slack import SlackConfig, SlackResource
 from mirage.types import PathSpec
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
 
 MOUNT = "/slack"
-ROOT = PathSpec(virtual=MOUNT, directory=MOUNT, resource_path="")
+ROOT = PathSpec(virtual=MOUNT, directory=MOUNT, vfs_path="")
 
 config = SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])
-resource = SlackResource(config=config)
-ws = Workspace({MOUNT: resource}, mode=MountMode.READ)
-hook = SlackEventHook(resource.accessor)
+vfs = SlackVFS(config=config)
+ws = Workspace({MOUNT: vfs}, mode=MountMode.READ)
+hook = SlackEventHook(vfs.accessor)
 
 
 async def handle(request: web.Request) -> web.Response:

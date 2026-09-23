@@ -30,7 +30,7 @@ from mirage.utils.key_prefix import mount_key
 
 def _paths(*names: str) -> list[PathSpec]:
     return [
-        PathSpec(resource_path=mount_key(n, ""),
+        PathSpec(vfs_path=mount_key(n, ""),
                  virtual=n,
                  directory="/d",
                  resolved=True) for n in names
@@ -244,7 +244,7 @@ async def test_follow_reads_past_the_read_through_cache():
     # polls for exactly what that body does not have yet, so it reads
     # the backend itself, from the first print on.
     fs = _Growing({"/s3/a.txt": b"l1\n"})
-    spec = PathSpec(resource_path=mount_key("/s3/a.txt", "/s3/"),
+    spec = PathSpec(vfs_path=mount_key("/s3/a.txt", "/s3/"),
                     virtual="/s3/a.txt",
                     directory="/s3/",
                     resolved=True)

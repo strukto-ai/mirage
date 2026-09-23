@@ -16,7 +16,7 @@ import importlib.metadata
 import logging
 
 from mirage.commands.cli.types import CLISpec
-from mirage.resource.loader import load_attr
+from mirage.vfs.loader import load_attr
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # register_cli_spec before the workspace loads.
 CLI_SPECS: dict[str, CLISpec] = {}
 
-# Bundled program trees, resolved lazily like the resource registry:
+# Bundled program trees, resolved lazily like the VFS registry:
 # the modules pull optional extras (himalaya needs the email stack), so
 # they must not import until the name is actually requested.
 BUILTIN_CLI_SPECS: dict[str, str] = {
@@ -47,7 +47,7 @@ BUILTIN_CLI_SPECS: dict[str, str] = {
 #
 # The entry point must resolve to a CLISpec tree. Builtin and
 # explicitly registered names win over entry points, mirroring the
-# ``mirage.resources`` group.
+# ``mirage.vfs`` group.
 ENTRY_POINT_GROUP = "mirage.clis"
 _ENTRY_POINT_SPECS: dict[str, str] = {}
 _entry_points_loaded = False
@@ -97,7 +97,7 @@ def unregister_cli_spec(name: str) -> None:
 def cli_spec_for(name: str) -> CLISpec:
     """Resolve a YAML ``cli:`` value to its program tree, fail loud.
 
-    Resolution order mirrors ``build_resource``: registered names, then
+    Resolution order mirrors ``build_vfs``: registered names, then
     builtins, then a direct loader reference, then ``mirage.clis``
     entry points from installed packages. A value containing ``:`` is
     the reference form, pointing straight at a CLISpec attribute as

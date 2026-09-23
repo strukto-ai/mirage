@@ -107,7 +107,7 @@ function dateCommand(
 
 export const GENERAL_DATE = command({
   name: 'date',
-  resource: null,
+  vfs: null,
   spec: specOf('date'),
   fn: dateCommand,
   provision: pureProvision,

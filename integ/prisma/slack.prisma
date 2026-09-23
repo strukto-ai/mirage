@@ -22,16 +22,21 @@ datasource db {
   relationMode = "prisma"
 }
 
+// `membersJson` is the member ids; conversations.list reports only their
+// count (`num_members`), which is derived from it rather than stored beside it.
 model Channel {
-  tenant     String
-  id         String
-  name       String
-  kind       String
-  created    Int
-  isArchived Boolean @default(false)
-  isPrivate  Boolean @default(false)
-  dmUserId   String?
-  seq        Int
+  tenant      String
+  id          String
+  name        String
+  kind        String
+  created     Int
+  isArchived  Boolean @default(false)
+  isPrivate   Boolean @default(false)
+  dmUserId    String?
+  topic       String  @default("")
+  purpose     String  @default("")
+  membersJson String  @default("[]")
+  seq         Int
 
   @@id([tenant, id])
 }

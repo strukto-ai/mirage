@@ -16,7 +16,7 @@ import type { NotionAccessor } from '../../../accessor/notion.ts'
 import { find as notionFind } from '../../../core/notion/find.ts'
 import { resolveGlobOf } from '../generic_bind/index.ts'
 import { NOTION_IO } from './io.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { findGeneric } from '../generic/find.ts'
@@ -38,7 +38,7 @@ async function findCommand(
 
 export const NOTION_FIND = command({
   name: 'find',
-  resource: ResourceName.NOTION,
+  vfs: VFSName.NOTION,
   spec: specOf('find'),
   fn: findCommand,
   provision: metadataProvision,

@@ -192,7 +192,7 @@ export async function resolveParent(
   accessor: GDriveAccessor,
   path: PathSpec,
 ): Promise<[string, string | null]> {
-  const key = path.resourcePath
+  const key = path.vfsPath
   const parentKey = key.includes('/') ? key.slice(0, key.lastIndexOf('/')) : ''
   const trimmed = rstripSlash(path.virtual)
   const parentVirtual = trimmed.includes('/')

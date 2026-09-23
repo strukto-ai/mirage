@@ -34,7 +34,7 @@ def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
                    index: IndexCacheStore = NULL_INDEX) -> FileStat:
         virtual = path_spec.virtual
         original_prefix = mount_prefix_of(path_spec.virtual,
-                                          path_spec.resource_path)
+                                          path_spec.vfs_path)
         path = path_spec.virtual
         if original_prefix and path.startswith(original_prefix):
             path = path[len(original_prefix):] or "/"

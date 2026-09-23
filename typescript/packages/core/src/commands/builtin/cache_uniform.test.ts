@@ -50,7 +50,7 @@ function spec(): PathSpec {
   return new PathSpec({
     virtual: '/s3/a.txt',
     directory: '/s3/',
-    resourcePath: mountKey('/s3/a.txt', '/s3/'),
+    vfsPath: mountKey('/s3/a.txt', '/s3/'),
   })
 }
 

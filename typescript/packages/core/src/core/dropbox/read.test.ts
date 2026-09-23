@@ -61,7 +61,7 @@ describe('dropbox read', () => {
       new PathSpec({
         virtual: '/dropbox/note.txt',
         directory: '/dropbox',
-        resourcePath: mountKey('/dropbox/note.txt', '/dropbox'),
+        vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
       }),
       index,
     )
@@ -88,7 +88,7 @@ describe('dropbox read', () => {
       new PathSpec({
         virtual: '/dropbox/note.txt',
         directory: '/dropbox',
-        resourcePath: mountKey('/dropbox/note.txt', '/dropbox'),
+        vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
       }),
       index,
     )
@@ -106,7 +106,7 @@ describe('dropbox read', () => {
     await expect(
       read(
         accessor,
-        new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/docs' }),
+        new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
         index,
       ),
       // The stamped code is the signal, not the message: the message is the

@@ -19,8 +19,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.oci import OCIConfig, OCIResource
 from mirage.types import PathSpec
+from mirage.vfs.oci import OCIVFS, OCIConfig
 
 load_dotenv(".env.development")
 
@@ -33,12 +33,12 @@ config = OCIConfig(
     secret_access_key=os.environ["OCI_SECRET_ACCESS_KEY"],
 )
 
-backend = OCIResource(config)
+backend = OCIVFS(config)
 ws = Workspace({"/oci/": backend}, mode=MountMode.READ)
 
 
 def ops_summary() -> str:
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
@@ -46,14 +46,13 @@ def ops_summary() -> str:
 async def main():
     print("=== PLAN ESTIMATES ===\n")
 
-    dr = await ws.execute("grep mirage /oci/data/example.jsonl",
-                          provision=True)
+    dr = await ws.shell("grep mirage /oci/data/example.jsonl", provision=True)
     print("--- plan: grep mirage /oci/data/example.jsonl ---")
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
     print(f"  read_ops: {dr.read_ops}, precision: {dr.precision}")
 
-    dr = await ws.execute("grep mirage /oci/data/example.jsonl | head -n 3",
-                          provision=True)
+    dr = await ws.shell("grep mirage /oci/data/example.jsonl | head -n 3",
+                        provision=True)
     print("\n--- plan: grep mirage ... | head -n 3 ---")
     print(f"  op: {dr.op}, children: {len(dr.children)}")
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
@@ -62,8 +61,8 @@ async def main():
         net, cache = c.network_read, c.cache_read
         print(f"    {c.command}: net={net}, cache={cache}, {c.precision}")
 
-    dr = await ws.execute("grep mirage /oci/data/example.jsonl && echo found",
-                          provision=True)
+    dr = await ws.shell("grep mirage /oci/data/example.jsonl && echo found",
+                        provision=True)
     print("\n--- plan: grep ... && echo found ---")
     print(f"  op: {dr.op}, network_read: {dr.network_read}")
     for c in dr.children:
@@ -72,12 +71,11 @@ async def main():
     print(f"\n  Stats after plans (should be 0): {ops_summary()}")
 
     print("\n--- caching: cat /oci/data/example.jsonl | wc -l ---")
-    result = await ws.execute("cat /oci/data/example.jsonl | wc -l")
+    result = await ws.shell("cat /oci/data/example.jsonl | wc -l")
     print(f"  lines: {(await result.stdout_str()).strip()}")
     print(f"  Stats after caching: {ops_summary()}")
 
-    dr = await ws.execute("grep mirage /oci/data/example.jsonl",
-                          provision=True)
+    dr = await ws.shell("grep mirage /oci/data/example.jsonl", provision=True)
     print("\n--- plan after cache: grep mirage ... ---")
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
     print(f"  cache_hits: {dr.cache_hits}, read_ops: {dr.read_ops}")
@@ -86,7 +84,7 @@ async def main():
 
     print("--- grep mirage /oci/data/example.jsonl ---")
     output = await (
-        await ws.execute("grep mirage /oci/data/example.jsonl")).stdout_str()
+        await ws.shell("grep mirage /oci/data/example.jsonl")).stdout_str()
     lines = output.strip().splitlines() if output.strip() else []
     print(f"  Matches: {len(lines)}")
     if lines:
@@ -96,20 +94,19 @@ async def main():
     print("\n--- grep -m 1 mirage /oci/data/example.jsonl ---")
     output = await (
         await
-        ws.execute("grep -m 1 mirage /oci/data/example.jsonl")).stdout_str()
+        ws.shell("grep -m 1 mirage /oci/data/example.jsonl")).stdout_str()
     lines = output.strip().splitlines() if output.strip() else []
     print(f"  Matches: {len(lines)}")
     print(f"  Stats: {ops_summary()}")
 
     print("\n--- grep mirage /oci/data/example.jsonl | wc -l ---")
-    result = await ws.execute("grep mirage /oci/data/example.jsonl | wc -l")
+    result = await ws.shell("grep mirage /oci/data/example.jsonl | wc -l")
     print(f"  Count: {(await result.stdout_str()).strip()}")
     print(f"  Exit code: {result.exit_code}")
     print(f"  Stats: {ops_summary()}")
 
     print("\n--- grep mirage /oci/data/example.jsonl | head -n 3 ---")
-    result = await ws.execute("grep mirage /oci/data/example.jsonl | head -n 3"
-                              )
+    result = await ws.shell("grep mirage /oci/data/example.jsonl | head -n 3")
     lines = (await result.stdout_str()).strip().splitlines()
     print(f"  Lines: {len(lines)}")
     for ln in lines:
@@ -118,7 +115,7 @@ async def main():
 
     print("\n--- cat /oci/data/example.jsonl"
           " | grep queue-operation | sort | uniq ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "cat /oci/data/example.jsonl | grep queue-operation | sort | uniq")
     lines = ((await result.stdout_str()).strip().splitlines() if
              (await result.stdout_str()).strip() else [])
@@ -127,14 +124,14 @@ async def main():
 
     print("\n--- rg queue-operation /oci/data/example.jsonl"
           " | head -n 5 | cut -d , -f 2 ---")
-    result = await ws.execute("rg queue-operation /oci/data/example.jsonl | "
-                              "head -n 5 | cut -d , -f 2")
+    result = await ws.shell("rg queue-operation /oci/data/example.jsonl | "
+                            "head -n 5 | cut -d , -f 2")
     print(f"  Fields:\n    {(await result.stdout_str()).strip()}")
     print(f"  Stats: {ops_summary()}")
 
     print("\n--- grep -m 1 mirage /oci/data/example.jsonl"
           " && echo 'found mirage' ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "grep -m 1 mirage /oci/data/example.jsonl && echo found")
     print(f"  Exit code: {result.exit_code}")
     print(
@@ -143,7 +140,7 @@ async def main():
 
     print("\n--- grep NONEXISTENT /oci/data/example.jsonl"
           " || echo 'not found' ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "grep NONEXISTENT /oci/data/example.jsonl || echo not_found")
     print(f"  Exit code: {result.exit_code}")
     print(f"  Output: {(await result.stdout_str()).strip()}")
@@ -151,31 +148,30 @@ async def main():
 
     print("\n--- (grep queue-operation /oci/data/example.jsonl"
           " | sort | uniq) | wc -l ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "(grep queue-operation /oci/data/example.jsonl | sort | uniq) | wc -l")
     print(f"  Unique queue ops: {(await result.stdout_str()).strip()}")
     print(f"  Stats: {ops_summary()}")
 
     print("\n--- head -n 1 /oci/data/example.jsonl"
           " ; wc -l /oci/data/example.jsonl ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "head -n 1 /oci/data/example.jsonl ; wc -l /oci/data/example.jsonl")
     print(f"  Output: {(await result.stdout_str()).strip()}")
     print(f"  Stats: {ops_summary()}")
 
     print("\n--- lazy multi-pipe: grep | grep -v | head | cut ---")
-    result = await ws.execute("grep queue-operation /oci/data/example.jsonl"
-                              " | grep -v error | head -n 2 | cut -d , -f 1")
+    result = await ws.shell("grep queue-operation /oci/data/example.jsonl"
+                            " | grep -v error | head -n 2 | cut -d , -f 1")
     print(f"  Output:\n    {(await result.stdout_str()).strip()}")
 
-    result_full = await ws.execute(
-        "grep queue-operation /oci/data/example.jsonl"
-        " | grep -v error | cut -d , -f 1")
+    result_full = await ws.shell("grep queue-operation /oci/data/example.jsonl"
+                                 " | grep -v error | cut -d , -f 1")
     full_lines = (await result_full.stdout_str()).strip().splitlines()
     print(f"  Without head: {len(full_lines)} lines (full OCI download)")
 
     print("\n--- rg -l mirage /oci/data ---")
-    output = await (await ws.execute("rg -l mirage /oci/data")).stdout_str()
+    output = await (await ws.shell("rg -l mirage /oci/data")).stdout_str()
     lines = output.strip().splitlines() if output.strip() else []
     print(f"  Files: {lines}")
     print(f"  Stats: {ops_summary()}")
@@ -183,47 +179,46 @@ async def main():
     print("\n=== JQ QUERIES ===\n")
 
     print("--- jq .metadata ---")
-    result = await ws.execute("jq .metadata /oci/data/example.json")
+    result = await ws.shell("jq .metadata /oci/data/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: all team names (nested [] iterator) ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "jq \".departments[].teams[].name\" /oci/data/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: all employee names ---")
-    result = await ws.execute("jq \".departments[].teams[].members[].name\""
-                              " /oci/data/example.json")
+    result = await ws.shell("jq \".departments[].teams[].members[].name\""
+                            " /oci/data/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: senior engineers on platform ---")
-    result = await ws.execute("jq \".departments[0].teams[0].members"
-                              " | map(select(.level == \\\"senior\\\"))"
-                              " | map(.name)\" /oci/data/example.json")
+    result = await ws.shell("jq \".departments[0].teams[0].members"
+                            " | map(select(.level == \\\"senior\\\"))"
+                            " | map(.name)\" /oci/data/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: all active project names ---")
-    result = await ws.execute("jq \".departments[].teams[].projects"
-                              " | map(select(.status == \\\"active\\\"))"
-                              " | map(.name)\" /oci/data/example.json")
+    result = await ws.shell("jq \".departments[].teams[].projects"
+                            " | map(select(.status == \\\"active\\\"))"
+                            " | map(.name)\" /oci/data/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: mirage project metrics ---")
-    result = await ws.execute("jq .departments[0].teams[0].projects[0].metrics"
-                              " /oci/data/example.json")
+    result = await ws.shell("jq .departments[0].teams[0].projects[0].metrics"
+                            " /oci/data/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: total budget ---")
-    result = await ws.execute(
-        "jq .metadata.total_budget /oci/data/example.json")
+    result = await ws.shell("jq .metadata.total_budget /oci/data/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: compact JSON row ---")
-    result = await ws.execute("jq -c .metadata /oci/data/example.json")
+    result = await ws.shell("jq -c .metadata /oci/data/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: departments pretty json ---")
-    result = await ws.execute("jq .departments /oci/data/example.json")
+    result = await ws.shell("jq .departments /oci/data/example.json")
     parsed = json.loads(await result.stdout_str())
     print(f"  departments: {len(parsed)}")
     print(f"  first team: {parsed[0]['teams'][0]['name']}")
@@ -232,7 +227,7 @@ async def main():
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print("=== metadata overlay on /oci/data/example.jsonl ===")
-    meta_res = await ws.execute(
+    meta_res = await ws.shell(
         'chmod 640 "/oci/data/example.jsonl"'
         ' && chown 500:dev "/oci/data/example.jsonl"'
         ' && touch -t 202601021530 "/oci/data/example.jsonl"')

@@ -24,12 +24,12 @@ from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
 from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.expand.node import expand_node
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session, visible_env
+from mirage.workspace.session import SessionState, visible_env
 
 
 async def expand_redirects(
     redirects: list[Redirect],
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None = None,
@@ -46,7 +46,7 @@ async def expand_redirects(
 
     Args:
         redirects (list[Redirect]): parsed redirects from get_redirects.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.

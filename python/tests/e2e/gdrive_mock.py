@@ -276,7 +276,7 @@ def patch_gdrive(*pairs) -> ExitStack:
 
     Args:
         *pairs: tuples of (token_manager, FakeGDrive). The right fake is
-            selected by token_manager identity, so multiple gdrive resources
+            selected by token_manager identity, so multiple gdrive mounts
             can coexist with separate file trees.
     """
     if len(pairs) == 1 and isinstance(pairs[0], FakeGDrive):

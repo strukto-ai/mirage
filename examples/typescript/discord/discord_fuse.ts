@@ -16,7 +16,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import dotenv from "dotenv";
 import {
-  DiscordResource,
+  DiscordVFS,
   Mount,
   MountBackend,
   MountMode,
@@ -35,9 +35,9 @@ function buildConfig(): DiscordConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new DiscordResource(buildConfig());
+  const vfs = new DiscordVFS(buildConfig());
   const ws = new Workspace({
-    "/discord": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/discord": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

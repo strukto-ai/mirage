@@ -100,7 +100,7 @@ async function main(): Promise<void> {
         'revenue,100',
       ]
       for (const b of configured) {
-        hardExpectations.push(`${b.toUpperCase()} (/${b}/) — ws.execute shell`)
+        hardExpectations.push(`${b.toUpperCase()} (/${b}/) — ws.shell shell`)
       }
       const missingHard = hardExpectations.filter((s) => !text.includes(s))
       if (missingHard.length > 0) {

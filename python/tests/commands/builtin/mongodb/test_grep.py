@@ -22,8 +22,8 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.mongodb.grep import grep
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
-from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 GENERICS = "mirage.commands.builtin.generic_bind.search._GENERICS"
 SEARCH_COLLECTION = "mirage.core.mongodb.search.search_collection"
@@ -50,7 +50,7 @@ def _stat_reads(monkeypatch):
 
 
 def _path(s: str = "/db1/collections/coll1/documents.jsonl") -> PathSpec:
-    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
+    return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
 async def _drain(source) -> bytes:

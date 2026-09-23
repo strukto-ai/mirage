@@ -14,13 +14,13 @@
 
 import asyncio
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _ws():
-    mem = RAMResource()
+    mem = RAMVFS()
     return Workspace(
         {"/data": (mem, MountMode.WRITE)},
         mode=MountMode.WRITE,
@@ -29,7 +29,7 @@ def _ws():
 
 def _run_raw(ws, cmd, cwd="/", stdin=None):
     ws._cwd = cwd
-    io = asyncio.run(ws.execute(cmd, stdin=stdin))
+    io = asyncio.run(ws.shell(cmd, stdin=stdin))
     return io.stdout, io
 
 
@@ -70,7 +70,7 @@ def test_realpath_e_missing_message_not_doubled():
     ws = _ws()
 
     async def go():
-        io = await ws.execute("realpath -e /data/nope.txt")
+        io = await ws.shell("realpath -e /data/nope.txt")
         return io.exit_code, await io.stderr_str()
 
     code, err = asyncio.run(go())

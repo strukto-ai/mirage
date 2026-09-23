@@ -37,7 +37,7 @@ def test_file_flag_reads_the_promoted_path():
 
 
 def test_file_flag_keeps_the_mount_relative_path():
-    """The backend reader is addressed by resource_path, not by virtual.
+    """The backend reader is addressed by vfs_path, not by virtual.
 
     Handing the trello reader `/board/workspaces/...` makes every read
     miss: it keys off the path with the mount prefix already taken off,
@@ -46,14 +46,14 @@ def test_file_flag_keeps_the_mount_relative_path():
     """
     scoped = PathSpec(virtual="/board/w/x.json",
                       directory="/board/w/",
-                      resource_path="w/x.json",
+                      vfs_path="w/x.json",
                       raw_path="/board/w/x.json",
                       resolved=True)
     parsed = parse_flags(["--desc_file", scoped], SPEC, "trello card update",
                          "/")
     spec = file_operand(FlagView(parsed.flag_kwargs, spec=SPEC), "desc_file")
     assert spec is not None
-    assert spec.resource_path == "w/x.json"
+    assert spec.vfs_path == "w/x.json"
     assert spec.virtual == "/board/w/x.json"
 
 

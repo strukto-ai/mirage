@@ -81,7 +81,7 @@ async def resolve(accessor: SharePointAccessor,
     Returns:
         ResolvedPath: Resolved components.
     """
-    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+    prefix = mount_prefix_of(path.virtual, path.vfs_path) or ""
     raw = path.virtual
     if prefix and raw.startswith(prefix):
         rest = raw[len(prefix):]

@@ -23,7 +23,7 @@ from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.workspace.executor.builtins.script.bash import handle_bash
 from mirage.workspace.executor.builtins.script.script import (read_script_text,
                                                               script_error)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -76,7 +76,7 @@ async def handle_exec_path(
     execute_fn: Callable[..., Any],
     path: str,
     args: list[str],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a slash-carrying head word as a program, bash's loader rule.
@@ -102,7 +102,7 @@ async def handle_exec_path(
         execute_fn (Callable): runs a program line in this session.
         path (str): the head word, as typed.
         args (list[str]): the words after it, positional for the script.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (ByteSource | None): input stream for the script.
     """
     try:

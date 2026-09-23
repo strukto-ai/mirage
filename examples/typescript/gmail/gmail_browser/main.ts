@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GWS, GmailResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GWS, GmailVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
@@ -32,7 +32,7 @@ function buildConfig(): { clientId: string; clientSecret: string; refreshToken: 
 
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   if (r.exitCode !== 0 && r.stderrText !== '') {
     console.log(`  STDERR: ${r.stderrText.slice(0, 200)}`)
   }
@@ -46,13 +46,13 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 async function main(): Promise<void> {
   const cfg = buildConfig()
   console.log('Loading Gmail via @struktoai/mirage-browser …')
-  const resource = new GmailResource(cfg)
-  const ws = new Workspace({ '/gmail': resource }, { mode: MountMode.WRITE })
+  const vfs = new GmailVFS(cfg)
+  const ws = new Workspace({ '/gmail': vfs }, { mode: MountMode.WRITE })
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...cfg })
   try {
     console.log(
-      '=== BROWSER MODE: GmailResource → gmail.googleapis.com (CORS) ===\n',
+      '=== BROWSER MODE: GmailVFS → gmail.googleapis.com (CORS) ===\n',
     )
 
     await run(ws, 'ls /gmail/')

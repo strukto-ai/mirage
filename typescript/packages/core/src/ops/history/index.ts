@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { HISTORY_IO } from '../../commands/builtin/history/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const HISTORY_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.HISTORY, HISTORY_IO)
+export const HISTORY_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.HISTORY, HISTORY_IO)

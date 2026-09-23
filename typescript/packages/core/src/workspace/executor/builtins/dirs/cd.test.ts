@@ -16,7 +16,7 @@ import { varsFromEnv } from '../../../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../../types.ts'
 import { ContentType, FileType } from '../../../../types.ts'
-import { Session } from '../../../session/session.ts'
+import { SessionState } from '../../../session/session.ts'
 import type { DispatchFn } from '../../cross_mount.ts'
 import { handleCd } from './cd.ts'
 
@@ -42,8 +42,8 @@ function dispatcher(dirs: string[] = [], files: string[] = []) {
 
 const noMountRoot = () => false
 
-function session(cwd = '/', env: Record<string, string> = {}): Session {
-  return new Session({ sessionId: 'test', cwd, vars: varsFromEnv(env) })
+function session(cwd = '/', env: Record<string, string> = {}): SessionState {
+  return new SessionState({ sessionId: 'test', cwd, vars: varsFromEnv(env) })
 }
 
 function decode(b: Uint8Array | null): string {
@@ -216,7 +216,7 @@ describe('handleCd', () => {
     const operand = new PathSpec({
       virtual: '/link',
       directory: '/link/',
-      resourcePath: '',
+      vfsPath: '',
       rawPath: '..',
     })
     const [, io] = await handleCd(

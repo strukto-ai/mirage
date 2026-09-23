@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 from pydantic import ValidationError
 
-from mirage.types import (Aggr, FileStat, FileType, Limit, MountMode, OnExceed,
-                          PathSpec, parse_mount_mode, word_text)
+from mirage.types import (DEFAULT_READ_TTL, Aggr, CacheFacts, FileStat,
+                          FileType, Limit, MountMode, OnExceed, PathSpec,
+                          ReadPolicy, ReadSpec, parse_mount_mode, word_text)
 
 
 def test_filestat_defaults():
@@ -88,7 +91,7 @@ def test_every_field_declares_an_aggr_rule():
             for m in field.metadata), (f"field {name!r} has no Aggr rule")
 
 
-def test_pathspec_requires_resource_path():
+def test_pathspec_requires_vfs_path():
     with pytest.raises(TypeError):
         PathSpec(virtual="/x.txt", directory="/")
 
@@ -96,15 +99,13 @@ def test_pathspec_requires_resource_path():
 def test_pathspec_raw_path_kept_when_given():
     p = PathSpec(virtual="/data/a.txt",
                  directory="/data/",
-                 resource_path="a.txt",
+                 vfs_path="a.txt",
                  raw_path="../a.txt")
     assert p.raw_path == "../a.txt"
 
 
 def test_pathspec_raw_path_defaults_to_virtual():
-    p = PathSpec(virtual="/data/a.txt",
-                 directory="/data/",
-                 resource_path="a.txt")
+    p = PathSpec(virtual="/data/a.txt", directory="/data/", vfs_path="a.txt")
     assert p.raw_path == "/data/a.txt"
 
 
@@ -115,38 +116,36 @@ def test_word_text_passes_strings_through():
 def test_word_text_renders_paths_as_typed():
     p = PathSpec(virtual="/data/a.txt",
                  directory="/data/",
-                 resource_path="a.txt",
+                 vfs_path="a.txt",
                  raw_path="a.txt")
     assert word_text(p) == "a.txt"
 
 
-def test_pathspec_dir_trims_resource_path():
+def test_pathspec_dir_trims_vfs_path():
     p = PathSpec(virtual="/data/sub/x.txt",
                  directory="/data/sub/",
-                 resource_path="sub/x.txt",
+                 vfs_path="sub/x.txt",
                  pattern="*.txt")
     d = p.dir
     assert d.virtual == "/data/sub/"
-    assert d.resource_path == "sub"
+    assert d.vfs_path == "sub"
     assert d.pattern == "*.txt"
 
 
 def test_pathspec_dir_at_mount_root():
-    p = PathSpec(virtual="/data/x.txt",
-                 directory="/data/",
-                 resource_path="x.txt")
-    assert p.dir.resource_path == ""
+    p = PathSpec(virtual="/data/x.txt", directory="/data/", vfs_path="x.txt")
+    assert p.dir.vfs_path == ""
 
 
 def test_pathspec_from_str_path_defaults_to_root_mounted():
     p = PathSpec.from_str_path("/a/b/c.txt")
-    assert p.resource_path == "a/b/c.txt"
+    assert p.vfs_path == "a/b/c.txt"
     assert p.directory == "/a/b/"
 
 
-def test_pathspec_from_str_path_explicit_resource_path():
+def test_pathspec_from_str_path_explicit_vfs_path():
     p = PathSpec.from_str_path("/mnt/s3/data/x.json", "data/x.json")
-    assert p.resource_path == "data/x.json"
+    assert p.vfs_path == "data/x.json"
 
 
 def test_parse_mount_mode_words_and_aliases():
@@ -161,3 +160,33 @@ def test_parse_mount_mode_rejects_bit_style_forms():
     for bad in ("w", "x", "wx", "rx", "admin"):
         with pytest.raises(ValueError):
             parse_mount_mode(bad)
+
+
+def test_read_policy_values():
+    assert ReadPolicy.FRESH == "fresh"
+    assert ReadPolicy.BOUNDED == "bounded"
+    assert ReadPolicy.PINNED == "pinned"
+
+
+def test_read_spec_defaults_to_bounded_at_the_index_ttl():
+    spec = ReadSpec()
+    assert spec.policy is ReadPolicy.BOUNDED
+    assert spec.ttl == DEFAULT_READ_TTL == 600
+
+
+def test_read_spec_carries_a_bound_under_fresh_too():
+    # Every entry is self-describing, so two workspaces sharing one cache
+    # under different policies cannot write entries the other cannot date.
+    assert ReadSpec(policy=ReadPolicy.FRESH).ttl == DEFAULT_READ_TTL
+
+
+def test_read_spec_is_frozen():
+    with pytest.raises(FrozenInstanceError):
+        ReadSpec().policy = ReadPolicy.FRESH
+
+
+def test_cache_facts_is_frozen():
+    facts = CacheFacts(cacheable=True, ttl=30)
+    assert (facts.cacheable, facts.ttl) == (True, 30)
+    with pytest.raises(FrozenInstanceError):
+        facts.ttl = 1

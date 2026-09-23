@@ -28,7 +28,7 @@ it.each([
 ])('PIPESTATUS after a construct that runs no pipeline: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {
-    const io = await ws.execute(command)
+    const io = await ws.shell(command)
     expect(io.stdoutText).toBe(stdout)
   } finally {
     await ws.close()

@@ -14,7 +14,7 @@
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.redis.dest import check_dest_parents
+from mirage.core.redis.dest import check_dest_parents, check_write_target
 from mirage.core.timeutil import now_iso
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -31,6 +31,7 @@ async def append_bytes(
     timer = start_op()
     p = norm(path)
     await check_dest_parents(store, path_spec, p)
+    await check_write_target(store, path_spec, p)
     existing = await store.get_file(p)
     if existing is not None:
         await store.set_file(p, existing + data)

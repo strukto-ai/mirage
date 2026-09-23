@@ -22,7 +22,7 @@ export class MirageShell implements Shell {
   async run(action: ShellAction): Promise<ShellResult> {
     const output: ShellOutputResult[] = []
     for (const cmd of action.commands) {
-      const io = await this.ws.execute(cmd)
+      const io = await this.ws.shell(cmd)
       output.push({
         stdout: io.stdoutText,
         stderr: withRefusal(io.stderrText, io.refusal),

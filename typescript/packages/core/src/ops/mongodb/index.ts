@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MONGODB_IO } from '../../commands/builtin/mongodb/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const MONGODB_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.MONGODB, MONGODB_IO)
+export const MONGODB_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.MONGODB, MONGODB_IO)

@@ -17,12 +17,12 @@ import asyncio
 import pydantic_monty
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.runtime.errors import EvalError
 from mirage.runtime.mixin import EvaluatorMixin
 from mirage.runtime.python import MontyRuntime
 from mirage.runtime.types import RunArgs
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -175,8 +175,8 @@ def test_monty_missing_extra_raises(monkeypatch):
 def test_python3_reports_missing_extra(monkeypatch):
     import mirage.runtime.python.monty.runtime as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.EXEC)
-    io = asyncio.run(ws.execute("python3 -c 'print(1)'"))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC)
+    io = asyncio.run(ws.shell("python3 -c 'print(1)'"))
     assert io.exit_code == 127
     assert b"monty' extra" in io.stderr
 
@@ -185,9 +185,7 @@ def test_workspace_explicit_monty_fails_loud(monkeypatch):
     import mirage.runtime.python.monty.runtime as monty_module
     monkeypatch.setattr(monty_module, "pydantic_monty", None)
     with pytest.raises(ImportError, match="monty' extra"):
-        Workspace({"/data": RAMResource()},
-                  mode=MountMode.EXEC,
-                  runtimes=["monty"])
+        Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty"])
 
 
 @pytest.mark.asyncio
@@ -308,7 +306,7 @@ async def test_monty_cancelled_eval_session_releases_its_checkout(monkeypatch):
 
 
 def test_reach_is_vfs():
-    assert MontyRuntime.reach == "vfs"
+    assert MontyRuntime.reach == "workspace"
 
 
 def test_monty_scratch_paths_live_in_the_tree():

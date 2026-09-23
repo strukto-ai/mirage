@@ -74,14 +74,14 @@ Or, if you're not using a pnpm workspace, in `package.json`:
 ## Verify
 
 ```ts
-import { Mount, MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { Mount, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
-  '/data': new Mount(new RAMResource(), { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
+  '/data': new Mount(new RAMVFS(), { mode: MountMode.WRITE, backend: MountBackend.FUSE }),
 })
 await ws.fuseReady()
 
-await ws.execute('echo hello | tee /data/x.txt')
+await ws.shell('echo hello | tee /data/x.txt')
 console.log('mountpoints:', ws.fuseMountpoints)
 
 // Any tool (ls, cat, external subprocess) can now see x.txt under the mountpoint.
@@ -99,7 +99,7 @@ field:
 
 | `backend` | Effect |
 | --- | --- |
-| `vfs` (default) | Lives only inside mirage's own filesystem, reached through the command surface. Nothing is registered with the kernel. |
+| `workspace` (default) | Lives only inside mirage's own filesystem, reached through the command surface. Nothing is registered with the kernel. |
 | `fuse` | Also exposed as a real mountpoint via FUSE. |
 | `fskit` | Also exposed as a real mountpoint via FSKit, with no kernel extension. macOS 15.4+ only; see below. |
 
@@ -110,15 +110,15 @@ where it lands; omit it for a fresh temp directory:
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
     backend: fuse
     mountpoint: /tmp/data-repo   # explicit path
   /s3:
-    resource: s3
+    vfs: s3
     backend: MountBackend.FUSE             # temp directory
 ```
 
-Programmatically, set `backend` per mount: `{ '/data': new Mount(dataResource, { backend: MountBackend.FUSE, mountpoint: '/tmp/data-repo' }), '/s3': new Mount(s3Resource, { backend: MountBackend.FUSE }) }`.
+Programmatically, set `backend` per mount: `{ '/data': new Mount(dataVfs, { backend: MountBackend.FUSE, mountpoint: '/tmp/data-repo' }), '/s3': new Mount(s3Vfs, { backend: MountBackend.FUSE }) }`.
 `ws.fuseMountpoints` returns a `{ prefix: path }` map of the live mountpoints.
 
 ## Mounting without the kernel extension (FSKit)
@@ -136,12 +136,12 @@ flowchart LR
     A[cat /Volumes/.../file] --> K[kernel VFS]
     K -->|backend=fuse| X[macFUSE kext] --> L[libfuse]
     K -->|backend=fskit| F[fskitd + macFUSE FSKit module] --> L
-    L --> M[MirageFS] --> R[resource]
+    L --> M[MirageFS] --> R[vfs]
 ```
 
 ```ts
 const ws = new Workspace({
-  '/data': new Mount(dataResource, { backend: MountBackend.FSKIT }),
+  '/data': new Mount(dataVfs, { backend: MountBackend.FSKIT }),
 })
 await ws.fuseReady()
 ws.fuseMountpoints['/data'] // => /Volumes/mirage-<id>, tagged fskit
@@ -149,7 +149,7 @@ ws.fuseMountpoints['/data'] // => /Volumes/mirage-<id>, tagged fskit
 
 The same rules as Python apply, checked at mount time: macOS-only, the
 mountpoint must be under `/Volumes` (named by mirage, created by the
-system), and every mounted resource should report exact sizes
+system), and every mounted VFS should report exact sizes
 (`sizesAlwaysKnown`; the `checkSizes` guard warns about anything else by
 name, and those files read as empty).
 
@@ -177,7 +177,7 @@ cannot gain from JavaScript.
 
 ## Size semantics for API-backed files
 
-Some resources (Linear, Trello, Slack, ...) cannot report a file's size
+Some mounts (Linear, Trello, Slack, ...) cannot report a file's size
 without fetching its content, so over the FUSE mount those files behave like
 Linux `/proc` files: they stat as **0 bytes until first open** and become
 fully readable the moment anything opens them. See
@@ -210,3 +210,7 @@ enforced by Mirage mount modes, not by the kernel. For that reason, never
 mount with the `default_permissions` FUSE option. It would make the kernel
 enforce the displayed bits, and a `chmod 000` could lock Mirage out of its
 own files.
+
+Extended attributes over FUSE are the ones the Mirage shell's `getfattr`
+and `setfattr` read and write. Mirage stores them in its namespace beside
+the symlinks, so every backend takes them.

@@ -18,7 +18,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.routing import RouteDecision
-from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, VFSRuntime,
+from mirage.runtime.table import (DEFAULT_ENTRIES, NAMED, WorkspaceRuntime,
                                   bind_commands, build_runtime,
                                   whole_line_runtime)
 from mirage.workspace.mount import MountRegistry
@@ -54,7 +54,7 @@ class Runtimes:
         """Build and wire the ordered entries.
 
         Name strings become no-option instances and every instance gets
-        the workspace dispatch attached. The vfs runtime is required:
+        the workspace dispatch attached. The workspace runtime is required:
         when the list omits it, an unconditional one is appended, so
         there is always an executor for unclaimed commands. An explicit
         list fails loud per entry. The default set (DEFAULT_ENTRIES,
@@ -84,8 +84,8 @@ class Runtimes:
             for entry in runtimes:
                 entries.append(
                     build_runtime(entry) if isinstance(entry, str) else entry)
-        if not any(entry.name == VFSRuntime.name for entry in entries):
-            entries.append(VFSRuntime())
+        if not any(entry.name == WorkspaceRuntime.name for entry in entries):
+            entries.append(WorkspaceRuntime())
         for entry in entries:
             reject_config_script(f"runtime {entry.name!r} script",
                                  entry.script)

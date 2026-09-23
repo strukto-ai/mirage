@@ -18,7 +18,7 @@ import { stripSlash } from '../../utils/slash.ts'
 import { detectScope } from './scope.ts'
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p })
+  return new PathSpec({ vfsPath: stripSlash(p), virtual: p, directory: p })
 }
 
 describe('gslides detectScope', () => {

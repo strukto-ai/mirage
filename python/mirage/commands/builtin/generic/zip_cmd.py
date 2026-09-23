@@ -1,5 +1,4 @@
 import io
-import posixpath
 import zipfile
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -27,6 +26,13 @@ WARNING_PREFIX = "\tzip warning: "
 # follow prints exactly this too.
 NOT_MATCHED = "name not matched: "
 NOTHING_TO_DO_EXIT = 12
+# Two operands that store under one name refuse the whole run (Info-ZIP's
+# check_dup, ZE_PARMS). -q silences the warning, not the error, and the
+# warning's later lines are indented with spaces under its first.
+REPEATED_EXIT = 16
+REPEATED_ERROR = ("\nzip error: Invalid command arguments "
+                  "(cannot repeat names in zip file)\n")
+REPEATED_INDENT = " " * 21
 # Info-ZIP has no mount boundaries to describe, so this borrows GNU
 # tar's --one-file-system wording rather than inventing a second one.
 CROSSING_REASON = OTHER_FILESYSTEM
@@ -64,31 +70,55 @@ class ZipPlan:
         warnings (tuple[str, ...]): stderr lines without their prefix.
         write (bool): whether to write an archive at all. Info-ZIP
             leaves no file behind when nothing matched.
+        repeated (str): the warning for two paths that store under one
+            name, empty when every name is unique.
     """
 
     members: tuple[ZipMember, ...]
     warnings: tuple[str, ...]
     write: bool
+    repeated: str = ""
+
+
+def _full_name(spelled: str, kind: MemberKind) -> str:
+    """The name Info-ZIP forms for a path before it stores it.
+
+    A directory carries the slash zip appends to it before descending,
+    so ``d`` and ``d/`` are one path.
+
+    Args:
+        spelled (str): the path as the operand spelled it.
+        kind (MemberKind): what the entry is.
+    """
+    if kind == "dir" and not spelled.endswith("/"):
+        return spelled + "/"
+    return spelled
+
+
+def _relative(name: str) -> str:
+    name = name.lstrip("/")
+    while name.startswith("./"):
+        name = name[2:]
+    return name
 
 
 def member_name(spelled: str, kind: MemberKind, junk: bool) -> str:
     """The entry name Info-ZIP stores for a path as the operand typed it.
 
-    A leading slash is stripped in silence (unlike tar, which warns), a
-    directory carries a trailing slash, and ``-j`` throws the directory
-    part away entirely.
+    Leading slashes go in silence (unlike tar, which warns), and so does
+    every ``./`` after them: ``zip -r out.zip .`` stores ``a.txt``, not
+    ``./a.txt``, and ``.`` itself, formed as ``./``, names nothing and is
+    not stored. Only that leading run goes, so ``d/./x`` keeps its
+    ``./`` and ``.//x`` stores ``/x``. ``-j`` keeps what follows the last
+    slash, which for a directory is nothing: ``-j`` stores no directory.
 
     Args:
         spelled (str): the path as the operand spelled it.
         kind (MemberKind): what the entry is.
         junk (bool): ``-j``, store the basename only.
     """
-    name = spelled.lstrip("/")
-    if junk:
-        name = posixpath.basename(name.rstrip("/"))
-    if kind == "dir" and name and not name.endswith("/"):
-        return name + "/"
-    return name
+    name = _relative(_full_name(spelled, kind))
+    return name[name.rfind("/") + 1:] if junk else name
 
 
 def excluded(name: str, patterns: list[str]) -> bool:
@@ -99,13 +129,38 @@ def excluded(name: str, patterns: list[str]) -> bool:
     it, ``*.txt`` takes every ``.txt`` at any depth, and a bare
     ``b.txt`` matches nothing below the top. That is the opposite of
     GNU tar's unanchored ``--exclude``, which is why the two have
-    separate matchers.
+    separate matchers. A pattern loses its leading slashes and ``./``
+    the way a name does, so ``./sub/*`` still takes ``sub/``.
 
     Args:
         name (str): the stored entry name, directories slash-terminated.
         patterns (list[str]): the raw ``-x`` values.
     """
-    return any(fnmatch(name, pattern) for pattern in patterns)
+    return any(fnmatch(name, _relative(pattern)) for pattern in patterns)
+
+
+def _repeated(formed: dict[str, list[str]], junk: bool) -> str:
+    """Info-ZIP's warning for the first name two paths would share.
+
+    ``check_dup`` sorts the stored names and reports the first one
+    reached from two different paths, those two in sorted order.
+
+    Args:
+        formed (dict[str, list[str]]): each stored name, with the
+            distinct full names that would store under it.
+        junk (bool): ``-j``, which Info-ZIP suggests as the cause.
+    """
+    clashes = sorted(name for name, fulls in formed.items() if len(fulls) > 1)
+    if not clashes:
+        return ""
+    name = clashes[0]
+    first, second = sorted(formed[name])[:2]
+    warning = (f"  first full name: {first}\n"
+               f"{REPEATED_INDENT} second full name: {second}\n"
+               f"{REPEATED_INDENT}name in zip file repeated: {name}")
+    if junk:
+        warning += f"\n{REPEATED_INDENT}this may be a result of using -j"
+    return warning
 
 
 async def plan_zip(
@@ -144,9 +199,13 @@ async def plan_zip(
     """
     members: list[ZipMember] = []
     warnings: list[str] = []
+    formed: dict[str, list[str]] = {}
     for path in paths:
         raw = path.raw_path
         base = path.virtual.rstrip("/") or "/"
+        # Info-ZIP walks a bare `.` with an empty prefix, so what it finds
+        # there is named bare: `zip -r out.zip . a.txt` names a.txt once.
+        spelling = "" if raw == "." else raw
         scan = await scan_operand(path,
                                   stat=stat,
                                   walk=walk,
@@ -170,18 +229,23 @@ async def plan_zip(
             shown = respell_one(crossing, base, raw)
             warnings.append(f"{shown}: {CROSSING_REASON}")
         for entry in scan.entries:
-            name = member_name(respell_one(entry.name_path, base, raw),
-                               entry.kind, junk)
+            spelled = respell_one(entry.name_path, base, spelling)
+            name = member_name(spelled, entry.kind, junk)
             if not name or excluded(name, exclude):
-                continue
-            # -j has no directory to name, so Info-ZIP drops directory
-            # entries under it entirely rather than storing bare slashes.
-            if junk and entry.kind == "dir":
                 continue
             read = entry.read
             if read is not None and read.virtual == archive.virtual:
                 # Info-ZIP never stores the archive it is writing, and
                 # says nothing about it.
+                continue
+            # One path named twice is stored once; two paths under one
+            # name are the run's error, reported once everything is seen.
+            fulls = formed.setdefault(name, [])
+            full = _full_name(spelled, entry.kind)
+            if full in fulls:
+                continue
+            fulls.append(full)
+            if len(fulls) > 1:
                 continue
             members.append(
                 ZipMember(name=name,
@@ -190,7 +254,8 @@ async def plan_zip(
                           target=entry.target))
     return ZipPlan(members=tuple(members),
                    warnings=tuple(warnings),
-                   write=bool(members))
+                   write=bool(members),
+                   repeated=_repeated(formed, junk))
 
 
 def _info(member: ZipMember, size: int) -> zipfile.ZipInfo:
@@ -242,6 +307,11 @@ async def zip_cmd(
                           exclude=x or [],
                           links=links,
                           mounts=mounts)
+    if plan.repeated:
+        return None, IOResult(exit_code=REPEATED_EXIT,
+                              stderr=_stderr(
+                                  (*plan.warnings, plan.repeated), q) +
+                              REPEATED_ERROR.encode())
     if not plan.write:
         # Info-ZIP writes no archive when nothing matched, and the error
         # is not a warning: -q does not silence it.

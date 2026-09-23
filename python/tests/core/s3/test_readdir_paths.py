@@ -16,36 +16,36 @@ import asyncio
 
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 @pytest.fixture
 def ws():
-    mem = RAMResource()
-    w = Workspace(resources={"/mnt/data": (mem, MountMode.WRITE)})
-    asyncio.run(w.execute("mkdir /mnt/data/dir"))
-    asyncio.run(w.execute("echo -n a > /mnt/data/dir/a.txt"))
-    asyncio.run(w.execute("echo -n b > /mnt/data/dir/b.txt"))
-    asyncio.run(w.execute("echo -n c > /mnt/data/c.csv"))
+    mem = RAMVFS()
+    w = Workspace(mounts={"/mnt/data": (mem, MountMode.WRITE)})
+    asyncio.run(w.shell("mkdir /mnt/data/dir"))
+    asyncio.run(w.shell("echo -n a > /mnt/data/dir/a.txt"))
+    asyncio.run(w.shell("echo -n b > /mnt/data/dir/b.txt"))
+    asyncio.run(w.shell("echo -n c > /mnt/data/c.csv"))
     return w
 
 
 def test_readdir_returns_leading_slash(ws):
-    entries = asyncio.run(ws.fs.readdir("/mnt/data/dir"))
+    entries = asyncio.run(ws.vfs.readdir("/mnt/data/dir"))
     for e in entries:
         assert e.startswith("/"), f"readdir entry missing leading /: {e}"
 
 
 def test_readdir_returns_full_virtual_paths(ws):
-    entries = asyncio.run(ws.fs.readdir("/mnt/data/dir"))
+    entries = asyncio.run(ws.vfs.readdir("/mnt/data/dir"))
     assert "/mnt/data/dir/a.txt" in entries
     assert "/mnt/data/dir/b.txt" in entries
 
 
 def test_readdir_root(ws):
-    entries = asyncio.run(ws.fs.readdir("/mnt/data"))
+    entries = asyncio.run(ws.vfs.readdir("/mnt/data"))
     names = [e.rsplit("/", 1)[-1] for e in entries]
     assert "dir" in names
     assert "c.csv" in names
@@ -54,7 +54,7 @@ def test_readdir_root(ws):
 def test_readdir_glob_expansion(ws):
 
     async def _run():
-        io = await ws.execute("echo /mnt/data/dir/*.txt")
+        io = await ws.shell("echo /mnt/data/dir/*.txt")
         return await io.stdout_str()
 
     out = asyncio.run(_run()).strip()

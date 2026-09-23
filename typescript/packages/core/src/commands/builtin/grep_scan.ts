@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { discardStreams } from '../../io/stream.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { fsStrerror } from '../../utils/errors.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { type IOResult } from '../../io/types.ts'
@@ -19,7 +21,7 @@ import { type FileStat, FileType } from '../../types.ts'
 import { getExtension } from '../resolve.ts'
 import { BINARY_EXTENSIONS } from './constants.ts'
 import { grepContextLines } from './grep_context.ts'
-import { decodeLine, encodeLine, lineOffsets, matchOffset, prefixOf } from './grep_offsets.ts'
+import { decodeLine, encodeLine, lineOffsets, MatchOffsets, prefixOf } from './grep_offsets.ts'
 import { compilePattern } from './grep_pattern.ts'
 import { NO_FILTERS, type WalkFilters, dirAdmitted, fileAdmitted } from './grep_select.ts'
 import { splitLines } from './utils/lines.ts'
@@ -92,6 +94,7 @@ export function grepLines(
         // selected, which is what -c, -l and the exit status read.
         if (!opts.invert && reGlobal !== null) {
           reGlobal.lastIndex = 0
+          const matchOffsets = byteOffsets ? new MatchOffsets(start, line) : null
           for (;;) {
             const m = reGlobal.exec(line)
             if (m === null) break
@@ -103,7 +106,7 @@ export function grepLines(
             }
             const fields = prefixOf(
               opts.lineNumbers ? i + 1 : null,
-              byteOffsets ? matchOffset(start, line, m.index) : null,
+              matchOffsets?.at(m.index) ?? null,
             )
             results.push(fields + m[0])
           }
@@ -169,6 +172,7 @@ export interface GrepStreamOptions {
   // (1 to start, 0 as soon as a line is selected); left out, the caller
   // keeps whatever it decides for itself.
   io?: IOResult
+  signal?: AbortSignal | undefined
 }
 
 export async function* grepStream(
@@ -211,6 +215,7 @@ export async function* grepStream(
     return
   }
   if (opts.io !== undefined) opts.io.exitCode = 1
+  const budget = new YieldBudget(opts.signal)
   let matchCount = 0
   let lineNum = 0
   const byteOffsets = opts.byteOffsets === true
@@ -221,59 +226,67 @@ export async function* grepStream(
     ? new RegExp(pat.source, pat.flags.includes('g') ? pat.flags : pat.flags + 'g')
     : null
   const iter = new AsyncLineIterator(source)
-  for await (const rawLine of iter) {
-    lineNum += 1
-    const lineStart = bytePos
-    bytePos += rawLine.byteLength + 1
-    const line = decodeLine(rawLine)
-    const found = pat.test(line)
-    const hit = opts.invert ? !found : found
-    if (!hit) continue
-    if (opts.io !== undefined) opts.io.exitCode = 0
-    // The count is per selected LINE, never per match, which is what makes
-    // `grep -oc '[0-9]*'` on `ab` answer 1 the way GNU does: the empty match
-    // selects the line even though -o prints nothing for it. -m counts
-    // selected lines for the same reason.
-    matchCount += 1
-    if (!opts.countOnly) {
-      if (opts.onlyMatching) {
-        // GNU -o prints every match on the line, one per line, and prints
-        // nothing at all for an empty match nor for an inverted selection,
-        // which has no match to print (`grep -ov abc` is zero bytes where
-        // GNU's own -c still says 1).
-        if (!opts.invert && reGlobal !== null) {
-          reGlobal.lastIndex = 0
-          for (;;) {
-            const m = reGlobal.exec(line)
-            if (m === null) break
-            // A global regex that matched the empty string leaves lastIndex
-            // where it was, so exec would keep returning it and this
-            // generator would never finish.
-            if (m[0] === '') {
-              reGlobal.lastIndex += 1
-              continue
+  try {
+    for await (const rawLine of iter) {
+      lineNum += 1
+      const lineStart = bytePos
+      bytePos += rawLine.byteLength + 1
+      const line = decodeLine(rawLine)
+      const found = pat.test(line)
+      const hit = opts.invert ? !found : found
+      if (!hit) continue
+      if (opts.io !== undefined) opts.io.exitCode = 0
+      // The count is per selected LINE, never per match, which is what makes
+      // `grep -oc '[0-9]*'` on `ab` answer 1 the way GNU does: the empty match
+      // selects the line even though -o prints nothing for it. -m counts
+      // selected lines for the same reason.
+      matchCount += 1
+      if (!opts.countOnly) {
+        if (opts.onlyMatching) {
+          // GNU -o prints every match on the line, one per line, and prints
+          // nothing at all for an empty match nor for an inverted selection,
+          // which has no match to print (`grep -ov abc` is zero bytes where
+          // GNU's own -c still says 1).
+          if (!opts.invert && reGlobal !== null) {
+            reGlobal.lastIndex = 0
+            const matchOffsets = byteOffsets ? new MatchOffsets(lineStart, line) : null
+            for (;;) {
+              const pending = budget.run()
+              if (pending !== undefined) await pending
+              const m = reGlobal.exec(line)
+              if (m === null) break
+              // A global regex that matched the empty string leaves lastIndex
+              // where it was, so exec would keep returning it and this
+              // generator would never finish.
+              if (m[0] === '') {
+                reGlobal.lastIndex += 1
+                continue
+              }
+              const fields = prefixOf(
+                opts.lineNumbers ? lineNum : null,
+                matchOffsets?.at(m.index) ?? null,
+              )
+              yield encodeLine(fields + m[0] + '\n')
             }
-            const fields = prefixOf(
-              opts.lineNumbers ? lineNum : null,
-              byteOffsets ? matchOffset(lineStart, line, m.index) : null,
-            )
-            yield encodeLine(fields + m[0] + '\n')
           }
+        } else if (opts.lineNumbers || byteOffsets) {
+          const fields = prefixOf(opts.lineNumbers ? lineNum : null, byteOffsets ? lineStart : null)
+          yield encodeLine(`${fields}${line}\n`)
+        } else {
+          const out = new Uint8Array(rawLine.byteLength + 1)
+          out.set(rawLine, 0)
+          out[rawLine.byteLength] = 0x0a
+          yield out
         }
-      } else if (opts.lineNumbers || byteOffsets) {
-        const fields = prefixOf(opts.lineNumbers ? lineNum : null, byteOffsets ? lineStart : null)
-        yield encodeLine(`${fields}${line}\n`)
-      } else {
-        const out = new Uint8Array(rawLine.byteLength + 1)
-        out.set(rawLine, 0)
-        out[rawLine.byteLength] = 0x0a
-        yield out
+      }
+      if (opts.maxCount !== null && matchCount >= opts.maxCount) {
+        if (opts.countOnly) yield enc.encode(String(matchCount) + '\n')
+        return
       }
     }
-    if (opts.maxCount !== null && matchCount >= opts.maxCount) {
-      if (opts.countOnly) yield enc.encode(String(matchCount) + '\n')
-      return
-    }
+  } catch (error) {
+    await discardStreams(source)
+    throw error
   }
   if (opts.countOnly) yield enc.encode(String(matchCount) + '\n')
 }

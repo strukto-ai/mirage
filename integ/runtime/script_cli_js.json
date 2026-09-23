@@ -8,7 +8,7 @@
     {
       "id": "js_program_is_named_and_gets_its_flags",
       "world": {
-        "runtimes": ["quickjs", "vfs"],
+        "runtimes": ["quickjs", "workspace"],
         "clis": {
           "pager": {
             "script": "console.log('prog', scriptArgs[0]);\nconsole.log('args', JSON.stringify(scriptArgs.slice(1)));\n",
@@ -30,7 +30,7 @@
     {
       "id": "js_pin_to_a_python_runtime_exits_127",
       "world": {
-        "runtimes": ["monty", "quickjs", "vfs"],
+        "runtimes": ["monty", "quickjs", "workspace"],
         "clis": {
           "pager": {
             "script": "console.log('unreachable');\n",

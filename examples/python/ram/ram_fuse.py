@@ -16,13 +16,13 @@ import os
 from pathlib import Path
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = REPO_ROOT / "data"
 
-resource = RAMResource()
-store = resource._store
+vfs = RAMVFS()
+store = vfs._store
 
 for fpath in sorted(DATA_DIR.iterdir()):
     if fpath.is_file():
@@ -35,10 +35,9 @@ for name in sorted(store.files):
     size = len(store.files[name])
     print(f"  {name} ({size:,} bytes)")
 
-with Workspace({
-        "/data/":
-        Mount(resource, mode=MountMode.WRITE, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/data/": Mount(vfs, mode=MountMode.WRITE,
+                     backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"\n=== FUSE MODE: mounted at {mp} ===\n")
@@ -59,6 +58,6 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

@@ -17,8 +17,8 @@ from unittest.mock import patch
 import pytest
 
 from mirage.core.slack.config import SlackConfig
-from mirage.resource.slack.slack import SlackResource
 from mirage.types import MountMode
+from mirage.vfs.slack.slack import SlackVFS
 from mirage.workspace.workspace import Workspace
 
 
@@ -35,8 +35,8 @@ async def test_ls_no_args_after_cd_returns_cwd_entries(config):
     without preserving the mount prefix, so readdir treated the mount prefix
     segment as a container name and returned [].
     """
-    resource = SlackResource(config)
-    ws = Workspace({"/slack": resource}, mode=MountMode.READ)
+    vfs = SlackVFS(config)
+    ws = Workspace({"/slack": vfs}, mode=MountMode.READ)
     channels_page = {
         "channels": [{
             "id": "C001",
@@ -64,13 +64,13 @@ async def test_ls_no_args_after_cd_returns_cwd_entries(config):
 
     with patch("mirage.core.slack.paginate.slack_get", new=fake_get), \
          patch("mirage.core.slack.readdir.slack_get", new=fake_get):
-        r = await ws.execute("cd /slack/channels/general__C001")
+        r = await ws.shell("cd /slack/channels/general__C001")
         assert r.exit_code == 0
-        r = await ws.execute("pwd")
+        r = await ws.shell("pwd")
         assert (await
                 r.stdout_str()).strip() == "/slack/channels/general__C001"
 
-        r = await ws.execute("ls")
+        r = await ws.shell("ls")
         out = (await r.stdout_str()).strip()
     assert r.exit_code == 0
     assert out != "", "ls no-args after cd returned empty"

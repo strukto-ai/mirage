@@ -88,7 +88,7 @@ function specAt(virtual: string, prefix: string): PathSpec {
     virtual,
     directory: virtual,
     resolved: false,
-    resourcePath: mountKey(virtual, prefix),
+    vfsPath: mountKey(virtual, prefix),
   })
 }
 
@@ -169,7 +169,7 @@ export class ReaddirWalk {
   }
 
   async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     yield* descend(this.readdir, this.stat, root, new RAMIndexCacheStore(), prefix)
   }
 }

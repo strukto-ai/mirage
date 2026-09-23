@@ -17,7 +17,7 @@ import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/type
 
 export { CAS_MAX_RETRIES, generationOf }
 
-// One session's durable fields: the JSON-able `Session.toJSON()` payload
+// One session's durable fields: the JSON-able `SessionState.toJSON()` payload
 // (session_id, cwd, env, created_at, mount_modes — snake_case so Python
 // and TypeScript workspaces can share one store). Volatile shell state
 // (functions, arrays, stdin buffers) never persists.

@@ -29,7 +29,7 @@ import { command } from '@struktoai/mirage-core/commands/config'
 import type { CommandFnResult, CommandOpts } from '@struktoai/mirage-core/commands/config'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { EmailAccessor } from '../../../accessor/email.ts'
@@ -104,7 +104,7 @@ async function grepCommand(
   ) {
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
-      const filePrefix = mountPrefixOf(operand.virtual, operand.resourcePath)
+      const filePrefix = mountPrefixOf(operand.virtual, operand.vfsPath)
       const pairs = await searchAndFormat(
         accessor,
         match.slots.folder ?? '',
@@ -153,7 +153,7 @@ async function grepCommand(
 
 export const EMAIL_GREP = command({
   name: 'grep',
-  resource: ResourceName.EMAIL,
+  vfs: VFSName.EMAIL,
   spec: specOf('grep'),
   fn: grepCommand,
   aggregate: prefixAggregate,

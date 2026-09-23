@@ -55,7 +55,7 @@ def _glob_escape(value: str) -> str:
 
 
 class RedisIndexCacheStore(IndexCacheStore):
-    """Redis-backed index cache for remote resource metadata.
+    """Redis-backed index cache for remote VFS metadata.
 
     Stores IndexEntry objects as JSON strings and directory children as
     JSON records holding children and expiry, including empty listings.
@@ -67,8 +67,8 @@ class RedisIndexCacheStore(IndexCacheStore):
     Multiple stores can share one Redis server by using distinct key_prefix
     values (e.g. "gdrive:", "s3:"). The full key layout is::
 
-        {key_prefix}mirage:idx:entry:{resource_path} -> IndexEntry JSON
-        {key_prefix}mirage:idx:directory:{resource_path} -> IndexDirectory JSON
+        {key_prefix}mirage:idx:entry:{vfs_path} -> IndexEntry JSON
+        {key_prefix}mirage:idx:directory:{vfs_path} -> IndexDirectory JSON
 
     Args:
         ttl (float): Default time-to-live in seconds for directory listings.
@@ -101,11 +101,11 @@ class RedisIndexCacheStore(IndexCacheStore):
         self._generation_key = f"{p}{GENERATION_KEY}"
         self._directory_generation_prefix = f"{self._generation_key}:"
 
-    def _entry_key(self, resource_path: str) -> str:
-        return f"{self._entry_prefix}{resource_path}"
+    def _entry_key(self, vfs_path: str) -> str:
+        return f"{self._entry_prefix}{vfs_path}"
 
-    def _children_key(self, resource_path: str) -> str:
-        return f"{self._children_prefix}{resource_path}"
+    def _children_key(self, vfs_path: str) -> str:
+        return f"{self._children_prefix}{vfs_path}"
 
     def seed(self, entries: dict[str, IndexEntry],
              children: dict[str, list[str]], expires_at: datetime) -> None:
@@ -186,43 +186,42 @@ class RedisIndexCacheStore(IndexCacheStore):
                     directories)
                 pipe = self._client.pipeline()
                 for entries, children, expires_at in pending:
-                    for resource_path, entry in entries.items():
-                        pipe.set(self._entry_key(resource_path),
+                    for vfs_path, entry in entries.items():
+                        pipe.set(self._entry_key(vfs_path),
                                  entry.model_dump_json())
-                    for resource_path, child_keys in children.items():
+                    for vfs_path, child_keys in children.items():
                         listing = IndexDirectory(
                             entries=child_keys,
                             expires_at=expires_at.timestamp(),
                             generation=
-                            f"{generation}:{directory_generations[resource_path]}"
-                        )
-                        pipe.set(self._children_key(resource_path),
+                            f"{generation}:{directory_generations[vfs_path]}")
+                        pipe.set(self._children_key(vfs_path),
                                  listing.model_dump_json())
                 await pipe.execute()
                 del self._pending_seeds[:len(pending)]
 
-    async def get(self, resource_path: str) -> LookupResult:
+    async def get(self, vfs_path: str) -> LookupResult:
         await self._flush_seed()
-        raw = await self._client.get(self._entry_key(resource_path))
+        raw = await self._client.get(self._entry_key(vfs_path))
         if raw is None:
             return LookupResult(status=LookupStatus.NOT_FOUND)
         entry = IndexEntry.model_validate_json(raw)
         return LookupResult(entry=entry)
 
-    async def put(self, resource_path: str, entry: IndexEntry) -> None:
+    async def put(self, vfs_path: str, entry: IndexEntry) -> None:
         await self._flush_seed()
         if not entry.index_time:
             entry = entry.model_copy(
                 update={"index_time": to_iso_z(datetime.now(timezone.utc))})
-        await self._client.set(self._entry_key(resource_path),
+        await self._client.set(self._entry_key(vfs_path),
                                entry.model_dump_json())
 
-    async def list_dir(self, resource_path: str) -> ListResult:
+    async def list_dir(self, vfs_path: str) -> ListResult:
         await self._flush_seed()
-        key = self._children_key(resource_path)
+        key = self._children_key(vfs_path)
         raw, current, directory = await self._client.mget(
             key, self._generation_key,
-            f"{self._directory_generation_prefix}{resource_path}")
+            f"{self._directory_generation_prefix}{vfs_path}")
         if raw is None:
             return ListResult(status=LookupStatus.NOT_FOUND)
         listing = IndexDirectory.model_validate_json(raw)
@@ -235,18 +234,18 @@ class RedisIndexCacheStore(IndexCacheStore):
 
     async def set_dir(
         self,
-        resource_path: str,
+        vfs_path: str,
         entries: list[tuple[str, IndexEntry]],
         expired_at: datetime | None = None,
     ) -> None:
         await self._flush_seed()
         now = datetime.now(timezone.utc)
         now_iso = to_iso_z(now)
-        prefix = "/" if resource_path == "/" else resource_path + "/"
+        prefix = "/" if vfs_path == "/" else vfs_path + "/"
 
         generation = await self._generation(self._generation_key)
         directory_generation = await self._generation(
-            f"{self._directory_generation_prefix}{resource_path}")
+            f"{self._directory_generation_prefix}{vfs_path}")
         pipe = self._client.pipeline()
         child_keys: list[str] = []
         for name, entry in entries:
@@ -262,7 +261,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             entries=child_keys,
             expires_at=expiry.timestamp(),
             generation=f"{generation}:{directory_generation}")
-        pipe.set(self._children_key(resource_path), listing.model_dump_json())
+        pipe.set(self._children_key(vfs_path), listing.model_dump_json())
 
         await pipe.execute()
 
@@ -279,15 +278,14 @@ class RedisIndexCacheStore(IndexCacheStore):
                 key_text = _text(key)
                 raw = await self._client.get(key)
                 if raw is not None:
-                    resource_path = key_text.removeprefix(self._entry_prefix)
-                    entries[resource_path] = IndexEntry.model_validate_json(
-                        raw)
+                    vfs_path = key_text.removeprefix(self._entry_prefix)
+                    entries[vfs_path] = IndexEntry.model_validate_json(raw)
             if cursor == 0:
                 return entries
 
-    async def invalidate_dir(self, resource_path: str) -> None:
+    async def invalidate_dir(self, vfs_path: str) -> None:
         await self._flush_seed()
-        children_key = self._children_key(resource_path)
+        children_key = self._children_key(vfs_path)
         raw = await self._client.get(children_key)
         child_paths = IndexDirectory.model_validate_json(
             raw).entries if raw is not None else []
@@ -295,17 +293,17 @@ class RedisIndexCacheStore(IndexCacheStore):
         for child in child_paths:
             pipe.delete(self._entry_key(child))
         pipe.delete(children_key)
-        pipe.delete(f"{self._directory_generation_prefix}{resource_path}")
+        pipe.delete(f"{self._directory_generation_prefix}{vfs_path}")
         await pipe.execute()
 
-    async def _scan_delete(self, prefix: str, resource_path: str) -> None:
+    async def _scan_delete(self, prefix: str, vfs_path: str) -> None:
         """Delete every key under ``prefix`` naming a path in the subtree.
 
         Args:
             prefix (str): Key namespace to scan (entries or children).
-            resource_path (str): Mount-absolute root of the subtree.
+            vfs_path (str): Mount-absolute root of the subtree.
         """
-        pattern = f"{_glob_escape(prefix + resource_path.rstrip('/'))}*"
+        pattern = f"{_glob_escape(prefix + vfs_path.rstrip('/'))}*"
         cursor = 0
         while True:
             cursor, keys = await self._client.scan(cursor,
@@ -313,19 +311,18 @@ class RedisIndexCacheStore(IndexCacheStore):
                                                    count=500)
             doomed = [
                 key for key in keys
-                if under_path(_text(key).removeprefix(prefix), resource_path)
+                if under_path(_text(key).removeprefix(prefix), vfs_path)
             ]
             if doomed:
                 await self._client.delete(*doomed)
             if cursor == 0:
                 return
 
-    async def invalidate_prefix(self, resource_path: str) -> None:
+    async def invalidate_prefix(self, vfs_path: str) -> None:
         await self._flush_seed()
-        await self._scan_delete(self._entry_prefix, resource_path)
-        await self._scan_delete(self._children_prefix, resource_path)
-        await self._scan_delete(self._directory_generation_prefix,
-                                resource_path)
+        await self._scan_delete(self._entry_prefix, vfs_path)
+        await self._scan_delete(self._children_prefix, vfs_path)
+        await self._scan_delete(self._directory_generation_prefix, vfs_path)
 
     async def invalidate(self) -> None:
         await self._flush_seed()

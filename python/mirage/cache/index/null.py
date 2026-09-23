@@ -30,22 +30,22 @@ class NullIndexCacheStore(IndexCacheStore):
     on ``index is None``.
     """
 
-    async def get(self, resource_path: str) -> LookupResult:
+    async def get(self, vfs_path: str) -> LookupResult:
         return LookupResult(status=LookupStatus.NOT_FOUND)
 
     def seed(self, entries: dict[str, IndexEntry],
              children: dict[str, list[str]], expires_at: datetime) -> None:
         return None
 
-    async def put(self, resource_path: str, entry: IndexEntry) -> None:
+    async def put(self, vfs_path: str, entry: IndexEntry) -> None:
         return None
 
-    async def list_dir(self, resource_path: str) -> ListResult:
+    async def list_dir(self, vfs_path: str) -> ListResult:
         return ListResult(status=LookupStatus.NOT_FOUND)
 
     async def set_dir(
         self,
-        resource_path: str,
+        vfs_path: str,
         entries: list[tuple[str, IndexEntry]],
         expired_at: datetime | None = None,
     ) -> None:
@@ -54,10 +54,10 @@ class NullIndexCacheStore(IndexCacheStore):
     async def entries(self) -> dict[str, IndexEntry]:
         return {}
 
-    async def invalidate_dir(self, resource_path: str) -> None:
+    async def invalidate_dir(self, vfs_path: str) -> None:
         return None
 
-    async def invalidate_prefix(self, resource_path: str) -> None:
+    async def invalidate_prefix(self, vfs_path: str) -> None:
         return None
 
     async def invalidate(self) -> None:

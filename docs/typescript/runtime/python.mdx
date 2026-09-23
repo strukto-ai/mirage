@@ -22,11 +22,11 @@ workspace's existing mounts through Pyodide's filesystem adapter.
 Installed Python script CLIs receive bare `argv` (including the installed name at index 0) and `stdin` (bytes, or `None` when absent), on both Monty and Pyodide. Pyodide also keeps `sys.argv` and `sys.stdin`. Ordinary `python3` commands retain their interpreter's existing globals.
 
 ```ts
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.EXEC })
-await ws.execute('echo hello > /data/a.txt')
-const io = await ws.execute(`python3 -c "print(open('/data/a.txt').read().strip())"`)
+const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
+await ws.shell('echo hello > /data/a.txt')
+const io = await ws.shell(`python3 -c "print(open('/data/a.txt').read().strip())"`)
 ```
 
 ### Workspace file access
@@ -35,6 +35,10 @@ Pyodide supports `open()`, `os.listdir`, `pathlib`, and native packages
 that use file operations, such as PIL and NumPy. These operations reach
 the same workspace mounts used by shell commands. Symlinks and metadata
 overlays come from the workspace namespace.
+
+`os.getxattr`, `os.listxattr`, `os.setxattr` and `os.removexattr` reach
+the attributes the shell's `getfattr` and `setfattr` see. They need the
+worker; the fallback below answers them with `OSError` (`ENOTSUP`).
 
 With a worker, files are fetched on first access and cached for that run.
 The cache is discarded before the next execution; it does not track
@@ -58,7 +62,7 @@ export default defineConfig({
 When workers or shared memory are unavailable, or a worker cannot start,
 Pyodide falls back to collecting mounted files before execution and
 replaying writes afterward. That fallback reads whole mounts into memory;
-use narrow mount prefixes for large resources. Neither mode requires JSPI.
+use narrow mount prefixes for large mounts. Neither mode requires JSPI.
 
 Mount workspace files under a non-root prefix such as `/data`. A mount at
 `/` cannot replace Pyodide's own filesystem, which contains its standard
@@ -79,10 +83,10 @@ either way Python spells it (`os.getenv` or `os.environ`):
 
 ```ts
 const ws = new Workspace(
-  { '/data': new RAMResource() },
-  { mode: MountMode.EXEC, runtimes: ['monty', 'vfs'] },
+  { '/data': new RAMVFS() },
+  { mode: MountMode.EXEC, runtimes: ['monty', 'workspace'] },
 )
-const io = await ws.execute(
+const io = await ws.shell(
   `python3 -c "from pathlib import Path; print(Path('/data/a.txt').read_text())"`,
 )
 ```
@@ -120,6 +124,8 @@ so a dependency update can revisit them.
 - Command-line arguments are the `argv` global; `sys.argv` does not exist.
 - No `sys.stdin` and no third-party imports.
 - `os.environ` reflects the session env only.
+- `os` has no extended-attribute calls (`os.getxattr` and its siblings);
+  run `getfattr` or `setfattr` in the shell instead.
 - `os.stat()` and `Path.stat()` answer with every attribute CPython's
   `stat_result` carries, but not its sequence half: `st[6]`, `len(st)`
   and iterating it raise `TypeError` here and work on the Python host,
@@ -132,7 +138,7 @@ Server workspace config files take a top-level `runtimes` list. Each
 entry is a name or a mapping with the uniform options (`captures`,
 `config`, `script`); the name is a runtime mirage ships, one the host
 registered with `registerRuntime`, or a `./file.mjs:Class` reference to a
-`Runtime` subclass, the form `resource:` and `cli:` take:
+`Runtime` subclass, the form `vfs:` and `cli:` take:
 
 ```yaml
 runtimes:
@@ -140,11 +146,10 @@ runtimes:
   - name: pyodide # knobs live in the entry's config block
     config:
       home: https://assets.example.com/pyodide/
-  - vfs
-
+  - workspace
 mounts:
   /data:
-    resource: ram
+    vfs: ram
     command_limits:
       python3:
         timeout_seconds: 30
@@ -164,10 +169,24 @@ entries are the `runtimes` workspace option, instances carrying their
 own options:
 
 ```ts
-const ws = new Workspace(resources, {
-  runtimes: [new PyodideRuntime({ config: { home: 'https://assets.example.com/pyodide/' } }), 'vfs'],
+const ws = new Workspace(mounts, {
+  runtimes: [new PyodideRuntime({ config: { home: 'https://assets.example.com/pyodide/' } }), 'workspace'],
 })
 ```
+
+`pyodide.config.initModule` accepts a trusted host module URL or absolute
+Node path. Its default export receives the loaded Pyodide instance before
+`bootstrapCode` runs, and may return a cleanup function. This supports
+registering narrow JavaScript capabilities with `registerJsModule` without
+exposing host globals through `import js`. The initializer also runs inside
+the execution worker; it must not depend on caller-thread state. It has host
+privileges and belongs in deployment configuration, never agent input.
+`POST /v1/workspaces` rejects it in request-supplied runtime configuration.
+Configuring an initializer changes the runtime's declared reach from
+`workspace` to `process`, because registered host capabilities can bypass
+the workspace gate even while `import js` remains sealed.
+Worker termination destroys its isolate; only in-process shutdown invokes
+the returned cleanup function, so extensions must tolerate abrupt shutdown.
 
 ## Resource limits
 

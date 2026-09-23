@@ -135,7 +135,7 @@ def make_stat(
             await guard(accessor, match, virtual)
         elif scope.probed:
             await assert_listed(readdir, accessor, path, index)
-        name = path.resource_path.strip("/").split("/")[-1]
+        name = path.vfs_path.strip("/").split("/")[-1]
         extra_fn = extras.get(match.kind) if extras is not None else None
         extra = extra_fn(match) if extra_fn is not None else {}
         if not scope.leaf:

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from mirage.observe.store import ObserverStore
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
-from mirage.runtime.table import VFSRuntime, bind_commands
+from mirage.runtime.table import WorkspaceRuntime, bind_commands
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.session import SessionStore
@@ -80,7 +80,7 @@ def wire_runtime_world(
         entries: list[Runtime | str] | None) -> tuple[Runtimes, Router]:
     """Build the ordered runtime world and its route-policy router.
 
-    Instances and the vfs marker; the first capturer binds each
+    Instances and the workspace marker; the first capturer binds each
     command. An explicit list fails loud per entry; the default world
     builds gracefully (a missing extra leaves the command reporting
     its install hint per invocation, never a silent escalation to
@@ -97,7 +97,8 @@ def wire_runtime_world(
     router = Router(registry, runtimes, binding.resolver)
     registry.runtime_bindings = bind_commands(runtimes.entries)
     registry.runtime_entries = runtimes.entries
-    registry.vfs_runtime = next(
-        (entry for entry in runtimes.entries if isinstance(entry, VFSRuntime)),
+    registry.workspace_runtime = next(
+        (entry
+         for entry in runtimes.entries if isinstance(entry, WorkspaceRuntime)),
         None)
     return runtimes, router

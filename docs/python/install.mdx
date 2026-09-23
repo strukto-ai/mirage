@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Install Mirage for Python with mirage-ai from PyPI or uv, then add extras for S3, Redis, FUSE, Google Workspace, and other resources.
+description: Install Mirage for Python with mirage-ai from PyPI or uv, then add extras for S3, Redis, FUSE, Google Workspace, and other mounts.
 keywords: ["mirage-ai", "Python virtual filesystem", "AI agents", "S3 filesystem", "FUSE", "agent tools"]
 icon: download
 ---
@@ -13,7 +13,7 @@ Install the base package into your project:
 uv add mirage-ai
 ```
 
-This is enough to start with local workflows such as the RAM resource and to understand the Mirage execution model.
+This is enough to start with local workflows such as the RAM VFS and to understand the Mirage execution model.
 
 If you are not using uv:
 
@@ -45,9 +45,9 @@ To upgrade later:
 uv tool install --upgrade mirage-ai
 ```
 
-## Resource Extras
+## VFS Extras
 
-Install extras when a resource needs optional dependencies:
+Install extras when a VFS needs optional dependencies:
 
 ```bash
 uv add "mirage-ai[s3]"
@@ -56,7 +56,7 @@ uv add "mirage-ai[redis]"
 uv add "mirage-ai[fuse]"
 ```
 
-Use the resource docs in the Python section when you are ready to connect real systems.
+Use the VFS docs in the Python section when you are ready to connect real systems.
 
 ## Install From Source
 
@@ -73,5 +73,5 @@ The `camel` extra conflicts with the `openai` stack, so excluding it keeps every
 ## Recommended Path
 
 1. Install the base package.
-2. Follow the [Python Quickstart](/python/quickstart) with the RAM resource.
-3. Add the resource extras and follow the [FUSE setup](/python/setup/fuse) if you need to expose mounts as a real filesystem.
+2. Follow the [Python Quickstart](/python/quickstart) with the RAM VFS.
+3. Add the VFS extras and follow the [FUSE setup](/python/setup/fuse) if you need to expose mounts as a real filesystem.

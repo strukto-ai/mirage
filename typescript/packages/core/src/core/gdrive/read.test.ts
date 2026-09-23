@@ -68,7 +68,7 @@ describe('gdrive read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      resourcePath: 'report.pdf',
+      vfsPath: 'report.pdf',
       virtual: '/report.pdf',
       directory: '/report.pdf',
     })
@@ -95,7 +95,7 @@ describe('gdrive read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      resourcePath: 'missing.txt',
+      vfsPath: 'missing.txt',
       virtual: '/missing.txt',
       directory: '/missing.txt',
     })
@@ -110,7 +110,7 @@ describe('gdrive read auto-bootstrap', () => {
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
     const path = new PathSpec({
-      resourcePath: 'missing.txt',
+      vfsPath: 'missing.txt',
       virtual: '/missing.txt',
       directory: '/missing.txt',
     })
@@ -134,7 +134,7 @@ describe('gdrive read auto-bootstrap', () => {
       ],
     ])
     const path = new PathSpec({
-      resourcePath: 'Team Drive',
+      vfsPath: 'Team Drive',
       virtual: '/Team Drive',
       directory: '/Team Drive',
     })

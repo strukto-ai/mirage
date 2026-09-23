@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 
 export async function handleEval(
   executeFn: ExecuteStringFn,
   args: string[],
-  session: Session,
+  session: SessionState,
 ): Promise<Result> {
   const script = args.join(' ')
   const io = await executeFn(script, { sessionId: session.sessionId })

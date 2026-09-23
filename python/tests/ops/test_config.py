@@ -15,8 +15,8 @@
 import inspect
 
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS, NamespaceLinks
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 # The seam's members in declaration order. The TypeScript twin
@@ -60,7 +60,7 @@ def test_namespace_satisfies_the_narrowed_protocol():
     # Narrowing the seam must not cost the structural match: the
     # workspace Namespace still answers every member, and keeps the
     # mutators the door calls on it directly.
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     assert isinstance(ws.namespace, NamespaceLinks)
     assert inspect.iscoroutinefunction(ws.namespace.symlink)
     assert inspect.iscoroutinefunction(ws.namespace.unlink)

@@ -14,7 +14,7 @@
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { recordStream, revisionFor } from '../../observe/context.ts'
-import { ResourceName, type PathSpec } from '../../types.ts'
+import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { createS3Client, isNotFoundError, loadS3Module, s3Key } from './client.ts'
 import { fpRevFromS3Response, read } from './read.ts'
@@ -32,7 +32,7 @@ function concatChunks(a: Uint8Array, b: Uint8Array): Uint8Array {
 
 export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterable<Uint8Array> {
   const virtual = path.virtual
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const rawPath =
     prefix !== '' && virtual.startsWith(prefix) ? virtual.slice(prefix.length) || '/' : virtual
 
@@ -51,7 +51,7 @@ export async function* stream(accessor: S3Accessor, path: PathSpec): AsyncIterab
 
   // Naming the virtual path keeps the record exact without consulting the
   // active mount prefix; record() leaves an already-prefixed path alone.
-  const rec = recordStream('read', virtual, ResourceName.S3)
+  const rec = recordStream('read', virtual, VFSName.S3)
 
   try {
     const resp = (await send(new GetObjectCommand(input))) as {
@@ -162,7 +162,7 @@ async function windowFromStream(
 }
 
 /**
- * The resource-level `range_read(path, start, end)`, end exclusive.
+ * The VFS-level `range_read(path, start, end)`, end exclusive.
  *
  * Every other backend's `rangeRead` and all of python's spell the window this
  * way; s3 read its fourth argument as a length, so `range_read(p, 10, 20)`

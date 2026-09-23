@@ -14,13 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { MirageEditor } from './editor.ts'
 
 function mkWs(): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -38,7 +38,7 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.fs.readFileText('/hello.txt')).toBe('hello world\n')
+    expect(await ws.vfs.readFileText('/hello.txt')).toBe('hello world\n')
   })
 
   it('createFile auto-mkdirs missing parent directories', async () => {
@@ -52,7 +52,7 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.fs.readFileText('/data/sub/file.txt')).toBe('content\n')
+    expect(await ws.vfs.readFileText('/data/sub/file.txt')).toBe('content\n')
   })
 
   it('createFile handles a root-level relative path without recursing on "."', async () => {
@@ -66,12 +66,12 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.fs.readFileText('bare.txt')).toBe('bare')
+    expect(await ws.vfs.readFileText('bare.txt')).toBe('bare')
   })
 
   it('createFile is idempotent on existing parent', async () => {
     const ws = mkWs()
-    await ws.fs.mkdir('/data')
+    await ws.vfs.mkdir('/data')
     const editor = new MirageEditor(ws)
 
     const result = await editor.createFile({
@@ -85,7 +85,7 @@ describe('MirageEditor', () => {
 
   it('updateFile applies a diff to existing content', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/notes.txt', 'one\ntwo\nthree\n')
+    await ws.vfs.writeFile('/notes.txt', 'one\ntwo\nthree\n')
     const editor = new MirageEditor(ws)
 
     const diff = '@@\n one\n-two\n+TWO\n three\n'
@@ -96,7 +96,7 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.fs.readFileText('/notes.txt')).toBe('one\nTWO\nthree\n')
+    expect(await ws.vfs.readFileText('/notes.txt')).toBe('one\nTWO\nthree\n')
   })
 
   it('updateFile returns failed for missing path', async () => {
@@ -117,7 +117,7 @@ describe('MirageEditor', () => {
 
   it('deleteFile removes the file', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/gone.txt', 'bye')
+    await ws.vfs.writeFile('/gone.txt', 'bye')
     const editor = new MirageEditor(ws)
 
     const result = await editor.deleteFile({
@@ -126,7 +126,7 @@ describe('MirageEditor', () => {
     })
 
     expect(result).toEqual({ status: 'completed' })
-    expect(await ws.fs.exists('/gone.txt')).toBe(false)
+    expect(await ws.vfs.exists('/gone.txt')).toBe(false)
   })
 
   it('deleteFile returns failed for missing path', async () => {

@@ -23,14 +23,14 @@ from mirage.workspace.executor.builtins.shared import (abs_path, fail,
                                                        split_flags)
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_readlink(
     namespace: Namespace,
     dispatch: DispatchFn,
-    session: Session,
+    session: SessionState,
     args: list[str | PathSpec],
 ) -> Result:
     """Print a symlink's target, GNU readlink semantics.
@@ -43,7 +43,7 @@ async def handle_readlink(
     Args:
         namespace (Namespace): addressing authority holding the links.
         dispatch (DispatchFn): op dispatcher, used for the existence check.
-        session (Session): current session, for the working directory.
+        session (SessionState): current session, for the working directory.
         args (list[str | PathSpec]): the command's words after the name.
     """
     flags, operands = split_flags(args, "fenm")

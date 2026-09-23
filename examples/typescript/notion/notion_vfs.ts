@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
   MountMode,
-  NotionResource,
+  NotionVFS,
   patchNodeFs,
   Workspace,
   type NotionConfig,
@@ -39,8 +39,8 @@ function buildConfig(): NotionConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new NotionResource(buildConfig())
-  const ws = new Workspace({ '/notion': resource }, { mode: MountMode.READ })
+  const vfs = new NotionVFS(buildConfig())
+  const ws = new Workspace({ '/notion': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Notion transparently ===\n')

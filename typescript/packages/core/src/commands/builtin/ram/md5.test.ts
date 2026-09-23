@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 import { md5Hex } from '../../../utils/hash.ts'
 const RAM_MD5 = RAM_COMMANDS.filter((c) => c.name === 'md5' && c.filetype == null)
@@ -24,13 +24,13 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runMd5(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_MD5[0]
   if (cmd === undefined) throw new Error('md5 not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags: {},
     filetypeFns: null,
@@ -49,46 +49,43 @@ async function runMd5(
 
 describe('md5', () => {
   it('matches md5Hex for a single file', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const data = ENC.encode('hello')
-    resource.store.files.set('/tmp/f.txt', data)
-    resource.store.dirs.add('/tmp')
+    vfs.store.files.set('/tmp/f.txt', data)
+    vfs.store.dirs.add('/tmp')
     const expected = md5Hex(data)
-    const r = await runMd5(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
+    const r = await runMd5(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe(`${expected}  /tmp/f.txt\n`)
   })
 
   it('handles empty file', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const data = new Uint8Array()
-    resource.store.files.set('/tmp/empty.txt', data)
-    resource.store.dirs.add('/tmp')
+    vfs.store.files.set('/tmp/empty.txt', data)
+    vfs.store.dirs.add('/tmp')
     const expected = md5Hex(data)
-    const r = await runMd5(resource, [PathSpec.fromStrPath('/tmp/empty.txt')])
+    const r = await runMd5(vfs, [PathSpec.fromStrPath('/tmp/empty.txt')])
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe(`${expected}  /tmp/empty.txt\n`)
   })
 
   it('hashes stdin when no paths', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const data = ENC.encode('disk content')
     const expected = `${md5Hex(data)}  -\n`
-    const r = await runMd5(resource, [], data)
+    const r = await runMd5(vfs, [], data)
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe(expected)
   })
 
   it('hashes multiple files', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const d1 = ENC.encode('one')
     const d2 = ENC.encode('two')
-    resource.store.files.set('/a.txt', d1)
-    resource.store.files.set('/b.txt', d2)
-    const r = await runMd5(resource, [
-      PathSpec.fromStrPath('/a.txt'),
-      PathSpec.fromStrPath('/b.txt'),
-    ])
+    vfs.store.files.set('/a.txt', d1)
+    vfs.store.files.set('/b.txt', d2)
+    const r = await runMd5(vfs, [PathSpec.fromStrPath('/a.txt'), PathSpec.fromStrPath('/b.txt')])
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe(`${md5Hex(d1)}  /a.txt\n${md5Hex(d2)}  /b.txt\n`)
   })

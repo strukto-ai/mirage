@@ -20,7 +20,7 @@ vi.mock('./client.ts', async () => {
   return { ...actual, loadS3Module: vi.fn(), createS3Client: vi.fn() }
 })
 
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { S3Accessor } from '../../accessor/s3.ts'
 import { PathSpec } from '../../types.ts'
 import * as clientMod from './client.ts'
@@ -81,7 +81,7 @@ function mockBucket(keys: string[]): void {
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({
-    resourcePath: virtual.replace(/^\/+|\/+$/g, ''),
+    vfsPath: virtual.replace(/^\/+|\/+$/g, ''),
     virtual,
     directory: virtual,
   })

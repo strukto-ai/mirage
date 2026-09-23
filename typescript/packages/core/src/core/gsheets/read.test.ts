@@ -63,7 +63,7 @@ describe('gsheets read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json',
       directory: '/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json',
-      resourcePath: mountKey('/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json', '/gsheets'),
+      vfsPath: mountKey('/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json', '/gsheets'),
     })
     const out = await read(accessor, path, index)
     expect(new TextDecoder().decode(out)).toContain('sheet1')
@@ -78,7 +78,7 @@ describe('gsheets read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gsheets/owned/Missing__xyz.gsheet.json',
       directory: '/gsheets/owned/Missing__xyz.gsheet.json',
-      resourcePath: mountKey('/gsheets/owned/Missing__xyz.gsheet.json', '/gsheets'),
+      vfsPath: mountKey('/gsheets/owned/Missing__xyz.gsheet.json', '/gsheets'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })

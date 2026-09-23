@@ -33,7 +33,7 @@ from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.constants import ARITH_DELIMITERS, ARITH_OPERATORS
 from mirage.workspace.expand.variable import (_lookup_var, expand_braces,
                                               land_arith_writes)
-from mirage.workspace.session import Session, visible_env
+from mirage.workspace.session import SessionState, visible_env
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import random_reader, session_elements
 
@@ -57,7 +57,7 @@ def _folded_whitespace(node: TSNodeLike) -> str:
 
 async def _expand_backtick_region(
     raw: str,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     node: TSNodeLike,
     offset: int,
@@ -66,7 +66,7 @@ async def _expand_backtick_region(
 
     Args:
         raw (str): the region's text, the folded prefix stripped.
-        session (Session): the session expanding it.
+        session (SessionState): the session expanding it.
         execute_fn (Callable[..., Any]): the nested-line door.
         node (TSNodeLike): the region's node.
         offset (int): where ``raw`` starts in the node's text, in the
@@ -90,7 +90,7 @@ async def _expand_backtick_region(
     return "".join(parts)
 
 
-async def child_line(session: Session,
+async def child_line(session: SessionState,
                      execute_fn: Callable[..., Any],
                      text: str,
                      node: Any,
@@ -105,7 +105,7 @@ async def child_line(session: Session,
     where they were typed rather than under a subshell of their own.
 
     Args:
-        session (Session): the parent shell's session.
+        session (SessionState): the parent shell's session.
         execute_fn (Callable[..., Any]): the workspace's nested-line
             executor.
         text (str): the line the substitution holds.
@@ -171,7 +171,7 @@ def arith_exit(expr: str, exc: ArithError) -> ExitSignal:
 
 async def expand_arith(
     ts_node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None = None,
@@ -228,7 +228,7 @@ async def expand_arith(
 
 async def _arith_subscript(
     sub_node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None,
@@ -244,7 +244,7 @@ async def _arith_subscript(
 
     Args:
         sub_node (TSNodeLike): the ``subscript`` node.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -277,7 +277,7 @@ async def _arith_subscript(
 
 async def expand_node(
     ts_node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -286,7 +286,7 @@ async def expand_node(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door, for
@@ -301,7 +301,7 @@ async def expand_node(
 
 async def expand_node_marked(
     ts_node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -315,7 +315,7 @@ async def expand_node_marked(
 
     Args:
         ts_node (TSNodeLike): the node to expand.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door, for

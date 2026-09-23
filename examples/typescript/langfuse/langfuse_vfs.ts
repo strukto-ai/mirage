@@ -17,7 +17,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  LangfuseResource,
+  LangfuseVFS,
   MountMode,
   patchNodeFs,
   Workspace,
@@ -53,8 +53,8 @@ function buildConfig(): LangfuseConfig {
 
 async function main(): Promise<void> {
   const MOUNT = '/langfuse'
-  const resource = new LangfuseResource(buildConfig())
-  const ws = new Workspace({ [MOUNT]: resource }, { mode: MountMode.READ })
+  const vfs = new LangfuseVFS(buildConfig())
+  const ws = new Workspace({ [MOUNT]: vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log(`=== VFS MODE: mounted at ${MOUNT} (in-process fs patch) ===\n`)

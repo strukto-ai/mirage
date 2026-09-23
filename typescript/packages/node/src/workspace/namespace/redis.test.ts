@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { Workspace } from '../../workspace.ts'
@@ -31,7 +31,7 @@ function makeStore(prefix: string): RedisNamespaceStore {
     : new RedisNamespaceStore({ keyPrefix: prefix })
 }
 
-// Ops resolve by resource kind in the workspace registry, so blocking
+// Ops resolve by VFS kind in the workspace registry, so blocking
 // setattr registration simulates an API backend with no attribute slot
 // (attrs land in the namespace overlay).
 class NoSetattrRegistry extends OpsRegistry {
@@ -78,20 +78,17 @@ describe.skipIf(skip)('RedisNamespaceStore', () => {
   it('whoami identity is shared across workspaces', async () => {
     const prefix = `mirage:test:namespace:${randomUUID().slice(0, 8)}:`
     const ws = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       { agentId: 'alice', namespaceStore: makeStore(prefix) },
     )
-    const io = await ws.execute('whoami')
+    const io = await ws.shell('whoami')
     expect(io.stdoutText).toBe('alice\n')
     await ws.close()
 
     // A fresh runtime attached to the same store, launched without an
     // agentId, adopts the workspace's identity.
-    const reborn = new Workspace(
-      { '/data': new RAMResource() },
-      { namespaceStore: makeStore(prefix) },
-    )
-    const io2 = await reborn.execute('whoami')
+    const reborn = new Workspace({ '/data': new RAMVFS() }, { namespaceStore: makeStore(prefix) })
+    const io2 = await reborn.shell('whoami')
     expect(io2.stdoutText).toBe('alice\n')
     const cleaner = makeStore(prefix)
     await cleaner.clear()
@@ -102,24 +99,24 @@ describe.skipIf(skip)('RedisNamespaceStore', () => {
   it('namespace state survives a workspace restart', async () => {
     const prefix = `mirage:test:namespace:${randomUUID().slice(0, 8)}:`
     const ws = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, ops: new NoSetattrRegistry(), namespaceStore: makeStore(prefix) },
     )
-    await ws.execute('echo alpha > /data/f.txt')
-    await ws.execute('chmod 601 /data/f.txt && chown 500:dev /data/f.txt')
-    await ws.execute('ln -s /data/f.txt /data/link')
+    await ws.shell('echo alpha > /data/f.txt')
+    await ws.shell('chmod 601 /data/f.txt && chown 500:dev /data/f.txt')
+    await ws.shell('ln -s /data/f.txt /data/link')
     await ws.close()
 
     const reborn = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, ops: new NoSetattrRegistry(), namespaceStore: makeStore(prefix) },
     )
-    await reborn.execute('echo alpha > /data/f.txt')
+    await reborn.shell('echo alpha > /data/f.txt')
     const st = (await reborn.dispatch('stat', '/data/f.txt')) as FileStat
     expect(st.mode).toBe(0o601)
     expect(st.uid).toBe(500)
     expect(st.gid).toBe('dev')
-    const r = await reborn.execute('readlink /data/link')
+    const r = await reborn.shell('readlink /data/link')
     expect(r.stdoutText).toBe('/data/f.txt\n')
     const cleaner = makeStore(prefix)
     await cleaner.clear()

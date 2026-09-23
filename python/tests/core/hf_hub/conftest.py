@@ -22,7 +22,7 @@ from mirage.types import PathSpec
 
 class FakeAccessor(HfHubAccessor):
     REPO_TYPE = "model"
-    RESOURCE_NAME = "hf_models"
+    VFS_NAME = "hf_models"
 
 
 @pytest.fixture
@@ -58,7 +58,7 @@ def ps(path: str, prefix: str = "") -> PathSpec:
     parent = virtual.rsplit("/", 1)[0] or "/"
     return PathSpec(virtual=virtual,
                     directory=parent,
-                    resource_path=rel,
+                    vfs_path=rel,
                     raw_path=virtual)
 
 

@@ -27,7 +27,7 @@ import {
   runtimeRefused,
   wordPolicy,
 } from '../lookup/index.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { classifyParts } from './classify/index.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { globNeedsShell, globOptions, resolveGlobs } from './globs.ts'
@@ -100,7 +100,7 @@ export class Argv {
  */
 export async function expandArgv(
   parts: TSNodeLike[],
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   registry: MountRegistry,

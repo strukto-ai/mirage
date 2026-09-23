@@ -29,10 +29,10 @@ vi.mock('./stat.ts', async () => {
 
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import type { LanceDriver } from './_driver.ts'
-import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
+import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import { walkFind } from '../generic/find.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
@@ -97,7 +97,7 @@ const TREE: Record<string, string[]> = {
   '/tbl/grp': ['/tbl/grp/c.md'],
 }
 
-const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
 describe('lancedb core find', () => {
   beforeEach(() => {
@@ -177,7 +177,7 @@ describe('lancedb core find', () => {
     const root = new PathSpec({
       virtual: '/mnt/ldb',
       directory: '/mnt/ldb',
-      resourcePath: mountKey('/mnt/ldb', '/mnt/ldb'),
+      vfsPath: mountKey('/mnt/ldb', '/mnt/ldb'),
     })
     const out = await find(makeAccessor(), root)
     expect(out).toEqual(['/tbl', '/tbl/a.md'])

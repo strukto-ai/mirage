@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_NL = RAM_COMMANDS.filter((c) => c.name === 'nl' && c.filetype == null)
 
@@ -23,14 +23,14 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runNl(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_NL[0]
   if (cmd === undefined) throw new Error('nl not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -49,9 +49,9 @@ async function runNl(
 
 describe('nl', () => {
   it('numbers non-empty lines by default', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('hello\n\nworld\n'))
-    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('hello\n\nworld\n'))
+    const r = await runNl(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.exitCode).toBe(0)
     const lines = r.out.split('\n')
     expect(lines[0]).toContain('1')
@@ -62,9 +62,9 @@ describe('nl', () => {
   })
 
   it('-b a numbers all lines including empty', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('hello\n\nworld\n'))
-    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { body_numbering: 'a' })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('hello\n\nworld\n'))
+    const r = await runNl(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { body_numbering: 'a' })
     const lines = r.out.split('\n')
     expect(lines[0]).toContain('1')
     expect(lines[1]).toContain('2')
@@ -72,9 +72,9 @@ describe('nl', () => {
   })
 
   it('-b n emits no line numbers', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('hello\nworld\n'))
-    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { body_numbering: 'n' })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('hello\nworld\n'))
+    const r = await runNl(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { body_numbering: 'n' })
     const lines = r.out.split('\n')
     for (const line of lines) {
       if (line === '') continue
@@ -85,9 +85,9 @@ describe('nl', () => {
   })
 
   it('-w width and -s separator', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('hello\n'))
-    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('hello\n'))
+    const r = await runNl(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       number_width: '3',
       number_separator: ':',
     })
@@ -95,9 +95,9 @@ describe('nl', () => {
   })
 
   it('-v start and -i increment', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc\n'))
-    const r = await runNl(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc\n'))
+    const r = await runNl(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       starting_line_number: '10',
       line_increment: '5',
     })
@@ -108,8 +108,8 @@ describe('nl', () => {
   })
 
   it('reads from stdin when no path', async () => {
-    const resource = new RAMResource()
-    const r = await runNl(resource, [], {}, ENC.encode('x\ny\n'))
+    const vfs = new RAMVFS()
+    const r = await runNl(vfs, [], {}, ENC.encode('x\ny\n'))
     expect(r.exitCode).toBe(0)
     const lines = r.out.split('\n')
     expect(lines[0]).toContain('1')
@@ -119,10 +119,10 @@ describe('nl', () => {
   })
 
   it('missing stdin with no path returns error', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const cmd = RAM_NL[0]
     if (cmd === undefined) throw new Error('nl not registered')
-    const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+    const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
       stdin: null,
       flags: {},
       filetypeFns: null,

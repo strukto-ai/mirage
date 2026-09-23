@@ -20,7 +20,7 @@ mode: "frame"
 
 <div className="max-w-none text-[15px] leading-7 mb-4">
   <p className="my-0">
-    Mount your resources, then run shell commands across them. The same <code>echo</code>, <code>ls</code>, <code>grep</code> work against an in-memory mount, <Icon icon="aws" /> S3, <Icon icon="slack" /> Slack, etc.
+    Mount your sources, then run shell commands across them. The same <code>echo</code>, <code>ls</code>, <code>grep</code> work against an in-memory mount, <Icon icon="aws" /> S3, <Icon icon="slack" /> Slack, etc.
   </p>
 </div>
 
@@ -30,20 +30,20 @@ mode: "frame"
     import os
 
     from mirage import Mount, MountMode, Workspace
-    from mirage.resource.ram import RAMResource
-    from mirage.resource.s3 import S3Config, S3Resource
-    from mirage.resource.slack import SlackConfig, SlackResource
+    from mirage.vfs.ram import RAMVFS
+    from mirage.vfs.s3 import S3Config, S3VFS
+    from mirage.vfs.slack import SlackConfig, SlackVFS
 
     ws = Workspace({
-        "/data": Mount(RAMResource(), mode=MountMode.WRITE),
-        "/s3": S3Resource(S3Config(bucket="my-bucket")),
-        "/slack": SlackResource(SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])),
+        "/data": Mount(RAMVFS(), mode=MountMode.WRITE),
+        "/s3": S3VFS(S3Config(bucket="my-bucket")),
+        "/slack": SlackVFS(SlackConfig(token=os.environ["SLACK_BOT_TOKEN"])),
     })
 
     # Same shell vocabulary, three different backends.
-    await ws.execute('echo "hello mirage" > /data/hello.txt')
-    await ws.execute("ls /s3/reports/")
-    result = await ws.execute('grep -r "release" /slack/channels/eng__C04QX')
+    await ws.shell('echo "hello mirage" > /data/hello.txt')
+    await ws.shell("ls /s3/reports/")
+    result = await ws.shell('grep -r "release" /slack/channels/eng__C04QX')
     print(await result.stdout_str())
     ```
   </Tab>
@@ -52,22 +52,22 @@ mode: "frame"
     import {
       Mount,
       MountMode,
-      RAMResource,
-      S3Resource,
-      SlackResource,
+      RAMVFS,
+      S3VFS,
+      SlackVFS,
       Workspace,
     } from '@struktoai/mirage-node'
 
     const ws = new Workspace({
-      '/data': new Mount(new RAMResource(), { mode: MountMode.WRITE }),
-      '/s3': new S3Resource({ bucket: 'my-bucket' }),
-      '/slack': new SlackResource({ token: process.env.SLACK_BOT_TOKEN! }),
+      '/data': new Mount(new RAMVFS(), { mode: MountMode.WRITE }),
+      '/s3': new S3VFS({ bucket: 'my-bucket' }),
+      '/slack': new SlackVFS({ token: process.env.SLACK_BOT_TOKEN! }),
     })
 
     // Same shell vocabulary, three different backends.
-    await ws.execute('echo "hello mirage" > /data/hello.txt')
-    await ws.execute('ls /s3/reports/')
-    const res = await ws.execute('grep -r "release" /slack/channels/eng__C04QX')
+    await ws.shell('echo "hello mirage" > /data/hello.txt')
+    await ws.shell('ls /s3/reports/')
+    const res = await ws.shell('grep -r "release" /slack/channels/eng__C04QX')
     console.log(new TextDecoder().decode(res.stdout))
     ```
   </Tab>
@@ -77,15 +77,15 @@ mode: "frame"
     mode: WRITE
     mounts:
       /data:
-        resource: ram
+        vfs: ram
         mode: WRITE
       /s3:
-        resource: s3
+        vfs: s3
         mode: READ
         config:
           bucket: ${AWS_S3_BUCKET}
       /slack:
-        resource: slack
+        vfs: slack
         mode: READ
         config:
           token: ${SLACK_BOT_TOKEN}
@@ -170,17 +170,17 @@ grep -r "mirage" /slack /gmail /github
 
     from mirage import Mount, MountMode, Workspace
     from mirage.agents.openai_agents import MirageSandboxClient
-    from mirage.resource.github import GitHubConfig, GitHubResource
-    from mirage.resource.linear import LinearConfig, LinearResource
-    from mirage.resource.slack import SlackConfig, SlackResource
+    from mirage.vfs.github import GitHubConfig, GitHubVFS
+    from mirage.vfs.linear import LinearConfig, LinearVFS
+    from mirage.vfs.slack import SlackConfig, SlackVFS
 
-    slack = SlackResource(SlackConfig(token="xoxb-..."))
-    github = GitHubResource(
+    slack = SlackVFS(SlackConfig(token="xoxb-..."))
+    github = GitHubVFS(
         GitHubConfig(token="github_pat_..."),
         owner="strukto-ai",
         repo="mirage",
     )
-    linear = LinearResource(LinearConfig(api_key="lin_api_..."))
+    linear = LinearVFS(LinearConfig(api_key="lin_api_..."))
 
     ws = Workspace({
         "/slack": slack,
@@ -215,23 +215,23 @@ grep -r "mirage" /slack /gmail /github
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
     import {
-      GitHubResource,
-      LinearResource,
+      GitHubVFS,
+      LinearVFS,
       Mount,
       MountMode,
-      SlackResource,
+      SlackVFS,
       Workspace,
     } from '@struktoai/mirage-node'
     import { Agent, run, shellTool } from '@openai/agents'
     import { MirageShell, buildSystemPrompt } from '@struktoai/mirage-agents/openai'
 
-    const slack = new SlackResource({ token: process.env.SLACK_BOT_TOKEN! })
-    const github = await GitHubResource.create({
+    const slack = new SlackVFS({ token: process.env.SLACK_BOT_TOKEN! })
+    const github = await GitHubVFS.create({
       token: process.env.GITHUB_TOKEN!,
       owner: 'strukto-ai',
       repo: 'mirage',
     })
-    const linear = new LinearResource({ apiKey: process.env.LINEAR_API_KEY! })
+    const linear = new LinearVFS({ apiKey: process.env.LINEAR_API_KEY! })
 
     const ws = new Workspace({
       '/slack': slack,
@@ -259,7 +259,7 @@ grep -r "mirage" /slack /gmail /github
 
     <div className="max-w-none text-[15px] leading-7 mt-4 mb-4">
       <p className="my-0">
-        Runnable source: <a href="https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/multi_resource_agent.ts" target="_blank" rel="noopener noreferrer"><code>examples/typescript/agents/openai/multi_resource_agent.ts</code></a>, the same shell-tool pattern over Slack and S3.
+        Runnable source: <a href="https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/multi_vfs_agent.ts" target="_blank" rel="noopener noreferrer"><code>examples/typescript/agents/openai/multi_vfs_agent.ts</code></a>, the same shell-tool pattern over Slack and S3.
       </p>
     </div>
   </Tab>
@@ -331,13 +331,13 @@ EOF
 
 <AccordionGroup>
   <Accordion title="Do I need FUSE?">
-    No. Mirage runs the workspace in-process: <code>ws.execute(...)</code> parses and dispatches commands without mounting anything on the host. FUSE is an optional surface if you also want host tools (editors, language servers, <code>rg</code>) to see the workspace.
+    No. Mirage runs the workspace in-process: <code>ws.shell(...)</code> parses and dispatches commands without mounting anything on the host. FUSE is an optional surface if you also want host tools (editors, language servers, <code>rg</code>) to see the workspace.
   </Accordion>
   <Accordion title="Where does the shell run? Is it really bash?">
     The shell runs in your Mirage process. It's a tree-sitter bash parser plus a custom executor that routes commands to per-mount handlers, so there is no subshell to <code>/bin/bash</code> and no <code>os.system</code>. Most common Unix verbs work (<code>ls</code>, <code>cat</code>, <code>grep</code>, <code>find</code>, <code>head</code>, <code>wc</code>, <code>jq</code>, ...) plus pipes, redirects, globs, and <code>&&</code>/<code>||</code>.
   </Accordion>
   <Accordion title="Is it sandboxed?">
-    The shell only sees your mounted resources: no arbitrary host filesystem, no shelling out to host binaries. For untrusted code you'd still want a real sandbox (Daytona, E2B, Modal); Mirage embeds inside those rather than replacing them.
+    The shell only sees your mounts: no arbitrary host filesystem, no shelling out to host binaries. For untrusted code you'd still want a real sandbox (Daytona, E2B, Modal); Mirage embeds inside those rather than replacing them.
   </Accordion>
   <Accordion title="What about latency and cost?">
     Backend-bound. <code>cat /s3/...</code> is one GetObject; <code>find /postgres/...</code> is a SQL query. Reads cache per session, and <code>mirage provision</code> returns a dry-run estimate (network bytes, cache hits, projected cost) before you commit to an expensive operation.
@@ -349,10 +349,10 @@ EOF
     Anything that exposes a shell tool: Claude Code, Codex / OpenAI Agents SDK, Cursor, OpenHands, Pydantic deepagents. Direct SDK integrations live under <a href="/python/agents">Python agents</a> and <a href="/typescript/agents">TypeScript agents</a>.
   </Accordion>
   <Accordion title="Python or TypeScript?">
-    Both. The Python package is the reference implementation; the TypeScript SDK (<code>@struktoai/mirage-node</code>) ships the same <code>Workspace</code>/<code>execute</code> surface and most resources. Some agent integrations land on Python first.
+    Both. The Python package is the reference implementation; the TypeScript SDK (<code>@struktoai/mirage-node</code>) ships the same <code>Workspace</code>/<code>execute</code> surface and most mounts. Some agent integrations land on Python first.
   </Accordion>
-  <Accordion title="What if a resource I want isn't supported yet?">
-    Resources are pluggable. The <a href="/python/resource/new">"Add a resource"</a> guide walks through the read/write/stat surface a new backend implements. PRs welcome.
+  <Accordion title="What if a VFS I want isn't supported yet?">
+    VFS types are pluggable. The <a href="/python/vfs/new">"Add a VFS"</a> guide walks through the read/write/stat surface a new backend implements. PRs welcome.
   </Accordion>
 </AccordionGroup>
 
@@ -360,7 +360,7 @@ EOF
 
 <CardGroup cols={2}>
   <Card title="Python Quickstart" icon="python" href="/python/quickstart">
-    Create a workspace, mount resources, and run shell commands in minutes.
+    Create a workspace, mount your sources, and run shell commands in minutes.
   </Card>
   <Card title="TypeScript Quickstart" icon="js" href="/typescript/quickstart">
     Same Workspace API in Node, browser, and edge runtimes.
@@ -368,8 +368,8 @@ EOF
   <Card title="CLI" icon="terminal" href="/home/cli">
     Drive workspaces from the shell: create, execute, snapshot, and restore.
   </Card>
-  <Card title="Resource Matrix" icon="grid-2" href="/home/resource-matrix">
-    Compare resources by mount mode, setup path, and common use cases.
+  <Card title="VFS Matrix" icon="grid-2" href="/home/vfs-matrix">
+    Compare VFS types by mount mode, setup path, and common use cases.
   </Card>
 </CardGroup>
 

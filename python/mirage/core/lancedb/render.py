@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.resource.lancedb.config import LanceDBConfig
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 _SKIP_KEYS = {"_distance", "_rowid", "_score"}
 

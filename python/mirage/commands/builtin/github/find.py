@@ -40,10 +40,7 @@ async def find_provision(accessor: GitHubAccessor, paths: list[PathSpec],
     return await metadata_provision("find " + " ".join(path_strs))
 
 
-@command("find",
-         resource="github",
-         spec=SPECS["find"],
-         provision=find_provision)
+@command("find", vfs="github", spec=SPECS["find"], provision=find_provision)
 async def find(
     accessor: GitHubAccessor,
     paths: list[PathSpec],

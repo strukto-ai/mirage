@@ -63,7 +63,7 @@ describe('gdocs read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json',
       directory: '/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json',
-      resourcePath: mountKey('/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json', '/gdocs'),
+      vfsPath: mountKey('/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json', '/gdocs'),
     })
     const out = await read(accessor, path, index)
     expect(new TextDecoder().decode(out)).toContain('doc1')
@@ -78,7 +78,7 @@ describe('gdocs read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gdocs/owned/Missing__xyz.gdoc.json',
       directory: '/gdocs/owned/Missing__xyz.gdoc.json',
-      resourcePath: mountKey('/gdocs/owned/Missing__xyz.gdoc.json', '/gdocs'),
+      vfsPath: mountKey('/gdocs/owned/Missing__xyz.gdoc.json', '/gdocs'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -94,7 +94,7 @@ describe('gdocs read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gdocs/owned/Missing__xyz.gdoc.json',
       directory: '/gdocs/owned/Missing__xyz.gdoc.json',
-      resourcePath: mountKey('/gdocs/owned/Missing__xyz.gdoc.json', '/gdocs'),
+      vfsPath: mountKey('/gdocs/owned/Missing__xyz.gdoc.json', '/gdocs'),
     })
     await expect(read(accessor, path, index)).rejects.toThrow(/google unavailable/)
   })

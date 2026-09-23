@@ -56,7 +56,7 @@ import { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { PgDriver, PgQueryResult } from '../../../core/postgres/_driver.ts'
 import * as searchModule from '../../../core/postgres/search.ts'
 import * as statModule from '../../../core/postgres/stat.ts'
-import { resolvePostgresConfig } from '../../../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../../../vfs/postgres/config.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { hasUnresolvedGlob } from '../utils/operands.ts'
 import { POSTGRES_COMMANDS } from './index.ts'
@@ -84,7 +84,7 @@ function globPath(): PathSpec {
   return new PathSpec({
     virtual: '/public/tables/*/rows.jsonl',
     directory: '/public/tables/',
-    resourcePath: 'public/tables/*/rows.jsonl',
+    vfsPath: 'public/tables/*/rows.jsonl',
     pattern: 'rows.jsonl',
     resolved: false,
   })
@@ -94,7 +94,7 @@ function concretePath(): PathSpec {
   return new PathSpec({
     virtual: '/public/tables/books/rows.jsonl',
     directory: '/public/tables/books/',
-    resourcePath: 'public/tables/books/rows.jsonl',
+    vfsPath: 'public/tables/books/rows.jsonl',
     resolved: true,
   })
 }

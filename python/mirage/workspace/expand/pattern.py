@@ -24,7 +24,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import escape_glob
 from mirage.utils.path import expand_tilde
 from mirage.workspace.expand.node import expand_node
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
 
 
@@ -48,7 +48,7 @@ def _unquoted_pattern(text: str) -> str:
 
 async def _quoted_string_pattern(
     ts_node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None = None,
@@ -62,7 +62,7 @@ async def _quoted_string_pattern(
 
     Args:
         ts_node (TSNodeLike): the string node.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
     """
@@ -85,7 +85,7 @@ async def _quoted_string_pattern(
 
 async def expand_pattern(
     ts_node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -102,7 +102,7 @@ async def expand_pattern(
 
     Args:
         ts_node (TSNodeLike): one pattern node.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
     """

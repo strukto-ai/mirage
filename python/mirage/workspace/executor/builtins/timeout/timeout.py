@@ -23,7 +23,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.utils.stream import ensure_stream
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 _DURATION = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)")
@@ -57,7 +57,7 @@ def parse_duration(raw: str) -> float | None:
 async def handle_timeout(
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run `timeout DURATION COMMAND [ARG...]`, killing at the deadline.
 
@@ -71,7 +71,7 @@ async def handle_timeout(
     Args:
         execute_fn (Callable): shell evaluator for the inner line.
         args (list[str]): options, duration operand, then the command.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     parse = parse_shell_options(SHELL_SPECS["timeout"], args or [])
     if parse.invalid is not None:

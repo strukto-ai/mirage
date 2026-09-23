@@ -14,19 +14,19 @@
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 
 
 @pytest.fixture
 def ws():
-    return Workspace({"/ram": RAMResource()}, mode=MountMode.WRITE)
+    return Workspace({"/ram": RAMVFS()}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_history_lists_recent_commands(ws):
-    await ws.execute("echo hello")
-    await ws.execute("echo world")
-    io = await ws.execute("history")
+    await ws.shell("echo hello")
+    await ws.shell("echo world")
+    io = await ws.shell("history")
     out = (io.stdout or b"").decode()
     assert "echo hello" in out
     assert "echo world" in out
@@ -35,10 +35,10 @@ async def test_history_lists_recent_commands(ws):
 
 @pytest.mark.asyncio
 async def test_history_n_returns_last_n(ws):
-    await ws.execute("echo a")
-    await ws.execute("echo b")
-    await ws.execute("echo c")
-    io = await ws.execute("history 2")
+    await ws.shell("echo a")
+    await ws.shell("echo b")
+    await ws.shell("echo c")
+    io = await ws.shell("history 2")
     out = (io.stdout or b"").decode()
     lines = [line for line in out.strip().split("\n") if line.strip()]
     assert len(lines) == 2
@@ -47,11 +47,11 @@ async def test_history_n_returns_last_n(ws):
 
 @pytest.mark.asyncio
 async def test_history_dash_c_clears(ws):
-    await ws.execute("echo a")
-    await ws.execute("echo b")
-    clear_io = await ws.execute("history -c")
+    await ws.shell("echo a")
+    await ws.shell("echo b")
+    clear_io = await ws.shell("history -c")
     assert clear_io.exit_code == 0
-    io = await ws.execute("history")
+    io = await ws.shell("history")
     out = (io.stdout or b"").decode()
     lines = [line for line in out.strip().split("\n") if line.strip()]
     assert len(lines) == 1
@@ -60,8 +60,8 @@ async def test_history_dash_c_clears(ws):
 
 @pytest.mark.asyncio
 async def test_history_invalid_numeric_arg(ws):
-    await ws.execute("echo a")
-    io = await ws.execute("history abc")
+    await ws.shell("echo a")
+    io = await ws.shell("history abc")
     assert io.exit_code == 1
     err = (io.stderr or b"").decode()
     assert "numeric" in err
@@ -71,13 +71,13 @@ async def test_history_invalid_numeric_arg(ws):
 async def test_history_isolated_per_session(ws):
     ws.create_session("alice")
     ws.create_session("bob")
-    await ws.execute("echo from-alice", session_id="alice")
-    await ws.execute("echo from-bob", session_id="bob")
-    io_a = await ws.execute("history", session_id="alice")
+    await ws.shell("echo from-alice", session_id="alice")
+    await ws.shell("echo from-bob", session_id="bob")
+    io_a = await ws.shell("history", session_id="alice")
     out_a = (io_a.stdout or b"").decode()
     assert "from-alice" in out_a
     assert "from-bob" not in out_a
-    io_b = await ws.execute("history", session_id="bob")
+    io_b = await ws.shell("history", session_id="bob")
     out_b = (io_b.stdout or b"").decode()
     assert "from-bob" in out_b
     assert "from-alice" not in out_b

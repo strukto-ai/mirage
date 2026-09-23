@@ -14,14 +14,14 @@
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 
 
 async def _workspace() -> Workspace:
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("mkdir -p /data/sub")
-    await ws.execute("echo hi > /data/sub/x.txt")
-    await ws.execute("cd /data")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /data/sub")
+    await ws.shell("echo hi > /data/sub/x.txt")
+    await ws.shell("cd /data")
     return ws
 
 
@@ -30,7 +30,7 @@ async def test_drain_error_respells_relative_operand():
     # cat of a directory errors on the first lazy pull, past the eager
     # chokepoint; the drain must still report the operand as typed.
     ws = await _workspace()
-    io = await ws.execute("cat sub")
+    io = await ws.shell("cat sub")
     assert io.exit_code == 1
     err = (io.stderr or b"").decode()
     assert err.startswith("cat: sub: ")
@@ -39,7 +39,7 @@ async def test_drain_error_respells_relative_operand():
 @pytest.mark.asyncio
 async def test_drain_error_keeps_absolute_operand():
     ws = await _workspace()
-    io = await ws.execute("cat /data/sub")
+    io = await ws.shell("cat /data/sub")
     assert io.exit_code == 1
     err = (io.stderr or b"").decode()
     assert err.startswith("cat: /data/sub: ")
@@ -48,7 +48,7 @@ async def test_drain_error_keeps_absolute_operand():
 @pytest.mark.asyncio
 async def test_eager_error_respells_relative_operand():
     ws = await _workspace()
-    io = await ws.execute("cat sub/missing.txt")
+    io = await ws.shell("cat sub/missing.txt")
     assert io.exit_code == 1
     assert (io.stderr or b"").decode() == (
         "cat: sub/missing.txt: No such file or directory\n")

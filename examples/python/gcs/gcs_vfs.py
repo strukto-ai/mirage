@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.gcs import GCSConfig, GCSResource
+from mirage.vfs.gcs import GCSVFS, GCSConfig
 
 load_dotenv(".env.development")
 
@@ -29,11 +29,11 @@ config = GCSConfig(
     secret_access_key=os.environ["GCS_SECRET_ACCESS_KEY"],
 )
 
-resource = GCSResource(config)
+vfs = GCSVFS(config)
 
 
 async def main():
-    with Workspace({"/gcs/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/gcs/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE: open() reads from GCS transparently ===\n")
 
         print("--- os.listdir() root ---")
@@ -69,7 +69,7 @@ async def main():
         print(f"  nonexistent: {os.path.exists('/gcs/data/nope.txt')}")
 
         print("\n--- VFS commands ---")
-        result = await ws.execute("grep -c mirage /gcs/data/example.jsonl")
+        result = await ws.shell("grep -c mirage /gcs/data/example.jsonl")
         print(f"  grep matches: {(await result.stdout_str()).strip()}")
 
         print("\n--- bash history ---")
@@ -79,7 +79,7 @@ async def main():
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

@@ -17,7 +17,7 @@ import { requireMountWritable } from '../../../context/session_context.ts'
 import { cardAddLabel } from '../../../core/trello/client.ts'
 import { normalizeCard } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { CommandSpec, Option } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -51,7 +51,7 @@ async function trelloCardLabelAddCommand(
 
 export const TRELLO_CARD_LABEL_ADD = command({
   name: 'trello card label',
-  resource: ResourceName.TRELLO,
+  vfs: VFSName.TRELLO,
   spec: SPEC,
   fn: trelloCardLabelAddCommand,
   write: true,

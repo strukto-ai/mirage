@@ -47,21 +47,21 @@ could not express.
 ```typescript
 import {
   HF,
-  HfModelsResource,
+  HfModelsVFS,
   Mount,
   MountMode,
-  RAMResource,
+  RAMVFS,
   Workspace,
 } from '@struktoai/mirage-node'
 
 const token = process.env.HF_TOKEN ?? ''
 const ws = new Workspace({
-  '/m': new HfModelsResource({ repoId: 'acme/model', token }),
-  '/work': new Mount(new RAMResource(), { mode: MountMode.WRITE }),
+  '/m': new HfModelsVFS({ repoId: 'acme/model', token }),
+  '/work': new Mount(new RAMVFS(), { mode: MountMode.WRITE }),
 })
 ws.registerCli('hf', HF, { token })
 
-await ws.execute('hf auth whoami')
+await ws.shell('hf auth whoami')
 ```
 
 `/m` keeps the default read mode, which is all a Hub mount can offer. `/work`
@@ -69,8 +69,8 @@ is the mount that takes `MountMode.WRITE`, and that asymmetry is the workflow
 above rather than an oversight: the Hub half is read-only, the local half is
 where edits live.
 
-The Hub resources need no extra dependency: they speak the Hub API over the
-runtime's own `fetch`. `HfBucketsResource` is a different product, the Xet
+The Hub VFS need no extra dependency: they speak the Hub API over the
+runtime's own `fetch`. `HfBucketsVFS` is a different product, the Xet
 object store behind [HF Buckets](/typescript/setup/hf_buckets).
 
 ## Commands

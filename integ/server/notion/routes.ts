@@ -24,6 +24,8 @@ import {
   retrieveDataSource,
   retrieveDatabase,
   retrievePage,
+  retrieveUser,
+  listUsers,
   search,
   unauthorized,
   whoami,
@@ -36,6 +38,7 @@ import {
   listCommentsRoute,
   replaceMarkdown,
   updatePageRoute,
+  updateBlockRoute,
 } from './writes.ts'
 
 // Every route is behind the token check, so it is applied once here rather
@@ -57,6 +60,8 @@ function write(method: string, path: string, handler: KitHandler<C>): KitRoute<C
 export function notionRoutes(): KitRoute<C>[] {
   return [
     get('/v1/users/me', whoami),
+    get('/v1/users/:id', retrieveUser),
+    get('/v1/users', listUsers),
     get('/v1/pages/:id/markdown', pageMarkdown),
     get('/v1/pages/:id', retrievePage),
     get('/v1/data_sources/:id', retrieveDataSource),
@@ -75,6 +80,7 @@ export function notionRoutes(): KitRoute<C>[] {
     write('PATCH', '/v1/pages/:id/markdown', replaceMarkdown),
     write('PATCH', '/v1/pages/:id', updatePageRoute),
     write('PATCH', '/v1/blocks/:id/children', appendChildrenRoute),
+    write('PATCH', '/v1/blocks/:id', updateBlockRoute),
     write('DELETE', '/v1/blocks/:id', deleteBlockRoute),
     write('POST', '/v1/comments', createCommentRoute),
   ]

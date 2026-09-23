@@ -16,7 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import type { VarAttr } from '../../../../shell/variable.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { envGet, shadowLocal, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -34,7 +34,7 @@ import { sessionView } from '../../../session/state.ts'
 
 export async function handleLocal(
   assignments: string[],
-  session: Session,
+  session: SessionState,
   state: SessionView | null = null,
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   cmd = 'local',

@@ -28,7 +28,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("find", resource="history", spec=SPECS["find"])
+@command("find", vfs="history", spec=SPECS["find"])
 async def find(accessor: HistoryAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

@@ -22,16 +22,16 @@ from openai import AsyncOpenAI
 
 from mirage import MountMode, Workspace
 from mirage.agents.openai_agents import MirageRunner, build_system_prompt
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 
 load_dotenv(".env.development")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LOGO_PATH = REPO_ROOT / "logo" / "mirage-text-logo-light.svg"
 
-ram = RAMResource()
-disk = DiskResource(root=str(REPO_ROOT))
+ram = RAMVFS()
+disk = DiskVFS(root=str(REPO_ROOT))
 ws = Workspace({"/ram": ram, "/disk": disk}, mode=MountMode.READ)
 
 agent = Agent(
@@ -56,11 +56,11 @@ async def main():
     png_path = "/ram/diagram.png"
     png_bytes = LOGO_PATH.read_bytes() if LOGO_PATH.exists() else b""
     if png_bytes:
-        await ws.fs.write(png_path, png_bytes)
+        await ws.vfs.write(png_path, png_bytes)
 
     txt_path = "/ram/notes.txt"
-    await ws.fs.write(txt_path,
-                      b"Status: green. INP < 200ms across all routes.\n")
+    await ws.vfs.write(txt_path,
+                       b"Status: green. INP < 200ms across all routes.\n")
 
     client = AsyncOpenAI()
     runner = MirageRunner(ws, client=client)
@@ -88,14 +88,14 @@ async def main():
     print(result.final_output)
 
 
-# Same flow works against any mounted resource. Example variants:
+# Same flow works against any mounted VFS. Example variants:
 #
-#   from mirage.resource.s3 import S3Resource, S3Config
-#   ws = Workspace({"/s3": S3Resource(S3Config(...))}, mode=MountMode.READ)
+#   from mirage.vfs.s3 import S3VFS, S3Config
+#   ws = Workspace({"/s3": S3VFS(S3Config(...))}, mode=MountMode.READ)
 #   await runner.run_with_attachments(agent, "...", ["/s3/bucket/img.png"])
 #
-#   from mirage.resource.slack import SlackResource, SlackConfig
-#   ws = Workspace({"/slack": SlackResource(SlackConfig(...))})
+#   from mirage.vfs.slack import SlackVFS, SlackConfig
+#   ws = Workspace({"/slack": SlackVFS(SlackConfig(...))})
 #   await runner.run_with_attachments(
 #       agent, "Summarize the PDF",
 #       ["/slack/channels/general__C1/2026-04-28/files/report__F1.pdf"])

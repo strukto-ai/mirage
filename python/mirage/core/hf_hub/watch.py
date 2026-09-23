@@ -52,7 +52,7 @@ class HfHubWalk:
             WalkEntry: one row per path in the repository subtree.
         """
         accessor = self._accessor
-        prefix = mount_prefix_of(root.virtual, root.resource_path)
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         tree = await fetch_tree(accessor)
         # The tree just fetched is exactly what the accessor holds, and
         # find, du and every no-index read consult it. Discarding it here

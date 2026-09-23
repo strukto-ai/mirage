@@ -30,7 +30,7 @@ import {
   type VarsBlock,
 } from '../../policy/profile.ts'
 import { DEFAULT_PROFILE } from './constants.ts'
-import { varsFromEnv, type Session } from './session.ts'
+import { varsFromEnv, type SessionState } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 
 /**
@@ -411,7 +411,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
  * session after hydration), so the document, not the store, is what an
  * agent runs under.
  */
-export function narrow(session: Session, compiled: CompiledProfile): void {
+export function narrow(session: SessionState, compiled: CompiledProfile): void {
   session.mountModes = compiled.mountModes === null ? null : new Map(compiled.mountModes)
   session.hiddenPaths = compiled.hiddenPaths
   session.shownPaths = compiled.shownPaths ?? null
@@ -432,7 +432,7 @@ export function narrow(session: Session, compiled: CompiledProfile): void {
  * the session starts; both are the agent's to change afterwards, which
  * is why hydration keeps the stored ones and re-stamps only `narrow`.
  */
-export function applyProfile(session: Session, compiled: CompiledProfile): void {
+export function applyProfile(session: SessionState, compiled: CompiledProfile): void {
   narrow(session, compiled)
   if (compiled.env != null) Object.assign(session.vars, varsFromEnv(compiled.env))
   if (compiled.cwd !== null) setCwd(session, compiled.cwd)

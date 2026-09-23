@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_SEQ } from './seq.ts'
 
 const DEC = new TextDecoder()
@@ -23,10 +23,10 @@ async function runSeq(
   texts: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = GENERAL_SEQ[0]
   if (cmd === undefined) throw new Error('seq not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], texts, {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
     filetypeFns: null,

@@ -16,7 +16,7 @@ import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { BASH_LONG_OPTIONS, BASH_START_FLAGS } from './constants.ts'
@@ -113,7 +113,7 @@ export async function handleBash(
   dispatch: DispatchFn,
   executeFn: ExecuteStringFn,
   args: string[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   name = 'bash',
 ): Promise<Result> {

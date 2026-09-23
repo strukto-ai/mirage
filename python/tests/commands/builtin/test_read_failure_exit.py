@@ -14,8 +14,8 @@
 
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 # The exit code GNU answers when a command cannot read an operand,
@@ -98,10 +98,10 @@ SILENT_IN_GNU = {"jq . {p}", "zgrep x {p}"}
 # on stdout, and `diff dir dir` exits 0. That is different semantics,
 # not a message bug.
 async def _ws() -> Workspace:
-    ws = Workspace({"/ram/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE)
     ws.get_session(ws.default_session_id).cwd = "/"
-    await ws.execute("mkdir -p /ram/dir")
-    await ws.fs.write("/ram/dir/inner.txt", b"inner\n")
+    await ws.shell("mkdir -p /ram/dir")
+    await ws.vfs.write("/ram/dir/inner.txt", b"inner\n")
     return ws
 
 
@@ -109,7 +109,7 @@ async def _ws() -> Workspace:
 @pytest.mark.parametrize("template", sorted(GNU_READ_EXIT))
 async def test_directory_read_exit_matches_gnu(template):
     ws = await _ws()
-    result = await ws.execute(template.format(p="/ram/dir"))
+    result = await ws.shell(template.format(p="/ram/dir"))
     assert result.exit_code == GNU_READ_EXIT[template][0]
 
 
@@ -117,7 +117,7 @@ async def test_directory_read_exit_matches_gnu(template):
 @pytest.mark.parametrize("template", sorted(GNU_READ_EXIT))
 async def test_missing_read_exit_matches_gnu(template):
     ws = await _ws()
-    result = await ws.execute(template.format(p="/ram/nope.txt"))
+    result = await ws.shell(template.format(p="/ram/nope.txt"))
     assert result.exit_code == GNU_READ_EXIT[template][1]
 
 
@@ -125,7 +125,7 @@ async def test_missing_read_exit_matches_gnu(template):
 @pytest.mark.parametrize("template", sorted(GNU_READ_EXIT))
 async def test_directory_read_says_is_a_directory(template):
     ws = await _ws()
-    result = await ws.execute(template.format(p="/ram/dir"))
+    result = await ws.shell(template.format(p="/ram/dir"))
     stderr = (result.stderr or b"").decode()
     assert "/ram/dir: Is a directory" in stderr
     assert "No such file" not in stderr
@@ -175,9 +175,9 @@ GNU_SED_MULTI = [
                          ids=[c[0] for c in GNU_SED_MULTI])
 async def test_multi_operand_read_failures_match_gnu(line, code, out, err):
     ws = await _ws()
-    await ws.execute("printf 'a\\nb\\n' > /ram/ok.txt")
-    await ws.execute("printf 'c\\nd\\n' > /ram/ok2.txt")
-    result = await ws.execute(line)
+    await ws.shell("printf 'a\\nb\\n' > /ram/ok.txt")
+    await ws.shell("printf 'c\\nd\\n' > /ram/ok2.txt")
+    result = await ws.shell(line)
     assert (result.stderr or b"").decode() == err
     assert (await result.stdout_str()
             if result.stdout is not None else "") == out
@@ -187,5 +187,5 @@ async def test_multi_operand_read_failures_match_gnu(line, code, out, err):
 @pytest.mark.asyncio
 async def test_a_bad_script_is_not_a_read_failure():
     ws = await _ws()
-    result = await ws.execute("sed 's/o/O/0' /ram/dir/inner.txt")
+    result = await ws.shell("sed 's/o/O/0' /ram/dir/inner.txt")
     assert result.exit_code == 1

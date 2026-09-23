@@ -1,18 +1,18 @@
 ---
 title: Email
 icon: envelope
-description: Set up IMAP/SMTP credentials for the Email resource.
+description: Set up IMAP/SMTP credentials for the Email VFS.
 ---
 
 ## Credentials
 
-The Email resource connects to any email account via IMAP (reading)
+The Email VFS connects to any email account via IMAP (reading)
 and SMTP (sending). You need the server hostnames and a password or
 app password.
 
 ### 1. Find Your IMAP/SMTP Settings
 
-| Resource    | IMAP Host               | IMAP Port | SMTP Host             | SMTP Port |
+| VFS    | IMAP Host               | IMAP Port | SMTP Host             | SMTP Port |
 | ----------- | ----------------------- | --------- | --------------------- | --------- |
 | Outlook/365 | `outlook.office365.com` | 993       | `smtp.office365.com`  | 587       |
 | Yahoo       | `imap.mail.yahoo.com`   | 993       | `smtp.mail.yahoo.com` | 587       |
@@ -26,7 +26,7 @@ running locally.
 
 ### 2. Create an App Password
 
-Most resources require an **app password** instead of your regular
+Most providers require an **app password** instead of your regular
 account password. This is a one-time password specifically for
 third-party apps.
 
@@ -76,7 +76,7 @@ EMAIL_PASSWORD=your-app-password
 ## Troubleshooting
 
 **"Authentication failed"** - Make sure you're using an app password,
-not your regular account password. Most resources block regular
+not your regular account password. Most providers block regular
 passwords for IMAP/SMTP access.
 
 **"Connection refused"** - Check the hostname and port. Some networks
@@ -85,4 +85,4 @@ block port 993/587. For ProtonMail, make sure Bridge is running.
 **"SSL handshake failed"** - If your server uses STARTTLS on port 143
 instead of SSL on port 993, set `use_ssl=False` and `imap_port=143`.
 
-For Python configuration, see the [Python Email resource](/python/resource/email) page.
+For Python configuration, see the [Python Email VFS](/python/vfs/email) page.

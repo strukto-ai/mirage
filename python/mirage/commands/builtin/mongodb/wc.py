@@ -28,7 +28,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("wc", resource="mongodb", spec=SPECS["wc"])
+@command("wc", vfs="mongodb", spec=SPECS["wc"])
 async def wc(accessor: MongoDBAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

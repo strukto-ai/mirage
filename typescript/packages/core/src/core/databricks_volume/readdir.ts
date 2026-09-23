@@ -101,7 +101,7 @@ export async function readdir(
     .map(
       (entry) =>
         [
-          virtualPath(accessor.config, entry.path, mountPrefixOf(path.virtual, path.resourcePath)),
+          virtualPath(accessor.config, entry.path, mountPrefixOf(path.virtual, path.vfsPath)),
           entry,
         ] as [string, DbxDirectoryEntry],
     )

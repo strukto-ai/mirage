@@ -17,7 +17,7 @@ import type { PathSpec } from '../../../types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 
 export function strip(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
   return stripSlash(p)

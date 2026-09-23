@@ -2,17 +2,17 @@ import os
 
 import pytest
 
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.metadata import (parse_group,
                                                          parse_owner,
                                                          parse_touch_stamp)
 
 
-class _OverlayRAMResource(RAMResource):
-    """RAM resource with the native setattr op stripped, standing in for
+class _OverlayRAMVFS(RAMVFS):
+    """RAM VFS with the native setattr op stripped, standing in for
     an API backend that has no attribute slot."""
 
     def __init__(self) -> None:
@@ -21,12 +21,11 @@ class _OverlayRAMResource(RAMResource):
 
 
 def _make_overlay_ws(
-        files: dict[str, bytes]) -> tuple[Workspace, _OverlayRAMResource]:
-    resource = _OverlayRAMResource()
-    resource._store.files.update(files)
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
-                   mode=MountMode.WRITE)
-    return ws, resource
+        files: dict[str, bytes]) -> tuple[Workspace, _OverlayRAMVFS]:
+    vfs = _OverlayRAMVFS()
+    vfs._store.files.update(files)
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    return ws, vfs
 
 
 async def _stat_mode(ws: Workspace, path: str) -> int | None:
@@ -35,21 +34,20 @@ async def _stat_mode(ws: Workspace, path: str) -> int | None:
 
 
 def _make_ws(mode: MountMode = MountMode.WRITE) -> Workspace:
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    return Workspace({"/data/": (resource, mode)}, mode=MountMode.WRITE)
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    return Workspace({"/data/": (vfs, mode)}, mode=MountMode.WRITE)
 
 
 async def _run(ws: Workspace, cmd: str) -> tuple[int, str, str]:
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return r.exit_code, await r.stdout_str(), await r.stderr_str()
 
 
 def _make_disk_ws(root) -> Workspace:
     (root / "f.txt").write_bytes(b"hello")
-    return Workspace(
-        {"/data/": (DiskResource(root=str(root)), MountMode.WRITE)},
-        mode=MountMode.WRITE)
+    return Workspace({"/data/": (DiskVFS(root=str(root)), MountMode.WRITE)},
+                     mode=MountMode.WRITE)
 
 
 def test_parse_owner_forms():
@@ -155,15 +153,14 @@ async def test_glob_rm_drops_meta_of_expanded_files():
 
 @pytest.mark.asyncio
 async def test_overlay_fallback_when_mount_has_no_setattr():
-    resource = _OverlayRAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
-                   mode=MountMode.WRITE)
+    vfs = _OverlayRAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, _, _ = await _run(
         ws, "chmod 601 /data/f.txt && chown 500:dev /data/f.txt"
         " && touch -t 202603041200 /data/f.txt")
     assert code == 0
-    assert resource._store.attrs == {}
+    assert vfs._store.attrs == {}
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
     assert st.mode == 0o601
     assert st.uid == 500

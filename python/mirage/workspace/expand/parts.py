@@ -35,7 +35,7 @@ from mirage.workspace.expand.node import (_folded_whitespace, expand_node,
                                           expand_node_marked)
 from mirage.workspace.expand.variable import expand_array_at, is_multiword_at
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
 
 
@@ -45,7 +45,7 @@ def _string_has_array_at(node: TSNodeLike) -> bool:
 
 async def _expand_string_with_array(
     node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None = None,
@@ -107,7 +107,7 @@ async def _expand_string_with_array(
 
 async def _expand_brace_word(
     node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None = None,
@@ -129,7 +129,7 @@ async def _expand_brace_word(
 
     Args:
         node (TSNodeLike): concatenation or brace_expression.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
     """
@@ -158,7 +158,7 @@ async def _expand_brace_word(
 
 async def expand_words(
     parts: list[Any],
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
@@ -173,7 +173,7 @@ async def expand_words(
 
     Args:
         parts (list[Any]): the word nodes to expand.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
     """
@@ -231,7 +231,7 @@ async def expand_words(
 
 async def expand_parts(
     parts: list[Any],
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
 ) -> list[str]:
@@ -242,7 +242,7 @@ async def expand_parts(
 
 async def expand_and_classify(
     words: list[Any],
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     cwd: str,

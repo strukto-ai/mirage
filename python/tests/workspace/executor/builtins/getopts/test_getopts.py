@@ -1,16 +1,16 @@
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.stream import materialize
 from mirage.shell.call_stack import CallStack
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.getopts import handle_getopts
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, session_view, set_attr
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
 @pytest.mark.asyncio
@@ -203,14 +203,14 @@ async def test_getopts_optind_reset_reparses():
 
 @pytest.mark.asyncio
 async def test_getopts_end_to_end_loop_with_case():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute('set -- -a val -b\n'
-                          'while getopts "a:b" opt; do\n'
-                          '  case $opt in\n'
-                          '    a) echo "a=$OPTARG" ;;\n'
-                          '    b) echo "b-set" ;;\n'
-                          '  esac\n'
-                          'done')
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell('set -- -a val -b\n'
+                        'while getopts "a:b" opt; do\n'
+                        '  case $opt in\n'
+                        '    a) echo "a=$OPTARG" ;;\n'
+                        '    b) echo "b-set" ;;\n'
+                        '  esac\n'
+                        'done')
     assert (io.stdout or b"") == b"a=val\nb-set\n"
 
 
@@ -300,15 +300,15 @@ async def test_getopts_fork_preserves_cursor():
 
 @pytest.mark.asyncio
 async def test_getopts_reassign_optind_same_value_reparses():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute('set -- -ab; getopts ab o; echo "1:$o"; '
-                          'OPTIND=1; getopts ab o; echo "2:$o"')
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell('set -- -ab; getopts ab o; echo "1:$o"; '
+                        'OPTIND=1; getopts ab o; echo "2:$o"')
     assert (io.stdout or b"") == b"1:a\n2:a\n"
 
 
 @pytest.mark.asyncio
 async def test_getopts_subshell_does_not_corrupt_parent_cursor():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute('set -- -ab; OPTIND=1; getopts ab o; '
-                          '(getopts ab o); getopts ab o; echo "$o"')
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell('set -- -ab; OPTIND=1; getopts ab o; '
+                        '(getopts ab o); getopts ab o; echo "$o"')
     assert (io.stdout or b"") == b"b\n"

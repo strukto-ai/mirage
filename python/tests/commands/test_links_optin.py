@@ -100,7 +100,7 @@ def test_every_link_aware_shadow_delegates_to_the_generic():
             continue
         source = inspect.getsource(inspect.getmodule(fn))
         if not any(call in source for call in GENERIC_CALLS[cmd.name]):
-            offenders.append(f"{cmd.resource}/{cmd.name} ({source_file})")
+            offenders.append(f"{cmd.vfs}/{cmd.name} ({source_file})")
     assert not offenders, (
         "these commands shadow a link-aware family without delegating to "
         f"its generic, so symlinks are invisible to them: {offenders}")

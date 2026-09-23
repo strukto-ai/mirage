@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.shell.variable import VarAttr
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import env_get, seed_var, set_attr
 
 
-def home_dir(session: Session) -> str | None:
+def home_dir(session: SessionState) -> str | None:
     """Return the session home directory used for ``~`` expansion.
 
     Args:
@@ -34,7 +34,7 @@ def home_dir(session: Session) -> str | None:
     return env_get(session, "HOME") or None
 
 
-def logical_cwd(session: Session) -> str:
+def logical_cwd(session: SessionState) -> str:
     """Return the cwd as last spelled, falling back to the physical one.
 
     bash keeps two names for the working directory: the physical one the
@@ -57,7 +57,7 @@ def logical_cwd(session: Session) -> str:
     return session.logical_cwd or session.cwd
 
 
-def set_cwd(session: Session, cwd: str) -> None:
+def set_cwd(session: SessionState, cwd: str) -> None:
     """Point the session at ``cwd`` without recording a ``cd``.
 
     For the callers that move a session from outside the shell: a
@@ -76,7 +76,7 @@ def set_cwd(session: Session, cwd: str) -> None:
     seed_var(session, "PWD", cwd)
 
 
-def change_dir(session: Session,
+def change_dir(session: SessionState,
                new_cwd: str,
                logical: str | None = None) -> None:
     """Move the session to ``new_cwd`` and record the previous cwd.

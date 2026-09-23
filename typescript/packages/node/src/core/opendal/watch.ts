@@ -54,8 +54,8 @@ export class OpendalWalk {
   }
 
   async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
-    const base = stripSlash(root.resourcePath)
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
+    const base = stripSlash(root.vfsPath)
     const listPath = base !== '' ? `${base}/` : '/'
     const operator = await this.accessor.operator()
     let entries
@@ -70,8 +70,8 @@ export class OpendalWalk {
       if (relative === '' || relative === listPath) continue
       let metadata: Metadata | null = entry.metadata()
       const isDir = relative.endsWith('/') || metadata.isDirectory()
-      const resourcePath = stripSlash(relative)
-      const virtual = prefix !== '' ? `${prefix}/${resourcePath}` : `/${resourcePath}`
+      const vfsPath = stripSlash(relative)
+      const virtual = prefix !== '' ? `${prefix}/${vfsPath}` : `/${vfsPath}`
       if (isDir) {
         yield { virtual, isDir: true, fingerprint: null }
         continue
@@ -81,7 +81,7 @@ export class OpendalWalk {
         metadata.lastModified === null &&
         metadata.contentLength === null
       ) {
-        metadata = await statOrNull(operator, resourcePath)
+        metadata = await statOrNull(operator, vfsPath)
       }
       const modified = metadata?.lastModified ?? null
       const size =

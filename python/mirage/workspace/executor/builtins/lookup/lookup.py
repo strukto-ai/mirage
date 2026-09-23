@@ -24,12 +24,12 @@ from mirage.workspace.executor.builtins.lookup.types import NameKind
 from mirage.workspace.executor.builtins.shared import result
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 def handle_type(
     args: list[str],
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
 ) -> Result:
     """Run the ``type`` builtin (``type [-afptP] name [name ...]``).
@@ -45,7 +45,7 @@ def handle_type(
 
     Args:
         args (list[str]): words after the ``type`` name.
-        session (Session): shell session (function table).
+        session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry for name resolution.
     """
     scan = scan_options(args, TYPE_OPTIONS)
@@ -81,7 +81,7 @@ def handle_type(
 
 def handle_which(
     args: list[str],
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
 ) -> Result:
     """Run the ``which`` builtin (``which [-as] name [name ...]``).
@@ -103,7 +103,7 @@ def handle_which(
 
     Args:
         args (list[str]): words after the ``which`` name.
-        session (Session): shell session (function table).
+        session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry for name resolution.
     """
     scan = scan_options(args, WHICH_OPTIONS)

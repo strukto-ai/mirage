@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
 const RAM_COLUMN = RAM_COMMANDS.filter((c) => c.name === 'column' && c.filetype == null)
 
@@ -23,14 +23,14 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runColumn(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_COLUMN[0]
   if (cmd === undefined) throw new Error('column not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -49,16 +49,16 @@ async function runColumn(
 
 describe('column', () => {
   it('-t pads into a table', async () => {
-    const resource = new RAMResource()
-    const r = await runColumn(resource, [], { t: true }, ENC.encode('name age\nAlice 30\nBob 25\n'))
+    const vfs = new RAMVFS()
+    const r = await runColumn(vfs, [], { t: true }, ENC.encode('name age\nAlice 30\nBob 25\n'))
     expect(r.exitCode).toBe(0)
     const lines = r.out.trim().split('\n')
     expect(lines.length).toBe(3)
   })
 
   it('passes through without -t', async () => {
-    const resource = new RAMResource()
-    const r = await runColumn(resource, [], {}, ENC.encode('a b\nc d\n'))
+    const vfs = new RAMVFS()
+    const r = await runColumn(vfs, [], {}, ENC.encode('a b\nc d\n'))
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('a b\nc d\n')
   })

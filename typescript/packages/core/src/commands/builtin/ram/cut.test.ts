@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 const RAM_CUT = RAM_COMMANDS.filter((c) => c.name === 'cut' && c.filetype == null)
 
 const ENC = new TextEncoder()
@@ -25,10 +25,10 @@ async function runCut(
   stdin: Uint8Array | null,
   flags: Record<string, string | boolean | number | string[]>,
 ): Promise<string> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = RAM_CUT[0]
   if (cmd === undefined) throw new Error('cut not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -130,10 +130,10 @@ describe('cut', () => {
   })
 
   it('missing stdin returns error', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const cmd = RAM_CUT[0]
     if (cmd === undefined) throw new Error('cut not registered')
-    const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+    const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
       stdin: null,
       flags: { fields: '1' },
       filetypeFns: null,
@@ -153,10 +153,10 @@ describe('cut', () => {
   })
 
   it('multi-character delimiter is rejected', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const cmd = RAM_CUT[0]
     if (cmd === undefined) throw new Error('cut not registered')
-    const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+    const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
       stdin: ENC.encode('a,b\n'),
       flags: { fields: '1', delimiter: ',,' },
       filetypeFns: null,

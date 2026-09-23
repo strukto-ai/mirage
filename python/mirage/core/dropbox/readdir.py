@@ -62,7 +62,7 @@ async def readdir(
     path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> list[str]:
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
     key = path.strip("/")
     virtual_key = prefix + "/" + key if key else prefix or "/"

@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_LS = RAM_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
 
@@ -23,13 +23,13 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runLs(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
   const cmd = RAM_LS[0]
   if (cmd === undefined) throw new Error('ls not registered')
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -42,43 +42,43 @@ async function runLs(
   return DEC.decode(buf)
 }
 
-function seed(resource: RAMResource, dirs: string[], files: Record<string, string>): void {
-  for (const d of dirs) resource.store.dirs.add(d)
+function seed(vfs: RAMVFS, dirs: string[], files: Record<string, string>): void {
+  for (const d of dirs) vfs.store.dirs.add(d)
   for (const [p, content] of Object.entries(files)) {
-    resource.store.files.set(p, ENC.encode(content))
+    vfs.store.files.set(p, ENC.encode(content))
   }
 }
 
 describe('ls', () => {
   it('lists files in directory', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], { '/tmp/a.txt': 'hello' })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')])
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], { '/tmp/a.txt': 'hello' })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')])
     expect(out.trimEnd().split('\n')).toEqual(['a.txt'])
   })
 
   it('empty directory', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], {})
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')])
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], {})
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')])
     expect(out).toBe('')
   })
 
   it('multiple files sorted alphabetically', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], {
       '/tmp/cherry.txt': 'c',
       '/tmp/apple.txt': 'a',
       '/tmp/banana.txt': 'b',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')])
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')])
     expect(out.trimEnd().split('\n')).toEqual(['apple.txt', 'banana.txt', 'cherry.txt'])
   })
 
   it('-l long format includes size and standard mode string', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], { '/tmp/file.txt': 'hello' })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { args_l: true })
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], { '/tmp/file.txt': 'hello' })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { args_l: true })
     const line = out.split('\n')[0] ?? ''
     const parts = line.split(/\s+/)
     expect(parts[0]).toBe('-rw-r--r--')
@@ -87,76 +87,76 @@ describe('ls', () => {
   })
 
   it('hides dotfiles by default', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], {
       '/tmp/.hidden': 'secret',
       '/tmp/visible.txt': 'hi',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')])
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')])
     expect(out.trimEnd().split('\n')).toEqual(['visible.txt'])
   })
 
   it('-a shows dotfiles', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], {
       '/tmp/.hidden': 'secret',
       '/tmp/visible.txt': 'hi',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { all: true })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { all: true })
     expect(out.trimEnd().split('\n').sort()).toEqual(['.hidden', 'visible.txt'])
   })
 
   it('-r reverses name sort', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], {
       '/tmp/a.txt': 'a',
       '/tmp/b.txt': 'b',
       '/tmp/c.txt': 'c',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { reverse: true })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { reverse: true })
     expect(out.trimEnd().split('\n')).toEqual(['c.txt', 'b.txt', 'a.txt'])
   })
 
   it('-S sorts by size descending', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], {
       '/tmp/big.txt': 'x'.repeat(100),
       '/tmp/small.txt': 'x',
       '/tmp/medium.txt': 'x'.repeat(50),
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { S: true })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { S: true })
     expect(out.trimEnd().split('\n')).toEqual(['big.txt', 'medium.txt', 'small.txt'])
   })
 
   it('-S -r sorts by size ascending', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], {
       '/tmp/big.txt': 'x'.repeat(100),
       '/tmp/small.txt': 'x',
       '/tmp/medium.txt': 'x'.repeat(50),
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { S: true, reverse: true })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { S: true, reverse: true })
     expect(out.trimEnd().split('\n')).toEqual(['small.txt', 'medium.txt', 'big.txt'])
   })
 
   it('-a with -r reverses all entries', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], {
       '/tmp/.z_hidden': 'z',
       '/tmp/a.txt': 'a',
       '/tmp/m.txt': 'm',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { all: true, reverse: true })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { all: true, reverse: true })
     expect(out.trimEnd().split('\n')).toEqual(['m.txt', 'a.txt', '.z_hidden'])
   })
 
   it('recursive listing (-R) walks subdirectories with headers', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp', '/tmp/sub'], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp', '/tmp/sub'], {
       '/tmp/a.txt': 'a',
       '/tmp/sub/b.txt': 'b',
     })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { recursive: true })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { recursive: true })
     expect(out).toContain('a.txt')
     expect(out).toContain('sub')
     expect(out).toContain('/tmp/sub:')
@@ -164,18 +164,18 @@ describe('ls', () => {
   })
 
   it('list-dir mode (-d) lists directory entries themselves, not contents', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], { '/tmp/a.txt': 'a' })
-    const out = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { directory: true })
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], { '/tmp/a.txt': 'a' })
+    const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { directory: true })
     // GNU ls -d prints the operand as given.
     expect(out).toBe('/tmp\n')
   })
 
   it('-1 never undoes -l, as in GNU', async () => {
-    const resource = new RAMResource()
-    seed(resource, ['/tmp'], { '/tmp/a.txt': 'a', '/tmp/b.txt': 'b' })
-    const long = await runLs(resource, [PathSpec.fromStrPath('/tmp')], { args_l: true })
-    const both = await runLs(resource, [PathSpec.fromStrPath('/tmp')], {
+    const vfs = new RAMVFS()
+    seed(vfs, ['/tmp'], { '/tmp/a.txt': 'a', '/tmp/b.txt': 'b' })
+    const long = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { args_l: true })
+    const both = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], {
       args_l: true,
       args_1: true,
     })

@@ -14,8 +14,8 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.dev.device import active_device
-from mirage.resource.dev.dev import DevStore
-from mirage.resource.ram.store import RAMStore
+from mirage.vfs.dev.dev import DevStore
+from mirage.vfs.ram.store import RAMStore
 
 
 def test_active_device_uses_live_dev_state():

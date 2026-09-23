@@ -62,11 +62,13 @@ filesystem calls and bridges them through the workspace dispatch, so
 a virtual backend — and writes are immediately visible to every command,
 with the same cache, write modes, and per-session mount narrowing as
 `cat`. A read-only mount (or a session narrowed to read) fails the open,
-so `std.open` returns `null` instead of writing.
+so `std.open` returns `null` instead of writing. The engine's `os` module
+has no extended-attribute calls; run `getfattr` or `setfattr` in the shell
+instead.
 
-This is capability isolation, not a resource sandbox: the sandboxed code
+This is capability isolation, not a VFS sandbox: the sandboxed code
 cannot reach your files or the network, but its CPU and memory are bounded
-only by `command_limits` timeouts. For untrusted code or hard resource
+only by `command_limits` timeouts. For untrusted code or hard VFS
 limits, run behind a sandboxed deployment.
 
 Each run gets its own epoch-interruption engine, so a `command_limits`
@@ -89,9 +91,9 @@ variable):
 ```python
 from mirage.runtime.js import QuickJsRuntime
 
-ws = Workspace({"/data": RAMResource()},
+ws = Workspace({"/data": RAMVFS()},
                mode=MountMode.EXEC,
-               runtimes=[QuickJsRuntime(config={"home": "/path/to/qjs-dir"}), "vfs"])
+               runtimes=[QuickJsRuntime(config={"home": "/path/to/qjs-dir"}), "workspace"])
 ```
 
 ```yaml
@@ -99,7 +101,7 @@ runtimes:
   - name: quickjs
     config:
       home: /path/to/qjs-dir
-  - vfs
+  - workspace
 ```
 
 The first run compiles `qjs-wasi.wasm` and caches the compilation as

@@ -20,12 +20,12 @@ from mirage.workspace.executor.statement import (assignment_status,
                                                  finish_statement,
                                                  restore_status,
                                                  snapshot_status)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 @pytest.mark.asyncio
 async def test_finish_statement_materializes_and_seeds():
-    session = Session(session_id="t")
+    session = SessionState(session_id="t")
     session.last_exit_code = 7
 
     async def gen():
@@ -40,7 +40,7 @@ async def test_finish_statement_materializes_and_seeds():
 
 @pytest.mark.asyncio
 async def test_finish_statement_none_stdout_still_seeds():
-    session = Session(session_id="t")
+    session = SessionState(session_id="t")
     io = IOResult(exit_code=1)
     assert await finish_statement(None, io, session) == b""
     assert session.last_exit_code == 1
@@ -48,7 +48,7 @@ async def test_finish_statement_none_stdout_still_seeds():
 
 @pytest.mark.asyncio
 async def test_finish_statement_pulls_lazy_exit_code():
-    session = Session(session_id="t")
+    session = SessionState(session_id="t")
     source = IOResult(exit_code=0)
     merged = await IOResult().merge(source)
 
@@ -63,7 +63,7 @@ async def test_finish_statement_pulls_lazy_exit_code():
 
 
 def test_assignment_status_tracks_substitutions():
-    session = Session(session_id="t")
+    session = SessionState(session_id="t")
     assert assignment_status(session, session._cmdsub_seq) == 0
     seq = session._cmdsub_seq
     session._cmdsub_seq += 1
@@ -73,7 +73,7 @@ def test_assignment_status_tracks_substitutions():
 
 
 def test_restore_status_puts_back_the_captured_shell_status():
-    session = Session(session_id="t")
+    session = SessionState(session_id="t")
     session.last_exit_code = 3
     session.pipe_status = (0, 3)
     before = snapshot_status(session)
@@ -91,7 +91,7 @@ def test_restore_status_declines_over_a_status_another_line_stamped():
     # before a concurrent line finished is older than that line's
     # result. Putting it back would resurrect a value the shell moved
     # past.
-    session = Session(session_id="t")
+    session = SessionState(session_id="t")
     mine = StatusWriter()
     theirs = StatusWriter()
     session.last_exit_code = 1

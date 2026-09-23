@@ -1,24 +1,23 @@
 mode: WRITE
-consistency: LAZY
 
 mounts:
   /:
-    resource: ram
+    vfs: ram
     backend: fuse
     mountpoint: /tmp/demo
 
   /notion:
-    resource: notion
+    vfs: notion
     config:
       api_key: ${NOTION_API_KEY}
 
   /local:
-    resource: disk
+    vfs: disk
     config:
       root: /tmp/mirage-local
 
   /s3:
-    resource: s3
+    vfs: s3
     config:
       bucket: ${AWS_S3_BUCKET}
       region: ${AWS_DEFAULT_REGION}
@@ -26,7 +25,7 @@ mounts:
       aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
 
   /slack:
-    resource: slack
+    vfs: slack
     config:
       token: ${SLACK_BOT_TOKEN}
       search_token: ${SLACK_USER_TOKEN}

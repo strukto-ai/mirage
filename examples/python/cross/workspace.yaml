@@ -1,9 +1,8 @@
 mode: WRITE
-consistency: LAZY
 
 mounts:
   /s3:
-    resource: s3
+    vfs: s3
     config:
       bucket: ${AWS_S3_BUCKET}
       region: ${AWS_DEFAULT_REGION}
@@ -11,25 +10,25 @@ mounts:
       aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
 
   /gdrive:
-    resource: gdrive
+    vfs: gdrive
     config:
       client_id: ${GOOGLE_CLIENT_ID}
       client_secret: ${GOOGLE_CLIENT_SECRET}
       refresh_token: ${GOOGLE_REFRESH_TOKEN}
 
   /gmail:
-    resource: gmail
+    vfs: gmail
     config:
       client_id: ${GOOGLE_CLIENT_ID}
       client_secret: ${GOOGLE_CLIENT_SECRET}
       refresh_token: ${GOOGLE_REFRESH_TOKEN}
 
   /slack:
-    resource: slack
+    vfs: slack
     config:
       token: ${SLACK_BOT_TOKEN}
 
   /discord:
-    resource: discord
+    vfs: discord
     config:
       token: ${DISCORD_BOT_TOKEN}

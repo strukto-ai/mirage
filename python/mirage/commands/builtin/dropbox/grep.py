@@ -30,7 +30,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("grep", resource="dropbox", spec=SPECS["grep"])
+@command("grep", vfs="dropbox", spec=SPECS["grep"])
 async def grep(accessor: DropboxAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

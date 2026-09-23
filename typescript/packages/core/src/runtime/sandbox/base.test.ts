@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RemoteSandbox } from './base.ts'
@@ -52,11 +52,11 @@ class RecordingSandbox extends RemoteSandbox {
 async function sandboxWorkspace(box: RecordingSandbox): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
-    { '/data': new RAMResource() },
+    { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
       shellParser: parser,
-      runtimes: [box, 'vfs'],
+      runtimes: [box, 'workspace'],
     },
   )
 }
@@ -68,7 +68,7 @@ describe('RemoteSandbox', () => {
       const box = new RecordingSandbox({ captures: line.split(' ', 1) })
       const ws = await sandboxWorkspace(box)
       try {
-        const io = await ws.execute(line)
+        const io = await ws.shell(line)
         expect(io.exitCode).toBe(0)
         expect(DEC.decode(io.stdout)).toBe(`ran:${line}`)
         expect(box.execs[0]?.[0]).toBe(line)
@@ -82,10 +82,10 @@ describe('RemoteSandbox', () => {
     const box = new RecordingSandbox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
-      const io = await ws.execute('python3 x')
+      const io = await ws.shell('python3 x')
       expect(DEC.decode(io.stdout)).toBe('ran:python3 x')
       expect(box.connectedCount).toBe(1)
-      await ws.execute('python3 x')
+      await ws.shell('python3 x')
       // The runtime connects on the first line, not per line.
       expect(box.connectedCount).toBe(1)
     } finally {
@@ -104,10 +104,10 @@ describe('RemoteSandbox', () => {
     const box = new FlakyBox({ captures: ['python3'] })
     const ws = await sandboxWorkspace(box)
     try {
-      const first = await ws.execute('python3 x')
+      const first = await ws.shell('python3 x')
       expect(first.exitCode).not.toBe(0)
       expect(DEC.decode(first.stderr)).toContain('not running')
-      const second = await ws.execute('python3 x')
+      const second = await ws.shell('python3 x')
       expect(second.exitCode).toBe(0)
       expect(box.connectedCount).toBe(2)
     } finally {
@@ -136,7 +136,7 @@ describe('RemoteSandbox', () => {
     const box = new RecordingSandbox({ captures: ['*'] })
     const ws = await sandboxWorkspace(box)
     try {
-      await ws.execute('wc -l', { stdin: ENC.encode('a\nb\n') })
+      await ws.shell('wc -l', { stdin: ENC.encode('a\nb\n') })
       const [, stdin] = box.execs[box.execs.length - 1] ?? ['', null, {}, '']
       expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\nb\n')
     } finally {
@@ -168,13 +168,13 @@ describe('RemoteSandbox', () => {
     const parser = await getTestParser()
     const guards = { python3: new Limit({ timeoutSeconds: 0.05 }) }
     const ws = new Workspace(
-      { '/data': [new RAMResource(), MountMode.EXEC, guards] },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+      { '/data': [new RAMVFS(), MountMode.EXEC, guards] },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
     )
     try {
       // A captured line obeys the same command limits as any
       // command: the mount's python3 timeout answers exit 124.
-      const io = await ws.execute('python3 train.py')
+      const io = await ws.shell('python3 train.py')
       expect(io.exitCode).toBe(124)
       expect(DEC.decode(io.stderr)).toContain('timed out')
     } finally {
@@ -192,11 +192,11 @@ describe('RemoteSandbox', () => {
     const parser = await getTestParser()
     const guards = { python3: new Limit({ maxLines: 2 }) }
     const ws = new Workspace(
-      { '/data': [new RAMResource(), MountMode.EXEC, guards] },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'vfs'] },
+      { '/data': [new RAMVFS(), MountMode.EXEC, guards] },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
     )
     try {
-      const io = await ws.execute('python3 train.py')
+      const io = await ws.shell('python3 train.py')
       expect(io.exitCode).toBe(0)
       expect(DEC.decode(io.stdout)).toBe('a\nb\n')
       expect(DEC.decode(io.stderr)).toContain('truncated at limit')

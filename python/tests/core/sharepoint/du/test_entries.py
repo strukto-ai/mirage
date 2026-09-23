@@ -19,8 +19,8 @@ def _accessor() -> SharePointAccessor:
 
 
 def _file_path() -> PathSpec:
-    return PathSpec(resource_path=mount_key("/sp/Engineering/Documents/a.txt",
-                                            "/sp"),
+    return PathSpec(vfs_path=mount_key("/sp/Engineering/Documents/a.txt",
+                                       "/sp"),
                     virtual="/sp/Engineering/Documents/a.txt",
                     directory="/sp/Engineering/Documents")
 

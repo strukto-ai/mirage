@@ -20,7 +20,7 @@ import {
   type RedactedConfig,
   secretSchema,
   secretStr,
-} from '../../resource/secrets.ts'
+} from '../../vfs/secrets.ts'
 
 // A pre-minted token read on every request. This is how a caller that
 // already owns the OAuth dance (a service account, a host application's

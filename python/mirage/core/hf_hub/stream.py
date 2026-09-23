@@ -25,7 +25,7 @@ from mirage.types import PathSpec
 
 async def range_read(accessor: HfHubAccessor, path: PathSpec, start: int,
                      end: int) -> bytes:
-    """Read a byte range, in the resource API's end-exclusive spelling.
+    """Read a byte range, in the VFS API's end-exclusive spelling.
 
     Args:
         accessor (HfHubAccessor): backend handle.
@@ -60,7 +60,7 @@ async def read_stream(
     raw = path.mount_path
     url = resolve_url(accessor.endpoint, accessor.repo_type, accessor.repo_id,
                       accessor.revision, accessor.repo_path(raw))
-    rec = record_stream("read", raw, accessor.RESOURCE_NAME)
+    rec = record_stream("read", raw, accessor.VFS_NAME)
     async for chunk in hub_stream(accessor.token,
                                   url,
                                   chunk_size,

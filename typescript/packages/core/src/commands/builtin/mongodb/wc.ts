@@ -19,7 +19,7 @@ import { MONGODB_IO } from './io.ts'
 import { streamAny } from '../../../core/mongodb/read.ts'
 import { detectScope } from '../../../core/mongodb/scope.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
-import { type PathSpec, ResourceName } from '../../../types.ts'
+import { type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import {
@@ -76,7 +76,7 @@ async function wcCommand(
 
 export const MONGODB_WC = command({
   name: 'wc',
-  resource: ResourceName.MONGODB,
+  vfs: VFSName.MONGODB,
   spec: specOf('wc'),
   fn: wcCommand,
 })

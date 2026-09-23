@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "id": "xattr_set_then_get",
+      "seq": 900001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr -n user.tag -v blue /data/xattr.txt && getfattr -n user.tag /data/xattr.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "# file: data/xattr.txt\nuser.tag=\"blue\"\n\n",
+        "stderr": "getfattr: Removing leading '/' from absolute path names\n"
+      }
+    },
+    {
+      "id": "xattr_binary_value_dumps_as_base64",
+      "seq": 900002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr -n user.note -v 0x00ff /data/xattr.txt && getfattr -d -m '^user\\.(note|tag)$' /data/xattr.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "# file: data/xattr.txt\nuser.note=0sAP8=\nuser.tag=\"blue\"\n\n",
+        "stderr": "getfattr: Removing leading '/' from absolute path names\n"
+      }
+    },
+    {
+      "id": "xattr_survives_a_rewrite",
+      "seq": 900005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo beta > /data/xattr.txt && getfattr -n user.tag --only-values /data/xattr.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "blue",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xattr_remove",
+      "seq": 900006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr -x user.note /data/xattr.txt && getfattr -n user.note /data/xattr.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/xattr.txt: user.note: No such attribute\n"
+      }
+    },
+    {
+      "id": "xattr_remove_missing",
+      "seq": 900007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr -x user.note /data/xattr.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "setfattr: /data/xattr.txt: No such attribute\n"
+      }
+    },
+    {
+      "id": "xattr_bad_encoding",
+      "seq": 900009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr -n user.tag -v 0xZZ /data/xattr.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "bad input encoding\n"
+      }
+    },
+    {
+      "id": "xattr_setfattr_needs_one_action",
+      "seq": 900011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "setfattr /data/xattr.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "Usage: setfattr {-n name} [-v value] [-h] file...\n       setfattr {-x name} [-h] file...\nTry `setfattr --help' for more information.\n"
+      }
+    }
+  ]
+}

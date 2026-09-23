@@ -14,10 +14,10 @@
 
 import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../../accessor/disk.ts'
 import { DISK_IO } from './io.ts'
 
 export const DISK_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DiskAccessor>(ResourceName.DISK, DISK_IO),
+  ...makeGenericCommands<DiskAccessor>(VFSName.DISK, DISK_IO),
 ]

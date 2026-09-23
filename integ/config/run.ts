@@ -14,24 +14,24 @@
 
 // The config-plane suite, TypeScript host. See run.py for what it proves.
 // State keys come back camelCase here and are folded to python's wire
-// spelling through the rename map `spec/typescript/node/resources.json`
-// records for the resource, so one expectation serves both hosts and the
+// spelling through the rename map `spec/typescript/node/vfs.json`
+// records for the VFS, so one expectation serves both hosts and the
 // committed spec is exercised rather than trusted.
 
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildResource } from '@struktoai/mirage-node'
+import { buildVfs } from '@struktoai/mirage-node'
 
 const HOST = 'typescript'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SUITE = join(HERE, 'cases.json')
-const SPEC = join(HERE, '..', '..', 'spec', 'typescript', 'node', 'resources.json')
+const SPEC = join(HERE, '..', '..', 'spec', 'typescript', 'node', 'vfs.json')
 
 interface Case {
   id: string
   hosts?: string[]
-  resource: string
+  vfs: string
   config: Record<string, unknown>
   expect: { refused?: string; state?: Record<string, unknown>; absent?: string[] }
 }
@@ -55,8 +55,8 @@ function camelToSnake(name: string): string {
 
 // A TypeScript field's python wire name: the rename map inverted, else the
 // default camelCase fold undone.
-function wireName(resource: string, field: string): string {
-  const rename = SPEC_CONFIGS[resource]?.rename ?? {}
+function wireName(vfs: string, field: string): string {
+  const rename = SPEC_CONFIGS[vfs]?.rename ?? {}
   for (const [wire, camel] of Object.entries(rename)) if (camel === field) return wire
   return camelToSnake(field)
 }
@@ -103,22 +103,22 @@ function problems(
 }
 
 async function run(testCase: Case): Promise<string[]> {
-  let resource
+  let vfs
   try {
-    resource = await buildResource(testCase.resource, { ...testCase.config })
+    vfs = await buildVfs(testCase.vfs, { ...testCase.config })
   } catch (err) {
     return problems(testCase, null, err instanceof Error ? err.message : String(err))
   }
-  const state = (await resource.getState()) as { config?: unknown }
-  const closer = (resource as { close?: () => unknown }).close
-  if (typeof closer === 'function') await closer.call(resource)
+  const state = (await vfs.getState()) as { config?: unknown }
+  const closer = (vfs as { close?: () => unknown }).close
+  if (typeof closer === 'function') await closer.call(vfs)
   const config = state.config
   if (config === null || typeof config !== 'object' || Array.isArray(config)) {
     return problems(testCase, null, null)
   }
   const folded: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(config as Record<string, unknown>)) {
-    folded[wireName(testCase.resource, key)] = value
+    folded[wireName(testCase.vfs, key)] = value
   }
   return problems(testCase, folded, null)
 }

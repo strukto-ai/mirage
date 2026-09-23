@@ -27,17 +27,17 @@ networks, volumes, and bind mounts belong on your own `docker run` command.
 ## Connect from TypeScript
 
 ```ts
-import { DockerRuntime, MountMode, S3Resource, Workspace } from '@struktoai/mirage-node'
+import { DockerRuntime, MountMode, S3VFS, Workspace } from '@struktoai/mirage-node'
 
 const runtime = new DockerRuntime({
   captures: ['python3'],
   config: { container: 'my-sandbox' },
 })
 const ws = new Workspace(
-  { '/data': new S3Resource({ bucket: 'my-bucket' }) },
-  { mode: MountMode.EXEC, runtimes: [runtime, 'vfs'] },
+  { '/data': new S3VFS({ bucket: 'my-bucket' }) },
+  { mode: MountMode.EXEC, runtimes: [runtime, 'workspace'] },
 )
-await ws.execute('python3 job.py', { cwd: '/data' })
+await ws.shell('python3 job.py', { cwd: '/data' })
 ```
 
 The `container` config accepts a container name or id. Unknown config fields

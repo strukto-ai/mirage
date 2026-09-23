@@ -41,5 +41,5 @@ async def read_bytes(accessor: HfBucketsAccessor,
             data = bytes(await op.read(key))
     except NotFound as exc:
         raise enoent(path) from exc
-    record("read", raw, accessor.RESOURCE_NAME, len(data), timer)
+    record("read", raw, accessor.VFS_NAME, len(data), timer)
     return data

@@ -16,7 +16,7 @@ The `hf_fs` tool supports six operations:
 - `cat` reads a text or JSON file with `--offset` and `--max-bytes`.
 - `attach` returns one complete JPEG, PNG, or WebP repository or bucket file as MCP image content.
 - `stat` inspects one URI.
-- `find` traverses descendants beneath one known resource.
+- `find` traverses descendants beneath one known VFS.
 - `search` performs API-backed discovery beneath a supported discovery root.
 
 Calls use an `operations` array. One call may submit up to 30 operations, which the server executes with bounded

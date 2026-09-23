@@ -52,7 +52,7 @@ export function fitIdName(label: string, resourceId: string, suffix = ''): strin
 /**
  * Build a `<name>__<id>` segment for VFS paths.
  *
- * Used by resources that encode resource IDs in filenames for reverse lookups
+ * Used by mounts that encode resource IDs in filenames for reverse lookups
  * (Discord, Slack, gcal calendars, Linear, Trello). By default applies the
  * full `sanitizeName` transform; set `pathSafe` to preserve the original
  * spelling and only escape the path separator. Discord and Slack use

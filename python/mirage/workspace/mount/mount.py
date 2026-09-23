@@ -40,13 +40,14 @@ from mirage.observe.context import (push_mount_context, push_revisions,
 from mirage.ops.host_io import host_io, with_host_io
 from mirage.ops.registry import RegisteredOp
 from mirage.policy import resolve_limit
-from mirage.resource.base import BaseResource
-from mirage.types import (ConsistencyPolicy, FileType, Limit, MountMode,
-                          PathSpec, Producer)
+from mirage.types import (FileType, Limit, MountMode, PathSpec, Producer,
+                          ReadSpec)
 from mirage.utils.errors import ReadOnlyError, ebusy, enotsup
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
-from mirage.workspace.mount.activity import ResourceActivity
+from mirage.vfs.base import BaseVFS
+from mirage.workspace.mount.activity import VFSActivity
+from mirage.workspace.mount.read_policy import coerce_read_policy
 
 # Ops that mutate everything under their endpoints in one backend call
 # (a directory rename relocates its whole subtree), so the door also
@@ -61,7 +62,7 @@ def _wrap_cmd_streams(
     mount_prefix: str,
     revisions: dict[str, str] | None,
     mount_id: str | None = None,
-    activity: ResourceActivity | None = None,
+    activity: VFSActivity | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Wrap any async-iterator streams in ``result`` with the mount
     prefix and active revisions, so ``record_stream`` and
@@ -110,7 +111,7 @@ def _wrap_cmd_streams(
 
 
 def _wrap_op_stream(result: Any, mount_prefix: str, mount_id: str,
-                    activity: ResourceActivity) -> Any:
+                    activity: VFSActivity) -> Any:
     """Hold the host-I/O bypass around an op result that streams.
 
     An op that returns an async iterator has not run its body yet: the
@@ -135,24 +136,24 @@ def _wrap_op_stream(result: Any, mount_prefix: str, mount_id: str,
 
 
 class MountEntry:
-    """A mounted resource with command and op dispatch.
+    """A mounted VFS with command and op dispatch.
 
     Each mount has its own lookup tables for commands and ops.
-    Different mounts of the same resource type can have
+    Different mounts of the same VFS type can have
     different registered commands/ops.
 
     Resolution hierarchy (same for commands and ops):
     1. (name, extension) -- filetype-specific
-    2. (name, None) -- resource-specific
+    2. (name, None) -- VFS-specific
     3. general[name] -- general fallback
     """
 
     def __init__(
         self,
         prefix: str,
-        resource: BaseResource,
+        vfs: BaseVFS,
         mode: MountMode = MountMode.READ,
-        consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+        read: ReadSpec | None = None,
     ) -> None:
         if not prefix.startswith("/"):
             raise ValueError(f"prefix must start with /: {prefix!r}")
@@ -162,10 +163,26 @@ class MountEntry:
             raise ValueError(f"prefix must not contain //: {prefix!r}")
         self.mount_id = uuid7()
         self.prefix = prefix
-        self.resource = resource
+        self.vfs = vfs
         self.mode = mode
-        self.consistency = consistency
-        self.activity = ResourceActivity()
+        # How this mount's cached bytes are revalidated. Read by the
+        # gate (Reconciler.may_serve_cached) and by the cache write path
+        # for its bound.
+        #
+        # Normalized here, where a spec becomes live mount state, because
+        # `ReadPolicy` is a (str, Enum) and `ReadSpec` coerces nothing:
+        # an embedder writing `ReadSpec(policy="fresh")` against the
+        # public API would otherwise store the bare string, and every
+        # reader compares with `is` -- the verdict, the gate, the routing
+        # reconcile -- so the mount would pass its capability check and
+        # then behave as `bounded` everywhere. That is the silent
+        # downgrade the policy exists to remove, so it is refused rather
+        # than kept. The TypeScript twin freezes its copy at the same
+        # point for the mirror-image reason.
+        spec = read if read is not None else ReadSpec()
+        self.read = dataclasses.replace(spec,
+                                        policy=coerce_read_policy(spec.policy))
+        self.activity = VFSActivity()
         self.retiring = False
         self.before_use: Callable[[], Awaitable[None]] | None = None
         self._ready_lock = asyncio.Lock()
@@ -204,17 +221,17 @@ class MountEntry:
 
     async def expand_glob(self, paths: list[PathSpec],
                           prefix: str) -> list[PathSpec]:
-        """Keep the resource open and prepared while its glob hook runs."""
+        """Keep the VFS open and prepared while its glob hook runs."""
         async with self.use():
             if self.cache_manager is None:
-                return await self.resource.resolve_glob(paths, prefix=prefix)
+                return await self.vfs.resolve_glob(paths, prefix=prefix)
             async with self.cache_manager.mutation():
                 await self.ensure_ready()
-                return await self.resource.resolve_glob(paths, prefix=prefix)
+                return await self.vfs.resolve_glob(paths, prefix=prefix)
 
     @property
     def index(self) -> IndexCacheStore:
-        index = self.resource.index
+        index = self.vfs.index
         return self.cache_manager.scope_index(
             index) if self.cache_manager else index
 
@@ -242,7 +259,7 @@ class MountEntry:
     # ── command registration ──────────────────────────
 
     def register(self, cmd: RegisteredCommand) -> None:
-        """Register a resource-specific command."""
+        """Register a VFS-specific command."""
         key = (cmd.name, cmd.filetype)
         self._cmds[key] = cmd
         if cmd.spec is not None:
@@ -253,9 +270,9 @@ class MountEntry:
         self,
         cmd: RegisteredCommand,
     ) -> None:
-        """Register a general command (resource=None).
+        """Register a general command (vfs=None).
 
-        General commands work on any resource (e.g. echo, pwd).
+        General commands work on any VFS (e.g. echo, pwd).
         They are the last fallback in resolve_command().
         """
         self._general_cmds[cmd.name] = cmd
@@ -272,7 +289,7 @@ class MountEntry:
 
         Lookup order:
         1. (cmd_name, extension) -- filetype-specific
-        2. (cmd_name, None) -- resource-specific
+        2. (cmd_name, None) -- VFS-specific
         3. general_cmds[cmd_name] -- general fallback
         """
         if extension:
@@ -375,41 +392,38 @@ class MountEntry:
                 and/or RegisteredOp values.
 
         Raises:
-            ValueError: If a command/op's resource doesn't match
-                this mount's resource.
+            ValueError: If a command/op's VFS doesn't match
+                this mount's VFS.
         """
-        pname = self.resource.name
+        pname = self.vfs.name
         for fn in fns:
             rcs: list[RegisteredCommand] = ([fn] if isinstance(
                 fn, RegisteredCommand) else getattr(fn, "_registered_commands",
                                                     []))
             if rcs:
                 matching = [
-                    rc for rc in rcs
-                    if rc.resource is None or rc.resource == pname
+                    rc for rc in rcs if rc.vfs is None or rc.vfs == pname
                 ]
                 if rcs and not matching:
-                    resources = sorted(
-                        {rc.resource
-                         for rc in rcs if rc.resource is not None})
-                    raise ValueError(
-                        f"command {rcs[0].name!r} is for resource(s) "
-                        f"{resources!r}, not {pname!r}")
+                    vfs_names = sorted(
+                        {rc.vfs
+                         for rc in rcs if rc.vfs is not None})
+                    raise ValueError(f"command {rcs[0].name!r} is for VFS(s) "
+                                     f"{vfs_names!r}, not {pname!r}")
                 for rc in matching:
                     self.register(rc)
             ros: list[RegisteredOp] = ([fn] if isinstance(fn, RegisteredOp)
                                        else getattr(fn, "_registered_ops", []))
             if ros:
                 matching_ops = [
-                    ro for ro in ros
-                    if ro.resource is None or ro.resource == pname
+                    ro for ro in ros if ro.vfs is None or ro.vfs == pname
                 ]
                 if ros and not matching_ops:
-                    resources = sorted(
-                        {ro.resource
-                         for ro in ros if ro.resource is not None})
-                    raise ValueError(f"op {ros[0].name!r} is for resource(s) "
-                                     f"{resources!r}, not {pname!r}")
+                    vfs_names = sorted(
+                        {ro.vfs
+                         for ro in ros if ro.vfs is not None})
+                    raise ValueError(f"op {ros[0].name!r} is for VFS(s) "
+                                     f"{vfs_names!r}, not {pname!r}")
                 for ro in matching_ops:
                     self.register_op(ro)
 
@@ -494,7 +508,7 @@ class MountEntry:
     # ── op registration ───────────────────────────────
 
     def register_op(self, op: RegisteredOp) -> None:
-        """Register a resource-specific VFS op."""
+        """Register a VFS-specific VFS op."""
         key = (op.name, op.filetype)
         self._ops[key] = op
 
@@ -505,7 +519,7 @@ class MountEntry:
         table: dict[tuple[Any, ...], Any],
         general: dict[str, Any],
     ) -> list[Any]:
-        """Resolve with cascade: try filetype, resource, general.
+        """Resolve with cascade: try filetype, VFS, general.
 
         Returns list of matching entries to try in order.
         First non-None result wins.
@@ -533,7 +547,7 @@ class MountEntry:
         flag_kwargs: dict[str, FlagValue],
         context: ExecContext = ExecContext(),
     ) -> tuple[ByteSource | None, IOResult]:
-        """Execute a command on this mount's resource.
+        """Execute a command on this mount's VFS.
 
         Pure dispatch — flag parsing is done upstream in
         executor/command.py. This method just resolves the
@@ -587,7 +601,7 @@ class MountEntry:
 
             paths = [
                 dataclasses.replace(
-                    p, resource_path=mount_key(p.virtual, mount_prefix))
+                    p, vfs_path=mount_key(p.virtual, mount_prefix))
                 if isinstance(p, PathSpec) else p for p in paths
             ]
 
@@ -600,7 +614,7 @@ class MountEntry:
             for k, v in flag_kwargs.items():
                 if isinstance(v, PathSpec):
                     flags[k] = dataclasses.replace(v,
-                                                   resource_path=mount_key(
+                                                   vfs_path=mount_key(
                                                        v.virtual,
                                                        mount_prefix))
                 elif isinstance(v, list) and v and all(
@@ -608,7 +622,7 @@ class MountEntry:
                     specs = [item for item in v if isinstance(item, PathSpec)]
                     flags[k] = [
                         dataclasses.replace(item,
-                                            resource_path=mount_key(
+                                            vfs_path=mount_key(
                                                 item.virtual, mount_prefix))
                         for item in specs
                     ]
@@ -625,7 +639,7 @@ class MountEntry:
                     virtual=cwd,
                     directory=cwd,
                     resolved=False,
-                    resource_path=mount_key(cwd, mount_prefix),
+                    vfs_path=mount_key(cwd, mount_prefix),
                 ),
                 mount_prefix=mount_prefix,
                 filetype_fns=(filetype_fns if not is_filetype_cmd else None),
@@ -685,7 +699,7 @@ class MountEntry:
                                    if resolved_limit is not None else None)
                     with host_io():
                         result = await run_with_timeout(
-                            cmd.fn(self.resource.accessor, paths, texts, opts),
+                            cmd.fn(self.vfs.accessor, paths, texts, opts),
                             cmd_timeout, cmd_name)
                     if result is not None:
                         stream, io = _wrap_cmd_streams(result, mount_prefix,
@@ -722,13 +736,13 @@ class MountEntry:
         *args,
         **kwargs,
     ) -> Any:
-        """Execute a VFS op on this mount's resource.
+        """Execute a VFS op on this mount's VFS.
 
-        Tries filetype-specific first, then resource-specific.
+        Tries filetype-specific first, then VFS-specific.
         First non-None result wins.
 
         A caller may override the filetype by passing one, and passing
-        None asks for the by-resource op even where a filetype-scoped
+        None asks for the by-VFS op even where a filetype-scoped
         one is registered. That is what a read-modify-write needs: it
         hands whatever it read straight back to ``write``, which always
         stores, so reading a rendered form would store the rendering
@@ -745,7 +759,7 @@ class MountEntry:
             levels = self._resolve_cascade(op_name, filetype, self._ops,
                                            self._general_ops)
             if not levels:
-                raise enotsup(str(self.resource.name), op_name, path)
+                raise enotsup(str(self.vfs.name), op_name, path)
 
             if any(o.write for o in levels):
                 # GNU reports the operand, not the guard's own wording, so
@@ -781,7 +795,7 @@ class MountEntry:
             scope = PathSpec(
                 virtual=path,
                 directory=path.rsplit("/", 1)[0] or "/",
-                resource_path=mount_key(path, mount_prefix),
+                vfs_path=mount_key(path, mount_prefix),
             )
             kwargs.setdefault("index", self.index)
             # Per-op caps are policy and fire at the op doors (post_ops);
@@ -799,7 +813,7 @@ class MountEntry:
                     # spells the two the same, and routing the physical one
                     # hands the op back to the backend serving it.
                     with host_io():
-                        result = op.fn(self.resource.accessor, scope, *args,
+                        result = op.fn(self.vfs.accessor, scope, *args,
                                        **kwargs)
                         if inspect.isawaitable(result):
                             result = await run_with_timeout(

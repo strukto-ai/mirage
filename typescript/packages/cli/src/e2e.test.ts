@@ -27,7 +27,7 @@ const ISOLATED_PORT = 18767
 
 function writeRamConfig(dir: string, name: string, mode = 'write'): string {
   const cfgPath = join(dir, name)
-  writeFileSync(cfgPath, `mounts:\n  /:\n    resource: ram\n    mode: ${mode}\n`)
+  writeFileSync(cfgPath, `mounts:\n  /:\n    vfs: ram\n    mode: ${mode}\n`)
   return cfgPath
 }
 
@@ -364,7 +364,7 @@ describe('mirage CLI end-to-end', () => {
       [
         'mounts:',
         '  /:',
-        '    resource: ram',
+        '    vfs: ram',
         '    mode: write',
         'profiles:',
         '  default:',
@@ -420,7 +420,7 @@ describe('mirage CLI end-to-end', () => {
       [
         'mounts:',
         '  /:',
-        '    resource: ram',
+        '    vfs: ram',
         '    mode: write',
         'profiles:',
         '  default:',
@@ -554,7 +554,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('workspace config interpolation uses CLI environment', async () => {
     const cfgPath = join(tmp, 'env-cfg.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: ${MIRAGE_E2E_MODE}\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: ${MIRAGE_E2E_MODE}\n')
     const useEnv = { ...env, MIRAGE_E2E_MODE: 'write' }
 
     const created = (await runCli(useEnv, ['workspace', 'create', cfgPath, '--id', 'env-ws'])) as {
@@ -727,10 +727,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('missing config env vars fail before workspace creation', async () => {
     const cfgPath = join(tmp, 'missing-env-cfg.yaml')
-    writeFileSync(
-      cfgPath,
-      'mounts:\n  /:\n    resource: ram\n    mode: ${MIRAGE_E2E_MISSING_MODE}\n',
-    )
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: ${MIRAGE_E2E_MISSING_MODE}\n')
     const useEnv = { ...env }
     delete useEnv.MIRAGE_E2E_MISSING_MODE
 
@@ -781,7 +778,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('commit / log / checkout / clone', async () => {
     const cfgPath = join(tmp, 'ver-clc.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
 
     await runCli(env, ['execute', '-w', id, '-c', 'echo v1 > /notes.txt'])
@@ -810,7 +807,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('log is empty before first commit', async () => {
     const cfgPath = join(tmp, 'ver-empty.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
     expect(await runCli(env, ['workspace', 'log', id])).toEqual([])
     await runCli(env, ['workspace', 'delete', id])
@@ -818,7 +815,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('diff versions and live', async () => {
     const cfgPath = join(tmp, 'ver-diff.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
 
     await runCli(env, ['execute', '-w', id, '-c', 'echo one > /a.txt'])
@@ -852,7 +849,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('branch diverges and guards commit', async () => {
     const cfgPath = join(tmp, 'ver-branch.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
 
     await runCli(env, ['execute', '-w', id, '-c', 'echo one > /a.txt'])
@@ -880,7 +877,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('diff includes deleted', async () => {
     const cfgPath = join(tmp, 'ver-del.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
 
     await runCli(env, ['execute', '-w', id, '-c', 'echo one > /a.txt'])
@@ -906,7 +903,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('clone live and explicit id', async () => {
     const cfgPath = join(tmp, 'ver-clone.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
     await runCli(env, ['execute', '-w', id, '-c', 'echo hello > /a.txt'])
 
@@ -927,7 +924,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('branch --from non-main', async () => {
     const cfgPath = join(tmp, 'ver-from.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
 
     await runCli(env, ['execute', '-w', id, '-c', 'echo one > /a.txt'])
@@ -945,7 +942,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('checkout by branch name', async () => {
     const cfgPath = join(tmp, 'ver-co.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
 
     await runCli(env, ['execute', '-w', id, '-c', 'echo one > /a.txt'])
@@ -971,7 +968,7 @@ describe('mirage CLI end-to-end', () => {
 
   it('error paths exit 2', async () => {
     const cfgPath = join(tmp, 'ver-err.yaml')
-    writeFileSync(cfgPath, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+    writeFileSync(cfgPath, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
     const id = ((await runCli(env, ['workspace', 'create', cfgPath])) as { id: string }).id
     await runCli(env, ['execute', '-w', id, '-c', 'echo one > /a.txt'])
     await runCli(env, ['workspace', 'commit', id, '-m', 'first'])

@@ -50,7 +50,7 @@ def glob_spec(virtual: str, prefix: str) -> PathSpec:
     return PathSpec(
         virtual=virtual,
         directory=virtual[:last_slash + 1],
-        resource_path=virtual[len(prefix):].strip("/"),
+        vfs_path=virtual[len(prefix):].strip("/"),
         pattern=virtual[last_slash + 1:],
         resolved=False,
     )
@@ -273,7 +273,7 @@ class _Gate:
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0] or "/",
-                    resource_path=virtual,
+                    vfs_path=virtual,
                     resolved=True)
 
 
@@ -734,7 +734,7 @@ async def test_guarded_rmdir_threads_the_index_to_the_fallback_listing(
 
     monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
     monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
-    spec = PathSpec(virtual="/m/d", directory="/m", resource_path="d")
+    spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     await adapter._guarded_rmdir(rmdir,
                                  readdir,
                                  stat_fn,
@@ -769,7 +769,7 @@ async def test_guarded_rmdir_answers_a_cascade_failure_with_the_refusal(
 
     monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
     monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
-    spec = PathSpec(virtual="/m/d", directory="/m", resource_path="d")
+    spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(rmdir, readdir, stat_fn, unlink, None,
                                      NOOPAccessor(), spec)
@@ -795,7 +795,7 @@ async def test_guarded_rmdir_folds_a_non_oserror_cascade_failure(monkeypatch):
 
     monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
     monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
-    spec = PathSpec(virtual="/m/d", directory="/m", resource_path="d")
+    spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(rmdir, readdir, stat_fn, unlink, None,
                                      NOOPAccessor(), spec)
@@ -821,7 +821,7 @@ async def test_guarded_rmdir_folds_a_failed_fallback_listing(monkeypatch):
 
     monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
     monkeypatch.setattr(adapter, "path_allowed", lambda v: v == "/m/d")
-    spec = PathSpec(virtual="/m/d", directory="/m", resource_path="d")
+    spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(rmdir, readdir, stat_fn, unlink, None,
                                      NOOPAccessor(), spec)
@@ -852,7 +852,7 @@ async def test_guarded_rmdir_counts_a_visible_mounted_child_as_content(
     monkeypatch.setattr(adapter, "hidden_paths_intersect", lambda _v: True)
     monkeypatch.setattr(adapter, "path_allowed", lambda v: v in
                         ("/m/d", "/m/d/m"))
-    spec = PathSpec(virtual="/m/d", directory="/m", resource_path="d")
+    spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await adapter._guarded_rmdir(rmdir, readdir, stat_fn, unlink,
                                      lambda _v: ["m"], NOOPAccessor(), spec)
@@ -896,7 +896,7 @@ async def test_hidden_guard_rmdir_reads_the_stamped_children(monkeypatch):
                      glob_children=lambda _v: ["m"])
     ops = adapter.with_hidden_guard(base)
     assert ops.rmdir is not None
-    spec = PathSpec(virtual="/m/d", directory="/m", resource_path="d")
+    spec = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     with pytest.raises(OSError) as exc:
         await ops.rmdir(NOOPAccessor(), spec)
     assert exc.value.errno == errno.ENOTEMPTY
@@ -922,7 +922,7 @@ def _glob_ops(mounted: bool) -> CommandIO:
 async def test_resolve_or_empty_expands_globs():
     spec = PathSpec(virtual="/*.txt",
                     directory="/",
-                    resource_path="*.txt",
+                    vfs_path="*.txt",
                     pattern="*.txt",
                     resolved=False)
     resolved = await adapter.resolve_or_empty(_glob_ops(True), None, [spec],

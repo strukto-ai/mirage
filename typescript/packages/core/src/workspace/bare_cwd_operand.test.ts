@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -27,20 +27,20 @@ const ENC = new TextEncoder()
 
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const r = new RAMResource()
+  const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add('/sub')
   r.store.files.set('/a.txt', ENC.encode('hello\n'))
   r.store.files.set('/sub/b.txt', ENC.encode('hello\n'))
   const registry = new OpsRegistry()
-  registry.registerResource(r)
+  registry.registerVfs(r)
   return new Workspace({ '/': r }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
 }
 
 describe('bare invocations default to the cwd', () => {
   it('find walks the cwd dot-spelled', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('find')
+    const io = await ws.shell('find')
     expect(io.exitCode).toBe(0)
     const out = stdoutStr(io)
     // The implicit dev/history mounts ride along dot-spelled,
@@ -56,14 +56,14 @@ describe('bare invocations default to the cwd', () => {
 
   it('find with only an expression implies the leading dot', async () => {
     const ws = await makeWs()
-    const io = await ws.execute("find -name '*.txt'")
+    const io = await ws.shell("find -name '*.txt'")
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('./a.txt\n./sub/b.txt\n')
   })
 
   it('tree renders the cwd', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('tree')
+    const io = await ws.shell('tree')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io).startsWith('.\n')).toBe(true)
     expect(stdoutStr(io)).toContain('a.txt')
@@ -71,7 +71,7 @@ describe('bare invocations default to the cwd', () => {
 
   it('du measures the cwd dot-spelled', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('du')
+    const io = await ws.shell('du')
     expect(io.exitCode).toBe(0)
     const out = stdoutStr(io)
     expect(out).toContain('\t./sub\n')
@@ -80,7 +80,7 @@ describe('bare invocations default to the cwd', () => {
 
   it('ls -R uses dot headers', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('ls -R')
+    const io = await ws.shell('ls -R')
     expect(io.exitCode).toBe(0)
     const out = stdoutStr(io)
     expect(out.startsWith('.:\n')).toBe(true)
@@ -89,7 +89,7 @@ describe('bare invocations default to the cwd', () => {
 
   it('plain ls still lists the cwd', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('ls')
+    const io = await ws.shell('ls')
     expect(io.exitCode).toBe(0)
     // The dev mount is a row like any other now, so it sorts into the
     // listing instead of trailing it the way the old stdout patch did.

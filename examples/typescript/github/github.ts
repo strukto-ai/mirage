@@ -15,7 +15,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { GitHubResource, MountMode, Workspace, type FileStat } from "@struktoai/mirage-node";
+import { GitHubVFS, MountMode, Workspace, type FileStat } from "@struktoai/mirage-node";
 
 const __HERE = fileURLToPath(new URL(".", import.meta.url));
 dotenv.config({ path: resolve(__HERE, "../../../.env.development") });
@@ -27,7 +27,7 @@ if (TOKEN === undefined || TOKEN === "") {
 
 async function show(ws: Workspace, cmd: string): Promise<void> {
   try {
-    const r = await ws.execute(cmd);
+    const r = await ws.shell(cmd);
     console.log(r.stdoutText);
     if (r.stderrText !== "") process.stderr.write(r.stderrText);
   } catch (err) {
@@ -44,7 +44,7 @@ async function header(
 ): Promise<void> {
   console.log(`=== ${label} ===`);
   try {
-    const r = await ws.execute(cmd);
+    const r = await ws.shell(cmd);
     console.log(r.stdoutText);
     if (r.stderrText !== "") process.stderr.write(r.stderrText);
   } catch (err) {
@@ -56,7 +56,7 @@ async function header(
 
 async function timed(ws: Workspace, cmd: string): Promise<[number, string]> {
   const start = performance.now();
-  const r = await ws.execute(cmd);
+  const r = await ws.shell(cmd);
   return [performance.now() - start, r.stdoutText];
 }
 
@@ -73,18 +73,18 @@ async function narrowCase(
 }
 
 async function main(): Promise<void> {
-  const resource = await GitHubResource.create({
+  const vfs = await GitHubVFS.create({
     token: TOKEN!,
     owner: "strukto-ai",
     repo: "mirage",
     ref: "main",
   });
-  const ws = new Workspace({ "/github": resource }, { mode: MountMode.READ });
+  const ws = new Workspace({ "/github": vfs }, { mode: MountMode.READ });
 
   await show(ws, "ls /github");
   await show(ws, "ls /github/python/mirage/core");
   await show(ws, "cat /github/python/pyproject.toml");
-  await show(ws, "grep 'BaseResource' /github/python/mirage/resource/base.py");
+  await show(ws, "grep 'BaseVFS' /github/python/mirage/vfs/base.py");
   await show(ws, "grep 'import' /github/python/mirage/*");
   await show(ws, "grep 'import' /github/python/mirage/core/s3/*.py");
   await show(ws, "grep -r 'async def' /github/python/mirage/core/s3/");
@@ -96,7 +96,7 @@ async function main(): Promise<void> {
   // workspace namespace (durable, snapshot-captured) and merge into
   // dispatch-level stat.
   console.log(`=== metadata overlay on /github/python/mirage/types.py ===`)
-  const metaRes = await ws.execute(
+  const metaRes = await ws.shell(
     `chmod 640 "/github/python/mirage/types.py" && chown 500:dev "/github/python/mirage/types.py" && touch -t 202601021530 "/github/python/mirage/types.py"`,
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   await header(
     ws,
     "grep -l (files with matches)",
-    "grep -rl 'BaseResource' /github/python/mirage/resource/",
+    "grep -rl 'BaseVFS' /github/python/mirage/vfs/",
   );
 
   for (const [label, cmd] of [
@@ -153,7 +153,7 @@ async function main(): Promise<void> {
     console.log(`\n=== ${label} ===`);
     let r;
     try {
-      r = await ws.execute(cmd);
+      r = await ws.shell(cmd);
     } catch (err) {
       console.log(
         `  error: ${err instanceof Error ? err.message : String(err)}`,
@@ -177,8 +177,8 @@ async function main(): Promise<void> {
   const bigDir = "/github/python/mirage/";
   await narrowCase(
     ws,
-    `grep -rln BaseResource ${bigDir} (subdir narrowing, -l short-circuit)`,
-    `grep -rln BaseResource ${bigDir}`,
+    `grep -rln BaseVFS ${bigDir} (subdir narrowing, -l short-circuit)`,
+    `grep -rln BaseVFS ${bigDir}`,
   );
   await narrowCase(
     ws,
@@ -290,7 +290,7 @@ async function main(): Promise<void> {
 
   console.log("=== grep dir operands (POSIX warn) ===");
   {
-    const r = await ws.execute("grep 'import' /github/python/mirage/*");
+    const r = await ws.shell("grep 'import' /github/python/mirage/*");
     const out = r.stdoutText.trim();
     const err = r.stderrText.trim();
     const matches = out === "" ? 0 : out.split("\n").length;
@@ -305,7 +305,7 @@ async function main(): Promise<void> {
     "diff -u /github/python/mirage/core/s3/stat.py /github/python/mirage/core/s3/read.py",
   );
   await header(ws, "tree -L", "tree -L 2 /github/python/mirage/");
-  await header(ws, "rg", "rg 'BaseResource' /github/python/mirage/resource/");
+  await header(ws, "rg", "rg 'BaseVFS' /github/python/mirage/vfs/");
 
   console.log(
     "=== caching: a warm read is served from cache (no backend fetch) ===",

@@ -26,11 +26,11 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-def make_mkdir(resource: str, io: CommandIO) -> Callable[..., Any]:
+def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
     """Build the implicit-parents mkdir override for one keyed store.
 
     Args:
-        resource (str): resource name the command registers under.
+        vfs (str): VFS name the command registers under.
         io (CommandIO): the backend's op table; must wire mkdir.
     """
     mkdir_impl = io.require(Operation.MKDIR)
@@ -70,7 +70,7 @@ def make_mkdir(resource: str, io: CommandIO) -> Callable[..., Any]:
                                 exit_code=1 if errors else 0)
 
     wrapped: Callable[..., Any] = command("mkdir",
-                                          resource=resource,
+                                          vfs=vfs,
                                           spec=SPECS["mkdir"],
                                           write=True)(mkdir)
     return wrapped

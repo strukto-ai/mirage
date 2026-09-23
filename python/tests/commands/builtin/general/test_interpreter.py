@@ -42,10 +42,7 @@ async def fake_dispatch(op, path, *args, **kwargs):
 
 
 def spec(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory="/",
-                    resolved=True,
-                    resource_path=path)
+    return PathSpec(virtual=path, directory="/", resolved=True, vfs_path=path)
 
 
 @pytest.mark.asyncio

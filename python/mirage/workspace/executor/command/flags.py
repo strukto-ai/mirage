@@ -31,7 +31,7 @@ def synthesize_path_spec(value: str) -> PathSpec:
 
     Covers a relative value cwd-resolved by ``parse_command`` (e.g.
     ``csplit -f part`` -> ``/data/part``) and a spec-classified PATH
-    operand the upstream classifier left as text. ``resource_path``
+    operand the upstream classifier left as text. ``vfs_path``
     stays empty on purpose: the mount stamps the backend key on every
     positional path and path-shaped flag value at execute time
     (``Mount.execute_cmd``), so a parse-time stamp is dead weight —
@@ -43,7 +43,7 @@ def synthesize_path_spec(value: str) -> PathSpec:
     """
     return PathSpec(virtual=value,
                     directory=value[:value.rfind("/") + 1] or "/",
-                    resource_path="",
+                    vfs_path="",
                     resolved=True)
 
 

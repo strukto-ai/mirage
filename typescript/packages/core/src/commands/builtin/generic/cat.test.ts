@@ -29,7 +29,7 @@ const FILES: Record<string, string> = {
 
 function spec(path: string): PathSpec {
   return new PathSpec({
-    resourcePath: stripSlash(path),
+    vfsPath: stripSlash(path),
     virtual: path,
     directory: path,
     resolved: true,
@@ -37,7 +37,7 @@ function spec(path: string): PathSpec {
 }
 
 function opts(): CommandOpts {
-  return { stdin: null, flags: {}, filetypeFns: null, cwd: '/', resource: {} } as CommandOpts
+  return { stdin: null, flags: {}, filetypeFns: null, cwd: '/', vfs: {} } as CommandOpts
 }
 
 async function* fileStream(path: string, pulled: string[]): AsyncIterable<Uint8Array> {

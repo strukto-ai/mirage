@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
-import { z } from '@struktoai/mirage-core/resource/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 
 const LoadAccountConfig = z.strictObject({ account: z.string().default('default') })
@@ -41,7 +41,7 @@ describe('workspaces router', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workspaces',
-      payload: { config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+      payload: { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
     })
     expect(res.statusCode).toBe(201)
     const body = res.json<{ id: string }>()
@@ -64,8 +64,8 @@ describe('workspaces router', () => {
         payload: {
           id: 'cli-ws',
           config: {
-            mounts: { '/': { resource: 'ram', mode: 'write' } },
-            runtimes: ['monty', 'vfs'],
+            mounts: { '/': { vfs: 'ram', mode: 'write' } },
+            runtimes: ['monty', 'workspace'],
             clis: { pager: { script } },
           },
         },
@@ -85,6 +85,59 @@ describe('workspaces router', () => {
     }
   }, 60_000)
 
+  describe.each(['initModule', 'init_module'])('request runtime %s', (key) => {
+    it.each(['local', 'token'] as const)('rejects host initializers with %s auth', async (mode) => {
+      const app = buildApp({ authConfig: { mode, bearerToken: 'test-token' } })
+      const headers = mode === 'token' ? { authorization: 'Bearer test-token' } : {}
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers,
+          payload: {
+            config: {
+              mounts: { '/': { vfs: 'ram', mode: 'write' } },
+              runtimes: [
+                'workspace',
+                {
+                  name: 'pyodide',
+                  config: { [key]: 'data:text/javascript,export default () => {}' },
+                },
+              ],
+            },
+          },
+        })
+        expect(res.statusCode).toBe(400)
+        expect(res.json()).toEqual({
+          detail: 'runtime initModule is only allowed in operator-owned configuration',
+        })
+        const list = await app.inject({ method: 'GET', url: '/v1/workspaces', headers })
+        expect(list.json()).toEqual([])
+      } finally {
+        await app.close()
+      }
+    })
+  })
+
+  it('POST /v1/workspaces accepts Pyodide config without a host initializer', async () => {
+    const app = buildApp()
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: {
+          config: {
+            mounts: { '/': { vfs: 'ram', mode: 'write' } },
+            runtimes: [{ name: 'pyodide', config: { auto_load_from_imports: false } }, 'workspace'],
+          },
+        },
+      })
+      expect(res.statusCode).toBe(201)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('GET /v1/workspaces lists active workspaces', async () => {
     const app = buildApp()
     await app.inject({
@@ -92,7 +145,7 @@ describe('workspaces router', () => {
       url: '/v1/workspaces',
       payload: {
         id: 'fixed-id',
-        config: { mounts: { '/': { resource: 'ram', mode: 'write' } } },
+        config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } },
       },
     })
     const res = await app.inject({ method: 'GET', url: '/v1/workspaces' })
@@ -113,12 +166,12 @@ describe('workspaces router', () => {
     await app.close()
   })
 
-  it('POST /v1/workspaces returns 502 when resource build fails', async () => {
+  it('POST /v1/workspaces returns 502 when VFS build fails', async () => {
     const app = buildApp()
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workspaces',
-      payload: { config: { mounts: { '/': { resource: 'not-a-real-resource' } } } },
+      payload: { config: { mounts: { '/': { vfs: 'not-a-real-VFS' } } } },
     })
     expect(res.statusCode).toBe(502)
     await app.close()
@@ -134,7 +187,7 @@ describe('workspaces router', () => {
       url: '/v1/workspaces',
       payload: {
         config: {
-          mounts: { '/': { resource: 'ram', mode: 'write' } },
+          mounts: { '/': { vfs: 'ram', mode: 'write' } },
           secrets: { prod: { source: 'nope' } },
         },
       },
@@ -150,7 +203,7 @@ describe('workspaces router', () => {
       url: '/v1/workspaces',
       payload: {
         id: 'to-delete',
-        config: { mounts: { '/': { resource: 'ram', mode: 'write' } } },
+        config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } },
       },
     })
     const res = await app.inject({ method: 'DELETE', url: '/v1/workspaces/to-delete' })
@@ -165,7 +218,7 @@ describe('workspaces router', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/workspaces',
-      payload: { id: 'src-w', config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+      payload: { id: 'src-w', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
     })
     const res = await app.inject({
       method: 'POST',
@@ -186,7 +239,7 @@ describe('workspaces router', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/workspaces',
-      payload: { id: 'src-s', config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+      payload: { id: 'src-s', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
     })
     for (const bad of [{ prod: { source: 'nope' } }, { prod: { nosource: 1 } }, []]) {
       const res = await app.inject({
@@ -218,7 +271,7 @@ describe('workspaces router', () => {
       await app1.inject({
         method: 'POST',
         url: '/v1/workspaces',
-        payload: { id: 'seed', config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+        payload: { id: 'seed', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
       })
       const snap = await app1.inject({
         method: 'POST',
@@ -256,7 +309,7 @@ describe('workspaces router', () => {
       await app.inject({
         method: 'POST',
         url: '/v1/workspaces',
-        payload: { id: 'esc', config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+        payload: { id: 'esc', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
       })
       const res = await app.inject({
         method: 'POST',
@@ -302,8 +355,8 @@ describe('workspaces router', () => {
           id: 'ptr-src',
           config: {
             mounts: {
-              '/': { resource: 'ram', mode: 'write' },
-              '/slack': { resource: 'slack', mode: 'read', config: { token: 'xoxb-src' } },
+              '/': { vfs: 'ram', mode: 'write' },
+              '/slack': { vfs: 'slack', mode: 'read', config: { token: 'xoxb-src' } },
             },
           },
         },
@@ -326,7 +379,7 @@ describe('workspaces router', () => {
               secrets: { prod: { source: 'acct-load', config: { account: 'live' } } },
               mounts: {
                 '/slack': {
-                  resource: 'slack',
+                  vfs: 'slack',
                   config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
                 },
               },
@@ -365,7 +418,7 @@ describe('workspaces router', () => {
       await app.inject({
         method: 'POST',
         url: '/v1/workspaces',
-        payload: { id: 'taken', config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+        payload: { id: 'taken', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
       })
       await app.inject({
         method: 'POST',
@@ -394,8 +447,8 @@ describe('workspaces router', () => {
           id: 'src-modes',
           config: {
             mounts: {
-              '/': { resource: 'ram', mode: 'write' },
-              '/ro': { resource: 'ram', mode: 'read' },
+              '/': { vfs: 'ram', mode: 'write' },
+              '/ro': { vfs: 'ram', mode: 'read' },
             },
           },
         },
@@ -427,7 +480,7 @@ describe('daemon disk-store default', () => {
       url: '/v1/workspaces',
       payload: {
         id: 'diskws',
-        config: { mounts: { '/': { resource: 'ram', mode: 'write' } } },
+        config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } },
       },
     })
     expect(res.statusCode).toBe(201)

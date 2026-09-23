@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 import pytest
 import yaml
 
-from mirage import EXTERNAL_COMMANDS, Limit, MountMode, RAMResource, Workspace
+from mirage import EXTERNAL_COMMANDS, RAMVFS, Limit, MountMode, Workspace
 from mirage.commands.cli.types import CLISpec
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec, Operand
@@ -34,7 +34,7 @@ from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.types import ProcessExecution, RunResult, ScriptSource
 from mirage.workspace.expand import argv as argv_module
 from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 class ProcessProbe(Runtime, ProcessExecutorMixin):
@@ -77,15 +77,14 @@ async def workspace(*args, **kwargs):
 @pytest.mark.asyncio
 async def test_external_fallback_preserves_vfs_pipes_and_redirects():
     probe = ProcessProbe()
-    async with workspace({"/": RAMResource()},
+    async with workspace({"/": RAMVFS()},
                          mode=MountMode.EXEC,
                          runtimes=[probe]) as ws:
-        result = await ws.execute(
+        result = await ws.shell(
             "printf 'GPU ready\nother\n' | native-tool | grep GPU > /out")
         assert result.exit_code == 0
         assert await result.stdout_str() == ""
-        assert await (await
-                      ws.execute("cat /out")).stdout_str() == "GPU ready\n"
+        assert await (await ws.shell("cat /out")).stdout_str() == "GPU ready\n"
         assert probe.requests[0].argv == ("native-tool", )
         assert probe.requests[0].stdin == b"GPU ready\nother\n"
         assert len(probe.requests) == 1
@@ -94,11 +93,11 @@ async def test_external_fallback_preserves_vfs_pipes_and_redirects():
 @pytest.mark.asyncio
 async def test_native_argv_preserves_empty_words_and_interpreter_options():
     probe = ProcessProbe(captures=("python3", EXTERNAL_COMMANDS))
-    async with workspace({"/work": RAMResource()},
+    async with workspace({"/work": RAMVFS()},
                          mode=MountMode.EXEC,
                          runtimes=[probe]) as ws:
-        await ws.execute("cd /work")
-        result = await ws.execute(
+        await ws.shell("cd /work")
+        result = await ws.shell(
             "TOKEN=one python3 -c 'print(1)' -u 'a b' '$(echo literal)' ''")
         assert result.exit_code == 0
         request = probe.requests[0]
@@ -106,18 +105,18 @@ async def test_native_argv_preserves_empty_words_and_interpreter_options():
                                 "$(echo literal)", "")
         assert request.cwd.virtual == "/work"
         assert request.env["TOKEN"] == "one"
-        await ws.execute("native-tool")
+        await ws.shell("native-tool")
         assert "TOKEN" not in probe.requests[1].env
 
 
 @pytest.mark.asyncio
 async def test_external_globs_expand_against_the_workspace():
     probe = ProcessProbe()
-    async with workspace({"/work": RAMResource()},
+    async with workspace({"/work": RAMVFS()},
                          mode=MountMode.EXEC,
                          runtimes=[probe]) as ws:
-        await ws.execute("touch /work/a.txt /work/b.txt")
-        result = await ws.execute("native-tool /work/*.txt '/work/*.txt'")
+        await ws.shell("touch /work/a.txt /work/b.txt")
+        result = await ws.shell("native-tool /work/*.txt '/work/*.txt'")
         assert result.exit_code == 0
         assert probe.requests[0].argv == ("native-tool", "/work/a.txt",
                                           "/work/b.txt", "/work/*.txt")
@@ -128,11 +127,10 @@ async def test_runtime_refusal_cannot_fall_through_to_external_capture():
     named = ProcessProbe(captures=("native-tool", ), script=lambda ctx: False)
     fallback = ProcessProbe()
     fallback.name = "fallback"
-    async with workspace({"/": RAMResource()}, runtimes=[named,
-                                                         fallback]) as ws:
-        assert (await ws.execute("native-tool")).exit_code == 126
+    async with workspace({"/": RAMVFS()}, runtimes=[named, fallback]) as ws:
+        assert (await ws.shell("native-tool")).exit_code == 126
         assert not named.requests and not fallback.requests
-        assert (await ws.execute("another-tool")).exit_code == 0
+        assert (await ws.shell("another-tool")).exit_code == 0
         assert len(fallback.requests) == 1
 
 
@@ -143,10 +141,9 @@ async def test_runtime_refusal_cannot_fall_through_to_external_capture():
 async def test_refused_external_capture_does_not_expand_globs(
         monkeypatch, captures):
     probe = ProcessProbe(captures=captures, script=lambda ctx: False)
-    async with workspace({"/": RAMResource()}, runtimes=[probe]) as ws:
-        assert await (await
-                      ws.execute("echo mirage")).stdout_str() == "mirage\n"
-        await ws.execute("shopt -s failglob")
+    async with workspace({"/": RAMVFS()}, runtimes=[probe]) as ws:
+        assert await (await ws.shell("echo mirage")).stdout_str() == "mirage\n"
+        await ws.shell("shopt -s failglob")
         resolved = argv_module.resolve_globs
         globbed = False
 
@@ -156,7 +153,7 @@ async def test_refused_external_capture_does_not_expand_globs(
             return await resolved(*args, **kwargs)
 
         monkeypatch.setattr(argv_module, "resolve_globs", track_globs)
-        result = await ws.execute("native-tool /api/*")
+        result = await ws.shell("native-tool /api/*")
         assert result.exit_code == 126
         assert await result.stderr_str(
         ) == "native-tool: no runtime accepted this line\n"
@@ -168,13 +165,12 @@ async def test_refused_external_capture_does_not_expand_globs(
 async def test_shell_function_precedes_external_and_discovery_names_the_route(
 ):
     probe = ProcessProbe()
-    async with workspace({"/": RAMResource()}, runtimes=[probe]) as ws:
+    async with workspace({"/": RAMVFS()}, runtimes=[probe]) as ws:
         assert await (
-            await
-            ws.execute("type -t native-tool")).stdout_str() == "external\n"
-        await ws.execute("native-tool() { echo function; }")
+            await ws.shell("type -t native-tool")).stdout_str() == "external\n"
+        await ws.shell("native-tool() { echo function; }")
         assert await (await
-                      ws.execute("native-tool")).stdout_str() == "function\n"
+                      ws.shell("native-tool")).stdout_str() == "function\n"
         assert not probe.requests
 
 
@@ -194,12 +190,12 @@ async def test_external_mount_timeout_replaces_default(monkeypatch, name,
     monkeypatch.setitem(DEFAULT_COMMAND_LIMITS, name,
                         Limit(timeout_seconds=0.05))
     probe = DelayedProcessProbe(captures=("python3", EXTERNAL_COMMANDS))
-    async with workspace({"/": RAMResource()},
+    async with workspace({"/": RAMVFS()},
                          mode=MountMode.EXEC,
                          runtimes=[probe]) as ws:
         for mount in ws._registry.mounts():
             mount.command_limits[name] = Limit(timeout_seconds=timeout)
-        result = await ws.execute(f"PROGRAM={name}; $PROGRAM")
+        result = await ws.shell(f"PROGRAM={name}; $PROGRAM")
         assert result.exit_code == 0
         assert await result.stdout_str() == "completed\n"
         assert len(probe.requests) == 1
@@ -218,10 +214,10 @@ async def test_external_timeout_cancels_process(monkeypatch, source):
         "native-tool": Limit(timeout_seconds=0.05)
     } if source == "mount" else {})
     probe = DelayedProcessProbe()
-    async with workspace({"/": (RAMResource(), MountMode.EXEC, overrides)},
+    async with workspace({"/": (RAMVFS(), MountMode.EXEC, overrides)},
                          mode=MountMode.EXEC,
                          runtimes=[probe]) as ws:
-        result = await ws.execute("native-tool")
+        result = await ws.shell("native-tool")
         assert result.exit_code == 124
         assert "native-tool: timed out after 0.05s" in await result.stderr_str(
         )
@@ -244,8 +240,8 @@ async def test_external_timeout_includes_stdin_materialization(monkeypatch):
             cancelled = True
 
     probe = ProcessProbe()
-    async with workspace({"/": RAMResource()}, runtimes=[probe]) as ws:
-        result = await ws.execute("native-tool", stdin=slow_stdin())
+    async with workspace({"/": RAMVFS()}, runtimes=[probe]) as ws:
+        result = await ws.shell("native-tool", stdin=slow_stdin())
         assert result.exit_code == 124
         assert "native-tool: timed out after 0.05s" in await result.stderr_str(
         )
@@ -266,7 +262,7 @@ class ShellProbe(Runtime, LineExecutorMixin):
 
 
 @command("trello board list",
-         resource="ram",
+         vfs="ram",
          spec=CommandSpec(positional=(Operand(), ), rest=Operand(type="str")))
 async def board_list(accessor, paths, texts, opts):
     return b"ok\n", IOResult()
@@ -280,10 +276,10 @@ async def board_list(accessor, paths, texts, opts):
 ])
 async def test_native_execution_preserves_command_tokens(kind, head, expected):
     probe = kind(captures=("trello board list", ))
-    ram = RAMResource()
+    ram = RAMVFS()
     ram.register(board_list)
     async with workspace({"/": ram}, runtimes=[probe]) as ws:
-        result = await ws.execute(head + " 'a b' '$(echo literal)' ''")
+        result = await ws.shell(head + " 'a b' '$(echo literal)' ''")
         assert result.exit_code == 0
         tokens = (*expected, "a b", "$(echo literal)", "")
         if isinstance(probe, ProcessProbe):
@@ -305,7 +301,7 @@ async def test_native_execution_preserves_command_tokens(kind, head, expected):
 async def test_boundary_expansion_preserves_command_tokens(
         kind, head, prefix, pattern, matches, monkeypatch):
     probe = kind(captures=("trello board list", ))
-    ram = RAMResource()
+    ram = RAMVFS()
     ram.register(board_list)
     resolve_globs = argv_module.resolve_globs
     pending = True
@@ -320,14 +316,14 @@ async def test_boundary_expansion_preserves_command_tokens(
     async with workspace(
         {
             "/": ram,
-            "/base/inner": RAMResource(),
-            "/base/other": RAMResource(),
+            "/base/inner": RAMVFS(),
+            "/base/other": RAMVFS(),
         },
             mode=MountMode.EXEC,
             runtimes=[probe]) as ws:
         # Leave the glob pending so command dispatch owns boundary expansion.
         monkeypatch.setattr(argv_module, "resolve_globs", defer_once)
-        result = await ws.execute(f"{head} {pattern} 'a b' ''")
+        result = await ws.shell(f"{head} {pattern} 'a b' ''")
         assert result.exit_code == 0
         tokens = (*prefix, *matches, "a b", "")
         if isinstance(probe, ProcessProbe):
@@ -348,11 +344,11 @@ async def test_scripted_multiword_capture_sees_its_full_command(kind, source):
               ctx.commands[-1].command == "trello board list" and ctx.commands[
                   -1].words[-1] == "/allowed")
     probe = kind(captures=("trello board list", ), script=script)
-    ram = RAMResource()
+    ram = RAMVFS()
     ram.register(board_list)
     async with workspace({"/": ram},
                          runtimes=[probe, MontyRuntime(captures=())]) as ws:
-        allowed = await ws.execute("echo ok | trello board list /allowed")
+        allowed = await ws.shell("echo ok | trello board list /allowed")
         assert allowed.exit_code == 0
         if isinstance(probe, ProcessProbe):
             assert probe.requests[0].argv == ("trello", "board", "list",
@@ -362,7 +358,7 @@ async def test_scripted_multiword_capture_sees_its_full_command(kind, source):
             assert shlex.split(
                 probe.lines[0]) == ["trello", "board", "list", "/allowed"]
             probe.lines.clear()
-        denied = await ws.execute("echo ok | trello board list /denied")
+        denied = await ws.shell("echo ok | trello board list /denied")
         assert denied.exit_code == 126
         assert not (probe.requests
                     if isinstance(probe, ProcessProbe) else probe.lines)
@@ -379,16 +375,16 @@ async def test_external_script_sees_first_unresolved_stage(head):
         script=lambda ctx: seen.append(ctx) or ctx.command == "native-tool")
     named = ProcessProbe(captures=("python3", ))
     named.name = "named"
-    ram = RAMResource()
+    ram = RAMVFS()
     ram.register(board_list)
     async with workspace({"/": ram}, runtimes=[probe, named]) as ws:
         ws.register_cli(
             "custom-cli",
             CLISpec(name="custom-cli", fn=lambda inv: (b"ok\n", IOResult())))
-        await ws.execute("echo ok > /input")
-        await ws.execute("custom-stage() { echo ok; }")
+        await ws.shell("echo ok > /input")
+        await ws.shell("custom-stage() { echo ok; }")
         seen.clear()
-        result = await ws.execute(head + " | native-tool")
+        result = await ws.shell(head + " | native-tool")
         assert result.exit_code == 0
         assert len(probe.requests) == 1
         assert seen[0].command == "native-tool"
@@ -398,7 +394,7 @@ async def test_external_script_sees_first_unresolved_stage(head):
                                                if head == "trello board list"
                                                else head.split()[0])
         probe.requests.clear()
-        denied = await ws.execute(head + " | denied-tool")
+        denied = await ws.shell(head + " | denied-tool")
         assert denied.exit_code == 126
         assert not probe.requests
 
@@ -420,14 +416,14 @@ async def test_named_external_capture_cannot_bypass_path_policy(kind, line):
         CommandRule(reason="protected",
                     commands=("cat", "grep", "tar"),
                     paths=("/work/secret.txt", )))
-    async with workspace({"/work": RAMResource()},
+    async with workspace({"/work": RAMVFS()},
                          runtimes=[probe],
                          policies=[policy],
                          mode=MountMode.EXEC) as ws:
         assert (await
-                ws.execute("echo secret > /work/secret.txt")).exit_code == 0
-        await ws.execute("cd /work")
-        result = await ws.execute(line)
+                ws.shell("echo secret > /work/secret.txt")).exit_code == 0
+        await ws.shell("cd /work")
+        result = await ws.shell(line)
         assert result.exit_code != 0
         assert "protected" in await result.stderr_str()
         assert not (probe.requests
@@ -442,16 +438,16 @@ async def test_external_spec_preserves_text_words_and_shell_globs(kind):
         CommandRule(reason="protected",
                     commands=("grep", ),
                     paths=("/work/secret.txt", )))
-    async with workspace({"/work": RAMResource()},
+    async with workspace({"/work": RAMVFS()},
                          runtimes=[probe],
                          policies=[policy],
                          mode=MountMode.EXEC) as ws:
         assert (await
-                ws.execute("echo secret > /work/secret.txt")).exit_code == 0
+                ws.shell("echo secret > /work/secret.txt")).exit_code == 0
         assert (await
-                ws.execute("echo public > /work/public.txt")).exit_code == 0
-        await ws.execute("cd /work")
-        result = await ws.execute("grep secret.txt public*.txt")
+                ws.shell("echo public > /work/public.txt")).exit_code == 0
+        await ws.shell("cd /work")
+        result = await ws.shell("grep secret.txt public*.txt")
         assert result.exit_code == 0
         tokens = ("grep", "secret.txt", "public.txt")
         if isinstance(probe, ProcessProbe):
@@ -465,28 +461,29 @@ async def test_external_spec_preserves_text_words_and_shell_globs(kind):
 @pytest.mark.parametrize("willing", [True, False])
 async def test_native_captures_preserve_shell_builtins(kind, willing):
     probe = kind(captures=tuple(SHELL_NAMES), script=lambda ctx: willing)
-    async with workspace({"/work": RAMResource()},
+    async with workspace({"/work": RAMVFS()},
                          mode=MountMode.EXEC,
                          runtimes=[probe]) as ws:
-        session = Session(session_id="lookup")
+        session = SessionState(session_id="lookup")
         for name in SHELL_NAMES - {"python", "python3", "node", "js"}:
             assert lookup(name, session,
                           ws._registry) is Consumer.SESSION, name
             layers = lookup_all(name, session, ws._registry)
             assert layers[0] is Consumer.SESSION, name
             assert Consumer.EXTERNAL not in layers, name
-        assert (await ws.execute("cd /work")).exit_code == 0
-        assert await (await ws.execute("pwd")).stdout_str() == "/work\n"
-        assert (await ws.execute("export NATIVE_TEST=kept")).exit_code == 0
-        assert await (await ws.execute('printf "%s\n" "$NATIVE_TEST"')
-                      ).stdout_str() == "kept\n"
-        assert await (await ws.execute("echo shell")).stdout_str() == "shell\n"
-        assert await (await ws.execute("type -a echo")
+        assert (await ws.shell("cd /work")).exit_code == 0
+        assert await (await ws.shell("pwd")).stdout_str() == "/work\n"
+        assert (await ws.shell("export NATIVE_TEST=kept")).exit_code == 0
+        assert await (
+            await
+            ws.shell('printf "%s\n" "$NATIVE_TEST"')).stdout_str() == "kept\n"
+        assert await (await ws.shell("echo shell")).stdout_str() == "shell\n"
+        assert await (await ws.shell("type -a echo")
                       ).stdout_str() == "echo is a shell builtin\n"
         assert not (probe.requests
                     if isinstance(probe, ProcessProbe) else probe.lines)
         for name in ("python", "python3", "node", "js"):
-            result = await ws.execute(name + " --version")
+            result = await ws.shell(name + " --version")
             assert result.exit_code == (0 if willing else 126)
         delegated = probe.requests if isinstance(probe,
                                                  ProcessProbe) else probe.lines

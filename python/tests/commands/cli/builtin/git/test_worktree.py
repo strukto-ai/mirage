@@ -148,7 +148,7 @@ async def test_an_ignored_directory_holding_a_tracked_file_is_still_walked(
 async def test_a_symlink_is_reported_as_a_symlink(git_rw):
     # Links are namespace state, so the backend stat behind the walk
     # dereferences one: without the name plane the walk sees the target.
-    await git_rw.execute("ln -s a.txt /repo/link")
+    await git_rw.shell("ln -s a.txt /repo/link")
     found = await walk(git_rw, TRACKED)
     assert found.files["link"].type is FileType.SYMLINK
     assert found.files["link"].extra[LINK_TARGET_KEY] == "a.txt"
@@ -159,7 +159,7 @@ async def test_a_symlink_is_reported_as_a_symlink(git_rw):
 async def test_a_broken_symlink_is_still_found(git_rw):
     # git lstats, so a link to nothing is an untracked entry like any
     # other; a dereferencing stat answers None and loses it entirely.
-    await git_rw.execute("ln -s nowhere /repo/broken")
+    await git_rw.shell("ln -s nowhere /repo/broken")
     found = await walk(git_rw, TRACKED)
     assert found.files["broken"].type is FileType.SYMLINK
     assert "broken" in found.untracked
@@ -170,7 +170,7 @@ async def test_a_symlink_to_a_directory_is_not_descended(
         git_rw, repo_path: Path):
     (repo_path / "sub").mkdir()
     (repo_path / "sub" / "in.txt").write_text("x\n", encoding="utf-8")
-    await git_rw.execute("ln -s sub /repo/dirlink")
+    await git_rw.shell("ln -s sub /repo/dirlink")
     found = await walk(git_rw, TRACKED)
     assert found.files["dirlink"].type is FileType.SYMLINK
     assert not any(path.startswith("dirlink/") for path in found.files)

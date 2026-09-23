@@ -1,0 +1,247 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { PathSpec } from '@struktoai/mirage-core/types'
+import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
+import { HttpProxyAgent } from 'http-proxy-agent'
+import { HttpsProxyAgent } from 'https-proxy-agent'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { S3VFS } from './s3.ts'
+import type { S3Config } from './config.ts'
+import { installS3Mock, type S3Mock } from './mock.ts'
+
+// S3 tests run against an in-memory mock of the AWS SDK v3 S3Client (via
+// aws-sdk-client-mock). No external service required.
+const bucket = `mirage-s3-test-${String(Date.now())}`
+const config: S3Config = {
+  bucket,
+  region: 'us-east-1',
+  accessKeyId: 'test',
+  secretAccessKey: 'test',
+  forcePathStyle: true,
+}
+
+function mkPath(virtual: string, prefix = ''): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
+}
+
+const DEC = new TextDecoder()
+const ENC = new TextEncoder()
+
+// Port of tests/workspace/test_snapshot.py::test_no_real_creds_in_tar_bytes.
+// Runs without S3 — pure in-memory check that getState() + snapshot encoding
+// never leaks real credentials in the serialized bytes.
+describe('S3VFS credential redaction', () => {
+  it('getState() redacts accessKeyId/secretAccessKey/sessionToken', async () => {
+    const leaky: S3Config = {
+      bucket: 'b',
+      region: 'us-east-1',
+      accessKeyId: 'AKIA-OBVIOUS-LEAK',
+      secretAccessKey: 'SECRET-OBVIOUS-LEAK',
+      sessionToken: 'TOKEN-OBVIOUS-LEAK',
+    }
+    const res = new S3VFS(leaky)
+    const state = await res.getState()
+    expect(state.config.accessKeyId).toBe('<REDACTED>')
+    expect(state.config.secretAccessKey).toBe('<REDACTED>')
+    expect(state.config.sessionToken).toBe('<REDACTED>')
+    const serialized = JSON.stringify(state)
+    expect(serialized).not.toContain('AKIA-OBVIOUS-LEAK')
+    expect(serialized).not.toContain('SECRET-OBVIOUS-LEAK')
+    expect(serialized).not.toContain('TOKEN-OBVIOUS-LEAK')
+    expect(serialized).toContain('<REDACTED>')
+  })
+
+  it('configures proxy agents and redacts proxy credentials', async () => {
+    const res = new S3VFS({
+      bucket: 'b',
+      proxy: 'http://proxy-user:proxy-secret@localhost:8080',
+      timeoutMs: 1234,
+    })
+    const provider = res.accessor.config.httpAgentProvider
+    expect(provider).toBeTypeOf('function')
+    const agents = provider?.()
+    expect(agents?.httpAgent).toBeInstanceOf(HttpProxyAgent)
+    expect(agents?.httpsAgent).toBeInstanceOf(HttpsProxyAgent)
+    const serialized = JSON.stringify(await res.getState())
+    expect(serialized).not.toContain('proxy-user')
+    expect(serialized).not.toContain('proxy-secret')
+    expect(serialized).toContain('<REDACTED>')
+  })
+
+  it('hands out fresh agents per call so a per-op destroy() cannot cross ops', () => {
+    const res = new S3VFS({ bucket: 'b', proxy: 'http://localhost:8080' })
+    const first = res.accessor.config.httpAgentProvider?.()
+    const second = res.accessor.config.httpAgentProvider?.()
+    expect(first?.httpAgent).not.toBe(second?.httpAgent)
+    expect(first?.httpsAgent).not.toBe(second?.httpsAgent)
+  })
+
+  it('treats an empty proxy as disabled', () => {
+    const res = new S3VFS({ bucket: 'b', proxy: '' })
+    expect(res.accessor.config.httpAgentProvider).toBeUndefined()
+  })
+})
+
+describe('S3VFS (mocked integration)', () => {
+  let vfs: S3VFS
+  let mock: S3Mock
+
+  beforeAll(() => {
+    mock = installS3Mock()
+    vfs = new S3VFS(config)
+  })
+
+  afterEach(() => {
+    // Clear stored objects between tests so writes don't leak.
+    for (const b of mock.store.allBuckets()) {
+      const objs = mock.store.objects(b)
+      objs.clear()
+    }
+  })
+
+  afterAll(() => {
+    mock.restore()
+  })
+
+  describe('writes', () => {
+    it('writeFile + readFile round-trips', async () => {
+      const p = mkPath('/hello.txt')
+      await vfs.writeFile(p, ENC.encode('hello world'))
+      const bytes = await vfs.readFile(p)
+      expect(DEC.decode(bytes)).toBe('hello world')
+    })
+
+    it('appendFile extends existing content', async () => {
+      const p = mkPath('/append.txt')
+      await vfs.writeFile(p, ENC.encode('one\n'))
+      await vfs.appendFile(p, ENC.encode('two\n'))
+      const bytes = await vfs.readFile(p)
+      expect(DEC.decode(bytes)).toBe('one\ntwo\n')
+    })
+
+    it('appendFile on missing key creates the object', async () => {
+      const p = mkPath('/append_new.txt')
+      await vfs.appendFile(p, ENC.encode('fresh'))
+      const bytes = await vfs.readFile(p)
+      expect(DEC.decode(bytes)).toBe('fresh')
+    })
+
+    it('copy duplicates the object under a new key', async () => {
+      const src = mkPath('/copy_src.txt')
+      const dst = mkPath('/copy_dst.txt')
+      await vfs.writeFile(src, ENC.encode('src data'))
+      await vfs.copy(src, dst)
+      expect(DEC.decode(await vfs.readFile(dst))).toBe('src data')
+      // Source still there.
+      expect(DEC.decode(await vfs.readFile(src))).toBe('src data')
+    })
+
+    it('rename moves the object', async () => {
+      const src = mkPath('/rename_src.txt')
+      const dst = mkPath('/rename_dst.txt')
+      await vfs.writeFile(src, ENC.encode('moving'))
+      await vfs.rename(src, dst)
+      expect(DEC.decode(await vfs.readFile(dst))).toBe('moving')
+      expect(await vfs.exists(src)).toBe(false)
+    })
+
+    it('unlink removes a single object', async () => {
+      const p = mkPath('/unlink.txt')
+      await vfs.writeFile(p, ENC.encode('doomed'))
+      expect(await vfs.exists(p)).toBe(true)
+      await vfs.unlink(p)
+      expect(await vfs.exists(p)).toBe(false)
+    })
+
+    it('truncate zero-pads to the requested length', async () => {
+      const p = mkPath('/truncate.txt')
+      await vfs.writeFile(p, ENC.encode('abcdef'))
+      await vfs.truncate(p, 3)
+      expect(DEC.decode(await vfs.readFile(p))).toBe('abc')
+      await vfs.truncate(p, 5)
+      const bytes = await vfs.readFile(p)
+      expect(bytes.byteLength).toBe(5)
+      expect(DEC.decode(bytes.subarray(0, 3))).toBe('abc')
+      expect(bytes[3]).toBe(0)
+      expect(bytes[4]).toBe(0)
+    })
+  })
+
+  describe('reads', () => {
+    it('readdir returns full paths for immediate children', async () => {
+      await vfs.writeFile(mkPath('/rd/a.txt'), ENC.encode('a'))
+      await vfs.writeFile(mkPath('/rd/b.txt'), ENC.encode('b'))
+      await vfs.writeFile(mkPath('/rd/sub/c.txt'), ENC.encode('c'))
+      const entries = await vfs.readdir(mkPath('/rd/'))
+      expect(entries.sort()).toEqual(['/rd/a.txt', '/rd/b.txt', '/rd/sub'])
+    })
+
+    it('stat returns size + ETag fingerprint', async () => {
+      const p = mkPath('/stat.txt')
+      await vfs.writeFile(p, ENC.encode('sized'))
+      const s = await vfs.stat(p)
+      expect(s.size).toBe(5)
+      expect(typeof s.fingerprint).toBe('string')
+      expect((s.fingerprint ?? '').length).toBeGreaterThan(0)
+    })
+
+    it('stat treats a trailing-slash path as a directory probe', async () => {
+      // Some S3-compatible backends (notably MinIO) don't allow a file at
+      // `hint` and a prefix `hint/...` to coexist — the second write silently
+      // overwrites the namespace. Real AWS S3 does allow it. For portability
+      // we exercise only the directory-probe branch here; the file branch is
+      // covered by the other stat tests.
+      await vfs.writeFile(mkPath('/hintdir/child'), ENC.encode('inside'))
+      const dirStat = await vfs.stat(mkPath('/hintdir/'))
+      expect(dirStat.type).toBe('directory')
+    })
+
+    it('exists returns false for missing keys', async () => {
+      expect(await vfs.exists(mkPath('/does/not/exist.txt'))).toBe(false)
+    })
+  })
+
+  describe('recursive', () => {
+    it('du sums sizes under a prefix', async () => {
+      await vfs.writeFile(mkPath('/du/a'), ENC.encode('x'.repeat(10)))
+      await vfs.writeFile(mkPath('/du/b'), ENC.encode('y'.repeat(20)))
+      const total = await vfs.du(mkPath('/du/'))
+      expect(total).toBe(30)
+    })
+
+    it('rmR deletes every object under the prefix', async () => {
+      await vfs.writeFile(mkPath('/rmr/x.txt'), ENC.encode('x'))
+      await vfs.writeFile(mkPath('/rmr/sub/y.txt'), ENC.encode('y'))
+      await vfs.rmR(mkPath('/rmr/'))
+      expect(await vfs.exists(mkPath('/rmr/x.txt'))).toBe(false)
+      expect(await vfs.exists(mkPath('/rmr/sub/y.txt'))).toBe(false)
+    })
+
+    it('find with name glob matches expected entries', async () => {
+      await vfs.writeFile(mkPath('/find/a.txt'), ENC.encode('a'))
+      await vfs.writeFile(mkPath('/find/b.md'), ENC.encode('b'))
+      await vfs.writeFile(mkPath('/find/c.txt'), ENC.encode('c'))
+      const txts = await vfs.find(mkPath('/find/'), { name: '*.txt' })
+      expect(txts.sort()).toEqual(['/find/a.txt', '/find/c.txt'])
+    })
+
+    it('find with minSize skips small files and directories (size 0)', async () => {
+      await vfs.writeFile(mkPath('/sz/small'), ENC.encode('x'))
+      await vfs.writeFile(mkPath('/sz/big'), ENC.encode('x'.repeat(100)))
+      const results = await vfs.find(mkPath('/sz/'), { minSize: 10 })
+      expect(results).toEqual(['/sz/big'])
+    })
+  })
+})

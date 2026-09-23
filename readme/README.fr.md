@@ -41,24 +41,24 @@ Mirage est **un terminal virtuel pour les agents IA**. Le système de fichiers v
 ```python
 ws = Workspace(
     {
-        "/tmp":   (RAMResource(), MountMode.EXEC),
-        "/redis": (RedisResource(url=redis_url), MountMode.WRITE),
-        "/slack": (SlackResource(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+        "/tmp":   (RAMVFS(), MountMode.EXEC),
+        "/redis": (RedisVFS(url=redis_url), MountMode.WRITE),
+        "/slack": (SlackVFS(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
     },
     # monty capture python : les scripts s'exécutent en bac à sable dans l'espace de travail
-    runtimes=[MontyRuntime(captures=["python", "python3"]), "vfs"],
+    runtimes=[MontyRuntime(captures=["python", "python3"]), "workspace"],
 )
 
 # un seul grep balaie toutes les sources
-await ws.execute("grep -rln session /redis /tmp")
+await ws.shell("grep -rln session /redis /tmp")
 
 # exécute un script hébergé dans Slack, écrit le rapport dans Redis
-await ws.execute("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
+await ws.shell("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
 
 # installe un CLI typé sous un mot-clé : dispatché par nom, pas par chemin,
 # et découvrable via `man`, `type` et `which` comme tout autre programme
 ws.register_cli("slack", SLACK, {"token": slack_bot_token})
-await ws.execute('slack send-message --channel general --text "report is up"')
+await ws.shell('slack send-message --channel general --text "report is up"')
 ```
 
 ## À propos
@@ -121,16 +121,16 @@ npx @struktoai/mirage-cli
 
 ```python
 from mirage import Workspace
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3Config, S3VFS
 
 ws = Workspace({
-    "/data": RAMResource(),
-    "/s3":   S3Resource(S3Config(bucket="my-bucket")),
+    "/data": RAMVFS(),
+    "/s3":   S3VFS(S3Config(bucket="my-bucket")),
 })
 
-await ws.execute("cp /s3/report.csv /data/report.csv")
-await ws.execute("grep alert /s3/data/log.jsonl | wc -l")
+await ws.shell("cp /s3/report.csv /data/report.csv")
+await ws.shell("grep alert /s3/data/log.jsonl | wc -l")
 
 await ws.snapshot("demo.tar")
 ```
@@ -138,15 +138,15 @@ await ws.snapshot("demo.tar")
 ### TypeScript
 
 ```ts
-import { Workspace, RAMResource, S3Resource } from '@struktoai/mirage-node'
+import { Workspace, RAMVFS, S3VFS } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
-  '/data': new RAMResource(),
-  '/s3':   new S3Resource({ bucket: 'my-bucket' }),
+  '/data': new RAMVFS(),
+  '/s3':   new S3VFS({ bucket: 'my-bucket' }),
 })
 
-await ws.execute('cp /s3/report.csv /data/report.csv')
-await ws.execute('grep alert /s3/data/log.jsonl | wc -l')
+await ws.shell('cp /s3/report.csv /data/report.csv')
+await ws.shell('grep alert /s3/data/log.jsonl | wc -l')
 
 await ws.snapshot('demo.tar')
 ```
@@ -163,7 +163,7 @@ mirage workspace load demo.tar --id demo-restored
 
 ## Frameworks d'agents
 
-Mirage s'intègre aux frameworks d'agents comme bac à sable ou couche d'outils. Les opérations POSIX telles que `read` peuvent aussi être personnalisées par ressource et par type de fichier : Mirage n'embarque aucun moteur de rendu de format, donc un format s'affiche selon ce que vous enregistrez, et une commande enregistrée pour une ressource et une extension l'emporte sur la commande générique.
+Mirage s'intègre aux frameworks d'agents comme bac à sable ou couche d'outils. Les opérations POSIX telles que `read` peuvent aussi être personnalisées par VFS et par type de fichier : Mirage n'embarque aucun moteur de rendu de format, donc un format s'affiche selon ce que vous enregistrez, et une commande enregistrée pour un VFS et une extension l'emporte sur la commande générique.
 
 |                | Intégrations                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -181,10 +181,10 @@ Chaque `Workspace` possède un cache à deux niveaux, pour que le travail répé
 Les deux niveaux utilisent par défaut la RAM du processus, sans configuration. Un store Redis partage l'état du cache entre workers, processus et machines :
 
 ```ts
-import { RedisFileCacheStore, S3Resource, Workspace } from '@struktoai/mirage-node'
+import { RedisFileCacheStore, S3VFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
-  { '/s3': new S3Resource({ bucket: 'my-bucket' }) },
+  { '/s3': new S3VFS({ bucket: 'my-bucket' }) },
   {
     cache: new RedisFileCacheStore({ url: 'redis://localhost:6379/0', cacheLimit: '8GB' }),
     index: { type: 'redis', url: 'redis://localhost:6379/0', ttl: 600 },

@@ -6,7 +6,7 @@ from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.resource.nextcloud import NextcloudConfig
+from mirage.vfs.nextcloud import NextcloudConfig
 
 
 @dataclass

@@ -44,7 +44,7 @@ export class GitHubWalk {
 
   async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
     const accessor = this.accessor
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const { tree, truncated } = await fetchTree(
       accessor.transport,
       accessor.owner,
@@ -63,7 +63,7 @@ export class GitHubWalk {
     // unrelated read happened to refill the index, so a pull that reported
     // a CREATE was followed by a find that could not see the file.
     accessor.tree = buildTreeMap(tree)
-    const stem = stripSlash(rstripSlash(root.resourcePath))
+    const stem = stripSlash(rstripSlash(root.vfsPath))
     const base = stem !== '' ? `${stem}/` : ''
     for (const item of tree) {
       if (base !== '' && !item.path.startsWith(base)) continue

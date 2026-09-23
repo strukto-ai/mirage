@@ -25,7 +25,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("rg", resource="history", spec=SPECS["rg"])
+@command("rg", vfs="history", spec=SPECS["rg"])
 async def rg(accessor: HistoryAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

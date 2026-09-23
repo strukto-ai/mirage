@@ -25,9 +25,9 @@ from mirage.core.dropbox.constants import (DROPBOX_API_BASE,
                                            DROPBOX_CONTENT_BASE,
                                            DROPBOX_TOKEN_URL,
                                            TOKEN_BUFFER_SECONDS)
-from mirage.resource.dropbox.config import DropboxConfig
-from mirage.resource.secrets import reveal_secret
 from mirage.utils.ranges import ByteWindow
+from mirage.vfs.dropbox.config import DropboxConfig
+from mirage.vfs.secrets import reveal_secret
 
 
 class DropboxApiError(RuntimeError):

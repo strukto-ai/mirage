@@ -72,10 +72,7 @@ async def find_provision(accessor: EmailAccessor, paths: list[PathSpec],
         replace(opts, command="find " + " ".join(p.virtual for p in paths)))
 
 
-@command("find",
-         resource="email",
-         spec=SPECS["find"],
-         provision=find_provision)
+@command("find", vfs="email", spec=SPECS["find"], provision=find_provision)
 async def find(
     accessor: EmailAccessor,
     paths: list[PathSpec],
@@ -101,7 +98,7 @@ async def find(
     if name and name_only:
         operand = _folder_operand(paths)
         if operand is not None:
-            prefix = mount_prefix_of(operand.virtual, operand.resource_path)
+            prefix = mount_prefix_of(operand.virtual, operand.vfs_path)
             return await _find_server_side(accessor, operand, name, prefix)
 
     args = parse_find_args(tuple(texts),
@@ -115,7 +112,7 @@ async def find(
                            mindepth=mindepth,
                            empty=empty)
     searches = paths if paths else [
-        PathSpec(virtual="/", directory="/", resource_path="")
+        PathSpec(virtual="/", directory="/", vfs_path="")
     ]
     results: list[str] = []
     links = opts.ns.links if opts.ns is not None else None

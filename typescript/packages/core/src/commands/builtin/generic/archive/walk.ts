@@ -63,13 +63,13 @@ function linkTarget(stat: FileStat): string {
 // absolute virtual paths; reading their bytes needs the backend key too,
 // which is the virtual path with this mount's prefix removed.
 function childSpec(virtual: string, root: PathSpec): PathSpec {
-  const cut = rstripSlash(root.virtual).length - stripSlash(root.resourcePath).length
+  const cut = rstripSlash(root.virtual).length - stripSlash(root.vfsPath).length
   const prefix = rstripSlash(root.virtual.slice(0, cut))
   const slash = virtual.lastIndexOf('/')
   return new PathSpec({
     virtual,
     directory: slash >= 0 ? virtual.slice(0, slash + 1) : '/',
-    resourcePath: mountKey(virtual, prefix),
+    vfsPath: mountKey(virtual, prefix),
     rawPath: virtual,
   })
 }
@@ -86,7 +86,7 @@ function sameMount(mounts: MountView | null, one: string, other: string): boolea
 // Three sources have to be merged because no single one can see them
 // all: the backend walk (files and directories), the namespace (its
 // symlinks, which no backend readdir reports), and the mount table (a
-// nested mount, whose keys live in another resource entirely).
+// nested mount, whose keys live in another VFS entirely).
 //
 // `base` and `nameBase` differ only when a link is being followed: the
 // walk runs over the target while the members keep the link's own name.

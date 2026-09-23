@@ -40,7 +40,7 @@ from mirage.workspace.node.occurrence import (Frame, argv_frame, body_frame,
                                               line_frame, occurrence_in,
                                               root_frame, segment_frames,
                                               whole_occurrence)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
 
 UNREADABLE = "cannot read {raw} before the runtime expands it"
@@ -90,7 +90,8 @@ def _from_refusal(name: str, args: tuple[str, ...],
                        refusal=refusal.refusal)
 
 
-def _explained(ctx: CommandContext, session: Session, registry: MountRegistry,
+def _explained(ctx: CommandContext, session: SessionState,
+               registry: MountRegistry,
                asked: Deny | Ask | None) -> Explanation:
     """One command's explanation, rendered from the same table the gate
     renders a refusal with.
@@ -103,7 +104,7 @@ def _explained(ctx: CommandContext, session: Session, registry: MountRegistry,
 
     Args:
         ctx (CommandContext): the classified command.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the decision ledger.
         asked (Deny | Ask | None): what the policy chain answered.
     """
@@ -167,7 +168,7 @@ class Judged:
 async def _judge_words(
     words: list[Word],
     occurrence: Occurrence,
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str = "",
@@ -191,7 +192,7 @@ async def _judge_words(
     Args:
         words (list[Word]): the command's words, name first.
         occurrence (Occurrence): the command's place on the line.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
@@ -255,19 +256,22 @@ def _is_verdict(expl: Explanation) -> bool:
     """Whether an explanation refuses the line's intent, rather than
     just failing one command.
 
-    A rule that named itself is a verdict. So is a refusal the document
-    said nothing about: a coded policy answers on its own account, and
-    with no permissions document there is no rule for it to point at,
-    so reading "no rule" as "no verdict" made every coded policy invisible
-    to the pass. What stays out is the rule-less DENY: a head word the
-    session cannot see, a line no allow entry covers, and a word only
-    the runtime can expand, each of which the docstring above explains
-    is answered where it happens rather than against the whole line.
+    Explicit deny rules and command-scoped policy refusals hold the line.
+    Operand-scoped filesystem refusals wait for the per-command gate,
+    where earlier commands have established the live cwd and namespace.
+    Rule-less DENY results also wait: an unavailable head word, an
+    uncovered command, or words only the runtime can expand fail where
+    they occur rather than against the whole line.
 
     Args:
         expl (Explanation): one command's explanation.
     """
     if expl.exit_code == 0:
+        return False
+    if expl.rule is not None and expl.outcome is Outcome.DENY:
+        return True
+    # Filesystem refusals use the live cwd and fail only their command.
+    if expl.refusal is not None and expl.refusal.scope == "operand":
         return False
     return expl.rule is not None or expl.outcome is Outcome.ALLOW
 
@@ -323,20 +327,20 @@ class Walked:
     Args:
         words (list[Word]): the command's words, name first.
         redirects (tuple[Word, ...]): the statement's redirect targets.
-        session (Session): the session the command is judged in.
+        session (SessionState): the session the command is judged in.
         occurrence (Occurrence): the command's place on the line.
     """
 
     words: list[Word]
     redirects: tuple[Word, ...]
-    session: Session
+    session: SessionState
     occurrence: Occurrence
 
 
 # A walk yields each command and returns the session its scope ends in,
 # which is how a `cd` reaches the commands after it without escaping the
 # child shell it ran in.
-Walk = Generator[Walked, None, Session]
+Walk = Generator[Walked, None, SessionState]
 
 
 def _words_of(node: Any, home: str | None) -> list[Word]:
@@ -350,7 +354,7 @@ def _words_of(node: Any, home: str | None) -> list[Word]:
     return [Word(get_text(part), literal_word(part, home)) for part in parts]
 
 
-def _walk_node(node: Any, session: Session, home: str | None,
+def _walk_node(node: Any, session: SessionState, home: str | None,
                frame: Frame) -> Walk:
     """Every command under one node, in source order, each with the
     session it is judged in; returns the session the node leaves behind.
@@ -380,7 +384,7 @@ def _walk_node(node: Any, session: Session, home: str | None,
 
     Args:
         node (Any): the tree-sitter node to walk.
-        session (Session): the session this node begins in.
+        session (SessionState): the session this node begins in.
         home (str | None): the home directory a leading ``~`` names.
         frame (Frame): the scope the node is read in.
     """
@@ -417,14 +421,14 @@ def _walk_node(node: Any, session: Session, home: str | None,
     return (yield from _walk_children(node, session, home, frame))
 
 
-def _walk_children(node: Any, session: Session, home: str | None,
+def _walk_children(node: Any, session: SessionState, home: str | None,
                    frame: Frame) -> Walk:
     """One scope's children in order, threading the cwd between them;
     returns the session the scope ends in.
 
     Args:
         node (Any): the tree-sitter node whose children form the scope.
-        session (Session): the session the scope begins in.
+        session (SessionState): the session the scope begins in.
         home (str | None): the home directory a leading ``~`` names.
         frame (Frame): the scope the children are read in.
     """
@@ -439,7 +443,7 @@ def _walk_children(node: Any, session: Session, home: str | None,
     return walked
 
 
-def _after_cd(words: list[Word], session: Session) -> Session:
+def _after_cd(words: list[Word], session: SessionState) -> SessionState:
     """The session the next command of a line is judged in, which
     differs from this one only when this command was a literal ``cd``.
 
@@ -452,7 +456,7 @@ def _after_cd(words: list[Word], session: Session) -> Session:
 
     Args:
         words (list[Word]): the command's words, name first.
-        session (Session): the session the command was judged in.
+        session (SessionState): the session the command was judged in.
     """
     if len(words) != 2 or words[0].value != "cd" or words[1].text is None:
         return session
@@ -463,7 +467,7 @@ def _after_cd(words: list[Word], session: Session) -> Session:
 
 
 def _walked_line(ast: Any,
-                 session: Session,
+                 session: SessionState,
                  frame: Frame | None = None) -> Iterator[Walked]:
     """Every command of a line with its redirect targets, the session
     it is judged in and its place on the line.
@@ -477,7 +481,7 @@ def _walked_line(ast: Any,
 
     Args:
         ast (Any): the parsed tree-sitter root node.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         frame (Frame | None): the scope the line is read in; None
             reads ``ast`` as a line of its own.
     """
@@ -488,7 +492,7 @@ def _walked_line(ast: Any,
 
 async def prejudge_line(
     ast: Any,
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     handed: HandOff,
@@ -567,10 +571,9 @@ async def prejudge_line(
     the limit stated above in another form.
 
     Every command is judged whether or not the session carries a
-    document. A coded policy refuses on its own account, and one is
-    always registered (``MountRootPolicy``), so returning early on a
-    session with no rules held the line for a document and let a policy
-    keep the half-line behavior the pass exists to remove.
+    document. Command-scoped coded policies can hold the line without
+    a named rule. Operand-scoped policies, including MountRootPolicy,
+    remain the per-command gate's responsibility.
 
     A line with one command to judge is left to the per-command gate,
     which is not an optimization but the more faithful answer: there is
@@ -582,7 +585,7 @@ async def prejudge_line(
 
     Args:
         ast (Any): the parsed tree-sitter root node.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
@@ -648,7 +651,7 @@ async def prejudge_line(
 async def _verdict_refuses(
     judged: Judged,
     redirects: Sequence[PathSpec],
-    walked: Session,
+    walked: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str,
@@ -673,7 +676,7 @@ async def _verdict_refuses(
         judged (Judged): the verdict's explanation and its occurrence.
         redirects (Sequence[PathSpec]): the statement's redirect
             targets, empty for a command that has none.
-        walked (Session): the session the command is judged in.
+        walked (SessionState): the session the command is judged in.
         registry (MountRegistry): registry holding the policies and the
             decision ledger.
         namespace (Namespace | None): the link table.
@@ -734,7 +737,7 @@ def _defines_function(node: Any) -> bool:
     return False
 
 
-def _sole_literal_command(node: Any, session: Session,
+def _sole_literal_command(node: Any, session: SessionState,
                           frame: Frame) -> Walked | None:
     """The node's one fully-literal command, when nothing else in the
     node can read a name.
@@ -750,7 +753,7 @@ def _sole_literal_command(node: Any, session: Session,
 
     Args:
         node (Any): one walked node (the line's tree or a stored body).
-        session (Session): the session the line runs in.
+        session (SessionState): the session the line runs in.
         frame (Frame): the scope the node is read in.
     """
     items = list(_walked_line(node, session, frame))
@@ -810,7 +813,7 @@ async def _command_refused(
 
 async def unrefused_nodes(
     nodes: Sequence[Any],
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     handed: HandOff,
@@ -845,7 +848,7 @@ async def unrefused_nodes(
     Args:
         nodes (Sequence[Any]): the line's walked set (``line_nodes``),
             the line's own tree first.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
@@ -879,7 +882,7 @@ async def unrefused_nodes(
 
 async def _judge_line(
     ast: Any,
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str,
@@ -891,7 +894,7 @@ async def _judge_line(
 
     Args:
         ast (Any): the parsed tree-sitter root node.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
@@ -910,7 +913,7 @@ async def _judge_line(
 
 async def explain_line(
     ast: Any,
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str = "",
@@ -930,7 +933,7 @@ async def explain_line(
 
     Args:
         ast (Any): the parsed tree-sitter root node.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.

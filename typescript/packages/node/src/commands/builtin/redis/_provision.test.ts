@@ -18,7 +18,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 import { writeBytes } from '@struktoai/mirage-core/core/redis/write'
-import { RedisStore } from '../../../resource/redis/store.ts'
+import { RedisStore } from '../../../vfs/redis/store.ts'
 import {
   fileReadProvision,
   headTailProvision,

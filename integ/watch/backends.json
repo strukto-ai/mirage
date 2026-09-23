@@ -1,5 +1,5 @@
 {
-  "resources": [
+  "mounts": [
     "disk",
     "ssh",
     "dropbox",
@@ -497,7 +497,7 @@
           ]
         }
       ],
-      "skip_resources": [
+      "skip_vfs": [
         "hf_buckets"
       ]
     },

@@ -54,8 +54,8 @@ class MirageRunner:
         self._client = client
 
     async def _block_for_path(self, path: str) -> dict[str, Any]:
-        st = await self._ws.fs.stat(path)
-        data = await self._ws.fs.read(path)
+        st = await self._ws.vfs.stat(path)
+        data = await self._ws.vfs.read(path)
         if st.content in _VISION_TYPES:
             mime = _MIMETYPE_FOR[st.content]
             b64 = base64.b64encode(data).decode("ascii")
@@ -86,7 +86,7 @@ class MirageRunner:
 
         Args:
             prompt (str): User-facing instruction text.
-            paths (list[str]): Mirage paths to attach (any resource).
+            paths (list[str]): Mirage paths to attach (any VFS).
 
         Returns:
             list[dict]: Content blocks ready to embed in a user message.

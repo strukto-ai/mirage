@@ -17,7 +17,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  GSlidesResource,
+  GSlidesVFS,
   MountMode,
   patchNodeFs,
   Workspace,
@@ -41,8 +41,8 @@ function buildConfig(): GSlidesConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new GSlidesResource(buildConfig())
-  const ws = new Workspace({ '/gslides/': resource }, { mode: MountMode.READ })
+  const vfs = new GSlidesVFS(buildConfig())
+  const ws = new Workspace({ '/gslides/': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Google Docs transparently ===\n')

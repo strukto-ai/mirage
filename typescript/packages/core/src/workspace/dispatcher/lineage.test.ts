@@ -14,14 +14,14 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithSession } from '../../context/session_context.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { BARE_PREFIX, requireTurfWritable, turfOf } from './lineage.ts'
 
 function entry(prefix: string, mode: MountMode): MountEntry {
-  return new MountEntry({ prefix, resource: new RAMResource(), mode })
+  return new MountEntry({ prefix, vfs: new RAMVFS(), mode })
 }
 
 function path(virtual: string): PathSpec {
@@ -60,7 +60,7 @@ describe('requireTurfWritable', () => {
     // The grant is what binds: it says what this session may do, which
     // covers the namespace plane as well as the backend one, so a grant
     // that stops a file write at /extra stops the table write too.
-    const ws = new Workspace({ '/extra': [new RAMResource(), MountMode.WRITE] })
+    const ws = new Workspace({ '/extra': [new RAMVFS(), MountMode.WRITE] })
     const owner = ws.namespace.tryMountFor('/extra/lk')
     const sess = ws.createSession('agent', { mounts: { '/extra/': 'read' } })
     await runWithSession(sess, () => {
@@ -75,7 +75,7 @@ describe('requireTurfWritable', () => {
   it('a root statement governs bare turf', async () => {
     // "Above every mount" is governed by "/": a profile that caps the
     // root to read refuses the table write there, with no mount at /.
-    const ws = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+    const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
     const sess = ws.createSession('agent', { mounts: { '/': 'read' } })
     await runWithSession(sess, () => {
       let thrown: unknown = null

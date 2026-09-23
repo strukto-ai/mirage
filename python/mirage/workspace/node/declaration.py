@@ -26,7 +26,7 @@ from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import expand_array_items
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (conversion_scalar,
                                             ensure_var_visible, seed_var,
                                             session_view, set_attr)
@@ -92,7 +92,7 @@ def _declare_option_refusal(
     cmd: str,
     flag_chars: set[str],
     plus_chars: set[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[Any, IOResult, ExecutionNode] | None:
     """The refusal a `declare` family option cluster earns, if any.
 
@@ -104,7 +104,7 @@ def _declare_option_refusal(
         cmd (str): the builtin's own name for the diagnostic.
         flag_chars (set[str]): the `-` letters, `--` excluded.
         plus_chars (set[str]): the `+` letters.
-        session (Session): shell session state (unused today, kept so
+        session (SessionState): shell session state (unused today, kept so
             a later check that reads it does not change the signature).
     """
     bad = next((c for c in sorted(flag_chars | plus_chars)
@@ -121,7 +121,7 @@ def _declare_option_refusal(
 
 async def _plus_refusals(
     cmd: str,
-    session: Session,
+    session: SessionState,
     view: SessionView,
     plus_chars: set[str],
     assignments: list[str],
@@ -139,7 +139,7 @@ async def _plus_refusals(
 
     Args:
         cmd (str): the builtin's own name for the diagnostic.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         plus_chars (set[str]): the `+` letters.
         assignments (list[str]): `NAME` / `NAME=value` operands.
@@ -169,7 +169,7 @@ async def _plus_refusals(
 
 
 async def _stamp_attrs(
-    session: Session,
+    session: SessionState,
     view: SessionView,
     flag_chars: set[str],
     plus_chars: set[str],
@@ -190,7 +190,7 @@ async def _stamp_attrs(
     would be, in the builtin's voice.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         flag_chars (set[str]): the `-` letters.
         plus_chars (set[str]): the `+` letters.
@@ -241,7 +241,7 @@ async def _stamp_attrs(
 
 
 async def _stamp_export(
-    session: Session,
+    session: SessionState,
     view: SessionView,
     flag_chars: set[str],
     assignments: list[str],
@@ -276,7 +276,7 @@ async def _stamp_export(
     host-seeded credential the deployment had refused.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         flag_chars (set[str]): the declaration's collected flag letters.
         assignments (list[str]): `NAME` / `NAME=value` operands.
@@ -308,7 +308,7 @@ async def _stamp_export(
 
 async def execute_declaration(
     node: Any,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace,
@@ -325,7 +325,7 @@ async def execute_declaration(
 
     Args:
         node (Any): the tree-sitter ``declaration_command`` node.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.

@@ -1,6 +1,6 @@
 # Browser Linear demo
 
-Demonstrates the browser `LinearResource` calling `api.linear.app/graphql` directly — no proxy server. Linear's GraphQL API supports CORS and uses an `Authorization` header, so the browser can talk to it directly (mirroring how the browser `S3Resource` signs requests with credentials it holds).
+Demonstrates the browser `LinearVFS` calling `api.linear.app/graphql` directly — no proxy server. Linear's GraphQL API supports CORS and uses an `Authorization` header, so the browser can talk to it directly (mirroring how the browser `S3VFS` signs requests with credentials it holds).
 
 ## Run
 

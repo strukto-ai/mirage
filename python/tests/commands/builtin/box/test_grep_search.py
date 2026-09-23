@@ -34,7 +34,7 @@ def make_accessor() -> BoxAccessor:
 
 
 def scope() -> PathSpec:
-    return PathSpec(resource_path="", virtual="/data", directory="/data")
+    return PathSpec(vfs_path="", virtual="/data", directory="/data")
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ async def test_count_forces_the_full_walk(harness, index):
 async def test_narrowed_files_reach_the_generic_grep(harness, index):
     narrow, generic = harness
     hits = [
-        PathSpec(resource_path="a.txt",
+        PathSpec(vfs_path="a.txt",
                  virtual="/data/a.txt",
                  directory="",
                  resolved=True)
@@ -104,7 +104,7 @@ async def test_narrowed_files_reach_the_generic_grep(harness, index):
 async def test_explicit_h_survives_narrowing(harness, index):
     narrow, generic = harness
     hits = [
-        PathSpec(resource_path="a.txt",
+        PathSpec(vfs_path="a.txt",
                  virtual="/data/a.txt",
                  directory="",
                  resolved=True)

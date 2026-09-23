@@ -14,7 +14,7 @@
 
 import {
   IndexEntry,
-  RAMResource,
+  RAMVFS,
   RedisIndexCacheStore,
   Workspace,
   type RedisIndexConfig,
@@ -27,7 +27,7 @@ function file(name: string): IndexEntry {
 }
 
 async function main(): Promise<void> {
-  // A workspace-level `index` config points every mounted resource's index
+  // A workspace-level `index` config points every mounted VFS's index
   // cache at the same Redis instance. Two separate Mirage processes that
   // share a keyPrefix then share one index -- the building block for running
   // the same mounts locally and in a remote sandbox.
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   const indexConfig: RedisIndexConfig = { type: 'redis', url: REDIS_URL, keyPrefix }
 
   // Workspace A: a RAM mount whose INDEX is backed by Redis (not RAM).
-  const ramA = new RAMResource()
+  const ramA = new RAMVFS()
   const wsA = new Workspace({ '/data': ramA }, { index: indexConfig })
   console.log(`index store A is redis-backed: ${ramA.index instanceof RedisIndexCacheStore}`)
 
@@ -46,9 +46,9 @@ async function main(): Promise<void> {
     ['notes.md', file('notes.md')],
   ])
 
-  // Workspace B: a *separate* resource pointed at the *same* Redis index
+  // Workspace B: a *separate* VFS pointed at the *same* Redis index
   // (same keyPrefix). It sees what A cached without re-listing anything.
-  const ramB = new RAMResource()
+  const ramB = new RAMVFS()
   const wsB = new Workspace({ '/data': ramB }, { index: indexConfig })
 
   const entry = await ramB.index.get('/data/hello.txt')

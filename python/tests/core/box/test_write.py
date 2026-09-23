@@ -58,7 +58,7 @@ _TREE = {
 
 
 def _spec(virtual: str) -> PathSpec:
-    return PathSpec(resource_path=virtual.strip("/"),
+    return PathSpec(vfs_path=virtual.strip("/"),
                     virtual=virtual,
                     directory=virtual)
 

@@ -31,7 +31,7 @@ from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.node.occurrence import occurrence_of
-from mirage.workspace.session import (Session, reset_current_session,
+from mirage.workspace.session import (SessionState, reset_current_session,
                                       set_current_session)
 from mirage.workspace.types import ExecutionNode
 
@@ -65,7 +65,7 @@ async def handle_background(
     execute_node,
     left: TSNodeLike,
     right: TSNodeLike | None,
-    session: Session,
+    session: SessionState,
     job_table: JobTable,
     agent_id: str | None,
     stdin: ByteSource | None = None,
@@ -199,7 +199,7 @@ async def handle_background(
 async def run_statement(
     execute_node: Callable[..., Any],
     node: TSNodeLike,
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     job_table: JobTable | None,
@@ -219,7 +219,7 @@ async def run_statement(
     Args:
         execute_node (Callable): the executor's statement runner.
         node (TSNodeLike): the statement.
-        session (Session): shell session.
+        session (SessionState): shell session.
         stdin (ByteSource | None): the statement's input; a job gets
             none, like a background process reading /dev/null.
         call_stack (CallStack | None): function-call scope, if any.
@@ -255,12 +255,12 @@ def _job_result(
                                                      stderr=err)
 
 
-def _session_of(session: Session | None) -> str:
+def _session_of(session: SessionState | None) -> str:
     """The job list a builtin reads: the calling session's, or the shared
     empty id when it runs with no session (a bare table in a test).
 
     Args:
-        session (Session | None): the shell session, if any.
+        session (SessionState | None): the shell session, if any.
     """
     return session.session_id if session is not None else ""
 
@@ -336,7 +336,7 @@ async def _adopt(
 async def handle_wait(
     job_table: JobTable,
     parts: list[str],
-    session: Session | None = None,
+    session: SessionState | None = None,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Wait for background jobs, with bash's option surface.
@@ -360,7 +360,7 @@ async def handle_wait(
     Args:
         job_table (JobTable): the session's jobs.
         parts (list[str]): the command words, `wait` first.
-        session (Session | None): shell session state, for `-p`.
+        session (SessionState | None): shell session state, for `-p`.
         view (SessionView | None): the session plane's gated door.
     """
     cmd_str = " ".join(parts)
@@ -491,7 +491,7 @@ async def handle_wait(
 async def handle_disown(
     job_table: JobTable,
     parts: list[str],
-    session: Session | None = None,
+    session: SessionState | None = None,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Drop jobs from the table without stopping them.
@@ -505,7 +505,7 @@ async def handle_disown(
     Args:
         job_table (JobTable): the session's jobs.
         parts (list[str]): the command words, `disown` first.
-        session (Session | None): unused; the job-builtin signature.
+        session (SessionState | None): unused; the job-builtin signature.
         view (SessionView | None): unused; the job-builtin signature.
     """
     cmd_str = " ".join(parts)
@@ -551,7 +551,7 @@ async def handle_disown(
 async def handle_fg(
     job_table: JobTable,
     parts: list[str],
-    session: Session | None = None,
+    session: SessionState | None = None,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Foreground a background job: print its command line, then block
@@ -603,7 +603,7 @@ async def handle_fg(
 async def handle_kill(
     job_table: JobTable,
     parts: list[str],
-    session: Session | None = None,
+    session: SessionState | None = None,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     cmd_str = " ".join(parts)
@@ -655,7 +655,7 @@ def _job_row(job: Job, long: bool) -> str:
 async def handle_jobs(
     job_table: JobTable,
     parts: list[str],
-    session: Session | None = None,
+    session: SessionState | None = None,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """List jobs, with bash's flags applied to mirage's row shape.
@@ -721,7 +721,7 @@ async def handle_jobs(
 async def handle_ps(
     job_table: JobTable,
     parts: list[str],
-    session: Session | None = None,
+    session: SessionState | None = None,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     cmd_str = " ".join(parts)

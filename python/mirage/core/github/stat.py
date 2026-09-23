@@ -32,7 +32,7 @@ async def stat(
     index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path_spec.virtual
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     rel = path_spec.mount_path.strip("/")
     if not rel:
         return FileStat(name="/", type=FileType.DIRECTORY)
@@ -46,7 +46,7 @@ async def stat(
                 accessor,
                 PathSpec(virtual=parent_path,
                          directory=parent_path,
-                         resource_path=mount_key(parent_path, prefix)),
+                         vfs_path=mount_key(parent_path, prefix)),
                 index=index,
             )
         except FileNotFoundError as exc:

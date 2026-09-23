@@ -63,7 +63,7 @@ describe('gslides read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gslides/owned/2026-04-01_Deck__slide1.gslide.json',
       directory: '/gslides/owned/2026-04-01_Deck__slide1.gslide.json',
-      resourcePath: mountKey('/gslides/owned/2026-04-01_Deck__slide1.gslide.json', '/gslides'),
+      vfsPath: mountKey('/gslides/owned/2026-04-01_Deck__slide1.gslide.json', '/gslides'),
     })
     const out = await read(accessor, path, index)
     expect(new TextDecoder().decode(out)).toContain('slide1')
@@ -78,7 +78,7 @@ describe('gslides read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gslides/owned/Missing__xyz.gslide.json',
       directory: '/gslides/owned/Missing__xyz.gslide.json',
-      resourcePath: mountKey('/gslides/owned/Missing__xyz.gslide.json', '/gslides'),
+      vfsPath: mountKey('/gslides/owned/Missing__xyz.gslide.json', '/gslides'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })

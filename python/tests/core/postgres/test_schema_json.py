@@ -21,7 +21,7 @@ from mirage.accessor.postgres import PostgresAccessor
 from mirage.core.postgres._schema_json import (_db_name_from_dsn,
                                                build_database_json,
                                                build_entity_schema_json)
-from mirage.resource.postgres.config import PostgresConfig
+from mirage.vfs.postgres.config import PostgresConfig
 
 
 @asynccontextmanager

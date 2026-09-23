@@ -162,7 +162,7 @@ def glob_span(pattern: str | None) -> tuple[date, date] | None:
 # word: `'*'?.txt` still globs, on the `?` alone, and matches only a
 # name starting with a literal star. A mark is one character wide, so
 # every length relation between a spec's virtual, directory,
-# resource_path and raw_path keeps holding, and no mark is a glob
+# vfs_path and raw_path keeps holding, and no mark is a glob
 # character, so `has_glob` already answers "does this word still glob".
 # The marks are Unicode noncharacters, permanently unassigned and never
 # valid interchange text -- the same impossible input `brace.py` assumes
@@ -260,7 +260,7 @@ def _unmark_spec(spec: PathSpec) -> PathSpec:
         spec,
         virtual=unmark_globs(spec.virtual),
         directory=unmark_globs(spec.directory),
-        resource_path=unmark_globs(spec.resource_path),
+        vfs_path=unmark_globs(spec.vfs_path),
         raw_path=unmark_globs(spec.raw_path),
         pattern=None if spec.pattern is None else unmark_globs(spec.pattern),
     )
@@ -388,7 +388,7 @@ async def expand_pattern(
         readdir (Callable): backend readdir ``(accessor, path, index)``
             returning absolute virtual paths.
         accessor (Accessor): backend handle passed through to readdir.
-        path (PathSpec): unresolved spec whose ``resource_path`` still
+        path (PathSpec): unresolved spec whose ``vfs_path`` still
             contains the pattern.
         index (IndexCacheStore): the per-call cache index.
         children (ChildMounts | None): child names the namespace owes a
@@ -396,9 +396,8 @@ async def expand_pattern(
             see either, so a walk that stops at readdir misses both; this
             is the union ``merge_readdir`` applies to a listing.
     """
-    prefix = path.virtual[:len(path.virtual.rstrip("/")) -
-                          len(path.resource_path)]
-    segments = path.resource_path.split("/") if path.resource_path else []
+    prefix = path.virtual[:len(path.virtual.rstrip("/")) - len(path.vfs_path)]
+    segments = path.vfs_path.split("/") if path.vfs_path else []
     # Two spec shapes reach resolvers: a full pattern path (classify), where
     # the pattern is already the last segment, and a directory-shaped spec
     # (PathSpec.dir), where the pattern applies to the directory's entries.
@@ -423,8 +422,8 @@ async def expand_pattern(
             # none, so it keeps its warm listing.
             spec = PathSpec(virtual=parent,
                             directory=parent,
-                            resource_path=rekey(path.virtual,
-                                                path.resource_path, parent),
+                            vfs_path=rekey(path.virtual, path.vfs_path,
+                                           parent),
                             pattern=seg if has_glob(seg) else None)
             try:
                 entries = await readdir(accessor, spec, index)
@@ -450,7 +449,7 @@ async def expand_pattern(
         if not level:
             return []
     matches = [
-        PathSpec.from_str_path(e, rekey(path.virtual, path.resource_path, e))
+        PathSpec.from_str_path(e, rekey(path.virtual, path.vfs_path, e))
         for e in level
     ]
     # A typed word (raw differs from virtual) spells its matches; the
@@ -470,7 +469,7 @@ class ResolveGlobFn(Protocol):
     """One backend's glob resolver, bound to its own readdir.
 
     Named rather than left as `Callable[..., Any]`, because that erasure
-    is what let the resource base declare a wider parameter than any
+    is what let the VFS base declare a wider parameter than any
     implementation accepts. `ResolveGlobOp` in the generic_bind adapter
     is the consumer-side twin; mypy checks the two agree where the
     adapter hands this function out, which is the check that was missing.

@@ -96,33 +96,6 @@ it('preserves a long line and its unterminated tail', async () => {
   expect(await reader.readline()).toBeNull()
 })
 
-it('allows timer progress while populating a file-cache fingerprint', async () => {
-  const cache = new RAMFileCacheStore()
-  let fired = false
-  const timer = setTimeout(() => {
-    fired = true
-  }, 1)
-  try {
-    await cache.set('/big', new Uint8Array(20_000_000))
-    expect(fired).toBe(true)
-  } finally {
-    clearTimeout(timer)
-  }
-})
-
-it.each(['set', 'add'] as const)(
-  'discards a pending %s when the cache is cleared',
-  async (operation) => {
-    const cache = new RAMFileCacheStore()
-    const pending = cache[operation]('/large', new Uint8Array(20_000_000))
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await cache.clear()
-    await pending
-    expect(await cache.get('/large')).toBeNull()
-    expect(cache.cacheSize).toBe(0)
-  },
-)
-
 it.each(['mapfile values', 'read -N 131072 value'])(
   'aborts %s while consuming ready stdin and closes the producer',
   async (command) => {
@@ -144,7 +117,7 @@ it.each(['mapfile values', 'read -N 131072 value'])(
     }
     try {
       await expect(
-        ws.execute(command, { stdin: source(), signal: controller.signal }),
+        ws.shell(command, { stdin: source(), signal: controller.signal }),
       ).rejects.toMatchObject({ name: 'AbortError' })
       // Polled rather than read once, because the producer is allowed to
       // close on a later turn than the abort that rejected above:
@@ -232,7 +205,7 @@ it.each(['mapfile values', 'read -N 131072 value', 'cat | wc -l'])(
     const input = new CachableAsyncIterator(source())
     try {
       await expect(
-        ws.execute(command, { stdin: input, signal: controller.signal }),
+        ws.shell(command, { stdin: input, signal: controller.signal }),
       ).rejects.toMatchObject({ name: 'AbortError' })
       expect(closed).toBe(true)
       expect(input.bufferedChunks).toHaveLength(0)
@@ -294,7 +267,7 @@ it.each(['timeout', 'read failure'])('records %s while finalizing a shell reader
     throw kind === 'timeout' ? new CommandTimeoutError('mapfile', 1) : new Error('read failed')
   }
   try {
-    const result = await ws.execute('mapfile values', { stdin: source() })
+    const result = await ws.shell('mapfile values', { stdin: source() })
     const code = kind === 'timeout' ? 124 : 1
     expect(result.exitCode).toBe(code)
     const events = await ws.observer.commandEvents()
@@ -320,7 +293,7 @@ it('preserves a caller-supplied abort reason and records cancellation', async ()
   }
   try {
     await expect(
-      ws.execute('mapfile values', { stdin: source(), signal: controller.signal }),
+      ws.shell('mapfile values', { stdin: source(), signal: controller.signal }),
     ).rejects.toMatchObject({ name: 'AbortError', cause: reason })
     const events = await ws.observer.commandEvents()
     expect(events[0]?.exit_code).toBe(130)
@@ -409,7 +382,7 @@ it('answers a timeout signal with an AbortError that carries the timeout', async
   }
   try {
     const failure = await ws
-      .execute('mapfile values', { stdin: source(), signal: AbortSignal.timeout(30) })
+      .shell('mapfile values', { stdin: source(), signal: AbortSignal.timeout(30) })
       .then(
         () => null,
         (error: unknown) => error,

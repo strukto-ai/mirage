@@ -4,7 +4,7 @@ icon: github
 description: Mount a GitHub repository as a Mirage filesystem from Node or the browser.
 ---
 
-`GitHubResource` exposes a single repository at a ref as a read-only
+`GitHubVFS` exposes a single repository at a ref as a read-only
 filesystem. Reads stream blobs through GitHub's
 [REST API](https://docs.github.com/en/rest); it does not imitate another CLI.
 
@@ -17,9 +17,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { GitHubResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { GitHubVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const gh = await GitHubResource.create({
+const gh = await GitHubVFS.create({
   token: process.env.GITHUB_TOKEN!,
   owner: 'strukto-ai',
   repo: 'mirage',
@@ -27,13 +27,13 @@ const gh = await GitHubResource.create({
 })
 
 const ws = new Workspace({ '/repo': gh }, { mode: MountMode.READ })
-await ws.execute('cat /repo/README.md')
+await ws.shell('cat /repo/README.md')
 ```
 
 The constructor is private: `create` fetches the repo's git tree before it
-builds the resource, so it has to be awaited. Python deliberately differs
-here: `GitHubResource(...)` is an ordinary call that contacts nothing, and
-hydrates the tree on first read, which is what lets its `build_resource`
+builds the VFS, so it has to be awaited. Python deliberately differs
+here: `GitHubVFS(...)` is an ordinary call that contacts nothing, and
+hydrates the tree on first read, which is what lets its `build_vfs`
 stay synchronous.
 
 ## Browser
@@ -43,9 +43,9 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { GitHubResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GitHubVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const gh = await GitHubResource.create({
+const gh = await GitHubVFS.create({
   token: GITHUB_TOKEN,
   owner: 'strukto-ai',
   repo: 'mirage',
@@ -68,4 +68,4 @@ The token reaches the browser, so use a fine-grained PAT scoped to read-only acc
 
 `read`. Writes are not yet exposed.
 
-For the mounted layout (refs, paths, blob caching) see the [Python GitHub docs](/python/resource/github).
+For the mounted layout (refs, paths, blob caching) see the [Python GitHub docs](/python/vfs/github).

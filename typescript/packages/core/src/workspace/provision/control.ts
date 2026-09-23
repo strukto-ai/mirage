@@ -15,13 +15,13 @@
 import { scaled } from '../../provision/combine.ts'
 import { rollupList } from '../../provision/rollup.ts'
 import { Precision, ProvisionResult } from '../../provision/types.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import type { ProvisionNodeFn } from './pipes.ts'
 
 async function planBody(
   provisionNode: ProvisionNodeFn,
   body: readonly unknown[],
-  session: Session,
+  session: SessionState,
 ): Promise<ProvisionResult> {
   const children: ProvisionResult[] = []
   for (const cmd of body) children.push(await provisionNode(cmd, session))
@@ -44,7 +44,7 @@ export async function handleFunctionProvision(
   name: string,
   body: readonly unknown[],
   planning: Set<string>,
-  session: Session,
+  session: SessionState,
 ): Promise<ProvisionResult> {
   if (planning.has(name)) {
     return new ProvisionResult({ command: name, precision: Precision.UNKNOWN })
@@ -70,7 +70,7 @@ export async function handleIfProvision(
   provisionNode: ProvisionNodeFn,
   branches: readonly [unknown, readonly unknown[]][],
   elseBody: readonly unknown[] | null,
-  session: Session,
+  session: SessionState,
 ): Promise<ProvisionResult> {
   const condCosts: ProvisionResult[] = []
   const children: ProvisionResult[] = []
@@ -91,7 +91,7 @@ export async function handleForProvision(
   provisionNode: ProvisionNodeFn,
   body: readonly unknown[],
   n: number,
-  session: Session,
+  session: SessionState,
 ): Promise<ProvisionResult> {
   const result = await planBody(provisionNode, body, session)
   return scaled(result, n, 'for')
@@ -100,7 +100,7 @@ export async function handleForProvision(
 export async function handleWhileProvision(
   provisionNode: ProvisionNodeFn,
   body: readonly unknown[],
-  session: Session,
+  session: SessionState,
 ): Promise<ProvisionResult> {
   const result = await planBody(provisionNode, body, session)
   result.precision = Precision.UNKNOWN

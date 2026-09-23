@@ -21,7 +21,7 @@ import { eaccesOnDenied, resolveKey } from './resolve.ts'
 
 // A Drive folder delete removes its subtree in one call.
 async function rmRImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
-  const key = path.resourcePath
+  const key = path.vfsPath
   if (key === '') return
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(path)

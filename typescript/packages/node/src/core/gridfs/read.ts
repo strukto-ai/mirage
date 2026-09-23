@@ -15,7 +15,7 @@
 import type { ObjectId } from 'mongodb'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, revisionFor, startOp } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
@@ -117,7 +117,7 @@ export async function read(
   const fileId = await resolveFileId(accessor, path, key)
   const bytes = await downloadBytes(accessor, path, fileId, options)
   const revision = fileId.toString()
-  record('read', virtual, ResourceName.GRIDFS, bytes.byteLength, timer, {
+  record('read', virtual, VFSName.GRIDFS, bytes.byteLength, timer, {
     fingerprint: revision,
     revision,
   })

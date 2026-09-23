@@ -321,7 +321,7 @@ describe('JobTable.wait ordering', () => {
 describe('JobTable.waitAll', () => {
   it('survives a failing task — mixed success/failure both land in the table', async () => {
     const jt = new JobTable()
-    const failing: JobRunner = () => Promise.reject(new Error('resource API error'))
+    const failing: JobRunner = () => Promise.reject(new Error('VFS API error'))
     const bad = jt.submit({ command: 'bad', run: failing, abort: new AbortController(), cwd: '/' })
     const good = jt.submit({
       command: 'good',
@@ -334,7 +334,7 @@ describe('JobTable.waitAll', () => {
     const badJob = jt.get(bad.id)
     const goodJob = jt.get(good.id)
     expect(badJob?.exitCode).toBe(1)
-    expect(dec(await badJob?.console.snapshot(Channel.STDERR))).toContain('resource API error')
+    expect(dec(await badJob?.console.snapshot(Channel.STDERR))).toContain('VFS API error')
     expect(goodJob?.exitCode).toBe(0)
     expect(dec(await goodJob?.console.snapshot(Channel.STDOUT))).toBe('hello')
   })

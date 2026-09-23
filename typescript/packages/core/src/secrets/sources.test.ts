@@ -333,7 +333,7 @@ describe('resolveConfigSecrets', () => {
 
   it('leaves a class instance whole', async () => {
     // A config field may hold a live object: rebuilding it from its
-    // own entries drops the methods the resource then calls.
+    // own entries drops the methods the VFS then calls.
     class AuthProvider {
       readonly kind = 'oauth'
       tokens(): string {

@@ -15,15 +15,14 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import type { Limit } from '@struktoai/mirage-core/types'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { Resource } from '@struktoai/mirage-core/resource/base'
+import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { DiskWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { type WorkspaceRegistry } from '../registry.ts'
-import { z } from '@struktoai/mirage-core/resource/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
-import { buildOverrideResources, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
+import { buildOverrideMounts, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
 import {
   configToWorkspaceArgs,
   loadWorkspaceConfig,
@@ -85,6 +84,17 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       let cfg: WorkspaceConfigRaw
       try {
         cfg = loadWorkspaceConfig(config as Record<string, unknown>)
+        for (const entry of cfg.runtimes ?? []) {
+          if (typeof entry === 'string') continue
+          const runtimeConfig = entry.config
+          if (
+            runtimeConfig !== null &&
+            typeof runtimeConfig === 'object' &&
+            Object.hasOwn(runtimeConfig, 'initModule')
+          ) {
+            throw new Error('runtime initModule is only allowed in operator-owned configuration')
+          }
+        }
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })
       }
@@ -99,14 +109,10 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           // python's create route refuses with 400 got a 502 here.
           return reply.status(400).send({ detail: e.message })
         }
-        return reply.status(502).send({ detail: `resource build failed: ${(e as Error).message}` })
+        return reply.status(502).send({ detail: `VFS build failed: ${(e as Error).message}` })
       }
-      const resourceMap: Record<string, MountSpec> = {}
-      const commandLimits: Record<string, Record<string, Limit>> = {}
-      for (const [prefix, [resource, mode, limits]] of Object.entries(args.resources)) {
-        resourceMap[prefix] = [resource, mode]
-        if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
-      }
+      // The Mounts ride through whole; see workspace_config.ts.
+      const vfsMap: Record<string, MountSpec> = { ...args.mounts }
       // The registry id and the state-store scope must be the same identity,
       // so resolve it before construction: explicit REST id, then the
       // config's workspaceId, then a fresh mint.
@@ -118,7 +124,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         // clis block parsed, validated, and then installed nothing.
         // Only identity and the store default are the daemon's to
         // decide.
-        ws = new Workspace(resourceMap, {
+        ws = new Workspace(vfsMap, {
           ...args.options,
           workspaceId: wid,
           // Daemon default is disk (a created workspace survives restart
@@ -128,7 +134,6 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           // Whichever of the two built it, no sibling workspace shares
           // it, so this workspace is the one that closes it.
           ownsStore: true,
-          ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
         })
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })
@@ -173,12 +178,12 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       } catch {
         return reply.status(400).send({ detail: `snapshot not found: ${path}` })
       }
-      let overrides: Record<string, Resource>
+      let overrides: Record<string, VFS>
       try {
         // An override mount's credential may be a pointer at one of
         // these declarations; a container the constructor will reject
         // is left for it to reject. Mirrors the python load route.
-        overrides = await buildOverrideResources(override ?? null, override?.secrets)
+        overrides = await buildOverrideMounts(override ?? null, override?.secrets)
       } catch (e) {
         return reply.status(400).send({ detail: `override build failed: ${(e as Error).message}` })
       }

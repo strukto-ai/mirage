@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
 
@@ -31,9 +31,9 @@ def command_name(command: str) -> str:
     return words[0] if words else ""
 
 
-def fork_for_call(session: Session, cwd: str | None,
-                  env: dict[str, str] | None) -> Session:
-    """Session a single ``execute`` call runs in.
+def fork_for_call(session: SessionState, cwd: str | None,
+                  env: dict[str, str] | None) -> SessionState:
+    """Session a single ``shell`` call runs in.
 
     A per-call ``cwd``/``env`` runs in an ephemeral clone, matching a
     bash subshell: ``cd`` and ``export`` inside the line do not leak
@@ -41,7 +41,7 @@ def fork_for_call(session: Session, cwd: str | None,
     session is used as is.
 
     Args:
-        session (Session): the persistent session for the call.
+        session (SessionState): the persistent session for the call.
         cwd (str | None): per-call working directory override.
         env (dict[str, str] | None): per-call environment overrides,
             layered on top of the session's env.

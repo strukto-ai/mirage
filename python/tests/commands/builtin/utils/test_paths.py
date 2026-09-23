@@ -21,13 +21,13 @@ from mirage.types import PathSpec
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.strip("/"))
+                    vfs_path=virtual.strip("/"))
 
 
 def _glob_spec(virtual: str, directory: str, pattern: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=directory,
-                    resource_path=virtual.strip("/"),
+                    vfs_path=virtual.strip("/"),
                     pattern=pattern,
                     resolved=False)
 
@@ -57,7 +57,7 @@ def test_has_unresolved_glob_true_when_any_operand_globs():
 def test_resolve_script_absolute_is_normalized():
     spec = resolve_script("/data/../data/run.py", _spec("/cwd"))
     assert spec.virtual == "/data/run.py"
-    assert spec.resource_path == "data/run.py"
+    assert spec.vfs_path == "data/run.py"
     assert spec.directory == "/data/"
     assert spec.resolved is True
 
@@ -88,4 +88,4 @@ def test_empty_paths_without_cwd_default_to_root():
     result = default_paths([], None)
     assert len(result) == 1
     assert result[0].virtual == "/"
-    assert result[0].resource_path == ""
+    assert result[0].vfs_path == ""

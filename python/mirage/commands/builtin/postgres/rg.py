@@ -32,7 +32,7 @@ _search = make_search("rg",
                       guard=True)
 
 
-@command("rg", resource="postgres", spec=SPECS["rg"])
+@command("rg", vfs="postgres", spec=SPECS["rg"])
 async def rg(accessor: PostgresAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

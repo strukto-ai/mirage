@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ownRecord, Session, varsFromEntries, varsFromEnv } from './session.ts'
+import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMSessionStore } from './ram.ts'
@@ -24,10 +24,10 @@ import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 
-type StoredSession = Parameters<typeof Session.fromJSON>[0]
+type StoredSession = Parameters<typeof SessionState.fromJSON>[0]
 
 /** Whether any of the session's variables carries a pointer. */
-function holdsManaged(session: Session): boolean {
+function holdsManaged(session: SessionState): boolean {
   return Object.values(session.vars).some((v) => v.managed !== undefined)
 }
 
@@ -42,7 +42,7 @@ function holdsManaged(session: Session): boolean {
  * absent name gains the seed. The records are frozen, so sharing them
  * across sessions is safe.
  */
-function mergeSeedVars(session: Session, seedVars: Record<string, ShellVar>): void {
+function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>): void {
   for (const [name, seeded] of Object.entries(seedVars)) {
     if (!(name in session.vars)) session.vars[name] = seeded
   }
@@ -59,7 +59,7 @@ function mergeSeedVars(session: Session, seedVars: Record<string, ShellVar>): vo
  * while process shutdown leaves stored sessions in place.
  */
 export class SessionManager {
-  private readonly sessions = new Map<string, Session>()
+  private readonly sessions = new Map<string, SessionState>()
   private readonly persistLock = new KeyLock()
   private readonly sessionStore: SessionStore
   private defaultIdInternal: string
@@ -87,7 +87,7 @@ export class SessionManager {
     this.hasManaged = Object.values(this.seedVarsInternal).some((v) => v.managed !== undefined)
     this.sessions.set(
       defaultSessionId,
-      new Session({ sessionId: defaultSessionId, vars: ownRecord(this.seedVarsInternal) }),
+      new SessionState({ sessionId: defaultSessionId, vars: ownRecord(this.seedVarsInternal) }),
     )
   }
 
@@ -145,10 +145,10 @@ export class SessionManager {
   }
 
   /** Replace an existing, hydrated session's restrictions, preserving its scratch state. */
-  async setProfile(sessionId: string, compiled: CompiledProfile): Promise<Session> {
+  async setProfile(sessionId: string, compiled: CompiledProfile): Promise<SessionState> {
     return this.persistLock.withLock(sessionId, async () => {
       const session = this.get(sessionId)
-      const candidate = Session.fromJSON(session.toJSON() as StoredSession)
+      const candidate = SessionState.fromJSON(session.toJSON() as StoredSession)
       narrow(candidate, compiled)
       await this.flushOne(candidate)
       narrow(session, compiled)
@@ -280,7 +280,7 @@ export class SessionManager {
   private async hydrate(): Promise<void> {
     const entries = await this.sessionStore.load()
     for (const [sid, fields] of entries) {
-      const stored = Session.fromJSON(fields as StoredSession)
+      const stored = SessionState.fromJSON(fields as StoredSession)
       if (sid === this.defaultId) {
         const dflt = this.defaultSession()
         setCwd(dflt, stored.cwd)
@@ -340,7 +340,7 @@ export class SessionManager {
   }
 
   /** Persist one session, retrying when another writer races us. */
-  private async flushOne(session: Session): Promise<void> {
+  private async flushOne(session: SessionState): Promise<void> {
     const sid = session.sessionId
     // Clean: the store already has exactly this state.
     if (JSON.stringify(session.toJSON()) === this.persisted.get(sid)) return
@@ -368,7 +368,7 @@ export class SessionManager {
    * snapshot wins over prior store contents, mirroring
    * `Namespace.replaceNodes`.
    */
-  async replaceFromSnapshot(sessions: readonly Session[]): Promise<void> {
+  async replaceFromSnapshot(sessions: readonly SessionState[]): Promise<void> {
     this.loaded = true
     this.loadPromise = Promise.resolve()
     const entries = new Map<string, SessionFields>()
@@ -390,13 +390,13 @@ export class SessionManager {
   create(
     sessionId: string,
     options: { mountModes?: ReadonlyMap<string, MountMode> | null; env?: EnvEntries } = {},
-  ): Session {
+  ): SessionState {
     if (this.sessions.has(sessionId)) {
       throw new Error(`Session ${sessionId} already exists`)
     }
     const seeded = ownRecord(this.seedVarsInternal)
     if (options.env !== undefined) Object.assign(seeded, varsFromEntries(options.env))
-    const session = new Session({
+    const session = new SessionState({
       sessionId,
       mountModes: options.mountModes ?? null,
       vars: seeded,
@@ -406,13 +406,13 @@ export class SessionManager {
     return session
   }
 
-  get(sessionId: string): Session {
+  get(sessionId: string): SessionState {
     const s = this.sessions.get(sessionId)
     if (s === undefined) throw new Error(`unknown session: ${sessionId}`)
     return s
   }
 
-  list(): Session[] {
+  list(): SessionState[] {
     return [...this.sessions.values()]
   }
 
@@ -439,7 +439,7 @@ export class SessionManager {
     return this.sessionStore.close()
   }
 
-  private defaultSession(): Session {
+  private defaultSession(): SessionState {
     const s = this.sessions.get(this.defaultId)
     if (s === undefined) throw new Error('default session missing')
     return s

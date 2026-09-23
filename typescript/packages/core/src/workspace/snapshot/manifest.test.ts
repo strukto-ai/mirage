@@ -110,13 +110,13 @@ describe('splitManifestAndBlobs', () => {
     expect(job?.[JobKey.STDERR]).toBe('')
   })
 
-  it('rewrites mount resource state instead of passing it through', () => {
+  it('rewrites mount VFS state instead of passing it through', () => {
     const state = makeState()
     state[StateKey.MOUNTS] = [
       {
         [MountKey.INDEX]: 0,
         [MountKey.PREFIX]: '/m',
-        [MountKey.RESOURCE_STATE]: {
+        [MountKey.VFS_STATE]: {
           type: 'ram',
           files: { '/a.txt': new TextEncoder().encode('hi') },
         },
@@ -126,8 +126,8 @@ describe('splitManifestAndBlobs', () => {
     const [manifest, blobs] = splitManifestAndBlobs(state)
 
     const mount = (manifest[StateKey.MOUNTS] as AnyDict[])[0]
-    const resourceState = mount?.[MountKey.RESOURCE_STATE] as AnyDict | undefined
-    const files = resourceState?.files as AnyDict | undefined
+    const vfsState = mount?.[MountKey.VFS_STATE] as AnyDict | undefined
+    const files = vfsState?.files as AnyDict | undefined
     const ref = (files?.['/a.txt'] as AnyDict | undefined)?.[BLOB_REF_KEY]
     expect(blobs[String(ref)]).toEqual(new TextEncoder().encode('hi'))
   })

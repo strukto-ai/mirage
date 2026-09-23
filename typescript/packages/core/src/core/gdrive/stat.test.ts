@@ -62,7 +62,7 @@ describe('gdrive stat shared drives', () => {
     const result = await stat(
       accessor,
       new PathSpec({
-        resourcePath: 'Team Drive',
+        vfsPath: 'Team Drive',
         virtual: '/Team Drive',
         directory: '/Team Drive',
       }),
@@ -86,7 +86,7 @@ describe('gdrive stat parent refresh', () => {
       stat(
         makeAccessor(),
         new PathSpec({
-          resourcePath: 'missing.txt',
+          vfsPath: 'missing.txt',
           virtual: '/missing.txt',
           directory: '/missing.txt',
         }),

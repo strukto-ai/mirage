@@ -114,13 +114,13 @@ def _reverse_hunks(
 async def _load_patch_data(
     i: PathSpec | None,
     paths: list[PathSpec],
-    has_resource: bool,
+    has_vfs: bool,
     stdin: ByteSource | None,
     read_bytes: Callable[..., Awaitable[bytes]],
 ) -> bytes:
-    if i is not None and has_resource:
+    if i is not None and has_vfs:
         return await read_bytes(i)
-    if paths and has_resource:
+    if paths and has_vfs:
         return await read_bytes(paths[0])
     data = await read_stdin_async(stdin)
     if data is None:
@@ -133,7 +133,7 @@ async def patch(
     *,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    has_resource: bool,
+    has_vfs: bool,
     stdin: ByteSource | None = None,
     p: str | None = None,
     R: bool = False,
@@ -145,8 +145,7 @@ async def patch(
         raise extra_operand_error(CommandName.PATCH, paths[2].raw_path
                                   or paths[2].virtual)
     strip_count = int(p) if p else 0
-    patch_data = await _load_patch_data(i, paths, has_resource, stdin,
-                                        read_bytes)
+    patch_data = await _load_patch_data(i, paths, has_vfs, stdin, read_bytes)
     patch_text = patch_data.decode(errors="replace")
     file_hunks = _parse_patch(patch_text, strip_count)
     writes: dict[str, ByteSource] = {}
@@ -196,13 +195,13 @@ async def patch_generic(
     opts: CommandOpts,
     read_bytes: Callable[..., Awaitable[bytes]],
     write_bytes: Callable[..., Awaitable[None]],
-    has_resource: bool,
+    has_vfs: bool,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(opts.flags)
     return await patch(paths,
                        read_bytes=read_bytes,
                        write_bytes=write_bytes,
-                       has_resource=has_resource,
+                       has_vfs=has_vfs,
                        stdin=opts.stdin,
                        p=parsed.strip,
                        R=parsed.reverse,

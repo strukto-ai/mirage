@@ -57,7 +57,7 @@ def test_a_truncated_label_still_round_trips():
 
 def test_the_id_is_never_trimmed_to_make_room():
     # The label is what gives: a shortened id would stop addressing the
-    # resource, so an id too wide to name is over budget rather than
+    # VFS, so an id too wide to name is over budget rather than
     # silently mangled. Same rule as gcal's event filenames.
     long_id = "v" * (NAME_MAX_BYTES + 10)
     name = make_id_name("Some Name", long_id)

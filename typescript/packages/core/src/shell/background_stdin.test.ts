@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
@@ -29,15 +29,15 @@ const ENC = new TextEncoder()
 describe('background jobs + stdin (port of tests/shell/test_background_jobs.py)', () => {
   it('sleep 0 & cat → cat receives stdin, not the backgrounded sleep', async () => {
     const parser = await getTestParser()
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const registry = new OpsRegistry()
-    registry.registerResource(ram)
+    registry.registerVfs(ram)
     const ws = new Workspace(
       { '/data': ram },
       { mode: MountMode.WRITE, ops: registry, shellParser: parser },
     )
     ws.getSession(ws.defaultSessionId).cwd = '/data'
-    const io = await ws.execute('sleep 0 & cat', { stdin: ENC.encode('hello\n') })
+    const io = await ws.shell('sleep 0 & cat', { stdin: ENC.encode('hello\n') })
     if (!('stdout' in io)) throw new Error('expected ExecuteResult')
     expect(stdoutStr(io).trim()).toBe('hello')
     await ws.close()

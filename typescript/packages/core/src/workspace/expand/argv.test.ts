@@ -20,7 +20,7 @@ function ps(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual.slice(0, virtual.lastIndexOf('/') + 1),
-    resourcePath: '',
+    vfsPath: '',
     resolved: true,
   })
 }

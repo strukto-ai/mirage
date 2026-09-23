@@ -15,8 +15,8 @@
 from pydantic import SecretStr
 
 from mirage.core.ssh.config import SSHConfig
-from mirage.resource.secrets import (REDACTED_SECRET, redacted_config_dump,
-                                     reveal_secret)
+from mirage.vfs.secrets import (REDACTED_SECRET, redacted_config_dump,
+                                reveal_secret)
 
 
 def test_password_and_passphrase_are_secrets():

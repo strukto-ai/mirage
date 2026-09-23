@@ -1,10 +1,10 @@
 ---
 title: S3
 icon: aws
-description: Set up AWS S3 as a MIRAGE resource from Node or the browser.
+description: Set up AWS S3 as a MIRAGE VFS from Node or the browser.
 ---
 
-MIRAGE ships `S3Resource` in **two runtimes**:
+MIRAGE ships `S3VFS` in **two runtimes**:
 
 - `@struktoai/mirage-node`, signs requests server-side using [@aws-sdk/client-s3](https://www.npmjs.com/package/@aws-sdk/client-s3).
 - `@struktoai/mirage-browser`, stays secret-free: your backend hands out **presigned URLs** and the browser fetches them with `fetch()`.
@@ -19,9 +19,9 @@ pnpm add @struktoai/mirage-node
 
 ```ts
 import { MountMode, Workspace } from '@struktoai/mirage-node'
-import { S3Resource } from '@struktoai/mirage-node'
+import { S3VFS } from '@struktoai/mirage-node'
 
-const s3 = new S3Resource({
+const s3 = new S3VFS({
   bucket: process.env.AWS_S3_BUCKET!,
   region: process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
@@ -34,7 +34,7 @@ const s3 = new S3Resource({
 })
 
 const ws = new Workspace({ '/bucket/': s3 }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -46,7 +46,7 @@ If `~/.aws/credentials` is configured, you can omit `accessKeyId`/`secretAccessK
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `S3Resource` never sees AWS credentials. You implement one function, `presignedUrlProvider`, that your frontend calls to get a signed URL for each S3 operation. The actual signing happens on **your server**, using any S3-signing SDK you prefer.
+The browser `S3VFS` never sees AWS credentials. You implement one function, `presignedUrlProvider`, that your frontend calls to get a signed URL for each S3 operation. The actual signing happens on **your server**, using any S3-signing SDK you prefer.
 
 ### 1. Server: sign URLs on demand
 
@@ -105,9 +105,9 @@ Scope the presigner to the **minimal operations your app needs**. Read-only view
 ### 2. Browser: wire it up
 
 ```ts
-import { MountMode, S3Resource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, S3VFS, Workspace } from '@struktoai/mirage-browser'
 
-const s3 = new S3Resource({
+const s3 = new S3VFS({
   bucket: 'my-bucket',
   presignedUrlProvider: async (path, op, opts) => {
     const r = await fetch('/presign', {
@@ -121,7 +121,7 @@ const s3 = new S3Resource({
 })
 
 const ws = new Workspace({ '/bucket/': s3 }, { mode: MountMode.READ })
-const res = await ws.execute('cat /bucket/hello.txt')
+const res = await ws.shell('cat /bucket/hello.txt')
 console.log(res.stdoutText)
 ```
 
@@ -183,12 +183,12 @@ CORS is origin-exact. `http://localhost:5173` ≠ `http://localhost:5174` ≠ `h
 
 See [S3 Setup](/home/setup/s3) for credential setup.
 
-## Scoping a resource to a key prefix
+## Scoping a VFS to a key prefix
 
 Pass `keyPrefix` to scope every operation to a subpath of the bucket:
 
 ```ts
-const s3 = new S3Resource({
+const s3 = new S3VFS({
   bucket: 'app-data',
   region: 'eu-west-1',
   keyPrefix: `users/${userId}/`,
@@ -204,5 +204,5 @@ In YAML-based configs the snake-case spelling `key_prefix` is also accepted and 
 <Warning>
 **Browser variant — security note**
 
-For `mirage-browser`'s `S3Resource` (which uses `presignedUrlProvider`), `keyPrefix` flows through the same core code path, but a client-controlled prefix is not a security boundary — a malicious client can ignore or alter it before signing. For real isolation, enforce the prefix inside your server-side `presignedUrlProvider` implementation (and in the IAM/STS session policy backing those credentials). Treat the client-side `keyPrefix` as ergonomics only.
+For `mirage-browser`'s `S3VFS` (which uses `presignedUrlProvider`), `keyPrefix` flows through the same core code path, but a client-controlled prefix is not a security boundary — a malicious client can ignore or alter it before signing. For real isolation, enforce the prefix inside your server-side `presignedUrlProvider` implementation (and in the IAM/STS session policy backing those credentials). Treat the client-side `keyPrefix` as ergonomics only.
 </Warning>

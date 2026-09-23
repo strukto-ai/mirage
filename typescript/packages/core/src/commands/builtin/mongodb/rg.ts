@@ -14,7 +14,7 @@
 
 import { detectScope } from '../../../core/mongodb/scope.ts'
 import { SEARCHERS } from '../../../core/mongodb/search.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { makeSearch } from '../generic_bind/search.ts'
@@ -23,7 +23,7 @@ import { MONGODB_IO } from './io.ts'
 
 export const MONGODB_RG = command({
   name: 'rg',
-  resource: ResourceName.MONGODB,
+  vfs: VFSName.MONGODB,
   spec: specOf('rg'),
   fn: makeSearch('rg', detectScope, SEARCHERS, MONGODB_IO, {
     qualify: pushdownOperand,

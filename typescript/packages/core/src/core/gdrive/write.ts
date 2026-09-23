@@ -24,7 +24,7 @@ async function writeImpl(
   path: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const key = path.resourcePath
+  const key = path.vfsPath
   if (key === '') throw eisdir(path)
   const tm = accessor.tokenManager
   const node = await resolveKey(accessor, key)

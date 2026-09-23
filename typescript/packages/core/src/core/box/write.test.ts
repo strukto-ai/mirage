@@ -68,7 +68,7 @@ const TREE: Record<string, ApiModule.BoxItem[]> = {
 }
 
 function spec(virtual: string): PathSpec {
-  return new PathSpec({ resourcePath: virtual.replace(/^\/+/, ''), virtual, directory: virtual })
+  return new PathSpec({ vfsPath: virtual.replace(/^\/+/, ''), virtual, directory: virtual })
 }
 
 describe('box write ops', () => {

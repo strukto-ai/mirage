@@ -19,16 +19,16 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.linear import LinearConfig, LinearResource
+from mirage.vfs.linear import LinearConfig, LinearVFS
 
 load_dotenv(".env.development")
 
 config = LinearConfig(api_key=os.environ["LINEAR_API_KEY"])
-resource = LinearResource(config=config)
+vfs = LinearVFS(config=config)
 
 
 async def main():
-    with Workspace({"/linear/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/linear/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE ===\n")
 
         print("--- os.listdir() root ---")
@@ -72,7 +72,7 @@ async def main():
                         print(f"  title: {data.get('title')}")
                         print(f"  state: {data.get('state_name')}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes")
 

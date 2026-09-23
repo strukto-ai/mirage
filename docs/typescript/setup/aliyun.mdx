@@ -1,7 +1,7 @@
 ---
 title: Alibaba OSS
 icon: /images/aliyun-logo.svg
-description: Set up Alibaba Cloud OSS as a MIRAGE resource from Node or the browser.
+description: Set up Alibaba Cloud OSS as a MIRAGE VFS from Node or the browser.
 ---
 
 Alibaba Cloud OSS exposes an S3-compatible API with AWS Signature V4 against `https://s3.oss-<region>.aliyuncs.com`. MIRAGE derives this endpoint from your region automatically.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { AliyunResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { AliyunVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const oss = new AliyunResource({
+const oss = new AliyunVFS({
   bucket: process.env.OSS_BUCKET!,
   region: process.env.OSS_REGION!,
   accessKeyId: process.env.OSS_ACCESS_KEY_ID!,
@@ -25,7 +25,7 @@ const oss = new AliyunResource({
 })
 
 const ws = new Workspace({ '/bucket/': oss }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `AliyunResource` is secret-free, your backend signs each operation using your RAM keys and returns a URL. OSS's S3-compatible endpoint accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the OSS endpoint.
+The browser `AliyunVFS` is secret-free, your backend signs each operation using your RAM keys and returns a URL. OSS's S3-compatible endpoint accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the OSS endpoint.
 
 ### 1. Server: sign URLs with the OSS endpoint
 
@@ -92,9 +92,9 @@ app.post('/presign/oss', async (req, res) => {
 ### 2. Browser: wire it up
 
 ```ts
-import { AliyunResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { AliyunVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const oss = new AliyunResource({
+const oss = new AliyunVFS({
   bucket: 'my-bucket',
   region: 'cn-hangzhou',
   presignedUrlProvider: async (path, op, opts) => {
@@ -119,4 +119,4 @@ const ws = new Workspace({ '/bucket/': oss }, { mode: MountMode.READ })
 
 Configure CORS rules in the Alibaba Cloud console: OSS -> your bucket -> **Content Security** -> **CORS**. Allow your dev/production origins with methods `GET, PUT, HEAD, DELETE, POST`, allowed headers `*`, and expose headers `ETag, Content-Length, Content-Type, Last-Modified`.
 
-See the [Alibaba OSS resource](/python/resource/aliyun) docs for the equivalent Python wiring.
+See the [Alibaba OSS VFS](/python/vfs/aliyun) docs for the equivalent Python wiring.

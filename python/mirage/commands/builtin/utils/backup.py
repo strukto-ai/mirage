@@ -79,8 +79,8 @@ def sibling_path(path: PathSpec, appended: str) -> PathSpec:
         appended (str): Text appended to the full name (e.g. ``~``).
     """
     virtual = path.virtual.rstrip("/") + appended
-    return PathSpec.from_str_path(
-        virtual, rekey(path.virtual, path.resource_path, virtual))
+    return PathSpec.from_str_path(virtual,
+                                  rekey(path.virtual, path.vfs_path, virtual))
 
 
 def parent_path(path: PathSpec) -> PathSpec:
@@ -90,9 +90,9 @@ def parent_path(path: PathSpec) -> PathSpec:
         path (PathSpec): Any non-root path.
     """
     virtual = path.virtual.rstrip("/").rsplit("/", 1)[0] or "/"
-    resource = path.resource_path.rstrip("/").rsplit("/", 1)[0] \
-        if "/" in path.resource_path.rstrip("/") else ""
-    return PathSpec.from_str_path(virtual, resource)
+    vfs = path.vfs_path.rstrip("/").rsplit("/", 1)[0] \
+        if "/" in path.vfs_path.rstrip("/") else ""
+    return PathSpec.from_str_path(virtual, vfs)
 
 
 async def _numbered_versions(readdir: ReaddirFn | None,

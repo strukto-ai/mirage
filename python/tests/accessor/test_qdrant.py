@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.resource.qdrant.config import QdrantConfig
+from mirage.vfs.qdrant.config import QdrantConfig
 
 
 @pytest.mark.asyncio

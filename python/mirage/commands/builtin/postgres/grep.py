@@ -35,7 +35,7 @@ _search = make_search("grep",
                       guard=True)
 
 
-@command("grep", resource="postgres", spec=SPECS["grep"])
+@command("grep", vfs="postgres", spec=SPECS["grep"])
 async def grep(accessor: PostgresAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

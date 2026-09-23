@@ -32,8 +32,7 @@ def _child_spec(parent: PathSpec, name: str) -> PathSpec:
     child = parent.virtual.rstrip("/") + "/" + name
     return PathSpec(virtual=child,
                     directory=child,
-                    resource_path=rekey(parent.virtual, parent.resource_path,
-                                        child))
+                    vfs_path=rekey(parent.virtual, parent.vfs_path, child))
 
 
 async def _diff_pair(

@@ -19,7 +19,7 @@ import subprocess
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
 
@@ -27,12 +27,11 @@ config = SlackConfig(
     token=os.environ["SLACK_BOT_TOKEN"],
     search_token=os.environ.get("SLACK_USER_TOKEN"),
 )
-resource = SlackResource(config=config)
+vfs = SlackVFS(config=config)
 
-with Workspace({
-        "/slack/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/slack/": Mount(vfs, mode=MountMode.READ,
+                      backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -120,6 +119,6 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

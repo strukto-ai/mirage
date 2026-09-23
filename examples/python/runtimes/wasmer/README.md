@@ -11,7 +11,7 @@ WASIX Python guest  --mapdir /s3-->  host FUSE mountpoint  -->  Mirage  -->  S3
    (wasmer run)                         (macFUSE / fuse3)
 ```
 
-1. `wasmer_fuse.py` (host) FUSE-mounts an `S3Resource` at a temp mountpoint.
+1. `wasmer_fuse.py` (host) FUSE-mounts an `S3VFS` at a temp mountpoint.
 1. It launches `wasmer run python/python` with `--mapdir /s3:<mountpoint>`, so the
    guest's `/s3` is backed by the host FUSE mount.
 1. `remote/guest.py` runs inside the WASIX guest: it `os.listdir('/s3')` and reads

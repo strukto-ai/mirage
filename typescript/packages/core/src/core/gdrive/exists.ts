@@ -17,7 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import { resolveKey } from './resolve.ts'
 
 export async function exists(accessor: GDriveAccessor, path: PathSpec): Promise<boolean> {
-  const key = path.resourcePath
+  const key = path.vfsPath
   if (key === '') return true
   return (await resolveKey(accessor, key)) !== null
 }

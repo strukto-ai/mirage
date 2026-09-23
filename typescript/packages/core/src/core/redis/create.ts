@@ -14,7 +14,7 @@
 
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { checkDestParents } from './dest.ts'
@@ -27,6 +27,6 @@ export async function create(accessor: RedisAccessor, path: PathSpec): Promise<v
   await checkDestParents(store, path, p)
   await store.setFile(p, new Uint8Array(0))
   await store.setModified(p, nowIso())
-  record('create', p, ResourceName.REDIS, 0, timer)
+  record('create', p, VFSName.REDIS, 0, timer)
   await invalidateAfterWrite(path)
 }

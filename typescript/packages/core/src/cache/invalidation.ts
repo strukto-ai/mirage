@@ -15,12 +15,21 @@
 export type Stamp = readonly [epoch: number, key: number]
 
 /**
- * The invalidations a fingerprinting writer checks before it installs.
+ * The invalidations a cache writer checks before it installs.
  *
- * A writer reads its bytes, then hashes them, and the hash yields; an
- * invalidation that lands in that window makes the bytes stale even
- * though the writer was granted its turn after it. The writer takes a
- * stamp before it waits and compares it after it hashed.
+ * A writer holds bytes it read earlier; an invalidation that lands between
+ * the read and the install makes them stale even though the writer was
+ * granted its turn after it. The writer takes a stamp before it waits and
+ * compares it before it installs.
+ *
+ * The window is open only where the writer actually suspends in between,
+ * and that differs by host. Here it always does: `KeyLock.withLock` awaits
+ * an already-resolved promise, which is a microtask yield, and the redis
+ * store additionally awaits its client. On python it currently never does
+ * (`asyncio.Lock.acquire` returns without suspending when the lock is
+ * free), so the check is dormant there rather than dead -- it is the
+ * contract both hosts share, and the guard that keeps a future await from
+ * silently reopening the window.
  *
  * Two counters, because invalidations have two reaches. The store-wide
  * epoch answers `clear` and a prefix eviction, whose victims cannot be

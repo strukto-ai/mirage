@@ -18,8 +18,8 @@ from typing import Any
 import aiohttp
 
 from mirage.core.api.client import SessionArg, api_request
-from mirage.resource.secrets import reveal_secret
-from mirage.resource.trello.config import TrelloConfig
+from mirage.vfs.secrets import reveal_secret
+from mirage.vfs.trello.config import TrelloConfig
 
 
 class TrelloAPIError(RuntimeError):

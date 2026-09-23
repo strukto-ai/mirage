@@ -1,0 +1,39 @@
+{
+  "_meta": {
+    "by_vfs": {},
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "vfs_names": []
+  },
+  "options": [
+    {
+      "description": "set the value of the named extended attribute",
+      "long": "--name",
+      "short": "-n",
+      "type": "str"
+    },
+    {
+      "description": "remove the named extended attribute",
+      "long": "--remove",
+      "short": "-x",
+      "type": "str"
+    },
+    {
+      "description": "use value as the attribute value",
+      "long": "--value",
+      "short": "-v",
+      "type": "str"
+    },
+    {
+      "description": "do not dereference symbolic links",
+      "long": "--no-dereference",
+      "short": "-h",
+      "type": "bool"
+    }
+  ],
+  "rest": {
+    "type": "path"
+  }
+}

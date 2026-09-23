@@ -18,7 +18,7 @@ import * as browserPkg from './index.ts'
 describe('@struktoai/mirage-browser barrel exports', () => {
   it('re-exports core symbols', () => {
     expect(browserPkg.MountMode).toBeDefined()
-    expect(browserPkg.RAMResource).toBeDefined()
+    expect(browserPkg.RAMVFS).toBeDefined()
     expect(browserPkg.OpsRegistry).toBeDefined()
     expect(browserPkg.PathSpec).toBeDefined()
   })
@@ -36,16 +36,19 @@ describe('@struktoai/mirage-browser barrel exports', () => {
     const workspace = new browserPkg.Workspace(
       {},
       {
-        runtimes: [new E2BRuntime({ captures: ['python3'], config: { sandboxId: 'test' } }), 'vfs'],
+        runtimes: [
+          new E2BRuntime({ captures: ['python3'], config: { sandboxId: 'test' } }),
+          'workspace',
+        ],
       },
     )
     expect(workspace).toBeInstanceOf(browserPkg.Workspace)
     await workspace.close()
   })
 
-  it('exports OPFSResource', () => {
-    expect(browserPkg.OPFSResource).toBeDefined()
-    expect(typeof browserPkg.OPFSResource).toBe('function')
+  it('exports OPFSVFS', () => {
+    expect(browserPkg.OPFSVFS).toBeDefined()
+    expect(typeof browserPkg.OPFSVFS).toBe('function')
   })
 
   it('exports OPFS_OPS array', () => {

@@ -52,8 +52,8 @@ ARITH_SIGN = 1 << 63
 ARITH_MAX_DEPTH = 16
 
 # What the shell calls itself when no script is running, bash's "bash".
-# A nested `bash`/`sh` overrides it through Session.script_name, and
-# `Session.argv0` is the one place the two are folded together.
+# A nested `bash`/`sh` overrides it through SessionState.script_name, and
+# `SessionState.argv0` is the one place the two are folded together.
 SHELL_ARGV0 = "mirage"
 
 # The descriptors the shell models: stdin, stdout and stderr, and no
@@ -70,7 +70,7 @@ FD_CLOSE = -1
 SHELL_FDS = frozenset({FD_STDIN, FD_STDOUT, FD_STDERR})
 
 # The two dynamic variables the shell answers itself: PIPESTATUS reads
-# the session's record of the last pipeline (`Session.pipe_status`) and
+# the session's record of the last pipeline (`SessionState.pipe_status`) and
 # RANDOM steps a generator (`session/rng.py`). Neither lives in the
 # variable store.
 PIPESTATUS = "PIPESTATUS"
@@ -88,13 +88,13 @@ RANDOM_M = 0x7FFFFFFF
 RANDOM_ZERO_SEED = 123459876
 RANDOM_MODULUS = 1 << 32
 RANDOM_MAX = 32767
-# What `Session._random_seed` holds once `unset RANDOM` has stripped the
+# What `SessionState._random_seed` holds once `unset RANDOM` has stripped the
 # name of its meaning: no generated word is ever empty.
 RANDOM_UNSET = ""
 
 # Node types whose failure never triggers `set -e` by shape alone.
 # Lists are NOT exempt: bash exits when the command after the final
-# `&&`/`||` fails; short-circuit failures set Session.errexit_immune
+# `&&`/`||` fails; short-circuit failures set SessionState.errexit_immune
 # instead, so the executor loops skip only those.
 ERREXIT_EXEMPT_TYPES = frozenset({
     NodeType.NEGATED_COMMAND,

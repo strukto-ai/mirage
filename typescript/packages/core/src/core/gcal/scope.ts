@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { EVENT_SUFFIX } from '../../resource/gcal/event_entry.ts'
+import { EVENT_SUFFIX } from '../../vfs/gcal/event_entry.ts'
 import { ContentType } from '../../types.ts'
 import { Codec } from '../hierarchy/codec.ts'
 import { Scope, Slot, makeDetectScope } from '../hierarchy/scope.ts'

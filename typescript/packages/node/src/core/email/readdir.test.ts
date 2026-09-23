@@ -68,7 +68,7 @@ const ACCESSOR = { config: { maxMessages: 50 } } as unknown as EmailAccessor
 const SPEC = new PathSpec({
   virtual: '/INBOX',
   directory: '/INBOX',
-  resourcePath: 'INBOX',
+  vfsPath: 'INBOX',
 })
 
 describe('email readdir', () => {

@@ -60,7 +60,7 @@ def test_format_fs_error_appends_strerror():
 def test_format_fs_error_rewrites_to_raw_path():
     spec = PathSpec(virtual="/a/missing.txt",
                     directory="/a/",
-                    resource_path="missing.txt",
+                    vfs_path="missing.txt",
                     raw_path="missing.txt")
     err = format_fs_error("diff", enoent("/a/missing.txt"), [spec])
     assert err == b"diff: missing.txt: No such file or directory\n"

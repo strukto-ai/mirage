@@ -67,7 +67,7 @@ export async function listing(
     const result = tree.get(prefix)
     if (!result) throw enoent(path)
     if (index) {
-      const root = mountPrefixOf(path.virtual, path.resourcePath) + '/' + ps.slice(0, 4).join('/')
+      const root = mountPrefixOf(path.virtual, path.vfsPath) + '/' + ps.slice(0, 4).join('/')
       await index.invalidatePrefix(root)
       await index.put(root, entry('files', true))
       for (const [directory, entries] of tree)

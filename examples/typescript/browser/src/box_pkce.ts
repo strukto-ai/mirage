@@ -30,7 +30,7 @@
  * in localStorage is updated by `onRefreshTokenRotated` after each TokenManager
  * refresh. If you wipe localStorage you'll need to reconnect.
  */
-import { BoxResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 import { escapeHtml } from './html.ts'
 
 declare const __BOX_CLIENT_ID__: string
@@ -151,7 +151,7 @@ async function exchangeCode(code: string, state: string): Promise<StoredTokens> 
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
-  const res = await ws.execute(cmd)
+  const res = await ws.shell(cmd)
   const out = res.stdoutText.replace(/\s+$/, '')
   if (out !== '') line(out)
   const err = res.stderrText.replace(/\s+$/, '')
@@ -160,7 +160,7 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 }
 
 async function runDemo(tokens: StoredTokens): Promise<void> {
-  const box = new BoxResource({
+  const box = new BoxVFS({
     clientId: clientId(),
     refreshToken: tokens.refresh,
     onRefreshTokenRotated: (next: string): void => {

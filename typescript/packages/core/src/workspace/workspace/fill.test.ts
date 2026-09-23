@@ -17,9 +17,9 @@ import { z } from 'zod'
 
 import { Option, type FlagValue } from '../../commands/spec/types.ts'
 import { CLISpec, type CLIVerbFn } from '../../commands/cli/types.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import { VFSRuntime } from '../../runtime/table.ts'
+import { WorkspaceRuntime } from '../../runtime/table.ts'
 import { ScriptSource } from '../../runtime/routing/types.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
@@ -85,7 +85,7 @@ async function makeWs(
 ): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
-    { '/': new RAMResource() },
+    { '/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       shellParser: parser,
@@ -137,11 +137,11 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-lazy', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-lazy', ref: 'r' } })
     try {
-      expect((await ws.execute('echo hi')).exitCode).toBe(0)
+      expect((await ws.shell('echo hi')).exitCode).toBe(0)
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('echo $TOKEN'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
-      expect(stdoutStr(await ws.execute('echo $TOKEN'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -153,9 +153,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-whole', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-whole', ref: 'r' } })
     try {
-      expect((await ws.execute('ls /')).exitCode).toBe(0)
+      expect((await ws.shell('ls /')).exitCode).toBe(0)
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('env'))).toContain('TOKEN=t0')
+      expect(stdoutStr(await ws.shell('env'))).toContain('TOKEN=t0')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -170,7 +170,7 @@ describe('fillEnv through execute', () => {
       L: { from: 'fake-eager', ref: 'rl' },
     })
     try {
-      expect((await ws.execute('echo hi')).exitCode).toBe(0)
+      expect((await ws.shell('echo hi')).exitCode).toBe(0)
       expect(calls).toEqual(['re'])
       const session = ws.getSession(ws.defaultSessionId)
       expect(session.vars.E?.value).toBe('ev')
@@ -188,7 +188,7 @@ describe('fillEnv through execute', () => {
       DB_PASS: { from: 'fake-group', ref: 'db', key: 'pass' },
     })
     try {
-      expect(stdoutStr(await ws.execute('echo $DB_USER:$DB_PASS'))).toBe('u:p\n')
+      expect(stdoutStr(await ws.shell('echo $DB_USER:$DB_PASS'))).toBe('u:p\n')
       expect(calls).toEqual(['db'])
     } finally {
       await ws.close()
@@ -200,7 +200,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-key', FakeConfig, fetch)
     const ws = await makeWs({ API: { from: 'fake-key', ref: 'r' } })
     try {
-      expect(stdoutStr(await ws.execute('echo $API'))).toBe('v\n')
+      expect(stdoutStr(await ws.shell('echo $API'))).toBe('v\n')
     } finally {
       await ws.close()
     }
@@ -211,7 +211,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-miss', FakeConfig, fetch)
     const ws = await makeWs({ T: { from: 'fake-miss', ref: 'r', key: 'c' } })
     try {
-      const io = await ws.execute('echo $T')
+      const io = await ws.shell('echo $T')
       expect(io.exitCode).toBe(1)
       const err = stderrStr(io)
       expect(err).toContain('T')
@@ -228,7 +228,7 @@ describe('fillEnv through execute', () => {
     const ws = await makeWs(undefined)
     try {
       ws.sessionManager.create('s2', { env: { S: { from: 'fake-session', ref: 'r' } } })
-      const io = await ws.execute('echo $S', { sessionId: 's2' })
+      const io = await ws.shell('echo $S', { sessionId: 's2' })
       expect(stdoutStr(io)).toBe('sv\n')
       expect(calls).toEqual(['r'])
       expect('S' in ws.getSession(ws.defaultSessionId).vars).toBe(false)
@@ -240,13 +240,13 @@ describe('fillEnv through execute', () => {
   it('a readonly preset refuses with bash wording', async () => {
     const ws = await makeWs({ EDITOR: { value: 'vi', readonly: true } })
     try {
-      let io = await ws.execute('EDITOR=x')
+      let io = await ws.shell('EDITOR=x')
       expect(io.exitCode).toBe(1)
       expect(stderrStr(io)).toBe('bash: EDITOR: readonly variable\n')
-      io = await ws.execute('unset EDITOR')
+      io = await ws.shell('unset EDITOR')
       expect(io.exitCode).toBe(1)
       expect(stderrStr(io)).toBe('bash: unset: EDITOR: cannot unset: readonly variable\n')
-      expect(stdoutStr(await ws.execute('echo $EDITOR'))).toBe('vi\n')
+      expect(stdoutStr(await ws.shell('echo $EDITOR'))).toBe('vi\n')
     } finally {
       await ws.close()
     }
@@ -263,7 +263,7 @@ describe('fillEnv through execute', () => {
         attrs: new Set([VarAttr.Export]),
         managed: { source: 'fake', ref: 'r', key: 'T', eager: false },
       }
-      expect(stdoutStr(await ws.execute('export -p'))).toContain('declare -x T\n')
+      expect(stdoutStr(await ws.shell('export -p'))).toContain('declare -x T\n')
     } finally {
       await ws.close()
     }
@@ -274,7 +274,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-cmdsub', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-cmdsub', ref: 'r' } })
     try {
-      expect(stdoutStr(await ws.execute('x=$(echo $TOKEN); echo $x'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('x=$(echo $TOKEN); echo $x'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -286,9 +286,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-fork', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-fork', ref: 'r' } })
     try {
-      expect(stdoutStr(await ws.execute('(export TOKEN=y; echo $TOKEN)'))).toBe('y\n')
+      expect(stdoutStr(await ws.shell('(export TOKEN=y; echo $TOKEN)'))).toBe('y\n')
       expect(ws.getSession(ws.defaultSessionId).vars.TOKEN?.managed).not.toBeUndefined()
-      expect(stdoutStr(await ws.execute('echo $TOKEN'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
     } finally {
       await ws.close()
     }
@@ -299,9 +299,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-write', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-write', ref: 'r' } })
     try {
-      expect((await ws.execute('export TOKEN=mine')).exitCode).toBe(0)
+      expect((await ws.shell('export TOKEN=mine')).exitCode).toBe(0)
       const afterWrite = calls.length
-      expect(stdoutStr(await ws.execute('echo $TOKEN'))).toBe('mine\n')
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('mine\n')
       expect(calls.length).toBe(afterWrite)
       const data = ws.getSession(ws.defaultSessionId).toJSON()
       expect((data.env as Record<string, string>).TOKEN).toBe('mine')
@@ -315,12 +315,12 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-dead', FakeConfig, () => Promise.reject(new Error('connection refused')))
     const ws = await makeWs({ TOKEN: { from: 'fake-dead', ref: 'r' } })
     try {
-      const io = await ws.execute('echo $TOKEN')
+      const io = await ws.shell('echo $TOKEN')
       expect(io.exitCode).toBe(1)
       // The source's own words stay host-side: the agent learns the
       // variable and the source name, never the exception text.
       expect(stderrStr(io)).toBe('TOKEN: cannot fetch from fake-dead\n')
-      expect((await ws.execute('ls /')).exitCode).toBe(0)
+      expect((await ws.shell('ls /')).exitCode).toBe(0)
     } finally {
       await ws.close()
     }
@@ -330,9 +330,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-exit', FakeConfig, () => Promise.reject(new Error('connection refused')))
     const ws = await makeWs({ TOKEN: { from: 'fake-exit', ref: 'r' } })
     try {
-      expect((await ws.execute('true')).exitCode).toBe(0)
-      expect((await ws.execute('echo $TOKEN')).exitCode).toBe(1)
-      expect(stdoutStr(await ws.execute('echo $?'))).toBe('1\n')
+      expect((await ws.shell('true')).exitCode).toBe(0)
+      expect((await ws.shell('echo $TOKEN')).exitCode).toBe(1)
+      expect(stdoutStr(await ws.shell('echo $?'))).toBe('1\n')
     } finally {
       await ws.close()
     }
@@ -348,8 +348,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-detach', FakeConfig, () => Promise.reject(new Error('sealed')))
     const ws = await makeWs({ TOKEN: { from: 'fake-detach', ref: 'r' } })
     try {
-      expect((await ws.execute('export TOKEN=local')).exitCode).toBe(0)
-      expect(stdoutStr(await ws.execute('echo $TOKEN'))).toBe('local\n')
+      expect((await ws.shell('export TOKEN=local')).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('local\n')
     } finally {
       await ws.close()
     }
@@ -361,10 +361,10 @@ describe('fillEnv through execute', () => {
     const ws = await makeWs({ TOKEN: { from: 'fake-mutate', ref: 'r' } })
     try {
       for (const line of ['set -u', 'set +u', 'declare -x OTHER=1', 'export OTHER=2']) {
-        await ws.execute(line)
+        await ws.shell(line)
       }
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('declare -p TOKEN'))).toContain('t0')
+      expect(stdoutStr(await ws.shell('declare -p TOKEN'))).toContain('t0')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -376,7 +376,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-printenv', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-printenv', ref: 'r' } })
     try {
-      expect(stdoutStr(await ws.execute('printenv TOKEN'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('printenv TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -390,10 +390,10 @@ describe('fillEnv through execute', () => {
     try {
       const session = ws.getSession(ws.defaultSessionId)
       session.hiddenVars = { names: ['TOKEN'] }
-      const io = await ws.execute('env')
+      const io = await ws.shell('env')
       expect(io.exitCode).toBe(0)
       expect(stdoutStr(io)).not.toContain('TOKEN')
-      expect(stdoutStr(await ws.execute('echo [$TOKEN]'))).toBe('[]\n')
+      expect(stdoutStr(await ws.shell('echo [$TOKEN]'))).toBe('[]\n')
       expect(calls).toEqual([])
     } finally {
       await ws.close()
@@ -405,9 +405,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-fn', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-fn', ref: 'r' } })
     try {
-      expect((await ws.execute('f() { echo "t:$TOKEN"; }')).exitCode).toBe(0)
+      expect((await ws.shell('f() { echo "t:$TOKEN"; }')).exitCode).toBe(0)
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('f'))).toBe('t:t0\n')
+      expect(stdoutStr(await ws.shell('f'))).toBe('t:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -419,10 +419,10 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-fn2', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-fn2', ref: 'r' } })
     try {
-      await ws.execute('inner() { echo "i:$TOKEN"; }')
-      await ws.execute('outer() { inner; }')
+      await ws.shell('inner() { echo "i:$TOKEN"; }')
+      await ws.shell('outer() { inner; }')
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('outer'))).toBe('i:t0\n')
+      expect(stdoutStr(await ws.shell('outer'))).toBe('i:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -434,9 +434,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-indirect', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-indirect', ref: 'r' } })
     try {
-      expect((await ws.execute('name=TOKEN')).exitCode).toBe(0)
+      expect((await ws.shell('name=TOKEN')).exitCode).toBe(0)
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('echo ${!name}'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('echo ${!name}'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -452,7 +452,7 @@ describe('fillEnv through execute', () => {
       // Written straight into the session so the declaring line's own
       // opaque-read fetch cannot mask the deref path.
       session.vars.r2 = { value: 'TOKEN', attrs: new Set([VarAttr.Nameref]) }
-      expect(stdoutStr(await ws.execute('echo $r2'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('echo $r2'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -464,10 +464,10 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-alias', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-alias', ref: 'r' } })
     try {
-      expect((await ws.execute('shopt -s expand_aliases')).exitCode).toBe(0)
-      expect((await ws.execute('alias show=\'echo "a:$TOKEN"\'')).exitCode).toBe(0)
+      expect((await ws.shell('shopt -s expand_aliases')).exitCode).toBe(0)
+      expect((await ws.shell('alias show=\'echo "a:$TOKEN"\'')).exitCode).toBe(0)
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('show'))).toBe('a:t0\n')
+      expect(stdoutStr(await ws.shell('show'))).toBe('a:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -481,9 +481,9 @@ describe('fillEnv through execute', () => {
       __mirage_alias_rest__: { from: 'fake-alias-rest', ref: 'r', key: 'token' },
     })
     try {
-      await ws.execute('shopt -s expand_aliases')
-      await ws.execute("alias ll='echo hi'")
-      expect(stdoutStr(await ws.execute('ll'))).toBe('hi\n')
+      await ws.shell('shopt -s expand_aliases')
+      await ws.shell("alias ll='echo hi'")
+      expect(stdoutStr(await ws.shell('ll'))).toBe('hi\n')
       expect(calls).toEqual([])
     } finally {
       await ws.close()
@@ -495,8 +495,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-alias-off', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-alias-off', ref: 'r' } })
     try {
-      await ws.execute("alias show='echo $TOKEN'")
-      expect((await ws.execute('show')).exitCode).not.toBe(0)
+      await ws.shell("alias show='echo $TOKEN'")
+      expect((await ws.shell('show')).exitCode).not.toBe(0)
       expect(calls).toEqual([])
     } finally {
       await ws.close()
@@ -508,9 +508,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-order', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-order', ref: 'r' } })
     try {
-      expect((await ws.execute('f() { echo "t:$TOKEN"; }')).exitCode).toBe(0)
+      expect((await ws.shell('f() { echo "t:$TOKEN"; }')).exitCode).toBe(0)
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('f; f() { :; }'))).toBe('t:t0\n')
+      expect(stdoutStr(await ws.shell('f; f() { :; }'))).toBe('t:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -522,7 +522,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-redef-multi', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-redef-multi', ref: 'r' } })
     try {
-      const io = await ws.execute('f() { :; }; f; f() { echo "e:$TOKEN"; }; f')
+      const io = await ws.shell('f() { :; }; f; f() { echo "e:$TOKEN"; }; f')
       expect(stdoutStr(io)).toBe('e:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -535,7 +535,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-body-local', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-body-local', ref: 'r' } })
     try {
-      const io = await ws.execute('f() { local TOKEN=shadow; echo "in:$TOKEN"; }; f')
+      const io = await ws.shell('f() { local TOKEN=shadow; echo "in:$TOKEN"; }; f')
       expect(stdoutStr(io)).toBe('in:shadow\n')
       expect(calls).toEqual([])
     } finally {
@@ -548,7 +548,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-body-line', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-body-line', ref: 'r' } })
     try {
-      const io = await ws.execute('f() { local TOKEN=shadow; }; f; echo "g:$TOKEN"')
+      const io = await ws.shell('f() { local TOKEN=shadow; }; f; echo "g:$TOKEN"')
       expect(stdoutStr(io)).toBe('g:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -561,7 +561,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-body-pre', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-body-pre', ref: 'r' } })
     try {
-      const io = await ws.execute('f() { echo "pre:$TOKEN"; local TOKEN=shadow; }; f')
+      const io = await ws.shell('f() { echo "pre:$TOKEN"; local TOKEN=shadow; }; f')
       expect(stdoutStr(io)).toBe('pre:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -574,7 +574,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-body-assign', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-body-assign', ref: 'r' } })
     try {
-      const io = await ws.execute('f() { TOKEN=w; echo "in:$TOKEN"; }; f')
+      const io = await ws.shell('f() { TOKEN=w; echo "in:$TOKEN"; }; f')
       expect(stdoutStr(io)).toBe('in:w\n')
       expect(calls).toEqual([])
     } finally {
@@ -587,7 +587,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-body-pin', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-body-pin', ref: 'r' } })
     try {
-      const io = await ws.execute('f() { local TOKEN=$TOKEN; echo "in:$TOKEN"; }; f')
+      const io = await ws.shell('f() { local TOKEN=$TOKEN; echo "in:$TOKEN"; }; f')
       expect(stdoutStr(io)).toBe('in:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -604,8 +604,8 @@ describe('fillEnv through execute', () => {
       // leading local masks its later reads on a later line exactly
       // as it does when the definition and the call share one.
       const line = 'fshadow() { local TOKEN=shadow; echo "s:$TOKEN"; }'
-      expect((await ws.execute(line)).exitCode).toBe(0)
-      expect(stdoutStr(await ws.execute('fshadow'))).toBe('s:shadow\n')
+      expect((await ws.shell(line)).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell('fshadow'))).toBe('s:shadow\n')
       expect(calls).toEqual([])
     } finally {
       await ws.close()
@@ -618,8 +618,8 @@ describe('fillEnv through execute', () => {
     const ws = await makeWs({ TOKEN: { from: 'fake-stored-read', ref: 'r' } })
     try {
       const line = 'fread() { echo "r:$TOKEN"; local TOKEN=shadow; }'
-      expect((await ws.execute(line)).exitCode).toBe(0)
-      expect(stdoutStr(await ws.execute('fread'))).toBe('r:t0\n')
+      expect((await ws.shell(line)).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell('fread'))).toBe('r:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -631,7 +631,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-top-decl', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-top-decl', ref: 'r' } })
     try {
-      const io = await ws.execute('export TOKEN=local; printenv TOKEN')
+      const io = await ws.shell('export TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
       expect(calls).toEqual([])
     } finally {
@@ -644,7 +644,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-top-local', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-top-local', ref: 'r' } })
     try {
-      const io = await ws.execute('local TOKEN=x; echo "t:$TOKEN"')
+      const io = await ws.shell('local TOKEN=x; echo "t:$TOKEN"')
       expect(stdoutStr(io)).toBe('t:t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -657,7 +657,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-tilde', FakeConfig, fetch)
     const ws = await makeWs({ HOME: { from: 'fake-tilde', ref: 'h' } })
     try {
-      const io = await ws.execute('echo ~/logs')
+      const io = await ws.shell('echo ~/logs')
       expect(stdoutStr(io)).toBe('/hh/logs\n')
       expect(calls).toEqual(['h'])
     } finally {
@@ -670,8 +670,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-cd-home', FakeConfig, fetch)
     const ws = await makeWs({ HOME: { from: 'fake-cd-home', ref: 'h' } })
     try {
-      expect((await ws.execute('mkdir /d')).exitCode).toBe(0)
-      const io = await ws.execute('cd; pwd')
+      expect((await ws.shell('mkdir /d')).exitCode).toBe(0)
+      const io = await ws.shell('cd; pwd')
       expect(stdoutStr(io)).toBe('/d\n')
       expect(calls).toEqual(['h'])
     } finally {
@@ -684,8 +684,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-cd-old', FakeConfig, fetch)
     const ws = await makeWs({ OLDPWD: { from: 'fake-cd-old', ref: 'o' } })
     try {
-      expect((await ws.execute('mkdir /d')).exitCode).toBe(0)
-      const io = await ws.execute('cd -')
+      expect((await ws.shell('mkdir /d')).exitCode).toBe(0)
+      const io = await ws.shell('cd -')
       expect(stdoutStr(io)).toBe('/d\n')
       expect(calls).toEqual(['o'])
     } finally {
@@ -698,8 +698,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-cd-path', FakeConfig, fetch)
     const ws = await makeWs({ CDPATH: { from: 'fake-cd-path', ref: 'c' } })
     try {
-      expect((await ws.execute('mkdir -p /pp/sub')).exitCode).toBe(0)
-      const io = await ws.execute('cd sub')
+      expect((await ws.shell('mkdir -p /pp/sub')).exitCode).toBe(0)
+      const io = await ws.shell('cd sub')
       expect(stdoutStr(io)).toBe('/pp/sub\n')
       expect(calls).toEqual(['c'])
     } finally {
@@ -712,7 +712,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-read-ifs', FakeConfig, fetch)
     const ws = await makeWs({ IFS: { from: 'fake-read-ifs', ref: 'i' } })
     try {
-      const io = await ws.execute("echo 'a b' | read v")
+      const io = await ws.shell("echo 'a b' | read v")
       expect(io.exitCode).toBe(0)
       expect(calls).toEqual(['i'])
     } finally {
@@ -725,7 +725,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-getopts', FakeConfig, fetch)
     const ws = await makeWs({ OPTIND: { from: 'fake-getopts', ref: 'g' } })
     try {
-      const io = await ws.execute('getopts ab o')
+      const io = await ws.shell('getopts ab o')
       expect(io.exitCode).toBe(1)
       expect(calls).toEqual(['g'])
     } finally {
@@ -738,7 +738,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-mask-tilde', FakeConfig, fetch)
     const ws = await makeWs({ HOME: { from: 'fake-mask-tilde', ref: 'h' } })
     try {
-      const io = await ws.execute('HOME=/d; echo ~')
+      const io = await ws.shell('HOME=/d; echo ~')
       expect(stdoutStr(io)).toBe('/d\n')
       expect(calls).toEqual([])
     } finally {
@@ -751,9 +751,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-arith-chase', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-arith-chase', ref: 'r' } })
     try {
-      expect((await ws.execute('name=TOKEN')).exitCode).toBe(0)
+      expect((await ws.shell('name=TOKEN')).exitCode).toBe(0)
       expect(calls).toEqual([])
-      const io = await ws.execute('echo $((name))')
+      const io = await ws.shell('echo $((name))')
       expect(stdoutStr(io)).toBe('7\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -766,7 +766,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-arith-line', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-arith-line', ref: 'r' } })
     try {
-      const io = await ws.execute('name=TOKEN; echo $((name))')
+      const io = await ws.shell('name=TOKEN; echo $((name))')
       expect(stdoutStr(io)).toBe('7\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -779,7 +779,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-arith-mask', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-arith-mask', ref: 'r' } })
     try {
-      const io = await ws.execute('f() { local TOKEN=5; echo $((TOKEN)); }; f')
+      const io = await ws.shell('f() { local TOKEN=5; echo $((TOKEN)); }; f')
       expect(stdoutStr(io)).toBe('5\n')
       expect(calls).toEqual([])
     } finally {
@@ -792,7 +792,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-arith-bodyval', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-arith-bodyval', ref: 'r' } })
     try {
-      const io = await ws.execute('f() { local n=TOKEN; echo $((n)); }; f')
+      const io = await ws.shell('f() { local n=TOKEN; echo $((n)); }; f')
       expect(stdoutStr(io)).toBe('7\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -805,8 +805,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-arith-test', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-arith-test', ref: 'r' } })
     try {
-      expect((await ws.execute('name=TOKEN')).exitCode).toBe(0)
-      const io = await ws.execute('[[ name -gt 5 ]]; echo $?')
+      expect((await ws.shell('name=TOKEN')).exitCode).toBe(0)
+      const io = await ws.shell('[[ name -gt 5 ]]; echo $?')
       expect(stdoutStr(io)).toBe('0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -819,8 +819,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-arith-let', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-arith-let', ref: 'r' } })
     try {
-      expect((await ws.execute('name=TOKEN')).exitCode).toBe(0)
-      const io = await ws.execute('let y=name+1; echo $y')
+      expect((await ws.shell('name=TOKEN')).exitCode).toBe(0)
+      const io = await ws.shell('let y=name+1; echo $y')
       expect(stdoutStr(io)).toBe('8\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -833,8 +833,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-arith-dyn', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-arith-dyn', ref: 'r' } })
     try {
-      expect((await ws.execute('other=TOKEN')).exitCode).toBe(0)
-      const io = await ws.execute('n=$other; echo $((n))')
+      expect((await ws.shell('other=TOKEN')).exitCode).toBe(0)
+      const io = await ws.shell('n=$other; echo $((n))')
       expect(stdoutStr(io)).toBe('7\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -852,7 +852,7 @@ describe('fillEnv through execute', () => {
     try {
       // A's fetched value names B, unknowable before the fetch: the
       // second planning pass is what reaches B.
-      const io = await ws.execute('echo $((A + 1))')
+      const io = await ws.shell('echo $((A + 1))')
       expect(stdoutStr(io)).toBe('8\n')
       expect(calls).toEqual(['ra', 'rb'])
     } finally {
@@ -865,7 +865,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-arith-num', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-arith-num', ref: 'r' } })
     try {
-      const io = await ws.execute('echo $((2 + 2))')
+      const io = await ws.shell('echo $((2 + 2))')
       expect(stdoutStr(io)).toBe('4\n')
       expect(calls).toEqual([])
     } finally {
@@ -878,9 +878,9 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-dyn', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-dyn', ref: 'r' } })
     try {
-      expect((await ws.execute('h=echo')).exitCode).toBe(0)
+      expect((await ws.shell('h=echo')).exitCode).toBe(0)
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('$h hi'))).toBe('hi\n')
+      expect(stdoutStr(await ws.shell('$h hi'))).toBe('hi\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -895,7 +895,7 @@ describe('fillEnv through execute', () => {
       const twin = await ws.copy()
       try {
         twin.createSession('later')
-        const io = await twin.execute('echo $MODE:$TOKEN', { sessionId: 'later' })
+        const io = await twin.shell('echo $MODE:$TOKEN', { sessionId: 'later' })
         expect(stdoutStr(io)).toBe('prod:t0\n')
         expect(calls).toEqual(['r'])
       } finally {
@@ -913,11 +913,11 @@ describe('fillEnv through execute', () => {
       new DenyNamed('printenv'),
     ])
     try {
-      const io = await ws.execute('printenv TOKEN')
+      const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
       expect(io.refusal?.reason).toContain('printenv is off')
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('echo $TOKEN'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -934,7 +934,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-dynamic', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-dynamic', ref: 'r' } }, [new DenyNamed('echo')])
     try {
-      const io = await ws.execute('echo $TOKEN')
+      const io = await ws.shell('echo $TOKEN')
       expect(io.exitCode).toBe(126)
       expect(io.refusal?.reason).toContain('echo is off')
       expect(calls).toEqual(['r'])
@@ -959,7 +959,7 @@ describe('fillEnv through execute', () => {
       approve,
     )
     try {
-      const io = await ws.execute('printenv TOKEN')
+      const io = await ws.shell('printenv TOKEN')
       expect(stdoutStr(io)).toBe('t0\n')
       expect(calls).toEqual(['ask', 'r'])
       expect(ws.decisions.pending()).toEqual([])
@@ -983,7 +983,7 @@ describe('fillEnv through execute', () => {
       refuse,
     )
     try {
-      const io = await ws.execute('printenv TOKEN')
+      const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
       expect(io.refusal?.reason).toContain('printenv needs sign-off')
       expect(calls).toEqual(['ask'])
@@ -1001,7 +1001,7 @@ describe('fillEnv through execute', () => {
       new AskNamed('printenv'),
     ])
     try {
-      const io = await ws.execute('printenv TOKEN')
+      const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
       expect(stderrStr(io)).toBe('printenv: Permission denied\n')
       expect(io.refusal?.kind).toBe('pending')
@@ -1009,7 +1009,7 @@ describe('fillEnv through execute', () => {
       const pending = ws.decisions.pending()
       expect(pending).toHaveLength(1)
       await ws.decisions.answer(pending[0]?.id ?? '', Outcome.ALLOW, Scope.ONCE)
-      const again = await ws.execute('printenv TOKEN')
+      const again = await ws.shell('printenv TOKEN')
       expect(stdoutStr(again)).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -1028,12 +1028,12 @@ describe('fillEnv through execute', () => {
       new DenyNamed('printenv'),
     ])
     try {
-      expect((await ws.execute('f() { printenv TOKEN; }')).exitCode).toBe(0)
-      const io = await ws.execute('f')
+      expect((await ws.shell('f() { printenv TOKEN; }')).exitCode).toBe(0)
+      const io = await ws.shell('f')
       expect(io.exitCode).toBe(126)
       expect(io.refusal?.reason).toContain('printenv is off')
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('echo $TOKEN'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -1047,9 +1047,9 @@ describe('fillEnv through execute', () => {
       new DenyNamed('printenv'),
     ])
     try {
-      await ws.execute('inner() { printenv TOKEN; }')
-      await ws.execute('outer() { inner; }')
-      const io = await ws.execute('outer')
+      await ws.shell('inner() { printenv TOKEN; }')
+      await ws.shell('outer() { inner; }')
+      const io = await ws.shell('outer')
       expect(io.exitCode).toBe(126)
       expect(calls).toEqual([])
     } finally {
@@ -1073,7 +1073,7 @@ describe('fillEnv through execute', () => {
       const session = ws.getSession(ws.defaultSessionId)
       const tree = parser.parse('printenv TOKEN; echo "e:$TOKEN"')
       session.functions.f = tree.namedChildren.filter((node) => node.type === 'command')
-      const io = await ws.execute('f')
+      const io = await ws.shell('f')
       expect(stdoutStr(io)).toBe('e:t0\n')
       expect(io.refusal?.reason).toContain('printenv is off')
       expect(calls).toEqual(['r'])
@@ -1089,8 +1089,8 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-inv-deny', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-inv-deny', ref: 'r' } }, [new DenyNamed('f')])
     try {
-      await ws.execute('f() { printenv TOKEN; }')
-      const io = await ws.execute('f')
+      await ws.shell('f() { printenv TOKEN; }')
+      const io = await ws.shell('f')
       expect(io.exitCode).toBe(126)
       expect(calls).toEqual([])
     } finally {
@@ -1112,7 +1112,7 @@ describe('fillEnv through execute', () => {
       [new DenyNamed('printenv')],
     )
     try {
-      const io = await ws.execute('g() { printenv TOKEN; }')
+      const io = await ws.shell('g() { printenv TOKEN; }')
       expect(io.exitCode).toBe(0)
       expect(calls).toEqual(['re'])
     } finally {
@@ -1133,8 +1133,8 @@ describe('fillEnv through execute', () => {
       approve,
     )
     try {
-      await ws.execute('f() { printenv TOKEN; }')
-      const io = await ws.execute('f')
+      await ws.shell('f() { printenv TOKEN; }')
+      const io = await ws.shell('f')
       expect(stdoutStr(io)).toBe('t0\n')
       expect(calls).toEqual(['ask', 'r'])
       expect(ws.decisions.pending()).toEqual([])
@@ -1156,8 +1156,8 @@ describe('fillEnv through execute', () => {
       refuse,
     )
     try {
-      await ws.execute('f() { printenv TOKEN; }')
-      const io = await ws.execute('f')
+      await ws.shell('f() { printenv TOKEN; }')
+      const io = await ws.shell('f')
       expect(io.exitCode).toBe(126)
       expect(io.refusal?.reason).toContain('printenv needs sign-off')
       expect(calls).toEqual(['ask'])
@@ -1175,14 +1175,14 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-env-i', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-env-i', ref: 'r' } })
     try {
-      const io = await ws.execute('env -i')
+      const io = await ws.shell('env -i')
       expect(io.exitCode).toBe(0)
       expect(stdoutStr(io)).toBe('')
-      const inner = await ws.execute('env -i printenv TOKEN')
+      const inner = await ws.shell('env -i printenv TOKEN')
       expect(inner.exitCode).toBe(1)
       expect(stdoutStr(inner)).toBe('')
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('env printenv TOKEN'))).toBe('t0\n')
+      expect(stdoutStr(await ws.shell('env printenv TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -1196,10 +1196,10 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-mask-assign', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-mask-assign', ref: 'r' } })
     try {
-      const io = await ws.execute('TOKEN=local; printenv TOKEN')
+      const io = await ws.shell('TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
       expect(calls).toEqual([])
-      const later = await ws.execute('printenv TOKEN')
+      const later = await ws.shell('printenv TOKEN')
       expect(stdoutStr(later)).toBe('local\n')
       expect(calls).toEqual([])
     } finally {
@@ -1212,7 +1212,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-mask-unset', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-mask-unset', ref: 'r' } })
     try {
-      const io = await ws.execute('unset TOKEN; printenv TOKEN')
+      const io = await ws.shell('unset TOKEN; printenv TOKEN')
       expect(io.exitCode).toBe(1)
       expect(stdoutStr(io)).toBe('')
       expect(calls).toEqual([])
@@ -1230,13 +1230,13 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-env-excl', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-env-excl', ref: 'r' } })
     try {
-      const removed = await ws.execute('env -u TOKEN printenv TOKEN')
+      const removed = await ws.shell('env -u TOKEN printenv TOKEN')
       expect(removed.exitCode).toBe(1)
       expect(stdoutStr(removed)).toBe('')
-      const overridden = await ws.execute('env TOKEN=local printenv TOKEN')
+      const overridden = await ws.shell('env TOKEN=local printenv TOKEN')
       expect(stdoutStr(overridden)).toBe('local\n')
       expect(calls).toEqual([])
-      const real = await ws.execute('printenv TOKEN')
+      const real = await ws.shell('printenv TOKEN')
       expect(stdoutStr(real)).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -1252,10 +1252,10 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-prefix', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-prefix', ref: 'r' } })
     try {
-      const io = await ws.execute('TOKEN=local printenv TOKEN')
+      const io = await ws.shell('TOKEN=local printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
       expect(calls).toEqual([])
-      const real = await ws.execute('echo $TOKEN')
+      const real = await ws.shell('echo $TOKEN')
       expect(stdoutStr(real)).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -1271,7 +1271,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-cond', FakeConfig, first.fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-cond', ref: 'r' } })
     try {
-      const io = await ws.execute('A=1 && printenv TOKEN')
+      const io = await ws.shell('A=1 && printenv TOKEN')
       expect(stdoutStr(io)).toBe('t0\n')
       expect(first.calls).toEqual(['r'])
     } finally {
@@ -1281,7 +1281,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-bg', FakeConfig, second.fetch)
     const ws2 = await makeWs({ TOKEN: { from: 'fake-bg', ref: 'r' } })
     try {
-      await ws2.execute('TOKEN=local & printenv TOKEN')
+      await ws2.shell('TOKEN=local & printenv TOKEN')
       expect(second.calls).toEqual(['r'])
     } finally {
       await ws2.close()
@@ -1295,7 +1295,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-selfread', FakeConfig, fetch)
     const ws = await makeWs({ TOKEN: { from: 'fake-selfread', ref: 'r' } })
     try {
-      const io = await ws.execute('TOKEN=$TOKEN; printenv TOKEN')
+      const io = await ws.shell('TOKEN=$TOKEN; printenv TOKEN')
       expect(stdoutStr(io)).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -1320,7 +1320,7 @@ describe('fillEnv through execute', () => {
     }
     const ws = await makeWs({ TOKEN: { from: 'fake-gated', ref: 'r' } }, [gate])
     try {
-      const io = await ws.execute('TOKEN=local; printenv TOKEN')
+      const io = await ws.shell('TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -1338,7 +1338,7 @@ describe('fillEnv through execute', () => {
     })
     try {
       ws.registerCli('mycli', envCliSpec())
-      await ws.execute('mycli alpha')
+      await ws.shell('mycli alpha')
       expect([...calls].sort()).toEqual(['alpha', 'root'])
     } finally {
       await ws.close()
@@ -1356,9 +1356,9 @@ describe('fillEnv through execute', () => {
       ws.registerCli('mycli', envCliSpec())
       // Typed outranks environment: the parser never reads CLI_ROOT
       // when --token is on the line, so nothing may fetch it.
-      await ws.execute('mycli --token explicit alpha')
+      await ws.shell('mycli --token explicit alpha')
       expect(calls).toEqual(['alpha'])
-      await ws.execute('mycli --token explicit alpha --a explicit2')
+      await ws.shell('mycli --token explicit alpha --a explicit2')
       expect(calls).toEqual(['alpha'])
     } finally {
       await ws.close()
@@ -1376,7 +1376,7 @@ describe('fillEnv through execute', () => {
       ws.registerCli('mycli', envCliSpec())
       // An abbreviation is never claimed as supplied: the scan stops
       // and the fetch keeps today's shape, over-fetching only.
-      await ws.execute('mycli --tok explicit alpha')
+      await ws.shell('mycli --tok explicit alpha')
       expect([...calls].sort()).toEqual(['alpha', 'root'])
     } finally {
       await ws.close()
@@ -1401,7 +1401,7 @@ describe('fillEnv through execute', () => {
           subcommands: [new CLISpec({ name: 'alpha', fn: probe })],
         }),
       )
-      const io = await ws.execute('mycli alpha')
+      const io = await ws.shell('mycli alpha')
       expect(io.exitCode).toBe(0)
       expect(calls).toEqual(['root'])
       // The walk fills the group level from the same environment the
@@ -1425,7 +1425,7 @@ describe('fillEnv through execute', () => {
       ws.registerCli('mycli', sharedCliSpec(probe))
       // --token is typed, but --a still falls back to the variable the
       // two declare, so it must fetch.
-      const io = await ws.execute('mycli --token typed alpha')
+      const io = await ws.shell('mycli --token typed alpha')
       expect(io.exitCode).toBe(0)
       expect(calls).toEqual(['shared'])
       expect(seen).toEqual([{ token: 'typed', a: 's0' }])
@@ -1445,7 +1445,7 @@ describe('fillEnv through execute', () => {
     const ws = await makeWs({ CLI_SHARED: { from: 'fake-cli-shared-all', ref: 'shared' } })
     try {
       ws.registerCli('mycli', sharedCliSpec(probe))
-      const io = await ws.execute('mycli --token typed alpha --a typed2')
+      const io = await ws.shell('mycli --token typed alpha --a typed2')
       expect(io.exitCode).toBe(0)
       expect(calls).toEqual([])
       expect(seen).toEqual([{ token: 'typed', a: 'typed2' }])
@@ -1461,9 +1461,9 @@ describe('fillEnv through execute', () => {
     try {
       // The append alone on its line is a read: it starts from the
       // value it extends, then the write detaches the name.
-      expect((await ws.execute('TOKEN+=x')).exitCode).toBe(0)
+      expect((await ws.shell('TOKEN+=x')).exitCode).toBe(0)
       expect(calls).toEqual(['r'])
-      expect(stdoutStr(await ws.execute('echo $TOKEN'))).toBe('t0x\n')
+      expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0x\n')
       expect(calls).toEqual(['r'])
     } finally {
       await ws.close()
@@ -1475,7 +1475,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-opterr', FakeConfig, fetch)
     const ws = await makeWs({ OPTERR: { from: 'fake-opterr', ref: 'oe' } })
     try {
-      const io = await ws.execute('getopts a opt -z')
+      const io = await ws.shell('getopts a opt -z')
       expect(calls).toEqual(['oe'])
       expect(stderrStr(io)).toBe('')
       expect(io.exitCode).toBe(0)
@@ -1496,10 +1496,10 @@ describe('fillEnv through execute', () => {
     })
     try {
       ws.registerCli('mycli', envCliSpec())
-      await ws.execute('shopt -s expand_aliases')
-      await ws.execute("alias n='mycli'")
+      await ws.shell('shopt -s expand_aliases')
+      await ws.shell("alias n='mycli'")
       expect(calls).toEqual([])
-      await ws.execute('n alpha')
+      await ws.shell('n alpha')
       expect(calls).toContain('alpha')
       expect(calls).toContain('root')
     } finally {
@@ -1513,11 +1513,11 @@ describe('fillEnv through execute', () => {
     const ws = await makeWs({ CLI_ROOT: { from: 'fake-cli-shadow', ref: 'root' } })
     try {
       ws.registerCli('mycli', envCliSpec())
-      await ws.execute('mycli() { echo shadowed; }')
-      expect(stdoutStr(await ws.execute('mycli'))).toBe('shadowed\n')
+      await ws.shell('mycli() { echo shadowed; }')
+      expect(stdoutStr(await ws.shell('mycli'))).toBe('shadowed\n')
       expect(calls).toEqual([])
-      await ws.execute('unset -f mycli')
-      await ws.execute('mycli')
+      await ws.shell('unset -f mycli')
+      await ws.shell('mycli')
       expect(calls).toEqual(['root'])
     } finally {
       await ws.close()
@@ -1531,7 +1531,7 @@ describe('guestBound', () => {
     const node = parser.parse('python3 -c "print()"') as unknown as TSNodeLike
     const guest = { name: 'monty' } as unknown as Runtime
     expect(guestBound([node], null, { python3: guest })).toBe(true)
-    expect(guestBound([node], null, { python3: new VFSRuntime() })).toBe(false)
+    expect(guestBound([node], null, { python3: new WorkspaceRuntime() })).toBe(false)
     expect(guestBound([node], null, { other: guest })).toBe(false)
     expect(guestBound([node], null, { '*': guest })).toBe(true)
   })
@@ -1569,7 +1569,7 @@ describe('declared source instances', () => {
       { prod: { source: 'acct-one', config: { account: 'a1' } } },
     )
     try {
-      expect(stdoutStr(await ws.execute('echo "$TOKEN"'))).toBe('a1:r:none\n')
+      expect(stdoutStr(await ws.shell('echo "$TOKEN"'))).toBe('a1:r:none\n')
     } finally {
       await ws.close()
     }
@@ -1590,7 +1590,7 @@ describe('declared source instances', () => {
       },
     )
     try {
-      expect(stdoutStr(await ws.execute('echo "$A"; echo "$B"'))).toBe('a1:r:none\na2:r:none\n')
+      expect(stdoutStr(await ws.shell('echo "$A"; echo "$B"'))).toBe('a1:r:none\na2:r:none\n')
     } finally {
       await ws.close()
     }
@@ -1613,7 +1613,7 @@ describe('declared source instances', () => {
       },
     )
     try {
-      expect(stdoutStr(await ws.execute('echo "$TOKEN"'))).toBe('default:r:s3cr3t\n')
+      expect(stdoutStr(await ws.shell('echo "$TOKEN"'))).toBe('default:r:s3cr3t\n')
     } finally {
       await ws.close()
     }
@@ -1628,7 +1628,7 @@ describe('declared source instances', () => {
       { prod: { source: 'acct-bare', config: { account: 'a1' } } },
     )
     try {
-      expect(stdoutStr(await ws.execute('echo "$TOKEN"'))).toBe('default:r:none\n')
+      expect(stdoutStr(await ws.shell('echo "$TOKEN"'))).toBe('default:r:none\n')
     } finally {
       await ws.close()
     }
@@ -1664,10 +1664,10 @@ describe('declared source instances', () => {
       { prod: { source: 'acct-denied', config: { token: { from: 'env', key: 'TOKEN' } } } },
     )
     try {
-      const denied = await ws.execute('printenv TOKEN')
+      const denied = await ws.shell('printenv TOKEN')
       expect(denied.exitCode).toBe(126)
       expect(calls).toEqual([])
-      expect(stdoutStr(await ws.execute('echo "$TOKEN"'))).toBe('default:r:t\n')
+      expect(stdoutStr(await ws.shell('echo "$TOKEN"'))).toBe('default:r:t\n')
       expect(calls).toEqual([''])
     } finally {
       await ws.close()
@@ -1688,7 +1688,7 @@ describe('declared source instances', () => {
       },
     )
     try {
-      const io = await ws.execute('echo "$TOKEN"')
+      const io = await ws.shell('echo "$TOKEN"')
       expect(io.exitCode).toBe(1)
       const message = stderrStr(io)
       expect(message).toContain('1 fields')
@@ -1721,8 +1721,8 @@ describe('declared source instances', () => {
     ws.createSession('b')
     try {
       const [first, second] = await Promise.all([
-        ws.execute('echo "$TOKEN"', { sessionId: 'a' }),
-        ws.execute('echo "$TOKEN"', { sessionId: 'b' }),
+        ws.shell('echo "$TOKEN"', { sessionId: 'a' }),
+        ws.shell('echo "$TOKEN"', { sessionId: 'b' }),
       ])
       expect(stdoutStr(first)).toBe('default:r:t\n')
       expect(stdoutStr(second)).toBe('default:r:t\n')
@@ -1745,7 +1745,7 @@ describe('declared source instances', () => {
     try {
       const copy = await ws.copy()
       try {
-        expect(stdoutStr(await copy.execute('echo "$TOKEN"'))).toBe('a1:r:none\n')
+        expect(stdoutStr(await copy.shell('echo "$TOKEN"'))).toBe('a1:r:none\n')
       } finally {
         await copy.close()
       }
@@ -1785,8 +1785,8 @@ describe('declared source instances', () => {
       { prod: { source: 'acct-bad', config: { nonesuch: 'x' } } },
     )
     try {
-      expect((await ws.execute('echo hi')).exitCode).toBe(0)
-      const out = await ws.execute('echo "$TOKEN"')
+      expect((await ws.shell('echo hi')).exitCode).toBe(0)
+      const out = await ws.shell('echo "$TOKEN"')
       expect(out.exitCode).toBe(1)
       expect(stderrStr(out)).toContain('secrets.prod')
     } finally {
@@ -1813,7 +1813,7 @@ def pre_command(ctx):
 async function scriptedWs(env: EnvEntries, source: string): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
-    { '/': new RAMResource() },
+    { '/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       shellParser: parser,
@@ -1834,7 +1834,7 @@ describe('fillEnv under a profile policy', () => {
     registerSecrets('fake-scripted-gate', FakeConfig, fetch)
     const ws = await scriptedWs({ TOKEN: { from: 'fake-scripted-gate', ref: 'r' } }, SESSION_GATE)
     try {
-      const io = await ws.execute('TOKEN=local; printenv TOKEN')
+      const io = await ws.shell('TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -1850,7 +1850,7 @@ describe('fillEnv under a profile policy', () => {
     registerSecrets('fake-scripted-judge', FakeConfig, fetch)
     const ws = await scriptedWs({ TOKEN: { from: 'fake-scripted-judge', ref: 'r' } }, COMMAND_JUDGE)
     try {
-      const io = await ws.execute('TOKEN=local; printenv TOKEN')
+      const io = await ws.shell('TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
       expect(calls).toEqual([])
     } finally {
@@ -1875,7 +1875,7 @@ describe('a managed fetch under the invocation signal', () => {
     const ws = await makeWs({ TOKEN: { from: 'fake-stalled', ref: 'r' } })
     try {
       await expect(
-        ws.execute('echo $TOKEN', { signal: AbortSignal.timeout(50) }),
+        ws.shell('echo $TOKEN', { signal: AbortSignal.timeout(50) }),
       ).rejects.toMatchObject({ name: 'AbortError' })
       late.release()
       await new Promise((resolve) => setTimeout(resolve, 20))

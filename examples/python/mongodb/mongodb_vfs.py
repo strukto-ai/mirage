@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
+from mirage.vfs.mongodb import MongoDBConfig, MongoDBVFS
 
 load_dotenv(".env.development")
 
@@ -28,11 +28,11 @@ COLL = "heterogeneous"
 VIEW = "high_rated_films"
 
 config = MongoDBConfig(uri=os.environ["MONGODB_URI"], databases=[DB])
-resource = MongoDBResource(config=config)
+vfs = MongoDBVFS(config=config)
 
 
 async def main():
-    with Workspace({"/mongodb/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/mongodb/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE: open() reads from MongoDB ===\n")
 
         print("--- listdir() root (databases) ---")
@@ -101,7 +101,7 @@ async def main():
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, "
               f"{total} bytes transferred")

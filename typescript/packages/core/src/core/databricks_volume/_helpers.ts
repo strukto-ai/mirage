@@ -23,7 +23,7 @@ export function ensurePathSpec(path: PathSpec | string): PathSpec {
 
 export function parentPath(path: PathSpec | string): PathSpec {
   const p = ensurePathSpec(path)
-  const prefix = mountPrefixOf(p.virtual, p.resourcePath)
+  const prefix = mountPrefixOf(p.virtual, p.vfsPath)
   const stripped = rstripSlash(p.mountPath)
   let parentRelative = stripped.includes('/') ? stripped.slice(0, stripped.lastIndexOf('/')) : '/'
   if (!parentRelative.startsWith('/')) parentRelative = '/' + parentRelative

@@ -21,7 +21,7 @@ from mirage.commands.registry import RegisteredCommand
 from mirage.commands.spec import SPECS
 from mirage.core.ram.read import read_bytes
 from mirage.io.types import IOResult
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 MAGIC = b"TALLY1"
 
@@ -50,25 +50,25 @@ async def tally_cat(accessor, paths, *texts, **kwargs):
 
 
 async def main() -> None:
-    ws = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
 
-    await ws.fs.write("/data/hits.tally", encode({"alpha": 3, "beta": 11}))
-    await ws.fs.write("/data/notes.txt", b"plain text\n")
+    await ws.vfs.write("/data/hits.tally", encode({"alpha": 3, "beta": 11}))
+    await ws.vfs.write("/data/notes.txt", b"plain text\n")
 
     mount = ws.mount("/data/")
     mount.register(
         RegisteredCommand("cat",
                           spec=SPECS["cat"],
-                          resource="ram",
+                          vfs="ram",
                           filetype=".tally",
                           fn=tally_cat))
 
     # .tally routes to the renderer above; .txt falls back to the generic cat.
-    print((await ws.execute("cat /data/hits.tally")).stdout.decode(), end="")
-    print((await ws.execute("cat /data/notes.txt")).stdout.decode(), end="")
+    print((await ws.shell("cat /data/hits.tally")).stdout.decode(), end="")
+    print((await ws.shell("cat /data/notes.txt")).stdout.decode(), end="")
 
     # The renderer composes with the rest of the shell like any other command.
-    out = await ws.execute("cat /data/hits.tally | sort -k2 -n | tail -1")
+    out = await ws.shell("cat /data/hits.tally | sort -k2 -n | tail -1")
     print("largest:", out.stdout.decode().strip())
 
 

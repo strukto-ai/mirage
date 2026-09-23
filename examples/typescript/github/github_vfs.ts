@@ -16,7 +16,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GitHubResource, MountMode, patchNodeFs, Workspace, type GitHubConfig } from '@struktoai/mirage-node'
+import { GitHubVFS, MountMode, patchNodeFs, Workspace, type GitHubConfig } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
@@ -35,8 +35,8 @@ function buildConfig(): GitHubConfig {
 
 async function main(): Promise<void> {
   const cfg = buildConfig()
-  const resource = await GitHubResource.create(cfg)
-  const ws = new Workspace({ '/github/': resource }, { mode: MountMode.READ })
+  const vfs = await GitHubVFS.create(cfg)
+  const ws = new Workspace({ '/github/': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from GitHub transparently ===\n')

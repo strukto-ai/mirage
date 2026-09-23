@@ -19,8 +19,8 @@ import pytest
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.readdir import readdir
-from mirage.resource.s3 import S3Config
 from mirage.types import PathSpec
+from mirage.vfs.s3 import S3Config
 from tests.e2e.s3_mock import patch_s3_multi
 
 _TREE = {
@@ -45,7 +45,7 @@ def _accessor(key_prefix: str | None = None) -> S3Accessor:
 def _path(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.strip("/"))
+                    vfs_path=virtual.strip("/"))
 
 
 def _readdir(store: dict[str, bytes], virtual: str, key_prefix: str = ""):

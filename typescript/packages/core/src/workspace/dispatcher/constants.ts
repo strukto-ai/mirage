@@ -42,6 +42,17 @@ export const POLICY_WRITE_OPS: ReadonlySet<string> = new Set([
   ...DISPATCH_WRITE_OPS,
   'setattr',
   'symlink',
+  'setxattr',
+  'removexattr',
+])
+
+// The extended-attribute ops, which the node table answers: what a caller
+// sets is stored on the path's node beside the overlay's mode and times.
+export const XATTR_OPS: ReadonlySet<string> = new Set([
+  'getxattr',
+  'listxattr',
+  'setxattr',
+  'removexattr',
 ])
 
 // Ops the node table itself answers: a symlink is namespace state with

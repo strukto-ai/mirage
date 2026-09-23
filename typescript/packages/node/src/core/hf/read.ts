@@ -59,6 +59,6 @@ export async function read(
     data = Buffer.from(sliceWindow(new Uint8Array(whole), 0, options.size ?? null))
   }
   const bytes = new Uint8Array(data)
-  record('read', virtual, accessor.resourceName, bytes.byteLength, timer)
+  record('read', virtual, accessor.vfsName, bytes.byteLength, timer)
   return bytes
 }

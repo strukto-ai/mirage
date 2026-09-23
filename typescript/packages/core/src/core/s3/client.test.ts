@@ -14,7 +14,7 @@
 
 import type { S3Client } from '@aws-sdk/client-s3'
 import { describe, expect, it } from 'vitest'
-import type { S3HttpAgents } from '../../resource/s3/config.ts'
+import type { S3HttpAgents } from '../../vfs/s3/config.ts'
 import { createS3Client } from './client.ts'
 
 interface ResolvedHandlerConfig {

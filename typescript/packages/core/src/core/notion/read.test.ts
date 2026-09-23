@@ -47,7 +47,7 @@ function makeAccessor(transport: NotionTransport): NotionAccessor {
 }
 
 function spec(virtual: string, prefix = ''): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
 const PAGE_ID_DASHED = 'aaaa1111-2222-3333-4444-555566667777'
@@ -171,7 +171,7 @@ describe('notion read', () => {
     const virtual = `/notion/pages/Prefixed__${PAGE_ID_DASHED}/page.json`
     const bytes = await read(
       makeAccessor(transport),
-      new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, '/notion') }),
+      new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/notion') }),
       undefined,
     )
     const decoded = decodeJson(bytes) as Record<string, unknown>

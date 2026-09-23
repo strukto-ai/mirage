@@ -1,11 +1,11 @@
 import type { Operator } from 'opendal'
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { loadOptionalPeer } from '../optional_peer.ts'
-import type { NextcloudConfig } from '../resource/nextcloud/config.ts'
+import type { NextcloudConfig } from '../vfs/nextcloud/config.ts'
 
 export class NextcloudAccessor extends Accessor {
-  readonly resourceName = ResourceName.NEXTCLOUD
+  readonly vfsName = VFSName.NEXTCLOUD
   private operatorPromise: Promise<Operator> | null = null
 
   constructor(readonly config: NextcloudConfig) {
@@ -20,7 +20,7 @@ export class NextcloudAccessor extends Accessor {
   private async createOperator(): Promise<Operator> {
     const mod = await loadOptionalPeer(
       () => import('opendal') as Promise<{ Operator: typeof Operator }>,
-      { feature: 'Nextcloud resources', packageName: 'opendal' },
+      { feature: 'Nextcloud VFS', packageName: 'opendal' },
     )
     const options: Record<string, string> = { endpoint: this.config.url }
     if (this.config.username !== undefined) options.username = this.config.username

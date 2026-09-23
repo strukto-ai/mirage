@@ -20,10 +20,10 @@ independent Discord implementation uses
 from mirage import Workspace
 from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.core.discord.config import DiscordConfig
-from mirage.resource.discord import DiscordResource
+from mirage.vfs.discord import DiscordVFS
 
 config = DiscordConfig(token="bot-token")
-ws = Workspace({"/discord": DiscordResource(config)})
+ws = Workspace({"/discord": DiscordVFS(config)})
 ws.register_cli("discord", DISCORD, config.model_dump())
 ```
 

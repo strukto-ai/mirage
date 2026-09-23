@@ -56,8 +56,8 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
-  const key = path.resourcePath
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  const key = path.vfsPath
   if (key === '') {
     // The mount root has no parent listing to inherit an mtime from; fetch
     // the folder's own metadata so find -mtime and ls -ld see a real
@@ -95,7 +95,7 @@ export async function stat(
           virtual: parentVirtual,
           directory: parentVirtual,
           resolved: false,
-          resourcePath: mountKey(parentVirtual, prefix),
+          vfsPath: mountKey(parentVirtual, prefix),
         }),
         index,
       )

@@ -23,7 +23,7 @@ from mirage.types import PathSpec
 @dataclass
 class RegisteredOp:
     name: str
-    resource: str
+    vfs: str
     filetype: str | None
     fn: Callable[..., Any]
     write: bool = False
@@ -32,18 +32,18 @@ class RegisteredOp:
 def op(
     name: str,
     *,
-    resource: str | list[str],
+    vfs: str | list[str],
     filetype: str | None = None,
     write: bool = False,
 ) -> Callable[..., Any]:
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        resources = (resource if isinstance(resource, list) else [resource])
+        vfs_names = (vfs if isinstance(vfs, list) else [vfs])
         ops = getattr(fn, "_registered_ops", [])
-        for p in resources:
+        for p in vfs_names:
             ro = RegisteredOp(
                 name=name,
-                resource=p,
+                vfs=p,
                 filetype=filetype,
                 fn=fn,
                 write=write,
@@ -63,38 +63,34 @@ class OpsRegistry:
 
     def register(self, fn_or_op) -> None:
         if isinstance(fn_or_op, RegisteredOp):
-            key = (fn_or_op.name, fn_or_op.filetype, fn_or_op.resource)
+            key = (fn_or_op.name, fn_or_op.filetype, fn_or_op.vfs)
             self._registered[key] = fn_or_op
         elif hasattr(fn_or_op, "_registered_ops"):
             for ro in fn_or_op._registered_ops:
-                key = (ro.name, ro.filetype, ro.resource)
+                key = (ro.name, ro.filetype, ro.vfs)
                 self._registered[key] = ro
         else:
             raise TypeError(
                 f"Expected @op-decorated function or RegisteredOp, "
                 f"got {type(fn_or_op)}")
 
-    def unregister_resource(self, resource_kind: str) -> None:
-        keys = [
-            k for k, ro in self._registered.items()
-            if ro.resource == resource_kind
-        ]
+    def unregister_vfs(self, vfs_kind: str) -> None:
+        keys = [k for k, ro in self._registered.items() if ro.vfs == vfs_kind]
         for k in keys:
             del self._registered[k]
 
     def resolve(
         self,
         name: str,
-        resource: str,
+        vfs: str,
         filetype: str | None = None,
     ) -> Callable[..., Any]:
         if filetype:
-            key: tuple[str, str | None,
-                       str | None] = (name, filetype, resource)
+            key: tuple[str, str | None, str | None] = (name, filetype, vfs)
             if key in self._registered:
                 return self._registered[key].fn
 
-        key = (name, None, resource)
+        key = (name, None, vfs)
         if key in self._registered:
             return self._registered[key].fn
 
@@ -102,12 +98,12 @@ class OpsRegistry:
         if key in self._registered:
             return self._registered[key].fn
 
-        raise KeyError(f"no op registered: {name!r} for resource {resource!r}")
+        raise KeyError(f"no op registered: {name!r} for VFS {vfs!r}")
 
     async def call(
         self,
         name: str,
-        resource: str,
+        vfs: str,
         accessor: Accessor,
         path: PathSpec,
         *args,
@@ -116,12 +112,11 @@ class OpsRegistry:
     ):
         levels = []
         if filetype:
-            key: tuple[str, str | None,
-                       str | None] = (name, filetype, resource)
+            key: tuple[str, str | None, str | None] = (name, filetype, vfs)
             if key in self._registered:
                 levels.append(self._registered[key].fn)
 
-        key = (name, None, resource)
+        key = (name, None, vfs)
         if key in self._registered:
             levels.append(self._registered[key].fn)
 
@@ -130,8 +125,7 @@ class OpsRegistry:
             levels.append(self._registered[key].fn)
 
         if not levels:
-            raise KeyError(
-                f"no op registered: {name!r} for resource {resource!r}")
+            raise KeyError(f"no op registered: {name!r} for VFS {vfs!r}")
 
         for fn in levels:
             result = fn(accessor, path, *args, **kwargs)

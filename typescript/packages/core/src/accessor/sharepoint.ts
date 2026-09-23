@@ -28,7 +28,7 @@ import {
   parseConfigWithSchema,
   redactConfigWithSchema,
   type RedactedConfig,
-} from '../resource/secrets.ts'
+} from '../vfs/secrets.ts'
 import { stripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 

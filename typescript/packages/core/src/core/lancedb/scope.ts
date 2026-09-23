@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
+import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 import { ContentType } from '../../types.ts'
 import { contentTypeForExtension } from '../../utils/filetype.ts'
 import { perAccessor } from '../hierarchy/bind.ts'

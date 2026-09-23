@@ -117,7 +117,7 @@ export function makeStat<A extends Accessor>(
     } else if (scope.probed) {
       await assertListed(readdir, accessor, path, store)
     }
-    const name = stripSlash(path.resourcePath).split('/').pop() ?? ''
+    const name = stripSlash(path.vfsPath).split('/').pop() ?? ''
     const extraFn = extras?.[match.kind]
     const extra = extraFn !== undefined ? extraFn(match) : {}
     if (!scope.leaf) return new FileStat({ name, type: FileType.DIRECTORY, extra })

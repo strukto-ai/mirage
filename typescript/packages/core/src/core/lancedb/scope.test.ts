@@ -20,7 +20,7 @@ import {
   resolveLanceDBConfig,
   type LanceDBConfig,
   type LanceDBConfigResolved,
-} from '../../resource/lancedb/config.ts'
+} from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { INVALID, ROOT, makeDetectScope, type DetectFn } from '../hierarchy/scope.ts'
 import type { LanceDriver } from './_driver.ts'
@@ -45,7 +45,7 @@ function detect(c: LanceDBConfigResolved): DetectFn {
 }
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p })
+  return new PathSpec({ vfsPath: stripSlash(p), virtual: p, directory: p })
 }
 
 describe('lancedb scope', () => {

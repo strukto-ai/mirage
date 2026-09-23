@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as s3ClientModule from '../../core/s3/client.ts'
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { currentFakeS3, installFakeS3 } from '../fixtures/s3_fake.ts'
 import { RAMWorkspaceStateStore } from './ram.ts'
 import { S3WorkspaceStateStore } from './s3.ts'

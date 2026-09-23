@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { z } from '@struktoai/mirage-core/resource/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import type { EnvEntries, ResolvedSecret } from '@struktoai/mirage-core/secrets/types'

@@ -16,7 +16,7 @@ import type { SessionView } from '../../ops/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { randomReader, sessionElements, visibleEnv } from '../session/state.ts'
 import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
@@ -73,7 +73,7 @@ export function foldedWhitespace(node: TSNodeLike): string {
  */
 async function expandBacktickRegion(
   raw: string,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   node: TSNodeLike,
   offset: number,
@@ -112,7 +112,7 @@ async function expandBacktickRegion(
  * node, for a backtick region holding several.
  */
 async function childLine(
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   text: string,
   node: TSNodeLike,
@@ -161,7 +161,7 @@ function collectDollarNodes(node: TSNodeLike, acc: TSNodeLike[]): void {
 // command substitution (heredoc bodies do this).
 async function substituteDollarRefs(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -209,7 +209,7 @@ export function arithExit(expr: string, err: ArithError): ExitSignal {
 
 export async function expandArith(
   tsNode: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -264,7 +264,7 @@ export async function expandArith(
  */
 async function arithSubscript(
   subNode: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -303,7 +303,7 @@ async function arithSubscript(
 // Expand a tree-sitter node to the string it stands for.
 export async function expandNode(
   tsNode: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,
@@ -321,7 +321,7 @@ export async function expandNode(
  */
 export async function expandNodeMarked(
   tsNode: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,

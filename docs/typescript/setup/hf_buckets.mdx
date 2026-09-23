@@ -4,9 +4,9 @@ icon: /images/huggingface-logo.svg
 description: Mount Hugging Face Buckets as a Mirage filesystem in TypeScript with lazy reads and writes.
 ---
 
-`HfBucketsResource` mounts a [Hugging Face Bucket](https://huggingface.co/docs/buckets)
+`HfBucketsVFS` mounts a [Hugging Face Bucket](https://huggingface.co/docs/buckets)
 at a prefix such as `/hf/`. The TypeScript backend mirrors the
-[Python one](/python/resource/hf_buckets) and returns identical results.
+[Python one](/python/vfs/hf_buckets) and returns identical results.
 
 For credential setup, see [HF Buckets Setup](/home/setup/hf_buckets).
 
@@ -22,9 +22,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { HfBucketsResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { HfBucketsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const bucket = new HfBucketsResource({
+const bucket = new HfBucketsVFS({
   bucket: process.env.HF_BUCKET_NAME!, // "namespace/bucket-name"
   token: process.env.HF_TOKEN,
   // Optional:
@@ -34,13 +34,13 @@ const bucket = new HfBucketsResource({
 
 const ws = new Workspace({ '/hf/': bucket }, { mode: MountMode.READ })
 
-console.log((await ws.execute('ls /hf/')).stdoutText)
-console.log((await ws.execute('tree /hf/')).stdoutText)
-console.log((await ws.execute("find /hf/ -name '*.json'")).stdoutText)
-console.log((await ws.execute('stat /hf/data/file.txt')).stdoutText)
+console.log((await ws.shell('ls /hf/')).stdoutText)
+console.log((await ws.shell('tree /hf/')).stdoutText)
+console.log((await ws.shell("find /hf/ -name '*.json'")).stdoutText)
+console.log((await ws.shell('stat /hf/data/file.txt')).stdoutText)
 ```
 
-`HfBucketsResource` takes the bucket in `namespace/bucket-name` form plus an
+`HfBucketsVFS` takes the bucket in `namespace/bucket-name` form plus an
 optional access token. Both `READ` and `WRITE` modes are supported out of the box.
 
 ## Filesystem Layout

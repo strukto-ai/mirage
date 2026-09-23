@@ -21,16 +21,15 @@ from mirage import MountMode, Workspace
 from mirage.cache.index import IndexCacheStore
 from mirage.cache.index.config import IndexEntry
 from mirage.ops import Ops
-from mirage.resource.gslides import GSlidesConfig, GSlidesResource
+from mirage.vfs.gslides import GSlidesConfig, GSlidesVFS
 
 
 def _make_gslides_ops() -> tuple[Ops, IndexCacheStore]:
-    # Mounting re-derives the resource's index from the workspace's
+    # Mounting re-derives the VFS's index from the workspace's
     # config, so the store to seed is the one the mount ends up with.
-    resource = GSlidesResource(
-        config=GSlidesConfig(client_id="x", refresh_token="y"))
-    ws = Workspace({"/gslides/": resource}, mode=MountMode.READ)
-    return ws.fs, resource.index
+    vfs = GSlidesVFS(config=GSlidesConfig(client_id="x", refresh_token="y"))
+    ws = Workspace({"/gslides/": vfs}, mode=MountMode.READ)
+    return ws.vfs, vfs.index
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { makeWorkspace, stdoutStr } from '../fixtures/workspace_fixture.ts'
 
 describe("background jobs respect the session's hides (regression)", () => {
-  // This passes both before and after the Session.fork() migration: the
+  // This passes both before and after the SessionState.fork() migration: the
   // bg-job promise is created inside the parent's runWithSession() scope,
   // so AsyncLocalStorage propagates the *parent* session to the hide
   // filter even though the bgSession object itself does not carry the
@@ -26,14 +26,14 @@ describe("background jobs respect the session's hides (regression)", () => {
   it('cmd & in a restricted session cannot escape the hides', async () => {
     const { ws } = await makeWorkspace()
     ws.createSession('restricted', { profile: { paths: { hide: ['/ram'] } } })
-    await ws.execute('echo hello > /ram/leaked.txt &', {
+    await ws.shell('echo hello > /ram/leaked.txt &', {
       sessionId: 'restricted',
     })
-    await ws.execute('wait', { sessionId: 'restricted' })
+    await ws.shell('wait', { sessionId: 'restricted' })
     // Read back from the DEFAULT (unrestricted) session so we measure
     // whether the bg write actually landed, not whether the read is
     // also blocked.
-    const probe = await ws.execute('cat /ram/leaked.txt')
+    const probe = await ws.shell('cat /ram/leaked.txt')
     expect(stdoutStr(probe).includes('hello')).toBe(false)
     await ws.close()
   }, 30_000)

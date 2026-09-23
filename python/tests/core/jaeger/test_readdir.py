@@ -20,8 +20,8 @@ from mirage.accessor.jaeger import JaegerAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.jaeger.readdir import readdir
 from mirage.core.render.json import json_bytes
-from mirage.resource.jaeger.config import JaegerConfig
 from mirage.types import PathSpec
+from mirage.vfs.jaeger.config import JaegerConfig
 
 TRACE_A = "a" * 32
 TRACE_B = "b" * 32
@@ -39,7 +39,7 @@ def index():
 
 def spec(path: str) -> PathSpec:
     virtual = f"/{path}" if path else "/"
-    return PathSpec(resource_path=path, virtual=virtual, directory=virtual)
+    return PathSpec(vfs_path=path, virtual=virtual, directory=virtual)
 
 
 @pytest.mark.asyncio

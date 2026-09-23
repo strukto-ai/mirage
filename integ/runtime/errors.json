@@ -9,7 +9,7 @@
       "world": {
         "runtimes": [
           "pyodide",
-          "vfs"
+          "workspace"
         ]
       },
       "build_error": {
@@ -24,7 +24,7 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ]
       },
       "build_error": {
@@ -36,7 +36,7 @@
       "world": {
         "runtimes": [
           "ghost",
-          "vfs"
+          "workspace"
         ]
       },
       "build_error": {
@@ -56,7 +56,7 @@
               "homee": "/x"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "build_error": {
@@ -76,7 +76,7 @@
               "homee": "/x"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "build_error": {
@@ -96,7 +96,7 @@
               "home": "/nonexistent-wasi-build"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "build_error": {
@@ -107,11 +107,11 @@
       "id": "syntax_error_exit2",
       "world": {
         "runtimes": [
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -129,11 +129,11 @@
       "id": "syntax_error_unclamped",
       "world": {
         "runtimes": [
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -152,11 +152,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "route_policy": "{'deny': 'nothing runs'}"

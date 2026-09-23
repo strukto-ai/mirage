@@ -27,7 +27,7 @@ import { DIR_FINGERPRINT } from './constants.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 
 export function specFor(root: PathSpec, virtual: string): PathSpec {
-  const cut = rstripSlash(root.virtual).length - root.resourcePath.length
+  const cut = rstripSlash(root.virtual).length - root.vfsPath.length
   return PathSpec.fromStrPath(virtual, stripSlash(virtual.slice(cut)))
 }
 

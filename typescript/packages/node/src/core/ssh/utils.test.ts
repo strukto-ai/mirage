@@ -22,7 +22,7 @@ describe('stripPrefix', () => {
     const p = new PathSpec({
       virtual: '/ssh/foo/bar',
       directory: '/ssh/foo',
-      resourcePath: mountKey('/ssh/foo/bar', '/ssh'),
+      vfsPath: mountKey('/ssh/foo/bar', '/ssh'),
     })
     expect(stripPrefix(p)).toBe('/foo/bar')
   })
@@ -30,7 +30,7 @@ describe('stripPrefix', () => {
     const p = new PathSpec({
       virtual: '/ssh',
       directory: '/ssh',
-      resourcePath: mountKey('/ssh', '/ssh'),
+      vfsPath: mountKey('/ssh', '/ssh'),
     })
     expect(stripPrefix(p)).toBe('/')
   })
@@ -38,13 +38,13 @@ describe('stripPrefix', () => {
     const p = new PathSpec({
       virtual: '/other/foo',
       directory: '/other',
-      resourcePath: mountKey('/other/foo', '/ssh'),
+      vfsPath: mountKey('/other/foo', '/ssh'),
     })
     expect(stripPrefix(p)).toBe('/other/foo')
   })
   it('returns the original when prefix is empty', () => {
     const p = new PathSpec({
-      resourcePath: 'foo/bar',
+      vfsPath: 'foo/bar',
       virtual: '/foo/bar',
       directory: '/foo',
     })

@@ -682,8 +682,8 @@ async def _deref_entry(
     spec = PathSpec(virtual=target,
                     directory=target,
                     resolved=False,
-                    resource_path=rekey(directory.virtual,
-                                        directory.resource_path, target))
+                    vfs_path=rekey(directory.virtual, directory.vfs_path,
+                                   target))
     try:
         return (await stat(spec, index)).model_copy(update={"name": link.name})
     except (OSError, ValueError):
@@ -715,8 +715,7 @@ def _child_spec(path: PathSpec, name: str) -> PathSpec:
     return PathSpec(virtual=child,
                     directory=child,
                     resolved=False,
-                    resource_path=rekey(path.virtual, path.resource_path,
-                                        child))
+                    vfs_path=rekey(path.virtual, path.vfs_path, child))
 
 
 async def _mount_row(
@@ -798,8 +797,8 @@ async def _stat_entries(
         entry_spec = PathSpec(virtual=entry,
                               directory=entry,
                               resolved=False,
-                              resource_path=rekey(path.virtual,
-                                                  path.resource_path, entry))
+                              vfs_path=rekey(path.virtual, path.vfs_path,
+                                             entry))
         try:
             s = await stat(entry_spec, index)
         except (OSError, ValueError) as exc:

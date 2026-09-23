@@ -20,11 +20,11 @@ from mirage.policy.match import Outcome
 from mirage.policy.profile import CompiledProfile
 from mirage.policy.types import (AdmissionRules, CommandRule, Decision,
                                  HideReason, ProfileScript, Scope)
-from mirage.resource.ram import RAMResource
 from mirage.runtime.types import ScriptSource
 from mirage.shell.variable import ShellVar
 from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
                           ShownPaths)
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import RAMSessionStore, SessionManager
 from mirage.workspace.session.session import vars_from_entries
@@ -385,14 +385,14 @@ async def test_manager_close_deletes_from_store():
 @pytest.mark.asyncio
 async def test_sessions_persist_across_workspaces_on_shared_store():
     store = RAMSessionStore()
-    ram = RAMResource()
+    ram = RAMVFS()
     ws_a = Workspace({"/data": ram}, mode=MountMode.EXEC, session_store=store)
     ws_a.create_session("narrow", mounts={"/data": "read"})
     await ws_a.flush_sessions()
 
     ws_b = Workspace({"/data": ram}, mode=MountMode.EXEC, session_store=store)
-    result = await ws_b.execute("echo blocked > /data/x.txt",
-                                session_id="narrow")
+    result = await ws_b.shell("echo blocked > /data/x.txt",
+                              session_id="narrow")
     assert result.exit_code != 0
 
 

@@ -32,11 +32,11 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 
 
-def make_rm(resource: str, io: CommandIO) -> Callable[..., Any]:
+def make_rm(vfs: str, io: CommandIO) -> Callable[..., Any]:
     """Build the no-real-directories rm override for one keyed store.
 
     Args:
-        resource (str): resource name the command registers under.
+        vfs (str): VFS name the command registers under.
         io (CommandIO): the backend's op table; must wire rm_r.
     """
     stat = io.stat
@@ -153,7 +153,7 @@ def make_rm(resource: str, io: CommandIO) -> Callable[..., Any]:
                                 exit_code=1 if errors else 0)
 
     wrapped: Callable[..., Any] = command("rm",
-                                          resource=resource,
+                                          vfs=vfs,
                                           spec=SPECS["rm"],
                                           write=True)(rm)
     return wrapped

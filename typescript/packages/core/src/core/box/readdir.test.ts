@@ -61,7 +61,7 @@ describe('box readdir', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       index,
     )
     expect(out).toEqual(['/docs/', '/notes.txt'])
@@ -82,7 +82,7 @@ describe('box readdir', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/docs' }),
+      new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
       index,
     )
     expect(out).toContain('/docs/note.md')
@@ -97,7 +97,7 @@ describe('box readdir', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ virtual: '/box', directory: '/box', resourcePath: mountKey('/box', '/box') }),
+      new PathSpec({ virtual: '/box', directory: '/box', vfsPath: mountKey('/box', '/box') }),
       index,
     )
     expect(out).toEqual(['/box/a.txt'])
@@ -124,7 +124,7 @@ describe('box readdir', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       index,
     )
     expect(out).toEqual(['/empty.txt'])
@@ -143,7 +143,7 @@ describe('box readdir', () => {
     await expect(
       readdir(
         makeAccessor(),
-        new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+        new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
         new RAMIndexCacheStore(),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -156,7 +156,7 @@ describe('box readdir', () => {
     await expect(
       readdir(
         makeAccessor(),
-        new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+        new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
         new RAMIndexCacheStore(),
       ),
     ).rejects.toMatchObject({ status: 429 })

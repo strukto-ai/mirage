@@ -89,7 +89,7 @@ export class DiskWalk {
   }
 
   async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const start = resolveSafe(this.accessor.root, root.mountPath)
     for await (const entry of descend(this.accessor.root, start)) {
       yield {

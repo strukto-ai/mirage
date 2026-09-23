@@ -21,7 +21,7 @@ from mirage.types import PathSpec
 async def exists(accessor: GDriveAccessor,
                  path: PathSpec,
                  index: IndexCacheStore = NULL_INDEX) -> bool:
-    key = path.resource_path
+    key = path.vfs_path
     if not key:
         return True
     return await resolve_key(accessor, key) is not None

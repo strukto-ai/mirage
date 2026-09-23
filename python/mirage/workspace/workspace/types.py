@@ -15,27 +15,28 @@
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
-from mirage.resource.base import BaseResource
-from mirage.types import Limit, MountBackend, MountMode
+from mirage.types import Limit, MountBackend, MountMode, ReadSpec
+from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.spec import Mount
 
-ResourceMount: TypeAlias = (BaseResource | Mount
-                            | tuple[BaseResource, MountMode]
-                            | tuple[BaseResource, MountMode, dict[str, Limit]])
+VFSMount: TypeAlias = (BaseVFS | Mount
+                       | tuple[BaseVFS, MountMode]
+                       | tuple[BaseVFS, MountMode, dict[str, Limit]])
 
 
 @dataclass(frozen=True, slots=True)
 class MountSpec:
-    """One entry of the ``resources`` mapping, in resolved form.
+    """One entry of the ``mounts`` mapping, in resolved form.
 
-    Every accepted spelling (bare resource, ``(resource, mode)`` tuple,
+    Every accepted spelling (bare VFS, ``(VFS, mode)`` tuple,
     full ``Mount``) narrows to this before the registry sees it, so the
     mount loop reads one shape instead of a union.
     """
 
     prefix: str
-    resource: BaseResource
+    vfs: BaseVFS
     mode: MountMode
-    backend: MountBackend = MountBackend.VFS
+    read: ReadSpec
+    backend: MountBackend = MountBackend.WORKSPACE
     mountpoint: str | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)

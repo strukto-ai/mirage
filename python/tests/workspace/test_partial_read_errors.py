@@ -14,14 +14,14 @@
 
 import asyncio
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _make_ws():
-    ram1 = RAMResource()
-    ram2 = RAMResource()
+    ram1 = RAMVFS()
+    ram2 = RAMVFS()
     ram1._store.files["/f.txt"] = b"aaa\n"
     return Workspace(
         {
@@ -31,7 +31,7 @@ def _make_ws():
 
 
 def _make_numbered_ws():
-    ram = RAMResource()
+    ram = RAMVFS()
     ram._store.files["/f.txt"] = b"1\n2\n"
     ram._store.files["/g.txt"] = b"3\n4\n"
     ram._store.files["/h.txt"] = b"hello\n"
@@ -41,7 +41,7 @@ def _make_numbered_ws():
 def _run(ws, cmd):
 
     async def _inner():
-        io = await ws.execute(cmd)
+        io = await ws.shell(cmd)
         return await io.stdout_str(), await io.stderr_str(), io.exit_code
 
     return asyncio.run(_inner())
@@ -304,8 +304,8 @@ def test_sort_still_aborts_on_missing():
 
 
 def _make_cross_numbered_ws():
-    ram1 = RAMResource()
-    ram2 = RAMResource()
+    ram1 = RAMVFS()
+    ram2 = RAMVFS()
     ram1._store.files["/f.txt"] = b"1\n2\n"
     return Workspace(
         {

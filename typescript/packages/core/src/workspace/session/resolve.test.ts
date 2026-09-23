@@ -29,7 +29,7 @@ import {
   resolveProfile,
   withInline,
 } from './resolve.ts'
-import { Session } from './session.ts'
+import { SessionState } from './session.ts'
 import { VarAttr } from '../../shell/variable.ts'
 
 function readOp(virtual: string): OpsContext {
@@ -38,7 +38,7 @@ function readOp(virtual: string): OpsContext {
     path: new PathSpec({
       virtual,
       directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-      resourcePath: virtual,
+      vfsPath: virtual,
       rawPath: virtual,
     }),
     write: false,
@@ -250,7 +250,7 @@ describe('compileProfile', () => {
   it('carries the name, which narrow stamps onto the session', () => {
     const profile = parseSessionProfile({ cwd: '/scratch' })
     expect(compileProfile(profile, 'reviewer').profile).toBe('reviewer')
-    const session = new Session({ sessionId: 's1' })
+    const session = new SessionState({ sessionId: 's1' })
     narrow(session, compileProfile(profile, 'reviewer'))
     expect(session.profile).toBe('reviewer')
     // A document passed without a name, and no document at all, leave
@@ -317,7 +317,7 @@ describe('narrow / applyProfile', () => {
         vars: { hide: ['SLACK_TOKEN'] },
       }),
     )
-    const narrowed = new Session({ sessionId: 's1' })
+    const narrowed = new SessionState({ sessionId: 's1' })
     narrow(narrowed, compiled)
     expect(narrowed.mountModes).toEqual(new Map([['/a', MountMode.WRITE]]))
     expect(narrowed.mountModes).not.toBe(compiled.mountModes)
@@ -325,7 +325,7 @@ describe('narrow / applyProfile', () => {
     expect(narrowed.hiddenVars).toEqual({ names: ['SLACK_TOKEN'], patterns: [] })
     expect(narrowed.cwd).toBe('/')
     expect(narrowed.env.ROLE).toBeUndefined()
-    const applied = new Session({ sessionId: 's2' })
+    const applied = new SessionState({ sessionId: 's2' })
     applyProfile(applied, compiled)
     expect(applied.mountModes).toEqual(new Map([['/a', MountMode.WRITE]]))
     expect(applied.cwd).toBe('/a')
@@ -342,7 +342,7 @@ describe('narrow / applyProfile', () => {
       ask: [{ reason: DEFAULT_ASK_REASON, commands: ['git'] }],
       deny: [],
     })
-    const session = new Session({ sessionId: 's' })
+    const session = new SessionState({ sessionId: 's' })
     narrow(session, compiled)
     expect(session.commands).toEqual(compiled.commands)
     expect(compileProfile({ cwd: '/x' }).commands).toBeNull()
@@ -435,7 +435,7 @@ describe('the path axis through resolve', () => {
         paths: { hide: [{ patterns: ['/repo'], reason: 'sealed' }], show: ['/repo/public'] },
       }),
     )
-    const session = new Session({ sessionId: 's' })
+    const session = new SessionState({ sessionId: 's' })
     narrow(session, compiled)
     expect(session.shownPaths).toEqual(compiled.shownPaths)
     expect(session.hideReasons).toEqual(compiled.hideReasons)

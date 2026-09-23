@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { FakeSlackTransport, makeFakeResource } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs } from './_test_util.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 const SLACK_DIRNAME = SLACK_COMMANDS.filter((c) => c.name === 'dirname' && c.filetype == null)
@@ -25,8 +25,8 @@ async function runDirname(texts: string[]): Promise<string> {
   const cmd = SLACK_DIRNAME[0]
   if (cmd === undefined) throw new Error('dirname not registered')
   const transport = new FakeSlackTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, [], texts, {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, [], texts, {
     stdin: null,
     flags: {},
     filetypeFns: null,

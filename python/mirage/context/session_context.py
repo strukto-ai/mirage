@@ -28,7 +28,7 @@ from mirage.utils.path import parent
 if TYPE_CHECKING:
     from mirage.policy.policies import Policies
     from mirage.workspace.session.manager import SessionManager
-    from mirage.workspace.session.session import Session
+    from mirage.workspace.session.session import SessionState
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,12 +36,12 @@ class SessionBinding:
     """The session bound to one async context, and whose it is.
 
     Args:
-        session (Session | None): the live session.
+        session (SessionState | None): the live session.
         owner (SessionManager | None): the session manager the session
             belongs to, which is one per workspace. None when the
             binder did not name one.
     """
-    session: "Session | None"
+    session: "SessionState | None"
     owner: "SessionManager | None"
 
 
@@ -51,12 +51,12 @@ _current_session: ContextVar[SessionBinding | None] = ContextVar(
 )
 
 
-def set_current_session(session: "Session | None",
+def set_current_session(session: "SessionState | None",
                         owner: "SessionManager | None" = None) -> Token[Any]:
     """Bind ``session`` to the current async context.
 
     Args:
-        session (Session | None): the session to bind.
+        session (SessionState | None): the session to bind.
         owner (SessionManager | None): the manager the session belongs
             to. None keeps the owner already bound, so a nested bind
             inside a line (a background job's fork) stays attributed to
@@ -73,13 +73,13 @@ def reset_current_session(token: Token[Any]) -> None:
     _current_session.reset(token)
 
 
-def get_current_session() -> "Session | None":
+def get_current_session() -> "SessionState | None":
     """Return the session bound to the current async context, if any."""
     binding = _current_session.get()
     return binding.session if binding is not None else None
 
 
-def get_current_session_for(owner: "SessionManager") -> "Session | None":
+def get_current_session_for(owner: "SessionManager") -> "SessionState | None":
     """Return the bound session only when ``owner`` published it.
 
     A session carries one workspace's cwd, env and mount grants, so a
@@ -96,7 +96,7 @@ def get_current_session_for(owner: "SessionManager") -> "Session | None":
 
 
 def get_current_session_unless_foreign(
-        owner: "SessionManager") -> "Session | None":
+        owner: "SessionManager") -> "SessionState | None":
     """The bound session, unless another owner published it.
 
     An op door keeps the session it is reached under, so it never
@@ -209,7 +209,7 @@ def dotglob_active() -> bool:
     return sess is not None and bool(sess.shopts.get("dotglob"))
 
 
-def session_path_allowed(sess: "Session", virtual: str) -> bool:
+def session_path_allowed(sess: "SessionState", virtual: str) -> bool:
     """Whether a session's path axis leaves this path visible: its
     hides, re-opened where a deeper show entry says so.
 
@@ -219,7 +219,7 @@ def session_path_allowed(sess: "Session", virtual: str) -> bool:
     or an ask never names a path the session cannot see.
 
     Args:
-        sess (Session): the session asking.
+        sess (SessionState): the session asking.
         virtual (str): absolute virtual path.
     """
     return path_visible(sess.hidden_paths, sess.shown_paths, virtual)
@@ -443,7 +443,7 @@ _program_invocation: ContextVar[int | None] = ContextVar(
     "mirage_program_invocation", default=None)
 
 
-def set_program_invocation(session: "Session") -> Token[Any]:
+def set_program_invocation(session: "SessionState") -> Token[Any]:
     """Mark the line about to run in a session as a program run.
 
     ``find -exec`` hands its words to ``execvp``, so the head it runs is
@@ -454,7 +454,7 @@ def set_program_invocation(session: "Session") -> Token[Any]:
     session), so that shell's builtins are its own.
 
     Args:
-        session (Session): the session the program line runs in.
+        session (SessionState): the session the program line runs in.
     """
     return _program_invocation.set(id(session))
 
@@ -471,11 +471,11 @@ def reset_program_invocation(token: Token[Any]) -> None:
     _program_invocation.reset(token)
 
 
-def program_invocation(session: "Session") -> bool:
+def program_invocation(session: "SessionState") -> bool:
     """Whether the line running in this session is a program run.
 
     Args:
-        session (Session): the session a builtin is answering in.
+        session (SessionState): the session a builtin is answering in.
     """
     return _program_invocation.get() == id(session)
 

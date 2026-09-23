@@ -51,7 +51,7 @@ function makeAccessor(transport: NotionTransport): NotionAccessor {
 }
 
 function spec(virtual: string, prefix = ''): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
 const TOP1_ID = 'aaaa1111-2222-3333-4444-555566667777'
@@ -87,7 +87,7 @@ describe('notion readdir root', () => {
       new PathSpec({
         virtual: '/notion',
         directory: '/notion',
-        resourcePath: mountKey('/notion', '/notion'),
+        vfsPath: mountKey('/notion', '/notion'),
       }),
       undefined,
     )
@@ -138,7 +138,7 @@ describe('notion readdir pages', () => {
       new PathSpec({
         virtual: '/notion/pages',
         directory: '/notion/pages',
-        resourcePath: mountKey('/notion/pages', '/notion'),
+        vfsPath: mountKey('/notion/pages', '/notion'),
       }),
       undefined,
     )
@@ -356,7 +356,7 @@ describe('notion readdir subtree', () => {
       new PathSpec({
         virtual: dirPath,
         directory: dirPath,
-        resourcePath: mountKey(dirPath, '/notion'),
+        vfsPath: mountKey(dirPath, '/notion'),
       }),
       undefined,
     )

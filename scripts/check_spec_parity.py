@@ -26,8 +26,8 @@ TYPESCRIPT = [
 ]
 EXCEPTIONS = SPEC / "parity_exceptions.json"
 
-BY_RESOURCE = "_meta.by_resource"
-BY_RESOURCE_KEYS = "_meta.by_resource.keys"
+BY_VFS = "_meta.by_vfs"
+BY_VFS_KEYS = "_meta.by_vfs.keys"
 
 
 def spec_fields(py: dict[str, Any], ts: dict[str, Any]) -> list[str]:
@@ -48,22 +48,22 @@ def spec_fields(py: dict[str, Any], ts: dict[str, Any]) -> list[str]:
 
 
 def meta_fields(py_meta: dict[str, Any], ts_meta: dict[str, Any]) -> list[str]:
-    """Every ``_meta`` key either side emits, ``by_resource`` excluded.
+    """Every ``_meta`` key either side emits, ``by_vfs`` excluded.
 
     Args:
         py_meta (dict[str, Any]): the python ``_meta`` block.
         ts_meta (dict[str, Any]): the typescript ``_meta`` block.
     """
-    return sorted((set(py_meta) | set(ts_meta)) - {"by_resource"})
+    return sorted((set(py_meta) | set(ts_meta)) - {"by_vfs"})
 
 
-def load_resource_trees() -> dict[str, dict[str, Any]]:
-    """The three ``resources.json`` payloads, or a SystemExit naming the
+def load_vfs_trees() -> dict[str, dict[str, Any]]:
+    """The three ``vfs.json`` payloads, or a SystemExit naming the
     generator that has not been run."""
     trees = {
-        "python": SPEC / "python" / "resources.json",
-        "node": SPEC / "typescript" / "node" / "resources.json",
-        "browser": SPEC / "typescript" / "browser" / "resources.json",
+        "python": SPEC / "python" / "vfs.json",
+        "node": SPEC / "typescript" / "node" / "vfs.json",
+        "browser": SPEC / "typescript" / "browser" / "vfs.json",
     }
     loaded: dict[str, dict[str, Any]] = {}
     for tree, path in trees.items():
@@ -86,13 +86,13 @@ def merge_variants(loaded: dict[str, dict[str, Any]], key: str,
     Preferring node is only safe because ``check_variant_facts`` has
     already failed on any name the two runtimes describe differently.
     Without it the preference silently hid a divergence rather than
-    resolving one: the fifteen browser S3-family resources declared
+    resolving one: the fifteen browser S3-family VFS declared
     neither ``sizes_always_known`` nor ``storage_id`` while their node
     twins declared both, and python matched node, so the whole
     python-versus-typescript comparison passed.
 
     Args:
-        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        loaded (dict[str, dict[str, Any]]): the three VFS trees.
         key (str): the payload key to merge, e.g. ``"capabilities"``.
         language_only (set[str]): names with no counterpart to compare.
     """
@@ -109,7 +109,7 @@ def merge_variants(loaded: dict[str, dict[str, Any]], key: str,
 def check_variant_facts(loaded: dict[str, dict[str, Any]], key: str,
                         allowed: dict[str, dict[str, str]],
                         used: set[str]) -> list[str]:
-    """Node against browser for one resource-fact table.
+    """Node against browser for one VFS-fact table.
 
     A backend both runtimes register is one backend, and it should not
     behave differently depending on which package mounted it. Nothing
@@ -118,12 +118,12 @@ def check_variant_facts(loaded: dict[str, dict[str, Any]], key: str,
     turns a divergence into a silently discarded value.
 
     A ``null`` entry is a runtime declining to serve the backend at all,
-    which is a membership fact ``check_resources`` already covers.
+    which is a membership fact ``check_vfs_names`` already covers.
 
     Args:
-        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        loaded (dict[str, dict[str, Any]]): the three VFS trees.
         key (str): the payload key to compare, e.g. ``"capabilities"``.
-        allowed (dict[str, dict[str, str]]): per-resource keys whose
+        allowed (dict[str, dict[str, str]]): per-VFS keys whose
             divergence is documented, each mapped to its reason.
         used (set[str]): collects the exemptions that fired.
     """
@@ -152,7 +152,7 @@ def check_capabilities(loaded: dict[str, dict[str, Any]],
                        allowed: dict[str,
                                      dict[str,
                                           str]], used: set[str]) -> list[str]:
-    """Per-resource behavior values: TTLs, caching, snapshot support.
+    """Per-VFS behavior values: TTLs, caching, snapshot support.
 
     Registry membership says a backend can be built; these say what it
     does once mounted, and they are just as hand-maintained. Python kept
@@ -161,10 +161,10 @@ def check_capabilities(loaded: dict[str, dict[str, Any]],
     listing of a live schema while its typescript twin was exact.
 
     Args:
-        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        loaded (dict[str, dict[str, Any]]): the three VFS trees.
         expansions (dict[str, list[str]]): python alias table.
         language_only (set[str]): names present in one runtime only.
-        allowed (dict[str, dict[str, str]]): per-resource keys whose
+        allowed (dict[str, dict[str, str]]): per-VFS keys whose
             divergence is documented, each mapped to its reason.
         used (set[str]): collects the exemptions that fired.
     """
@@ -205,7 +205,7 @@ def check_command_io(loaded: dict[str, dict[str, Any]], aliases: dict[str,
     cap — while its twin pushes the same query down to the API.
 
     Args:
-        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        loaded (dict[str, dict[str, Any]]): the three VFS trees.
         aliases (dict[str, str]): python command-package name to the
             typescript one where the directories differ.
         language_only (set[str]): backends present in one runtime only.
@@ -262,7 +262,7 @@ def check_configs(loaded: dict[str, dict[str, Any]],
                   expansions: dict[str, list[str]], language_only: set[str],
                   allowed: dict[str, dict[str,
                                           str]], used: set[str]) -> list[str]:
-    """Per-resource config field sets: what a mount can be told.
+    """Per-VFS config field sets: what a mount can be told.
 
     Python dumps its pydantic wire names; TypeScript dumps the zod shape
     behind each ``normalize*Config`` door plus the rename map the door
@@ -275,15 +275,15 @@ def check_configs(loaded: dict[str, dict[str, Any]],
     credentials, so the two runtimes' configs differ by design and the
     node entry -- the one that mirrors python -- is the one compared.
 
-    Exemptions are keyed by resource then by field, spelled either way
+    Exemptions are keyed by VFS then by field, spelled either way
     (``refreshFn`` or ``refresh_fn``); ``validates`` exempts a door that
     does not parse.
 
     Args:
-        loaded (dict[str, dict[str, Any]]): the three resource trees.
+        loaded (dict[str, dict[str, Any]]): the three VFS trees.
         expansions (dict[str, list[str]]): python alias table.
         language_only (set[str]): names present in one runtime only.
-        allowed (dict[str, dict[str, str]]): per-resource keys whose
+        allowed (dict[str, dict[str, str]]): per-VFS keys whose
             divergence is documented, each mapped to its reason.
         used (set[str]): collects the exemptions that fired.
     """
@@ -355,12 +355,12 @@ def _membership(py: dict[str, Any], ts: dict[str, Any],
     return failures
 
 
-def check_resources(loaded: dict[str, dict[str, Any]], language_only: set[str],
+def check_vfs_names(loaded: dict[str, dict[str, Any]], language_only: set[str],
                     expansions: dict[str, list[str]],
                     unconstructible: dict[str, dict[str, str]]) -> list[str]:
     """Registry membership, the surface the command specs cannot see.
 
-    A resource's ``_meta`` entries say it registers commands; nothing said
+    A VFS's ``_meta`` entries say it registers commands; nothing said
     it could be *built* by name. The two sets drifted five times — python
     had no ``sharepoint`` factory and the typescript registries had no
     chroma/dify/lancedb/qdrant — while every command spec stayed identical,
@@ -368,8 +368,8 @@ def check_resources(loaded: dict[str, dict[str, Any]], language_only: set[str],
     tables.
 
     Args:
-        loaded (dict[str, dict[str, Any]]): the three resource trees.
-        language_only (set[str]): resources that exist in one runtime only.
+        loaded (dict[str, dict[str, Any]]): the three VFS trees.
+        language_only (set[str]): VFS that exist in one runtime only.
         expansions (dict[str, list[str]]): python alias table, so one
             python name can stand for several typescript ones.
         unconstructible (dict[str, dict[str, str]]): per-tree names that
@@ -379,17 +379,17 @@ def check_resources(loaded: dict[str, dict[str, Any]], language_only: set[str],
     for tree, payload in loaded.items():
         registry = set(payload["registry"])
         allowed = unconstructible.get(tree, {})
-        orphans = sorted(set(payload["command_resources"]) - registry)
+        orphans = sorted(set(payload["command_vfs_names"]) - registry)
         unexpected = [r for r in orphans if r not in allowed]
         if unexpected:
             failures.append(
-                f"{tree}: these resources register builtin commands but "
+                f"{tree}: these VFS register builtin commands but "
                 f"cannot be built by name: {unexpected}\n"
                 f"    add a registry factory, or document the omission in "
-                f"{EXCEPTIONS.name} under unconstructible_resources.{tree}")
+                f"{EXCEPTIONS.name} under unconstructible_vfs_names.{tree}")
         stale = sorted(set(allowed) - set(orphans))
         if stale:
-            failures.append(f"stale unconstructible_resources.{tree} entries "
+            failures.append(f"stale unconstructible_vfs_names.{tree} entries "
                             f"in {EXCEPTIONS.name}: {stale}")
 
     py_registry: set[str] = set()
@@ -400,10 +400,9 @@ def check_resources(loaded: dict[str, dict[str, Any]], language_only: set[str],
     only_py = sorted(py_registry - ts_registry - language_only)
     only_ts = sorted(ts_registry - py_registry - language_only)
     if only_py:
-        failures.append(f"resources constructible only in python: {only_py}")
+        failures.append(f"VFS constructible only in python: {only_py}")
     if only_ts:
-        failures.append(
-            f"resources constructible only in typescript: {only_ts}")
+        failures.append(f"VFS constructible only in typescript: {only_ts}")
     return failures
 
 
@@ -415,92 +414,91 @@ def load_dir(path: Path) -> dict[str, Any]:
     return {f.stem: json.loads(f.read_text()) for f in path.glob("*.json")}
 
 
-def expand_by_resource(by_resource: dict[str, Any],
-                       expansions: dict[str, list[str]]) -> dict[str, Any]:
+def expand_by_vfs(by_vfs: dict[str, Any],
+                  expansions: dict[str, list[str]]) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    for name, entry in by_resource.items():
+    for name, entry in by_vfs.items():
         for alias in expansions.get(name, [name]):
             out[alias] = entry
     return out
 
 
-def merge_by_resource(variants: list[dict[str, Any]]) -> dict[str, Any]:
+def merge_by_vfs(variants: list[dict[str, Any]]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for variant in variants:
         for name, entry in variant.items():
             if name in out and out[name] != entry:
                 raise SystemExit(f"typescript variants disagree on the "
-                                 f"metadata for resource {name!r}")
+                                 f"metadata for VFS {name!r}")
             out[name] = entry
     return out
 
 
 def compare_command(py: dict[str, Any], ts: dict[str, Any],
-                    py_by_resource: dict[str, Any],
-                    ts_by_resource: dict[str, Any]) -> list[str]:
+                    py_by_vfs: dict[str, Any],
+                    ts_by_vfs: dict[str, Any]) -> list[str]:
     """Every divergence between one command's two specs, before exemptions.
 
-    Per-resource metadata differences are reported one key at a time as
-    ``_meta.by_resource:<resource>:<key>`` so an exemption can name exactly
+    Per-VFS metadata differences are reported one key at a time as
+    ``_meta.by_vfs:<VFS>:<key>`` so an exemption can name exactly
     the fact it covers instead of muting the whole field.
 
     Args:
         py (dict[str, Any]): the python spec payload.
         ts (dict[str, Any]): the typescript spec payload.
-        py_by_resource (dict[str, Any]): python per-resource metadata,
+        py_by_vfs (dict[str, Any]): python per-VFS metadata,
             already expanded through the alias table.
-        ts_by_resource (dict[str, Any]): typescript per-resource metadata,
-            already stripped of language-only resources.
+        ts_by_vfs (dict[str, Any]): typescript per-VFS metadata,
+            already stripped of language-only VFS.
     """
     diffs: list[str] = []
     for field in spec_fields(py, ts):
         if py.get(field) != ts.get(field):
             diffs.append(field)
-    if set(py_by_resource) != set(ts_by_resource):
-        diffs.append(BY_RESOURCE_KEYS)
+    if set(py_by_vfs) != set(ts_by_vfs):
+        diffs.append(BY_VFS_KEYS)
         return diffs
-    for name in sorted(py_by_resource):
-        a, b = py_by_resource[name], ts_by_resource[name]
+    for name in sorted(py_by_vfs):
+        a, b = py_by_vfs[name], ts_by_vfs[name]
         for key in sorted(set(a) | set(b)):
             if a.get(key) != b.get(key):
-                diffs.append(f"{BY_RESOURCE}:{name}:{key}")
-    # The union flags are derived from the per-resource entries, so they
+                diffs.append(f"{BY_VFS}:{name}:{key}")
+    # The union flags are derived from the per-VFS entries, so they
     # only add signal once those agree; otherwise they restate the same
     # divergence in a coarser form.
-    if not any(d.startswith(BY_RESOURCE) for d in diffs):
+    if not any(d.startswith(BY_VFS) for d in diffs):
         for field in meta_fields(py["_meta"], ts["_meta"]):
-            # `resources` denormalizes by_resource's keys, so it carries the
+            # `vfs_names` denormalizes by_vfs's keys, so it carries the
             # raw names and needs the same alias expansion and
             # language-only filtering before the two lists can be compared.
-            if field == "resources":
-                if set(py_by_resource) != set(ts_by_resource):
-                    diffs.append("_meta.resources")
+            if field == "vfs_names":
+                if set(py_by_vfs) != set(ts_by_vfs):
+                    diffs.append("_meta.vfs_names")
                 continue
             if py["_meta"].get(field) != ts["_meta"].get(field):
                 diffs.append(f"_meta.{field}")
     return diffs
 
 
-def exempted(diff: str, fields: set[str],
-             by_resource: dict[str, list[str]]) -> bool:
+def exempted(diff: str, fields: set[str], by_vfs: dict[str,
+                                                       list[str]]) -> bool:
     if diff in fields:
         return True
-    if not diff.startswith(f"{BY_RESOURCE}:"):
+    if not diff.startswith(f"{BY_VFS}:"):
         return False
     _, name, key = diff.split(":", 2)
-    return key in by_resource.get(name, [])
+    return key in by_vfs.get(name, [])
 
 
 def describe(diff: str, py: dict[str, Any], ts: dict[str, Any],
-             py_by_resource: dict[str, Any], ts_by_resource: dict[str,
-                                                                  Any]) -> str:
-    if diff.startswith(f"{BY_RESOURCE}:"):
+             py_by_vfs: dict[str, Any], ts_by_vfs: dict[str, Any]) -> str:
+    if diff.startswith(f"{BY_VFS}:"):
         _, name, key = diff.split(":", 2)
-        return (f"    {BY_RESOURCE}[{name}].{key}: "
-                f"python={py_by_resource[name].get(key)!r} "
-                f"typescript={ts_by_resource[name].get(key)!r}")
-    if diff in (BY_RESOURCE_KEYS, "_meta.resources"):
-        a, b = set(py_by_resource), set(ts_by_resource)
+        return (f"    {BY_VFS}[{name}].{key}: "
+                f"python={py_by_vfs[name].get(key)!r} "
+                f"typescript={ts_by_vfs[name].get(key)!r}")
+    if diff in (BY_VFS_KEYS, "_meta.vfs_names"):
+        a, b = set(py_by_vfs), set(ts_by_vfs)
         return (f"    {diff}: python-only={sorted(a - b)} "
                 f"typescript-only={sorted(b - a)}")
     if diff.startswith("_meta."):
@@ -540,11 +538,11 @@ def describe(diff: str, py: dict[str, Any], ts: dict[str, Any],
 def compare_variants(variants: list[dict[str, Any]]) -> list[str]:
     """Divergences between the typescript variants' own spec payloads.
 
-    ``by_resource`` and its denormalized ``resources`` key legitimately
+    ``by_vfs`` and its denormalized ``vfs_names`` key legitimately
     differ — a backend registers in only one runtime — but everything else
     describes the command itself and must match. Python is compared against
     the node variant, so without this check nothing ever reads
-    ``spec/typescript/browser`` beyond its per-resource metadata.
+    ``spec/typescript/browser`` beyond its per-VFS metadata.
 
     Args:
         variants (list[dict[str, Any]]): one loaded spec tree per variant,
@@ -557,7 +555,7 @@ def compare_variants(variants: list[dict[str, Any]]) -> list[str]:
         diffs = [f for f in spec_fields(a, b) if a.get(f) != b.get(f)]
         diffs += [
             f"_meta.{f}" for f in meta_fields(a["_meta"], b["_meta"])
-            if f != "resources" and a["_meta"].get(f) != b["_meta"].get(f)
+            if f != "vfs_names" and a["_meta"].get(f) != b["_meta"].get(f)
         ]
         if diffs:
             failures.append(f"typescript node and browser disagree on "
@@ -567,20 +565,20 @@ def compare_variants(variants: list[dict[str, Any]]) -> list[str]:
 
 def main() -> int:
     exceptions = json.loads(EXCEPTIONS.read_text())
-    expansions: dict[str,
-                     list[str]] = exceptions["resource_expansions"]["python"]
-    language_only = set(exceptions["language_only_resources"])
+    expansions: dict[str, list[str]] = exceptions["vfs_expansions"]["python"]
+    language_only = set(exceptions["language_only_vfs_names"])
     unconstructible: dict[str,
                           dict[str,
-                               str]] = exceptions["unconstructible_resources"]
+                               str]] = exceptions["unconstructible_vfs_names"]
     allowed: dict[str, Any] = exceptions["commands"]
-    capability_exempt: dict[str,
-                            dict[str,
-                                 str]] = exceptions["resource_capabilities"]
+    capability_exempt: dict[str, dict[str,
+                                      str]] = exceptions["vfs_capabilities"]
     io_exempt: dict[str, dict[str, str]] = exceptions["command_io"]
     io_aliases: dict[str, str] = exceptions["command_io_aliases"]["python"]
-    variant_exempt: dict[str, dict[str, dict[
-        str, str]]] = exceptions["variant_resource_facts"]
+    variant_exempt: dict[str,
+                         dict[str,
+                              dict[str,
+                                   str]]] = exceptions["variant_vfs_facts"]
     config_exempt: dict[str, dict[str, str]] = exceptions["config_fields"]
 
     py_specs = load_dir(PYTHON)
@@ -603,10 +601,10 @@ def main() -> int:
     if only_ts:
         failures.append(f"commands only in typescript: {only_ts}")
 
-    trees = load_resource_trees()
+    trees = load_vfs_trees()
     failures.extend(compare_variants(ts_variants))
     failures.extend(
-        check_resources(trees, language_only, expansions, unconstructible))
+        check_vfs_names(trees, language_only, expansions, unconstructible))
     # Before python is compared against the merged typescript view, since
     # that merge prefers node and would otherwise discard the difference.
     for table in ("capabilities", "command_io"):
@@ -641,34 +639,33 @@ def main() -> int:
     }
     stale_facts = sorted(declared - used_facts)
     if stale_facts:
-        failures.append(f"stale resource-fact exemptions in "
+        failures.append(f"stale VFS-fact exemptions in "
                         f"{EXCEPTIONS.name}, the divergence they cover is "
                         f"gone: {stale_facts}")
 
     for name in sorted(set(py_specs) & set(ts_variants[0])):
         py, ts = py_specs[name], ts_variants[0][name]
-        py_by_resource = expand_by_resource(py["_meta"]["by_resource"],
-                                            expansions)
-        ts_by_resource = {
+        py_by_vfs = expand_by_vfs(py["_meta"]["by_vfs"], expansions)
+        ts_by_vfs = {
             k: v
-            for k, v in merge_by_resource(
-                [v[name]["_meta"]["by_resource"]
-                 for v in ts_variants]).items() if k not in language_only
+            for k, v in merge_by_vfs(
+                [v[name]["_meta"]["by_vfs"] for v in ts_variants]).items()
+            if k not in language_only
         }
-        diffs = compare_command(py, ts, py_by_resource, ts_by_resource)
+        diffs = compare_command(py, ts, py_by_vfs, ts_by_vfs)
         if not diffs:
             continue
         exempt = allowed.get(name, {})
         fields = set(exempt.get("fields", []))
-        by_resource: dict[str, list[str]] = exempt.get("by_resource", {})
-        real = [d for d in diffs if not exempted(d, fields, by_resource)]
+        by_vfs: dict[str, list[str]] = exempt.get("by_vfs", {})
+        real = [d for d in diffs if not exempted(d, fields, by_vfs)]
         # An exemption earns its keep only by suppressing a live divergence.
         if len(real) < len(diffs):
             used.add(name)
         if not real:
             continue
         detail = "\n".join(
-            describe(d, py, ts, py_by_resource, ts_by_resource) for d in real)
+            describe(d, py, ts, py_by_vfs, ts_by_vfs) for d in real)
         failures.append(f"{name}:\n{detail}")
 
     stale = sorted(set(allowed) - used)

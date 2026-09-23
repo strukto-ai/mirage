@@ -16,7 +16,7 @@ import asyncio
 import re
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 # An incident-response workspace: the service tree, the runbooks the
 # oncall works from, and the credentials nobody reads by hand.
@@ -198,9 +198,9 @@ def answer(out: bytes, err: bytes, code: int) -> str:
 async def main() -> None:
     ws = Workspace(
         {
-            "/repo/": RAMResource(),
-            "/runbook/": RAMResource(),
-            "/vault/": RAMResource(),
+            "/repo/": RAMVFS(),
+            "/runbook/": RAMVFS(),
+            "/vault/": RAMVFS(),
         },
         mode=MountMode.WRITE,
         profiles=PROFILES,
@@ -209,13 +209,13 @@ async def main() -> None:
     # A session that names no role is unrestricted, which is the host's
     # own view and the only place this seeding could run.
     for line in SEED:
-        await ws.execute(line)
+        await ws.shell(line)
 
     for role in PROFILES:
         ws.create_session(role, profile=role)
 
     for role, line, note in LINES:
-        res = await ws.execute(line, session_id=role)
+        res = await ws.shell(line, session_id=role)
         print(f"{role:10} {line:42} "
               f"{answer(res.stdout or b'', res.stderr or b'', res.exit_code)}")
         print(f"{'':10} {'':42} {note}")

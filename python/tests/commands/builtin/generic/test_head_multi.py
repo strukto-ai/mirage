@@ -21,7 +21,7 @@ from mirage.utils.key_prefix import mount_key
 
 def _paths(*names: str) -> list[PathSpec]:
     return [
-        PathSpec(resource_path=mount_key(n, ""),
+        PathSpec(vfs_path=mount_key(n, ""),
                  virtual=n,
                  directory="/d",
                  resolved=True) for n in names

@@ -38,12 +38,12 @@ async def _delete(accessor: GCalAccessor, match: ScopeMatch,
     calendars = await calendar_index(accessor)
     calendar = calendars.get(match.slots["calendar"])
     if calendar is None:
-        raise enoent(match.resource_path)
+        raise enoent(match.vfs_path)
     if calendar.get("accessRole") not in ("owner", "writer"):
-        raise PermissionError(match.resource_path)
+        raise PermissionError(match.vfs_path)
     cal_id = calendar.get("id")
     if not isinstance(cal_id, str):
-        raise enoent(match.resource_path)
+        raise enoent(match.vfs_path)
     await delete_event(accessor.token_manager, cal_id, entry.id)
 
 

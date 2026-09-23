@@ -21,7 +21,7 @@ import {
   Mount,
   MountBackend,
   MountMode,
-  TrelloResource,
+  TrelloVFS,
   Workspace,
   type TrelloConfig,
 } from "@struktoai/mirage-node";
@@ -42,9 +42,9 @@ function buildConfig(): TrelloConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new TrelloResource(buildConfig());
+  const vfs = new TrelloVFS(buildConfig());
   const ws = new Workspace({
-    "/trello": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/trello": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

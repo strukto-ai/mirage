@@ -46,7 +46,7 @@ async def iter_tree(
         accessor (GDriveAccessor): backend accessor.
         path (PathSpec): directory to walk (mount-relative root allowed).
     """
-    base = path.resource_path
+    base = path.vfs_path
     folder_id, drive_id = await resolve_dir(accessor, base, path.virtual)
     stack: list[tuple[str, str, str | None]] = [(base, folder_id, drive_id)]
     while stack:

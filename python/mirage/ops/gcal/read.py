@@ -19,7 +19,7 @@ from mirage.types import PathSpec
 from mirage.utils.ranges import slice_window
 
 
-@op("read", resource=["gcal"], filetype=".gcal.json")
+@op("read", vfs=["gcal"], filetype=".gcal.json")
 async def read(accessor: GCalAccessor,
                path: PathSpec,
                *,

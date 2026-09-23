@@ -18,7 +18,7 @@ import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { CLIRegistry } from '../../../cli/registry.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import { Session } from '../../../session/session.ts'
+import { SessionState } from '../../../session/session.ts'
 import { handleType, handleWhich } from './lookup.ts'
 
 // Mirrors python/tests/workspace/executor/builtins/lookup/test_handle.py.
@@ -44,8 +44,8 @@ function makeRegistry(withCli = false): MountRegistry {
   } as unknown as MountRegistry
 }
 
-function makeSession(): Session {
-  return new Session({ sessionId: 's1' })
+function makeSession(): SessionState {
+  return new SessionState({ sessionId: 's1' })
 }
 
 async function body(out: ByteSource | null): Promise<string> {

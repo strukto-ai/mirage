@@ -17,21 +17,21 @@ import sys
 import pytest
 import pytest_asyncio
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.types import materialize
 from mirage.runtime.python import LocalRuntime
 
 
 @pytest_asyncio.fixture
 async def ws():
-    workspace = Workspace({"/": RAMResource()}, mode=MountMode.EXEC)
+    workspace = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC)
     yield workspace
     await workspace.close()
 
 
 @pytest_asyncio.fixture
 async def ws_cpython():
-    workspace = Workspace({"/": RAMResource()},
+    workspace = Workspace({"/": RAMVFS()},
                           mode=MountMode.EXEC,
                           runtimes=[LocalRuntime()])
     yield workspace
@@ -40,29 +40,29 @@ async def ws_cpython():
 
 @pytest.mark.asyncio
 async def test_dash_u_before_a_script_is_a_flag_not_the_script(ws):
-    await ws.execute("printf 'print(42)\\n' > /s.py")
-    io = await ws.execute("python3 -u /s.py")
+    await ws.shell("printf 'print(42)\\n' > /s.py")
+    io = await ws.shell("python3 -u /s.py")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"42\n"
 
 
 @pytest.mark.asyncio
 async def test_unknown_short_option_exits_2_naming_the_letter(ws):
-    io = await ws.execute("python3 -zz -c 'print(1)'")
+    io = await ws.shell("python3 -zz -c 'print(1)'")
     assert io.exit_code == 2
     assert b"Unknown option: -z" in (await materialize(io.stderr))
 
 
 @pytest.mark.asyncio
 async def test_unknown_long_option_uses_cpythons_lowercase_shape(ws):
-    io = await ws.execute("python3 --nope")
+    io = await ws.shell("python3 --nope")
     assert io.exit_code == 2
     assert b"unknown option --nope" in (await materialize(io.stderr))
 
 
 @pytest.mark.asyncio
 async def test_payload_option_without_its_argument_exits_2(ws):
-    io = await ws.execute("python3 -c")
+    io = await ws.shell("python3 -c")
     assert io.exit_code == 2
     err = await materialize(io.stderr)
     assert b"Argument expected for the -c option" in err
@@ -73,7 +73,7 @@ async def test_payload_option_without_its_argument_exits_2(ws):
 @pytest.mark.parametrize("name", ["python", "python3"])
 @pytest.mark.parametrize("flag", ["--version", "-V", "-VV"])
 async def test_version_reports_the_monty_guest(ws, name, flag):
-    io = await ws.execute(f"{name} {flag}")
+    io = await ws.shell(f"{name} {flag}")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"Python 3.14.0 (monty)\n"
     assert await materialize(io.stderr) == b""
@@ -81,7 +81,7 @@ async def test_version_reports_the_monty_guest(ws, name, flag):
 
 @pytest.mark.asyncio
 async def test_version_reports_the_local_interpreter(ws_cpython):
-    io = await ws_cpython.execute("python3 --version")
+    io = await ws_cpython.shell("python3 --version")
     assert io.exit_code == 0
     assert await materialize(
         io.stdout) == f"Python {sys.version.split()[0]}\n".encode()
@@ -94,8 +94,8 @@ async def test_version_reports_the_local_interpreter(ws_cpython):
     "echo 'print(argv[-1])' | python3 - --version",
 ])
 async def test_program_version_operand_is_not_intercepted(ws, line):
-    await ws.execute("echo 'print(argv[-1])' > /version.py")
-    io = await ws.execute(line)
+    await ws.shell("echo 'print(argv[-1])' > /version.py")
+    io = await ws.shell(line)
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"--version\n"
 
@@ -103,9 +103,9 @@ async def test_program_version_operand_is_not_intercepted(ws, line):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["python", "python3", "js", "node"])
 async def test_version_without_a_runtime_uses_the_invoked_name(name):
-    ws = Workspace({"/": RAMResource()}, runtimes=[])
+    ws = Workspace({"/": RAMVFS()}, runtimes=[])
     try:
-        io = await ws.execute(f"{name} --version")
+        io = await ws.shell(f"{name} --version")
         assert io.exit_code == 127
         assert await materialize(io.stdout) == b""
         assert await materialize(io.stderr
@@ -117,51 +117,51 @@ async def test_version_without_a_runtime_uses_the_invoked_name(name):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["python", "python3", "js", "node"])
 async def test_missing_script_uses_the_invoked_name(ws, name):
-    io = await ws.execute(f"{name} /missing-script")
+    io = await ws.shell(f"{name} /missing-script")
     assert io.exit_code == 1
     assert await io.stderr_str() == f"{name}: /missing-script: No such file\n"
 
 
 @pytest.mark.asyncio
 async def test_dash_h_aliases_the_help_tier(ws):
-    io = await ws.execute("python3 -h")
+    io = await ws.shell("python3 -h")
     assert io.exit_code == 0
     assert b"Usage: python3" in (await materialize(io.stdout))
 
 
 @pytest.mark.asyncio
 async def test_words_after_the_script_reach_the_script_verbatim(ws):
-    await ws.execute("printf 'print(argv[1])\\n' > /s.py")
-    io = await ws.execute("python3 /s.py --not-my-flag")
+    await ws.shell("printf 'print(argv[1])\\n' > /s.py")
+    io = await ws.shell("python3 /s.py --not-my-flag")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"--not-my-flag\n"
 
 
 @pytest.mark.asyncio
 async def test_argv0_is_the_script_path_as_typed(ws):
-    await ws.execute("printf 'print(argv[0])\\n' > /s.py")
-    io = await ws.execute("python3 /s.py")
+    await ws.shell("printf 'print(argv[0])\\n' > /s.py")
+    io = await ws.shell("python3 /s.py")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"/s.py\n"
 
 
 @pytest.mark.asyncio
 async def test_dash_operand_reads_the_program_from_stdin(ws):
-    io = await ws.execute("echo 'print(7)' | python3 -")
+    io = await ws.shell("echo 'print(7)' | python3 -")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"7\n"
 
 
 @pytest.mark.asyncio
 async def test_argv0_under_dash_c_is_dash_c(ws):
-    io = await ws.execute("python3 -c 'print(argv[0])'")
+    io = await ws.shell("python3 -c 'print(argv[0])'")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"-c\n"
 
 
 @pytest.mark.asyncio
 async def test_dash_m_on_a_runtime_without_modules_refuses(ws):
-    io = await ws.execute("python3 -m json.tool")
+    io = await ws.shell("python3 -m json.tool")
     assert io.exit_code == 1
     err = await materialize(io.stderr)
     assert b"-m" in err
@@ -170,14 +170,14 @@ async def test_dash_m_on_a_runtime_without_modules_refuses(ws):
 
 @pytest.mark.asyncio
 async def test_dash_m_runs_a_module_on_a_cpython_runtime(ws_cpython):
-    io = await ws_cpython.execute("python3 -m json.tool --help")
+    io = await ws_cpython.shell("python3 -m json.tool --help")
     assert io.exit_code == 0
     assert b"json.tool" in (await materialize(io.stdout))
 
 
 @pytest.mark.asyncio
 async def test_dash_m_missing_module_is_one_line_not_a_traceback(ws_cpython):
-    io = await ws_cpython.execute("python3 -m nosuchmod")
+    io = await ws_cpython.shell("python3 -m nosuchmod")
     assert io.exit_code == 1
     err = await materialize(io.stderr)
     assert err == b"python3: No module named nosuchmod\n"
@@ -185,7 +185,7 @@ async def test_dash_m_missing_module_is_one_line_not_a_traceback(ws_cpython):
 
 @pytest.mark.asyncio
 async def test_dash_o_strips_asserts_on_a_cpython_runtime(ws_cpython):
-    io = await ws_cpython.execute(
+    io = await ws_cpython.shell(
         "python3 -O -c 'assert False, \"boom\"; print(\"ok\")'")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"ok\n"
@@ -193,7 +193,7 @@ async def test_dash_o_strips_asserts_on_a_cpython_runtime(ws_cpython):
 
 @pytest.mark.asyncio
 async def test_init_flag_warns_on_a_runtime_that_cannot_honor_it(ws):
-    io = await ws.execute("python3 -O -c 'print(1)'")
+    io = await ws.shell("python3 -O -c 'print(1)'")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"1\n"
     err = await materialize(io.stderr)
@@ -202,23 +202,23 @@ async def test_init_flag_warns_on_a_runtime_that_cannot_honor_it(ws):
 
 @pytest.mark.asyncio
 async def test_ignored_by_design_flags_do_not_warn(ws):
-    io = await ws.execute("python3 -u -q -c 'print(1)'")
+    io = await ws.shell("python3 -u -q -c 'print(1)'")
     assert io.exit_code == 0
     assert not (await materialize(io.stderr))
 
 
 @pytest.mark.asyncio
 async def test_argv0_on_a_cpython_runtime_is_the_script_not_dash_c(ws_cpython):
-    await ws_cpython.execute(
+    await ws_cpython.shell(
         "printf 'import sys\\nprint(sys.argv[0])\\n' > /s.py")
-    io = await ws_cpython.execute("python3 /s.py")
+    io = await ws_cpython.shell("python3 /s.py")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"/s.py\n"
 
 
 @pytest.mark.asyncio
 async def test_argv0_on_a_cpython_runtime_under_dash_operand(ws_cpython):
-    io = await ws_cpython.execute(
+    io = await ws_cpython.shell(
         "echo 'import sys; print(sys.argv[0])' | python3 - a")
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"-\n"
@@ -226,8 +226,8 @@ async def test_argv0_on_a_cpython_runtime_under_dash_operand(ws_cpython):
 
 @pytest.mark.asyncio
 async def test_traceback_names_the_script_on_a_cpython_runtime(ws_cpython):
-    await ws_cpython.execute("printf 'raise ValueError(1)\\n' > /boom.py")
-    io = await ws_cpython.execute("python3 /boom.py")
+    await ws_cpython.shell("printf 'raise ValueError(1)\\n' > /boom.py")
+    io = await ws_cpython.shell("python3 /boom.py")
     assert io.exit_code == 1
     assert b'File "/boom.py"' in (await materialize(io.stderr))
 
@@ -237,8 +237,8 @@ async def test_a_shadowing_function_receives_the_words_as_typed(ws):
     # bash's own rule: a function of the same name takes the line. It
     # has no CPython option table, so the `--` the interpreter's handoff
     # would need must not be inserted into its arguments.
-    await ws.execute('python3() { echo "$@"; }')
-    io = await ws.execute('python3 -c payload -u x')
+    await ws.shell('python3() { echo "$@"; }')
+    io = await ws.shell('python3 -c payload -u x')
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"-c payload -u x\n"
 
@@ -248,8 +248,8 @@ async def test_command_bypasses_the_function_and_restores_the_handoff(
         ws_cpython):
     # `command` masks the function for its inner run, so the interpreter
     # is what runs and -u belongs to the program again.
-    await ws_cpython.execute('python3() { echo "$@"; }')
-    io = await ws_cpython.execute(
+    await ws_cpython.shell('python3() { echo "$@"; }')
+    io = await ws_cpython.shell(
         'command python3 -c "import sys; print(sys.argv)" -u x')
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"['-c', '-u', 'x']\n"
@@ -257,9 +257,9 @@ async def test_command_bypasses_the_function_and_restores_the_handoff(
 
 @pytest.mark.asyncio
 async def test_unsetting_the_function_restores_the_handoff(ws_cpython):
-    await ws_cpython.execute('python3() { echo "$@"; }')
-    await ws_cpython.execute('unset -f python3')
-    io = await ws_cpython.execute(
-        'python3 -c "import sys; print(sys.argv)" -u x')
+    await ws_cpython.shell('python3() { echo "$@"; }')
+    await ws_cpython.shell('unset -f python3')
+    io = await ws_cpython.shell('python3 -c "import sys; print(sys.argv)" -u x'
+                                )
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"['-c', '-u', 'x']\n"

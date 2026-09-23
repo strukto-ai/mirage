@@ -25,7 +25,7 @@ import { detectScope, NATIVE_KINDS } from '../../../core/discord/scope.ts'
 import { listChannels } from '../../../core/discord/channels.ts'
 import { formatGrepResults, searchGuild } from '../../../core/discord/search.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
+import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { patternArg } from '../grep_pattern.ts'
@@ -84,7 +84,7 @@ async function rgCommand(
         const lines = formatGrepResults(
           raw,
           target,
-          mountPrefixOf(operand.virtual, operand.resourcePath),
+          mountPrefixOf(operand.virtual, operand.vfsPath),
           channelMap,
         )
         if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
@@ -128,7 +128,7 @@ async function rgCommand(
 
 export const DISCORD_RG = command({
   name: 'rg',
-  resource: ResourceName.DISCORD,
+  vfs: VFSName.DISCORD,
   spec: specOf('rg'),
   fn: rgCommand,
 })

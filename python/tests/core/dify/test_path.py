@@ -66,8 +66,7 @@ def test_virtual_key_for_honors_prefix_and_patterns():
             "/knowledge/guides/quickstart",
             "guides/quickstart")) == "/knowledge/guides/quickstart"
     assert path.virtual_key_for(
-        PathSpec(resource_path=mount_key("/knowledge/guides/*.md",
-                                         "/knowledge"),
+        PathSpec(vfs_path=mount_key("/knowledge/guides/*.md", "/knowledge"),
                  virtual="/knowledge/guides/*.md",
                  directory="/knowledge/guides",
                  pattern="*.md")) == "/knowledge/guides"

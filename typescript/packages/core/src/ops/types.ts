@@ -26,7 +26,7 @@ export type StatPath = (path: string) => Promise<FileStat | null>
 // readdir one virtual path through the workspace rather than one backend.
 // What a walker whose output is a single document (tree) reads once it
 // reaches a mount boundary, since the subtree below it lives in another
-// resource that the walker's own accessor cannot open.
+// VFS that the walker's own accessor cannot open.
 export type ReaddirPath = (path: string) => Promise<string[]>
 
 // The mount prefix serving a virtual path. A mount boundary is a filesystem
@@ -46,7 +46,7 @@ export type ChildMounts = (parent: string) => string[]
 //
 // A command runs bound to one backend, and that backend cannot see a
 // mount nested inside its own tree: the child's keys live in another
-// resource entirely, so the parent's `readdir` never lists it. A walker
+// VFS entirely, so the parent's `readdir` never lists it. A walker
 // that must account for the whole subtree therefore has to be told, the
 // same way `LinkView` tells it about symlinks.
 //

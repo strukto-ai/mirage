@@ -86,10 +86,8 @@ def path_flag_scopes(cmd_name: str, argv: list[str],
         return []
     parsed = parse_command(spec, argv, cwd, cmd_name)
     return [
-        PathSpec(virtual=value,
-                 directory=value,
-                 resource_path="",
-                 raw_path=value) for value in parsed.path_flag_values
+        PathSpec(virtual=value, directory=value, vfs_path="", raw_path=value)
+        for value in parsed.path_flag_values
     ]
 
 
@@ -121,7 +119,7 @@ def positional_scopes(cmd_name: str, argv: list[str], cwd: str,
             value,
             PathSpec(virtual=value,
                      directory=value,
-                     resource_path="",
+                     vfs_path="",
                      raw_path=value)) for value in parsed.paths()
     ]
 

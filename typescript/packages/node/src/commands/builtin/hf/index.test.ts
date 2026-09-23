@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { HF_RESOURCES } from '../../../accessor/hf.ts'
+import { HF_VFS_NAMES } from '../../../accessor/hf.ts'
 import { HF_COMMANDS } from './index.ts'
 import { HF_IO } from './io.ts'
 
@@ -93,15 +93,15 @@ describe('HF_COMMANDS', () => {
     }
   })
 
-  it('registers every command for all four hf resources', () => {
+  it('registers every command for all four hf VFS', () => {
     const byName = new Map<string, Set<string>>()
     for (const cmd of HF_COMMANDS) {
       const set = byName.get(cmd.name) ?? new Set<string>()
-      if (cmd.resource !== null) set.add(cmd.resource)
+      if (cmd.vfs !== null) set.add(cmd.vfs)
       byName.set(cmd.name, set)
     }
-    for (const [name, resources] of byName.entries()) {
-      expect([name, [...resources].sort()]).toEqual([name, [...HF_RESOURCES].sort()])
+    for (const [name, mounts] of byName.entries()) {
+      expect([name, [...mounts].sort()]).toEqual([name, [...HF_VFS_NAMES].sort()])
     }
   })
 })

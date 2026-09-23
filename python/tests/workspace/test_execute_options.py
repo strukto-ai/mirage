@@ -17,20 +17,20 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.abort import MirageAbortError, cancellable_sleep
 from mirage.workspace.executor.builtins.sleep.sleep import handle_sleep
 
 
 def _make_ws():
-    resource = RAMResource()
-    store = resource._store
+    vfs = RAMVFS()
+    store = vfs._store
     store.dirs.add("/")
     store.dirs.add("/subdir")
     store.dirs.add("/other")
     store.files["/subdir/file.txt"] = b"hello"
     store.modified["/subdir/file.txt"] = "2024-01-01"
-    return Workspace({"/ram/": resource}, mode=MountMode.WRITE)
+    return Workspace({"/ram/": vfs}, mode=MountMode.WRITE)
 
 
 # ── cwd tests ────────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ def _make_ws():
 @pytest.mark.asyncio
 async def test_cwd_runs_in_override():
     ws = _make_ws()
-    r = await ws.execute("pwd", cwd="/ram/subdir")
+    r = await ws.shell("pwd", cwd="/ram/subdir")
     assert (await r.stdout_str()).strip() == "/ram/subdir"
 
 
@@ -47,7 +47,7 @@ async def test_cwd_runs_in_override():
 async def test_cwd_does_not_mutate_session():
     ws = _make_ws()
     before = ws.get_session(ws.default_session_id).cwd
-    await ws.execute("pwd", cwd="/ram/subdir")
+    await ws.shell("pwd", cwd="/ram/subdir")
     after = ws.get_session(ws.default_session_id).cwd
     assert before == after
 
@@ -56,7 +56,7 @@ async def test_cwd_does_not_mutate_session():
 async def test_cwd_cd_does_not_leak():
     ws = _make_ws()
     before = ws.get_session(ws.default_session_id).cwd
-    await ws.execute("cd /ram/subdir", cwd="/ram")
+    await ws.shell("cd /ram/subdir", cwd="/ram")
     after = ws.get_session(ws.default_session_id).cwd
     assert before == after
 
@@ -65,8 +65,8 @@ async def test_cwd_cd_does_not_leak():
 async def test_cwd_parallel_isolation():
     ws = _make_ws()
     r1, r2 = await asyncio.gather(
-        ws.execute("pwd", cwd="/ram/subdir"),
-        ws.execute("pwd", cwd="/ram/other"),
+        ws.shell("pwd", cwd="/ram/subdir"),
+        ws.shell("pwd", cwd="/ram/other"),
     )
     assert (await r1.stdout_str()).strip() == "/ram/subdir"
     assert (await r2.stdout_str()).strip() == "/ram/other"
@@ -75,10 +75,10 @@ async def test_cwd_parallel_isolation():
 @pytest.mark.asyncio
 async def test_setup_persists_overrides_inherit():
     ws = _make_ws()
-    await ws.execute("export DEBUG=1")
+    await ws.shell("export DEBUG=1")
     assert ws.get_session(ws.default_session_id).env.get("DEBUG") == "1"
     before_cwd = ws.get_session(ws.default_session_id).cwd
-    r = await ws.execute("printenv DEBUG", cwd="/ram/subdir")
+    r = await ws.shell("printenv DEBUG", cwd="/ram/subdir")
     assert (await r.stdout_str()).strip() == "1"
     assert ws.get_session(ws.default_session_id).cwd == before_cwd
     assert ws.get_session(ws.default_session_id).env.get("DEBUG") == "1"
@@ -87,7 +87,7 @@ async def test_setup_persists_overrides_inherit():
 @pytest.mark.asyncio
 async def test_function_definitions_do_not_leak():
     ws = _make_ws()
-    await ws.execute("greet() { echo hi; }", cwd="/ram/subdir")
+    await ws.shell("greet() { echo hi; }", cwd="/ram/subdir")
     session = ws.get_session(ws.default_session_id)
     assert "greet" not in session.functions
 
@@ -98,7 +98,7 @@ async def test_function_definitions_do_not_leak():
 @pytest.mark.asyncio
 async def test_env_exposes_override():
     ws = _make_ws()
-    r = await ws.execute("printenv FOO", env={"FOO": "bar"})
+    r = await ws.shell("printenv FOO", env={"FOO": "bar"})
     assert r.exit_code == 0
     assert (await r.stdout_str()).strip() == "bar"
 
@@ -107,7 +107,7 @@ async def test_env_exposes_override():
 async def test_env_does_not_mutate_session():
     ws = _make_ws()
     before = dict(ws.get_session(ws.default_session_id).env)
-    await ws.execute("printenv FOO", env={"FOO": "bar"})
+    await ws.shell("printenv FOO", env={"FOO": "bar"})
     after = dict(ws.get_session(ws.default_session_id).env)
     assert before == after
 
@@ -115,18 +115,18 @@ async def test_env_does_not_mutate_session():
 @pytest.mark.asyncio
 async def test_env_export_does_not_leak():
     ws = _make_ws()
-    await ws.execute("export LEAKED=yes", env={"FOO": "bar"})
+    await ws.shell("export LEAKED=yes", env={"FOO": "bar"})
     assert "LEAKED" not in ws.get_session(ws.default_session_id).env
 
 
 @pytest.mark.asyncio
 async def test_env_layers_onto_session():
     ws = _make_ws()
-    await ws.execute("export BASE=keep")
+    await ws.shell("export BASE=keep")
     assert ws.get_session(ws.default_session_id).env.get("BASE") == "keep"
-    r_base = await ws.execute("printenv BASE", env={"FOO": "bar"})
+    r_base = await ws.shell("printenv BASE", env={"FOO": "bar"})
     assert (await r_base.stdout_str()).strip() == "keep"
-    r_foo = await ws.execute("printenv FOO", env={"FOO": "bar"})
+    r_foo = await ws.shell("printenv FOO", env={"FOO": "bar"})
     assert (await r_foo.stdout_str()).strip() == "bar"
     session_env = ws.get_session(ws.default_session_id).env
     assert session_env.get("BASE") == "keep"
@@ -137,8 +137,8 @@ async def test_env_layers_onto_session():
 async def test_env_parallel_isolation():
     ws = _make_ws()
     r1, r2 = await asyncio.gather(
-        ws.execute("printenv FOO", env={"FOO": "one"}),
-        ws.execute("printenv FOO", env={"FOO": "two"}),
+        ws.shell("printenv FOO", env={"FOO": "one"}),
+        ws.shell("printenv FOO", env={"FOO": "two"}),
     )
     assert (await r1.stdout_str()).strip() == "one"
     assert (await r2.stdout_str()).strip() == "two"
@@ -153,7 +153,7 @@ async def test_cancel_pre_set_raises_immediately():
     cancel = asyncio.Event()
     cancel.set()
     with pytest.raises(Exception) as exc_info:
-        await ws.execute("echo hi", cancel=cancel)
+        await ws.shell("echo hi", cancel=cancel)
     assert "abort" in str(exc_info.value).lower()
 
 
@@ -169,7 +169,7 @@ async def test_cancel_aborts_sleep_within_timeout():
     asyncio.create_task(trigger())
     t0 = asyncio.get_event_loop().time()
     with pytest.raises(Exception):
-        await ws.execute("sleep 5", cancel=cancel)
+        await ws.shell("sleep 5", cancel=cancel)
     assert asyncio.get_event_loop().time() - t0 < 1.0
 
 
@@ -185,7 +185,7 @@ async def test_cancel_inside_for_loop():
     asyncio.create_task(trigger())
     t0 = asyncio.get_event_loop().time()
     with pytest.raises(Exception):
-        await ws.execute(
+        await ws.shell(
             "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 1; done",
             cancel=cancel,
         )
@@ -204,7 +204,7 @@ async def test_cancel_between_list_stages():
     asyncio.create_task(trigger())
     t0 = asyncio.get_event_loop().time()
     with pytest.raises(Exception):
-        await ws.execute(
+        await ws.shell(
             "sleep 1 && sleep 1 && sleep 1 && echo done",
             cancel=cancel,
         )
@@ -227,8 +227,7 @@ async def test_cancel_inside_command_substitution(monkeypatch):
 
     monkeypatch.setitem(handle_sleep.__globals__, "cancellable_sleep",
                         tracked_sleep)
-    task = asyncio.create_task(
-        ws.execute('echo "$(sleep 3600)"', cancel=cancel))
+    task = asyncio.create_task(ws.shell('echo "$(sleep 3600)"', cancel=cancel))
     try:
         # Synchronize on the inner command, not parsing/runner wall time.
         await asyncio.wait_for(entered.wait(), timeout=10)
@@ -253,8 +252,8 @@ async def test_cancel_workspace_remains_usable():
 
     asyncio.create_task(trigger())
     with pytest.raises(Exception):
-        await ws.execute("sleep 5", cancel=cancel)
-    r = await ws.execute("echo recovered")
+        await ws.shell("sleep 5", cancel=cancel)
+    r = await ws.shell("echo recovered")
     assert r.exit_code == 0
     assert r.stdout.decode().strip() == "recovered"
 
@@ -265,7 +264,7 @@ async def test_cancel_workspace_remains_usable():
 async def _tool_call(ws, cmd, cwd_v, env_v, timeout):
     cancel = asyncio.Event()
     asyncio.get_event_loop().call_later(timeout, cancel.set)
-    return await ws.execute(cmd, cwd=cwd_v, env=env_v, cancel=cancel)
+    return await ws.shell(cmd, cwd=cwd_v, env=env_v, cancel=cancel)
 
 
 @pytest.mark.asyncio
@@ -287,14 +286,12 @@ async def test_agent_pattern_parallel_tool_calls_each_with_own_options():
 
 @pytest.mark.asyncio
 async def test_execute_uses_custom_default_session_id():
-    resource = RAMResource()
-    resource._store.dirs.add("/")
-    ws = Workspace({"/ram/": resource},
-                   mode=MountMode.WRITE,
-                   session_id="mysess")
-    r = await ws.execute("echo hi > /ram/f.txt")
+    vfs = RAMVFS()
+    vfs._store.dirs.add("/")
+    ws = Workspace({"/ram/": vfs}, mode=MountMode.WRITE, session_id="mysess")
+    r = await ws.shell("echo hi > /ram/f.txt")
     assert r.exit_code == 0
-    r2 = await ws.execute("cat /ram/f.txt")
+    r2 = await ws.shell("cat /ram/f.txt")
     assert (await r2.stdout_str()).strip() == "hi"
 
 
@@ -319,18 +316,18 @@ async def test_an_aborted_line_does_not_erase_a_concurrent_lines_status():
     # A's snapshot is older than B's result, so putting it back would
     # resurrect a status the shell had already moved past.
     ws = _make_ws()
-    await ws.execute("true")
+    await ws.shell("true")
 
     cancel = asyncio.Event()
-    blocked = asyncio.create_task(ws.execute("sleep 5", cancel=cancel))
+    blocked = asyncio.create_task(ws.shell("sleep 5", cancel=cancel))
     # Let the blocked line reach its snapshot before the other one runs.
     await asyncio.sleep(0.05)
 
-    await ws.execute("false")
+    await ws.shell("false")
 
     cancel.set()
     with pytest.raises(Exception):
         await blocked
 
-    r = await ws.execute("echo $?")
+    r = await ws.shell("echo $?")
     assert r.stdout.decode().strip() == "1"

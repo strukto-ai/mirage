@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.postgres import PostgresConfig, PostgresResource
+from mirage.vfs.postgres import PostgresConfig, PostgresVFS
 
 load_dotenv(".env.development")
 
@@ -27,10 +27,10 @@ config = PostgresConfig(
     max_read_rows=1_000_000,
     max_read_bytes=512 * 1024 * 1024,
 )
-resource = PostgresResource(config=config)
+vfs = PostgresVFS(config=config)
 
 with Workspace(
-    {"/pg/": Mount(resource, mode=MountMode.READ,
+    {"/pg/": Mount(vfs, mode=MountMode.READ,
                    backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
@@ -99,6 +99,6 @@ with Workspace(
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

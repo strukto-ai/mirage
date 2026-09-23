@@ -23,7 +23,7 @@ from mirage.core.postgres.semantic import (SAMPLE_VALUES_LIMIT,
                                            build_entity_semantic_json,
                                            build_relationships,
                                            classify_column)
-from mirage.resource.postgres.config import PostgresConfig
+from mirage.vfs.postgres.config import PostgresConfig
 
 COLUMNS = [
     {

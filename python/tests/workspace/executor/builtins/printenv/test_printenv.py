@@ -3,12 +3,12 @@ import pytest
 from mirage.io.stream import materialize
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.printenv import handle_printenv
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, set_attr
 
 
-def _session() -> Session:
-    session = Session(session_id="s1")
+def _session() -> SessionState:
+    session = SessionState(session_id="s1")
     seed_var(session, "SHOWN", "yes")
     set_attr(session, "SHOWN", VarAttr.EXPORT)
     seed_var(session, "PLAIN", "no")

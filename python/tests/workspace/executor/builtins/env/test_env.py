@@ -6,15 +6,15 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.workspace.executor.builtins.env import handle_env
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, set_attr
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
-def seed_exported(session: Session, name: str, value: str) -> None:
+def seed_exported(session: SessionState, name: str, value: str) -> None:
     """Seed a variable the process-view printers will actually list.
 
     `env`, `printenv` and `export -p` show exported names only, so a
@@ -23,7 +23,7 @@ def seed_exported(session: Session, name: str, value: str) -> None:
     plain shell variable, which those three rightly never print.
 
     Args:
-        session (Session): the session being seeded.
+        session (SessionState): the session being seeded.
         name (str): variable name.
         value (str): the value to store.
     """

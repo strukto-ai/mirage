@@ -111,7 +111,7 @@ async function duWalk(
   if (info.type !== FileType.DIRECTORY) {
     const size = info.size ?? 0
     if (entries !== null) {
-      const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+      const prefix = mountPrefixOf(path.virtual, path.vfsPath)
       entries.push([`/${mountKey(path.virtual, prefix)}`, size])
     }
     return size
@@ -130,7 +130,7 @@ async function duWalk(
       ops,
       accessor,
       index,
-      PathSpec.fromStrPath(child, rekey(path.virtual, path.resourcePath, child)),
+      PathSpec.fromStrPath(child, rekey(path.virtual, path.vfsPath, child)),
       budget,
       entries,
     )

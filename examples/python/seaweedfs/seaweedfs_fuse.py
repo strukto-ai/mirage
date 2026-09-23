@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
+from mirage.vfs.seaweedfs import SeaweedFSConfig, SeaweedFSVFS
 
 load_dotenv(".env.development")
 
@@ -29,33 +29,31 @@ config = SeaweedFSConfig(
     secret_access_key=os.environ.get("SEAWEEDFS_SECRET_KEY", "any"),
 )
 
-resource = SeaweedFSResource(config)
+vfs = SeaweedFSVFS(config)
 
 SEED_KEYS = ("/seaweedfs/data/example.jsonl", "/seaweedfs/data/config.json",
              "/seaweedfs/notes.txt")
 
 
 async def seed(ws: Workspace) -> None:
-    await ws.fs.write(
+    await ws.vfs.write(
         "/seaweedfs/data/example.jsonl",
         b'{"event":"queue-operation","tool":"mirage"}\n'
         b'{"event":"read","tool":"mirage"}\n'
         b'{"event":"queue-operation","tool":"other"}\n')
-    await ws.fs.write(
+    await ws.vfs.write(
         "/seaweedfs/data/config.json",
         b'{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}')
-    await ws.fs.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
+    await ws.vfs.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
 
 
 async def cleanup(ws: Workspace) -> None:
     for key in SEED_KEYS:
-        await ws.execute(f"rm {key}")
+        await ws.shell(f"rm {key}")
 
 
 mounts = {
-    "/seaweedfs/": Mount(resource,
-                         mode=MountMode.WRITE,
-                         backend=MountBackend.FUSE)
+    "/seaweedfs/": Mount(vfs, mode=MountMode.WRITE, backend=MountBackend.FUSE)
 }
 with Workspace(mounts) as ws:
     asyncio.run(seed(ws))
@@ -90,6 +88,6 @@ with Workspace(mounts) as ws:
 
     asyncio.run(cleanup(ws))
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

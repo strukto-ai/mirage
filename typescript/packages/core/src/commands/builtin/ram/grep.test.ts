@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_GREP = RAM_COMMANDS.filter((c) => c.name === 'grep' && c.filetype == null)
 
@@ -23,14 +23,14 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runGrep(
-  resource: RAMResource,
+  vfs: RAMVFS,
   pattern: string,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ text: string; exitCode: number }> {
   const cmd = RAM_GREP[0]
   if (cmd === undefined) throw new Error('grep not registered')
-  const result = await cmd.fn(resource.accessor, paths, [pattern], {
+  const result = await cmd.fn(vfs.accessor, paths, [pattern], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -45,36 +45,34 @@ async function runGrep(
 
 describe('grep', () => {
   it('match found (files_only with -l)', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar\nhello again'))
-    const { text } = await runGrep(resource, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar\nhello again'))
+    const { text } = await runGrep(vfs, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
       args_l: true,
     })
     expect(text).toBe('/tmp/a.txt\n')
   })
 
   it('no match returns exitCode 1', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar'))
-    const { text, exitCode } = await runGrep(resource, 'xyz', [PathSpec.fromStrPath('/tmp/a.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar'))
+    const { text, exitCode } = await runGrep(vfs, 'xyz', [PathSpec.fromStrPath('/tmp/a.txt')])
     expect(text).toBe('')
     expect(exitCode).toBe(1)
   })
 
   it('empty file returns no match', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', new Uint8Array())
-    const { text, exitCode } = await runGrep(resource, 'hello', [
-      PathSpec.fromStrPath('/tmp/a.txt'),
-    ])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', new Uint8Array())
+    const { text, exitCode } = await runGrep(vfs, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')])
     expect(text).toBe('')
     expect(exitCode).toBe(1)
   })
 
   it('-r on a single file retains single-file output', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/log.txt', ENC.encode('one\nerror here\ntwo\nerror again\n'))
-    const { text } = await runGrep(resource, 'error', [PathSpec.fromStrPath('/log.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/log.txt', ENC.encode('one\nerror here\ntwo\nerror again\n'))
+    const { text } = await runGrep(vfs, 'error', [PathSpec.fromStrPath('/log.txt')], {
       r: true,
       n: true,
     })
@@ -82,9 +80,9 @@ describe('grep', () => {
   })
 
   it('-i ignore case matches', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('Hello World\nhello world\nHELLO'))
-    const { text } = await runGrep(resource, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('Hello World\nhello world\nHELLO'))
+    const { text } = await runGrep(vfs, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
       i: true,
       args_l: true,
     })
@@ -92,9 +90,9 @@ describe('grep', () => {
   })
 
   it('-v invert match', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('hello\nworld\nhello again'))
-    const { text } = await runGrep(resource, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('hello\nworld\nhello again'))
+    const { text } = await runGrep(vfs, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
       v: true,
       args_l: true,
     })
@@ -102,49 +100,49 @@ describe('grep', () => {
   })
 
   it('-c count only', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\nfoo baz'))
-    const { text } = await runGrep(resource, 'foo', [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\nfoo baz'))
+    const { text } = await runGrep(vfs, 'foo', [PathSpec.fromStrPath('/tmp/a.txt')], {
       c: true,
     })
     expect(text.trim()).toBe('2')
   })
 
   it('-n line numbers', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('x\nhello\ny'))
-    const { text } = await runGrep(resource, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('x\nhello\ny'))
+    const { text } = await runGrep(vfs, 'hello', [PathSpec.fromStrPath('/tmp/a.txt')], {
       n: true,
     })
     expect(text.trim()).toBe('2:hello')
   })
 
   it('-F fixed string disables regex metachars', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('axb\na.b'))
-    const { text } = await runGrep(resource, 'a.b', [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('axb\na.b'))
+    const { text } = await runGrep(vfs, 'a.b', [PathSpec.fromStrPath('/tmp/a.txt')], {
       F: true,
     })
     expect(text.trim()).toBe('a.b')
   })
 
   it('-w whole word', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('foobar\nfoo bar'))
-    const { text } = await runGrep(resource, 'foo', [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('foobar\nfoo bar'))
+    const { text } = await runGrep(vfs, 'foo', [PathSpec.fromStrPath('/tmp/a.txt')], {
       w: true,
     })
     expect(text.trim()).toBe('foo bar')
   })
 
   it('recursive mode (-r) searches all files under a directory', async () => {
-    const resource = new RAMResource()
-    resource.store.dirs.add('/tmp')
-    resource.store.dirs.add('/tmp/sub')
-    resource.store.files.set('/tmp/a.txt', ENC.encode('hello world\n'))
-    resource.store.files.set('/tmp/sub/b.txt', ENC.encode('goodbye hello\n'))
-    resource.store.files.set('/tmp/sub/c.txt', ENC.encode('nothing\n'))
-    const { text } = await runGrep(resource, 'hello', [PathSpec.fromStrPath('/tmp')], { r: true })
+    const vfs = new RAMVFS()
+    vfs.store.dirs.add('/tmp')
+    vfs.store.dirs.add('/tmp/sub')
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('hello world\n'))
+    vfs.store.files.set('/tmp/sub/b.txt', ENC.encode('goodbye hello\n'))
+    vfs.store.files.set('/tmp/sub/c.txt', ENC.encode('nothing\n'))
+    const { text } = await runGrep(vfs, 'hello', [PathSpec.fromStrPath('/tmp')], { r: true })
     const lines = text.trim().split('\n').sort()
     expect(lines).toHaveLength(2)
     expect(lines[0]).toContain('a.txt')

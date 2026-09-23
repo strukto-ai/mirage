@@ -65,7 +65,7 @@ prefix:
 # sandbox.yaml, inside the sandbox
 mounts:
   /data:
-    resource: s3
+    vfs: s3
     config:
       bucket: my-bucket
       aws_access_key_id: ...
@@ -93,7 +93,7 @@ This needs an image with `fuse3` and Mirage plus your backends installed
 
 <Note>
   The `ssh` provider can skip all of this when the files live on the ssh
-  machine itself: mount them over the ssh resource at a prefix equal to
+  machine itself: mount them over the ssh VFS at a prefix equal to
   their remote absolute path, and captured lines open them natively with no
   FUSE and no remote Mirage. See
   [Skip the FUSE](/python/runtime/sandbox/ssh#skip-the-fuse) on the SSH page.
@@ -135,7 +135,7 @@ sidebar for connection and configuration details.
 
 Sandbox runtimes are ordinary `runtimes` entries: a name, its captures, and
 a `config` block describing the machine (mirroring a mount's `config`
-block), with `vfs` as the in-process catch-all. Only the selected runtime
+block), with `workspace` as the in-process catch-all. Only the selected runtime
 consumes its entry, so one file stays portable:
 
 ```yaml
@@ -144,11 +144,10 @@ runtimes:
     captures: ["python3"]
     config:
       container: my-sandbox # started with your own `docker run`
-  - vfs
-
+  - workspace
 mounts:
   /data:
-    resource: s3
+    vfs: s3
     config:
       bucket: ${AWS_S3_BUCKET}
       region: ${AWS_DEFAULT_REGION}

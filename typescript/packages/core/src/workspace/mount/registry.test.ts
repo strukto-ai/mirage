@@ -18,12 +18,15 @@ import { CLISpec } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { BaseResource, type Resource } from '../../resource/base.ts'
+import { BaseVFS, type VFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { isNoMount } from '../../utils/errors.ts'
+import { RAMFileCacheStore } from '../../cache/file/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import type { MountEntry } from './mount.ts'
 import { MountCommandUnsupported, MountRegistry } from './registry.ts'
 
-class StubResource extends BaseResource implements Resource {
+class StubVFS extends BaseVFS implements VFS {
   readonly kind = 'stub'
   open(): Promise<void> {
     return Promise.resolve()
@@ -33,7 +36,7 @@ class StubResource extends BaseResource implements Resource {
   }
 }
 
-class RAMStubResource extends BaseResource implements Resource {
+class RAMStubVFS extends BaseVFS implements VFS {
   readonly kind = 'ram'
   open(): Promise<void> {
     return Promise.resolve()
@@ -48,18 +51,18 @@ const EMPTY_SPEC = new CommandSpec()
 
 describe('MountRegistry.resolve', () => {
   it('resolves a nested path to the matching mount; PathSpec keeps original + sets prefix', () => {
-    const ram = new StubResource()
+    const ram = new StubVFS()
     const reg = new MountRegistry({ '/data': ram }, MountMode.WRITE)
     const [r, p, mode] = reg.resolve('/data/foo.txt')
     expect(r).toBe(ram)
     expect(p.virtual).toBe('/data/foo.txt')
-    expect(mountPrefixOf(p.virtual, p.resourcePath)).toBe('/data')
+    expect(mountPrefixOf(p.virtual, p.vfsPath)).toBe('/data')
     expect(p.mountPath).toBe('/foo.txt')
     expect(mode).toBe(MountMode.WRITE)
   })
 
   it('resolves the mount root exactly', () => {
-    const ram = new StubResource()
+    const ram = new StubVFS()
     const reg = new MountRegistry({ '/data': ram }, MountMode.READ)
     const [, p] = reg.resolve('/data')
     expect(p.virtual).toBe('/data')
@@ -67,8 +70,8 @@ describe('MountRegistry.resolve', () => {
   })
 
   it('picks the longest matching prefix', () => {
-    const root = new StubResource()
-    const logs = new StubResource()
+    const root = new StubVFS()
+    const logs = new StubVFS()
     const reg = new MountRegistry({ '/data': root, '/data/logs': logs }, MountMode.READ)
     const [picked, p] = reg.resolve('/data/logs/2026.log')
     expect(picked).toBe(logs)
@@ -77,15 +80,15 @@ describe('MountRegistry.resolve', () => {
   })
 
   it('falls back to the shorter mount when longer does not match', () => {
-    const root = new StubResource()
-    const logs = new StubResource()
+    const root = new StubVFS()
+    const logs = new StubVFS()
     const reg = new MountRegistry({ '/data': root, '/data/logs': logs }, MountMode.READ)
     const [picked] = reg.resolve('/data/other')
     expect(picked).toBe(root)
   })
 
   it('uses a root mount when nothing more specific matches', () => {
-    const rootRes = new StubResource()
+    const rootRes = new StubVFS()
     const reg = new MountRegistry({ '/': rootRes }, MountMode.READ)
     const [r, p] = reg.resolve('/anywhere/deep/file')
     expect(r).toBe(rootRes)
@@ -93,7 +96,7 @@ describe('MountRegistry.resolve', () => {
   })
 
   it('preserves a trailing slash on the resolved path', () => {
-    const ram = new StubResource()
+    const ram = new StubVFS()
     const reg = new MountRegistry({ '/data': ram }, MountMode.READ)
     const [, p] = reg.resolve('/data/logs/')
     expect(p.virtual).toBe('/data/logs/')
@@ -101,13 +104,13 @@ describe('MountRegistry.resolve', () => {
   })
 
   it('throws when no mount matches the path', () => {
-    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.READ)
+    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.READ)
     expect(() => reg.resolve('/elsewhere')).toThrow(/no mount matches/)
   })
 
   it('normalizes mount prefixes so "/data", "data", and "/data/" collide', () => {
-    const a = new StubResource()
-    const b = new StubResource()
+    const a = new StubVFS()
+    const b = new StubVFS()
     expect(() => new MountRegistry({ '/data': a, 'data/': b }, MountMode.READ)).toThrow(
       /duplicate mount prefix/,
     )
@@ -117,7 +120,7 @@ describe('MountRegistry.resolve', () => {
 describe('MountRegistry.descendantMounts', () => {
   function multi(): MountRegistry {
     return new MountRegistry(
-      { '/': new StubResource(), '/r2': new StubResource(), '/ram': new StubResource() },
+      { '/': new StubVFS(), '/r2': new StubVFS(), '/ram': new StubVFS() },
       MountMode.WRITE,
     )
   }
@@ -125,9 +128,9 @@ describe('MountRegistry.descendantMounts', () => {
   function nested(): MountRegistry {
     return new MountRegistry(
       {
-        '/': new StubResource(),
-        '/data': new StubResource(),
-        '/data/inner': new StubResource(),
+        '/': new StubVFS(),
+        '/data': new StubVFS(),
+        '/data/inner': new StubVFS(),
       },
       MountMode.WRITE,
     )
@@ -149,13 +152,13 @@ describe('MountRegistry.descendantMounts', () => {
   })
 
   it('returns empty when the path is exactly a mount root with no nested mount', () => {
-    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.WRITE)
     expect(reg.descendantMounts('/data')).toEqual([])
     expect(reg.descendantMounts('/data/')).toEqual([])
   })
 
   it('returns empty for a path inside a mount with no nested mount', () => {
-    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.WRITE)
     expect(reg.descendantMounts('/data/sub')).toEqual([])
   })
 
@@ -180,13 +183,13 @@ describe('MountRegistry.descendantMounts', () => {
 })
 
 describe('MountRegistry.resolveMount: cross-mount fallback', () => {
-  it('falls back to a resource-specific mount when cwd mount lacks the cmd', async () => {
+  it('falls back to a VFS-specific mount when cwd mount lacks the cmd', async () => {
     const reg = new MountRegistry(
-      { '/a': new RAMStubResource(), '/b': new RAMStubResource() },
+      { '/a': new RAMStubVFS(), '/b': new RAMStubVFS() },
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
-    const [grepB] = command({ name: 'grep', resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
+    const [grepB] = command({ name: 'grep', vfs: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
     if (grepB === undefined) throw new Error('missing grep cmd')
     b.register(grepB)
     const mount = await reg.resolveMount('grep', [], '/a/x')
@@ -195,26 +198,26 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
 
   it('still allows fallback when fallback cmd is general (e.g. seq)', async () => {
     const reg = new MountRegistry(
-      { '/a': new RAMStubResource(), '/b': new RAMStubResource() },
+      { '/a': new RAMStubVFS(), '/b': new RAMStubVFS() },
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
-    const [seqB] = command({ name: 'seq', resource: null, spec: EMPTY_SPEC, fn: NOOP_CMD })
+    const [seqB] = command({ name: 'seq', vfs: null, spec: EMPTY_SPEC, fn: NOOP_CMD })
     if (seqB === undefined) throw new Error('missing seq cmd')
     b.registerGeneral(seqB)
     const mount = await reg.resolveMount('seq', [], '/a/x')
     expect(mount).toBe(b)
   })
 
-  it('finds nested resource mount even when a parent mount intercepts cwd', async () => {
+  it('finds nested VFS mount even when a parent mount intercepts cwd', async () => {
     const reg = new MountRegistry(
-      { '/home': new RAMStubResource(), '/home/zecheng/linear': new RAMStubResource() },
+      { '/home': new RAMStubVFS(), '/home/zecheng/linear': new RAMStubVFS() },
       MountMode.READ,
     )
     const linear = reg.mountForPrefix('/home/zecheng/linear')
     const [linearSearch] = command({
       name: 'linear-search',
-      resource: 'ram',
+      vfs: 'ram',
       spec: EMPTY_SPEC,
       fn: NOOP_CMD,
     })
@@ -226,7 +229,7 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
 
   it('returns null when no mount has the command', async () => {
     const reg = new MountRegistry(
-      { '/a': new RAMStubResource(), '/b': new RAMStubResource() },
+      { '/a': new RAMStubVFS(), '/b': new RAMStubVFS() },
       MountMode.READ,
     )
     const mount = await reg.resolveMount('nonexistent-cmd', [], '/a/x')
@@ -234,20 +237,20 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
   })
 
   it('returns null when cwd matches no mount and no mount has the command', async () => {
-    const reg = new MountRegistry({ '/a': new RAMStubResource() }, MountMode.READ)
+    const reg = new MountRegistry({ '/a': new RAMStubVFS() }, MountMode.READ)
     const mount = await reg.resolveMount('linear-search', [], '/somewhere/else')
     expect(mount).toBeNull()
   })
 
   it('returns the cwd mount directly when it has the command', async () => {
     const reg = new MountRegistry(
-      { '/a': new RAMStubResource(), '/b': new RAMStubResource() },
+      { '/a': new RAMStubVFS(), '/b': new RAMStubVFS() },
       MountMode.READ,
     )
     const a = reg.mountForPrefix('/a')
     const b = reg.mountForPrefix('/b')
-    const [grepA] = command({ name: 'grep', resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
-    const [grepB] = command({ name: 'grep', resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
+    const [grepA] = command({ name: 'grep', vfs: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
+    const [grepB] = command({ name: 'grep', vfs: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
     if (grepA === undefined || grepB === undefined) throw new Error('missing grep cmd')
     a.register(grepA)
     b.register(grepB)
@@ -257,15 +260,15 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
 
   it('routes by first path arg when present, ignoring cwd', async () => {
     const reg = new MountRegistry(
-      { '/a': new RAMStubResource(), '/b': new RAMStubResource() },
+      { '/a': new RAMStubVFS(), '/b': new RAMStubVFS() },
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
-    const [grepB] = command({ name: 'grep', resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
+    const [grepB] = command({ name: 'grep', vfs: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
     if (grepB === undefined) throw new Error('missing grep cmd')
     b.register(grepB)
     const path = new PathSpec({
-      resourcePath: 'b/file.txt',
+      vfsPath: 'b/file.txt',
       virtual: '/b/file.txt',
       directory: '/b',
     })
@@ -275,13 +278,13 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
 
   it('resolves write command on READ fallback mount so execution reports read-only', async () => {
     const reg = new MountRegistry(
-      { '/a': new RAMStubResource(), '/b': new RAMStubResource() },
+      { '/a': new RAMStubVFS(), '/b': new RAMStubVFS() },
       MountMode.READ,
     )
     const b = reg.mountForPrefix('/b')
     const [writeCmd] = command({
       name: 'mutate',
-      resource: 'ram',
+      vfs: 'ram',
       spec: EMPTY_SPEC,
       fn: NOOP_CMD,
       write: true,
@@ -299,7 +302,7 @@ describe('MountRegistry.resolveMount: cross-mount fallback', () => {
   })
 })
 
-class LimitedResource extends BaseResource implements Resource {
+class LimitedVFS extends BaseVFS implements VFS {
   readonly kind = 'limited'
   open(): Promise<void> {
     return Promise.resolve()
@@ -311,12 +314,12 @@ class LimitedResource extends BaseResource implements Resource {
 
 describe('MountRegistry.resolveMount: path-bound dispatch', () => {
   function pathBoundRegistryWithFallback(): MountRegistry {
-    const reg = new MountRegistry({ '/limited/': new LimitedResource() }, MountMode.WRITE)
-    reg.mount('/', new RAMStubResource(), MountMode.WRITE)
+    const reg = new MountRegistry({ '/limited/': new LimitedVFS() }, MountMode.WRITE)
+    reg.mount('/', new RAMStubVFS(), MountMode.WRITE)
     const root = reg.mountForPrefix('/')
     const [fallbackOnly] = command({
       name: 'fallback-only',
-      resource: 'ram',
+      vfs: 'ram',
       spec: EMPTY_SPEC,
       fn: NOOP_CMD,
     })
@@ -328,7 +331,7 @@ describe('MountRegistry.resolveMount: path-bound dispatch', () => {
   it('rejects a path-bound command unsupported by its backend', async () => {
     const reg = pathBoundRegistryWithFallback()
     const path = new PathSpec({
-      resourcePath: 'limited/file.txt',
+      vfsPath: 'limited/file.txt',
       virtual: '/limited/file.txt',
       directory: '/limited',
     })
@@ -350,10 +353,10 @@ describe('MountRegistry.resolveMount: path-bound dispatch', () => {
 
 describe('MountRegistry.matchCommandPrefix', () => {
   function regWith(names: string[]): MountRegistry {
-    const reg = new MountRegistry({ '/data': new RAMStubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/data': new RAMStubVFS() }, MountMode.WRITE)
     const mount = reg.mountForPrefix('/data')
     for (const name of names) {
-      const [rc] = command({ name, resource: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
+      const [rc] = command({ name, vfs: 'ram', spec: EMPTY_SPEC, fn: NOOP_CMD })
       if (rc === undefined) throw new Error(`missing cmd ${name}`)
       mount.register(rc)
     }
@@ -398,7 +401,7 @@ describe('MountRegistry.matchCommandPrefix', () => {
 
 describe('MountRegistry mount lookup contract', () => {
   it('mountFor throws the typed noMount for a path outside every mount', () => {
-    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.WRITE)
     let thrown: unknown = null
     try {
       reg.mountFor('/unknown/file.txt')
@@ -409,13 +412,13 @@ describe('MountRegistry mount lookup contract', () => {
   })
 
   it('tryMountFor returns null on a miss and the mount on a hit', () => {
-    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.WRITE)
     expect(reg.tryMountFor('/unknown/file.txt')).toBeNull()
     expect(reg.tryMountFor('/data/file.txt')?.prefix).toBe('/data/')
   })
 
   it('mountForPrefix throws the typed noMount; tryMountForPrefix returns null', () => {
-    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.WRITE)
     let thrown: unknown = null
     try {
       reg.mountForPrefix('/unknown/')
@@ -428,14 +431,14 @@ describe('MountRegistry mount lookup contract', () => {
   })
 
   it('tryMountForPrefix normalizes the registration spelling', () => {
-    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.WRITE)
     for (const spelling of ['/data', 'data/', '/data/']) {
       expect(reg.tryMountForPrefix(spelling)?.prefix).toBe('/data/')
     }
   })
 
   it('groupByMount propagates the miss instead of dropping the path', () => {
-    const reg = new MountRegistry({ '/data': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/data': new StubVFS() }, MountMode.WRITE)
     let thrown: unknown = null
     try {
       reg.groupByMount(['/data/a.txt', '/unknown/b.txt'])
@@ -443,5 +446,69 @@ describe('MountRegistry mount lookup contract', () => {
       thrown = err
     }
     expect(isNoMount(thrown)).toBe(true)
+  })
+})
+
+describe('MountRegistry read gate', () => {
+  // The closure the registry injects into each mount's CacheManager. Its
+  // job is to run the shared verdict, and to answer without probing in the
+  // two cases where probing is wrong.
+  class StubReconciler {
+    readonly asked: string[] = []
+    constructor(
+      private readonly answer: boolean,
+      private readonly rejects?: Error,
+    ) {}
+    reconcileRead(): Promise<void> {
+      return Promise.resolve()
+    }
+    mayServeCached(_mount: MountEntry, path: string): Promise<boolean> {
+      this.asked.push(path)
+      if (this.rejects !== undefined) return Promise.reject(this.rejects)
+      return Promise.resolve(this.answer)
+    }
+  }
+
+  function gated(reconciler?: StubReconciler) {
+    const registry = new MountRegistry({ data: new RAMVFS() }, MountMode.WRITE)
+    registry.attachFileCache(new RAMFileCacheStore())
+    const mount = registry.mountFor('/data/f.txt')
+    if (reconciler !== undefined) registry.setReconciler(reconciler)
+    return { registry, mount }
+  }
+
+  const gateOf = (registry: MountRegistry) =>
+    registry as unknown as { mayServeCached(m: MountEntry, k: string): Promise<boolean> }
+
+  it('trusts the cache with no reconciler wired', async () => {
+    // attachFileCache runs before setReconciler, so the closure reads the
+    // reconciler at call time and falls back to trusting the cache.
+    const { registry, mount } = gated()
+    expect(await gateOf(registry).mayServeCached(mount, '/data/f.txt')).toBe(true)
+  })
+
+  it('consults the reconciler', async () => {
+    const rec = new StubReconciler(true)
+    const { registry, mount } = gated(rec)
+    expect(await gateOf(registry).mayServeCached(mount, '/data/f.txt')).toBe(true)
+    expect(rec.asked).toEqual(['/data/f.txt'])
+  })
+
+  it('refuses a retiring mount without probing', async () => {
+    const rec = new StubReconciler(true)
+    const { registry, mount } = gated(rec)
+    mount.retiring = true
+    expect(await gateOf(registry).mayServeCached(mount, '/data/f.txt')).toBe(false)
+    expect(rec.asked).toEqual([])
+  })
+
+  it('propagates a probe failure rather than reading as serve-cold', async () => {
+    // The safety valve: swallowing here would turn every backend outage
+    // into a silent cache bypass.
+    const rec = new StubReconciler(true, new Error('backend down'))
+    const { registry, mount } = gated(rec)
+    await expect(gateOf(registry).mayServeCached(mount, '/data/f.txt')).rejects.toThrow(
+      'backend down',
+    )
   })
 })

@@ -19,7 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { expandTemplate, makeInert, substitute } from './brace.ts'
 import { classifyWord } from './classify/index.ts'
@@ -44,7 +44,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 // keeps the value live.
 async function expandBraceWord(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -76,7 +76,7 @@ function stringHasArrayAt(node: TSNodeLike): boolean {
 
 async function expandStringWithArray(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -131,7 +131,7 @@ async function expandStringWithArray(
  */
 export async function expandWords(
   parts: TSNodeLike[],
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,
@@ -184,7 +184,7 @@ export async function expandWords(
 
 export async function expandParts(
   parts: TSNodeLike[],
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
 ): Promise<string[]> {
@@ -194,7 +194,7 @@ export async function expandParts(
 
 export async function expandAndClassify(
   words: TSNodeLike[],
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   cwd: string,

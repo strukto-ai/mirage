@@ -85,7 +85,7 @@ class SSHWalk {
   }
 
   async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const sftp = await this.accessor.sftp()
     const start = `/${stripSlash(root.mountPath)}`
     for await (const entry of descend(sftp, this.accessor.config.root ?? '/', start)) {

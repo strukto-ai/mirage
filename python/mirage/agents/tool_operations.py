@@ -83,13 +83,13 @@ async def ensure_parents(ws: Workspace, path: str) -> None:
     parent = gnu_dirname(path)
     if parent in ("/", "", "."):
         return
-    if await ws.fs.exists(parent):
+    if await ws.vfs.exists(parent):
         return
     await ensure_parents(ws, parent)
     try:
-        await ws.fs.mkdir(parent)
+        await ws.vfs.mkdir(parent)
     except OSError:
-        if not await ws.fs.exists(parent):
+        if not await ws.vfs.exists(parent):
             raise
 
 
@@ -117,7 +117,7 @@ class MirageToolOperations:
         Returns:
             ToolResult: The command's rendered output.
         """
-        return _io_result(await self._ws.execute(command))
+        return _io_result(await self._ws.shell(command))
 
     async def read(self,
                    path: str,
@@ -136,7 +136,7 @@ class MirageToolOperations:
         try:
             data = await self._versions.read(path)
         except (OSError, ValueError) as exc:
-            if not await self._ws.fs.exists(path):
+            if not await self._ws.vfs.exists(path):
                 return ToolResult(f"Error: file '{path}' not found", True)
             return ToolResult(f"Error: {exc}", True)
         return ToolResult(number_lines(decode(data), offset, limit))
@@ -151,7 +151,7 @@ class MirageToolOperations:
         Returns:
             ToolResult: The confirmation, or the failure.
         """
-        if await self._ws.fs.exists(path):
+        if await self._ws.vfs.exists(path):
             return ToolResult(f"Error: file '{path}' already exists", True)
         await ensure_parents(self._ws, path)
         await self._versions.write(path, content)
@@ -178,7 +178,7 @@ class MirageToolOperations:
         except StaleMirageFileError as exc:
             return ToolResult(f"Error: {exc}", True)
         except (OSError, ValueError) as exc:
-            if not await self._ws.fs.exists(path):
+            if not await self._ws.vfs.exists(path):
                 return ToolResult(f"Error: file '{path}' not found", True)
             return ToolResult(f"Error: {exc}", True)
         count = content.count(old_string)
@@ -207,7 +207,7 @@ class MirageToolOperations:
         Returns:
             ToolResult: The listing, or the failure.
         """
-        return _io_result(await self._ws.execute(f"ls {shlex.quote(path)}"))
+        return _io_result(await self._ws.shell(f"ls {shlex.quote(path)}"))
 
     async def grep(self, pattern: str, path: str) -> ToolResult:
         """Search recursively for a pattern.
@@ -219,7 +219,7 @@ class MirageToolOperations:
         Returns:
             ToolResult: The matches.
         """
-        io = await self._ws.execute(
+        io = await self._ws.shell(
             f"grep -rn {shlex.quote(pattern)} {shlex.quote(path)}")
         # grep exits 1 for "no match", which is a normal empty answer,
         # and >1 for a real failure (bad regex, unreadable path). Only

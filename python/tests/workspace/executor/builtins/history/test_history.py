@@ -18,7 +18,7 @@ from mirage.commands.config import ExecContext
 from mirage.io.types import IOResult
 from mirage.workspace.executor.builtins.history.history import (_parse_args,
                                                                 handle_history)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 class FakeMount:
@@ -46,8 +46,8 @@ class FakeRegistry:
         return self.mount
 
 
-def session() -> Session:
-    return Session(session_id="test")
+def session() -> SessionState:
+    return SessionState(session_id="test")
 
 
 def test_parse_args_collects_clustered_option_letters():

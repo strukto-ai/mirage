@@ -17,28 +17,28 @@ import { readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline/promises'
-import { FuseManager, MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { FuseManager, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const DATA_DIR = fileURLToPath(new URL('../../../data/', import.meta.url))
 
 async function main(): Promise<void> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
 
-  // Seed via a temporary WRITE-mode workspace, then mount the same resource READ-only.
-  const seedWs = new Workspace({ '/data/': resource }, { mode: MountMode.WRITE })
+  // Seed via a temporary WRITE-mode workspace, then mount the same VFS READ-only.
+  const seedWs = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE })
   const seedEntries = readdirSync(DATA_DIR, { withFileTypes: true })
     .filter((e) => e.isFile())
     .sort((a, b) => (a.name < b.name ? -1 : 1))
   for (const e of seedEntries) {
     const raw = readFileSync(join(DATA_DIR, e.name))
     const bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
-    await seedWs.fs.writeFile('/data/' + e.name, bytes)
+    await seedWs.vfs.writeFile('/data/' + e.name, bytes)
   }
   await seedWs.close()
 
-  console.log(`Seeded ${String(resource.store.files.size)} files from ${DATA_DIR}`)
+  console.log(`Seeded ${String(vfs.store.files.size)} files from ${DATA_DIR}`)
 
-  const ws = new Workspace({ '/data/': resource }, { mode: MountMode.READ })
+  const ws = new Workspace({ '/data/': vfs }, { mode: MountMode.READ })
   const fm = new FuseManager()
   const mp = await fm.setup(ws)
   let cleaned = false

@@ -1,7 +1,7 @@
 ---
 title: Tencent COS
 icon: /images/tencent-logo.svg
-description: Set up Tencent Cloud Object Storage as a MIRAGE resource from Node or the browser.
+description: Set up Tencent Cloud Object Storage as a MIRAGE VFS from Node or the browser.
 ---
 
 Tencent COS uses the S3 API with AWS Signature V4 against `https://cos.<region>.myqcloud.com`. MIRAGE derives this endpoint from your region automatically. COS bucket names include the APPID suffix (e.g. `my-bucket-1250000000`).
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { MountMode, TencentResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, TencentVFS, Workspace } from '@struktoai/mirage-node'
 
-const cos = new TencentResource({
+const cos = new TencentVFS({
   bucket: process.env.COS_BUCKET!,
   region: process.env.COS_REGION!,
   accessKeyId: process.env.COS_SECRET_ID!,
@@ -25,7 +25,7 @@ const cos = new TencentResource({
 })
 
 const ws = new Workspace({ '/bucket/': cos }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `TencentResource` is secret-free, your backend signs each operation using your CAM keys and returns a URL. COS accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the COS endpoint.
+The browser `TencentVFS` is secret-free, your backend signs each operation using your CAM keys and returns a URL. COS accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the COS endpoint.
 
 ### 1. Server: sign URLs with the COS endpoint
 
@@ -92,9 +92,9 @@ app.post('/presign/cos', async (req, res) => {
 ### 2. Browser: wire it up
 
 ```ts
-import { MountMode, TencentResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, TencentVFS, Workspace } from '@struktoai/mirage-browser'
 
-const cos = new TencentResource({
+const cos = new TencentVFS({
   bucket: 'my-bucket-1250000000',
   region: 'ap-guangzhou',
   presignedUrlProvider: async (path, op, opts) => {
@@ -119,4 +119,4 @@ const ws = new Workspace({ '/bucket/': cos }, { mode: MountMode.READ })
 
 Configure CORS rules in the Tencent Cloud console: COS -> your bucket -> **Security Management** -> **CORS**. Allow your dev/production origins with methods `GET, PUT, HEAD, DELETE, POST`, allowed headers `*`, and expose headers `ETag, Content-Length, Content-Type, Last-Modified`.
 
-See the [Tencent resource](/python/resource/tencent) docs for the equivalent Python wiring.
+See the [Tencent VFS](/python/vfs/tencent) docs for the equivalent Python wiring.

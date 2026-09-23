@@ -28,7 +28,7 @@ from mirage.workspace.executor.builtins.shared import (arith_refusal,
                                                        is_valid_name,
                                                        readonly_refusal,
                                                        refusal)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (conversion_scalar, set_attr,
                                             shadow_local, subscript_index)
 from mirage.workspace.types import ExecutionNode
@@ -56,7 +56,7 @@ async def premark(view: SessionView, name: str,
 
 async def store_staged_arrays(
     cmd: str,
-    session: Session,
+    session: SessionState,
     view: SessionView,
     arrays: list[tuple[str, bool, list[str]]],
     mark: VarAttr | None = None,
@@ -82,7 +82,7 @@ async def store_staged_arrays(
 
     Args:
         cmd (str): builtin name for refusal rendering.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         arrays (list[tuple[str, bool, list[str]]]): staged
             ``(name, append, items)`` literals from the declaration.
@@ -326,7 +326,7 @@ def assoc_body(amap: dict[str, str]) -> str:
     return f"=({parts} )"
 
 
-def declare_line(session: Session, name: str) -> str | None:
+def declare_line(session: SessionState, name: str) -> str | None:
     """The ``declare -p`` line for one name, or None when it has none.
 
     The attribute cluster is `attr_letters`, which is why this renders
@@ -339,7 +339,7 @@ def declare_line(session: Session, name: str) -> str | None:
     False for one: reporting it as declared would leak it.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         name (str): the variable to render.
 
     Returns:
@@ -368,7 +368,7 @@ def declare_line(session: Session, name: str) -> str | None:
 
 async def handle_declare_print(
     names: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``declare -p``: render declarations for names, or for all.
 
@@ -379,7 +379,7 @@ async def handle_declare_print(
 
     Args:
         names (list[str]): the names to render, empty for all.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     targets = names or sorted(session.vars)
     lines: list[str] = []
@@ -403,7 +403,7 @@ async def handle_declare_print(
 
 def handle_declare_functions(
     cmd: str,
-    session: Session,
+    session: SessionState,
     flags: set[str],
     names: list[str],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -419,7 +419,7 @@ def handle_declare_functions(
 
     Args:
         cmd (str): the builtin's own name for a diagnostic.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         flags (set[str]): the declaration's collected flag letters.
         names (list[str]): the function names, empty to list all.
     """
@@ -443,12 +443,12 @@ def handle_declare_functions(
 
 
 def readonly_functions(
-        session: Session,
+        session: SessionState,
         names: list[str]) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run ``readonly -f``: freeze the named functions, or list the frozen.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         names (list[str]): the function names, empty to list.
     """
     if not names:
@@ -474,7 +474,7 @@ def readonly_functions(
     return None, IOResult(), ExecutionNode(command="readonly", exit_code=0)
 
 
-def note_local_array(session: Session, name: str) -> bool:
+def note_local_array(session: SessionState, name: str) -> bool:
     """Record the caller's array before a function shadows ``name``.
 
     ``local -a`` / ``declare -a`` inside a function shadow the caller's
@@ -482,7 +482,7 @@ def note_local_array(session: Session, name: str) -> bool:
     teardown in ``execute_command``.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         name (str): the array name being declared.
 
     Returns:
@@ -524,7 +524,7 @@ def nameref_refusal(cmd: str, name: str, target: str) -> str | None:
 
 
 async def write_global(
-    session: Session,
+    session: SessionState,
     view: SessionView,
     key: str,
     value: ShellValue,
@@ -542,7 +542,7 @@ async def write_global(
     caller's local too).
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         key (str): the variable.
         value (ShellValue): the value.

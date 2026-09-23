@@ -20,8 +20,8 @@ from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.langfuse.readdir import readdir
 from mirage.core.render.json import jsonl_bytes
-from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.types import PathSpec
+from mirage.vfs.langfuse.config import LangfuseConfig
 
 
 @pytest.fixture
@@ -41,9 +41,9 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    result = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    result = await readdir(accessor,
+                           PathSpec(vfs_path="", virtual="/", directory="/"),
+                           index)
     assert result == ["/traces", "/sessions", "/prompts", "/datasets"]
 
 
@@ -65,8 +65,7 @@ async def test_readdir_traces(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="traces",
-                     virtual="/traces",
+            PathSpec(vfs_path="traces", virtual="/traces",
                      directory="/traces"), index)
 
     assert "/traces/abc123.json" in result
@@ -86,7 +85,7 @@ async def test_readdir_sessions(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="sessions",
+            PathSpec(vfs_path="sessions",
                      virtual="/sessions",
                      directory="/sessions"), index)
 
@@ -112,7 +111,7 @@ async def test_readdir_prompts(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="prompts",
+            PathSpec(vfs_path="prompts",
                      virtual="/prompts",
                      directory="/prompts"), index)
 
@@ -133,7 +132,7 @@ async def test_readdir_datasets(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="datasets",
+            PathSpec(vfs_path="datasets",
                      virtual="/datasets",
                      directory="/datasets"), index)
 
@@ -151,7 +150,7 @@ async def test_readdir_dataset_contents(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="datasets/qa-eval",
+            PathSpec(vfs_path="datasets/qa-eval",
                      virtual="/datasets/qa-eval",
                      directory="/datasets/qa-eval"), index)
     assert "/datasets/qa-eval/items.jsonl" in result
@@ -170,7 +169,7 @@ async def test_readdir_dataset_runs_sized(accessor, index):
     ):
         await readdir(
             accessor,
-            PathSpec(resource_path="datasets/qa-eval/runs",
+            PathSpec(vfs_path="datasets/qa-eval/runs",
                      virtual="/datasets/qa-eval/runs",
                      directory="/datasets/qa-eval/runs"), index)
     lookup = await index.get("/datasets/qa-eval/runs/run-a.jsonl")
@@ -182,7 +181,7 @@ async def test_readdir_dotfile_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path=".hidden",
+            PathSpec(vfs_path=".hidden",
                      virtual="/.hidden",
                      directory="/.hidden"), index)
 
@@ -192,7 +191,7 @@ async def test_readdir_dotfile_nested_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path="traces/.DS_Store",
+            PathSpec(vfs_path="traces/.DS_Store",
                      virtual="/traces/.DS_Store",
                      directory="/traces/.DS_Store"), index)
 
@@ -217,7 +216,7 @@ async def test_readdir_prompt_versions(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="prompts/summarize",
+            PathSpec(vfs_path="prompts/summarize",
                      virtual="/prompts/summarize",
                      directory="/prompts/summarize"), index)
 
@@ -236,8 +235,7 @@ async def test_readdir_traces_applies_no_window_by_default(accessor, index):
     with patch("mirage.core.langfuse.readdir.fetch_traces", fake):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="traces",
-                     virtual="/traces",
+            PathSpec(vfs_path="traces", virtual="/traces",
                      directory="/traces"), index)
 
     assert result == ["/traces/old-trace.json"]
@@ -257,8 +255,7 @@ async def test_readdir_traces_passes_explicit_window(index):
     with patch("mirage.core.langfuse.readdir.fetch_traces", fake):
         await readdir(
             windowed,
-            PathSpec(resource_path="traces",
-                     virtual="/traces",
+            PathSpec(vfs_path="traces", virtual="/traces",
                      directory="/traces"), index)
 
     assert fake.await_args.kwargs["from_timestamp"] == "2026-01-01T00:00:00Z"

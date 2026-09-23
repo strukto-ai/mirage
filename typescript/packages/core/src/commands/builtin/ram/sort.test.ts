@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_SORT = RAM_COMMANDS.filter((c) => c.name === 'sort' && c.filetype == null)
 
@@ -23,14 +23,14 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runSort(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ lines: string[]; exitCode: number }> {
   const cmd = RAM_SORT[0]
   if (cmd === undefined) throw new Error('sort not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -52,52 +52,52 @@ async function runSort(
 
 describe('sort', () => {
   it('default alphabetical sort', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('banana\napple\ncherry'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('banana\napple\ncherry'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.exitCode).toBe(0)
     expect(r.lines).toEqual(['apple', 'banana', 'cherry'])
   })
 
   it('already sorted stays in order', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a\nb\nc'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')])
     expect(r.lines).toEqual(['a', 'b', 'c'])
   })
 
   it('-r reverses sort order', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('banana\napple\ncherry'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { reverse: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('banana\napple\ncherry'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { reverse: true })
     expect(r.lines).toEqual(['cherry', 'banana', 'apple'])
   })
 
   it('-n numeric sort', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('10\n2\n30\n1'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { numeric_sort: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('10\n2\n30\n1'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { numeric_sort: true })
     expect(r.lines).toEqual(['1', '2', '10', '30'])
   })
 
   it('-u deduplicates', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('banana\napple\nbanana\napple\ncherry'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { unique: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('banana\napple\nbanana\napple\ncherry'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { unique: true })
     expect(r.lines).toEqual(['apple', 'banana', 'cherry'])
   })
 
   it('-f ignores case', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('Banana\napple\nCherry'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { ignore_case: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('Banana\napple\nCherry'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { ignore_case: true })
     expect(r.lines).toEqual(['apple', 'Banana', 'Cherry'])
   })
 
   it('-k numeric key field', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a 10\nb 2\nc 30'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a 10\nb 2\nc 30'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       key: '2',
       numeric_sort: true,
     })
@@ -105,9 +105,9 @@ describe('sort', () => {
   })
 
   it('-t field separator with -k', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a:10\nb:2\nc:30'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a:10\nb:2\nc:30'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       field_separator: ':',
       key: '2',
       numeric_sort: true,
@@ -116,9 +116,9 @@ describe('sort', () => {
   })
 
   it('-n -r combined', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('10\n2\n30\n1'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('10\n2\n30\n1'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       numeric_sort: true,
       reverse: true,
     })
@@ -126,26 +126,26 @@ describe('sort', () => {
   })
 
   it('missing stdin and no path uses empty standard input', async () => {
-    const resource = new RAMResource()
-    const r = await runSort(resource, [])
+    const vfs = new RAMVFS()
+    const r = await runSort(vfs, [])
     expect(r.exitCode).toBe(0)
     expect(r.lines).toEqual([])
   })
 
   // KEYDEF grammar pinned to GNU coreutils 9.7 output.
   it('multiple keys with per-key modifiers', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a 2 z\nb 2 a\nc 1 m\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a 2 z\nb 2 a\nc 1 m\n'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       key: ['2,2n', '1,1r'],
     })
     expect(r.lines).toEqual(['c 1 m', 'b 2 a', 'a 2 z'])
   })
 
   it('global reverse combined with a per-key numeric key', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('z 2\nm 2\na 2\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('z 2\nm 2\na 2\n'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       reverse: true,
       key: '2,2n',
     })
@@ -153,18 +153,18 @@ describe('sort', () => {
   })
 
   it('-k field extends to EOL, differing from a bounded range', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a 2 z\nb 2 a\nc 1 m\n'))
-    const eol = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '2' })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a 2 z\nb 2 a\nc 1 m\n'))
+    const eol = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '2' })
     expect(eol.lines).toEqual(['c 1 m', 'b 2 a', 'a 2 z'])
-    const range = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '2,2' })
+    const range = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '2,2' })
     expect(range.lines).toEqual(['c 1 m', 'a 2 z', 'b 2 a'])
   })
 
   it('char offsets with an explicit separator', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('apple:12\nbee:3\ncat:100\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('apple:12\nbee:3\ncat:100\n'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       field_separator: ':',
       key: '1.2,1.3',
     })
@@ -172,9 +172,9 @@ describe('sort', () => {
   })
 
   it('-s keeps input order on ties', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('z 2\nm 2\na 2\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('z 2\nm 2\na 2\n'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       stable: true,
       key: '2,2n',
     })
@@ -182,26 +182,26 @@ describe('sort', () => {
   })
 
   it('zero field number exits 2', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('a\nb\n'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '0' })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('a\nb\n'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], { key: '0' })
     expect(r.exitCode).toBe(2)
     expect(r.lines).toEqual([])
   })
 
   it('-g parses infinity as numeric and hex as non-numeric', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('inf\n5\n-3\nnan\nabc'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('inf\n5\n-3\nnan\nabc'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       general_numeric_sort: true,
     })
     expect(r.lines).toEqual(['abc', 'nan', '-3', '5', 'inf'])
   })
 
   it('-g treats hex strings as non-numeric', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/f.txt', ENC.encode('0x10\n5'))
-    const r = await runSort(resource, [PathSpec.fromStrPath('/tmp/f.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/f.txt', ENC.encode('0x10\n5'))
+    const r = await runSort(vfs, [PathSpec.fromStrPath('/tmp/f.txt')], {
       general_numeric_sort: true,
     })
     expect(r.lines).toEqual(['0x10', '5'])

@@ -4,7 +4,7 @@ icon: /images/langfuse-logo.svg
 description: Mount Langfuse traces and observations as a Mirage filesystem.
 ---
 
-`LangfuseResource` exposes Langfuse projects and traces as a read-only tree.
+`LangfuseVFS` exposes Langfuse projects and traces as a read-only tree.
 
 Setup steps for the public/secret keys live at [Langfuse Credentials](/home/setup/langfuse).
 
@@ -15,16 +15,16 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { LangfuseResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { LangfuseVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const lf = new LangfuseResource({
+const lf = new LangfuseVFS({
   publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
   secretKey: process.env.LANGFUSE_SECRET_KEY!,
   host: process.env.LANGFUSE_HOST,
 })
 
 const ws = new Workspace({ '/lf': lf }, { mode: MountMode.READ })
-await ws.execute('ls /lf/traces/')
+await ws.shell('ls /lf/traces/')
 ```
 
 ## Browser
@@ -34,9 +34,9 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { LangfuseResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { LangfuseVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const lf = new LangfuseResource({
+const lf = new LangfuseVFS({
   publicKey: LANGFUSE_PUBLIC_KEY,
   secretKey: LANGFUSE_SECRET_KEY,
 })
@@ -56,4 +56,4 @@ const lf = new LangfuseResource({
 
 `read`.
 
-For the layout and search behavior see the [Python Langfuse docs](/python/resource/langfuse).
+For the layout and search behavior see the [Python Langfuse docs](/python/vfs/langfuse).

@@ -22,10 +22,10 @@ import boto3
 from moto.server import ThreadedMotoServer
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
-from mirage.resource.redis import RedisResource
-from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import PathSpec
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.redis import RedisVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 
 S3_BUCKET = "mirage-integ-cross"
 CREDS = dict(aws_access_key_id="testing",
@@ -45,7 +45,7 @@ def check(label: str, cond: bool) -> None:
 
 
 async def run(ws: Workspace, cmd: str) -> tuple[str, str, int]:
-    io = await ws.execute(cmd)
+    io = await ws.shell(cmd)
     return await io.stdout_str(), await io.stderr_str(), io.exit_code
 
 
@@ -278,6 +278,9 @@ async def check_cross_mount_cache(ws: Workspace, s3_client,
     out, _, _ = await run(ws, f"cat {src} {x}")
     check(f"{label}: cross cat serves cached",
           out == "aaa\nkeepme\nmid\nlast\n")
+    out, _, _ = await run(ws, f"printf 'pipe\\n' | cat {src} - {x}")
+    check(f"{label}: cross cat mixes stdin and cached bytes",
+          out == "aaa\npipe\nkeepme\nmid\nlast\n")
     out, _, _ = await run(ws, f"head -n 1 {src} {x}")
     check(f"{label}: cross head serves cached", "keepme" in out
           and "nomatch" not in out)
@@ -553,8 +556,8 @@ async def main() -> None:
     s3_client = boto3.client("s3", endpoint_url=endpoint, **CREDS)
     s3_client.create_bucket(Bucket=S3_BUCKET)
 
-    mounts = {"/ram": RAMResource(), "/ram2": RAMResource()}
-    mounts["/s3"] = S3Resource(
+    mounts = {"/ram": RAMVFS(), "/ram2": RAMVFS()}
+    mounts["/s3"] = S3VFS(
         S3Config(bucket=S3_BUCKET,
                  region="us-east-1",
                  endpoint_url=endpoint,
@@ -564,7 +567,7 @@ async def main() -> None:
     redis_url = os.environ.get("REDIS_URL")
     if redis_url:
         prefix = f"mirage-integ-cross-{uuid.uuid4().hex[:8]}/"
-        mounts["/redis"] = RedisResource(url=redis_url, key_prefix=prefix)
+        mounts["/redis"] = RedisVFS(url=redis_url, key_prefix=prefix)
 
     ws = Workspace(mounts, mode=MountMode.WRITE, agent_id="integ-agent")
     try:

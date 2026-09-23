@@ -28,7 +28,7 @@ def file_operand(fl: FlagView, name: str) -> PathSpec | None:
     executor promotes it), so ``as_str`` reads it as absent and the
     operand silently goes unread. The whole spec is returned, not its
     virtual path: a backend reader is addressed by the mount-relative
-    ``resource_path``, and only the error message wants the virtual one.
+    ``vfs_path``, and only the error message wants the virtual one.
 
     Args:
         fl (FlagView): Flag view constructed with the command's spec.

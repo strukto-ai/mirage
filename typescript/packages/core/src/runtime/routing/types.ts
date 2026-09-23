@@ -174,7 +174,7 @@ export class ScriptSource {
  * ScriptSource (its last expression is the verdict).
  *
  * ```
- * new VFSRuntime({ script: (ctx) => ctx.builtin && !ctx.line.includes('/secret') })
+ * new WorkspaceRuntime({ script: (ctx) => ctx.builtin && !ctx.line.includes('/secret') })
  *
  * // workspace yaml: guard.py next to the config file
  * // runtimes:
@@ -241,7 +241,7 @@ export type RoutePolicy =
  * The one-line placement decision the dispatcher consults.
  *
  * Both fields hold runtimes: the decision IS "which runtime runs which
- * command". The vfs runtime is a legal value in either; a command
+ * command". The workspace runtime is a legal value in either; a command
  * placed on it is served by the workspace executor itself.
  */
 export interface RouteDecision {
@@ -253,8 +253,8 @@ export interface RouteDecision {
    */
   bindings: Record<string, Runtime | null>
   /**
-   * Where commands no entry captures run: the catch-all vfs runtime,
-   * or null when the vfs runtime refused the line or declares
+   * Where commands no entry captures run: the catch-all workspace runtime,
+   * or null when the workspace runtime refused the line or declares
    * captures; unbound commands then exit 126.
    */
   fallback: Runtime | null

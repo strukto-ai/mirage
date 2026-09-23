@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeDiscordTransport, makeFakeResource, seedChannel, seedGuild } from './_test_util.ts'
+import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
 import { DISCORD_COMMANDS } from './index.ts'
 
 const DEC = new TextDecoder()
@@ -30,8 +30,8 @@ async function runFind(
   const cmd = DISCORD_COMMANDS.find((c) => c.name === 'find')
   if (cmd === undefined) throw new Error('find not registered')
   const transport = options.transport ?? new FakeDiscordTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -61,7 +61,7 @@ describe('discord find', () => {
           virtual: '/mnt/discord/My Server__G1/channels/general__C1',
           directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         }),
       ],
       { name: 'chat.jsonl' },
@@ -75,12 +75,12 @@ describe('discord find', () => {
   it('exits 1 with a clean error for an invalid -maxdepth', async () => {
     const cmd = DISCORD_COMMANDS.find((c) => c.name === 'find')
     if (cmd === undefined) throw new Error('find not registered')
-    const resource = makeFakeResource(new FakeDiscordTransport())
+    const vfs = makeFakeVfs(new FakeDiscordTransport())
     const result = await cmd.fn(
-      resource.accessor,
+      vfs.accessor,
       [
         new PathSpec({
-          resourcePath: 'mnt/discord',
+          vfsPath: 'mnt/discord',
           virtual: '/mnt/discord',
           directory: '/mnt/discord',
           resolved: false,

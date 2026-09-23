@@ -16,7 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from '../../core/discord/client.ts'
-import { PathSpec, ResourceName } from '../../types.ts'
+import { PathSpec, VFSName } from '../../types.ts'
 import { DISCORD_OPS } from './index.ts'
 
 const readdirOp = DISCORD_OPS.find((o) => o.name === 'readdir' && o.filetype === null)
@@ -35,14 +35,14 @@ class FakeDiscordTransport implements DiscordTransport {
 }
 
 describe('ops/discord/readdir', () => {
-  it('is registered against ResourceName.DISCORD as a non-write readdir op', () => {
+  it('is registered against VFSName.DISCORD as a non-write readdir op', () => {
     expect(readdirOp.name).toBe('readdir')
-    expect(readdirOp.resource).toBe(ResourceName.DISCORD)
+    expect(readdirOp.vfs).toBe(VFSName.DISCORD)
     expect(readdirOp.write).toBe(false)
     expect(readdirOp.filetype).toBeNull()
   })
 
-  it('dispatches to coreReaddir using the resource accessor', async () => {
+  it('dispatches to coreReaddir using the VFS accessor', async () => {
     const t = new FakeDiscordTransport((_m, endpoint) => {
       if (endpoint === '/users/@me/guilds') {
         return [{ id: 'G1', name: 'My Server' }]
@@ -55,7 +55,7 @@ describe('ops/discord/readdir', () => {
       new PathSpec({
         virtual: '/mnt/discord',
         directory: '/mnt/discord',
-        resourcePath: mountKey('/mnt/discord', '/mnt/discord'),
+        vfsPath: mountKey('/mnt/discord', '/mnt/discord'),
       }),
       [],
       {},

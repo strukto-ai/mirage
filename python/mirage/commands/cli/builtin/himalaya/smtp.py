@@ -19,7 +19,7 @@ from email.policy import default as default_policy
 import aiosmtplib
 
 from mirage.core.email.config import EmailConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 async def send_raw(config: EmailConfig, raw: bytes) -> Message:

@@ -19,7 +19,7 @@ import { ContentType, FileType } from '../types.ts'
 import { handleTest } from './executor/builtins/condition/index.ts'
 import type { DispatchFn } from './executor/cross_mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
-import type { Session } from './session/session.ts'
+import type { SessionState } from './session/session.ts'
 import type { Workspace } from './workspace/workspace.ts'
 import { makeIntegrationWS, run, runExit, runResult } from './fixtures/integration_fixture.ts'
 
@@ -27,8 +27,8 @@ let ws: Workspace
 
 beforeAll(async () => {
   ws = (await makeIntegrationWS({ 'plain.txt': 'apple\nbanana\n' })).ws
-  await ws.execute('mkdir -p /data/sub')
-  await ws.execute("printf '' > /data/empty.txt")
+  await ws.shell('mkdir -p /data/sub')
+  await ws.shell("printf '' > /data/empty.txt")
 })
 
 afterAll(async () => {
@@ -57,12 +57,12 @@ describe('test/[ file operators', () => {
   })
 
   it('-x true after chmod', async () => {
-    await ws.execute('chmod +x /data/plain.txt')
+    await ws.shell('chmod +x /data/plain.txt')
     expect(await runExit(ws, '[ -x /data/plain.txt ]')).toBe(0)
   })
 
   it('-L on links, files, and dangling links', async () => {
-    await ws.execute('ln -s /data/plain.txt /data/zl && ln -s /data/nope /data/zd')
+    await ws.shell('ln -s /data/plain.txt /data/zl && ln -s /data/nope /data/zd')
     expect(await runExit(ws, '[ -L /data/zl ]')).toBe(0)
     expect(await runExit(ws, '[ -h /data/zl ]')).toBe(0)
     expect(await runExit(ws, '[ -L /data/plain.txt ]')).toBe(1)
@@ -199,7 +199,7 @@ const stubNamespace = {
   isLink: () => false,
 } as unknown as Namespace
 
-const stubSession = { cwd: '/data', env: {}, arrays: {} } as unknown as Session
+const stubSession = { cwd: '/data', env: {}, arrays: {} } as unknown as SessionState
 
 /**
  * Mimics a prefix store (s3/gridfs/hf/nextcloud): stat never sees

@@ -18,7 +18,7 @@ import { decodeAnsiC } from '../../shell/escapes.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import { escapeGlob } from '../../utils/glob_walk.ts'
 import { expandTilde } from '../../utils/path.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { expandNode, type ExecuteFn } from './node.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -49,7 +49,7 @@ function unquotedPattern(text: string): string {
  */
 async function quotedStringPattern(
   tsNode: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   view?: SessionView,
@@ -79,7 +79,7 @@ async function quotedStringPattern(
  */
 export async function expandPattern(
   tsNode: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
   view?: SessionView,

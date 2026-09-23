@@ -14,7 +14,7 @@
 
 // The package's front door, and only that: the names a program reaches
 // for first. Everything else in core is reached by module path, the way
-// `mirage.resource.s3` is in Python -- the `./*` subpath map means no
+// `mirage.vfs.s3` is in Python -- the `./*` subpath map means no
 // symbol needs a line here to be importable.
 //
 // So do not add a name because something inside the repo wants it; that
@@ -26,7 +26,6 @@
 // root is typescript/, which leaves the consumers out of view.
 
 export { Accessor } from './accessor/base.ts'
-export { defaultFingerprint } from './cache/file/utils.ts'
 export { IndexEntry } from './cache/index/config.ts'
 export type { RedisIndexConfig } from './cache/index/config.ts'
 export { RedisIndexCacheStore } from './cache/index/redis.ts'
@@ -58,18 +57,18 @@ export type {
 } from './policy/index.ts'
 export { Outcome, Scope } from './policy/index.ts'
 export { ProvisionResult } from './provision/types.ts'
-export type { Resource } from './resource/base.ts'
-export { ChromaResource } from './resource/chroma/chroma.ts'
-export { normalizeDatabricksVolumeConfig } from './resource/databricks_volume/config.ts'
-export { DevResource } from './resource/dev/dev.ts'
-export { DifyResource } from './resource/dify/dify.ts'
-export { GenericResource } from './resource/generic.ts'
-export { Mem0Resource } from './resource/mem0/mem0.ts'
-export { OneDriveResource } from './resource/onedrive/onedrive.ts'
-export { QdrantResource } from './resource/qdrant/qdrant.ts'
-export { RAMResource } from './resource/ram/ram.ts'
-export { secretStr, z } from './resource/secrets.ts'
-export { SharePointResource } from './resource/sharepoint/sharepoint.ts'
+export type { VFS } from './vfs/base.ts'
+export { ChromaVFS } from './vfs/chroma/chroma.ts'
+export { normalizeDatabricksVolumeConfig } from './vfs/databricks_volume/config.ts'
+export { DevVFS } from './vfs/dev/dev.ts'
+export { DifyVFS } from './vfs/dify/dify.ts'
+export { GenericVFS } from './vfs/generic.ts'
+export { Mem0VFS } from './vfs/mem0/mem0.ts'
+export { OneDriveVFS } from './vfs/onedrive/onedrive.ts'
+export { QdrantVFS } from './vfs/qdrant/qdrant.ts'
+export { RAMVFS } from './vfs/ram/ram.ts'
+export { secretStr, z } from './vfs/secrets.ts'
+export { SharePointVFS } from './vfs/sharepoint/sharepoint.ts'
 export { EXTERNAL_COMMANDS } from './runtime/constants.ts'
 export { Runtime } from './runtime/base.ts'
 export type { RuntimeEntry } from './runtime/base.ts'
@@ -88,8 +87,8 @@ export type {
 export { JobConsole } from './shell/console/index.ts'
 export type { ConsoleFactory } from './shell/job_table/index.ts'
 export {
-  ConsistencyPolicy,
   ContentType,
+  DEFAULT_READ_TTL,
   DriftPolicy,
   FileChangeKind,
   FileEvent,
@@ -100,9 +99,10 @@ export {
   MountMode,
   OnExceed,
   PathSpec,
-  ResourceName,
+  ReadPolicy,
+  VFSName,
 } from './types.ts'
-export type { WalkEntry } from './types.ts'
+export type { ReadSpec, WalkEntry } from './types.ts'
 export { eisdir, enoent, enotdir } from './utils/errors.ts'
 export { snakeToCamel } from './utils/normalize.ts'
 export { ListingDeltaHook, RAMWatchQueue, Watcher } from './watch/index.ts'
@@ -111,5 +111,5 @@ export { ContentDriftError } from './workspace/snapshot/drift.ts'
 export { toStateDict } from './workspace/snapshot/state.ts'
 export { S3WorkspaceStateStore } from './workspace/store/s3.ts'
 export { Workspace } from './workspace/workspace/workspace.ts'
-export { SessionHandle, type SessionExecuteOptions } from './workspace/workspace/handle.ts'
+export { Session, type SessionExecuteOptions } from './workspace/workspace/handle.ts'
 export type { MountSpec } from './workspace/workspace/workspace.ts'

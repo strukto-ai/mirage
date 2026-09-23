@@ -41,7 +41,7 @@ def dify_index() -> RAMIndexCacheStore:
 
 @pytest.fixture
 def knowledge_root() -> PathSpec:
-    return PathSpec(resource_path=mount_key("/knowledge", "/knowledge"),
+    return PathSpec(vfs_path=mount_key("/knowledge", "/knowledge"),
                     virtual="/knowledge",
                     directory="/knowledge")
 
@@ -55,6 +55,6 @@ def guide_path() -> PathSpec:
 
 @pytest.fixture
 def guides_path() -> PathSpec:
-    return PathSpec(resource_path=mount_key("/knowledge/guides", "/knowledge"),
+    return PathSpec(vfs_path=mount_key("/knowledge/guides", "/knowledge"),
                     virtual="/knowledge/guides",
                     directory="/knowledge/guides")

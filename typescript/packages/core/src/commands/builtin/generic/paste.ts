@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isStdin } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -76,8 +77,9 @@ export async function pasteGeneric(
   const zeroTerminated = fl.asBool('zero_terminated')
   const fileLines: string[][] = []
   let stdinConsumed = false
+  const stdinSlots = paths.flatMap((p, i) => (isStdin(p) ? [i] : []))
   for (const p of paths) {
-    if (p.virtual === '-') {
+    if (isStdin(p)) {
       const raw = stdinConsumed ? null : await readStdinAsync(opts.stdin)
       stdinConsumed = true
       fileLines.push(splitRecords(raw !== null ? DEC.decode(raw) : '', zeroTerminated))
@@ -86,15 +88,19 @@ export async function pasteGeneric(
       fileLines.push(splitRecords(DEC.decode(data), zeroTerminated))
     }
   }
+  if (!serial && stdinSlots.length > 1) {
+    const records = fileLines[stdinSlots[0] ?? 0] ?? []
+    for (const [column, slot] of stdinSlots.entries()) {
+      fileLines[slot] = records.filter((_, i) => i % stdinSlots.length === column)
+    }
+  }
   if (fileLines.length === 0 && !stdinConsumed) {
     const raw = await readStdinAsync(opts.stdin)
     fileLines.push(splitRecords(raw !== null ? DEC.decode(raw) : '', zeroTerminated))
   }
   let outLines: string[]
   if (serial) {
-    outLines = fileLines
-      .filter((lines) => lines.length > 0)
-      .map((lines) => joinFields(lines, delimiters))
+    outLines = fileLines.map((lines) => joinFields(lines, delimiters))
   } else {
     const maxLen = Math.max(...fileLines.map((l) => l.length))
     outLines = []

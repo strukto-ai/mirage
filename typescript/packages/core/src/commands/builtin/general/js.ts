@@ -137,14 +137,14 @@ async function jsCommand(
 
 export const GENERAL_JS = command({
   name: 'js',
-  resource: null,
+  vfs: null,
   spec: specOf('js'),
   fn: jsCommand,
 })
 
 export const GENERAL_NODE = command({
   name: 'node',
-  resource: null,
+  vfs: null,
   spec: specOf('node'),
   fn: jsCommand,
 })

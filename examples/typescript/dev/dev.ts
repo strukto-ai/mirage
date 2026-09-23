@@ -12,39 +12,39 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DevResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { DevVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const dev = new DevResource()
+  const dev = new DevVFS()
   const ws = new Workspace({ '/dev': dev }, { mode: MountMode.WRITE })
 
   console.log('=== ls /dev/ ===')
-  const lsRes = await ws.execute('ls /dev/')
+  const lsRes = await ws.shell('ls /dev/')
   process.stdout.write(lsRes.stdoutText + '\n')
 
   console.log('=== stat /dev/null ===')
-  const statNull = await ws.execute('stat /dev/null')
+  const statNull = await ws.shell('stat /dev/null')
   process.stdout.write(statNull.stdoutText + '\n')
 
   console.log('=== stat /dev/zero ===')
-  const statZero = await ws.execute('stat /dev/zero')
+  const statZero = await ws.shell('stat /dev/zero')
   process.stdout.write(statZero.stdoutText + '\n')
 
   console.log('=== wc -c /dev/null (should be 0) ===')
-  const wcNull = await ws.execute('wc -c /dev/null')
+  const wcNull = await ws.shell('wc -c /dev/null')
   process.stdout.write(wcNull.stdoutText + '\n')
 
   console.log('=== bounded read from /dev/zero (should be 2097152) ===')
-  const wcZero = await ws.execute('head -c 2M /dev/zero | wc -c')
+  const wcZero = await ws.shell('head -c 2M /dev/zero | wc -c')
   process.stdout.write(wcZero.stdoutText + '\n')
 
   console.log('=== /dev/null device metadata ===')
-  const statDevice = await ws.execute("stat -c '%F %t %T' /dev/null")
+  const statDevice = await ws.shell("stat -c '%F %t %T' /dev/null")
   process.stdout.write(statDevice.stdoutText + '\n')
 
   console.log('=== write to /dev/null is silently dropped ===')
-  await ws.execute('echo "this disappears" | tee /dev/null')
-  const after = await ws.execute('wc -c /dev/null')
+  await ws.shell('echo "this disappears" | tee /dev/null')
+  const after = await ws.shell('wc -c /dev/null')
   process.stdout.write(`after write: ${after.stdoutText}\n`)
 
   await ws.close()

@@ -236,24 +236,24 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/res",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory",
           "fixture": "columnar/v1"
         },
         {
           "path": "/ro",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory",
           "mode": "read"
         }
@@ -318,12 +318,12 @@
       "mounts": [
         {
           "path": "/",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ],
@@ -355,12 +355,12 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/alias",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory",
           "alias_of": "/data"
         }
@@ -375,17 +375,17 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/data/inner",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/ghost/deep",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ],
@@ -408,7 +408,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ],
@@ -427,12 +427,12 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "http_fixture",
+          "vfs": "http_fixture",
           "backend": "memory"
         },
         {
           "path": "/ro",
-          "resource": "http_fixture",
+          "vfs": "http_fixture",
           "backend": "memory",
           "mode": "read"
         }
@@ -447,24 +447,24 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "disk",
+          "vfs": "disk",
           "backend": "tmpdir",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "disk",
+          "vfs": "disk",
           "backend": "tmpdir"
         },
         {
           "path": "/res",
-          "resource": "disk",
+          "vfs": "disk",
           "backend": "tmpdir",
           "fixture": "columnar/v1"
         },
         {
           "path": "/ro",
-          "resource": "disk",
+          "vfs": "disk",
           "backend": "tmpdir",
           "mode": "read"
         }
@@ -530,18 +530,18 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "redis",
+          "vfs": "redis",
           "backend": "redis",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "redis",
+          "vfs": "redis",
           "backend": "redis"
         },
         {
           "path": "/res",
-          "resource": "redis",
+          "vfs": "redis",
           "backend": "redis",
           "fixture": "columnar/v1"
         }
@@ -584,12 +584,12 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/data2",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]
@@ -603,18 +603,18 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "opfs",
+          "vfs": "opfs",
           "backend": "memory",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "opfs",
+          "vfs": "opfs",
           "backend": "memory"
         },
         {
           "path": "/res",
-          "resource": "opfs",
+          "vfs": "opfs",
           "backend": "memory",
           "fixture": "columnar/v1"
         }
@@ -630,20 +630,20 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "s3",
+          "vfs": "s3",
           "backend": "s3",
           "bucket": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "s3",
+          "vfs": "s3",
           "backend": "s3",
           "bucket": "data2"
         },
         {
           "path": "/res",
-          "resource": "s3",
+          "vfs": "s3",
           "backend": "s3",
           "bucket": "res",
           "fixture": "columnar/v1"
@@ -684,7 +684,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "s3",
+          "vfs": "s3",
           "backend": "s3",
           "bucket": "shared",
           "prefix": "team/reports/data",
@@ -692,14 +692,14 @@
         },
         {
           "path": "/data2",
-          "resource": "s3",
+          "vfs": "s3",
           "backend": "s3",
           "bucket": "shared",
           "prefix": "team/reports/data2"
         },
         {
           "path": "/res",
-          "resource": "s3",
+          "vfs": "s3",
           "backend": "s3",
           "bucket": "shared",
           "prefix": "team/reports/res",
@@ -741,111 +741,111 @@
       "mounts": [
         {
           "path": "/raw",
-          "resource": "s3",
+          "vfs": "s3",
           "backend": "s3",
           "bucket": "object-storage"
         },
         {
           "path": "/s3",
-          "resource": "s3",
+          "vfs": "s3",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/s3"
         },
         {
           "path": "/aliyun",
-          "resource": "aliyun",
+          "vfs": "aliyun",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/aliyun"
         },
         {
           "path": "/backblaze",
-          "resource": "backblaze",
+          "vfs": "backblaze",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/backblaze"
         },
         {
           "path": "/ceph",
-          "resource": "ceph",
+          "vfs": "ceph",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/ceph"
         },
         {
           "path": "/digitalocean",
-          "resource": "digitalocean",
+          "vfs": "digitalocean",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/digitalocean"
         },
         {
           "path": "/gcs",
-          "resource": "gcs",
+          "vfs": "gcs",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/gcs"
         },
         {
           "path": "/minio",
-          "resource": "minio",
+          "vfs": "minio",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/minio"
         },
         {
           "path": "/oci",
-          "resource": "oci",
+          "vfs": "oci",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/oci"
         },
         {
           "path": "/qingstor",
-          "resource": "qingstor",
+          "vfs": "qingstor",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/qingstor"
         },
         {
           "path": "/r2",
-          "resource": "r2",
+          "vfs": "r2",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/r2"
         },
         {
           "path": "/scaleway",
-          "resource": "scaleway",
+          "vfs": "scaleway",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/scaleway"
         },
         {
           "path": "/seaweedfs",
-          "resource": "seaweedfs",
+          "vfs": "seaweedfs",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/seaweedfs"
         },
         {
           "path": "/supabase",
-          "resource": "supabase",
+          "vfs": "supabase",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/supabase"
         },
         {
           "path": "/tencent",
-          "resource": "tencent",
+          "vfs": "tencent",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/tencent"
         },
         {
           "path": "/wasabi",
-          "resource": "wasabi",
+          "vfs": "wasabi",
           "backend": "s3",
           "bucket": "object-storage",
           "prefix": "aliases/wasabi"
@@ -862,20 +862,20 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "gridfs",
+          "vfs": "gridfs",
           "backend": "gridfs",
           "bucket": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "gridfs",
+          "vfs": "gridfs",
           "backend": "gridfs",
           "bucket": "data2"
         },
         {
           "path": "/res",
-          "resource": "gridfs",
+          "vfs": "gridfs",
           "backend": "gridfs",
           "bucket": "res",
           "fixture": "columnar/v1"
@@ -916,7 +916,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "gridfs",
+          "vfs": "gridfs",
           "backend": "gridfs",
           "bucket": "shared",
           "prefix": "team/reports/data",
@@ -924,14 +924,14 @@
         },
         {
           "path": "/data2",
-          "resource": "gridfs",
+          "vfs": "gridfs",
           "backend": "gridfs",
           "bucket": "shared",
           "prefix": "team/reports/data2"
         },
         {
           "path": "/res",
-          "resource": "gridfs",
+          "vfs": "gridfs",
           "backend": "gridfs",
           "bucket": "shared",
           "prefix": "team/reports/res",
@@ -949,20 +949,20 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "databricks_volume",
+          "vfs": "databricks_volume",
           "backend": "databricks_volume",
           "volume": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "databricks_volume",
+          "vfs": "databricks_volume",
           "backend": "databricks_volume",
           "volume": "data2"
         },
         {
           "path": "/res",
-          "resource": "databricks_volume",
+          "vfs": "databricks_volume",
           "backend": "databricks_volume",
           "volume": "res",
           "fixture": "columnar/v1"
@@ -979,7 +979,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "databricks_volume",
+          "vfs": "databricks_volume",
           "backend": "databricks_volume",
           "volume": "shared",
           "prefix": "team/reports/data",
@@ -987,14 +987,14 @@
         },
         {
           "path": "/data2",
-          "resource": "databricks_volume",
+          "vfs": "databricks_volume",
           "backend": "databricks_volume",
           "volume": "shared",
           "prefix": "team/reports/data2"
         },
         {
           "path": "/res",
-          "resource": "databricks_volume",
+          "vfs": "databricks_volume",
           "backend": "databricks_volume",
           "volume": "shared",
           "prefix": "team/reports/res",
@@ -1012,27 +1012,27 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "dropbox",
+          "vfs": "dropbox",
           "backend": "dropbox",
           "bucket": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "dropbox",
+          "vfs": "dropbox",
           "backend": "dropbox",
           "bucket": "data2"
         },
         {
           "path": "/res",
-          "resource": "dropbox",
+          "vfs": "dropbox",
           "backend": "dropbox",
           "bucket": "res",
           "fixture": "columnar/v1"
         },
         {
           "path": "/search",
-          "resource": "dropbox",
+          "vfs": "dropbox",
           "backend": "dropbox",
           "bucket": "search",
           "fixture": "search/v1"
@@ -1049,7 +1049,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "dropbox",
+          "vfs": "dropbox",
           "backend": "dropbox",
           "bucket": "shared",
           "root": "team/reports/data",
@@ -1057,7 +1057,7 @@
         },
         {
           "path": "/data2",
-          "resource": "dropbox",
+          "vfs": "dropbox",
           "backend": "dropbox",
           "bucket": "shared",
           "root": "team/reports/data2",
@@ -1065,7 +1065,7 @@
         },
         {
           "path": "/res",
-          "resource": "dropbox",
+          "vfs": "dropbox",
           "backend": "dropbox",
           "bucket": "shared",
           "root": "team/reports/res",
@@ -1083,21 +1083,21 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "onedrive",
+          "vfs": "onedrive",
           "backend": "onedrive",
           "fixture": "files/v1",
           "prefix": "data"
         },
         {
           "path": "/data2",
-          "resource": "onedrive",
+          "vfs": "onedrive",
           "backend": "onedrive",
           "prefix": "xm2",
           "seed_root": true
         },
         {
           "path": "/res",
-          "resource": "onedrive",
+          "vfs": "onedrive",
           "backend": "onedrive",
           "prefix": "res",
           "fixture": "columnar/v1"
@@ -1114,27 +1114,27 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ssh",
+          "vfs": "ssh",
           "backend": "ssh",
           "root": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "ssh",
+          "vfs": "ssh",
           "backend": "ssh",
           "root": "xm2"
         },
         {
           "path": "/res",
-          "resource": "ssh",
+          "vfs": "ssh",
           "backend": "ssh",
           "root": "res",
           "fixture": "columnar/v1"
         },
         {
           "path": "/links",
-          "resource": "ssh",
+          "vfs": "ssh",
           "backend": "ssh",
           "root": "links"
         }
@@ -1159,20 +1159,20 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "nextcloud",
+          "vfs": "nextcloud",
           "backend": "webdav",
           "root": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "nextcloud",
+          "vfs": "nextcloud",
           "backend": "webdav",
           "root": "xm2"
         },
         {
           "path": "/res",
-          "resource": "nextcloud",
+          "vfs": "nextcloud",
           "backend": "webdav",
           "root": "res",
           "fixture": "columnar/v1"
@@ -1189,20 +1189,20 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "sharepoint",
+          "vfs": "sharepoint",
           "backend": "sharepoint",
           "drive": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "sharepoint",
+          "vfs": "sharepoint",
           "backend": "sharepoint",
           "drive": "xm2"
         },
         {
           "path": "/res",
-          "resource": "sharepoint",
+          "vfs": "sharepoint",
           "backend": "sharepoint",
           "drive": "res",
           "fixture": "columnar/v1"
@@ -1219,7 +1219,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "sharepoint",
+          "vfs": "sharepoint",
           "backend": "sharepoint",
           "drive": "shared",
           "prefix": "team/reports/data",
@@ -1227,7 +1227,7 @@
         },
         {
           "path": "/data2",
-          "resource": "sharepoint",
+          "vfs": "sharepoint",
           "backend": "sharepoint",
           "drive": "shared",
           "prefix": "team/reports/data2",
@@ -1235,7 +1235,7 @@
         },
         {
           "path": "/res",
-          "resource": "sharepoint",
+          "vfs": "sharepoint",
           "backend": "sharepoint",
           "drive": "shared",
           "prefix": "team/reports/res",
@@ -1254,7 +1254,7 @@
       "mounts": [
         {
           "path": "/memories",
-          "resource": "mem0",
+          "vfs": "mem0",
           "backend": "mem0",
           "mode": "read"
         }
@@ -1270,7 +1270,7 @@
       "mounts": [
         {
           "path": "/pg",
-          "resource": "postgres",
+          "vfs": "postgres",
           "backend": "postgres",
           "mode": "read"
         }
@@ -1286,7 +1286,7 @@
       "mounts": [
         {
           "path": "/mongodb",
-          "resource": "mongodb",
+          "vfs": "mongodb",
           "backend": "mongodb",
           "mode": "read"
         }
@@ -1302,7 +1302,7 @@
       "mounts": [
         {
           "path": "/knowledge",
-          "resource": "chroma",
+          "vfs": "chroma",
           "backend": "chroma",
           "mode": "read"
         }
@@ -1318,7 +1318,7 @@
       "mounts": [
         {
           "path": "/db",
-          "resource": "qdrant",
+          "vfs": "qdrant",
           "backend": "qdrant",
           "mode": "read"
         }
@@ -1334,7 +1334,7 @@
       "mounts": [
         {
           "path": "/db",
-          "resource": "lancedb",
+          "vfs": "lancedb",
           "backend": "lancedb",
           "mode": "read"
         }
@@ -1351,7 +1351,7 @@
       "mounts": [
         {
           "path": "/db",
-          "resource": "qdrant",
+          "vfs": "qdrant",
           "backend": "qdrant",
           "mode": "read"
         }
@@ -1368,7 +1368,7 @@
       "mounts": [
         {
           "path": "/db",
-          "resource": "lancedb",
+          "vfs": "lancedb",
           "backend": "lancedb",
           "mode": "read"
         }
@@ -1384,7 +1384,7 @@
       "mounts": [
         {
           "path": "/notion",
-          "resource": "notion",
+          "vfs": "notion",
           "backend": "notion",
           "mode": "read"
         }
@@ -1400,20 +1400,20 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "hf",
+          "vfs": "hf",
           "backend": "hf",
           "bucket": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "hf",
+          "vfs": "hf",
           "backend": "hf",
           "bucket": "data2"
         },
         {
           "path": "/res",
-          "resource": "hf",
+          "vfs": "hf",
           "backend": "hf",
           "bucket": "res",
           "fixture": "columnar/v1"
@@ -1430,19 +1430,19 @@
       "mounts": [
         {
           "path": "/repo",
-          "resource": "hf_models",
+          "vfs": "hf_models",
           "backend": "hf_hub",
           "repo": "integ/repo-v1"
         },
         {
           "path": "/data",
-          "resource": "hf_datasets",
+          "vfs": "hf_datasets",
           "backend": "hf_hub",
           "repo": "integ/data-v1"
         },
         {
           "path": "/space",
-          "resource": "hf_spaces",
+          "vfs": "hf_spaces",
           "backend": "hf_hub",
           "repo": "integ/space-v1"
         }
@@ -1462,13 +1462,13 @@
       "mounts": [
         {
           "path": "/repo",
-          "resource": "hf_models",
+          "vfs": "hf_models",
           "backend": "hf_hub",
           "repo": "integ/repo-cli"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]
@@ -1483,27 +1483,27 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "box",
+          "vfs": "box",
           "backend": "box",
           "folder": "data",
           "seed": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "box",
+          "vfs": "box",
           "backend": "box",
           "folder": "data2"
         },
         {
           "path": "/res",
-          "resource": "box",
+          "vfs": "box",
           "backend": "box",
           "folder": "res",
           "seed": "columnar/v1"
         },
         {
           "path": "/search",
-          "resource": "box",
+          "vfs": "box",
           "backend": "box",
           "folder": "search",
           "seed": "search/v1"
@@ -1520,14 +1520,14 @@
       "mounts": [
         {
           "path": "/repo",
-          "resource": "github",
+          "vfs": "github",
           "backend": "github",
           "repo": "integ/repo-v1",
           "mode": "read"
         },
         {
           "path": "/trunc",
-          "resource": "github",
+          "vfs": "github",
           "backend": "github",
           "repo": "integ/repo-trunc",
           "mode": "read"
@@ -1548,14 +1548,14 @@
       "mounts": [
         {
           "path": "/repo",
-          "resource": "github",
+          "vfs": "github",
           "backend": "github",
           "repo": "integ/repo-cli",
           "mode": "read"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]
@@ -1570,7 +1570,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "hf",
+          "vfs": "hf",
           "backend": "hf",
           "bucket": "shared",
           "prefix": "team/reports/data",
@@ -1578,14 +1578,14 @@
         },
         {
           "path": "/data2",
-          "resource": "hf",
+          "vfs": "hf",
           "backend": "hf",
           "bucket": "shared",
           "prefix": "team/reports/data2"
         },
         {
           "path": "/res",
-          "resource": "hf",
+          "vfs": "hf",
           "backend": "hf",
           "bucket": "shared",
           "prefix": "team/reports/res",
@@ -1603,20 +1603,20 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "root": "data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "root": "xm2"
         },
         {
           "path": "/res",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "root": "res",
           "fixture": "columnar/v1"
@@ -1636,20 +1636,20 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "root": "team/reports/data",
           "fixture": "files/v1"
         },
         {
           "path": "/data2",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "root": "team/reports/data2"
         },
         {
           "path": "/res",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "root": "team/reports/res",
           "fixture": "columnar/v1"
@@ -1666,14 +1666,14 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "drive": "eng",
           "root": "team/data"
         },
         {
           "path": "/data2",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "drive": "eng",
           "root": "team/data2"
@@ -1695,22 +1695,22 @@
       "mounts": [
         {
           "path": "/docs",
-          "resource": "gdocs",
+          "vfs": "gdocs",
           "backend": "gdocs"
         },
         {
           "path": "/sheets",
-          "resource": "gsheets",
+          "vfs": "gsheets",
           "backend": "gsheets"
         },
         {
           "path": "/slides",
-          "resource": "gslides",
+          "vfs": "gslides",
           "backend": "gslides"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ],
@@ -1730,7 +1730,7 @@
       "mounts": [
         {
           "path": "/docs",
-          "resource": "gdocs",
+          "vfs": "gdocs",
           "backend": "gdocs"
         }
       ],
@@ -1751,12 +1751,12 @@
       "mounts": [
         {
           "path": "/cal",
-          "resource": "gcal",
+          "vfs": "gcal",
           "backend": "gcal"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "ram"
         }
       ],
@@ -1777,12 +1777,12 @@
       "mounts": [
         {
           "path": "/mail",
-          "resource": "gmail",
+          "vfs": "gmail",
           "backend": "gmail"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "ram"
         }
       ],
@@ -1805,12 +1805,12 @@
       "mounts": [
         {
           "path": "/mail",
-          "resource": "email",
+          "vfs": "email",
           "backend": "email"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "ram"
         }
       ]
@@ -1870,12 +1870,12 @@
       "mounts": [
         {
           "path": "/mail",
-          "resource": "email",
+          "vfs": "email",
           "backend": "email"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "ram"
         }
       ]
@@ -1899,12 +1899,12 @@
       "mounts": [
         {
           "path": "/mail",
-          "resource": "gmail",
+          "vfs": "gmail",
           "backend": "gmail"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "ram"
         }
       ]
@@ -1924,7 +1924,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "gdrive",
+          "vfs": "gdrive",
           "backend": "gdrive",
           "root": "team/scope"
         }
@@ -1944,11 +1944,11 @@
       "mounts": [
         {
           "path": "/slack",
-          "resource": "slack"
+          "vfs": "slack"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]
@@ -1967,11 +1967,11 @@
       "mounts": [
         {
           "path": "/discord",
-          "resource": "discord"
+          "vfs": "discord"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]
@@ -1990,11 +1990,11 @@
       "mounts": [
         {
           "path": "/notion",
-          "resource": "notion"
+          "vfs": "notion"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ],
@@ -2016,11 +2016,11 @@
       "mounts": [
         {
           "path": "/issues",
-          "resource": "linear"
+          "vfs": "linear"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]
@@ -2036,7 +2036,7 @@
       "mounts": [
         {
           "path": "/slack",
-          "resource": "slack",
+          "vfs": "slack",
           "backend": "slack"
         }
       ]
@@ -2052,12 +2052,12 @@
       "mounts": [
         {
           "path": "/discord",
-          "resource": "discord",
+          "vfs": "discord",
           "backend": "discord"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "ram"
         }
       ]
@@ -2073,12 +2073,12 @@
       "mounts": [
         {
           "path": "/board",
-          "resource": "trello",
+          "vfs": "trello",
           "backend": "trello"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "ram"
         }
       ]
@@ -2094,12 +2094,12 @@
       "mounts": [
         {
           "path": "/issues",
-          "resource": "linear",
+          "vfs": "linear",
           "backend": "linear"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "ram"
         }
       ]
@@ -2116,7 +2116,7 @@
       "mounts": [
         {
           "path": "/knowledge",
-          "resource": "dify",
+          "vfs": "dify",
           "backend": "dify"
         }
       ]
@@ -2132,7 +2132,7 @@
       "mounts": [
         {
           "path": "/j",
-          "resource": "jaeger",
+          "vfs": "jaeger",
           "backend": "jaeger"
         }
       ]
@@ -2148,7 +2148,7 @@
       "mounts": [
         {
           "path": "/lf",
-          "resource": "langfuse",
+          "vfs": "langfuse",
           "backend": "langfuse"
         }
       ]
@@ -2163,7 +2163,7 @@
       "mounts": [
         {
           "path": "/vfs",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory",
           "fixture": "statvfs/v1"
         }
@@ -2187,7 +2187,7 @@
       "mounts": [
         {
           "path": "/databricks",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "databricks",
           "mode": "read"
         }
@@ -2203,7 +2203,7 @@
       "mounts": [
         {
           "path": "/discord",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "discord",
           "mode": "read"
         }
@@ -2219,7 +2219,7 @@
       "mounts": [
         {
           "path": "/email",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "email",
           "mode": "read"
         }
@@ -2235,7 +2235,7 @@
       "mounts": [
         {
           "path": "/gdocs",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "gdocs",
           "mode": "read"
         }
@@ -2251,7 +2251,7 @@
       "mounts": [
         {
           "path": "/gdrive",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "gdrive",
           "mode": "read"
         }
@@ -2267,7 +2267,7 @@
       "mounts": [
         {
           "path": "/gmail",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "gmail",
           "mode": "read"
         }
@@ -2283,7 +2283,7 @@
       "mounts": [
         {
           "path": "/gsheets",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "gsheets",
           "mode": "read"
         }
@@ -2299,7 +2299,7 @@
       "mounts": [
         {
           "path": "/gslides",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "gslides",
           "mode": "read"
         }
@@ -2315,7 +2315,7 @@
       "mounts": [
         {
           "path": "/langfuse",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "langfuse",
           "mode": "read"
         }
@@ -2331,7 +2331,7 @@
       "mounts": [
         {
           "path": "/linear",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "linear",
           "mode": "read"
         }
@@ -2347,7 +2347,7 @@
       "mounts": [
         {
           "path": "/mem0",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "mem0",
           "mode": "read"
         }
@@ -2363,7 +2363,7 @@
       "mounts": [
         {
           "path": "/onedrive",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "onedrive",
           "mode": "read"
         }
@@ -2379,7 +2379,7 @@
       "mounts": [
         {
           "path": "/sharepoint",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "sharepoint",
           "mode": "read"
         }
@@ -2395,7 +2395,7 @@
       "mounts": [
         {
           "path": "/slack",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "slack",
           "mode": "read"
         }
@@ -2411,7 +2411,7 @@
       "mounts": [
         {
           "path": "/trello",
-          "resource": "arg_error",
+          "vfs": "arg_error",
           "backend": "trello",
           "mode": "read"
         }
@@ -2429,7 +2429,7 @@
       "mounts": [
         {
           "path": "/repo",
-          "resource": "disk",
+          "vfs": "disk",
           "backend": "tmpdir",
           "fixture": "git"
         }
@@ -2447,7 +2447,7 @@
       "mounts": [
         {
           "path": "/repo",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory",
           "fixture": "git"
         }
@@ -2465,23 +2465,23 @@
       "mounts": [
         {
           "path": "/repo",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory",
           "fixture": "git"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/vault",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/vault/d/inner",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ],
@@ -2925,12 +2925,12 @@
       "mounts": [
         {
           "path": "/repo",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         },
         {
           "path": "/scratch",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ],
@@ -2984,7 +2984,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory",
           "mode": "exec"
         }
@@ -3001,7 +3001,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]
@@ -3032,7 +3032,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]
@@ -3048,7 +3048,7 @@
       "mounts": [
         {
           "path": "/data",
-          "resource": "ram",
+          "vfs": "ram",
           "backend": "memory"
         }
       ]

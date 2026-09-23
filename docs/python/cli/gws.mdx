@@ -20,10 +20,10 @@ independent implementation uses
 from mirage import Workspace
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.core.google.config import GoogleConfig
-from mirage.resource.gmail import GmailResource
+from mirage.vfs.gmail import GmailVFS
 
 config = GoogleConfig(client_id="...", client_secret="...", refresh_token="...")
-ws = Workspace({"/mail": GmailResource(config)})
+ws = Workspace({"/mail": GmailVFS(config)})
 ws.register_cli("gws", GWS, config.model_dump())
 ```
 
@@ -78,12 +78,12 @@ gws drive permissions create \
 ### Folder scope
 
 A config carrying `folder_id` scopes what the CLI **creates**, so a file
-it makes lands in the same folder a `GDriveResource` sharing that config
+it makes lands in the same folder a `GDriveVFS` sharing that config
 mounts, and the agent's own `ls` shows what it just made:
 
 ```python
 config = GoogleConfig(client_id="...", refresh_token="...", folder_id="FOLDER_ID")
-ws = Workspace({"/data": GDriveResource(config)})
+ws = Workspace({"/data": GDriveVFS(config)})
 ws.register_cli("gws", GWS, config.model_dump())
 ```
 

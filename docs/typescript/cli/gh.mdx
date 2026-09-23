@@ -20,10 +20,10 @@ independent implementation uses
 
 ```typescript
 import { GH } from '@struktoai/mirage-core'
-import { GitHubResource, Workspace } from '@struktoai/mirage-node'
+import { GitHubVFS, Workspace } from '@struktoai/mirage-node'
 
 const config = { token: process.env.GITHUB_TOKEN!, repo: 'acme/tools' }
-const repo = await GitHubResource.create({
+const repo = await GitHubVFS.create({
   token: config.token,
   owner: 'acme',
   repo: 'tools',
@@ -33,7 +33,7 @@ const repo = await GitHubResource.create({
 const ws = new Workspace({ '/repo': repo })
 ws.registerCli('gh', GH, config)
 
-await ws.execute('gh repo view')
+await ws.shell('gh repo view')
 ```
 
 In YAML the same install rides the `clis:` section; see the

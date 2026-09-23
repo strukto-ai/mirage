@@ -2,8 +2,8 @@ import pytest
 from pydantic import ValidationError
 
 from mirage.core.wandb.pathing import safe_name
-from mirage.resource.registry import build_resource
-from mirage.resource.wandb import WandbConfig
+from mirage.vfs.registry import build_vfs
+from mirage.vfs.wandb import WandbConfig
 
 
 @pytest.mark.parametrize("config", [{
@@ -38,10 +38,7 @@ def test_entities_match_filesystem_names(name: str) -> None:
 
 
 def test_registry_redacts_key_and_has_no_mutations() -> None:
-    resource = build_resource("wandb", {
-        "entities": ["lab"],
-        "api_key": "private-key"
-    })
-    assert resource.name == "wandb"
-    assert "private-key" not in str(resource.get_state())
-    assert not resource.SIZES_ALWAYS_KNOWN
+    vfs = build_vfs("wandb", {"entities": ["lab"], "api_key": "private-key"})
+    assert vfs.name == "wandb"
+    assert "private-key" not in str(vfs.get_state())
+    assert not vfs.SIZES_ALWAYS_KNOWN

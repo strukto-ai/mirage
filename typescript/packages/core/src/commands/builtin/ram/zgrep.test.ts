@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 import { gzip } from '../../../utils/compress.ts'
 const RAM_ZGREP = RAM_COMMANDS.filter((c) => c.name === 'zgrep' && c.filetype == null)
@@ -24,7 +24,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runZgrep(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   texts: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
@@ -32,17 +32,12 @@ async function runZgrep(
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_ZGREP[0]
   if (cmd === undefined) throw new Error('zgrep not registered')
-  const result = await cmd.fn(
-    (resource as { accessor?: unknown }).accessor as never,
-    paths,
-    texts,
-    {
-      stdin,
-      flags,
-      filetypeFns: null,
-      cwd: '/',
-    },
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
+    stdin,
+    flags,
+    filetypeFns: null,
+    cwd: '/',
+  })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
@@ -56,42 +51,42 @@ async function runZgrep(
 
 describe('zgrep', () => {
   it('finds pattern in gzipped file', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const compressed = await gzip(ENC.encode('foo\nbar\nbaz\n'))
-    resource.store.files.set('/f.gz', compressed)
-    const r = await runZgrep(resource, [PathSpec.fromStrPath('/f.gz')], ['bar'])
+    vfs.store.files.set('/f.gz', compressed)
+    const r = await runZgrep(vfs, [PathSpec.fromStrPath('/f.gz')], ['bar'])
     expect(r.exitCode).toBe(0)
     expect(r.out.trim()).toBe('bar')
   })
 
   it('exits with 1 when no match', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const compressed = await gzip(ENC.encode('foo\nbar\n'))
-    resource.store.files.set('/f.gz', compressed)
-    const r = await runZgrep(resource, [PathSpec.fromStrPath('/f.gz')], ['xyz'])
+    vfs.store.files.set('/f.gz', compressed)
+    const r = await runZgrep(vfs, [PathSpec.fromStrPath('/f.gz')], ['xyz'])
     expect(r.exitCode).toBe(1)
   })
 
   it('-L prints the operand as typed', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/o.gz', await gzip(ENC.encode('foo\n')))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/o.gz', await gzip(ENC.encode('foo\n')))
     const typed = new PathSpec({
       virtual: '/o.gz',
       directory: '/',
-      resourcePath: '/o.gz',
+      vfsPath: '/o.gz',
       rawPath: './o.gz',
     })
-    const r = await runZgrep(resource, [typed], ['hello'], { files_without_match: true })
+    const r = await runZgrep(vfs, [typed], ['hello'], { files_without_match: true })
     expect(r.exitCode).toBe(1)
     expect(r.out).toBe('./o.gz\n')
-    const listed = await runZgrep(resource, [typed], ['foo'], { args_l: true })
+    const listed = await runZgrep(vfs, [typed], ['foo'], { args_l: true })
     expect(listed.out).toBe('./o.gz\n')
   })
 
   it('labels stdin "(standard input)" under -H', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const compressed = await gzip(ENC.encode('foo\nbar\n'))
-    const r = await runZgrep(resource, [], ['bar'], { H: true }, compressed)
+    const r = await runZgrep(vfs, [], ['bar'], { H: true }, compressed)
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('(standard input):bar\n')
   })

@@ -27,7 +27,7 @@ import { PostgresAccessor } from '../../../accessor/postgres.ts'
 import type { PgDriver, PgQueryResult } from '../../../core/postgres/_driver.ts'
 import * as readModule from '../../../core/postgres/read.ts'
 import * as statModule from '../../../core/postgres/stat.ts'
-import { resolvePostgresConfig } from '../../../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../../../vfs/postgres/config.ts'
 import { materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { POSTGRES_COMMANDS } from './index.ts'
@@ -75,7 +75,7 @@ describe('postgres cat size-guard surfacing', () => {
       virtual: '/pg/public/tables/users/rows.jsonl',
       directory: '/pg/public/tables/users/',
       resolved: true,
-      resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
+      vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
     })
     const result = await cmd.fn(accessor, [path], [], {
       stdin: null,

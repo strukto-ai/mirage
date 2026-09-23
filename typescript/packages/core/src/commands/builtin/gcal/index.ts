@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GCalAccessor } from '../../../accessor/gcal.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { GCAL_IO } from './io.ts'
@@ -23,6 +23,6 @@ import { GCAL_RM } from './rm.ts'
 // (commands/cli/builtin/gws), installed by name; the mount only serves the
 // filesystem surface, and rm is the one mutation a path can express.
 export const GCAL_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GCalAccessor>(ResourceName.GCAL, GCAL_IO),
+  ...makeGenericCommands<GCalAccessor>(VFSName.GCAL, GCAL_IO),
   ...GCAL_RM,
 ]

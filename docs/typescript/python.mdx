@@ -11,7 +11,7 @@ Mirage TypeScript implements `python3` as a shell builtin, backed by [Pyodide](h
 <Tabs>
   <Tab title="-c inline code">
     ```ts
-    const r = await ws.execute(`python3 -c "print(sum(range(1, 11)))"`)
+    const r = await ws.shell(`python3 -c "print(sum(range(1, 11)))"`)
     r.stdout          // "55\n"
     r.exitCode        // 0
     ```
@@ -19,21 +19,21 @@ Mirage TypeScript implements `python3` as a shell builtin, backed by [Pyodide](h
   <Tab title="Script file from any mount">
     ```ts
     // Script can live on any Mirage mount (RAM, disk, S3, Redis, ...).
-    await ws.execute(`cat > /ram/hello.py <<'PYEOF'
+    await ws.shell(`cat > /ram/hello.py <<'PYEOF'
     import sys
     print(f"args: {sys.argv[1:]}")
     PYEOF`)
-    const r = await ws.execute('python3 /ram/hello.py alice bob')
+    const r = await ws.shell('python3 /ram/hello.py alice bob')
     r.stdout          // "args: ['alice', 'bob']\n"
     ```
   </Tab>
   <Tab title="Piped stdin code">
     ```ts
-    const r = await ws.execute(`echo 'print(1+1)' | python3`)
+    const r = await ws.shell(`echo 'print(1+1)' | python3`)
     r.stdout          // "2\n"
 
     // Heredocs (quoted, unquoted, dash-stripped) all work:
-    await ws.execute(`python3 << 'PYEOF'
+    await ws.shell(`python3 << 'PYEOF'
     for i in range(3):
         print(f"item-{i}")
     PYEOF`)
@@ -69,8 +69,8 @@ Pyodide runs CPython in WebAssembly, using a worker when workers and `SharedArra
 A single Pyodide interpreter serves all `python3` calls in one workspace, so imports persist across calls.
 
 ```ts
-await ws.execute(`python3 -c "import json"`)
-const r = await ws.execute(`python3 -c "import sys; print('json' in sys.modules)"`)
+await ws.shell(`python3 -c "import json"`)
+const r = await ws.shell(`python3 -c "import sys; print('json' in sys.modules)"`)
 r.stdout // "True", Python Mirage would print "False"
 ```
 
@@ -83,8 +83,8 @@ Mirage keeps one Pyodide interpreter per workspace, so concurrent `python3` call
 ```ts
 // Runs in ~2s total, not ~1s:
 await Promise.all([
-  ws.execute(`python3 -c "import time; time.sleep(1)"`),
-  ws.execute(`python3 -c "import time; time.sleep(1)"`),
+  ws.shell(`python3 -c "import time; time.sleep(1)"`),
+  ws.shell(`python3 -c "import time; time.sleep(1)"`),
 ])
 ```
 
@@ -96,10 +96,10 @@ For parallelism, use separate workspaces. Envs and `sys.modules` are fully isola
 
 ```ts
 // works
-await ws.execute(`python3 -c "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"`)
+await ws.shell(`python3 -c "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"`)
 
 // needs a real fd
-await ws.execute(`python3 -c "import select; select.select([0], [], [])"`)
+await ws.shell(`python3 -c "import select; select.select([0], [], [])"`)
 ```
 
 Anything through `sys.stdin.read()`, `input()`, `print()`, `.buffer.read/write()` works. `select`, `poll`, `fcntl`, and `os.read(fd, ...)` on fd 0/1/2 don't apply in WASM.
@@ -109,30 +109,30 @@ Anything through `sys.stdin.read()`, `input()`, `print()`, `.buffer.read/write()
 Python code under `python3` can `open()` paths inside any Mirage-mounted prefix. Reads and writes route through the workspace's mount layer (RAM, S3, OPFS, Slack, anything you've registered).
 
 ```ts
-import { MountMode, RAMResource } from '@struktoai/mirage-core'
+import { MountMode, RAMVFS } from '@struktoai/mirage-core'
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 ws.addMount('/ram', ram, MountMode.WRITE)
 
-await ws.fs.writeFile('/ram/in.txt', 'hello')
-const r = await ws.execute(`python3 -c 'print(open("/ram/in.txt").read())'`)
+await ws.vfs.writeFile('/ram/in.txt', 'hello')
+const r = await ws.shell(`python3 -c 'print(open("/ram/in.txt").read())'`)
 r.stdoutText // "hello\n"
 
 // Writes flush back through the bridge:
-await ws.execute(`python3 -c 'open("/ram/out.txt","w").write("from python")'`)
-await ws.fs.readFileText('/ram/out.txt') // "from python"
+await ws.shell(`python3 -c 'open("/ram/out.txt","w").write("from python")'`)
+await ws.vfs.readFileText('/ram/out.txt') // "from python"
 ```
 
 PIL and other native-extension libs that go through Python's `open()` work too:
 
 ```ts
-await ws.execute(`python3 -c '
+await ws.shell(`python3 -c '
 from PIL import Image
 img = Image.new("RGB", (4, 4), color="red")
 img.save("/ram/icon.png")
 '`)
-const png = await ws.fs.readFile('/ram/icon.png')
-// PNG bytes, ws.fs sees what Python wrote
+const png = await ws.vfs.readFile('/ram/icon.png')
+// PNG bytes, ws.vfs sees what Python wrote
 ```
 
 See [Pyodide workspace file access](/typescript/runtime/python#workspace-file-access)
@@ -154,15 +154,15 @@ The tree-sitter-bash grammar strips newlines inside `"..."`. For multi-line `-c`
 
 ```ts
 // Newlines collapse, SyntaxError
-await ws.execute(`python3 -c "x = 2
+await ws.shell(`python3 -c "x = 2
 print(x * 3)"`)
 
 // Single quotes preserve newlines
-await ws.execute(`python3 -c 'x = 2
+await ws.shell(`python3 -c 'x = 2
 print(x * 3)'`)
 
 // Heredocs read more naturally
-await ws.execute(`python3 << 'PYEOF'
+await ws.shell(`python3 << 'PYEOF'
 x = 2
 print(x * 3)
 PYEOF`)

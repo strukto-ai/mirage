@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import { MountMode } from '../../types.ts'
@@ -23,7 +23,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import type { DispatchFn } from '../executor/cross_mount.ts'
 import { Namespace } from '../mount/namespace/namespace.ts'
 import { MountRegistry } from '../mount/registry.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
 import { specWordKinds } from '../expand/spec_hints.ts'
@@ -49,9 +49,9 @@ function buildDeps(registry: MountRegistry): ExecuteNodeDeps {
 }
 
 function plainRegistry(): MountRegistry {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
-  ops.registerResource(ram)
+  ops.registerVfs(ram)
   return new MountRegistry({ '/ram': ram }, MountMode.WRITE)
 }
 
@@ -65,7 +65,11 @@ describe('executeNode dispatcher', () => {
       namedChildren: [],
       isNamed: true,
     }
-    const [stdout, io] = await executeNode(buildDeps(reg), node, new Session({ sessionId: 't' }))
+    const [stdout, io] = await executeNode(
+      buildDeps(reg),
+      node,
+      new SessionState({ sessionId: 't' }),
+    )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
     expect(new TextDecoder().decode(await materialize(io.stderr))).toBe(
@@ -103,7 +107,7 @@ describe('executeNode dispatcher', () => {
       namedChildren: [nameNode, body],
       isNamed: true,
     }
-    const session = new Session({ sessionId: 't' })
+    const session = new SessionState({ sessionId: 't' })
     const [stdout, io] = await executeNode(buildDeps(reg), fnNode, session)
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
@@ -119,7 +123,7 @@ describe('executeNode dispatcher', () => {
       namedChildren: [],
       isNamed: true,
     }
-    const session = new Session({ sessionId: 't' })
+    const session = new SessionState({ sessionId: 't' })
     const [, io] = await executeNode(buildDeps(reg), node, session)
     expect(io.exitCode).toBe(0)
     expect(session.env.FOO).toBe('bar')
@@ -134,7 +138,7 @@ describe('executeNode dispatcher', () => {
       namedChildren: [],
       isNamed: true,
     }
-    const session = new Session({ sessionId: 't' })
+    const session = new SessionState({ sessionId: 't' })
     await executeNode(buildDeps(reg), node, session)
     // Only the seeded $PWD, so the assignment really did nothing.
     expect(Object.keys(session.env)).toEqual(['PWD'])
@@ -160,7 +164,7 @@ describe('executeNode dispatcher', () => {
       namedChildren: [inner],
       isNamed: true,
     }
-    const [, io] = await executeNode(buildDeps(reg), neg, new Session({ sessionId: 't' }))
+    const [, io] = await executeNode(buildDeps(reg), neg, new SessionState({ sessionId: 't' }))
     expect(io.exitCode).toBe(1)
   })
 
@@ -187,7 +191,7 @@ describe('executeNode dispatcher', () => {
       namedChildren: [inner],
       isNamed: true,
     }
-    const [, io] = await executeNode(buildDeps(reg), neg, new Session({ sessionId: 't' }))
+    const [, io] = await executeNode(buildDeps(reg), neg, new SessionState({ sessionId: 't' }))
     expect(io.exitCode).toBe(0)
   })
 
@@ -204,7 +208,7 @@ describe('executeNode dispatcher', () => {
       ],
       isNamed: true,
     }
-    const session = new Session({ sessionId: 't', cwd: '/ram/subdir' })
+    const session = new SessionState({ sessionId: 't', cwd: '/ram/subdir' })
     const [stdout, io] = await executeNode(buildDeps(reg), cmd, session)
     expect(io.exitCode).toBe(0)
     expect(decode(await materialize(stdout))).toBe('/ram/subdir\n')
@@ -223,7 +227,11 @@ describe('executeNode dispatcher', () => {
       ],
       isNamed: true,
     }
-    const [stdout, io] = await executeNode(buildDeps(reg), cmd, new Session({ sessionId: 't' }))
+    const [stdout, io] = await executeNode(
+      buildDeps(reg),
+      cmd,
+      new SessionState({ sessionId: 't' }),
+    )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
   })
@@ -241,7 +249,7 @@ describe('executeNode dispatcher', () => {
       ],
       isNamed: true,
     }
-    const [, io] = await executeNode(buildDeps(reg), cmd, new Session({ sessionId: 't' }))
+    const [, io] = await executeNode(buildDeps(reg), cmd, new SessionState({ sessionId: 't' }))
     expect(io.exitCode).toBe(1)
   })
 
@@ -279,7 +287,7 @@ describe('executeNode dispatcher', () => {
       namedChildren: [trueCmd, errNode],
       isNamed: true,
     }
-    const session = new Session({ sessionId: 't' })
+    const session = new SessionState({ sessionId: 't' })
     const [, io] = await executeNode(buildDeps(reg), prog, session)
     expect(io.exitCode).toBe(0)
     expect(session.lastExitCode).toBe(0)
@@ -297,7 +305,7 @@ describe('executeNode dispatcher', () => {
     const [stdout, io, exec] = await executeNode(
       buildDeps(reg),
       comment,
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
@@ -334,7 +342,7 @@ describe('executeNode dispatcher', () => {
       namedChildren: [trueCmd, comment],
       isNamed: true,
     }
-    const session = new Session({ sessionId: 't' })
+    const session = new SessionState({ sessionId: 't' })
     const [, io] = await executeNode(buildDeps(reg), prog, session)
     expect(io.exitCode).toBe(0)
     expect(session.lastExitCode).toBe(0)
@@ -381,7 +389,7 @@ describe('executeNode dispatcher', () => {
     const [, io, exec] = await executeNode(
       buildDeps(reg),
       compound,
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     // The comment must not become the lastExec; the real `false` should.
     expect(exec.command).toBe('false')
@@ -422,7 +430,7 @@ describe('executeNode dispatcher', () => {
     const [, io, exec] = await executeNode(
       buildDeps(reg),
       compound,
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     expect(io.exitCode).toBe(1)
     expect(exec.command).toBe('false')

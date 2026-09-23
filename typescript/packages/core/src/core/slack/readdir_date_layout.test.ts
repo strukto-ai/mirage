@@ -35,7 +35,7 @@ class FakeTransport implements SlackTransport {
 const PREFIX = '/mnt/slack'
 
 function p(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, PREFIX) })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, PREFIX) })
 }
 
 describe('readdir: date directory layout', () => {

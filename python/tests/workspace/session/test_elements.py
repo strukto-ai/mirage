@@ -16,13 +16,13 @@ import asyncio
 
 from mirage.shell.variable import VarAttr, with_attr
 from mirage.types import HiddenVars
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element, element_is_set
 from mirage.workspace.session.state import seed_var
 
 
-def _session() -> Session:
-    session = Session(session_id="s", cwd="/")
+def _session() -> SessionState:
+    session = SessionState(session_id="s", cwd="/")
     seed_var(session, "m", {"a": "1", "k5": "9", "0": "z"})
     seed_var(session, "arr", ["10", "20", "30"])
     seed_var(session, "s5", "5")

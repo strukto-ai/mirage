@@ -32,8 +32,8 @@ PROBED = [
     (400, "validation_error", "block_id should be a valid uuid.",
      "error: Public API request failed (400 Bad Request validation_error): "
      "block_id should be a valid uuid.\n", 5),
-    (403, "restricted_resource", "sample message.",
-     "error: Public API request failed (403 Forbidden restricted_resource): "
+    (403, "restricted_vfs", "sample message.",
+     "error: Public API request failed (403 Forbidden restricted_vfs): "
      "sample message.\n", 5),
     (404, "object_not_found", "Could not find block with ID: x.",
      "error: Public API request failed (404 Not Found object_not_found): "

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../../accessor/discord.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { DISCORD_GREP } from './grep.ts'
@@ -24,7 +24,7 @@ import { DISCORD_RG } from './rg.ts'
 const DISCORD_OVERRIDES = new Set(['grep', 'rg', 'head'])
 
 export const DISCORD_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<DiscordAccessor>(ResourceName.DISCORD, DISCORD_IO, {
+  ...makeGenericCommands<DiscordAccessor>(VFSName.DISCORD, DISCORD_IO, {
     overrides: DISCORD_OVERRIDES,
   }),
   ...DISCORD_GREP,

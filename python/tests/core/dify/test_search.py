@@ -106,8 +106,7 @@ async def test_search_segments_scopes_folder_to_all_documents(monkeypatch):
         accessor(),
         "login docs",
         [
-            PathSpec(resource_path=mount_key("/knowledge/guides",
-                                             "/knowledge"),
+            PathSpec(vfs_path=mount_key("/knowledge/guides", "/knowledge"),
                      virtual="/knowledge/guides",
                      directory="/knowledge/guides")
         ],
@@ -158,12 +157,10 @@ async def test_search_segments_unions_slug_and_name_based_paths(monkeypatch):
         accessor(),
         "setup",
         [
-            PathSpec(resource_path=mount_key("/knowledge/guides/api",
-                                             "/knowledge"),
+            PathSpec(vfs_path=mount_key("/knowledge/guides/api", "/knowledge"),
                      virtual="/knowledge/guides/api",
                      directory="/knowledge/guides/api"),
-            PathSpec(resource_path=mount_key("/knowledge/README.md",
-                                             "/knowledge"),
+            PathSpec(vfs_path=mount_key("/knowledge/README.md", "/knowledge"),
                      virtual="/knowledge/README.md",
                      directory="/knowledge/README.md"),
         ],
@@ -199,8 +196,7 @@ async def test_search_segments_uses_configured_slug_metadata_name(monkeypatch):
         custom_slug_accessor(),
         "setup",
         [
-            PathSpec(resource_path=mount_key("/knowledge/guides/api",
-                                             "/knowledge"),
+            PathSpec(vfs_path=mount_key("/knowledge/guides/api", "/knowledge"),
                      virtual="/knowledge/guides/api",
                      directory="/knowledge/guides/api")
         ],

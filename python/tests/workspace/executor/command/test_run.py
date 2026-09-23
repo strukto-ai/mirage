@@ -18,8 +18,8 @@ import inspect
 import pytest
 
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
-from mirage.resource.disk import DiskResource
 from mirage.types import MountMode
+from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.command.run import (drop_mount_caches,
                                                    link_view,
@@ -139,20 +139,20 @@ async def _cli_write_case(tmp_path) -> tuple[str, str, str]:
     (tmp_path / "two").mkdir()
     (tmp_path / "one" / "a.txt").write_bytes(b"v1\n")
     (tmp_path / "two" / "b.txt").write_bytes(b"v1\n")
-    one = DiskResource(root=str(tmp_path / "one"))
-    two = DiskResource(root=str(tmp_path / "two"))
+    one = DiskVFS(root=str(tmp_path / "one"))
+    two = DiskVFS(root=str(tmp_path / "two"))
     one.caches_reads = True
     two.caches_reads = True
     ws = Workspace({"/one/": one, "/two/": two}, mode=MountMode.WRITE)
-    await (await ws.execute("cat /one/a.txt")).stdout_str()
-    await (await ws.execute("cat /two/b.txt")).stdout_str()
+    await (await ws.shell("cat /one/a.txt")).stdout_str()
+    await (await ws.shell("cat /two/b.txt")).stdout_str()
     (tmp_path / "one" / "a.txt").write_bytes(b"v2\n")
     (tmp_path / "one" / "new.txt").write_bytes(b"fresh\n")
     (tmp_path / "two" / "b.txt").write_bytes(b"v2\n")
     await drop_mount_caches(ws._registry)
-    body = await (await ws.execute("cat /one/a.txt")).stdout_str()
-    listing = await (await ws.execute("ls /one")).stdout_str()
-    other = await (await ws.execute("cat /two/b.txt")).stdout_str()
+    body = await (await ws.shell("cat /one/a.txt")).stdout_str()
+    listing = await (await ws.shell("ls /one")).stdout_str()
+    other = await (await ws.shell("cat /two/b.txt")).stdout_str()
     return body, listing, other
 
 

@@ -21,7 +21,7 @@ from mirage.accessor.postgres import PostgresAccessor
 from mirage.core.postgres.search import (format_grep_results, search_database,
                                          search_entity, search_kind,
                                          search_schema)
-from mirage.resource.postgres.config import PostgresConfig
+from mirage.vfs.postgres.config import PostgresConfig
 
 
 @asynccontextmanager

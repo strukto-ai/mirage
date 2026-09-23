@@ -18,7 +18,7 @@ import { PathSpec } from '../../types.ts'
 import {
   normalizeDatabricksVolumeConfig,
   type DatabricksVolumeConfig,
-} from '../../resource/databricks_volume/config.ts'
+} from '../../vfs/databricks_volume/config.ts'
 import { backendPath, configuredRoot, normalizePosix, virtualPath, volumeRoot } from './path.ts'
 
 const CONFIG: DatabricksVolumeConfig = normalizeDatabricksVolumeConfig({
@@ -60,7 +60,7 @@ describe('backendPath', () => {
     const path = new PathSpec({
       virtual: '/volume/reports/latest.md',
       directory: '/volume/reports',
-      resourcePath: mountKey('/volume/reports/latest.md', '/volume'),
+      vfsPath: mountKey('/volume/reports/latest.md', '/volume'),
     })
     expect(backendPath(CONFIG, path)).toBe(
       '/Volumes/main/default/agent_files/root/reports/latest.md',
@@ -71,7 +71,7 @@ describe('backendPath', () => {
     const path = new PathSpec({
       virtual: '/volume/reports/../latest.md',
       directory: '/volume/reports',
-      resourcePath: mountKey('/volume/reports/../latest.md', '/volume'),
+      vfsPath: mountKey('/volume/reports/../latest.md', '/volume'),
     })
     expect(backendPath(CONFIG, path)).toBe('/Volumes/main/default/agent_files/root/latest.md')
   })
@@ -80,7 +80,7 @@ describe('backendPath', () => {
     const path = new PathSpec({
       virtual: '/volume/../../other_schema/other_volume/secret.txt',
       directory: '/volume',
-      resourcePath: mountKey('/volume/../../other_schema/other_volume/secret.txt', '/volume'),
+      vfsPath: mountKey('/volume/../../other_schema/other_volume/secret.txt', '/volume'),
     })
     expect(() => backendPath(CONFIG, path)).toThrow('escapes Databricks volume root')
   })

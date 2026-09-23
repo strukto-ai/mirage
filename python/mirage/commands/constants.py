@@ -19,7 +19,4 @@ from mirage.types import PathSpec
 # PathSpec, so one instance serves as the field default. The TS twin
 # (commands/constants.ts) holds the pre-promotion string, because the
 # TS CommandOpts keeps cwd as a virtual-path string.
-ROOT_CWD = PathSpec(virtual="/",
-                    directory="/",
-                    resource_path="",
-                    resolved=False)
+ROOT_CWD = PathSpec(virtual="/", directory="/", vfs_path="", resolved=False)

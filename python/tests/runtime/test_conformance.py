@@ -20,7 +20,6 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.io.types import materialize
-from mirage.resource.ram import RAMResource
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.python.wasi import WASI_HOME_ENV
@@ -28,6 +27,7 @@ from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import RunArgs
 from mirage.types import ContentType, FileStat, FileType
+from mirage.vfs.ram import RAMVFS
 
 
 def _wasi_available() -> bool:
@@ -458,17 +458,17 @@ QUICKJS_ROWS = (
 def _world(runtime: str) -> Workspace:
     return Workspace(
         {
-            "/data": RAMResource(),
-            "/other": RAMResource(),
-            "/ro": (RAMResource(), MountMode.READ),
+            "/data": RAMVFS(),
+            "/other": RAMVFS(),
+            "/ro": (RAMVFS(), MountMode.READ),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "vfs"],
+        runtimes=[runtime, "workspace"],
     )
 
 
 async def _sh(ws: Workspace, line: str) -> tuple[int, str]:
-    io = await ws.execute(line)
+    io = await ws.shell(line)
     out = (await materialize(io.stdout)).decode()
     return io.exit_code, out
 
@@ -547,9 +547,9 @@ async def test_a_root_mount_is_served_like_any_other(runtime: str):
     Args:
         runtime (str): registry name of the runtime under test.
     """
-    ws = Workspace({"/": RAMResource()},
+    ws = Workspace({"/": RAMVFS()},
                    mode=MountMode.EXEC,
-                   runtimes=[runtime, "vfs"])
+                   runtimes=[runtime, "workspace"])
     try:
         line = ROOT_WRITE_JS if runtime == "quickjs" else ROOT_WRITE_PY
         prefix = "node -e" if runtime == "quickjs" else "python3 -c"

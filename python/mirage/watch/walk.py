@@ -104,7 +104,7 @@ async def _stat_at(stat: StatFn, virtual: str, prefix: str,
     spec = PathSpec(virtual=virtual,
                     directory=virtual,
                     resolved=False,
-                    resource_path=mount_key(virtual, prefix))
+                    vfs_path=mount_key(virtual, prefix))
     try:
         return await stat(spec, index)
     except FileNotFoundError:
@@ -149,7 +149,7 @@ async def _descend(readdir: ReaddirFn, stat: StatFn, spec: PathSpec,
             child_spec = PathSpec(virtual=trimmed,
                                   directory=trimmed,
                                   resolved=False,
-                                  resource_path=mount_key(trimmed, prefix))
+                                  vfs_path=mount_key(trimmed, prefix))
             async for row in _descend(readdir, stat, child_spec, index,
                                       prefix):
                 yield row
@@ -187,7 +187,7 @@ class ReaddirWalk:
         Args:
             root (PathSpec): Watch root (mount-virtual path).
         """
-        prefix = mount_prefix_of(root.virtual, root.resource_path)
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         index = RAMIndexCacheStore()
         async for entry in _descend(self._readdir, self._stat, root, index,
                                     prefix):

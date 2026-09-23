@@ -1,0 +1,412 @@
+---
+title: Trello
+description: Mount Trello workspaces, boards, lists, cards, members, and labels as a Mirage filesystem for Python agents.
+icon: table-columns
+---
+The Trello VFS exposes workspaces, boards, lists, cards, members, and
+labels as a virtual filesystem mounted at some prefix such as `/trello/`.
+
+For API key setup, see [Trello Setup](/home/setup/trello).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.vfs.trello import TrelloConfig, TrelloVFS
+
+config = TrelloConfig(
+    api_key=os.environ["TRELLO_API_KEY"],
+    api_token=os.environ["TRELLO_API_TOKEN"],
+)
+vfs = TrelloVFS(config=config)
+ws = Workspace({"/trello": vfs}, mode=MountMode.READ)
+```
+
+## Filesystem Layout
+
+```text
+/trello/
+  workspaces/
+    <workspace-name>__<workspace-id>/
+      workspace.json
+      boards/
+        <board-name>__<board-id>/
+          board.json
+          members/
+            <full-name>__<member-id>.json
+            ...
+          labels/
+            <label-name>__<label-id>.json
+            ...
+          lists/
+            <list-name>__<list-id>/
+              list.json
+              cards/
+                <card-name>__<card-id>/
+                  card.json
+                  comments.jsonl
+                ...
+            ...
+```
+
+Example:
+
+```text
+/trello/
+  workspaces/
+    engineering__abc123def/
+      workspace.json
+      boards/
+        product-roadmap__brd_001/
+          board.json
+          members/
+            alice__mem_001.json
+            bob__mem_002.json
+          labels/
+            bug__lbl_001.json
+            feature__lbl_002.json
+          lists/
+            backlog__lst_001/
+              list.json
+              cards/
+                fix-login__crd_001/
+                  card.json
+                  comments.jsonl
+                add-search__crd_002/
+                  card.json
+                  comments.jsonl
+            in-progress__lst_002/
+              list.json
+              cards/
+                ...
+```
+
+Directory and file names embed the Trello ID after `__` so that
+VFS-specific commands can reference the correct VFS without
+extra lookups.
+
+### Workspaces
+
+Each workspace directory is named:
+
+```text
+<workspace-name>__<workspace-id>
+```
+
+Inside the workspace directory:
+
+- `workspace.json` is the normalized workspace metadata
+- `boards/` contains one directory per board
+
+### Boards
+
+Each board directory is named:
+
+```text
+<board-name>__<board-id>
+```
+
+Inside the board directory:
+
+- `board.json` is the normalized board metadata
+- `members/` contains one JSON file per board member
+- `labels/` contains one JSON file per board label
+- `lists/` contains one directory per list
+
+### Lists
+
+Each list directory is named:
+
+```text
+<list-name>__<list-id>
+```
+
+Each list directory contains:
+
+- `list.json` -- normalized list metadata with fields such as `list_id`,
+  `list_name`, `board_id`, `closed`, `pos`
+- `cards/` contains one directory per card
+
+### Cards
+
+Each card directory is named:
+
+```text
+<card-name>__<card-id>
+```
+
+Each card directory contains:
+
+- `card.json` -- normalized card metadata with command-aligned fields such as
+  `card_id`, `board_id`, `list_id`, `member_ids`, `label_ids`, `due`, `url`
+- `comments.jsonl` -- normalized comment stream ordered by `created_at`
+
+`comments.jsonl` is a Mirage representation chosen for shell-friendly
+workflows. It is not a native Trello file format.
+
+### Members
+
+Each member file is named:
+
+```text
+<full-name>__<member-id>.json
+```
+
+Member JSON includes command-aligned identifiers such as `member_id` and
+`username` so the value can be reused directly in commands like
+`trello card assign`.
+
+### Labels
+
+Each label file is named:
+
+```text
+<label-name>__<label-id>.json
+```
+
+Label JSON includes `label_id`, `label_name`, `color`, and `board_id`.
+
+## Cache
+
+Uses `IndexCacheStore` (same as other mounts).
+
+## Example
+
+See `examples/trello/trello.py` for the full working example.
+
+```bash
+# List workspaces
+ls /trello/workspaces/
+
+# Read workspace metadata
+cat /trello/workspaces/engineering__abc123/workspace.json
+
+# List boards
+ls /trello/workspaces/engineering__abc123/boards/
+
+# Read board metadata
+cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/board.json
+
+# List lists
+ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/
+
+# Read a card
+cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/card.json
+
+# Read card comments
+cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/comments.jsonl
+
+# Extract card ID with jq
+cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/card.json \
+  | jq '.card_id'
+
+# Read last 5 comments
+tail -n 5 /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/comments.jsonl
+
+# List members
+ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/members/
+
+# List labels
+ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/labels/
+
+# Tree view
+tree -L 2 /trello/workspaces/
+```
+
+## Finding IDs
+
+IDs are embedded in directory and file names after `__`:
+
+```bash
+# Workspace ID -- embedded in directory name
+ls /trello/workspaces/
+# -> engineering__abc123   <- workspace_id = abc123
+
+# Board ID -- embedded in board directory name
+ls /trello/workspaces/engineering__abc123/boards/
+# -> roadmap__brd_001   <- board_id = brd_001
+
+# List ID -- embedded in list directory name
+ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/
+# -> backlog__lst_001   <- list_id = lst_001
+
+# Card ID -- embedded in card directory name
+ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/
+# -> fix-login__crd_001   <- card_id = crd_001
+
+# Member ID -- embedded in member file name
+ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/members/
+# -> alice__mem_001.json   <- member_id = mem_001
+
+# Label ID -- embedded in label file name
+ls /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/labels/
+# -> bug__lbl_001.json   <- label_id = lbl_001
+
+# Use stat for structured metadata
+stat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/card.json
+
+# Extract fields with jq
+cat /trello/workspaces/engineering__abc123/boards/roadmap__brd_001/lists/backlog__lst_001/cards/fix-login__crd_001/card.json \
+  | jq '{card_id, board_id, list_id, member_ids, label_ids}'
+```
+
+## Shell Commands
+
+Standard commands available on the mounted Trello tree:
+
+| Command         | Notes                                      |
+| --------------- | ------------------------------------------ |
+| `ls`            | List workspaces, boards, lists, cards      |
+| `cat`           | Read .json metadata or .jsonl comments     |
+| `head` / `tail` | First/last N lines                         |
+| `grep` / `rg`   | Pattern search (file or directory level)   |
+| `jq`            | Query JSON fields                          |
+| `wc`            | Line/word/byte counts                      |
+| `stat`          | File metadata (name, size, type)           |
+| `find`          | Recursive search with `-name`, `-maxdepth` |
+| `tree`          | Directory tree view                        |
+| `basename`      | Extract file name from path                |
+| `dirname`       | Extract directory from path                |
+| `realpath`      | Resolve path to absolute form              |
+
+## VFS-Specific Commands
+
+The command surface mirrors a Trello CLI: nested `trello <noun> <verb>` names
+that emit normalized JSON to stdout, so you can pipe any of them to `jq`.
+
+### Read commands
+
+```bash
+trello board list                         # all boards
+trello board show brd_001
+trello board members brd_001
+trello list list brd_001                  # lists on a board
+trello label list brd_001
+trello card list lst_001                  # cards in a list
+trello card show crd_001
+trello card comments crd_001
+```
+
+### `trello card create`
+
+Create a new card. Description can be passed via `--desc`, `--desc_file`, or stdin.
+
+```bash
+trello card create --list_id LST123 --name "Fix login"
+trello card create --list_id LST123 --name "Fix login" --desc "Details here"
+cat brief.md | trello card create --list_id LST123 --name "Agent bug"
+```
+
+| Option        | Required | Description                         |
+| ------------- | -------- | ----------------------------------- |
+| `--list_id`   | yes      | Trello list ID                      |
+| `--name`      | yes      | Card name                           |
+| `--desc`      | no       | Inline description text             |
+| `--desc_file` | no       | Path to file containing description |
+
+### `trello card update`
+
+Update an existing card. Description can be passed via `--desc`, `--desc_file`, or stdin.
+
+```bash
+trello card update --card_id CRD123 --name "Updated title"
+trello card update --card_id CRD123 --desc "New description"
+trello card update --card_id CRD123 --closed true
+```
+
+| Option        | Required | Description                         |
+| ------------- | -------- | ----------------------------------- |
+| `--card_id`   | yes      | Trello card ID                      |
+| `--name`      | no       | New card name                       |
+| `--desc`      | no       | Inline description text             |
+| `--desc_file` | no       | Path to file containing description |
+| `--due`       | no       | Due date                            |
+| `--closed`    | no       | Archive card (true/false)           |
+
+### `trello card move`
+
+Move a card to a different list.
+
+```bash
+trello card move --card_id CRD123 --list_id LST999
+```
+
+| Option      | Required | Description    |
+| ----------- | -------- | -------------- |
+| `--card_id` | yes      | Trello card ID |
+| `--list_id` | yes      | Trello list ID |
+
+### `trello card assign`
+
+Assign a member to a card.
+
+```bash
+trello card assign --card_id CRD123 --member_id MEM001
+```
+
+| Option        | Required | Description      |
+| ------------- | -------- | ---------------- |
+| `--card_id`   | yes      | Trello card ID   |
+| `--member_id` | yes      | Trello member ID |
+
+### `trello card comment`
+
+Add a comment to a card. Text can be passed via `--text`, `--text_file`, or stdin.
+
+```bash
+trello card comment --card_id CRD123 --text "Looks good"
+cat note.md | trello card comment --card_id CRD123
+```
+
+| Option        | Required | Description                  |
+| ------------- | -------- | ---------------------------- |
+| `--card_id`   | yes      | Trello card ID               |
+| `--text`      | \*       | Inline comment text          |
+| `--text_file` | \*       | Path to file containing text |
+
+\* One of `--text`, `--text_file`, or stdin is required.
+
+### `trello card comment-update`
+
+Update an existing comment. Text can be passed via `--text`, `--text_file`, or stdin.
+
+```bash
+trello card comment-update --comment_id CMT001 --card_id CRD123 --text "Updated text"
+```
+
+| Option         | Required | Description                  |
+| -------------- | -------- | ---------------------------- |
+| `--comment_id` | yes      | Trello comment ID            |
+| `--card_id`    | yes      | Trello card ID               |
+| `--text`       | \*       | Inline comment text          |
+| `--text_file`  | \*       | Path to file containing text |
+
+\* One of `--text`, `--text_file`, or stdin is required.
+
+### `trello card label`
+
+Add a label to a card.
+
+```bash
+trello card label --card_id CRD123 --label_id LBL001
+```
+
+| Option       | Required | Description     |
+| ------------ | -------- | --------------- |
+| `--card_id`  | yes      | Trello card ID  |
+| `--label_id` | yes      | Trello label ID |
+
+### `trello card unlabel`
+
+Remove a label from a card.
+
+```bash
+trello card unlabel --card_id CRD123 --label_id LBL001
+```
+
+| Option       | Required | Description     |
+| ------------ | -------- | --------------- |
+| `--card_id`  | yes      | Trello card ID  |
+| `--label_id` | yes      | Trello label ID |

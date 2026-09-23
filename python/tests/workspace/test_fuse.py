@@ -15,8 +15,8 @@
 import subprocess
 import tempfile
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.workspace import Workspace
 
@@ -44,7 +44,7 @@ class TestFuseManager:
         # caller.
         _fake_mount(monkeypatch)
 
-        ws = Workspace({"/a/": RAMResource()}, mode=MountMode.WRITE)
+        ws = Workspace({"/a/": RAMVFS()}, mode=MountMode.WRITE)
         fm = FuseManager()
         fm.setup(ws._ops, prefix="/a/", mountpoint=str(tmp_path))
         fm.close()
@@ -61,7 +61,7 @@ class TestFuseManager:
         monkeypatch.setattr(tempfile, "mkdtemp",
                             lambda *_args, **_kwargs: str(generated))
 
-        ws = Workspace({"/a/": RAMResource()}, mode=MountMode.WRITE)
+        ws = Workspace({"/a/": RAMVFS()}, mode=MountMode.WRITE)
         fm = FuseManager()
         fm.setup(ws._ops, prefix="/a/")
         fm.close()

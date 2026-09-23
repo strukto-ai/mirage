@@ -22,13 +22,13 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-browser ai @ai-sdk/openai
 ## Usage
 
 ```ts
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { generateText, stepCountIs } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { mirageTools } from '@struktoai/mirage-agents/vercel'
 import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })

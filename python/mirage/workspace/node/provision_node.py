@@ -39,7 +39,7 @@ from mirage.workspace.provision.control import (handle_for_provision,
 from mirage.workspace.provision.pipes import (handle_connection_provision,
                                               handle_pipe_provision)
 from mirage.workspace.provision.redirect import handle_redirect_provision
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_cfor_parts, get_command_name, get_for_parts,
@@ -110,7 +110,7 @@ async def _gate_command(
     execute_fn: Callable[..., Any],
     name: str,
     parts: list[Any],
-    session: Session,
+    session: SessionState,
     plan_scope: PlanScope,
     agent_id: str,
     redirects: Sequence[PathSpec] = (),
@@ -142,7 +142,7 @@ async def _gate_command(
         execute_fn (Callable): recursive execute (for expansions).
         name (str): the node's command name, unexpanded.
         parts (list): the node's words, env prefix already split off.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         plan_scope (PlanScope): walk-local planner state.
         agent_id (str): the agent the plan is attributed to.
         redirects (Sequence[PathSpec]): the statement's expanded
@@ -185,7 +185,7 @@ async def _provision_redirected(
     agent_id: str,
     command: Any,
     redirects: list[Any],
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Plan one redirected command: expand targets, gate, cost, degrade.
 
@@ -198,7 +198,7 @@ async def _provision_redirected(
         agent_id (str): the agent the plan is attributed to.
         command (Any): the redirected command node.
         redirects (list): parsed redirects.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     expanded, pipe_node = await expand_redirects(redirects, session,
                                                  execute_fn, registry)
@@ -258,7 +258,7 @@ async def _provision_planned(
     plan: ProvisionResult,
     planned: Any,
     node: Any,
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Provision recurse wrapper that answers one node with a plan already
     made and provisions every other node normally.
@@ -268,7 +268,7 @@ async def _provision_planned(
         plan (ProvisionResult): the plan standing for ``planned``.
         planned (Any): the node the plan was made for.
         node (Any): the node being provisioned.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     if node is planned:
         return plan
@@ -285,7 +285,7 @@ async def _provision_reassociated(
     redirects: list[Any],
     right: Any,
     node: Any,
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Provision recurse wrapper for a re-associated trailing redirect.
 
@@ -302,7 +302,7 @@ async def _provision_reassociated(
         redirects (list): parsed redirects hoisted off the list.
         right (Any): the list's last command node.
         node (Any): node being provisioned by the connection handler.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     if node is not right:
         return await recurse(node, session)
@@ -317,7 +317,7 @@ async def provision_node(
     execute_fn: Callable[..., Any],
     namespace: Namespace | None,
     node: Any,
-    session: Session,
+    session: SessionState,
     scope: PlanScope | None = None,
     agent_id: str = "",
 ) -> ProvisionResult:
@@ -333,7 +333,7 @@ async def provision_node(
         dispatch (DispatchFn): VFS op dispatcher (op, path, **kw).
         execute_fn (Callable): recursive execute (for expansions).
         node (Any): tree-sitter node to plan.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         scope (PlanScope | None): walk-local planner state; created at
             the root and threaded through recursion.
         agent_id (str): the agent the plan is attributed to, for the

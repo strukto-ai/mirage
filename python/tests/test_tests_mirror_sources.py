@@ -22,8 +22,8 @@ IGNORED = {"__pycache__", ".pytest_cache"}
 # reader can go from `mirage/<pkg>/` to `tests/<pkg>/` without guessing. These
 # eight mirror nothing on purpose: they hold harnesses and fixture data rather
 # than a suite for one source package. Every other test directory must have a
-# twin -- `tests/resource/object_storage/` is what this rule is for, because it
-# collected 24 suites for 19 sibling packages and made `mirage/resource/s3/`
+# twin -- `tests/vfs/object_storage/` is what this rule is for, because it
+# collected 24 suites for 19 sibling packages and made `mirage/vfs/s3/`
 # look untested.
 UNMIRRORED_DIRS = {
     "commands/builtin/jq":
@@ -61,7 +61,7 @@ UNMIRRORED_DIRS = {
 # would count 816 today. What the ratchet buys is narrower than it looks:
 # a module whose name appears nowhere in the suite cannot be added
 # silently.
-MIRROR_BASELINE = 168
+MIRROR_BASELINE = 167
 
 
 def _test_dirs() -> list[pathlib.Path]:

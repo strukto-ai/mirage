@@ -35,7 +35,7 @@ export function flatPathSpec(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: mountKey(virtual, ''),
+    vfsPath: mountKey(virtual, ''),
     resolved: true,
   })
 }

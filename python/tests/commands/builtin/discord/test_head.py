@@ -29,7 +29,7 @@ CHAT = (f"/discord/myguild__G1/channels/general__C1/{DAY}/chat.jsonl")
 
 
 def _path(path: str) -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, "/discord"),
+    return PathSpec(vfs_path=mount_key(path, "/discord"),
                     virtual=path,
                     directory=path)
 

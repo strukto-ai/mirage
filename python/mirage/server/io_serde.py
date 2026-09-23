@@ -29,7 +29,7 @@ async def io_result_to_dict(
 
     Args:
         result (IOResult | ProvisionResult | None): the
-            workspace.execute return value.
+            workspace.shell return value.
 
     Returns:
         dict[str, Any]: serializable response payload.

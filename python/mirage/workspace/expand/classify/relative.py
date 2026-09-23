@@ -39,13 +39,13 @@ def relative_spec(word: str, registry: MountRegistry,
     mount = registry.try_mount_for(path)
     if mount is None:
         return word
-    resource_path = mount_key(path, mount.prefix.rstrip("/"))
+    vfs_path = mount_key(path, mount.prefix.rstrip("/"))
     last_slash = path.rfind("/")
     if has_glob(word):
         return PathSpec(
             virtual=path,
             directory=path[:last_slash + 1],
-            resource_path=resource_path,
+            vfs_path=vfs_path,
             pattern=path[last_slash + 1:],
             resolved=False,
             raw_path=word,
@@ -53,7 +53,7 @@ def relative_spec(word: str, registry: MountRegistry,
     return PathSpec(
         virtual=path,
         directory=path[:last_slash + 1],
-        resource_path=resource_path,
+        vfs_path=vfs_path,
         resolved=True,
         raw_path=word,
     )

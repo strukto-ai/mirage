@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.resource.gdocs import GDocsConfig, GDocsResource
-from mirage.resource.ram import RAMResource
-from mirage.resource.slack import SlackConfig, SlackResource
 from mirage.types import MountMode
+from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.slack import SlackConfig, SlackVFS
 from mirage.workspace import Workspace
 
 
-def test_file_prompt_includes_mounted_resources():
-    ram = RAMResource()
+def test_file_prompt_includes_mounts():
+    ram = RAMVFS()
     ws = Workspace(
         {"/": (ram, MountMode.WRITE)},
         mode=MountMode.WRITE,
@@ -31,7 +31,7 @@ def test_file_prompt_includes_mounted_resources():
 
 
 def test_file_prompt_shows_write_commands_for_writable_mounts():
-    slack = SlackResource(config=SlackConfig(token="xoxb-fake"))
+    slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
     ws = Workspace(
         {"/slack": (slack, MountMode.WRITE)},
         mode=MountMode.WRITE,
@@ -42,7 +42,7 @@ def test_file_prompt_shows_write_commands_for_writable_mounts():
 
 
 def test_file_prompt_hides_write_commands_for_readonly():
-    slack = SlackResource(config=SlackConfig(token="xoxb-fake"))
+    slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
     ws = Workspace(
         {"/slack": (slack, MountMode.READ)},
         mode=MountMode.READ,
@@ -54,7 +54,7 @@ def test_file_prompt_hides_write_commands_for_readonly():
 
 def test_file_prompt_substitutes_prefix_in_write_prompt():
     cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
-    gdocs = GDocsResource(config=cfg)
+    gdocs = GDocsVFS(config=cfg)
     ws = Workspace(
         {"/home/zecheng/gdocs": (gdocs, MountMode.WRITE)},
         mode=MountMode.WRITE,

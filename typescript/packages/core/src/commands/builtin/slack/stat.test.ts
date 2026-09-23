@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeSlackTransport, makeFakeResource, seedChannel } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs, seedChannel } from './_test_util.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 const SLACK_STAT = SLACK_COMMANDS.filter((c) => c.name === 'stat' && c.filetype == null)
@@ -32,8 +32,8 @@ async function runStat(
   const cmd = SLACK_STAT[0]
   if (cmd === undefined) throw new Error('stat not registered')
   const transport = options.transport ?? new FakeSlackTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -61,7 +61,7 @@ describe('slack stat', () => {
           virtual: '/mnt/slack/channels/general__C1',
           directory: '/mnt/slack/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
         }),
       ],
       {},
@@ -80,7 +80,7 @@ describe('slack stat', () => {
           virtual: '/mnt/slack/channels/general__C1',
           directory: '/mnt/slack/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
         }),
       ],
       { c: '%n' },

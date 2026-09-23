@@ -27,7 +27,7 @@ from mirage.runtime.vfs import RuntimeVFS
 from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileStat, FileType
 from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.stat_view import CHAR_MODE, DIR_MODE, FILE_MODE, LINK_MODE
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 class ListingVFS(RuntimeVFS):
@@ -408,7 +408,7 @@ async def test_the_hop_rebinds_the_launch_session_on_a_bare_thread():
     # context, so a bare Thread models them: the op arrives with an
     # empty context and only the VFS's captured session can scope it.
     dispatch = SessionSpyDispatch()
-    sess = Session(session_id="agent")
+    sess = SessionState(session_id="agent")
     token = set_current_session(sess)
     try:
         vfs = RuntimeVFS(dispatch, asyncio.get_running_loop())
@@ -434,7 +434,7 @@ async def test_the_hop_rebinds_the_launch_recorder_on_a_bare_thread():
     # threads guest calls arrive on never had it, and the loop task
     # run_coroutine_threadsafe schedules gets the loop's context, not
     # the typed line's. Without the rebind a guest's file I/O never
-    # reaches ws.fs.records while the same op from a shell line does.
+    # reaches ws.vfs.records while the same op from a shell line does.
     dispatch = LedgerDispatch()
     scope = RecordingScope()
     try:

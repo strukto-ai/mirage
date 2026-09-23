@@ -20,9 +20,9 @@ import pytest
 from mirage.core.jq import is_streamable_jsonl_expr, parse_json_docs
 from mirage.core.ram.read import read_bytes
 from mirage.observe.context import RecordingScope
-from mirage.resource.disk.disk import DiskResource
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.disk.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 from .conftest import (SAMPLE_JSONL, collect, jq, jq_all, mem_ws, run_raw,
@@ -97,7 +97,7 @@ class TestJqJsonl:
 
     def test_jsonl_disk_backend(self, tmp_path):
         (tmp_path / "data.jsonl").write_bytes(SAMPLE_JSONL)
-        disk = DiskResource(str(tmp_path))
+        disk = DiskVFS(str(tmp_path))
         ws = Workspace(
             {"/disk": (disk, MountMode.WRITE)},
             mode=MountMode.WRITE,
@@ -144,7 +144,7 @@ class TestJqStreamingVerification:
         return ("\n".join(lines) + "\n").encode()
 
     def _ws_with_jsonl(self, data: bytes) -> Workspace:
-        mem = RAMResource()
+        mem = RAMVFS()
         mem.accessor.store.files["/data.jsonl"] = data
         return Workspace(
             {"/m": (mem, MountMode.WRITE)},
@@ -163,7 +163,7 @@ class TestJqStreamingVerification:
 
     def test_jsonl_non_streamable_reads_full(self):
         data = self._make_large_jsonl(100)
-        mem = RAMResource()
+        mem = RAMVFS()
         mem.accessor.store.files["/data.jsonl"] = data
         scope = RecordingScope()
         records = scope.records
@@ -176,7 +176,7 @@ class TestJqStreamingVerification:
 
     def test_json_always_reads_full(self):
         data = json.dumps({"a": 1}).encode()
-        mem = RAMResource()
+        mem = RAMVFS()
         mem.accessor.store.files["/f.json"] = data
         scope = RecordingScope()
         records = scope.records
@@ -208,7 +208,7 @@ class TestJqStreamingVerification:
     def test_disk_jsonl_streaming(self, tmp_path):
         data = self._make_large_jsonl(50)
         (tmp_path / "data.jsonl").write_bytes(data)
-        disk = DiskResource(str(tmp_path))
+        disk = DiskVFS(str(tmp_path))
         ws = Workspace(
             {"/d": (disk, MountMode.WRITE)},
             mode=MountMode.WRITE,
@@ -222,7 +222,7 @@ class TestJqStreamingVerification:
 class TestJqPlanDryRun:
 
     def _plan_ws(self, filename: str, data: bytes) -> Workspace:
-        mem = RAMResource()
+        mem = RAMVFS()
         mem.accessor.store.files["/" + filename] = data
         return Workspace(
             {"/m": (mem, MountMode.WRITE)},
@@ -232,7 +232,7 @@ class TestJqPlanDryRun:
     def test_plan_json_full_read(self):
         data = json.dumps({"a": 1, "b": 2}).encode()
         ws = self._plan_ws("f.json", data)
-        result = asyncio.run(ws.execute("jq .a /m/f.json", provision=True))
+        result = asyncio.run(ws.shell("jq .a /m/f.json", provision=True))
         assert result.network_read_high == len(data)
         assert result.network_read_low == len(data)
 
@@ -241,7 +241,7 @@ class TestJqPlanDryRun:
         data = ("\n".join(lines) + "\n").encode()
         ws = self._plan_ws("data.jsonl", data)
         result = asyncio.run(
-            ws.execute("jq '.[] | .x' /m/data.jsonl", provision=True))
+            ws.shell("jq '.[] | .x' /m/data.jsonl", provision=True))
         assert result.network_read_low == 0
         assert result.network_read_high == len(data)
 
@@ -250,6 +250,6 @@ class TestJqPlanDryRun:
         data = ("\n".join(lines) + "\n").encode()
         ws = self._plan_ws("data.jsonl", data)
         result = asyncio.run(
-            ws.execute("jq length /m/data.jsonl", provision=True))
+            ws.shell("jq length /m/data.jsonl", provision=True))
         assert result.network_read_low == len(data)
         assert result.network_read_high == len(data)

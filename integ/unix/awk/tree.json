@@ -1,0 +1,174 @@
+{
+  "cases": [
+    {
+      "id": "awk_tree_concat_assignment",
+      "seq": 991400,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'School/Courses_Materials/notes.md\\n' | awk -F/ '{indent=indent\"    \";print indent $NF}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "    notes.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_tree_variable_persists_across_records",
+      "seq": 991401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'School/Courses_Materials/notes.md\\nb/c\\n' | awk -F/ '{indent=indent\"    \";print indent $NF}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "    notes.md\n        c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_tree_juxtaposed_print_operands",
+      "seq": 991402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'School/Courses_Materials/notes.md\\n' | awk -F/ '{print indent $NF}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "notes.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_tree_last_field",
+      "seq": 991403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'School/Courses_Materials/notes.md\\n' | awk -F/ '{print $NF}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "notes.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_tree_depth_as_nf",
+      "seq": 991404,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'School/Courses_Materials/notes.md\\n' | awk -F/ '{print NF}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

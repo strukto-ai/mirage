@@ -162,7 +162,7 @@ def cwd_spec(cwd: PathSpec | str) -> PathSpec:
     return PathSpec(virtual=cwd,
                     directory=cwd,
                     resolved=False,
-                    resource_path=cwd.strip("/"))
+                    vfs_path=cwd.strip("/"))
 
 
 ENOENT_TEXT = "No such file or directory"
@@ -186,7 +186,7 @@ async def du_operands(
     A failed stat is not proof of absence, and du runs bound to one
     backend, so its own stat cannot see two things that make a path a
     real directory: a mount nested below it and a symlink below it are
-    both namespace state, held in another resource or in no resource at
+    both namespace state, held in another VFS or in no VFS at
     all. ``stat_path`` is the channel that knows, because it resolves
     through the dispatcher rather than one accessor, and it is the same
     probe ``find`` classifies its start point with. Session filtering
@@ -348,7 +348,7 @@ def to_virtual(entries: Sequence[tuple[str, int]],
     Returns:
         list[tuple[str, int]]: the pairs with absolute virtual paths.
     """
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     if not prefix:
         return list(entries)
     return [(prefix + "/" + entry.lstrip("/"), size)

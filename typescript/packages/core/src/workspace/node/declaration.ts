@@ -32,7 +32,7 @@ import {
 import { type ExecuteFn, expandNode } from '../expand/node.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import {
   conversionScalar,
   ensureVarVisible,
@@ -145,7 +145,7 @@ function declareOptionRefusal(
  */
 function plusRefusals(
   cmd: string,
-  session: Session,
+  session: SessionState,
   view: SessionView,
   plusChars: ReadonlySet<string>,
   assignments: readonly string[],
@@ -197,7 +197,7 @@ function plusRefusals(
  * of the ungated-write allowlist that `setAttr` sites must justify.
  */
 async function stampAttrs(
-  session: Session,
+  session: SessionState,
   view: SessionView,
   flagChars: ReadonlySet<string>,
   plusChars: ReadonlySet<string>,
@@ -262,7 +262,7 @@ async function stampAttrs(
  * the deployment had refused.
  */
 async function stampExport(
-  session: Session,
+  session: SessionState,
   view: SessionView,
   flagChars: ReadonlySet<string>,
   assignments: readonly string[],
@@ -307,7 +307,7 @@ async function stampExport(
  */
 export async function executeDeclaration(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   namespace: Namespace,

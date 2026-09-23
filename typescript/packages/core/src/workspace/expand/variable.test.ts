@@ -16,12 +16,12 @@ import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 import { CallStack } from '../../shell/call_stack.ts'
 import { NodeType as NT } from '../../shell/types.ts'
-import { Session, type SessionInit } from '../session/session.ts'
+import { SessionState, type SessionInit } from '../session/session.ts'
 import { expandBraces, lookupVar } from './variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 
-function makeSession(init: Partial<Omit<SessionInit, 'sessionId'>> = {}): Session {
-  return new Session({ sessionId: 'test', ...init })
+function makeSession(init: Partial<Omit<SessionInit, 'sessionId'>> = {}): SessionState {
+  return new SessionState({ sessionId: 'test', ...init })
 }
 
 function stringNode(type: string, text: string): TSNodeLike {

@@ -9,9 +9,7 @@ from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
 
 
 def _ps(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory=path,
-                    resource_path=path.strip("/"))
+    return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
 def _names(paths: list[str]) -> set[str]:
@@ -75,7 +73,7 @@ def test_blob_size_leaves_undecodable_values_unknown():
 def _globbed(path: str, pattern: str) -> PathSpec:
     return PathSpec(virtual=path,
                     directory=path,
-                    resource_path=path.strip("/"),
+                    vfs_path=path.strip("/"),
                     pattern=pattern)
 
 

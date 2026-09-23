@@ -14,7 +14,7 @@
 
 import { recordStream } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import { ResourceName, type PathSpec } from '../../types.ts'
+import { VFSName, type PathSpec } from '../../types.ts'
 import { norm } from './utils.ts'
 import { enoent } from '../../utils/errors.ts'
 
@@ -23,7 +23,7 @@ export async function* stream(accessor: RAMAccessor, path: PathSpec): AsyncItera
   const p = norm(path.mountPath)
   const data = accessor.store.files.get(p)
   if (data === undefined) throw enoent(path)
-  const rec = recordStream('read', p, ResourceName.RAM)
+  const rec = recordStream('read', p, VFSName.RAM)
   if (rec !== null) rec.bytes = data.byteLength
   yield data
 }

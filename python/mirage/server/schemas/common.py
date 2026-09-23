@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 class MountSummary(BaseModel):
     prefix: str
-    resource: str
+    vfs: str
     mode: str
     description: str = ""
 

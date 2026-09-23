@@ -190,7 +190,7 @@ function operand(virtual: string, pattern: string | null = null): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-    resourcePath: virtual.replace(/^\/+|\/+$/g, ''),
+    vfsPath: virtual.replace(/^\/+|\/+$/g, ''),
     pattern,
     resolved: pattern === null,
   })

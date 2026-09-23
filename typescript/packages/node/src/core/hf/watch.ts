@@ -17,7 +17,7 @@ import type { HfAccessor } from '../../accessor/hf.ts'
 import { OpendalWalk } from '../opendal/watch.ts'
 
 /**
- * Build the delta hook shared by every Hugging Face resource.
+ * Build the delta hook shared by every Hugging Face VFS.
  *
  * One recursive tree listing per pull, fingerprinted on the Hub's ETag. A
  * mount pinned to an immutable `revision` cannot report a change, because the

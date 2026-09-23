@@ -26,12 +26,12 @@ import { eaccesOnDenied, isFolder, resolveKey } from './resolve.ts'
  * this is the same request `rmR` sends and the emptiness check is the only
  * thing separating them. Without it `rmdir` destroyed the whole subtree for
  * every caller that does not pre-check emptiness itself, and the command
- * builders are the only callers that do: FUSE, `ws.fs` and the sandbox
+ * builders are the only callers that do: FUSE, `ws.vfs` and the sandbox
  * runtimes all reach the op directly. The probe is the one `rename` already
  * makes before it overwrites a directory, bounded to a single entry.
  */
 async function rmdirImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
-  const key = path.resourcePath
+  const key = path.vfsPath
   if (key === '') return
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(path)

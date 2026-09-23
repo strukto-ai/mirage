@@ -1,7 +1,7 @@
 ---
 title: MinIO
 icon: /images/minio-logo.svg
-description: Set up MinIO as a MIRAGE resource from Node or the browser.
+description: Set up MinIO as a MIRAGE VFS from Node or the browser.
 ---
 
 MinIO speaks the S3 API with AWS Signature V4 against your own server endpoint (e.g. `http://localhost:9000`). MinIO is self-hosted, so the endpoint is required and path-style addressing is used by default.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { MinIOResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { MinIOVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const minio = new MinIOResource({
+const minio = new MinIOVFS({
   bucket: process.env.MINIO_BUCKET!,
   endpoint: process.env.MINIO_ENDPOINT!,
   accessKeyId: process.env.MINIO_ACCESS_KEY!,
@@ -25,7 +25,7 @@ const minio = new MinIOResource({
 })
 
 const ws = new Workspace({ '/bucket/': minio }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `MinIOResource` is secret-free, your backend signs each operation using your MinIO keys and returns a URL. MinIO accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your MinIO endpoint.
+The browser `MinIOVFS` is secret-free, your backend signs each operation using your MinIO keys and returns a URL. MinIO accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your MinIO endpoint.
 
 ### 1. Server: sign URLs with the MinIO endpoint
 
@@ -95,9 +95,9 @@ MinIO uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style re
 ### 2. Browser: wire it up
 
 ```ts
-import { MinIOResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { MinIOVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const minio = new MinIOResource({
+const minio = new MinIOVFS({
   bucket: 'my-bucket',
   endpoint: 'http://localhost:9000',
   presignedUrlProvider: async (path, op, opts) => {
@@ -126,4 +126,4 @@ MinIO answers CORS preflights for **all origins by default**, so local dev typic
 MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:5173,https://app.example.com
 ```
 
-See the [MinIO resource](/python/resource/minio) docs for the equivalent Python wiring.
+See the [MinIO VFS](/python/vfs/minio) docs for the equivalent Python wiring.

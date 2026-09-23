@@ -16,10 +16,10 @@ from typing import Any
 
 from mirage.core.api.client import SessionArg, api_request, status_error
 from mirage.core.slack.config import SlackConfig
-from mirage.resource.secrets import reveal_secret
 from mirage.utils.naming import fit_id_name
 from mirage.utils.ranges import window_for
 from mirage.utils.sanitize import path_safe_name
+from mirage.vfs.secrets import reveal_secret
 
 
 def file_blob_name(file_meta: dict[str, Any]) -> str:

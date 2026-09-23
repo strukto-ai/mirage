@@ -40,7 +40,7 @@ from mirage.workspace.node.admission import (admit_line, is_pending,
                                              is_pending_refusal)
 from mirage.workspace.node.explain import prejudge_line, unrefused_nodes
 from mirage.workspace.node.occurrence import evaluated_from
-from mirage.workspace.session import (Session, get_current_session_for,
+from mirage.workspace.session import (SessionState, get_current_session_for,
                                       reset_current_session,
                                       set_current_session)
 from mirage.workspace.snapshot import ContentDriftError
@@ -155,13 +155,13 @@ async def recurse(
         inner = HandOff(parent=handed)
     else:
         inner = evaluated_from(node, handed, span)
-    io = await ws.execute(cmd,
-                          cancel=cancel,
-                          record=False,
-                          routing_decision=routing_decision,
-                          agent_id=agent_id,
-                          handed=inner,
-                          **opts)
+    io = await ws.shell(cmd,
+                        cancel=cancel,
+                        record=False,
+                        routing_decision=routing_decision,
+                        agent_id=agent_id,
+                        handed=inner,
+                        **opts)
     if isinstance(io, IOResult) and io.refusal is not None:
         nested.latest = io.refusal
     return io
@@ -185,20 +185,20 @@ def session_cwd(
 
 @dataclass(slots=True)
 class LineFrame:
-    """What ``Workspace.execute`` needs from the line to answer an abort:
+    """What ``Workspace.shell`` needs from the line to answer an abort:
     the shell it ran on and the status that shell had before it, filled
     by ``execute_line`` as soon as it knows them and before anything
     stamps. Per call, never on the session, so two lines on one session
     each keep their own.
 
     Attributes:
-        session (Session | None): the shell the line stamps on.
+        session (SessionState | None): the shell the line stamps on.
         status_before (StatusSnapshot | None): ``$?`` and
             ``${PIPESTATUS[@]}`` as the line found them.
         writer (StatusWriter): the line's identity, so a restore undoes
             only the stamps this line made.
     """
-    session: Session | None = None
+    session: SessionState | None = None
     status_before: StatusSnapshot | None = None
     writer: StatusWriter = field(default_factory=StatusWriter)
 
@@ -219,7 +219,7 @@ async def execute_line(
     handed: HandOff | None = None,
     frame: LineFrame | None = None,
 ) -> IOResult | ProvisionResult:
-    """The body of ``Workspace.execute``; see its docstring for the
+    """The body of ``Workspace.shell``; see its docstring for the
     argument contract.
 
     Order of gates: hydrate stores, drain any queued drift check,
@@ -235,12 +235,12 @@ async def execute_line(
             ``recurse`` for a nested evaluation; None for a typed line,
             which gets one of its own.
         frame (LineFrame | None): filled with the session and its
-            status before the line, for ``Workspace.execute`` to restore
+            status before the line, for ``Workspace.shell`` to restore
             ``$?`` from when the caller aborts.
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
-    cacheable = ws._dispatcher.capture_cacheable_paths()
+    cache_facts = ws._dispatcher.capture_cache_facts()
     await ws._namespace.ensure_loaded()
     await ws._meta.ensure()
     await ws._session_mgr.ensure_loaded()
@@ -284,7 +284,7 @@ async def execute_line(
                                         owner=ws._session_mgr)
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
-    # ``Workspace.execute``, after the last await of the line, so an
+    # ``Workspace.shell``, after the last await of the line, so an
     # abort that lands on the flush or the record is covered too.
     if frame is not None:
         frame.session = session
@@ -469,7 +469,7 @@ async def execute_line(
                         await fill_env(effective_session, names, sources)
                         names = plan_names(nodes)
             # No seam of its own: the whole line is one task under
-            # ``Workspace.execute``, and a cancel lands on whichever await
+            # ``Workspace.shell``, and a cancel lands on whichever await
             # the tree is in.
             io, _ = await run_command_tree(
                 ws.dispatch,
@@ -514,7 +514,7 @@ async def execute_line(
         if warnings:
             io.stderr = warnings + await io.materialize_stderr()
         record_status(session, io.exit_code, transparent=True)
-        await ws.apply_io(io, records=scope.records, is_cacheable=cacheable)
+        await ws.apply_io(io, records=scope.records, cache_facts=cache_facts)
         return io
     except CommandTimeoutError as exc:
         # The caller's event is read, never written: a timeout is this
@@ -531,7 +531,7 @@ async def execute_line(
         return io
     except (MirageAbortError, asyncio.CancelledError):
         # An aborted invocation is the caller's outcome, not the shell's;
-        # the record says so, and ``Workspace.execute`` restores `$?`.
+        # the record says so, and ``Workspace.shell`` restores `$?`.
         io = IOResult(exit_code=130, stderr=b"execute aborted\n")
         raise
     except (ContentDriftError, RouteError) as exc:

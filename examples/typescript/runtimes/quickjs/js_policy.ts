@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource, ScriptSource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, ScriptSource, Workspace } from '@struktoai/mirage-node'
 
 // A JS-only world with a JS policy. The quickjs runtime carries the
 // evaluator capability, so it doubles as the policy engine: the policy
@@ -30,15 +30,15 @@ const JS_POLICY = new ScriptSource(
 
 async function main(): Promise<void> {
   const ws = new Workspace(
-    { '/data': new RAMResource(), '/prod': new RAMResource() },
-    { mode: MountMode.EXEC, runtimes: ['quickjs', 'vfs'], routePolicy: JS_POLICY },
+    { '/data': new RAMVFS(), '/prod': new RAMVFS() },
+    { mode: MountMode.EXEC, runtimes: ['quickjs', 'workspace'], routePolicy: JS_POLICY },
   )
   try {
-    const ok = await ws.execute('echo hello > /data/notes.txt')
+    const ok = await ws.shell('echo hello > /data/notes.txt')
     console.log('write /data ->', ok.exitCode)
-    const served = await ws.execute('node -e "console.log(6 * 7)"')
+    const served = await ws.shell('node -e "console.log(6 * 7)"')
     console.log('node -e ->', served.stdoutText.trim())
-    const denied = await ws.execute('cat /prod/secret.txt')
+    const denied = await ws.shell('cat /prod/secret.txt')
     console.log('touch /prod ->', denied.exitCode, denied.stderrText.trim())
   } finally {
     await ws.close()

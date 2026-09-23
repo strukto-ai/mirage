@@ -1,4 +1,4 @@
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE

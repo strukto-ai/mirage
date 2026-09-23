@@ -45,7 +45,7 @@ async function probeDir<A extends Accessor, C>(
 /** Build a prefix listing with index write-back over one driver. */
 export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): ReaddirFn<A> {
   return async function readdir(accessor, path, index) {
-    const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+    const prefix = mountPrefixOf(path.virtual, path.vfsPath)
     // When called from resolveGlob with a pattern (e.g. *.txt), use
     // path.directory for the listing. Direct callers (ls, ops) pass
     // pattern=null so path.virtual is used.
@@ -105,7 +105,7 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
     names.sort(compareCodePoints)
     if (names.length > driver.scopeError) {
       console.warn(
-        `${driver.resource} readdir: ${fullVirtualKey} returned ` +
+        `${driver.vfs} readdir: ${fullVirtualKey} returned ` +
           `${String(names.length)} entries (limit ${String(driver.scopeError)})`,
       )
     }

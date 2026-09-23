@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from mirage import Workspace
 from mirage.config import resolve_secrets
 from mirage.secrets.errors import SecretsError
-from mirage.server.clone import (build_override_resources,
+from mirage.server.clone import (build_override_mounts,
                                  clone_workspace_with_override)
 from mirage.server.paths import PathOutsideRootError, resolve_within_root
 from mirage.server.summary import make_brief, make_detail
@@ -175,10 +175,10 @@ async def load_workspace(req: LoadWorkspaceRequest,
         # An override mount's credential may be a pointer at one of
         # these declarations; a container the constructor will reject
         # is left for it to reject.
-        resources = await build_override_resources(req.override, secrets)
+        mounts = await build_override_mounts(req.override, secrets)
     except (KeyError, TypeError, ValueError, SecretsError) as e:
-        # An override naming a resource the daemon cannot build (an
-        # unknown name, an unloadable ref, a ref that is not a resource,
+        # An override naming a VFS the daemon cannot build (an
+        # unknown name, an unloadable ref, a ref that is not a VFS,
         # a secrets source it cannot resolve) is the caller's mistake,
         # the answer the TypeScript daemon gives too; it used to escape
         # as a 500.
@@ -186,7 +186,7 @@ async def load_workspace(req: LoadWorkspaceRequest,
                             detail=f"override build failed: {e}")
     try:
         ws = await Workspace.load(str(safe_path),
-                                  resources=resources,
+                                  mounts=mounts,
                                   secrets=secrets)
     except FileNotFoundError:
         raise HTTPException(status_code=400,

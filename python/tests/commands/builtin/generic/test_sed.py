@@ -5,7 +5,7 @@ from mirage.types import PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(resource_path=(path).strip("/"),
+    return PathSpec(vfs_path=(path).strip("/"),
                     virtual=path,
                     directory=path,
                     resolved=True)
@@ -16,14 +16,14 @@ def _make_backend(files: dict[str, bytes]):
 
     async def read_bytes(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
-            resource_path=(path).strip("/"), virtual=path, directory=path)
+            vfs_path=(path).strip("/"), virtual=path, directory=path)
         if spec.virtual not in store:
             raise FileNotFoundError(spec.virtual)
         return store[spec.virtual]
 
     async def write_bytes(path, data):
         spec = path if isinstance(path, PathSpec) else PathSpec(
-            resource_path=(path).strip("/"), virtual=path, directory=path)
+            vfs_path=(path).strip("/"), virtual=path, directory=path)
         store[spec.virtual] = data
 
     return read_bytes, write_bytes, store

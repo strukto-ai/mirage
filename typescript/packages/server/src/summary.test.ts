@@ -13,17 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { Resource } from '@struktoai/mirage-core/resource/base'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { WorkspaceRegistry } from './registry.ts'
-import { describeResource, makeBrief, makeDetail } from './summary.ts'
+import { describeVfs, makeBrief, makeDetail } from './summary.ts'
 
 describe('summary', () => {
   it('makeBrief reports prefix count + workspace mode', () => {
     const r = new WorkspaceRegistry()
-    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const entry = r.add(ws, 'ws-x')
     const brief = makeBrief(entry)
     expect(brief.id).toBe('ws-x')
@@ -35,28 +35,28 @@ describe('summary', () => {
 
   it('makeDetail emits mounts + sessions', async () => {
     const r = new WorkspaceRegistry()
-    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const entry = r.add(ws, 'ws-y')
     const detail = await makeDetail(entry)
     // /data/ plus the empty root anchor at / (no user / mount was given).
     expect(detail.mounts.map((m) => m.prefix).sort()).toEqual(['/', '/data/'])
     const dataMount = detail.mounts.find((m) => m.prefix === '/data/')
-    expect(dataMount?.resource).toBe('ram')
+    expect(dataMount?.vfs).toBe('ram')
   })
 })
 
 const ASTRAL = '\u{10400}'
 
-// `RAMResource.prompt` is inferred as its own string literal, so a subclass
+// `RAMVFS.prompt` is inferred as its own string literal, so a subclass
 // cannot widen it; the description only ever reads the field.
-function promptResource(prompt: string): Resource {
-  return Object.assign(new RAMResource(), { prompt })
+function promptVfs(prompt: string): VFS {
+  return Object.assign(new RAMVFS(), { prompt })
 }
 
-describe('describeResource', () => {
+describe('describeVfs', () => {
   it('returns a short prompt whole', () => {
-    expect(describeResource(promptResource('hello'))).toBe('hello')
-    expect(describeResource(promptResource(''))).toBe('')
+    expect(describeVfs(promptVfs('hello'))).toBe('hello')
+    expect(describeVfs(promptVfs(''))).toBe('')
   })
 
   it('measures the budget in code points, matching python', () => {
@@ -64,11 +64,11 @@ describe('describeResource', () => {
     // units, so measuring `String.length` ellipsized a prompt python leaves
     // whole -- and the cut landed inside the 40th surrogate pair.
     const prompt = 'a'.repeat(40) + ASTRAL.repeat(45)
-    expect(describeResource(promptResource(prompt))).toBe(prompt)
+    expect(describeVfs(promptVfs(prompt))).toBe(prompt)
   })
 
   it('ellipsizes on a code-point boundary', () => {
-    const out = describeResource(promptResource(ASTRAL.repeat(130)))
+    const out = describeVfs(promptVfs(ASTRAL.repeat(130)))
     expect(out).toBe(ASTRAL.repeat(119) + '\u2026')
     expect(Array.from(out)).toHaveLength(120)
     // A half pair is a legal `String` value and only becomes U+FFFD once the
@@ -78,6 +78,6 @@ describe('describeResource', () => {
 
   it('drops trailing whitespace before the ellipsis', () => {
     const prompt = 'x'.repeat(118) + '  ' + 'y'.repeat(10)
-    expect(describeResource(promptResource(prompt))).toBe('x'.repeat(118) + '\u2026')
+    expect(describeVfs(promptVfs(prompt))).toBe('x'.repeat(118) + '\u2026')
   })
 })

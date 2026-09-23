@@ -19,8 +19,8 @@ from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import RAMIndexCacheStore, ResourceType
 from mirage.core.s3.readdir import readdir
 from mirage.core.s3.stat import stat
-from mirage.resource.s3 import S3Config
 from mirage.types import FileType, PathSpec
+from mirage.vfs.s3 import S3Config
 from tests.e2e.s3_mock import patch_s3_multi
 
 EXPECTED_MODIFIED = "2026-03-31T00:00:00Z"
@@ -43,7 +43,7 @@ def test_readdir_stores_remote_time_for_files():
     try:
         accessor = _accessor()
         cache = RAMIndexCacheStore(ttl=60)
-        scope = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
+        scope = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
         asyncio.run(readdir(accessor, scope, cache))
         file_lookup = asyncio.run(cache.get("/dir/a.txt"))
         assert file_lookup.entry is not None
@@ -65,9 +65,9 @@ def test_stat_returns_modified_from_index():
     try:
         accessor = _accessor()
         cache = RAMIndexCacheStore(ttl=60)
-        scope = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
+        scope = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
         asyncio.run(readdir(accessor, scope, cache))
-        target = PathSpec(resource_path="dir/a.txt",
+        target = PathSpec(vfs_path="dir/a.txt",
                           virtual="/dir/a.txt",
                           directory="/dir")
         result = asyncio.run(stat(accessor, target, index=cache))

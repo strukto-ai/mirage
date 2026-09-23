@@ -24,8 +24,8 @@ from mirage.commands.builtin.postgres.rg import rg
 from mirage.commands.builtin.postgres.tail import tail
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
-from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
+from mirage.vfs.postgres.config import PostgresConfig
 
 CONCRETE = "/public/tables/books/rows.jsonl"
 GLOB = "/public/tables/*/rows.jsonl"
@@ -74,19 +74,18 @@ def _glob_path() -> PathSpec:
     # otherwise read the "*" as an entity literally named "*".
     return PathSpec(virtual=GLOB,
                     directory="/public/tables",
-                    resource_path=GLOB.strip("/"),
+                    vfs_path=GLOB.strip("/"),
                     pattern="rows.jsonl",
                     resolved=False)
 
 
 def _resolved_pair() -> list[PathSpec]:
     return [
-        PathSpec(virtual=p,
-                 directory="/public/tables",
-                 resource_path=p.strip("/")) for p in (
-                     "/public/tables/authors/rows.jsonl",
-                     "/public/tables/books/rows.jsonl",
-                 )
+        PathSpec(virtual=p, directory="/public/tables", vfs_path=p.strip("/"))
+        for p in (
+            "/public/tables/authors/rows.jsonl",
+            "/public/tables/books/rows.jsonl",
+        )
     ]
 
 
@@ -137,7 +136,7 @@ async def test_grep_concrete_path_still_uses_pushdown(accessor, _guard_reads):
         _, io = await grep(accessor, [
             PathSpec(virtual=CONCRETE,
                      directory='/public/tables/books',
-                     resource_path=CONCRETE.strip('/'))
+                     vfs_path=CONCRETE.strip('/'))
         ], ['ada'], CommandOpts(index=NULL_INDEX))
 
     assert io.exit_code == 1
@@ -147,7 +146,7 @@ async def test_grep_concrete_path_still_uses_pushdown(accessor, _guard_reads):
 def _concrete_path() -> PathSpec:
     return PathSpec(virtual=CONCRETE,
                     directory="/public/tables/books",
-                    resource_path=CONCRETE.strip("/"))
+                    vfs_path=CONCRETE.strip("/"))
 
 
 @pytest.mark.asyncio
@@ -220,7 +219,7 @@ def _second_path() -> PathSpec:
     other = "/public/tables/authors/rows.jsonl"
     return PathSpec(virtual=other,
                     directory="/public/tables/authors",
-                    resource_path=other.strip("/"))
+                    vfs_path=other.strip("/"))
 
 
 @pytest.mark.asyncio
@@ -313,7 +312,7 @@ async def test_tail_follow_reads_the_relation_whole(accessor, flags):
 
     concrete = PathSpec(virtual=CONCRETE,
                         directory="/public/tables/books",
-                        resource_path=CONCRETE.strip("/"))
+                        vfs_path=CONCRETE.strip("/"))
     with patch(
             "mirage.commands.builtin.postgres.tail.client.count_rows",
             new=AsyncMock(side_effect=AssertionError("pushdown ran under -f")),

@@ -48,7 +48,7 @@ function accessor(transport: LangfuseTransport) {
 }
 
 function spec(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: stripSlash(virtual) })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: stripSlash(virtual) })
 }
 
 describe('langfuse read dataset run', () => {

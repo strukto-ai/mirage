@@ -25,7 +25,7 @@ from mirage.utils.key_prefix import mount_key
 
 
 def _path(path: str) -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, "/discord"),
+    return PathSpec(vfs_path=mount_key(path, "/discord"),
                     virtual=path,
                     directory=path)
 

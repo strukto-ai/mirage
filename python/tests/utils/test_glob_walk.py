@@ -29,7 +29,7 @@ from mirage.utils.glob_walk import (DEFAULT_MAX_GLOB_MATCHES, expand_pattern,
                                     make_resolve_glob, mark_escaped_globs,
                                     mark_globs, resolve_glob_with, spell_match,
                                     unmark_globs)
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 TREE = {
     "/notion": ["/notion/pages", "/notion/databases"],
@@ -65,7 +65,7 @@ def glob_spec(virtual: str, prefix: str) -> PathSpec:
     return PathSpec(
         virtual=virtual,
         directory=virtual[:last_slash + 1],
-        resource_path=virtual[len(prefix):].strip("/"),
+        vfs_path=virtual[len(prefix):].strip("/"),
         pattern=virtual[last_slash + 1:],
         resolved=False,
     )
@@ -133,7 +133,7 @@ def test_mark_escaped_globs_reads_backslashes_like_bash():
 def test_literal_word_freezes_a_pattern_that_carried_marks():
     spec = PathSpec(virtual="/data/" + mark_globs("*") + "?.txt",
                     directory="/data/",
-                    resource_path=mark_globs("*") + "?.txt",
+                    vfs_path=mark_globs("*") + "?.txt",
                     pattern=mark_globs("*") + "?.txt",
                     resolved=False)
     out = literal_word(spec)
@@ -147,7 +147,7 @@ def test_literal_word_freezes_a_pattern_that_carried_marks():
 def test_literal_word_leaves_an_unmarked_spec_untouched():
     spec = PathSpec(virtual="/data/*.txt",
                     directory="/data/",
-                    resource_path="*.txt",
+                    vfs_path="*.txt",
                     pattern="*.txt",
                     resolved=False)
     assert literal_word(spec) is spec
@@ -160,7 +160,7 @@ async def test_mid_path_glob_never_lists_pattern_dir():
     matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
     assert [m.virtual
             for m in matched] == ["/notion/pages/Demo_page__uuid1/page.md"]
-    assert matched[0].resource_path == "pages/Demo_page__uuid1/page.md"
+    assert matched[0].vfs_path == "pages/Demo_page__uuid1/page.md"
     assert all("*" not in c for c in CALLS)
 
 
@@ -201,7 +201,7 @@ async def test_directory_shaped_spec():
     spec = PathSpec(
         virtual="/notion/pages/",
         directory="/notion/pages/",
-        resource_path="pages",
+        vfs_path="pages",
         pattern="Demo*",
         resolved=False,
     )
@@ -216,7 +216,7 @@ async def test_cold_listing_directory_marker_is_not_part_of_the_name():
     spec = glob_spec("/box/*", "/box")
     matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
     assert [m.virtual for m in matched] == ["/box/f.txt", "/box/sub"]
-    assert [m.resource_path for m in matched] == ["f.txt", "sub"]
+    assert [m.vfs_path for m in matched] == ["f.txt", "sub"]
 
 
 @pytest.mark.asyncio
@@ -224,7 +224,7 @@ async def test_root_mount_glob():
     spec = glob_spec("/a*", "")
     matched = await expand_pattern(fake_readdir, NOOPAccessor(), spec, None)
     assert [m.virtual for m in matched] == ["/alpha"]
-    assert matched[0].resource_path == "alpha"
+    assert matched[0].vfs_path == "alpha"
 
 
 def test_spell_match_relative_midpath():
@@ -308,7 +308,7 @@ async def test_resolve_glob_with_unmatched_dir_shaped_dropped():
     spec = PathSpec(
         virtual="/notion/pages/",
         directory="/notion/pages/",
-        resource_path="pages",
+        vfs_path="pages",
         pattern="Missing*",
         resolved=False,
     )
@@ -394,8 +394,8 @@ async def test_make_resolve_glob_index_defaults_to_null():
 
 @pytest.mark.asyncio
 async def test_resolve_glob_with_drops_hidden_matches():
-    sess = Session(session_id="narrowed",
-                   hidden_paths=HiddenPaths(patterns=("*.json", )))
+    sess = SessionState(session_id="narrowed",
+                        hidden_paths=HiddenPaths(patterns=("*.json", )))
     token = set_current_session(sess)
     try:
         spec = glob_spec("/notion/pages/Demo_page__uuid1/page.*", "/notion")
@@ -409,8 +409,8 @@ async def test_resolve_glob_with_drops_hidden_matches():
 
 @pytest.mark.asyncio
 async def test_resolve_glob_with_all_hidden_falls_back_to_literal():
-    sess = Session(session_id="narrowed",
-                   hidden_paths=HiddenPaths(patterns=("*.json", )))
+    sess = SessionState(session_id="narrowed",
+                        hidden_paths=HiddenPaths(patterns=("*.json", )))
     token = set_current_session(sess)
     try:
         spec = glob_spec("/notion/pages/Roadmap__uuid2/page.*", "/notion")

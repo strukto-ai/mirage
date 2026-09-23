@@ -19,7 +19,7 @@ from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.workspace.executor.builtins.shared import is_count_word
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.control import BreakSignal, ContinueSignal
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -52,7 +52,7 @@ async def handle_false() -> tuple[ByteSource | None, IOResult, ExecutionNode]:
 
 async def handle_return(
     args: list[str],
-    session: Session,
+    session: SessionState,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Return from a function or sourced script, with bash's checks.
@@ -60,7 +60,7 @@ async def handle_return(
     Args:
         args (list[str]): words after the command name; at most one,
             the return status.
-        session (Session): session whose last exit code is the default
+        session (SessionState): session whose last exit code is the default
             status and whose source depth marks sourced execution.
         call_stack (CallStack | None): active call stack; a pushed
             frame marks function execution.
@@ -92,14 +92,14 @@ async def handle_return(
 
 async def handle_exit(
     args: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Exit the shell, with bash's argument checks.
 
     Args:
         args (list[str]): words after the command name; at most one,
             the exit status.
-        session (Session): session whose last exit code is the default
+        session (SessionState): session whose last exit code is the default
             status.
     """
     if args and not is_count_word(args[0]):

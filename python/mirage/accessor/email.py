@@ -16,7 +16,7 @@ import aioimaplib
 
 from mirage.accessor.base import Accessor
 from mirage.core.email.config import EmailConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 class EmailAccessor(Accessor):

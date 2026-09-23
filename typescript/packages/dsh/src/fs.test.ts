@@ -20,15 +20,15 @@ import { Context } from '@deepseek-ai/cordis'
 import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import {
-  DiskResource,
+  DiskVFS,
   LocalRuntime,
   Workspace,
   parseSessionProfile,
-  registerResourceFactory,
+  registerVfsFactory,
 } from '@struktoai/mirage-node'
 import { MirageFileSystem } from './fs.ts'
 import type { MirageFsConfig } from './fs.ts'
@@ -40,7 +40,7 @@ async function makeFs(
   seed: Record<string, string | Uint8Array> = {},
   options: { cwd?: string; readOnly?: boolean; diffBasisMaxBytes?: number } = {},
 ): Promise<{ fs: MirageFileSystem; ws: Workspace }> {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ws = new Workspace({ '/data': [ram, MountMode.WRITE] })
   workspaces.push(ws)
   for (const [path, content] of Object.entries(seed)) {
@@ -49,9 +49,9 @@ async function makeFs(
     let dir = ''
     for (const part of parts) {
       dir += `/${part}`
-      if (dir !== '/data' && !(await ws.fs.isDir(dir))) await ws.fs.mkdir(dir)
+      if (dir !== '/data' && !(await ws.vfs.isDir(dir))) await ws.vfs.mkdir(dir)
     }
-    await ws.fs.writeFile(full, content)
+    await ws.vfs.writeFile(full, content)
   }
   let target = ws
   if (options.readOnly === true) {
@@ -91,7 +91,7 @@ const tempRoots: string[] = []
 /**
  * A workspace with one disk mount, for the host-path mapping.
  *
- * @param prefix where the disk resource is mounted.
+ * @param prefix where the disk VFS is mounted.
  * @returns the filesystem seam and the host directory behind the mount.
  */
 async function makeDiskFs(
@@ -99,7 +99,7 @@ async function makeDiskFs(
 ): Promise<{ fs: MirageFileSystem; root: string; ws: Workspace }> {
   const root = await mkdtemp(join(tmpdir(), 'mirage-dsh-host-'))
   tempRoots.push(root)
-  const ws = new Workspace({ [prefix]: [new DiskResource({ root }), MountMode.WRITE] })
+  const ws = new Workspace({ [prefix]: [new DiskVFS({ root }), MountMode.WRITE] })
   workspaces.push(ws)
   const ctx = new Context()
   await ctx.plugin(MirageService, { workspace: ws }).await()
@@ -157,7 +157,7 @@ describe('resolve', () => {
 
   it('follows namespace symlinks to the canonical target', async () => {
     const { fs, ws } = await makeFs({ 'a.txt': 'hello' })
-    await ws.fs.symlink('/data/link.txt', '/data/a.txt')
+    await ws.vfs.symlink('/data/link.txt', '/data/a.txt')
     const viaLink = await fs.resolve('/data/link.txt')
     expect(String(viaLink.targetKey)).toBe('/data/a.txt')
   })
@@ -204,14 +204,14 @@ describe('stat and lstat', () => {
     const before = await fs.stat(target)
     const again = await fs.stat(target)
     expect(again?.version).toBe(before?.version)
-    await ws.fs.writeFile('/data/a.txt', 'three is longer')
+    await ws.vfs.writeFile('/data/a.txt', 'three is longer')
     const after = await fs.stat(target)
     expect(after?.version).not.toBe(before?.version)
   })
 
   it('lstat reports the link itself, stat its target', async () => {
     const { fs, ws } = await makeFs({ 'a.txt': 'hello' })
-    await ws.fs.symlink('/data/link.txt', '/data/a.txt')
+    await ws.vfs.symlink('/data/link.txt', '/data/a.txt')
     const path = await fs.lstat('/data/link.txt')
     expect(path?.type).toBe('symlink')
     expect(path?.size).toBe('/data/a.txt'.length)
@@ -373,7 +373,7 @@ describe('listDir', () => {
 
   it('merges namespace symlinks into the listing', async () => {
     const { fs, ws } = await makeFs({ 'a.txt': 'hello' })
-    await ws.fs.symlink('/data/link.txt', '/data/a.txt')
+    await ws.vfs.symlink('/data/link.txt', '/data/a.txt')
     const entries = await fs.listDir(await fs.resolve('/data'))
     const link = entries.find((e) => e.name === 'link.txt')
     expect(link?.type).toBe('file')
@@ -388,7 +388,7 @@ describe('listDir', () => {
 
   it('lists a cyclic symlink as an entry of unknown kind', async () => {
     const { fs, ws } = await makeFs({ 'a.txt': 'hello' })
-    await ws.fs.symlink('/data/loop', '/data/loop')
+    await ws.vfs.symlink('/data/loop', '/data/loop')
     const entries = await fs.listDir(await fs.resolve('/data'))
     expect(entries.map((e) => e.name)).toEqual(['a.txt', 'loop'])
     const loop = entries.find((e) => e.name === 'loop')
@@ -509,7 +509,7 @@ describe('editText', () => {
     const { fs, ws } = await makeFs({ 'a.txt': 'guarded content' })
     const target = await fs.resolve('/data/a.txt')
     const stale = await versionAt(fs, '/data/a.txt')
-    await ws.fs.writeFile('/data/a.txt', 'now something else entirely')
+    await ws.vfs.writeFile('/data/a.txt', 'now something else entirely')
     expect(
       await errorCode(
         fs.editText(
@@ -533,13 +533,13 @@ describe('cancellation across readiness', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    registerResourceFactory('gated-ram-write', async () => {
+    registerVfsFactory('gated-ram-write', async () => {
       await gate
-      return new RAMResource()
+      return new RAMVFS()
     })
     const ctx = new Context()
     const fiber = ctx.plugin(MirageService, {
-      mounts: { '/data': { resource: 'gated-ram-write', mode: 'write' } },
+      mounts: { '/data': { vfs: 'gated-ram-write', mode: 'write' } },
     })
     await fiber.await()
     await ctx.plugin(MirageFileSystem, {}).await()
@@ -554,7 +554,7 @@ describe('cancellation across readiness', () => {
     release()
     expect(await errorCode(pending)).toBe('FS_ABORTED')
     const ws = await ctx.mirage.ready
-    expect(await ws.fs.exists('/data/out.txt')).toBe(false)
+    expect(await ws.vfs.exists('/data/out.txt')).toBe(false)
     await fiber.dispose()
   })
 })
@@ -580,7 +580,7 @@ describe('sandbox policy', () => {
     expect(await errorCode(fs.writeText(target, 'x', undefined, undefined, READ_ONLY))).toBe(
       'FS_SANDBOX_DENIED',
     )
-    expect(await ws.fs.exists('/data/new.txt')).toBe(false)
+    expect(await ws.vfs.exists('/data/new.txt')).toBe(false)
   })
 
   it('refuses an edit under a read-only policy', async () => {
@@ -590,7 +590,7 @@ describe('sandbox policy', () => {
     expect(await errorCode(fs.editText(target, edit, undefined, undefined, READ_ONLY))).toBe(
       'FS_SANDBOX_DENIED',
     )
-    expect(await ws.fs.readFileText('/data/a.txt')).toBe('one')
+    expect(await ws.vfs.readFileText('/data/a.txt')).toBe('one')
   })
 
   it('reads under a read-only policy, since only mutations are fenced', async () => {
@@ -623,7 +623,7 @@ describe('listDir cancellation', () => {
     // so the only deterministic window is the moment the listing lands.
     // Aborting as `readdir` returns puts the signal exactly there: with
     // the walk unguarded it would classify every child regardless.
-    const ops = ws.fs
+    const ops = ws.vfs
     const inner = ops.readdir.bind(ops)
     ops.readdir = async (path: string): Promise<string[]> => {
       const listing = await inner(path)
@@ -650,7 +650,7 @@ async function adapterOn(ws: Workspace, config: MirageFsConfig): Promise<MirageF
 describe('the session the adapter reads as', () => {
   it('a named session confines ctx.fs the way it confines the shell', async () => {
     const ws = new Workspace(
-      { '/data': [new RAMResource(), MountMode.WRITE] },
+      { '/data': [new RAMVFS(), MountMode.WRITE] },
       {
         profiles: {
           agent: parseSessionProfile(
@@ -661,11 +661,11 @@ describe('the session the adapter reads as', () => {
       },
     )
     workspaces.push(ws)
-    await ws.fs.mkdir('/data/vault')
-    await ws.fs.writeFile('/data/vault/secret', 'top')
-    await ws.fs.writeFile('/data/public.txt', 'pub')
-    await ws.fs.symlink('/data/vault/lk', '/data/public.txt')
-    await ws.fs.symlink('/data/hidden-lk', '/data/public.txt')
+    await ws.vfs.mkdir('/data/vault')
+    await ws.vfs.writeFile('/data/vault/secret', 'top')
+    await ws.vfs.writeFile('/data/public.txt', 'pub')
+    await ws.vfs.symlink('/data/vault/lk', '/data/public.txt')
+    await ws.vfs.symlink('/data/hidden-lk', '/data/public.txt')
     ws.createSession('agent', { profile: 'agent' })
     const fs = await adapterOn(ws, { sessionId: 'agent' })
     expect(await fs.stat(await fs.resolve('/data/vault/secret'))).toBeUndefined()
@@ -685,16 +685,16 @@ describe('the session the adapter reads as', () => {
     expect(await fs.lstat('/data/vault/lk')).toBeUndefined()
     expect(await fs.lstat('/data/hidden-lk')).toBeUndefined()
     expect(String((await fs.resolve('/data/hidden-lk')).targetKey)).toBe('/data/hidden-lk')
-    expect(await ws.fs.readFileText('/data/vault/secret')).toBe('top')
+    expect(await ws.vfs.readFileText('/data/vault/secret')).toBe('top')
   })
 
   it('reads links as the ambient session the door will keep', async () => {
-    // A callback reaching ctx.fs from inside `ws.execute` dispatches as
+    // A callback reaching ctx.fs from inside `ws.shell` dispatches as
     // that line's session, so the link table is judged as it too: a
     // link the ambient session hides stays typed for the door to refuse,
     // even though the adapter's own configured session could see it.
     const ws = new Workspace(
-      { '/data': [new RAMResource(), MountMode.WRITE] },
+      { '/data': [new RAMVFS(), MountMode.WRITE] },
       {
         profiles: {
           agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }, 'profile agent'),
@@ -702,9 +702,9 @@ describe('the session the adapter reads as', () => {
       },
     )
     workspaces.push(ws)
-    await ws.fs.mkdir('/data/vault')
-    await ws.fs.writeFile('/data/public.txt', 'pub')
-    await ws.fs.symlink('/data/vault/lk', '/data/public.txt')
+    await ws.vfs.mkdir('/data/vault')
+    await ws.vfs.writeFile('/data/public.txt', 'pub')
+    await ws.vfs.symlink('/data/vault/lk', '/data/public.txt')
     const agent = ws.createSession('agent', { profile: 'agent' })
     const fs = await adapterOn(ws, {})
     expect(String((await fs.resolve('/data/vault/lk')).targetKey)).toBe('/data/public.txt')
@@ -721,11 +721,11 @@ describe('the session the adapter reads as', () => {
   })
 
   it('probes a caller cwd as the session, not as the default', async () => {
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const seeder = new Workspace({ '/data': [ram, MountMode.WRITE] })
     workspaces.push(seeder)
-    await seeder.fs.mkdir('/data/work')
-    await seeder.fs.mkdir('/data/vault')
+    await seeder.vfs.mkdir('/data/work')
+    await seeder.vfs.mkdir('/data/vault')
     const ws = new Workspace(
       { '/data': [ram, MountMode.WRITE] },
       {
@@ -753,16 +753,16 @@ describe('the session the adapter reads as', () => {
     // the door, so it must hydrate first or a persisted hide is judged
     // by the wrong session and a persisted link is not seen at all.
     const store = new RAMWorkspaceStateStore()
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const build = (): Workspace =>
       new Workspace({ '/data': [ram, MountMode.WRITE] }, { workspaceId: 'shared', store })
     const wsA = build()
     workspaces.push(wsA)
-    await wsA.fs.mkdir('/data/vault')
-    await wsA.fs.writeFile('/data/vault/secret', 'top')
-    await wsA.fs.writeFile('/data/public.txt', 'pub')
-    await wsA.fs.symlink('/data/vault/lk', '/data/public.txt')
-    await wsA.fs.symlink('/data/lk', '/data/public.txt')
+    await wsA.vfs.mkdir('/data/vault')
+    await wsA.vfs.writeFile('/data/vault/secret', 'top')
+    await wsA.vfs.writeFile('/data/public.txt', 'pub')
+    await wsA.vfs.symlink('/data/vault/lk', '/data/public.txt')
+    await wsA.vfs.symlink('/data/lk', '/data/public.txt')
     await wsA.setSessionProfile(
       wsA.defaultSessionId,
       parseSessionProfile({ paths: { hide: ['/data/vault'] } }, 'profile default'),
@@ -784,10 +784,10 @@ describe('the session the adapter reads as', () => {
 
 describe('a policy refusal at the op door', () => {
   it('reads as a sandbox denial, so the tool layer offers the escalation', async () => {
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const seeder = new Workspace({ '/data': [ram, MountMode.WRITE] })
     workspaces.push(seeder)
-    await seeder.fs.writeFile('/data/keep.txt', 'original')
+    await seeder.vfs.writeFile('/data/keep.txt', 'original')
     const ws = new Workspace(
       { '/data': [ram, MountMode.WRITE] },
       {
@@ -849,7 +849,7 @@ describe('processPathFromHostPath', () => {
     // Dispatch routes /work/cache to the RAM child, so the disk file at
     // <root>/cache/x.txt is not what that virtual path reads.
     const { fs, root, ws } = await makeDiskFs()
-    ws.addMount('/work/cache', new RAMResource(), MountMode.WRITE)
+    ws.addMount('/work/cache', new RAMVFS(), MountMode.WRITE)
     expect(fs.processPathFromHostPath(join(root, 'cache', 'x.txt'))).toBeUndefined()
     // The rest of the disk mount still maps.
     expect(fs.processPathFromHostPath(join(root, 'kept.txt'))).toBe('/work/kept.txt')
@@ -868,7 +868,7 @@ describe('processPathFromHostPath', () => {
     // mutable disk grows a file at the same name. A read of /work/a.txt
     // follows the link, so the disk file is not what that path returns.
     const { fs, root, ws } = await makeDiskFs()
-    await ws.fs.symlink('/work/a.txt', '/work/other.txt')
+    await ws.vfs.symlink('/work/a.txt', '/work/other.txt')
     await writeFile(join(root, 'a.txt'), 'on disk')
     expect(fs.processPathFromHostPath(join(root, 'a.txt'))).toBeUndefined()
     // A sibling the link does not cover still maps.
@@ -878,7 +878,7 @@ describe('processPathFromHostPath', () => {
 
   it('declines a path whose ancestor is a namespace symlink', async () => {
     const { fs, root, ws } = await makeDiskFs()
-    await ws.fs.symlink('/work/sub', '/work/real')
+    await ws.vfs.symlink('/work/sub', '/work/real')
     expect(fs.processPathFromHostPath(join(root, 'sub', 'x.txt'))).toBeUndefined()
   })
 
@@ -907,7 +907,7 @@ describe('processPathFromHostPath', () => {
     if (virtual === undefined) throw new Error('expected a mapping')
     // The point of the mapping: what it returns is live in this world,
     // not merely well-formed.
-    expect(await ws.fs.readFileText(virtual)).toBe('hello')
+    expect(await ws.vfs.readFileText(virtual)).toBe('hello')
     expect(await fs.readText(await fs.resolve(virtual))).toBe('hello')
   })
 })

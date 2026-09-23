@@ -14,19 +14,19 @@
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 
 
 @pytest.fixture
 def workspace():
-    return Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    return Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_ls_lists_files(workspace):
-    await workspace.fs.write("/a.txt", b"a")
-    await workspace.fs.write("/b.txt", b"b")
-    io = await workspace.execute("ls /")
+    await workspace.vfs.write("/a.txt", b"a")
+    await workspace.vfs.write("/b.txt", b"b")
+    io = await workspace.shell("ls /")
     assert io.exit_code == 0
     names = set(io.stdout.decode().strip().split("\n"))
     assert "a.txt" in names
@@ -35,9 +35,9 @@ async def test_ls_lists_files(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_a_shows_dotfiles(workspace):
-    await workspace.fs.write("/.hidden", b"h")
-    await workspace.fs.write("/visible.txt", b"v")
-    io = await workspace.execute("ls -a /")
+    await workspace.vfs.write("/.hidden", b"h")
+    await workspace.vfs.write("/visible.txt", b"v")
+    io = await workspace.shell("ls -a /")
     assert io.exit_code == 0
     names = set(io.stdout.decode().strip().split("\n"))
     assert ".hidden" in names
@@ -46,9 +46,9 @@ async def test_ls_a_shows_dotfiles(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_no_dotfiles_by_default(workspace):
-    await workspace.fs.write("/.hidden", b"h")
-    await workspace.fs.write("/visible.txt", b"v")
-    io = await workspace.execute("ls /")
+    await workspace.vfs.write("/.hidden", b"h")
+    await workspace.vfs.write("/visible.txt", b"v")
+    io = await workspace.shell("ls /")
     assert io.exit_code == 0
     names = set(io.stdout.decode().strip().split("\n"))
     assert ".hidden" not in names
@@ -57,8 +57,8 @@ async def test_ls_no_dotfiles_by_default(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_l_long_format_includes_size(workspace):
-    await workspace.fs.write("/f.txt", b"hello")
-    io = await workspace.execute("ls -l /")
+    await workspace.vfs.write("/f.txt", b"hello")
+    io = await workspace.shell("ls -l /")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "f.txt" in out
@@ -67,18 +67,18 @@ async def test_ls_l_long_format_includes_size(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_F_classify_marks_dirs(workspace):
-    await workspace.fs.mkdir("/sub")
-    await workspace.fs.write("/sub/a.txt", b"a")
-    io = await workspace.execute("ls -F /")
+    await workspace.vfs.mkdir("/sub")
+    await workspace.vfs.write("/sub/a.txt", b"a")
+    io = await workspace.shell("ls -F /")
     assert io.exit_code == 0
     assert "sub/" in io.stdout.decode()
 
 
 @pytest.mark.asyncio
 async def test_ls_R_recursive(workspace):
-    await workspace.fs.mkdir("/sub")
-    await workspace.fs.write("/sub/a.txt", b"a")
-    io = await workspace.execute("ls -R /")
+    await workspace.vfs.mkdir("/sub")
+    await workspace.vfs.write("/sub/a.txt", b"a")
+    io = await workspace.shell("ls -R /")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "sub" in out
@@ -87,8 +87,8 @@ async def test_ls_R_recursive(workspace):
 
 @pytest.mark.asyncio
 async def test_ls_d_lists_dir_itself(workspace):
-    await workspace.fs.mkdir("/sub")
-    io = await workspace.execute("ls -d /sub")
+    await workspace.vfs.mkdir("/sub")
+    io = await workspace.shell("ls -d /sub")
     assert io.exit_code == 0
     assert "sub" in io.stdout.decode()
 
@@ -96,6 +96,6 @@ async def test_ls_d_lists_dir_itself(workspace):
 @pytest.mark.asyncio
 async def test_ls_missing_path_returns_exit_2(workspace):
     # GNU ls exits 2 when a command-line operand cannot be accessed.
-    io = await workspace.execute("ls /nope")
+    io = await workspace.shell("ls /nope")
     assert io.exit_code == 2
     assert b"nope" in (io.stderr or b"")

@@ -15,7 +15,7 @@
 import { childMountNames, namespaceNames } from '../../ops/namespace_view.ts'
 import type { NamespaceLinks } from '../../ops/config.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../utils/errors.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -33,7 +33,7 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { SHOPT_DEFAULTS } from '../../shell/constants.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 
 // How deep a `**` descends. bash has no cap, but every level here is
 // one listing per directory, so an accidental `**` over a large tree is
@@ -55,7 +55,7 @@ export function globNeedsShell(opts: GlobOptions): boolean {
   return opts.nullglob || opts.failglob || opts.globstar
 }
 
-export function globOptions(session: Session): GlobOptions {
+export function globOptions(session: SessionState): GlobOptions {
   return {
     nullglob: session.shopts.nullglob ?? SHOPT_DEFAULTS.get('nullglob') ?? false,
     failglob: session.shopts.failglob ?? SHOPT_DEFAULTS.get('failglob') ?? false,
@@ -63,14 +63,14 @@ export function globOptions(session: Session): GlobOptions {
   }
 }
 
-export interface ResourceWithGlob extends Resource {
+export interface ResourceWithGlob extends VFS {
   glob(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
 }
 
 // Virtual paths a directory owes the namespace, matching a segment.
 // Child mounts and symlinks are namespace state no backend can see, so a
 // glob that stops at one backend misses both: a nested mount's keys live
-// in another resource, and no resource stores a link. This is the union
+// in another VFS, and no VFS stores a link. This is the union
 // mergeReaddir already applies to a listing, filtered by the glob segment
 // with the same matcher backends use, and session-filtered by
 // namespaceNames so a scoped session never learns an ungranted mount's
@@ -135,7 +135,7 @@ function toSpecs(
     return new PathSpec({
       virtual: base.virtual,
       directory: base.directory,
-      resourcePath: base.resourcePath,
+      vfsPath: base.vfsPath,
       rawPath: spellMatch(unmarkGlobs(item.rawPath), v, walked),
     })
   })
@@ -149,7 +149,7 @@ function toSpecs(
 //
 // A match is a child of the directory it was globbed in, so a spec that is
 // the directory itself is not one. The shared resolver never answers a
-// dir-shaped ask that way, but `glob` is a public hook and a resource
+// dir-shaped ask that way, but `glob` is a public hook and a VFS
 // reinstating the literal on its own would hand back the spec it was given.
 // Unlike the word comparison this replaces, the test cannot discard a real
 // match: a match is strictly longer than the directory holding it, while a
@@ -196,11 +196,11 @@ async function levelMatches(
   await owner.ensureReady()
   const prefix = rstripSlash(owner.prefix)
   const out: string[] = []
-  if (owner.resource.glob !== undefined) {
+  if (owner.vfs.glob !== undefined) {
     const spec = new PathSpec({
       virtual: real,
       directory: real,
-      resourcePath: mountKey(real, prefix),
+      vfsPath: mountKey(real, prefix),
       pattern: seg,
       resolved: false,
     })
@@ -226,7 +226,7 @@ async function levelMatches(
   return real === dirVirtual ? out : respell(out, dirVirtual)
 }
 
-// Expand a mid-path pattern level by level via the resource's glob. A glob
+// Expand a mid-path pattern level by level via the VFS's glob. A glob
 // in a non-final segment (`s*/x.txt`) cannot resolve in one listing: each
 // glob segment is matched against its (already expanded) parent directory,
 // using the backend's own single-level glob per parent, so no backend needs
@@ -278,7 +278,7 @@ function matchRaw(item: PathSpec, match: PathSpec): PathSpec {
     directory: match.directory,
     pattern: match.pattern,
     resolved: match.resolved,
-    resourcePath: match.resourcePath,
+    vfsPath: match.vfsPath,
     rawPath: spelled,
   })
 }
@@ -367,7 +367,7 @@ async function walkGlobstar(
       new PathSpec({
         virtual: v,
         directory: v,
-        resourcePath: mountKey(v, owner),
+        vfsPath: mountKey(v, owner),
         rawPath: isSelf ? `${rstripSlash(sp)}/` : sp,
       }),
     )
@@ -383,8 +383,8 @@ async function walkGlobstar(
 // before listing it, because a link can point into a mount nothing has
 // touched yet. python's twin then reaches the mount's op table; a TypeScript
 // mount entry keeps no op table of its own (ops live on the workspace
-// registry), so the resource is asked through the same direct door the
-// listings use. A resource with no stat of its own cannot tell, so its
+// registry), so the VFS is asked through the same direct door the
+// listings use. A VFS with no stat of its own cannot tell, so its
 // match is kept.
 async function isDirectory(
   registry: MountRegistry,
@@ -407,7 +407,7 @@ async function isDirectory(
   await owner.ensureReady()
   let row: FileStat | undefined
   try {
-    row = await owner.resource.stat?.(PathSpec.fromStrPath(real, mountKey(real, prefix)))
+    row = await owner.vfs.stat?.(PathSpec.fromStrPath(real, mountKey(real, prefix)))
   } catch (err) {
     if (isFsError(err)) return false
     throw err
@@ -422,7 +422,7 @@ function withTrailingSlash(spec: PathSpec): PathSpec {
     directory: spec.directory,
     pattern: spec.pattern,
     resolved: spec.resolved,
-    resourcePath: spec.resourcePath,
+    vfsPath: spec.vfsPath,
     rawPath: `${spec.rawPath}/`,
   })
 }
@@ -453,7 +453,7 @@ export async function resolveGlobs(
         continue
       }
       const prefix = rstripSlash(mount.prefix)
-      // A resource with no glob of its own can still hold a nested mount
+      // A VFS with no glob of its own can still hold a nested mount
       // root or a link under the globbed directory; with nothing for the
       // namespace to add it keeps the untouched pass-through it had.
       const midPath = hasGlobChars(item.directory)
@@ -465,7 +465,7 @@ export async function resolveGlobs(
       const linked = !midPath && listingDir(links, directory) !== directory
       const extra =
         midPath || linked ? [] : namespaceChildren(registry, links, directory, item.pattern)
-      if (!linked && mount.resource.glob === undefined && extra.length === 0) {
+      if (!linked && mount.vfs.glob === undefined && extra.length === 0) {
         result.push(item)
         continue
       }
@@ -482,7 +482,7 @@ export async function resolveGlobs(
         directory: item.directory,
         pattern: item.pattern,
         resolved: item.resolved,
-        resourcePath: mountKey(item.virtual, prefix),
+        vfsPath: mountKey(item.virtual, prefix),
         rawPath: dirsOnly ? rstripSlash(item.rawPath) : item.rawPath,
       })
       const typed = dirsOnly
@@ -491,7 +491,7 @@ export async function resolveGlobs(
             directory: withPrefix.directory,
             pattern: withPrefix.pattern,
             resolved: withPrefix.resolved,
-            resourcePath: withPrefix.resourcePath,
+            vfsPath: withPrefix.vfsPath,
             rawPath: item.rawPath,
           })
         : withPrefix
@@ -574,7 +574,7 @@ function globHead(spec: PathSpec): string {
  * A glob operand is normally left for the owning backend to resolve,
  * which is how a prefix store pushes the listing down. That only holds
  * while every match belongs to that backend: a nested mount's root is a
- * child of the directory but its keys live in another resource, so the
+ * child of the directory but its keys live in another VFS, so the
  * backend answers "no such file" for a name its own listing shows. When
  * the glob's fixed head holds a child mount, the word is expanded here
  * instead, before routing, so the matches route per mount exactly as the

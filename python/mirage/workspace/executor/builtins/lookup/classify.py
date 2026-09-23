@@ -18,16 +18,16 @@ from mirage.workspace.executor.builtins.lookup.types import NameKind
 from mirage.workspace.lookup import lookup, lookup_all
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.names import KEYWORDS
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
-def classify(name: str, session: Session,
+def classify(name: str, session: SessionState,
              registry: MountRegistry) -> NameKind | None:
     """Classify the name as the layer that would run it, None if none does.
 
     Args:
         name (str): the operand word.
-        session (Session): shell session (function table).
+        session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry.
     """
     if name in session.aliases:
@@ -37,7 +37,7 @@ def classify(name: str, session: Session,
     return KIND_BY_CONSUMER.get(lookup(name, session, registry))
 
 
-def classify_all(name: str, session: Session,
+def classify_all(name: str, session: SessionState,
                  registry: MountRegistry) -> list[NameKind]:
     """Classify every layer holding the name, most-preferred first.
 
@@ -55,7 +55,7 @@ def classify_all(name: str, session: Session,
 
     Args:
         name (str): the operand word.
-        session (Session): shell session (function table).
+        session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry.
     """
     # An alias is reported first and whether or not `expand_aliases`
@@ -72,7 +72,7 @@ def classify_all(name: str, session: Session,
 
 
 def locations(name: str,
-              session: Session,
+              session: SessionState,
               registry: MountRegistry,
               all_mode: bool,
               drop: NameKind | None = None) -> list[NameKind]:
@@ -86,7 +86,7 @@ def locations(name: str,
 
     Args:
         name (str): the operand word.
-        session (Session): shell session (function table).
+        session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry.
         all_mode (bool): report every layer instead of the winner only.
         drop (NameKind | None): a layer this caller does not resolve.
@@ -97,13 +97,15 @@ def locations(name: str,
     return kinds if all_mode else kinds[:1]
 
 
-def describe(name: str, kind: NameKind, session: Session | None = None) -> str:
+def describe(name: str,
+             kind: NameKind,
+             session: SessionState | None = None) -> str:
     """Render the verbose line ``command -V`` and ``type`` print.
 
     Args:
         name (str): the operand word.
         kind (NameKind): the classification.
-        session (Session | None): shell session, needed only to read an
+        session (SessionState | None): shell session, needed only to read an
             alias's value; every other kind renders from the name alone.
     """
     if kind is NameKind.ALIAS and session is not None:

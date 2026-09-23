@@ -34,7 +34,7 @@ from mirage.core.gdrive.unlink import unlink as _unlink
 from mirage.core.gdrive.write import write_bytes as _write
 
 # Raw bytes read and write via the generic factory; google-native files
-# (gdoc/gsheet/gslide) render as API-resource JSON and are mutated through
+# (gdoc/gsheet/gslide) render as API-VFS JSON and are mutated through
 # the gws commands instead. gdrive's native read_stream is a coroutine
 # returning bytes-or-iterator (Workspace-aware), so the stream op is
 # synthesized from the whole-file read instead.

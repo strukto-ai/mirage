@@ -1,7 +1,7 @@
 ---
 title: DigitalOcean Spaces
 icon: /images/digitalocean-logo.svg
-description: Set up DigitalOcean Spaces as a MIRAGE resource from Node or the browser.
+description: Set up DigitalOcean Spaces as a MIRAGE VFS from Node or the browser.
 ---
 
 DigitalOcean Spaces uses the S3 API with AWS Signature V4 against `https://<region>.digitaloceanspaces.com`. MIRAGE derives this endpoint from your region automatically.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { DigitalOceanResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { DigitalOceanVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const spaces = new DigitalOceanResource({
+const spaces = new DigitalOceanVFS({
   bucket: process.env.DO_SPACE!,
   region: process.env.DO_REGION!,
   accessKeyId: process.env.DO_ACCESS_KEY_ID!,
@@ -25,7 +25,7 @@ const spaces = new DigitalOceanResource({
 })
 
 const ws = new Workspace({ '/bucket/': spaces }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `DigitalOceanResource` is secret-free, your backend signs each operation using your Spaces keys and returns a URL. Spaces accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the Spaces endpoint.
+The browser `DigitalOceanVFS` is secret-free, your backend signs each operation using your Spaces keys and returns a URL. Spaces accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the Spaces endpoint.
 
 ### 1. Server: sign URLs with the Spaces endpoint
 
@@ -92,9 +92,9 @@ app.post('/presign/spaces', async (req, res) => {
 ### 2. Browser: wire it up
 
 ```ts
-import { DigitalOceanResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { DigitalOceanVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const spaces = new DigitalOceanResource({
+const spaces = new DigitalOceanVFS({
   bucket: 'my-space',
   region: 'nyc3',
   presignedUrlProvider: async (path, op, opts) => {
@@ -125,4 +125,4 @@ aws s3api put-bucket-cors --bucket "$DO_SPACE" \
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
 ```
 
-See the [DigitalOcean resource](/python/resource/digitalocean) docs for the equivalent Python wiring.
+See the [DigitalOcean VFS](/python/vfs/digitalocean) docs for the equivalent Python wiring.

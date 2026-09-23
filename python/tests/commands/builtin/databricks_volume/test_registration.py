@@ -37,5 +37,5 @@ def test_databricks_volume_text_commands_registered_read_only():
     assert TEXT_COMMANDS <= names
     for command in registered:
         if command.name in TEXT_COMMANDS:
-            assert command.resource == "databricks_volume"
+            assert command.vfs == "databricks_volume"
             assert not command.write

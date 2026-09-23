@@ -20,8 +20,8 @@ import pytest
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.postgres.readdir import readdir
-from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
+from mirage.vfs.postgres.config import PostgresConfig
 
 
 @asynccontextmanager
@@ -53,8 +53,7 @@ async def test_readdir_root_lists_database_json_and_schemas(accessor, index):
     with patch("mirage.core.postgres.readdir.client") as mc:
         mc.list_schemas = AsyncMock(return_value=["public", "analytics"])
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
     assert "/database.json" in result
     assert "/public" in result
     assert "/analytics" in result
@@ -66,8 +65,7 @@ async def test_readdir_schema_lists_kinds(accessor, index):
         mc.list_schemas = AsyncMock(return_value=["public"])
         result = await readdir(
             accessor,
-            PathSpec(resource_path="public",
-                     virtual="/public",
+            PathSpec(vfs_path="public", virtual="/public",
                      directory="/public"), index)
     assert result == ["/public/tables", "/public/views"]
 
@@ -79,7 +77,7 @@ async def test_readdir_tables_kind_lists_tables(accessor, index):
         mc.list_tables = AsyncMock(return_value=["users", "orders"])
         result = await readdir(
             accessor,
-            PathSpec(resource_path="public/tables",
+            PathSpec(vfs_path="public/tables",
                      virtual="/public/tables",
                      directory="/public/tables"), index)
     assert "/public/tables/users" in result
@@ -94,7 +92,7 @@ async def test_readdir_views_kind_unions_views_and_matviews(accessor, index):
         mc.list_matviews = AsyncMock(return_value=["daily_revenue"])
         result = await readdir(
             accessor,
-            PathSpec(resource_path="public/views",
+            PathSpec(vfs_path="public/views",
                      virtual="/public/views",
                      directory="/public/views"), index)
     assert "/public/views/customer_360" in result
@@ -107,7 +105,7 @@ async def test_readdir_entity_lists_schema_and_rows(accessor, index):
         mc.list_tables = AsyncMock(return_value=["users"])
         result = await readdir(
             accessor,
-            PathSpec(resource_path="public/tables/users",
+            PathSpec(vfs_path="public/tables/users",
                      virtual="/public/tables/users",
                      directory="/public/tables/users"), index)
     assert result == [
@@ -124,7 +122,7 @@ async def test_readdir_view_entity_lists_schema_and_rows(accessor, index):
         mc.list_matviews = AsyncMock(return_value=[])
         result = await readdir(
             accessor,
-            PathSpec(resource_path="analytics/views/daily_revenue",
+            PathSpec(vfs_path="analytics/views/daily_revenue",
                      virtual="/analytics/views/daily_revenue",
                      directory="/analytics/views/daily_revenue"), index)
     assert result == [
@@ -139,7 +137,7 @@ async def test_readdir_invalid_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path="public/tables/users/extra/foo",
+            PathSpec(vfs_path="public/tables/users/extra/foo",
                      virtual="/public/tables/users/extra/foo",
                      directory="/public/tables/users/extra/foo"), index)
 
@@ -150,11 +148,9 @@ async def test_readdir_caches_root_listing(accessor, index):
     with patch("mirage.core.postgres.readdir.client") as mc:
         mc.list_schemas = mock_list_schemas
         first = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
         second = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
     assert first == second
     assert mock_list_schemas.call_count == 1
 
@@ -166,7 +162,7 @@ async def test_readdir_unknown_schema_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await readdir(
                 accessor,
-                PathSpec(resource_path="nope.txt",
+                PathSpec(vfs_path="nope.txt",
                          virtual="/nope.txt",
                          directory="/nope.txt"), index)
 
@@ -179,7 +175,7 @@ async def test_readdir_kind_under_unknown_schema_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await readdir(
                 accessor,
-                PathSpec(resource_path="nope/tables",
+                PathSpec(vfs_path="nope/tables",
                          virtual="/nope/tables",
                          directory="/nope/tables"), index)
 
@@ -191,6 +187,6 @@ async def test_readdir_unknown_entity_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await readdir(
                 accessor,
-                PathSpec(resource_path="public/tables/ghost",
+                PathSpec(vfs_path="public/tables/ghost",
                          virtual="/public/tables/ghost",
                          directory="/public/tables/ghost"), index)

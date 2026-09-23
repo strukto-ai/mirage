@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 # Captured before any workspace opens, so the block below can show that
 # the patch reached the module THIS file imported rather than a copy
@@ -31,7 +31,7 @@ HOST_LISTDIR = os.listdir
 # A fixed stamp, so the utime section prints the same line every run.
 STAMP = 1_700_000_000
 
-resource = RAMResource()
+vfs = RAMVFS()
 
 
 def label(exc: OSError) -> str:
@@ -50,11 +50,11 @@ def label(exc: OSError) -> str:
 
 
 async def main():
-    ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
 
-    await ws.execute('echo "hello world" | tee /data/hello.txt')
-    await ws.execute("mkdir /data/sub")
-    await ws.execute('echo "nested" | tee /data/sub/nested.txt')
+    await ws.shell('echo "hello world" | tee /data/hello.txt')
+    await ws.shell("mkdir /data/sub")
+    await ws.shell('echo "nested" | tee /data/sub/nested.txt')
 
     with ws:
         print("=== VFS MODE ===\n")
@@ -163,7 +163,7 @@ async def main():
         read = os.readlink(os.fsencode(f"{host}/host_link"))
         print(f"  host readlink(bytes): {os.path.basename(read)!r}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

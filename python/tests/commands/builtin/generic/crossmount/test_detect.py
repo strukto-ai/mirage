@@ -41,7 +41,7 @@ class _Registry:
 def _scope(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual[:virtual.rfind("/") + 1],
-                    resource_path="",
+                    vfs_path="",
                     resolved=True)
 
 

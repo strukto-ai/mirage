@@ -25,7 +25,7 @@ async def test_size_single_file(tmp_path):
     accessor = DiskAccessor(tmp_path)
     result = await size(
         accessor,
-        PathSpec(resource_path="a.txt", virtual="/a.txt", directory="/a.txt"))
+        PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/a.txt"))
     assert result == 5
 
 
@@ -35,5 +35,5 @@ async def test_size_directory(tmp_path):
     (tmp_path / "b.txt").write_bytes(b"bb")
     accessor = DiskAccessor(tmp_path)
     result = await size(accessor,
-                        PathSpec(resource_path="", virtual="/", directory="/"))
+                        PathSpec(vfs_path="", virtual="/", directory="/"))
     assert result == 5

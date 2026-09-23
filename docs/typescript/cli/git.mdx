@@ -19,12 +19,12 @@ distribute that source; its independent implementation uses
 
 ```typescript
 import { GIT } from '@struktoai/mirage-core'
-import { RAMResource, Workspace } from '@struktoai/mirage-node'
+import { RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-const ws = new Workspace({ '/repo': new RAMResource() })
+const ws = new Workspace({ '/repo': new RAMVFS() })
 ws.registerCli('git', GIT)
 
-await ws.execute('git -C /repo status --short')
+await ws.shell('git -C /repo status --short')
 ```
 
 In YAML the same install rides the `clis:` section; see the

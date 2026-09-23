@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.trello import TrelloConfig, TrelloResource
+from mirage.vfs.trello import TrelloConfig, TrelloVFS
 
 load_dotenv(".env.development")
 
@@ -27,11 +27,11 @@ config = TrelloConfig(
     api_key=os.environ["TRELLO_API_KEY"],
     api_token=os.environ["TRELLO_API_TOKEN"],
 )
-resource = TrelloResource(config=config)
+vfs = TrelloVFS(config=config)
 
 
 async def main():
-    with Workspace({"/trello/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/trello/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE ===\n")
 
         print("--- os.listdir() root ---")
@@ -104,7 +104,7 @@ async def main():
                                             f"  list_id: {data.get('list_id')}"
                                         )
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes")
 

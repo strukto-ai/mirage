@@ -4,9 +4,9 @@ import pytest
 from pydantic import SecretStr
 
 from mirage.commands.config import CommandOpts
-from mirage.resource.mem0 import Mem0Config
-from mirage.resource.mem0.mem0 import Mem0Resource
 from mirage.types import PathSpec
+from mirage.vfs.mem0 import Mem0Config
+from mirage.vfs.mem0.mem0 import Mem0VFS
 
 
 class FakeClient:
@@ -26,13 +26,13 @@ class FakeClient:
 
 
 def _res():
-    res = Mem0Resource(Mem0Config(api_key=SecretStr("k"), user_id="alex"))
+    res = Mem0VFS(Mem0Config(api_key=SecretStr("k"), user_id="alex"))
     res.accessor._client = FakeClient()
     return res
 
 
-def _command(resource: Mem0Resource, name: str):
-    return next(command.fn for command in resource.commands()
+def _command(vfs: Mem0VFS, name: str):
+    return next(command.fn for command in vfs.commands()
                 if command.name == name and command.filetype is None)
 
 
@@ -47,7 +47,7 @@ async def test_cat_returns_full_json():
     res = _res()
     p = PathSpec(virtual="/mem/aaa.json",
                  directory="/mem",
-                 resource_path="aaa.json",
+                 vfs_path="aaa.json",
                  resolved=True)
     out, _io = await _command(res, "cat")(res.accessor, [p], [],
                                           CommandOpts(index=res.index))

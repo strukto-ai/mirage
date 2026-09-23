@@ -32,7 +32,7 @@ async function run(flags: Record<string, FlagValue>): Promise<{ exit: number; st
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'ram' } as never,
+    vfs: { kind: 'ram' } as never,
   } as CommandOpts
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and cut never answers that way, so say so rather than destructure

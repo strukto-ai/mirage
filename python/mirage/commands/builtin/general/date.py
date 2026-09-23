@@ -31,7 +31,7 @@ from mirage.utils.dates import parse_date_expr
 from mirage.utils.timezone import zone_from_env
 
 
-@command("date", resource=None, spec=SPECS["date"], provision=pure_provision)
+@command("date", vfs=None, spec=SPECS["date"], provision=pure_provision)
 async def date(
     accessor: Accessor,
     paths: list[PathSpec],

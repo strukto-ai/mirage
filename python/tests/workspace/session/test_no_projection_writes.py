@@ -17,7 +17,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
 
-# `Session.env` / `.arrays` / `.readonly_vars` are read-only projections
+# `SessionState.env` / `.arrays` / `.readonly_vars` are read-only projections
 # of the variable records (MappingProxyType in python, Object.freeze in
 # TypeScript), so a write into one raises at runtime rather than landing.
 # Writers go through `seed_var`/`seedVar`, `set_attr`/`setAttr`, or the

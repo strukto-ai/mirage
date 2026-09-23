@@ -26,7 +26,7 @@ async def _invalidate_levels(path: PathSpec, count: int) -> None:
     # listing (not just the final target's) so a cached ancestor listing from
     # an earlier command re-fetches and sees the new folders. Box resolves
     # ids through those listings, so a stale ancestor hides new children.
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     segments = path.virtual.rstrip("/").split("/")
     for i in range(count):
         depth = len(segments) - count + i + 1

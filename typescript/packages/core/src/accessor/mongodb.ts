@@ -14,7 +14,7 @@
 
 import { Accessor } from './base.ts'
 import type { MongoDriver } from '../core/mongodb/_driver.ts'
-import type { MongoDBConfigResolved } from '../resource/mongodb/config.ts'
+import type { MongoDBConfigResolved } from '../vfs/mongodb/config.ts'
 
 interface CacheEntry<T> {
   value: T

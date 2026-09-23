@@ -18,8 +18,8 @@ from mirage.accessor.langfuse import LangfuseAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.langfuse import COMMANDS
 from mirage.commands.config import CommandOpts
-from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.types import PathSpec
+from mirage.vfs.langfuse.config import LangfuseConfig
 
 
 def _find_command():
@@ -33,7 +33,7 @@ def _find_command():
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.strip("/"))
+                    vfs_path=virtual.strip("/"))
 
 
 async def _run(paths, *texts: str, **flags) -> list[str]:

@@ -23,7 +23,7 @@ import {
   knownRuntimes,
   registerRuntime,
   runtimeBindingsFor,
-  VFSRuntime,
+  WorkspaceRuntime,
 } from './table.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PythonRuntime } from './python/base.ts'
@@ -48,8 +48,8 @@ describe('runtime table', () => {
     expect([...new MontyRuntime({ captures: ['only'] }).captures]).toEqual(['only'])
   })
 
-  it('default entries end with the vfs runtime', () => {
-    expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('vfs')
+  it('default entries end with the workspace runtime', () => {
+    expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('workspace')
   })
 
   it('the default python engine is pyodide and leads the default world', () => {
@@ -64,9 +64,9 @@ describe('runtime table', () => {
     expect(() => buildRuntime('ghost')).toThrow(/unknown runtime: 'ghost'/)
   })
 
-  it('buildRuntime builds the vfs runtime by name', () => {
-    expect(buildRuntime('vfs')).toBeInstanceOf(VFSRuntime)
-    const restricted = buildRuntime('vfs', { captures: ['grep', 'cat'] })
+  it('buildRuntime builds the workspace runtime by name', () => {
+    expect(buildRuntime('workspace')).toBeInstanceOf(WorkspaceRuntime)
+    const restricted = buildRuntime('workspace', { captures: ['grep', 'cat'] })
     expect([...restricted.captures]).toEqual(['grep', 'cat'])
   })
 
@@ -80,14 +80,14 @@ describe('bindCommands', () => {
   it('first capturer wins', () => {
     const fake = new FakeRuntime()
     const monty = new MontyRuntime()
-    const bindings = bindCommands([fake, monty, new VFSRuntime()])
+    const bindings = bindCommands([fake, monty, new WorkspaceRuntime()])
     expect(bindings.python3).toBe(fake)
     expect(bindings['made-up']).toBe(fake)
     expect(bindings.python).toBe(monty)
   })
 
-  it('the vfs runtime binds nothing', () => {
-    expect(bindCommands([new VFSRuntime()])).toEqual({})
+  it('the workspace runtime binds nothing', () => {
+    expect(bindCommands([new WorkspaceRuntime()])).toEqual({})
   })
 
   it('rejects duplicate names', () => {
@@ -105,7 +105,7 @@ describe('bindCommands', () => {
       }
     }
     const rt = new ProtoRuntime()
-    const bindings = bindCommands([rt, new VFSRuntime()])
+    const bindings = bindCommands([rt, new WorkspaceRuntime()])
     // A helper defeats TS resolving `.toString` to the Object method.
     const bound = (record: Record<string, Runtime>, name: string): Runtime | undefined =>
       record[name]
@@ -155,19 +155,19 @@ describe('buildRuntime option validation', () => {
 describe('runtimeBindingsFor', () => {
   it('maps only the named runtime captures', () => {
     const fake = new FakeRuntime()
-    const bindings = runtimeBindingsFor([fake, new VFSRuntime()], 'fake')
+    const bindings = runtimeBindingsFor([fake, new WorkspaceRuntime()], 'fake')
     expect(bindings).toEqual({ python3: fake, 'made-up': fake })
   })
 
-  it('rejects the vfs name', () => {
-    expect(() => runtimeBindingsFor([new FakeRuntime(), new VFSRuntime()], 'vfs')).toThrow(
-      /not a runtime you can select/,
-    )
+  it('rejects the workspace name', () => {
+    expect(() =>
+      runtimeBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], 'workspace'),
+    ).toThrow(/not a runtime you can select/)
   })
 
   it('unknown names list the workspace entries', () => {
-    expect(() => runtimeBindingsFor([new FakeRuntime(), new VFSRuntime()], 'nope')).toThrow(
-      /unknown runtime: 'nope' \(workspace runtimes: 'fake', 'vfs'\)/,
+    expect(() => runtimeBindingsFor([new FakeRuntime(), new WorkspaceRuntime()], 'nope')).toThrow(
+      /unknown runtime: 'nope' \(workspace runtimes: 'fake', 'workspace'\)/,
     )
   })
 })
@@ -190,7 +190,7 @@ describe('registerRuntime', () => {
       registerRuntime('monty', FakeRuntime)
     }).toThrow(/shadows a builtin/)
     expect(() => {
-      registerRuntime('vfs', FakeRuntime)
+      registerRuntime('workspace', FakeRuntime)
     }).toThrow(/shadows a builtin/)
   })
 

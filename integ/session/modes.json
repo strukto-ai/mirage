@@ -453,7 +453,7 @@
         "disk"
       ],
       "command": "ln -s /ro/y.txt /ro/rolink && readlink /ro/rolink",
-      "note": "A read-only MOUNT is a statement about a backend that cannot write, not a ban on names above it: symlinks are namespace state, so a link here needs no write capability from the resource and the target need not exist. integ/resources/<svc>/sym.json pins the same rule above postgres, mongodb, chroma and qdrant, all mounted read; those need containers, so /ro guards it on every host. What DOES gate this plane is a session grant -- see sess_read_grant_blocks_link_create.",
+      "note": "A read-only MOUNT is a statement about a backend that cannot write, not a ban on names above it: symlinks are namespace state, so a link here needs no write capability from the VFS and the target need not exist. integ/vfs/<svc>/sym.json pins the same rule above postgres, mongodb, chroma and qdrant, all mounted read; those need containers, so /ro guards it on every host. What DOES gate this plane is a session grant -- see sess_read_grant_blocks_link_create.",
       "expect": {
         "exit": 0,
         "stdout": "/ro/y.txt\n",

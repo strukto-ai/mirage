@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FileStat, FileType } from '@struktoai/mirage-core/types'
-import { DiskResource } from '../../resource/disk/disk.ts'
+import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { opOf, spec, tmpRoot } from '../../test-utils.ts'
 import { DISK_OPS } from './index.ts'
 
@@ -22,11 +22,11 @@ const statOp = opOf(DISK_OPS, 'stat')
 
 let root: string
 let cleanup: () => void
-let res: DiskResource
+let res: DiskVFS
 
 beforeEach(async () => {
   ;({ root, cleanup } = tmpRoot('mirage-disk-stat-op-'))
-  res = new DiskResource({ root })
+  res = new DiskVFS({ root })
   await res.open()
 })
 afterEach(() => {

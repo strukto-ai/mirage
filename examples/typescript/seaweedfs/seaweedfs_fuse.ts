@@ -23,7 +23,7 @@ import {
   Mount,
   MountBackend,
   MountMode,
-  SeaweedFSResource,
+  SeaweedFSVFS,
   Workspace,
   type SeaweedFSConfig,
 } from "@struktoai/mirage-node";
@@ -50,25 +50,25 @@ function configFromEnv(): SeaweedFSConfig {
 }
 
 async function seed(ws: Workspace): Promise<void> {
-  await ws.execute(
+  await ws.shell(
     `echo '{"event":"queue-operation","tool":"mirage"}' > /seaweedfs/data/example.jsonl`,
   );
-  await ws.execute(
+  await ws.shell(
     `echo '{"event":"read","tool":"mirage"}' >> /seaweedfs/data/example.jsonl`,
   );
-  await ws.execute(
+  await ws.shell(
     `echo '{"event":"queue-operation","tool":"other"}' >> /seaweedfs/data/example.jsonl`,
   );
-  await ws.execute(
+  await ws.shell(
     `echo '{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}' > /seaweedfs/data/config.json`,
   );
-  await ws.execute('echo "hello from seaweedfs" > /seaweedfs/notes.txt');
+  await ws.shell('echo "hello from seaweedfs" > /seaweedfs/notes.txt');
 }
 
 async function main(): Promise<void> {
   const cfg = configFromEnv();
   const ws = new Workspace({
-    "/seaweedfs/": new Mount(new SeaweedFSResource(cfg), {
+    "/seaweedfs/": new Mount(new SeaweedFSVFS(cfg), {
       mode: MountMode.WRITE,
       backend: MountBackend.FUSE,
     }),
@@ -86,13 +86,13 @@ async function main(): Promise<void> {
 
     try {
       console.log("--- virtual executor: stats via /seaweedfs ---");
-      const ls = await ws.execute("ls /seaweedfs/data");
+      const ls = await ws.shell("ls /seaweedfs/data");
       console.log(
         `  ls /seaweedfs/data : ${ls.stdoutText.trim().split("\n").join(", ")}`,
       );
-      const stat = await ws.execute("stat /seaweedfs/data/example.jsonl");
+      const stat = await ws.shell("stat /seaweedfs/data/example.jsonl");
       console.log(`  stat example.jsonl : ${stat.stdoutText.trim()}`);
-      const grep = await ws.execute(
+      const grep = await ws.shell(
         "grep -c queue-operation /seaweedfs/data/example.jsonl",
       );
       console.log(`  grep -c            : ${grep.stdoutText.trim()}`);
@@ -103,7 +103,7 @@ async function main(): Promise<void> {
       console.log(`>>>   cat ${mp}/data/config.json`);
       console.log(`>>>   wc -l ${mp}/data/example.jsonl`);
     } finally {
-      for (const key of SEED_KEYS) await ws.execute(`rm ${key}`);
+      for (const key of SEED_KEYS) await ws.shell(`rm ${key}`);
     }
   } finally {
     await ws.close();

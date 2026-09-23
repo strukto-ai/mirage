@@ -29,14 +29,14 @@ from mirage.workspace.executor.builtins.shared import (arith_refusal,
                                                        readonly_refusal,
                                                        refusal, require_view)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import session_view, visible_env
 from mirage.workspace.types import ExecutionNode
 
 
 async def _read_store(
-    session: Session,
+    session: SessionState,
     view: SessionView,
     var: str,
     value: str,
@@ -49,7 +49,7 @@ async def _read_store(
     ``readonly`` records.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         view (SessionView): the session plane's gated door.
         var (str): the target as the operand spelled it.
         value (str): the split word to store.
@@ -255,7 +255,7 @@ async def _read_raw(
 
 async def handle_read(
     args: list[str],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -277,7 +277,7 @@ async def handle_read(
 
     Args:
         args (list[str]): words after the command name.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (ByteSource | None): line source.
         state (SessionView | None): the session plane's gated door.
     """

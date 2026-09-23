@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
+from mirage.vfs.langfuse import LangfuseConfig, LangfuseVFS
 
 load_dotenv(".env.development")
 
@@ -27,12 +27,11 @@ config = LangfuseConfig(
     secret_key=os.environ["LANGFUSE_SECRET_KEY"],
     host=os.environ["LANGFUSE_HOST"],
 )
-resource = LangfuseResource(config=config)
+vfs = LangfuseVFS(config=config)
 
-with Workspace({
-        "/langfuse/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/langfuse/": Mount(vfs, mode=MountMode.READ,
+                         backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -86,7 +85,7 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, "
           f"{total} bytes transferred")

@@ -17,7 +17,7 @@ import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { asyncChain } from '../../../../io/stream.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 
@@ -63,7 +63,7 @@ function splitItems(data: Uint8Array, flags: Record<string, string | boolean>): 
 export async function handleXargs(
   executeFn: ExecuteStringFn,
   args: readonly string[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
 ): Promise<Result> {
   const parse = parseShellOptions(SHELL_SPECS.xargs, args)

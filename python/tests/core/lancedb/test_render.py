@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.lancedb.render import render_card
-from mirage.resource.lancedb.config import LanceDBConfig
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 
 def _cfg() -> LanceDBConfig:

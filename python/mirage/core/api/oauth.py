@@ -41,7 +41,7 @@ class TokenManager:
     ambiently), which is why it only ever surfaced as a flaky macOS
     battery.
 
-    A resource-owned manager is drained by the resource's ``close``. A
+    A VFS-owned manager is drained by the VFS's ``close``. A
     one-shot manager, which is what a CLI verb builds per invocation,
     is used as an async context manager so the pool it opened dies with
     the line that opened it.

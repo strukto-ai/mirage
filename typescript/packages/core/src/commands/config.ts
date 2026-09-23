@@ -127,7 +127,7 @@ export type CommandFnResult = [ByteSource | null, IOResult] | null
  * `async def cat(accessor, paths, *texts, stdin=None, n=False, **_extra)`.
  * TS gets four positional params: accessor, paths, texts (Python `*texts`),
  * and an opts bag (Python `**kwargs`). Generic on the accessor type so
- * resource-specific commands can declare e.g. `accessor: RAMAccessor`.
+ * VFS-specific commands can declare e.g. `accessor: RAMAccessor`.
  */
 export type CommandFn<A extends Accessor = Accessor> = (
   accessor: A,
@@ -148,7 +148,7 @@ export type AggregateFn = (results: AggregateResult[]) => Uint8Array
 export interface RegisteredCommandInit {
   name: string
   spec: CommandSpec
-  resource: string | null
+  vfs: string | null
   filetype?: string | null
   fn: CommandFn
   provisionFn?: ProvisionFn | null
@@ -167,7 +167,7 @@ export interface RegisteredCommandOverrides {
 export class RegisteredCommand {
   readonly name: string
   readonly spec: CommandSpec
-  readonly resource: string | null
+  readonly vfs: string | null
   readonly filetype: string | null
   readonly fn: CommandFn
   readonly provisionFn: ProvisionFn | null
@@ -180,7 +180,7 @@ export class RegisteredCommand {
   constructor(init: RegisteredCommandInit) {
     this.name = init.name
     this.spec = init.spec
-    this.resource = init.resource
+    this.vfs = init.vfs
     this.filetype = init.filetype ?? null
     this.fn = init.fn
     this.provisionFn = init.provisionFn ?? null
@@ -197,7 +197,7 @@ export class RegisteredCommand {
     return new RegisteredCommand({
       name: this.name,
       spec: this.spec,
-      resource: this.resource,
+      vfs: this.vfs,
       filetype: this.filetype,
       fn: overrides.fn ?? this.fn,
       provisionFn: overrides.provision === undefined ? this.provisionFn : overrides.provision,
@@ -255,7 +255,7 @@ export class CommandCatalog extends Array<RegisteredCommand> {
 
 export interface CommandOptions<A extends Accessor = Accessor> {
   name: string
-  resource: string | string[] | null
+  vfs: string | string[] | null
   spec: CommandSpec
   fn: CommandFn<A>
   filetype?: string | null
@@ -455,14 +455,14 @@ function withHelpSupport(
 export function command<A extends Accessor = Accessor>(
   options: CommandOptions<A>,
 ): RegisteredCommand[] {
-  const resources = Array.isArray(options.resource) ? options.resource : [options.resource]
+  const vfsNames = Array.isArray(options.vfs) ? options.vfs : [options.vfs]
   const { spec, fn } = withHelpSupport(options.name, options.spec, options.fn as CommandFn)
-  return resources.map(
+  return vfsNames.map(
     (r) =>
       new RegisteredCommand({
         name: options.name,
         spec,
-        resource: r,
+        vfs: r,
         filetype: options.filetype ?? null,
         fn,
         provisionFn: (options.provision ?? null) as ProvisionFn | null,
@@ -485,7 +485,7 @@ export function crossCommand(options: CrossCommandOptions): RegisteredCommand {
   return new RegisteredCommand({
     name: options.name,
     spec: options.spec,
-    resource: `${options.src}->${options.dst}`,
+    vfs: `${options.src}->${options.dst}`,
     filetype: null,
     fn: options.fn,
     src: options.src,

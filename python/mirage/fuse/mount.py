@@ -25,7 +25,7 @@ from mirage.fuse.darwin import install_macfuse_extensions
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
 from mirage.types import JsonValue
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 
 def load_fuse() -> Any:
@@ -122,7 +122,7 @@ def mount_background(
         ops: Ops,
         mountpoint: str,
         root_prefix: str = "",
-        session: Session | None = None,
+        session: SessionState | None = None,
         backend: str | MountBackend = MountBackend.FUSE) -> threading.Thread:
     """Mount in a background thread and return once the tree is live.
 
@@ -130,7 +130,7 @@ def mount_background(
         ops (Ops): the op facade to serve.
         mountpoint (str): where to mount.
         root_prefix (str): mount root; non-empty scopes the tree.
-        session (Session | None): bind ops to this session's mount grants.
+        session (SessionState | None): bind ops to this session's mount grants.
         backend (str | MountBackend): kernel interface to use.
 
     Returns:

@@ -1,5 +1,4 @@
 mode: WRITE
-consistency: LAZY
 
 # Snake_case top-level keys must parse + apply identically in both CLIs.
 default_session_id: crosssess
@@ -14,21 +13,21 @@ index:
 
 mounts:
   /ram:
-    resource: ram
+    vfs: ram
 
   /disk:
-    resource: disk
+    vfs: disk
     config:
       root: ${CROSS_DISK_ROOT}
 
   /redis:
-    resource: redis
+    vfs: redis
     config:
       url: ${REDIS_URL}
       key_prefix: ${CROSS_REDIS_PREFIX}
 
   /minio:
-    resource: minio
+    vfs: minio
     config:
       bucket: ${S3_BUCKET}
       endpoint_url: ${S3_ENDPOINT}
@@ -37,7 +36,7 @@ mounts:
 
   # Snake_case command_limits must parse + apply identically in both CLIs.
   /guard:
-    resource: ram
+    vfs: ram
     command_limits:
       cat:
         max_lines: 2

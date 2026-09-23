@@ -20,7 +20,7 @@ from mirage.runtime.routing import (RouteContext, RouteDecision, RouteError,
 from mirage.runtime.table import catch_all, runtime_bindings_for
 from mirage.workspace.lookup import Consumer, lookup
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session, env_snapshot
+from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.workspace.runtimes import Runtimes
 
 
@@ -52,7 +52,7 @@ class Router:
         command: str,
         runtime: str | None,
         provision: bool,
-        session: Session,
+        session: SessionState,
         session_id: str,
         agent_id: str,
         route_policy: RoutePolicy | None,
@@ -72,7 +72,7 @@ class Router:
             runtime (str | None): the execute() runtime argument, which
                 wins over the policy.
             provision (bool): whether this is a provision run.
-            session (Session): the effective session (cwd, env).
+            session (SessionState): the effective session (cwd, env).
             session_id (str): session hosting the line.
             agent_id (str): agent the line runs as.
             route_policy (RoutePolicy | None): the workspace route

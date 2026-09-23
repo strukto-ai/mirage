@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Policy } from '../../../../policy/base.ts'
 import type { Action, OpsContext } from '../../../../policy/types.ts'
-import { RAMResource } from '../../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
@@ -53,7 +53,7 @@ function dispatchOf(ws: Workspace): DispatchFn {
 async function makeWs(policies: Policy[] = []): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
-    { '/data': new RAMResource() },
+    { '/data': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       policies,
@@ -74,7 +74,7 @@ describe('ln -f on the same file', () => {
     // file and becomes a self-loop, as in GNU.
     const ws = await makeWs()
     try {
-      await ws.execute('printf hi > /data/a.txt')
+      await ws.shell('printf hi > /data/a.txt')
       const cases: [string, string][] = [
         ['ln -sf /data/a.txt /data/a.txt', "'/data/a.txt' and '/data/a.txt'"],
         ['ln -f /data/a.txt /data/a.txt', "'/data/a.txt' and '/data/a.txt'"],
@@ -82,19 +82,19 @@ describe('ln -f on the same file', () => {
         ['cd /data && ln -sfT a.txt a.txt', "'a.txt' and 'a.txt'"],
       ]
       for (const [line, wording] of cases) {
-        const r = await ws.execute(line)
+        const r = await ws.shell(line)
         expect(r.exitCode).toBe(1)
         expect(err(r)).toBe(`ln: ${wording} are the same file\n`)
-        const cat = await ws.execute('cat /data/a.txt')
+        const cat = await ws.shell('cat /data/a.txt')
         expect(DEC.decode(cat.stdout)).toBe('hi')
         expect(ws.namespace.isLink('/data/a.txt')).toBe(false)
       }
-      let r = await ws.execute('ln -sfb /data/a.txt /data/a.txt')
+      let r = await ws.shell('ln -sfb /data/a.txt /data/a.txt')
       expect(r.exitCode).toBe(0)
-      const kept = await ws.execute('cat /data/a.txt~')
+      const kept = await ws.shell('cat /data/a.txt~')
       expect(DEC.decode(kept.stdout)).toBe('hi')
       expect(ws.namespace.readlink('/data/a.txt')).toBe('/data/a.txt')
-      r = await ws.execute('ln -sf /data/nope /data/nope')
+      r = await ws.shell('ln -sf /data/nope /data/nope')
       expect(r.exitCode).toBe(0)
       expect(ws.namespace.readlink('/data/nope')).toBe('/data/nope')
     } finally {
@@ -112,25 +112,25 @@ describe('ln -b on a directory', () => {
     // -T the directory is where the link goes.
     const ws = await makeWs()
     try {
-      await ws.execute('mkdir -p /data/d; printf hi > /data/a.txt')
+      await ws.shell('mkdir -p /data/d; printf hi > /data/a.txt')
       for (const line of [
         'ln -sbT /data/a.txt /data/d',
         'ln -bT /data/a.txt /data/d',
         'ln -sfbT /data/a.txt /data/d',
         'ln -s --backup=numbered -T /data/a.txt /data/d',
       ]) {
-        const r = await ws.execute(line)
+        const r = await ws.shell(line)
         expect(r.exitCode).toBe(1)
         expect(err(r)).toBe('ln: /data/d: cannot overwrite directory\n')
-        const ls = await ws.execute('ls /data')
+        const ls = await ws.shell('ls /data')
         expect(DEC.decode(ls.stdout)).toBe('a.txt\nd\n')
         expect(ws.namespace.isLink('/data/d')).toBe(false)
       }
-      let r = await ws.execute('ln -sb /data/a.txt /data/d')
+      let r = await ws.shell('ln -sb /data/a.txt /data/d')
       expect(r.exitCode).toBe(0)
       expect(ws.namespace.readlink('/data/d/a.txt')).toBe('/data/a.txt')
-      await ws.execute('ln -s /data/d /data/lk')
-      r = await ws.execute('ln -sbT /data/a.txt /data/lk')
+      await ws.shell('ln -s /data/d /data/lk')
+      r = await ws.shell('ln -sbT /data/a.txt /data/lk')
       expect(r.exitCode).toBe(0)
       expect(ws.namespace.readlink('/data/lk')).toBe('/data/a.txt')
       expect(ws.namespace.readlink('/data/lk~')).toBe('/data/d')
@@ -147,11 +147,11 @@ describe('ln with a source it cannot read', () => {
     // foresee (a policy deny here) is that refusal, not an abort.
     const ws = await makeWs([new SealReads()])
     try {
-      await ws.execute('mkdir /data/d; printf a > /data/a.sealed; printf b > /data/b.txt')
-      const r = await ws.execute('ln /data/a.sealed /data/b.txt /data/d')
+      await ws.shell('mkdir /data/d; printf a > /data/a.sealed; printf b > /data/b.txt')
+      const r = await ws.shell('ln /data/a.sealed /data/b.txt /data/d')
       expect(r.exitCode).toBe(1)
       expect(err(r)).toBe("ln: failed to access '/data/a.sealed': Permission denied\n")
-      const rest = await ws.execute('ls /data/d; cat /data/d/b.txt')
+      const rest = await ws.shell('ls /data/d; cat /data/d/b.txt')
       expect(DEC.decode(rest.stdout)).toBe('b.txt\nb')
     } finally {
       await ws.close()
@@ -167,9 +167,9 @@ describe('rm and unlink reach a link through the op door', () => {
     // writable, so only the policy can be what refuses.
     const ws = await makeWs([new PinLinks()])
     try {
-      await ws.execute('echo b > /data/f.txt')
-      await ws.execute('ln -s f.txt /data/lk.pinned')
-      const r = await ws.execute('rm /data/lk.pinned')
+      await ws.shell('echo b > /data/f.txt')
+      await ws.shell('ln -s f.txt /data/lk.pinned')
+      const r = await ws.shell('rm /data/lk.pinned')
       expect(r.exitCode).toBe(1)
       expect(err(r)).toBe("rm: cannot remove '/data/lk.pinned': Permission denied\n")
       expect(ws.namespace.isLink('/data/lk.pinned')).toBe(true)
@@ -184,9 +184,9 @@ describe('rm and unlink reach a link through the op door', () => {
     // ways depending on whether the name it stopped was a link.
     const ws = await makeWs()
     try {
-      await ws.execute('echo b > /data/f.txt; ln -s f.txt /data/lk')
+      await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
-      const r = await ws.execute('rm /data/lk', { sessionId: 'agent' })
+      const r = await ws.shell('rm /data/lk', { sessionId: 'agent' })
       expect(r.exitCode).toBe(1)
       expect(err(r)).toBe('rm: read-only mount at /data/\n')
       expect(ws.namespace.isLink('/data/lk')).toBe(true)
@@ -201,10 +201,10 @@ describe('rm and unlink reach a link through the op door', () => {
     // a backend file does.
     const ws = await makeWs()
     try {
-      await ws.execute('echo b > /data/f.txt; ln -s f.txt /data/lk')
+      await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
-      const ln = await ws.execute('ln -s f.txt /data/lk2', { sessionId: 'agent' })
-      const mv = await ws.execute('mv /data/lk /data/lk3', { sessionId: 'agent' })
+      const ln = await ws.shell('ln -s f.txt /data/lk2', { sessionId: 'agent' })
+      const mv = await ws.shell('mv /data/lk /data/lk3', { sessionId: 'agent' })
       expect(ln.exitCode).toBe(1)
       expect(err(ln)).toBe('ln: read-only mount at /data/\n')
       expect(mv.exitCode).toBe(1)
@@ -221,14 +221,14 @@ describe('rm and unlink reach a link through the op door', () => {
     // says something failed.
     const ws = await makeWs([new PinLinks()])
     try {
-      await ws.execute('echo b > /data/f.txt')
-      await ws.execute('ln -s f.txt /data/lk.pinned; ln -s f.txt /data/lk')
-      const r = await ws.execute('rm /data/lk.pinned /data/lk /data/f.txt')
+      await ws.shell('echo b > /data/f.txt')
+      await ws.shell('ln -s f.txt /data/lk.pinned; ln -s f.txt /data/lk')
+      const r = await ws.shell('rm /data/lk.pinned /data/lk /data/f.txt')
       expect(r.exitCode).toBe(1)
       expect(err(r)).toBe("rm: cannot remove '/data/lk.pinned': Permission denied\n")
       expect(ws.namespace.isLink('/data/lk.pinned')).toBe(true)
       expect(ws.namespace.isLink('/data/lk')).toBe(false)
-      const gone = await ws.execute('test -e /data/f.txt; echo $?')
+      const gone = await ws.shell('test -e /data/f.txt; echo $?')
       expect(DEC.decode(gone.stdout)).toBe('1\n')
     } finally {
       await ws.close()
@@ -239,9 +239,9 @@ describe('rm and unlink reach a link through the op door', () => {
     // GNU -f silences only the absent; EROFS is not ENOENT.
     const ws = await makeWs()
     try {
-      await ws.execute('echo b > /data/f.txt; ln -s f.txt /data/lk')
+      await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
-      const r = await ws.execute('rm -f /data/lk', { sessionId: 'agent' })
+      const r = await ws.shell('rm -f /data/lk', { sessionId: 'agent' })
       expect(r.exitCode).toBe(1)
       expect(err(r)).toBe('rm: read-only mount at /data/\n')
     } finally {
@@ -254,10 +254,10 @@ describe('rm and unlink reach a link through the op door', () => {
     // exactly what -f silences; without -f the miss is reported.
     const ws = await makeWs()
     try {
-      await ws.execute('echo b > /data/f.txt; ln -s f.txt /data/lk.sec')
+      await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk.sec')
       ws.createSession('agent', { profile: { paths: { hide: ['/data/lk.sec'] } } })
-      const silent = await ws.execute('rm -f /data/lk.sec', { sessionId: 'agent' })
-      const loud = await ws.execute('rm /data/lk.sec', { sessionId: 'agent' })
+      const silent = await ws.shell('rm -f /data/lk.sec', { sessionId: 'agent' })
+      const loud = await ws.shell('rm /data/lk.sec', { sessionId: 'agent' })
       expect(silent.exitCode).toBe(0)
       expect(err(silent)).toBe('')
       expect(loud.exitCode).toBe(1)
@@ -273,15 +273,15 @@ describe('rm and unlink reach a link through the op door', () => {
     // the command tier refuses separately, whose line is the same line.
     const ws = await makeWs()
     try {
-      await ws.execute('echo b > /data/f.txt')
-      await ws.execute('ln -s f.txt /data/l1; ln -s f.txt /data/l2')
+      await ws.shell('echo b > /data/f.txt')
+      await ws.shell('ln -s f.txt /data/l1; ln -s f.txt /data/l2')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
       for (const line of [
         'rm /data/l1 /data/l2',
         'rm /data/l1 /data/f.txt',
         'rm /data/l1 /data/l2 /data/f.txt',
       ]) {
-        const r = await ws.execute(line, { sessionId: 'agent' })
+        const r = await ws.shell(line, { sessionId: 'agent' })
         expect(r.exitCode, line).toBe(1)
         expect(err(r), line).toBe('rm: read-only mount at /data/\n')
       }
@@ -301,8 +301,8 @@ describe('mv re-anchors what the node table holds', () => {
     // holds an entry for a link at all.
     const ws = await makeWs()
     try {
-      await ws.execute('mkdir -p /data/d; printf t > /data/t')
-      await ws.execute('ln -s /data/t /data/d/link')
+      await ws.shell('mkdir -p /data/d; printf t > /data/t')
+      await ws.shell('ln -s /data/t /data/d/link')
       const prepared = await prepareMv(
         ws.namespace,
         dispatchOf(ws),
@@ -324,7 +324,7 @@ describe('mv re-anchors what the node table holds', () => {
     // two-operand pair cannot describe at all.
     const ws = await makeWs()
     try {
-      await ws.execute('mkdir -p /data/dst; printf a > /data/a')
+      await ws.shell('mkdir -p /data/dst; printf a > /data/a')
       const pair = [PathSpec.fromStrPath('/data/a'), PathSpec.fromStrPath('/data/dst')]
       const dispatch = dispatchOf(ws)
       const into = await prepareMv(ws.namespace, dispatch, pair, ['/data/a', '/data/dst'], '/')
@@ -353,12 +353,12 @@ describe('mv re-anchors what the node table holds', () => {
   it('moves a link below a renamed directory with it', async () => {
     const ws = await makeWs()
     try {
-      await ws.execute('mkdir -p /data/d; printf t > /data/t')
-      await ws.execute('ln -s /data/t /data/d/link')
-      expect((await ws.execute('mv /data/d /data/moved')).exitCode).toBe(0)
-      const told = await ws.execute('readlink /data/moved/link')
+      await ws.shell('mkdir -p /data/d; printf t > /data/t')
+      await ws.shell('ln -s /data/t /data/d/link')
+      expect((await ws.shell('mv /data/d /data/moved')).exitCode).toBe(0)
+      const told = await ws.shell('readlink /data/moved/link')
       expect([told.exitCode, DEC.decode(told.stdout)]).toEqual([0, '/data/t\n'])
-      expect((await ws.execute('readlink /data/d/link')).exitCode).not.toBe(0)
+      expect((await ws.shell('readlink /data/d/link')).exitCode).not.toBe(0)
     } finally {
       await ws.close()
     }

@@ -18,8 +18,8 @@ import tempfile
 from pathlib import Path
 
 from mirage import MountMode, Workspace
-from mirage.resource.disk import DiskResource
 from mirage.types import PathSpec
+from mirage.vfs.disk import DiskVFS
 
 MOUNT = "/data"
 
@@ -54,10 +54,10 @@ async def main() -> None:
     tmp = Path(tempfile.mkdtemp())
     seed(tmp)
 
-    resource = DiskResource(root=str(tmp))
-    ws = Workspace({MOUNT: resource}, mode=MountMode.READ)
-    hook = resource.delta_hook()
-    root = PathSpec.from_str_path(MOUNT, resource_path="")
+    vfs = DiskVFS(root=str(tmp))
+    ws = Workspace({MOUNT: vfs}, mode=MountMode.READ)
+    hook = vfs.delta_hook()
+    root = PathSpec.from_str_path(MOUNT, vfs_path="")
 
     # A baseline pull records state and reports nothing. Hand the
     # checkpoint back on the next call and it diffs against it.
@@ -76,9 +76,9 @@ async def main() -> None:
     # notify invalidates the caches for the changed path and its
     # ancestor listings before delivering, so a read after an event
     # can never serve pre-change bytes.
-    result = await ws.execute(f"cat {MOUNT}/reports/q1.txt")
+    result = await ws.shell(f"cat {MOUNT}/reports/q1.txt")
     print(f"\nread after notify: {(await result.stdout_str()).strip()!r}")
-    result = await ws.execute(f"ls {MOUNT}/reports")
+    result = await ws.shell(f"ls {MOUNT}/reports")
     print(f"listing: {' '.join((await result.stdout_str()).split())}")
 
     await ws.close()

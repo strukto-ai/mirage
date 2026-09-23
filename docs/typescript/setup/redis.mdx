@@ -4,7 +4,7 @@ icon: /images/redis-logo.svg
 description: Mount Redis keys as a Mirage filesystem.
 ---
 
-`RedisResource` exposes Redis keys as files under a single mount. The base of every key is the configured `keyPrefix`.
+`RedisVFS` exposes Redis keys as files under a single mount. The base of every key is the configured `keyPrefix`.
 
 <Note>
   Node needs the `redis@^5` peer dependency and speaks the Redis protocol over a socket. The browser
@@ -20,16 +20,16 @@ pnpm add @struktoai/mirage-node redis
 ## Config
 
 ```ts
-import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RedisVFS, Workspace } from '@struktoai/mirage-node'
 
-const redis = new RedisResource({
+const redis = new RedisVFS({
   url: process.env.REDIS_URL ?? 'redis://localhost:6379',
   keyPrefix: 'mirage/',
 })
 
 const ws = new Workspace({ '/r': redis }, { mode: MountMode.WRITE })
-await ws.execute('echo "hello" | tee /r/greet')
-await ws.execute('cat /r/greet')
+await ws.shell('echo "hello" | tee /r/greet')
+await ws.shell('cat /r/greet')
 ```
 
 | Field | Default | Notes |
@@ -52,15 +52,15 @@ second field is needed. [Upstash Redis](/typescript/setup/upstash) covers that d
 page.
 
 ```ts
-import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, RedisVFS, Workspace } from '@struktoai/mirage-browser'
 
-const redis = new RedisResource({
+const redis = new RedisVFS({
   url: 'rediss://default:<token>@<name>.upstash.io:6379',
   keyPrefix: 'mirage/',
 })
 const ws = new Workspace({ '/r': redis }, { mode: MountMode.WRITE })
-await ws.execute('echo "hello" | tee /r/greet')
-await ws.execute('cat /r/greet')
+await ws.shell('echo "hello" | tee /r/greet')
+await ws.shell('cat /r/greet')
 ```
 
 | Field | Default | Notes |
@@ -86,4 +86,4 @@ needs no account: it starts an in-process HTTP front that speaks the same REST s
 redis, mounts it through `@struktoai/mirage-browser`, and reads every key back through the Node
 mount to show the two stores agree byte for byte. CI replays that one against a pinned transcript.
 
-For the broader Redis semantics (binary keys, key patterns, snapshot caveats) see the [Python Redis docs](/python/resource/redis).
+For the broader Redis semantics (binary keys, key patterns, snapshot caveats) see the [Python Redis docs](/python/vfs/redis).

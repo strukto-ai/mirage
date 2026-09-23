@@ -23,7 +23,7 @@ import type { CLIInstall } from '../../cli/types.ts'
 import { ScriptSource } from '../../../runtime/routing/types.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import type { RunArgs, RunResult, RuntimeLanguage } from '../../../runtime/types.ts'
-import { Session } from '../../session/session.ts'
+import { SessionState } from '../../session/session.ts'
 import { dropsMountCaches, handleCli } from './cli.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
@@ -64,7 +64,7 @@ describe('handleCli', () => {
     calls.length = 0
     const install = makeInstall()
     const parts = ['prog', '-vv', 'message', 'send', '-t', '#eng', 'hello', 'world']
-    const session = new Session({ sessionId: 't', vars: varsFromEnv({ EDITOR: 'vi' }) })
+    const session = new SessionState({ sessionId: 't', vars: varsFromEnv({ EDITOR: 'vi' }) })
     const [stdout, io, node] = await handleCli(install, parts, session)
     expect(io.exitCode).toBe(0)
     expect(dec.decode(await materialize(stdout))).toBe('sent[tok]\n')
@@ -84,7 +84,7 @@ describe('handleCli', () => {
     const [, io, node] = await handleCli(
       install,
       ['renamed', 'bogus'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     expect(io.exitCode).toBe(1)
     expect(dec.decode(await materialize(io.stderr))).toBe(
@@ -98,7 +98,7 @@ describe('handleCli', () => {
     const [stdout, io] = await handleCli(
       install,
       ['prog', 'message'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     expect(io.exitCode).toBe(1)
     const out = dec.decode(await materialize(stdout))
@@ -111,7 +111,7 @@ describe('handleCli', () => {
     const [stdout, io] = await handleCli(
       install,
       ['renamed', 'message', 'send', '--help'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     expect(io.exitCode).toBe(0)
     const out = dec.decode(await materialize(stdout))
@@ -136,7 +136,7 @@ describe('handleCli', () => {
     const [stdout, io] = await handleCli(
       install,
       ['prog', '--help'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     expect(io.exitCode).toBe(0)
     expect(dec.decode(await materialize(stdout))).toBe('help=true\n')
@@ -147,7 +147,7 @@ describe('handleCli', () => {
     const [, io] = await handleCli(
       install,
       ['prog', 'message', 'send', 'hi'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     expect(io.exitCode).toBe(2)
     expect(dec.decode(await materialize(io.stderr))).toMatch(
@@ -174,7 +174,7 @@ describe('handleCli', () => {
     })
     const install: CLIInstall = { name: 'prog', spec, config: null }
     await expect(
-      handleCli(install, ['prog', 'run'], new Session({ sessionId: 't' })),
+      handleCli(install, ['prog', 'run'], new SessionState({ sessionId: 't' })),
     ).rejects.toThrow(/prog run: timed out/)
   })
 
@@ -206,7 +206,14 @@ describe('handleCli', () => {
     })
     const install: CLIInstall = { name: 'prog', spec, config: {} }
     await expect(
-      handleCli(install, ['prog', 'run'], new Session({ sessionId: 't' }), null, {}, dropCaches),
+      handleCli(
+        install,
+        ['prog', 'run'],
+        new SessionState({ sessionId: 't' }),
+        null,
+        {},
+        dropCaches,
+      ),
     ).rejects.toThrow(/timed out/)
     expect(dropped).toBe(1)
     await new Promise((resolve) => setTimeout(resolve, 150))
@@ -245,7 +252,14 @@ describe('handleCli', () => {
     process.on('unhandledRejection', onUnhandled)
     try {
       await expect(
-        handleCli(install, ['prog', 'run'], new Session({ sessionId: 't' }), null, {}, dropCaches),
+        handleCli(
+          install,
+          ['prog', 'run'],
+          new SessionState({ sessionId: 't' }),
+          null,
+          {},
+          dropCaches,
+        ),
       ).rejects.toThrow(/timed out/)
       await new Promise((resolve) => setTimeout(resolve, 150))
       expect(calls).toBe(2)
@@ -264,7 +278,7 @@ describe('handleCli', () => {
     await handleCli(
       install,
       ['prog', 'message', 'send', '-t', 'x'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       stdin,
     )
     const inv = calls.pop()
@@ -347,7 +361,7 @@ describe('handleCli script arm', () => {
     const [stdout, io, node] = await handleCli(
       scriptInstall(),
       ['pager', 'report.txt', 'x'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [js, py] },
     )
@@ -372,7 +386,7 @@ describe('handleCli script arm', () => {
     const [, io] = await handleCli(
       install,
       ['pager', '-n', '3', 'report.txt'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
@@ -389,7 +403,7 @@ describe('handleCli script arm', () => {
       script: new ScriptSource('export const x = 1', 'js', true),
     })
     const install: CLIInstall = { name: 'pager', spec, config: null }
-    const [, io] = await handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, {
+    const [, io] = await handleCli(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [js],
     })
     expect(io.exitCode).toBe(0)
@@ -398,7 +412,7 @@ describe('handleCli script arm', () => {
 
   it('a non-module script sends no flags', async () => {
     const py = new FakePyRuntime()
-    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, {
+    await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [py],
     })
     expect(py.seen.pop()?.flags).toBeUndefined()
@@ -406,7 +420,7 @@ describe('handleCli script arm', () => {
 
   it('the env carries MIRAGE_CLI_CONFIG as JSON', async () => {
     const py = new FakePyRuntime()
-    const session = new Session({ sessionId: 't', vars: varsFromEnv({ EDITOR: 'vi' }) })
+    const session = new SessionState({ sessionId: 't', vars: varsFromEnv({ EDITOR: 'vi' }) })
     const [, io] = await handleCli(
       scriptInstall({ config: { apiKey: 'k1' } }),
       ['pager'],
@@ -424,7 +438,7 @@ describe('handleCli script arm', () => {
 
   it('the env omits MIRAGE_CLI_CONFIG without config', async () => {
     const py = new FakePyRuntime()
-    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), null, {
+    await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [py],
     })
     expect(py.seen.pop()?.env).not.toHaveProperty('MIRAGE_CLI_CONFIG')
@@ -435,9 +449,15 @@ describe('handleCli script arm', () => {
     // 'pager:' and two installs of one program are distinguishable.
     const py = new FakePyRuntime()
     const install: CLIInstall = { name: 'renamed', spec: scriptInstall().spec, config: null }
-    await handleCli(install, ['renamed', 'report.txt'], new Session({ sessionId: 't' }), null, {
-      entries: [py],
-    })
+    await handleCli(
+      install,
+      ['renamed', 'report.txt'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      {
+        entries: [py],
+      },
+    )
     const run = py.seen.pop()
     expect(run?.prog).toBe('renamed')
     expect(run?.args).toEqual(['report.txt'])
@@ -446,7 +466,7 @@ describe('handleCli script arm', () => {
   it('stdin materializes to bytes', async () => {
     const py = new FakePyRuntime()
     const stdin = new TextEncoder().encode('body')
-    await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }), stdin, {
+    await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), stdin, {
       entries: [py],
     })
     expect(py.seen.pop()?.stdin).toEqual(stdin)
@@ -459,7 +479,7 @@ describe('handleCli script arm', () => {
     const [, io] = await handleCli(
       scriptInstall(),
       ['pager', '--help'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
@@ -477,7 +497,7 @@ describe('handleCli script arm', () => {
     const [stdout, io] = await handleCli(
       install,
       ['pager', '--help'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
@@ -496,7 +516,7 @@ describe('handleCli script arm', () => {
     const [, io] = await handleCli(
       scriptInstall(),
       ['pager', '--width', '80', '-n', 'x'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
@@ -512,7 +532,7 @@ describe('handleCli script arm', () => {
     const [, io] = await handleCli(
       install,
       ['pager', '--frobnicate'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
@@ -531,7 +551,7 @@ describe('handleCli script arm', () => {
     const [, io] = await handleCli(
       scriptInstall({ runtime: 'otherpy' }),
       ['pager'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [first, pinned] },
     )
@@ -545,7 +565,7 @@ describe('handleCli script arm', () => {
     const [, io, node] = await handleCli(
       scriptInstall({ runtime: 'local' }),
       ['pager'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
@@ -562,7 +582,7 @@ describe('handleCli script arm', () => {
     const [, io] = await handleCli(
       scriptInstall({ runtime: 'fakejs' }),
       ['pager'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [js] },
     )
@@ -578,7 +598,7 @@ describe('handleCli script arm', () => {
     const [, io] = await handleCli(
       scriptInstall({ language: 'js' }),
       ['pager'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
@@ -589,7 +609,7 @@ describe('handleCli script arm', () => {
   })
 
   it('outside a workspace exits 127', async () => {
-    const [, io] = await handleCli(scriptInstall(), ['pager'], new Session({ sessionId: 't' }))
+    const [, io] = await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }))
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
       'pager: no workspace runtime runs python scripts (workspace runtimes: none)\n',
@@ -601,7 +621,7 @@ describe('handleCli script arm', () => {
     const [, io] = await handleCli(
       scriptInstall(),
       ['pager'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [crash] },
     )
@@ -619,7 +639,7 @@ describe('handleCli script arm', () => {
     const [stdout, io, node] = await handleCli(
       scriptInstall(),
       ['pager'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
@@ -638,7 +658,9 @@ describe('handleCli script arm', () => {
     })
     const install: CLIInstall = { name: 'pager', spec, config: null }
     await expect(
-      handleCli(install, ['pager'], new Session({ sessionId: 't' }), null, { entries: [sleepy] }),
+      handleCli(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
+        entries: [sleepy],
+      }),
     ).rejects.toThrow(/pager: timed out/)
     expect(sleepy.seen[0]?.timeoutSeconds).toBe(0.05)
     expect(sleepy.seen[0]?.signal?.aborted).toBe(true)
@@ -672,7 +694,7 @@ describe('cache drop on a thrown leaf', () => {
     const [, io] = await handleCli(
       throwingInstall(true),
       ['prog', 'push'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       {},
       () => {
@@ -689,7 +711,7 @@ describe('cache drop on a thrown leaf', () => {
     const [, io] = await handleCli(
       throwingInstall(false),
       ['prog', 'push'],
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
       null,
       {},
       () => {

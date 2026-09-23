@@ -14,19 +14,18 @@
 
 import pytest
 
-from mirage.resource.lancedb import LanceDBResource
 from mirage.types import MountMode
+from mirage.vfs.lancedb import LanceDBVFS
 from mirage.workspace import Workspace
 
 
 @pytest.fixture
 def ws(lance_config) -> Workspace:
-    return Workspace({"/db/": LanceDBResource(lance_config)},
-                     mode=MountMode.READ)
+    return Workspace({"/db/": LanceDBVFS(lance_config)}, mode=MountMode.READ)
 
 
 async def _out(ws: Workspace, cmd: str) -> str:
-    result = await ws.execute(cmd)
+    result = await ws.shell(cmd)
     return await result.stdout_str()
 
 

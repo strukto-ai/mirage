@@ -19,10 +19,10 @@ from mirage.core.gdocs.scope import detect_scope
 from mirage.core.google.constants import TOP_LEVEL_DIRS
 from mirage.core.google.date_glob import glob_to_modified_range
 from mirage.core.google.drive import list_all_files
-from mirage.resource.gdocs.doc_entry import make_filename
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.key_prefix import mount_prefix_of
+from mirage.vfs.gdocs.doc_entry import make_filename
 
 
 async def readdir(
@@ -32,7 +32,7 @@ async def readdir(
 ) -> list[str]:
     virtual = path_spec.virtual
     modified_range = None
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     if path_spec.pattern:
         modified_range = glob_to_modified_range(path_spec.pattern)
     path = path_spec.directory if path_spec.pattern else path_spec.virtual

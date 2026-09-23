@@ -23,7 +23,7 @@ import { stat as gmailStat } from '../../../core/gmail/stat.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/gmail/scope.ts'
 import { formatGrepResults, searchMessages } from '../../../core/gmail/search.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
+import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
 import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand } from '../grep_pushdown.ts'
 import { SEARCH_HONORED, SEARCH_MAX_RESULTS } from './grep.ts'
@@ -62,7 +62,7 @@ async function rgCommand(
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
       const labelName = match.slots.label ?? null
-      const filePrefix = mountPrefixOf(operand.virtual, operand.resourcePath)
+      const filePrefix = mountPrefixOf(operand.virtual, operand.vfsPath)
       const rows = await searchMessages(
         accessor.tokenManager,
         pattern,
@@ -89,7 +89,7 @@ async function rgCommand(
 
 export const GMAIL_RG = command({
   name: 'rg',
-  resource: ResourceName.GMAIL,
+  vfs: VFSName.GMAIL,
   spec: specOf('rg'),
   fn: rgCommand,
 })

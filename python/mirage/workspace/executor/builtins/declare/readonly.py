@@ -26,13 +26,13 @@ from mirage.workspace.executor.builtins.declare.declare import (
 from mirage.workspace.executor.builtins.shared import (arith_refusal,
                                                        readonly_refusal,
                                                        refusal, require_view)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (env_is_readonly, set_attr,
                                             visible_env)
 from mirage.workspace.types import ExecutionNode
 
 
-def _readonly_lines(session: Session, flags: set[str]) -> list[str]:
+def _readonly_lines(session: SessionState, flags: set[str]) -> list[str]:
     """Build sorted ``declare -r`` family readonly lines.
 
     ``-a`` narrows the listing to indexed arrays and ``-A`` to
@@ -41,7 +41,7 @@ def _readonly_lines(session: Session, flags: set[str]) -> list[str]:
     nothing. Bare and ``-p`` list every readonly name.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         flags (set[str]): option letters the caller supplied.
 
     Returns:
@@ -80,7 +80,7 @@ def _readonly_lines(session: Session, flags: set[str]) -> list[str]:
 
 async def handle_readonly(
     assignments: list[str],
-    session: Session,
+    session: SessionState,
     state: SessionView | None = None,
     arrays: list[tuple[str, bool, list[str]]] | None = None,
     stored: list[str] | None = None,

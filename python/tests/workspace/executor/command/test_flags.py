@@ -25,9 +25,9 @@ def test_synthesized_spec_leaves_the_backend_key_to_the_mount():
     spec = synthesize_path_spec("/data/sub/x.txt")
     assert spec.virtual == "/data/sub/x.txt"
     assert spec.directory == "/data/sub/"
-    # The mount stamps resource_path at execute time; a parse-time
+    # The mount stamps vfs_path at execute time; a parse-time
     # value is dead (proven by the sentinel run in both languages).
-    assert spec.resource_path == ""
+    assert spec.vfs_path == ""
     assert spec.resolved is True
 
 

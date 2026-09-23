@@ -17,7 +17,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.s3 import S3VFS, S3Config
 
 load_dotenv(".env.development")
 
@@ -36,14 +36,14 @@ deep_config = S3Config(
     key_prefix="subdata/subsubdata/",
 )
 
-resource = S3Resource(config)
-deep_resource = S3Resource(deep_config)
+vfs = S3VFS(config)
+deep_vfs = S3VFS(deep_config)
 
 with Workspace({
         "/s3/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE),
+        Mount(vfs, mode=MountMode.READ, backend=MountBackend.FUSE),
         "/deep/":
-        deep_resource
+        deep_vfs
 }) as ws:
     mp = ws.fuse_mountpoint
 
@@ -95,6 +95,6 @@ with Workspace({
     except EOFError:
         pass
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

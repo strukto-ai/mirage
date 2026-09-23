@@ -28,7 +28,7 @@ from mirage.utils.errors import eisdir
 async def write_bytes(accessor: GDriveAccessor, path: PathSpec,
                       data: bytes) -> None:
     virtual = path.virtual
-    key = path.resource_path
+    key = path.vfs_path
     if not key:
         raise eisdir(virtual)
     timer = start_op()

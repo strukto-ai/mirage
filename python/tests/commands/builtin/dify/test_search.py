@@ -57,8 +57,7 @@ async def test_search_command_resolves_globs_and_passes_multiple_documents(
     monkeypatch.setattr(search, "search_segments", search_segments)
 
     stdout, io = await command_search(accessor(), [
-        PathSpec(resource_path=mount_key('/knowledge/guides/*.md',
-                                         '/knowledge'),
+        PathSpec(vfs_path=mount_key('/knowledge/guides/*.md', '/knowledge'),
                  virtual='/knowledge/guides/*.md',
                  directory='/knowledge/guides',
                  pattern='*.md',
@@ -87,7 +86,7 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
         return b"dataset"
 
     monkeypatch.setattr(search, "search_segments", search_segments)
-    root = PathSpec(resource_path=mount_key("/knowledge", "/knowledge"),
+    root = PathSpec(vfs_path=mount_key("/knowledge", "/knowledge"),
                     virtual="/knowledge",
                     directory="/knowledge")
 

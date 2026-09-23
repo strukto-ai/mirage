@@ -18,10 +18,10 @@ independent implementation uses
 
 ```typescript
 import { GWS } from '@struktoai/mirage-core'
-import { GmailResource, Workspace } from '@struktoai/mirage-node'
+import { GmailVFS, Workspace } from '@struktoai/mirage-node'
 
 const config = { clientId: '...', clientSecret: '...', refreshToken: '...' }
-const ws = new Workspace({ '/mail': new GmailResource(config) })
+const ws = new Workspace({ '/mail': new GmailVFS(config) })
 ws.registerCli('gws', GWS, config)
 ```
 
@@ -76,12 +76,12 @@ gws drive permissions create \
 ### Folder scope
 
 A config carrying `folderId` scopes what the CLI **creates**, so a file
-it makes lands in the same folder a `GDriveResource` sharing that config
+it makes lands in the same folder a `GDriveVFS` sharing that config
 mounts, and the agent's own `ls` shows what it just made:
 
 ```typescript
 const config = { clientId: '...', refreshToken: '...', folderId: 'FOLDER_ID' }
-const ws = new Workspace({ '/data': new GDriveResource(config) })
+const ws = new Workspace({ '/data': new GDriveVFS(config) })
 ws.registerCli('gws', GWS, config)
 ```
 

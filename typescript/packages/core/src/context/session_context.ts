@@ -15,7 +15,7 @@
 import { createAsyncContext } from '../utils/async_context.ts'
 import type { ContextCall } from '../utils/async_context.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
-import type { Session } from '../workspace/session/session.ts'
+import type { SessionState } from '../workspace/session/session.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import {
   anchorDepth,
@@ -36,7 +36,7 @@ import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
  * the session manager it belongs to, which is one per workspace.
  */
 interface SessionBinding {
-  session: Session
+  session: SessionState
   owner: SessionManager | null
 }
 
@@ -50,7 +50,7 @@ const sessionStorage = createAsyncContext<SessionBinding>()
  * background job's fork) stays attributed to the workspace running it.
  */
 export function runWithSession<T>(
-  session: Session,
+  session: SessionState,
   fn: () => Promise<T>,
   owner?: SessionManager,
 ): Promise<T> {
@@ -61,7 +61,7 @@ export function runWithSession<T>(
   return Promise.resolve(sessionStorage.run(binding, fn))
 }
 
-export function getCurrentSession(): Session | null {
+export function getCurrentSession(): SessionState | null {
   return sessionStorage.getStore()?.session ?? null
 }
 
@@ -76,7 +76,7 @@ export function getCurrentSession(): Session | null {
  * fails open on "no session", so a frame another task shadows or
  * settles past must keep counting while it is live.
  */
-export function liveSessions(): Session[] {
+export function liveSessions(): SessionState[] {
   return sessionStorage.liveStores().map((binding) => binding.session)
 }
 
@@ -90,7 +90,7 @@ export function liveSessions(): Session[] {
  * concurrent workspace's bind shadowing the newest frame must not hide
  * this owner's own session.
  */
-export function getCurrentSessionFor(owner: SessionManager): Session | null {
+export function getCurrentSessionFor(owner: SessionManager): SessionState | null {
   const bindings = sessionStorage.liveStores()
   for (let at = bindings.length - 1; at >= 0; at--) {
     const binding = bindings[at]
@@ -110,7 +110,7 @@ export function getCurrentSessionFor(owner: SessionManager): Session | null {
  * binding that names no owner is a deliberate placement (a kernel
  * mount, a guest runtime, an embedder binding by hand) and is kept.
  */
-export function getCurrentSessionUnlessForeign(owner: SessionManager): Session | null {
+export function getCurrentSessionUnlessForeign(owner: SessionManager): SessionState | null {
   const binding = sessionStorage.getStore()
   if (binding === undefined) return null
   if (binding.owner !== null && binding.owner !== owner) return null
@@ -133,7 +133,7 @@ function normPrefix(mountPrefix: string): string {
  * profile cannot see. Folded to the weakest across every live session,
  * which on an isolating runtime is the bound one alone.
  */
-function sessionModeOf(sess: Session, mountPrefix: string): MountMode {
+function sessionModeOf(sess: SessionState, mountPrefix: string): MountMode {
   if (sess.mountModes == null) return MountMode.EXEC
   return sess.mountModes.get(normPrefix(mountPrefix)) ?? MountMode.EXEC
 }
@@ -213,7 +213,7 @@ export function dotglobActive(): boolean {
  * any policy reads it, so a rule or an ask never names a path the
  * session cannot see.
  */
-export function sessionPathAllowed(sess: Session, virtual: string): boolean {
+export function sessionPathAllowed(sess: SessionState, virtual: string): boolean {
   return pathVisible(sess.hiddenPaths, sess.shownPaths, virtual)
 }
 
@@ -430,10 +430,13 @@ export function runWithRedirectPaths<T>(
   return Promise.resolve(redirectStorage.run([node, paths], fn))
 }
 
-const programStorage = createAsyncContext<Session | null>()
+const programStorage = createAsyncContext<SessionState | null>()
 
 /** Capture all command admission state for a deferred workspace callback. */
-export function captureSessionContext(session?: Session, owner?: SessionManager): ContextCall[] {
+export function captureSessionContext(
+  session?: SessionState,
+  owner?: SessionManager,
+): ContextCall[] {
   const sessionScope: ContextCall =
     session === undefined
       ? sessionStorage.capture()
@@ -456,7 +459,7 @@ export function captureSessionContext(session?: Session, owner?: SessionManager)
  * a nested shell the line starts (`-exec sh -c ...`, which snapshots the
  * same session), so that shell's builtins are its own.
  */
-export function runAsProgram<T>(session: Session, fn: () => Promise<T>): Promise<T> {
+export function runAsProgram<T>(session: SessionState, fn: () => Promise<T>): Promise<T> {
   return Promise.resolve(programStorage.run(session, fn))
 }
 
@@ -468,7 +471,7 @@ export function runAsShell<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** Whether the line running in this session is a program run. */
-export function isProgramInvocation(session: Session): boolean {
+export function isProgramInvocation(session: SessionState): boolean {
   return programStorage.getStore() === session
 }
 
@@ -535,7 +538,7 @@ export function effectiveMountMode(mountPrefix: string, mountMode: MountMode): M
  * isolating runtime is the bound one alone.
  */
 function pathModeUnder(
-  sess: Session,
+  sess: SessionState,
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,
@@ -598,7 +601,7 @@ function reachesUnder(head: string, prefix: string): boolean {
  * sessions: a command runs only when every live session would let it.
  */
 function strongestUnderSession(
-  sess: Session,
+  sess: SessionState,
   mountPrefix: string,
   mountMode: MountMode,
 ): MountMode {
@@ -639,7 +642,7 @@ export function strongestModeUnder(mountPrefix: string, mountMode: MountMode): M
  * blame any live session raises answers.
  */
 function readonlyBelowUnder(
-  sess: Session,
+  sess: SessionState,
   virtual: string,
   mountPrefix: string,
   mountMode: MountMode,

@@ -36,7 +36,7 @@ describe('versions router', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/workspaces',
-      payload: { config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+      payload: { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
     })
     expect(res.statusCode).toBe(201)
     return res.json<{ id: string }>().id

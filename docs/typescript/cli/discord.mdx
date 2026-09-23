@@ -18,10 +18,10 @@ independent Discord implementation uses
 
 ```typescript
 import { DISCORD } from '@struktoai/mirage-core'
-import { DiscordResource, Workspace } from '@struktoai/mirage-node'
+import { DiscordVFS, Workspace } from '@struktoai/mirage-node'
 
 const config = { token: 'bot-token' }
-const ws = new Workspace({ '/discord': new DiscordResource(config) })
+const ws = new Workspace({ '/discord': new DiscordVFS(config) })
 ws.registerCli('discord', DISCORD, config)
 ```
 

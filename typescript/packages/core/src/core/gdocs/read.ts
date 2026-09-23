@@ -33,7 +33,7 @@ const TABS_CONTENT_PARAM = 'true'
  * `tabs` empty unless asked otherwise, so without `includeTabsContent` a
  * multi-tab document renders as tab 1 and the rest are absent rather than
  * truncated. Asking for it moves the content under `tabs[]` and leaves
- * `body` empty, which is the shape the resource prompt documents.
+ * `body` empty, which is the shape the VFS prompt documents.
  */
 export async function readDoc(tm: TokenManager, docId: string): Promise<Uint8Array> {
   const url = `${docsBase(tm)}/documents/${docId}`

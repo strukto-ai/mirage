@@ -319,13 +319,15 @@ def reports_link(name: str, words: list[str | PathSpec]) -> bool:
 # operand, readlink's whole subject is the link it was handed, and
 # mkdir is naming something that must not exist yet -- resolving its
 # last component would make `mkdir -p dangle` create the link's missing
-# target where GNU answers "File exists".
+# target where GNU answers "File exists". getfattr and setfattr read -h
+# off their own line and hand the door the link or its target.
 # A trailing slash still applies: these are lstat-by-default, not
 # slash-proof (`touch dlink/` succeeds against the target directory,
 # `touch flink/` is "Not a directory"), which is why they are separate
 # from SLASH_KEEPS_LAST.
 SELF_RESOLVING = {
-    "chmod", "chown", "chgrp", "touch", "ln", "readlink", "mkdir"
+    "chmod", "chown", "chgrp", "touch", "ln", "readlink", "mkdir", "getfattr",
+    "setfattr"
 }
 
 

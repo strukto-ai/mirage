@@ -18,7 +18,7 @@
 //     pnpm --dir examples/typescript exec tsx fuse/fskit.ts
 //
 // It mounts, reads, then shows the two things that will bite you: the
-// mount-time warning for size-unknown resources (their files read as
+// mount-time warning for size-unknown mounts (their files read as
 // empty over fskit), and the partial write surface. Every probe below
 // runs in a child process: a TS FUSE mount is served by this process's
 // event loop, so touching the mountpoint synchronously from here would
@@ -32,23 +32,23 @@ import {
   Mount,
   MountBackend,
   MountMode,
-  RAMResource,
+  RAMVFS,
   Workspace,
 } from "@struktoai/mirage-node";
 
 const run = promisify(execFile);
 const CONTENT = new TextEncoder().encode('{"messages": 2}\n');
 
-class SizeUnknownRAM extends RAMResource {
-  // A resource that cannot size its files, like Slack or Gmail.
+class SizeUnknownRAM extends RAMVFS {
+  // A VFS that cannot size its files, like Slack or Gmail.
   override readonly sizesAlwaysKnown = false;
 }
 
-function seed(resource: RAMResource): RAMResource {
-  resource.store.dirs.add("/");
-  resource.store.files.set("/api.json", CONTENT);
-  resource.store.files.set("/existing.txt", new TextEncoder().encode("old\n"));
-  return resource;
+function seed(vfs: RAMVFS): RAMVFS {
+  vfs.store.dirs.add("/");
+  vfs.store.files.set("/api.json", CONTENT);
+  vfs.store.files.set("/existing.txt", new TextEncoder().encode("old\n"));
+  return vfs;
 }
 
 async function attempt(cmd: string, args: string[]): Promise<string> {
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
 
   console.log("\n=== fskit mount ===");
   const ws = new Workspace({
-    "/data": new Mount(seed(new RAMResource()), {
+    "/data": new Mount(seed(new RAMVFS()), {
       mode: MountMode.WRITE,
       backend: MountBackend.FSKIT,
     }),

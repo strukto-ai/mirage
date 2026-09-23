@@ -16,7 +16,7 @@ from mirage.commands.cli.types import CLIInvocation
 from mirage.core.notion.config import NotionConfig
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 async def token(

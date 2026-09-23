@@ -14,7 +14,7 @@
 
 import dotenv from 'dotenv'
 import {
-  DiscordResource,
+  DiscordVFS,
   MountMode,
   Workspace,
   type DiscordConfig,
@@ -36,18 +36,18 @@ function assertNonEmpty(out: string, msg: string): void {
 }
 
 async function main(): Promise<void> {
-  const resource = new DiscordResource(buildConfig())
-  const ws = new Workspace({ '/discord': resource }, { mode: MountMode.READ })
+  const vfs = new DiscordVFS(buildConfig())
+  const ws = new Workspace({ '/discord': vfs }, { mode: MountMode.READ })
 
   try {
     console.log('=== ls /discord/ (guilds) ===')
-    let r = await ws.execute('ls /discord/')
+    let r = await ws.shell('ls /discord/')
     console.log(r.stdoutText)
     assertNonEmpty(r.stdoutText, 'ls /discord/ returned no guilds')
 
     const guild = r.stdoutText.trim().split('\n')[0]!.trim()
     console.log(`=== ls /discord/${guild}/channels/ ===`)
-    r = await ws.execute(`ls "/discord/${guild}/channels/"`)
+    r = await ws.shell(`ls "/discord/${guild}/channels/"`)
     console.log(r.stdoutText)
     assertNonEmpty(r.stdoutText, 'no channels in first guild')
 
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
 
     // ── pick a date with messages ──────────────────
     console.log(`\n=== ls ${base}/ (date directories, last 5) ===`)
-    r = await ws.execute(`ls "${base}/" | tail -n 5`)
+    r = await ws.shell(`ls "${base}/" | tail -n 5`)
     console.log(r.stdoutText)
     const dates = r.stdoutText
       .trim()
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     let targetDate = dates[dates.length - 1]!
     for (let i = dates.length - 1; i >= 0; i--) {
       const d = dates[i]!
-      const test = await ws.execute(`cat "${base}/${d}/chat.jsonl" | head -c 1`)
+      const test = await ws.shell(`cat "${base}/${d}/chat.jsonl" | head -c 1`)
       if (test.stdoutText.trim() !== '') {
         targetDate = d
         break
@@ -81,12 +81,12 @@ async function main(): Promise<void> {
 
     // ── cat chat.jsonl ─────────────────────────────
     console.log(`\n=== cat ${targetDate}/chat.jsonl | head -n 3 ===`)
-    r = await ws.execute(`cat "${filePath}" | head -n 3`)
+    r = await ws.shell(`cat "${filePath}" | head -n 3`)
     console.log(r.stdoutText.slice(0, 300))
 
     // ── date dir contents ──────────────────────────
     console.log(`\n=== ls ${base}/${targetDate}/ ===`)
-    r = await ws.execute(`ls "${base}/${targetDate}/"`)
+    r = await ws.shell(`ls "${base}/${targetDate}/"`)
     console.log(r.stdoutText)
 
 
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${filePath} ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "${filePath}" && chown 500:dev "${filePath}" && touch -t 202601021530 "${filePath}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
 
     // ── files dir ──────────────────────────────────
     console.log(`\n=== ls ${base}/${targetDate}/files/ (attachments) ===`)
-    r = await ws.execute(`ls "${base}/${targetDate}/files/"`)
+    r = await ws.shell(`ls "${base}/${targetDate}/files/"`)
     const filesOut = r.stdoutText.trim()
     if (filesOut !== '') {
       for (const line of filesOut.split('\n').slice(0, 5)) console.log(`  ${line}`)
@@ -120,14 +120,14 @@ async function main(): Promise<void> {
       const attPath = `${base}/${targetDate}/files/${firstAtt}`
 
       console.log(`\n=== stat ${firstAtt} ===`)
-      r = await ws.execute(`stat "${attPath}"`)
+      r = await ws.shell(`stat "${attPath}"`)
       const statOut = r.stdoutText.trim()
       console.log(`  ${statOut.slice(0, 200)}`)
       const sizeMatch = /size=(\d+)/.exec(statOut)
       const expectedSize = sizeMatch !== null ? Number.parseInt(sizeMatch[1]!, 10) : null
 
       console.log(`\n=== cat ${firstAtt} (byte-exact CDN download) ===`)
-      r = await ws.execute(`cat "${attPath}"`)
+      r = await ws.shell(`cat "${attPath}"`)
       console.log(
         `  bytes=${String(r.stdout.byteLength)} expected=${String(expectedSize)} exit=${String(r.exitCode)}`,
       )
@@ -140,12 +140,12 @@ async function main(): Promise<void> {
 
     // ── grep at FILE level ─────────────────────────
     console.log(`\n=== grep at FILE level: grep -c . ${targetDate}/chat.jsonl ===`)
-    r = await ws.execute(`grep -c . "${filePath}"`)
+    r = await ws.shell(`grep -c . "${filePath}"`)
     console.log(`  line count: ${r.stdoutText.trim()}`)
 
     // ── grep at CHANNEL level (Discord search push-down) ──
     console.log(`\n=== grep at CHANNEL level: grep -m 5 . ${base}/ ===`)
-    r = await ws.execute(`grep -m 5 . "${base}/"`)
+    r = await ws.shell(`grep -m 5 . "${base}/"`)
     console.log(`  exit=${String(r.exitCode)}`)
     const chanOut = r.stdoutText.trim()
     if (chanOut !== '') {
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
 
     // ── grep at GUILD level ────────────────────────
     console.log(`\n=== grep at GUILD level: grep -m 5 . /discord/${guild}/ ===`)
-    r = await ws.execute(`grep -m 5 . "/discord/${guild}/"`)
+    r = await ws.shell(`grep -m 5 . "/discord/${guild}/"`)
     console.log(`  exit=${String(r.exitCode)}`)
     const guildOut = r.stdoutText.trim()
     if (guildOut !== '') {
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
 
     // ── jq pipeline ────────────────────────────────
     console.log(`\n=== jq -r '.[] | .author.username' ${targetDate}/chat.jsonl ===`)
-    r = await ws.execute(`jq -r ".[] | .author.username" "${filePath}" | head -n 5`)
+    r = await ws.shell(`jq -r ".[] | .author.username" "${filePath}" | head -n 5`)
     const jqOut = r.stdoutText.trim()
     if (jqOut !== '') {
       for (const line of jqOut.split('\n').slice(0, 5)) console.log(`  ${line}`)
@@ -175,36 +175,36 @@ async function main(): Promise<void> {
 
     // ── stat ───────────────────────────────────────
     console.log(`\n=== stat ${filePath} ===`)
-    r = await ws.execute(`stat "${filePath}"`)
+    r = await ws.shell(`stat "${filePath}"`)
     console.log(`  ${r.stdoutText.trim().slice(0, 200)}`)
 
     // ── wc ─────────────────────────────────────────
     console.log(`\n=== wc -l ${targetDate}/chat.jsonl ===`)
-    r = await ws.execute(`wc -l "${filePath}"`)
+    r = await ws.shell(`wc -l "${filePath}"`)
     console.log(`  ${r.stdoutText.trim()}`)
 
     // ── basename / dirname / realpath (path ops) ───────
     console.log(`\n=== basename ${filePath} ===`)
-    r = await ws.execute(`basename "${filePath}"`)
+    r = await ws.shell(`basename "${filePath}"`)
     const baseOut = r.stdoutText.trim()
     console.log(`  ${baseOut}`)
     if (baseOut !== 'chat.jsonl') throw new Error(`basename expected 'chat.jsonl', got ${baseOut}`)
 
     const expectedDir = `${base}/${targetDate}`
     console.log(`\n=== dirname ${filePath} ===`)
-    r = await ws.execute(`dirname "${filePath}"`)
+    r = await ws.shell(`dirname "${filePath}"`)
     const dirOut = r.stdoutText.trim()
     console.log(`  ${dirOut}`)
     if (dirOut !== expectedDir) throw new Error(`dirname expected ${expectedDir}, got ${dirOut}`)
 
     console.log(`\n=== realpath ${filePath} ===`)
-    r = await ws.execute(`realpath "${filePath}"`)
+    r = await ws.shell(`realpath "${filePath}"`)
     const realOut = r.stdoutText.trim()
     console.log(`  ${realOut}`)
     if (realOut !== filePath) throw new Error(`realpath expected ${filePath}, got ${realOut}`)
 
     console.log(`\n=== realpath -e ${filePath} (must exist) ===`)
-    r = await ws.execute(`realpath -e "${filePath}"`)
+    r = await ws.shell(`realpath -e "${filePath}"`)
     console.log(`  exit=${String(r.exitCode)} ${r.stdoutText.trim()}`)
     if (r.exitCode !== 0) {
       throw new Error(`regression: realpath -e failed for existing file; stderr=${r.stderrText}`)
@@ -212,14 +212,14 @@ async function main(): Promise<void> {
 
     // ── tree ───────────────────────────────────────
     console.log(`\n=== tree -L 2 /discord/${guild}/ | head -n 20 ===`)
-    r = await ws.execute(`tree -L 2 "/discord/${guild}/" | head -n 20`)
+    r = await ws.shell(`tree -L 2 "/discord/${guild}/" | head -n 20`)
     for (const line of r.stdoutText.trim().split('\n').slice(0, 20)) {
       console.log(`  ${line}`)
     }
 
     // ── find chat.jsonl everywhere ────────────────
     console.log(`\n=== find /discord/${guild}/ -name chat.jsonl | head -n 5 ===`)
-    r = await ws.execute(`find "/discord/${guild}/" -name "chat.jsonl" | head -n 5`)
+    r = await ws.shell(`find "/discord/${guild}/" -name "chat.jsonl" | head -n 5`)
     console.log(`  exit=${String(r.exitCode)}`)
     if (r.exitCode !== 0) {
       throw new Error(
@@ -233,28 +233,28 @@ async function main(): Promise<void> {
 
     // ── pwd / cd / relative ────────────────────────
     console.log(`\n=== cd ${base} ===`)
-    r = await ws.execute(`cd "${base}"`)
+    r = await ws.shell(`cd "${base}"`)
     console.log(`  exit=${String(r.exitCode)}`)
 
     console.log('\n=== pwd (after cd) ===')
-    r = await ws.execute('pwd')
+    r = await ws.shell('pwd')
     console.log(`  ${r.stdoutText.trim()}`)
 
     console.log(`\n=== cat ${targetDate}/chat.jsonl (relative) | head -n 1 ===`)
-    r = await ws.execute(`cat "${targetDate}/chat.jsonl" | head -n 1`)
+    r = await ws.shell(`cat "${targetDate}/chat.jsonl" | head -n 1`)
     if (r.stdoutText.trim() !== '') {
       console.log(`  ${r.stdoutText.trim().slice(0, 120)}`)
     }
 
     // ── members ────────────────────────────────────────
     console.log(`\n=== ls /discord/${guild}/members/ | head -n 5 ===`)
-    r = await ws.execute(`ls "/discord/${guild}/members/" | head -n 5`)
+    r = await ws.shell(`ls "/discord/${guild}/members/" | head -n 5`)
     const memOut = r.stdoutText.trim()
     if (memOut !== '') {
       for (const line of memOut.split('\n')) console.log(`  ${line}`)
       const firstMember = memOut.split('\n')[0]!.trim()
       console.log(`\n=== cat /discord/${guild}/members/${firstMember} ===`)
-      r = await ws.execute(`cat "/discord/${guild}/members/${firstMember}"`)
+      r = await ws.shell(`cat "/discord/${guild}/members/${firstMember}"`)
       console.log(`  ${r.stdoutText.trim().slice(0, 200)}`)
     } else {
       console.log('  (no members visible)')
@@ -263,7 +263,7 @@ async function main(): Promise<void> {
     // ── glob expansion: a mid-path glob replaces the guild segment
     // (which may contain spaces) and walks into the literal tail.
     console.log('\n=== echo /discord/*/channels (mid-path glob) ===')
-    r = await ws.execute('echo /discord/*/channels')
+    r = await ws.shell('echo /discord/*/channels')
     const globOut = r.stdoutText.trim()
     console.log(`  ${globOut.slice(0, 200)}`)
     if (!globOut.endsWith('/channels')) {
@@ -271,7 +271,7 @@ async function main(): Promise<void> {
     }
 
     console.log('\n=== for f in /discord/*/channels/* (channel glob loop) ===')
-    r = await ws.execute('for f in /discord/*/channels/*; do echo found:$f; done | head -n 3')
+    r = await ws.shell('for f in /discord/*/channels/*; do echo found:$f; done | head -n 3')
     for (const line of r.stdoutText.trim().split('\n')) {
       console.log(`  ${line.slice(0, 120)}`)
     }
@@ -279,7 +279,7 @@ async function main(): Promise<void> {
     // A glob that matches nothing stays the literal word, so the
     // command reports it like GNU coreutils.
     console.log('\n=== cat /discord/zz-none-*/guild.json (no match) ===')
-    r = await ws.execute('cat /discord/zz-none-*/guild.json')
+    r = await ws.shell('cat /discord/zz-none-*/guild.json')
     const globErr = r.stderrText.trim()
     console.log(`  exit=${r.exitCode}  ${globErr.slice(0, 120)}`)
     if (r.exitCode !== 1 || !globErr.includes('zz-none-*')) {

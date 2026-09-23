@@ -55,7 +55,7 @@ probe() {
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
     backend: fskit
 YML
 

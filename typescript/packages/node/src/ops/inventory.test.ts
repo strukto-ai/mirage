@@ -20,7 +20,7 @@ import { HF_OPS } from './hf/index.ts'
 import { SSH_OPS } from './ssh/index.ts'
 
 // Golden snapshot of every backend's registered op surface, taken before
-// the ops-layer refactor. Each row is [name, resource, filetype, write];
+// the ops-layer refactor. Each row is [name, VFS, filetype, write];
 // filetype '' means no filetype binding. Any diff here is a registration
 // regression unless the change is deliberate.
 
@@ -54,6 +54,10 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'email', '', false],
   ],
   hf: [
+    ['append', 'hf_buckets', '', true],
+    ['append', 'hf_datasets', '', true],
+    ['append', 'hf_models', '', true],
+    ['append', 'hf_spaces', '', true],
     ['create', 'hf_buckets', '', true],
     ['create', 'hf_datasets', '', true],
     ['create', 'hf_models', '', true],
@@ -104,7 +108,7 @@ const sortRows = (rows: Row[]): Row[] =>
 
 for (const [backend, ops] of Object.entries(TABLES)) {
   test(`ops inventory: ${backend}`, () => {
-    const actual = sortRows(ops.map((o) => [o.name, o.resource, o.filetype ?? '', o.write] as Row))
+    const actual = sortRows(ops.map((o) => [o.name, o.vfs, o.filetype ?? '', o.write] as Row))
     const expected = OPS_INVENTORY[backend]
     if (!expected) throw new Error(`missing fixture: ${backend}`)
     expect(actual).toEqual(sortRows(expected))

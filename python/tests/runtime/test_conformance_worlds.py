@@ -20,9 +20,9 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.fuse.core import MountCore
 from mirage.io.types import materialize
-from mirage.resource.ram import RAMResource
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.python.wasi import WASI_HOME_ENV
+from mirage.vfs.ram import RAMVFS
 
 
 def _wasi_available() -> bool:
@@ -63,13 +63,13 @@ quickjs_live = pytest.mark.skipif(
 CWD = "runtime cwd is not wired: guests resolve no relative paths"
 
 
-def _seed(files: dict[str, bytes]) -> RAMResource:
-    """A RAM resource preloaded with mount-relative files.
+def _seed(files: dict[str, bytes]) -> RAMVFS:
+    """A RAM VFS preloaded with mount-relative files.
 
     Args:
         files (dict[str, bytes]): mount-relative path -> content.
     """
-    r = RAMResource()
+    r = RAMVFS()
     for name, body in files.items():
         r._store.files[name] = body
     return r
@@ -94,7 +94,7 @@ def structure_world(runtime: str) -> Workspace:
             "/base/inner": _seed({"/deep.txt": b"needle"}),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "vfs"],
+        runtimes=[runtime, "workspace"],
     )
 
 
@@ -119,7 +119,7 @@ def scoped_world(runtime: str) -> Workspace:
             "/closed": _seed({"/sec.txt": b"SECRET-xyz"}),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "vfs"],
+        runtimes=[runtime, "workspace"],
     )
     ws.create_session("agent", profile={"paths": {"hide": ["/closed"]}})
     return ws
@@ -136,7 +136,7 @@ async def _sh(ws: Workspace,
         session_id (str | None): session to run under, None for default.
     """
     kwargs = {"session_id": session_id} if session_id is not None else {}
-    io = await ws.execute(line, **kwargs)
+    io = await ws.shell(line, **kwargs)
     out = (await materialize(io.stdout)).decode() if io.stdout else ""
     err = (await materialize(io.stderr)).decode() if io.stderr else ""
     return io.exit_code, out, err
@@ -196,7 +196,7 @@ async def test_fuse_readdir_merges_child_mount_and_link():
     ws = structure_world("monty")
     try:
         assert (await _sh(ws, "ln -s /base/inner /base/lnk"))[0] == 0
-        core = MountCore(ws.fs)
+        core = MountCore(ws.vfs)
         names = core.readdir("/base")
         assert "a.txt" in names and "inner" in names and "lnk" in names
         assert core.getattr("/base/inner")["st_mode"] & 0o040000
@@ -294,7 +294,7 @@ async def test_door_stats_structure_only_directory():
     """
     ws = structure_world("monty")
     try:
-        st = await ws.fs.stat("/base/inner")
+        st = await ws.vfs.stat("/base/inner")
         assert st.type.value == "directory"
         code, out, err = await _sh(
             ws, "python3 -c \"from pathlib import Path; "
@@ -317,7 +317,7 @@ async def test_link_ancestors_synthesize_on_every_surface():
     ws = structure_world("monty")
     try:
         assert (await _sh(ws, "ln -s /base/a.txt /ghost/deep/lnk"))[0] == 0
-        st = await ws.fs.stat("/ghost")
+        st = await ws.vfs.stat("/ghost")
         assert st.type.value == "directory"
         code, out, _ = await _sh(ws, "ls /")
         assert code == 0
@@ -347,7 +347,7 @@ async def test_namespace_only_ancestor_serves_every_ls_variant():
             "/ghost/deep": _seed({"/x.txt": b"inside"}),
         },
         mode=MountMode.EXEC,
-        runtimes=["monty", "vfs"],
+        runtimes=["monty", "workspace"],
     )
     try:
         code, out, _ = await _sh(ws, "ls -R /ghost")
@@ -400,7 +400,7 @@ async def test_fuse_core_confines_a_hidden_mount():
     ws = scoped_world("monty")
     try:
         sess = ws.get_session("agent")
-        core = MountCore(ws.fs, session=sess)
+        core = MountCore(ws.vfs, session=sess)
         with pytest.raises(FileNotFoundError):
             core.readdir("/closed")
         with pytest.raises(FileNotFoundError):
@@ -462,7 +462,7 @@ def granted_child_world(runtime: str) -> Workspace:
             "/base/inner": _seed({"/deep.txt": b"needle"}),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "vfs"],
+        runtimes=[runtime, "workspace"],
     )
     ws.create_session("agent", profile={"paths": {"hide": ["/base/a.txt"]}})
     return ws
@@ -475,7 +475,7 @@ async def test_scoped_walk_reaches_a_child_below_hidden_content():
     ws = granted_child_world("monty")
     try:
         sess = ws.get_session("agent")
-        core = MountCore(ws.fs, session=sess)
+        core = MountCore(ws.vfs, session=sess)
         names = core.readdir("/base")
         assert "inner" in names
         assert "a.txt" not in names
@@ -532,7 +532,7 @@ def shadowed_world(runtime: str) -> Workspace:
             _seed({"/deep.txt": b"needle"}),
         },
         mode=MountMode.EXEC,
-        runtimes=[runtime, "vfs"],
+        runtimes=[runtime, "workspace"],
     )
     ws.create_session("agent", profile={"paths": {"hide": ["/base/inner"]}})
     return ws
@@ -680,7 +680,7 @@ def exclusive_world(runtime: str) -> Workspace:
     return Workspace(
         {"/w": _seed({"/keep.txt": b"keep"})},
         mode=MountMode.EXEC,
-        runtimes=[runtime, "vfs"],
+        runtimes=[runtime, "workspace"],
     )
 
 

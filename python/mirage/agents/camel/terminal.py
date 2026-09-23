@@ -63,12 +63,12 @@ class MirageTerminalToolkit(BaseToolkit):
                 message with the session id (non-blocking).
         """
         if block:
-            io = self._runner.run(self._ws.execute(command))
+            io = self._runner.run(self._ws.shell(command))
             return io_to_str(io)
         # Launches are silent (non-interactive bash), so the job id
         # comes from $! rather than a stderr announcement.
         bg_cmd = f"{command} & echo $!"
-        io = self._runner.run(self._ws.execute(bg_cmd))
+        io = self._runner.run(self._ws.shell(bg_cmd))
         stdout = decode(io.stdout if isinstance(io.stdout, bytes) else None)
         job_id = _parse_job_id(stdout)
         if job_id is None:
@@ -91,12 +91,12 @@ class MirageTerminalToolkit(BaseToolkit):
         job_id = self._sessions.get(id)
         if job_id is None:
             return f"Error: no session '{id}'"
-        ps_io = self._runner.run(self._ws.execute("ps"))
+        ps_io = self._runner.run(self._ws.shell("ps"))
         ps_out = decode(
             ps_io.stdout if isinstance(ps_io.stdout, bytes) else None)
         if any(line.startswith(f"{job_id}\t") for line in ps_out.splitlines()):
             return ps_out
-        wait_io = self._runner.run(self._ws.execute(f"wait %{job_id}"))
+        wait_io = self._runner.run(self._ws.shell(f"wait %{job_id}"))
         return io_to_str(wait_io)
 
     def shell_write_to_process(self, id: str, command: str) -> str:
@@ -126,7 +126,7 @@ class MirageTerminalToolkit(BaseToolkit):
         job_id = self._sessions.pop(id, None)
         if job_id is None:
             return f"Error: no session '{id}'"
-        io = self._runner.run(self._ws.execute(f"kill %{job_id}"))
+        io = self._runner.run(self._ws.shell(f"kill %{job_id}"))
         if io.exit_code != 0:
             return io_to_str(io) or f"kill failed for [{job_id}]"
         return f"killed session '{id}' (job [{job_id}])"
@@ -155,7 +155,7 @@ class MirageTerminalToolkit(BaseToolkit):
         """
         quoted = shlex.quote(file_path)
         io = self._runner.run(
-            self._ws.execute(f"cat > {quoted}", stdin=content.encode()))
+            self._ws.shell(f"cat > {quoted}", stdin=content.encode()))
         if io.exit_code != 0:
             return f"Error writing {file_path}: {io_to_str(io)}"
         return f"Wrote {len(content)} bytes to {file_path}"

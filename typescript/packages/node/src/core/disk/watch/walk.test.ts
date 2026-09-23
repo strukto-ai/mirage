@@ -30,8 +30,8 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-function spec(virtual: string, resourcePath: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath })
+function spec(virtual: string, vfsPath: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath })
 }
 
 async function touch(relative: string, body: string, seconds: number): Promise<void> {
@@ -124,7 +124,7 @@ describe('disk delta hook', () => {
     await touch('data/a.txt', 'gamma', 1_700_000_500)
     const second = await hook.pull(at, first.checkpoint)
     expect(second.changes[0]?.path.virtual).toBe('/d/data/a.txt')
-    expect(second.changes[0]?.path.resourcePath).toBe('data/a.txt')
+    expect(second.changes[0]?.path.vfsPath).toBe('data/a.txt')
   })
 })
 

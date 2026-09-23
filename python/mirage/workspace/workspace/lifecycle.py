@@ -42,7 +42,7 @@ def patch_process(ws: "Workspace", ) -> None:
 
     The block gets ONE event loop, driven a call at a time, that every
     patched call and the closing ``close()`` share. Without it each call
-    reached ``asyncio.run``, so a resource holding a connection pool bound
+    reached ``asyncio.run``, so a VFS holding a connection pool bound
     that pool to a loop that was closed before the next call, and the
     close at the end of the block died with "Event loop is closed" (redis
     is the one that shows it; any pooled async client would).
@@ -94,7 +94,7 @@ def close_sync_parts(ws: "Workspace", ) -> None:
     """Tear down everything that needs no event loop (idempotent).
 
     Kernel mounts, running jobs, and in-flight cache drains; the
-    async half (``close_async``) owns resources and stores.
+    async half (``close_async``) owns mounts and stores.
 
     Args:
         ws: the workspace being closed.
@@ -118,7 +118,7 @@ async def close_async(ws: "Workspace", ) -> None:
     """Release everything the workspace owns, exactly once.
 
     Order matters: the watch runtime goes first (it reads mounts), then
-    background jobs, then the line runtimes, then resources not shared
+    background jobs, then the line runtimes, then mounts not shared
     with a sibling workspace, then the state store if this workspace
     built it, then the sync parts, and finally the cache once its drains
     have settled.
@@ -128,7 +128,7 @@ async def close_async(ws: "Workspace", ) -> None:
     a reader parked on ``wait_finished``; a bare cancel leaves the job
     RUNNING with no ending chunk and that reader waits forever. It never
     joins the runner, so this cannot block shutdown on a job mid-write,
-    and it happens before any resource closes so a job cannot keep
+    and it happens before any VFS closes so a job cannot keep
     touching one that is already gone.
 
     Args:
@@ -150,18 +150,17 @@ async def close_async(ws: "Workspace", ) -> None:
             await line_runtime.close()
         retirements = await asyncio.gather(
             *(asyncio.shield(task)
-              for task in list(ws._registry.retiring_resources.values())),
+              for task in list(ws._registry.retiring_mounts.values())),
             return_exceptions=True)
         for result in retirements:
             if isinstance(result, BaseException):
                 raise result
-        resources = {
-            id(mount.resource): mount.resource
+        mounts = {
+            id(mount.vfs): mount.vfs
             for mount in ws._registry.mounts()
-            if id(mount.resource) not in ws._shared_resources
+            if id(mount.vfs) not in ws._shared_mounts
         }
-        await asyncio.gather(*(resource.close()
-                               for resource in resources.values()))
+        await asyncio.gather(*(vfs.close() for vfs in mounts.values()))
         if ws._owns_state_store:
             await ws._state_store.close()
         close_sync_parts(ws)

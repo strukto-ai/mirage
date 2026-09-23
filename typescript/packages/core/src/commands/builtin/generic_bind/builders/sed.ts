@@ -40,7 +40,7 @@ function positionalAsPaths(texts: string[], opts: CommandOpts): PathSpec[] {
       virtual: resolved,
       directory: slash >= 0 ? resolved.slice(0, slash + 1) : '/',
       resolved: true,
-      resourcePath: mountKey(resolved, prefix),
+      vfsPath: mountKey(resolved, prefix),
     })
   })
 }

@@ -22,11 +22,11 @@ from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import TSNodeLike
 from mirage.utils.errors import format_fs_error
 from mirage.workspace.abort import StatusWriter, line_status_writer
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
-def record_status(session: Session,
+def record_status(session: SessionState,
                   code: int,
                   *,
                   transparent: bool = False) -> None:
@@ -45,7 +45,7 @@ def record_status(session: Session,
     ``1 0``).
 
     Args:
-        session (Session): shell session receiving the status.
+        session (SessionState): shell session receiving the status.
         code (int): the statement's exit status.
         transparent (bool): whether the statement is not a pipeline of
             its own.
@@ -89,17 +89,17 @@ class StatusSnapshot:
     pipe_status_pending: tuple[int, ...] | None
 
 
-def snapshot_status(session: Session) -> StatusSnapshot:
+def snapshot_status(session: SessionState) -> StatusSnapshot:
     """Capture ``$?`` and ``${PIPESTATUS[@]}`` before a line runs.
 
     Args:
-        session (Session): shell session whose status is captured.
+        session (SessionState): shell session whose status is captured.
     """
     return StatusSnapshot(session.last_exit_code, session.pipe_status,
                           session._pipe_status_pending)
 
 
-def restore_status(session: Session, snapshot: StatusSnapshot,
+def restore_status(session: SessionState, snapshot: StatusSnapshot,
                    writer: StatusWriter | None) -> None:
     """Put back the status a line found, for a line the caller aborted.
 
@@ -117,7 +117,7 @@ def restore_status(session: Session, snapshot: StatusSnapshot,
     the point.
 
     Args:
-        session (Session): shell session receiving the status.
+        session (SessionState): shell session receiving the status.
         snapshot (StatusSnapshot): what ``snapshot_status`` captured.
         writer (StatusWriter | None): the restoring line's identity.
     """
@@ -128,7 +128,7 @@ def restore_status(session: Session, snapshot: StatusSnapshot,
     session._pipe_status_pending = snapshot.pipe_status_pending
 
 
-def carry_status(session: Session) -> None:
+def carry_status(session: SessionState) -> None:
     """Park the status just recorded again, for the boundary that closes
     the enclosing statement to claim rather than stamp over.
 
@@ -139,7 +139,7 @@ def carry_status(session: Session) -> None:
     ``1``.
 
     Args:
-        session (Session): shell session carrying the status.
+        session (SessionState): shell session carrying the status.
     """
     session._pipe_status_pending = session.pipe_status
 
@@ -147,7 +147,7 @@ def carry_status(session: Session) -> None:
 async def finish_statement(
     stdout: ByteSource | None,
     io: IOResult,
-    session: Session,
+    session: SessionState,
     node: TSNodeLike | None = None,
     exec_node: ExecutionNode | None = None,
 ) -> ByteSource | None:
@@ -170,7 +170,7 @@ async def finish_statement(
         stdout (ByteSource | None): the statement's possibly-lazy stdout.
         io (IOResult): the statement's result; exit_code may still be
             provisional until the barrier runs.
-        session (Session): shell session receiving the status.
+        session (SessionState): shell session receiving the status.
         node (TSNodeLike | None): the statement that finished,
             which decides whether it stamps ``PIPESTATUS`` itself; None
             (a caller without the node) stamps.
@@ -194,7 +194,7 @@ async def finish_statement(
     return result
 
 
-def assignment_status(session: Session, seq_before: int) -> int:
+def assignment_status(session: SessionState, seq_before: int) -> int:
     """Exit status of an assignment-only statement.
 
     Bash: an assignment statement exits 0 unless expanding it ran
@@ -202,7 +202,7 @@ def assignment_status(session: Session, seq_before: int) -> int:
     substitution performed becomes the statement's own.
 
     Args:
-        session (Session): shell session carrying substitution counters.
+        session (SessionState): shell session carrying substitution counters.
         seq_before (int): session._cmdsub_seq snapshot taken before the
             assignment expanded its value.
     """

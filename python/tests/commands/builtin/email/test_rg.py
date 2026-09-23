@@ -38,9 +38,7 @@ rg = importlib.import_module("mirage.commands.builtin.email.rg").rg
 
 
 def _path(s: str = "/email/INBOX") -> PathSpec:
-    return PathSpec(resource_path=mount_key(s, "/email"),
-                    virtual=s,
-                    directory=s)
+    return PathSpec(vfs_path=mount_key(s, "/email"), virtual=s, directory=s)
 
 
 @pytest.mark.asyncio
@@ -120,7 +118,7 @@ async def test_rg_mount_root_scans_instead_of_reporting_no_match():
     # answered exit 1 — "nothing matched" for a search it never ran. It has
     # to reach the generic scan instead.
     accessor = SimpleNamespace(config=SimpleNamespace(max_messages=10))
-    root = PathSpec(resource_path="", virtual="/email", directory="/email")
+    root = PathSpec(vfs_path="", virtual="/email", directory="/email")
     with patch("mirage.commands.builtin.email.rg.search_messages",
                new=AsyncMock(return_value=[])) as search, \
             patch("mirage.commands.builtin.email.rg.resolve_glob",

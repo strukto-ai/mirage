@@ -27,7 +27,7 @@ vi.mock('./client.ts', () => ({
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { ContentType, FileType, PathSpec } from '../../types.ts'
-import { resolvePostgresConfig } from '../../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import { stat } from './stat.ts'
@@ -46,7 +46,7 @@ describe('stat', () => {
   it('marks root as DIRECTORY', async () => {
     const r = await stat(
       makeAccessor(),
-      new PathSpec({ virtual: '/pg/', directory: '/pg/', resourcePath: mountKey('/pg/', '/pg') }),
+      new PathSpec({ virtual: '/pg/', directory: '/pg/', vfsPath: mountKey('/pg/', '/pg') }),
     )
     expect(r.name).toBe('/')
     expect(r.type).toBe(FileType.DIRECTORY)
@@ -58,7 +58,7 @@ describe('stat', () => {
       new PathSpec({
         virtual: '/pg/database.json',
         directory: '/pg/',
-        resourcePath: mountKey('/pg/database.json', '/pg'),
+        vfsPath: mountKey('/pg/database.json', '/pg'),
       }),
     )
     expect(r.content).toBe(ContentType.JSON)
@@ -71,7 +71,7 @@ describe('stat', () => {
       new PathSpec({
         virtual: '/pg/public/tables/users',
         directory: '/pg/public/tables/',
-        resourcePath: mountKey('/pg/public/tables/users', '/pg'),
+        vfsPath: mountKey('/pg/public/tables/users', '/pg'),
       }),
     )
     expect(r.type).toBe(FileType.DIRECTORY)
@@ -89,7 +89,7 @@ describe('stat', () => {
       new PathSpec({
         virtual: '/pg/public/tables/users/rows.jsonl',
         directory: '/pg/public/tables/users/',
-        resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
+        vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
     )
     expect(r.content).toBe(ContentType.TEXT)
@@ -106,7 +106,7 @@ describe('stat', () => {
         new PathSpec({
           virtual: '/pg/public/sequences',
           directory: '/pg/public/',
-          resourcePath: mountKey('/pg/public/sequences', '/pg'),
+          vfsPath: mountKey('/pg/public/sequences', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -119,7 +119,7 @@ describe('stat', () => {
         new PathSpec({
           virtual: '/pg/__nf_missing__.txt',
           directory: '/pg/',
-          resourcePath: mountKey('/pg/__nf_missing__.txt', '/pg'),
+          vfsPath: mountKey('/pg/__nf_missing__.txt', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })

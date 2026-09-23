@@ -18,23 +18,22 @@ import pytest
 
 from mirage.policy import CommandRule
 from mirage.policy.profile import CommandsBlock, SessionProfile
-from mirage.resource import RAMResource
 from mirage.types import MountMode
+from mirage.vfs import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.script import shebang_words
 
 
 @pytest.fixture()
 def ws() -> Workspace:
-    return Workspace(
-        resources={
-            "/": (RAMResource(), MountMode.WRITE),
-            "/work/": (RAMResource(), MountMode.WRITE),
-        })
+    return Workspace(mounts={
+        "/": (RAMVFS(), MountMode.WRITE),
+        "/work/": (RAMVFS(), MountMode.WRITE),
+    })
 
 
 def _run(ws: Workspace, line: str):
-    return asyncio.run(ws.execute(line))
+    return asyncio.run(ws.shell(line))
 
 
 def test_slash_head_word_runs_the_file(ws):
@@ -116,15 +115,15 @@ def test_path_guard_sees_the_executed_file():
     # admission context must carry it or a path-pattern guard never
     # fires on direct execution.
     # A command-less guard also seals the op layer, so the script is
-    # seeded through an unguarded workspace sharing the same resource.
-    prod = RAMResource()
-    seed = Workspace(resources={"/data/": (prod, MountMode.WRITE)})
+    # seeded through an unguarded workspace sharing the same VFS.
+    prod = RAMVFS()
+    seed = Workspace(mounts={"/data/": (prod, MountMode.WRITE)})
     _run(seed, "mkdir -p /data/prod")
-    asyncio.run(seed.fs.write("/data/prod/run.sh", b"echo leaked\n"))
-    asyncio.run(seed.fs.write("/data/ok.sh", b"echo fine\n"))
+    asyncio.run(seed.vfs.write("/data/prod/run.sh", b"echo leaked\n"))
+    asyncio.run(seed.vfs.write("/data/ok.sh", b"echo fine\n"))
     ws = Workspace(
-        resources={
-            "/": (RAMResource(), MountMode.WRITE),
+        mounts={
+            "/": (RAMVFS(), MountMode.WRITE),
             "/data/": (prod, MountMode.WRITE),
         },
         profiles={

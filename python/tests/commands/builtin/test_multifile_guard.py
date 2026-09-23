@@ -22,7 +22,7 @@ BUILTIN = pathlib.Path(
 
 GUARDED_COMMANDS = ("cat", "head", "tail", "wc", "du", "file", "nl", "md5")
 
-# Backends whose command genuinely operates on a single resource and rejects
+# Backends whose command genuinely operates on a single VFS and rejects
 # or has no multi-file semantics. Each entry needs a one-line reason so the
 # allowlist stays honest. Keyed by (command, backend).
 ALLOWLIST = {
@@ -138,5 +138,5 @@ def test_command_handles_multiple_files(cmd, backend, path):
                 f"paths[0]/resolved[0] without looping all paths. This drops "
                 f"every file after the first (the multi-file bug). Loop all "
                 f"paths or delegate to a *_multi helper. If this backend is "
-                f"genuinely single-resource, add it to ALLOWLIST with a "
+                f"genuinely single-VFS, add it to ALLOWLIST with a "
                 f"reason.")

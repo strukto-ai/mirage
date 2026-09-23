@@ -20,7 +20,7 @@
               "identity_file": "${MIRAGE_INTEG_SSH_KEY}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -49,7 +49,7 @@
               "identity_file": "${MIRAGE_INTEG_SSH_KEY}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -77,7 +77,7 @@
               "identity_file": "${MIRAGE_INTEG_SSH_KEY}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -107,7 +107,7 @@
               "identity_file": "${MIRAGE_INTEG_SSH_KEY}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -136,7 +136,7 @@
               "identity_file": "${MIRAGE_INTEG_SSH_KEY}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -169,7 +169,7 @@
               }
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -198,7 +198,7 @@
               "identity_file": "${MIRAGE_INTEG_SSH_KEY}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -227,11 +227,11 @@
               "identity_file": "${MIRAGE_INTEG_SSH_KEY}"
             }
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "limits": {
               "sleep": {
                 "timeout_seconds": 1
@@ -265,7 +265,7 @@
               "identity_file": "${MIRAGE_INTEG_SSH_KEY}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [

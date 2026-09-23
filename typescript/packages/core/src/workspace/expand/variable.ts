@@ -32,7 +32,7 @@ import { NodeType as NT, type ElementOps, type TSNodeLike } from '../../shell/ty
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { assignElement } from '../session/elements.ts'
 import { ReadonlyVariableError } from '../session/errors.ts'
 import {
@@ -131,7 +131,7 @@ function unbound(name: string): ExitSignal {
  * (`ensureVarVisible`) is applied here, and the refusal takes the
  * fatal expansion-error shape `${var:?}` uses.
  */
-function guardExpansionWrite(session: Session, ...names: string[]): void {
+function guardExpansionWrite(session: SessionState, ...names: string[]): void {
   for (const name of names) {
     try {
       ensureVarVisible(session, name)
@@ -152,7 +152,7 @@ function guardExpansionWrite(session: Session, ...names: string[]): void {
  */
 export function lookupVar(
   name: string,
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null,
   strict = true,
 ): string {
@@ -345,7 +345,7 @@ function refEnd(text: string, start: number): [string, number] | null {
 }
 
 // A double-quoted pattern segment: everything in it is literal.
-function dquotedPattern(inner: string, session: Session, callStack: CallStack | null): string {
+function dquotedPattern(inner: string, session: SessionState, callStack: CallStack | null): string {
   const out: string[] = []
   let i = 0
   const n = inner.length
@@ -378,7 +378,7 @@ function dquotedPattern(inner: string, session: Session, callStack: CallStack | 
 // live pattern while a double-quoted one splices literal text, and every
 // other character - glob syntax included - stays live. Literal text is
 // spelled in one-character classes because fnmatch has no escape character.
-function patternText(text: string, session: Session, callStack: CallStack | null): string {
+function patternText(text: string, session: SessionState, callStack: CallStack | null): string {
   if (!text.includes('$') && !text.includes('\\') && !text.includes("'") && !text.includes('"')) {
     return text
   }
@@ -434,7 +434,7 @@ async function expandOperand(
   node: TSNodeLike,
   expandChild: ExpandChild,
   patternMode: boolean,
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null,
 ): Promise<string> {
   if (node.type === NT.CONCATENATION) {
@@ -459,7 +459,7 @@ async function expandGroup(
   nodes: TSNodeLike[],
   expandChild: ExpandChild,
   patternMode: boolean,
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null,
 ): Promise<string> {
   const pieces: string[] = []
@@ -581,7 +581,7 @@ class ArithOperand {
   private readonly pending: Record<string, string> = {}
   private readonly pendingElems = new Map<string, string>()
 
-  constructor(private readonly session: Session) {
+  constructor(private readonly session: SessionState) {
     this.reader = randomReader(session)
   }
 
@@ -667,7 +667,7 @@ function sliceArray(arr: ShellArray, groups: string[], operand: ArithOperand): s
 // indices. False for single-word forms (${a[*]}, ${#a[@]}, non-@
 // subscript, or a default/alternate op acting on the joined value).
 // The positional parameters in scope, function args winning.
-function positionalArgs(session: Session, callStack: CallStack | null): string[] {
+function positionalArgs(session: SessionState, callStack: CallStack | null): string[] {
   if (callStack !== null && callStack.getAllPositional().length > 0) {
     return callStack.getAllPositional()
   }
@@ -706,7 +706,7 @@ export function isMultiwordAt(node: TSNodeLike): boolean {
 // its own.
 export async function expandArrayAt(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null,
   expandChild: ExpandChild,
   view?: SessionView,
@@ -726,7 +726,7 @@ export async function expandArrayAt(
 
 async function expandArrayAtIn(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null,
   expandChild: ExpandChild,
   operand: ArithOperand,
@@ -790,7 +790,7 @@ const LAZY_OPS: ReadonlySet<string> = new Set(['?', ':?', '=', ':=', ':-', '-', 
 async function operatorWord(
   p: BraceParse,
   expandChild: ExpandChild,
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null,
 ): Promise<string> {
   const group = p.groups[0]
@@ -885,7 +885,7 @@ function writeRefusal(err: PolicyDenied | ArithError): ExitSignal {
  * seeds), and a refused one dies the way `expansionWrite`'s does.
  */
 async function expansionIndex(
-  session: Session,
+  session: SessionState,
   view: SessionView | undefined,
   subscript: string,
 ): Promise<number> {
@@ -898,7 +898,7 @@ async function expansionIndex(
 }
 
 export async function landArithWrites(
-  session: Session,
+  session: SessionState,
   view: SessionView | undefined,
   writes: readonly ArithWrite[],
   reader: RandomReader,
@@ -910,7 +910,7 @@ export async function landArithWrites(
 }
 
 export async function expansionWrite(
-  session: Session,
+  session: SessionState,
   view: SessionView | undefined,
   name: string,
   key: string | null,
@@ -947,7 +947,7 @@ export async function expansionWrite(
  */
 export async function expandBraces(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null,
   expandChild: ExpandChild,
   view?: SessionView,
@@ -969,7 +969,7 @@ export async function expandBraces(
 
 async function expandBracesIn(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null,
   expandChild: ExpandChild,
   view: SessionView | undefined,

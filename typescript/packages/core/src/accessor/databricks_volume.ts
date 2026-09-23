@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import type { DatabricksVolumeConfig } from '../resource/databricks_volume/config.ts'
+import type { DatabricksVolumeConfig } from '../vfs/databricks_volume/config.ts'
 
 export class DatabricksVolumeAccessor extends Accessor {
   readonly config: DatabricksVolumeConfig

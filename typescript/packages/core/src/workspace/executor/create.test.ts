@@ -17,10 +17,10 @@ import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { PathSpec } from '../../types.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import { createFile } from './create.ts'
 
-const SCOPE = new PathSpec({ virtual: '/data/f', directory: '/data/', resourcePath: '' })
+const SCOPE = new PathSpec({ virtual: '/data/f', directory: '/data/', vfsPath: '' })
 
 class FakeDispatch {
   readonly calls: [string, Record<string, unknown>][] = []
@@ -41,8 +41,8 @@ class FakeDispatch {
   }
 }
 
-function sessionWithUmask(umask: number): Session {
-  const session = new Session({ sessionId: 's' })
+function sessionWithUmask(umask: number): SessionState {
+  const session = new SessionState({ sessionId: 's' })
   session.umask = umask
   return session
 }
@@ -53,7 +53,7 @@ function sessionWithUmask(umask: number): Session {
 describe('createFile', () => {
   it('never probes or sets a mode under the default umask', async () => {
     const d = new FakeDispatch(false)
-    await createFile(d.fn, new Session({ sessionId: 's' }), SCOPE, new Uint8Array(0))
+    await createFile(d.fn, new SessionState({ sessionId: 's' }), SCOPE, new Uint8Array(0))
     expect(d.ops()).toEqual(['write'])
   })
 

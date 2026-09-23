@@ -16,7 +16,7 @@ import type { CommandSpec } from '../../../../commands/spec/types.ts'
 
 // One entry of the manual: a documented word and the spec its page
 // renders from. A name has one spec however many mounts register it, so
-// the entry carries no mount and no resource; which backend serves the
+// the entry carries no mount and no VFS; which backend serves the
 // word is dispatch's business, not the manual's.
 export interface ManEntry {
   name: string

@@ -25,7 +25,7 @@ vi.mock('./client.ts', () => ({
 import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { PathSpec } from '../../types.ts'
-import { resolvePostgresConfig } from '../../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import { readdir } from './readdir.ts'
@@ -47,7 +47,7 @@ describe('readdir', () => {
     const path = new PathSpec({
       virtual: '/pg/',
       directory: '/pg/',
-      resourcePath: mountKey('/pg/', '/pg'),
+      vfsPath: mountKey('/pg/', '/pg'),
     })
     const out = await readdir(accessor, path)
     expect(out).toEqual(['/pg/database.json', '/pg/public', '/pg/analytics'])
@@ -60,7 +60,7 @@ describe('readdir', () => {
       new PathSpec({
         virtual: '/pg/public',
         directory: '/pg/public',
-        resourcePath: mountKey('/pg/public', '/pg'),
+        vfsPath: mountKey('/pg/public', '/pg'),
       }),
     )
     expect(out).toEqual(['/pg/public/tables', '/pg/public/views'])
@@ -74,7 +74,7 @@ describe('readdir', () => {
       new PathSpec({
         virtual: '/pg/public/tables',
         directory: '/pg/public/tables',
-        resourcePath: mountKey('/pg/public/tables', '/pg'),
+        vfsPath: mountKey('/pg/public/tables', '/pg'),
       }),
     )
     expect(out).toEqual(['/pg/public/tables/users', '/pg/public/tables/orders'])
@@ -89,7 +89,7 @@ describe('readdir', () => {
       new PathSpec({
         virtual: '/pg/public/views',
         directory: '/pg/public/views',
-        resourcePath: mountKey('/pg/public/views', '/pg'),
+        vfsPath: mountKey('/pg/public/views', '/pg'),
       }),
     )
     expect(out).toEqual(['/pg/public/views/a_mview', '/pg/public/views/z_view'])
@@ -102,7 +102,7 @@ describe('readdir', () => {
       new PathSpec({
         virtual: '/pg/public/tables/users',
         directory: '/pg/public/tables/users',
-        resourcePath: mountKey('/pg/public/tables/users', '/pg'),
+        vfsPath: mountKey('/pg/public/tables/users', '/pg'),
       }),
     )
     expect(out).toEqual([
@@ -119,7 +119,7 @@ describe('readdir', () => {
     const path = new PathSpec({
       virtual: '/pg/',
       directory: '/pg/',
-      resourcePath: mountKey('/pg/', '/pg'),
+      vfsPath: mountKey('/pg/', '/pg'),
     })
     await readdir(accessor, path, index)
     vi.mocked(client.listSchemas).mockClear()
@@ -134,7 +134,7 @@ describe('readdir', () => {
         new PathSpec({
           virtual: '/pg/public/tables/users/schema.json',
           directory: '/pg/public/tables/users/',
-          resourcePath: mountKey('/pg/public/tables/users/schema.json', '/pg'),
+          vfsPath: mountKey('/pg/public/tables/users/schema.json', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -148,7 +148,7 @@ describe('readdir', () => {
         new PathSpec({
           virtual: '/pg/nope.txt',
           directory: '/pg/nope.txt',
-          resourcePath: mountKey('/pg/nope.txt', '/pg'),
+          vfsPath: mountKey('/pg/nope.txt', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -163,7 +163,7 @@ describe('readdir', () => {
         new PathSpec({
           virtual: '/pg/nope/tables',
           directory: '/pg/nope/tables',
-          resourcePath: mountKey('/pg/nope/tables', '/pg'),
+          vfsPath: mountKey('/pg/nope/tables', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -177,7 +177,7 @@ describe('readdir', () => {
         new PathSpec({
           virtual: '/pg/public/tables/ghost',
           directory: '/pg/public/tables/ghost',
-          resourcePath: mountKey('/pg/public/tables/ghost', '/pg'),
+          vfsPath: mountKey('/pg/public/tables/ghost', '/pg'),
         }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })

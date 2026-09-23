@@ -16,7 +16,7 @@ import posixpath
 
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import MISS_ERRORS
+from mirage.utils.errors import MISS_ERRORS, enoent
 from mirage.utils.path import CycleError
 from mirage.workspace.mount.namespace import Namespace
 
@@ -74,7 +74,7 @@ async def path_stat(dispatch: DispatchFn, virtual: str) -> FileStat | None:
     """
     spec = PathSpec(virtual=virtual,
                     directory=virtual[:virtual.rfind("/") + 1] or "/",
-                    resource_path="")
+                    vfs_path="")
     return await resolve_path_stat(dispatch, spec)
 
 
@@ -84,7 +84,7 @@ async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:
     Resolves through the op dispatcher rather than one backend, so a
     directory served by another mount answers. This is what a walker
     reads once it crosses a mount boundary: the subtree under a nested
-    mount lives in a resource the walker's own accessor cannot open.
+    mount lives in a VFS the walker's own accessor cannot open.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -92,7 +92,7 @@ async def path_readdir(dispatch: DispatchFn, virtual: str) -> list[str]:
     """
     spec = PathSpec(virtual=virtual,
                     directory=virtual[:virtual.rfind("/") + 1] or "/",
-                    resource_path="")
+                    vfs_path="")
     entries, _ = await dispatch("readdir", spec)
     return list(entries)
 
@@ -136,13 +136,35 @@ async def link_target_stat(namespace: Namespace, dispatch: DispatchFn,
         return None
     spec = PathSpec(virtual=target,
                     directory=target[:target.rfind("/") + 1] or "/",
-                    resource_path="")
+                    vfs_path="")
     return await stat_or_none(dispatch, spec)
+
+
+async def dispatch_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
+    """Stat a path via dispatch in the shape the generics' probes take.
+
+    ``dest_kind`` and its kin are written against a backend ``stat`` that
+    raises on a miss, so a dispatcher answer of nothing becomes ENOENT.
+
+    Args:
+        dispatch (DispatchFn): op dispatcher.
+        path (PathSpec): path to stat.
+    """
+    stat: FileStat | None
+    stat, _ = await dispatch("stat", path)
+    if stat is None:
+        raise enoent(path)
+    return stat
 
 
 async def stat_or_none(dispatch: DispatchFn,
                        path: PathSpec) -> FileStat | None:
     """Stat a path via dispatch, mapping a missing file to ``None``.
+
+    ENOTDIR counts as missing too: a path under a plain file cannot
+    exist, and a folder-id backend (dropbox, box, gdrive) reports it from
+    the stat itself, naming the file in the chain, where a keyed store
+    answers ENOENT and leaves the chain to the command's own walk.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -153,6 +175,6 @@ async def stat_or_none(dispatch: DispatchFn,
     stat: FileStat | None
     try:
         stat, _ = await dispatch("stat", path)
-    except FileNotFoundError:
+    except (FileNotFoundError, NotADirectoryError):
         return None
     return stat

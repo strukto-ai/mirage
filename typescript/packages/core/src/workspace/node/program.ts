@@ -35,7 +35,7 @@ import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { unreadableStdin } from '../../shell/descriptors.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
@@ -43,12 +43,12 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
 export async function executeProgram(
   recurse: (
     n: TSNodeLike,
-    s: Session,
+    s: SessionState,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable,
@@ -89,12 +89,12 @@ export async function executeProgram(
 async function runProgram(
   recurse: (
     n: TSNodeLike,
-    s: Session,
+    s: SessionState,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable,

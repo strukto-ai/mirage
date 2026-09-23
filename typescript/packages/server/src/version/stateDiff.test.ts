@@ -20,7 +20,7 @@ import type { Policy } from '@struktoai/mirage-core/policy/index'
 import type { Action, SessionContext } from '@struktoai/mirage-core/policy/types'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { seedVar } from '@struktoai/mirage-core/workspace/session/state'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -49,21 +49,21 @@ describe('stateDiff + restore', () => {
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'mir-sdiff-'))
     store = await VersionStore.open(new LocalBackend(root), 'ws')
-    ws = new Workspace({ '/m': new RAMResource() }, { mode: MountMode.EXEC })
+    ws = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.EXEC })
   })
   afterEach(() => {
     rmSync(root, { recursive: true, force: true })
   })
 
   it('covers every category', async () => {
-    await ws.execute('echo one > /m/a.txt')
+    await ws.shell('echo one > /m/a.txt')
     const session = ws.createSession('narrow', { mounts: { '/m': 'read' } })
     seedVar(session, 'API_KEY', '@aws:prod-key')
     await ws.flushSessions()
     const v1 = await commitState(store, await toStateDict(ws), 'main', 'v1')
 
-    await ws.execute('echo two > /m/a.txt')
-    await ws.execute('ln -s /m/a.txt /m/l.txt')
+    await ws.shell('echo two > /m/a.txt')
+    await ws.shell('ln -s /m/a.txt /m/l.txt')
     seedVar(session, 'API_KEY', '@aws:other-key')
     session.mountModes = new Map([...(session.mountModes ?? []), ['/m', MountMode.WRITE]])
     await ws.flushSessions()
@@ -90,16 +90,16 @@ describe('stateDiff + restore', () => {
   })
 
   it('restores a single path, leaving other files and categories alone', async () => {
-    await ws.execute('echo one > /m/a.txt')
-    await ws.execute('echo keep > /m/b.txt')
+    await ws.shell('echo one > /m/a.txt')
+    await ws.shell('echo keep > /m/b.txt')
     const v1 = await commitState(store, await toStateDict(ws), 'main', 'v1')
-    await ws.execute('echo two > /m/a.txt')
-    await ws.execute('echo edited > /m/b.txt')
+    await ws.shell('echo two > /m/a.txt')
+    await ws.shell('echo edited > /m/b.txt')
 
     const report = await restore(store, ws, v1, { paths: ['/m/a.txt'] })
 
-    const a = await ws.execute('cat /m/a.txt')
-    const b = await ws.execute('cat /m/b.txt')
+    const a = await ws.shell('cat /m/a.txt')
+    const b = await ws.shell('cat /m/b.txt')
     expect(new TextDecoder().decode(a.stdout)).toBe('one\n')
     expect(new TextDecoder().decode(b.stdout)).toBe('edited\n')
     expect(report.categories).toEqual(['files'])
@@ -108,23 +108,23 @@ describe('stateDiff + restore', () => {
 
   it('restores the sessions category only, keeping live files', async () => {
     const session = ws.createSession('narrow', { mounts: { '/m': 'write' } })
-    await ws.execute('echo one > /m/a.txt')
+    await ws.shell('echo one > /m/a.txt')
     await ws.flushSessions()
     const v1 = await commitState(store, await toStateDict(ws), 'main', 'v1')
     session.mountModes = new Map([...(session.mountModes ?? []), ['/m', MountMode.READ]])
-    await ws.execute('echo two > /m/a.txt')
+    await ws.shell('echo two > /m/a.txt')
     await ws.flushSessions()
 
     const report = await restore(store, ws, v1, { categories: ['sessions'] })
 
-    const a = await ws.execute('cat /m/a.txt')
+    const a = await ws.shell('cat /m/a.txt')
     expect(new TextDecoder().decode(a.stdout)).toBe('two\n')
     expect(ws.getSession('narrow').mountModes?.get('/m')).toBe(MountMode.WRITE)
     expect(report.categories).toEqual(['sessions'])
   })
 
   it('rejects bad scopes', async () => {
-    await ws.execute('echo one > /m/a.txt')
+    await ws.shell('echo one > /m/a.txt')
     const v1 = await commitState(store, await toStateDict(ws), 'main', 'v1')
     await expect(
       restore(store, ws, v1, { paths: ['/m/a.txt'], categories: ['files'] }),

@@ -5,7 +5,7 @@ from typer.testing import CliRunner
 from mirage.cli.main import app
 from mirage.cli.mcp import MCP_ENV_NAMES, resolve_mcp_config
 
-MINIMAL = "mounts:\n  /:\n    resource: ram\n    mode: WRITE\n"
+MINIMAL = "mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n"
 
 runner = CliRunner()
 

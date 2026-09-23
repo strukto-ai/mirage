@@ -20,10 +20,10 @@ vi.mock('./client.ts', async () => {
   return { ...actual, iterLatest: vi.fn() }
 })
 
-import type { FindOptions } from '@struktoai/mirage-core/resource/base'
+import type { FindOptions } from '@struktoai/mirage-core/vfs/base'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
-import type { GridFSConfig } from '../../resource/gridfs/config.ts'
+import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
 import type { GridFSFileDoc } from './client.ts'
 import * as clientMod from './client.ts'
 import { buildQuery, globRegex } from './driver.ts'
@@ -133,7 +133,7 @@ function runFind(
     database: 'db',
   } as GridFSConfig)
   const spec = new PathSpec({
-    resourcePath: 'data',
+    vfsPath: 'data',
     virtual: '/mnt/data',
     directory: '/mnt/',
   })

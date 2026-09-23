@@ -5,7 +5,7 @@ from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from mirage.core.qdrant import query
-from mirage.resource.qdrant.config import QdrantConfig
+from mirage.vfs.qdrant.config import QdrantConfig
 
 
 def _match_value(condition):

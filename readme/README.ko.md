@@ -41,24 +41,24 @@ Mirage는 **AI 에이전트를 위한 가상 터미널**입니다. 가상 파일
 ```python
 ws = Workspace(
     {
-        "/tmp":   (RAMResource(), MountMode.EXEC),
-        "/redis": (RedisResource(url=redis_url), MountMode.WRITE),
-        "/slack": (SlackResource(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+        "/tmp":   (RAMVFS(), MountMode.EXEC),
+        "/redis": (RedisVFS(url=redis_url), MountMode.WRITE),
+        "/slack": (SlackVFS(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
     },
     # monty가 python을 가로채므로 스크립트는 워크스페이스 안에서 샌드박스로 실행된다
-    runtimes=[MontyRuntime(captures=["python", "python3"]), "vfs"],
+    runtimes=[MontyRuntime(captures=["python", "python3"]), "workspace"],
 )
 
 # grep 한 번으로 모든 소스를 훑는다
-await ws.execute("grep -rln session /redis /tmp")
+await ws.shell("grep -rln session /redis /tmp")
 
 # Slack에 있는 스크립트를 실행하고 리포트를 Redis에 기록한다
-await ws.execute("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
+await ws.shell("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
 
 # 헤드 워드로 타입이 있는 CLI를 설치한다: 경로가 아니라 이름으로 디스패치되고,
 # 다른 프로그램처럼 `man`, `type`, `which`로 찾을 수 있다
 ws.register_cli("slack", SLACK, {"token": slack_bot_token})
-await ws.execute('slack send-message --channel general --text "report is up"')
+await ws.shell('slack send-message --channel general --text "report is up"')
 ```
 
 ## 소개
@@ -121,16 +121,16 @@ npx @struktoai/mirage-cli
 
 ```python
 from mirage import Workspace
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3Config, S3VFS
 
 ws = Workspace({
-    "/data": RAMResource(),
-    "/s3":   S3Resource(S3Config(bucket="my-bucket")),
+    "/data": RAMVFS(),
+    "/s3":   S3VFS(S3Config(bucket="my-bucket")),
 })
 
-await ws.execute("cp /s3/report.csv /data/report.csv")
-await ws.execute("grep alert /s3/data/log.jsonl | wc -l")
+await ws.shell("cp /s3/report.csv /data/report.csv")
+await ws.shell("grep alert /s3/data/log.jsonl | wc -l")
 
 await ws.snapshot("demo.tar")
 ```
@@ -138,15 +138,15 @@ await ws.snapshot("demo.tar")
 ### TypeScript
 
 ```ts
-import { Workspace, RAMResource, S3Resource } from '@struktoai/mirage-node'
+import { Workspace, RAMVFS, S3VFS } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
-  '/data': new RAMResource(),
-  '/s3':   new S3Resource({ bucket: 'my-bucket' }),
+  '/data': new RAMVFS(),
+  '/s3':   new S3VFS({ bucket: 'my-bucket' }),
 })
 
-await ws.execute('cp /s3/report.csv /data/report.csv')
-await ws.execute('grep alert /s3/data/log.jsonl | wc -l')
+await ws.shell('cp /s3/report.csv /data/report.csv')
+await ws.shell('grep alert /s3/data/log.jsonl | wc -l')
 
 await ws.snapshot('demo.tar')
 ```
@@ -163,7 +163,7 @@ mirage workspace load demo.tar --id demo-restored
 
 ## 에이전트 프레임워크
 
-Mirage는 샌드박스 또는 도구 계층으로 에이전트 프레임워크에 연결된다. `read` 같은 POSIX 연산도 리소스와 파일 타입별로 커스터마이즈할 수 있다: Mirage는 파일 타입 렌더러를 전혀 포함하지 않으므로 형식은 등록한 방식대로 렌더링되며, 특정 리소스와 확장자에 등록한 명령이 일반 명령보다 우선한다.
+Mirage는 샌드박스 또는 도구 계층으로 에이전트 프레임워크에 연결된다. `read` 같은 POSIX 연산도 VFS와 파일 타입별로 커스터마이즈할 수 있다: Mirage는 파일 타입 렌더러를 전혀 포함하지 않으므로 형식은 등록한 방식대로 렌더링되며, 특정 VFS와 확장자에 등록한 명령이 일반 명령보다 우선한다.
 
 |               | 통합                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -181,10 +181,10 @@ Mirage는 샌드박스 또는 도구 계층으로 에이전트 프레임워크�
 두 계층 모두 기본값은 설정이 필요 없는 프로세스 내 RAM입니다. Redis 스토어를 쓰면 워커, 프로세스, 머신 간에 캐시 상태를 공유합니다:
 
 ```ts
-import { RedisFileCacheStore, S3Resource, Workspace } from '@struktoai/mirage-node'
+import { RedisFileCacheStore, S3VFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
-  { '/s3': new S3Resource({ bucket: 'my-bucket' }) },
+  { '/s3': new S3VFS({ bucket: 'my-bucket' }) },
   {
     cache: new RedisFileCacheStore({ url: 'redis://localhost:6379/0', cacheLimit: '8GB' }),
     index: { type: 'redis', url: 'redis://localhost:6379/0', ttl: 600 },

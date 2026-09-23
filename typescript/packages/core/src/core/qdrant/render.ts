@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QdrantRow } from './client.ts'
-import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
+import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
 import { compactJsonText, valueText } from '../render/json.ts'
 import { fieldValue, withoutField } from './payload.ts'

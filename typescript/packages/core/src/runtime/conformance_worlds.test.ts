@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileType, MountMode } from '../types.ts'
 import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
@@ -41,21 +41,21 @@ import { MontyRuntime } from './python/monty/index.ts'
 async function structureWorld(): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const base = new RAMResource()
-  const inner = new RAMResource()
-  ops.registerResource(base)
-  ops.registerResource(inner)
+  const base = new RAMVFS()
+  const inner = new RAMVFS()
+  ops.registerVfs(base)
+  ops.registerVfs(inner)
   const ws = new Workspace(
     {},
-    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'vfs'] },
+    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'workspace'] },
   )
   ws.addMount('/base', base, MountMode.WRITE)
   ws.addMount('/base/inner', inner, MountMode.WRITE)
-  // Seeded through the fs facade, not the shell: a shell line would be
+  // Seeded through the op facade, not the shell: a shell line would be
   // recorded into /.bash_history, which every session may read, and the
   // scoped-world tests would then find the seed line instead of a leak.
-  await ws.fs.writeFile('/base/a.txt', 'top')
-  await ws.fs.writeFile('/base/inner/deep.txt', 'needle')
+  await ws.vfs.writeFile('/base/a.txt', 'top')
+  await ws.vfs.writeFile('/base/inner/deep.txt', 'needle')
   return ws
 }
 
@@ -71,18 +71,18 @@ async function structureWorld(): Promise<Workspace> {
 async function scopedWorld(): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const open = new RAMResource()
-  const closed = new RAMResource()
-  ops.registerResource(open)
-  ops.registerResource(closed)
+  const open = new RAMVFS()
+  const closed = new RAMVFS()
+  ops.registerVfs(open)
+  ops.registerVfs(closed)
   const ws = new Workspace(
     {},
-    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'vfs'] },
+    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'workspace'] },
   )
   ws.addMount('/open', open, MountMode.WRITE)
   ws.addMount('/closed', closed, MountMode.WRITE)
-  await ws.fs.writeFile('/open/pub.txt', 'public')
-  await ws.fs.writeFile('/closed/sec.txt', 'SECRET-xyz')
+  await ws.vfs.writeFile('/open/pub.txt', 'public')
+  await ws.vfs.writeFile('/closed/sec.txt', 'SECRET-xyz')
   ws.createSession('agent', { profile: { paths: { hide: ['/closed'] } } })
   return ws
 }
@@ -92,7 +92,7 @@ async function run(
   line: string,
   sessionId?: string,
 ): Promise<[number, string, string]> {
-  const io = await ws.execute(line, sessionId !== undefined ? { sessionId } : undefined)
+  const io = await ws.shell(line, sessionId !== undefined ? { sessionId } : undefined)
   return [io.exitCode, stdoutStr(io), stderrStr(io)]
 }
 
@@ -198,18 +198,23 @@ describe('structure world', () => {
     // reporting the operand missing.
     const parser = await getTestParser()
     const ops = new OpsRegistry()
-    const base = new RAMResource()
-    const deep = new RAMResource()
-    ops.registerResource(base)
-    ops.registerResource(deep)
+    const base = new RAMVFS()
+    const deep = new RAMVFS()
+    ops.registerVfs(base)
+    ops.registerVfs(deep)
     const ws = new Workspace(
       {},
-      { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'vfs'] },
+      {
+        mode: MountMode.EXEC,
+        ops,
+        shellParser: parser,
+        runtimes: [new MontyRuntime(), 'workspace'],
+      },
     )
     ws.addMount('/base', base, MountMode.WRITE)
     ws.addMount('/ghost/deep', deep, MountMode.WRITE)
-    await ws.fs.writeFile('/base/a.txt', 'top')
-    await ws.fs.writeFile('/ghost/deep/x.txt', 'inside')
+    await ws.vfs.writeFile('/base/a.txt', 'top')
+    await ws.vfs.writeFile('/ghost/deep/x.txt', 'inside')
     try {
       const [rCode, rOut] = await run(ws, 'ls -R /ghost')
       expect(rCode).toBe(0)
@@ -325,20 +330,25 @@ describe('scoped world', () => {
     // refuses.
     const parser = await getTestParser()
     const ops = new OpsRegistry()
-    const base = new RAMResource()
-    const inner = new RAMResource()
-    ops.registerResource(base)
-    ops.registerResource(inner)
+    const base = new RAMVFS()
+    const inner = new RAMVFS()
+    ops.registerVfs(base)
+    ops.registerVfs(inner)
     const ws = new Workspace(
       {},
-      { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new MontyRuntime(), 'vfs'] },
+      {
+        mode: MountMode.EXEC,
+        ops,
+        shellParser: parser,
+        runtimes: [new MontyRuntime(), 'workspace'],
+      },
     )
     ws.addMount('/base', base, MountMode.WRITE)
-    await ws.fs.writeFile('/base/a.txt', 'top')
-    await ws.fs.mkdir('/base/inner')
-    await ws.fs.writeFile('/base/inner/leftover.txt', 'SHADOWED-xyz')
+    await ws.vfs.writeFile('/base/a.txt', 'top')
+    await ws.vfs.mkdir('/base/inner')
+    await ws.vfs.writeFile('/base/inner/leftover.txt', 'SHADOWED-xyz')
     ws.addMount('/base/inner', inner, MountMode.WRITE)
-    await ws.fs.writeFile('/base/inner/deep.txt', 'needle')
+    await ws.vfs.writeFile('/base/inner/deep.txt', 'needle')
     ws.createSession('agent', { profile: { paths: { hide: ['/base/inner'] } } })
     try {
       const [, out] = await run(ws, line, 'agent')
@@ -411,14 +421,19 @@ describe('scoped world', () => {
 async function exclusiveWorld(): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const w = new RAMResource()
-  ops.registerResource(w)
+  const w = new RAMVFS()
+  ops.registerVfs(w)
   const ws = new Workspace(
     {},
-    { mode: MountMode.EXEC, ops, shellParser: parser, runtimes: [new QuickJsRuntime(), 'vfs'] },
+    {
+      mode: MountMode.EXEC,
+      ops,
+      shellParser: parser,
+      runtimes: [new QuickJsRuntime(), 'workspace'],
+    },
   )
   ws.addMount('/w', w, MountMode.WRITE)
-  await ws.fs.writeFile('/w/keep.txt', 'keep')
+  await ws.vfs.writeFile('/w/keep.txt', 'keep')
   return ws
 }
 

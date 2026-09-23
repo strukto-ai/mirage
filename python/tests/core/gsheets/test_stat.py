@@ -38,7 +38,7 @@ def index():
 async def test_stat_root(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gsheets", "/gsheets"),
+        PathSpec(vfs_path=mount_key("/gsheets", "/gsheets"),
                  virtual="/gsheets",
                  directory="/gsheets"), index)
     assert result.type == FileType.DIRECTORY
@@ -49,7 +49,7 @@ async def test_stat_root(accessor, index):
 async def test_stat_owned_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+        PathSpec(vfs_path=mount_key("/gsheets/owned", "/gsheets"),
                  virtual="/gsheets/owned",
                  directory="/gsheets/owned"), index)
     assert result.type == FileType.DIRECTORY
@@ -70,7 +70,7 @@ async def test_stat_sheet_from_cache(accessor, index):
     target = "/gsheets/owned/2026-04-01_My_Sheet__s1.gsheet.json"
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key(target, "/gsheets"),
+        PathSpec(vfs_path=mount_key(target, "/gsheets"),
                  virtual=target,
                  directory=target),
         index,
@@ -98,7 +98,7 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     ) as mock_list:
         result = await stat(
             accessor,
-            PathSpec(resource_path=mount_key(target, "/gsheets"),
+            PathSpec(vfs_path=mount_key(target, "/gsheets"),
                      virtual=target,
                      directory=target), index)
     assert result.content == ContentType.JSON
@@ -124,7 +124,7 @@ async def test_stat_not_found_after_fallback(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(resource_path=mount_key(
-                    "/gsheets/owned/nope.gsheet.json", "/gsheets"),
+                PathSpec(vfs_path=mount_key("/gsheets/owned/nope.gsheet.json",
+                                            "/gsheets"),
                          virtual="/gsheets/owned/nope.gsheet.json",
                          directory="/gsheets/owned/nope.gsheet.json"), index)

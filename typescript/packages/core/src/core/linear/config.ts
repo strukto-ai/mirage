@@ -19,7 +19,7 @@ import {
   type ConfigOf,
   type RedactedConfig,
   secretStr,
-} from '../../resource/secrets.ts'
+} from '../../vfs/secrets.ts'
 
 export const LinearConfigSchema = z.object({
   apiKey: secretStr(),

@@ -5,7 +5,8 @@ from mirage.commands.builtin.cut_ranges import cut_stream, parse_ranges
 from mirage.commands.builtin.utils.operands import (merge_split_errors,
                                                     normalized_read,
                                                     split_readable)
-from mirage.commands.builtin.utils.stream import resolve_source
+from mirage.commands.builtin.utils.stream import (resolve_source, stdin_stat,
+                                                  stdin_stream)
 from mirage.commands.config import CommandOpts
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -97,6 +98,7 @@ async def cut(
         ranges = parse_ranges(parsed.ranges, parsed.mode)
     except (TypeError, ValueError) as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
+    read_stream = stdin_stream(read_stream, stdin)
     if paths:
         outputs = [
             cut_stream(read_stream(path),
@@ -142,7 +144,7 @@ async def cut_generic(
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
     """
-    readable, err = await split_readable(paths, stat, "cut")
+    readable, err = await split_readable(paths, stdin_stat(stat), "cut")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
     return await merge_split_errors(

@@ -15,9 +15,9 @@
 import { CacheType, type CacheConfig, type RedisCacheConfig } from '../../cache/file/config.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 
-export type FileCacheStore = FileCache & Resource
+export type FileCacheStore = FileCache & VFS
 export type FileCacheFactory = (config: RedisCacheConfig) => FileCacheStore
 
 const FACTORIES: Record<string, FileCacheFactory> = {}
@@ -25,7 +25,7 @@ const FACTORIES: Record<string, FileCacheFactory> = {}
 /**
  * Register the store that backs a `type:` in {@link buildFileCache}.
  *
- * The redis store extends a node-only resource, and core cannot import
+ * The redis store extends a node-only VFS, and core cannot import
  * node, so `@struktoai/mirage-node` registers it on import — the same
  * seam `registerRuntime` uses for the runtimes it owns. Python needs no
  * equivalent: there, redis is an optional extra of one package, so

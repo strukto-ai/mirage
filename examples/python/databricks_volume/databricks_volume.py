@@ -18,9 +18,9 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
-                                               DatabricksVolumeResource)
 from mirage.types import PathSpec
+from mirage.vfs.databricks_volume import (DatabricksVolumeConfig,
+                                          DatabricksVolumeVFS)
 
 load_dotenv(".env.development")
 
@@ -33,12 +33,12 @@ config = DatabricksVolumeConfig(
     token=os.environ.get("DATABRICKS_TOKEN"),
     profile=os.environ.get("DATABRICKS_CONFIG_PROFILE"),
 )
-resource = DatabricksVolumeResource(config=config)
+vfs = DatabricksVolumeVFS(config=config)
 
 
 async def _run(ws, cmd):
     print(f"\n>>> {cmd}")
-    result = await ws.execute(cmd)
+    result = await ws.shell(cmd)
     stdout = (await result.stdout_str()).strip()
     stderr = (await result.stderr_str()).strip()
     if stdout:
@@ -54,12 +54,12 @@ async def _run(ws, cmd):
 
 
 async def main():
-    ws = Workspace({"/dbx/": resource}, mode=MountMode.READ)
+    ws = Workspace({"/dbx/": vfs}, mode=MountMode.READ)
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /dbx/__nf_missing__.txt", "head /dbx/__nf_missing__.txt",
                 "stat /dbx/__nf_missing__.txt"):
-        result = await ws.execute(cmd)
+        result = await ws.shell(cmd)
         print(f"$ {cmd}")
         print(f"  exit={result.exit_code}  "
               f"{(await result.stderr_str()).strip()}")
@@ -75,9 +75,9 @@ async def main():
         # chmod/chown/touch never hit the Databricks API: attrs land in
         # the workspace namespace and merge into dispatch-level stat.
         print(f"=== metadata overlay on {target} ===")
-        meta_res = await ws.execute(f'chmod 640 "{target}"'
-                                    f' && chown 500:dev "{target}"'
-                                    f' && touch -t 202601021530 "{target}"')
+        meta_res = await ws.shell(f'chmod 640 "{target}"'
+                                  f' && chown 500:dev "{target}"'
+                                  f' && touch -t 202601021530 "{target}"')
         print(f"  chmod/chown/touch exit={meta_res.exit_code}")
         try:
             meta_st, _ = await ws.dispatch("stat",

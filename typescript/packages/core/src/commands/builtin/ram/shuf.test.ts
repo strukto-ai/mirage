@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
 const RAM_SHUF = RAM_COMMANDS.filter((c) => c.name === 'shuf' && c.filetype == null)
 
@@ -23,7 +23,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runShuf(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
@@ -31,17 +31,12 @@ async function runShuf(
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_SHUF[0]
   if (cmd === undefined) throw new Error('shuf not registered')
-  const result = await cmd.fn(
-    (resource as { accessor?: unknown }).accessor as never,
-    paths,
-    texts,
-    {
-      stdin,
-      flags,
-      filetypeFns: null,
-      cwd: '/',
-    },
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
+    stdin,
+    flags,
+    filetypeFns: null,
+    cwd: '/',
+  })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
@@ -55,8 +50,8 @@ async function runShuf(
 
 describe('shuf', () => {
   it('-e echoes args in random order', async () => {
-    const resource = new RAMResource()
-    const r = await runShuf(resource, [], { echo: true }, null, ['a', 'b', 'c'])
+    const vfs = new RAMVFS()
+    const r = await runShuf(vfs, [], { echo: true }, null, ['a', 'b', 'c'])
     expect(r.exitCode).toBe(0)
     const lines = r.out.trim().split('\n')
     expect(lines.length).toBe(3)
@@ -64,8 +59,8 @@ describe('shuf', () => {
   })
 
   it('-n limits output count', async () => {
-    const resource = new RAMResource()
-    const r = await runShuf(resource, [], { echo: true, head_count: '2' }, null, [
+    const vfs = new RAMVFS()
+    const r = await runShuf(vfs, [], { echo: true, head_count: '2' }, null, [
       'a',
       'b',
       'c',
@@ -78,8 +73,8 @@ describe('shuf', () => {
   })
 
   it('-r repeats items with -n count', async () => {
-    const resource = new RAMResource()
-    const r = await runShuf(resource, [], { repeat: true, echo: true, head_count: '5' }, null, [
+    const vfs = new RAMVFS()
+    const r = await runShuf(vfs, [], { repeat: true, echo: true, head_count: '5' }, null, [
       'a',
       'b',
       'c',
@@ -93,8 +88,8 @@ describe('shuf', () => {
   })
 
   it('shuffles stdin lines', async () => {
-    const resource = new RAMResource()
-    const r = await runShuf(resource, [], {}, ENC.encode('x\ny\nz\n'))
+    const vfs = new RAMVFS()
+    const r = await runShuf(vfs, [], {}, ENC.encode('x\ny\nz\n'))
     expect(r.exitCode).toBe(0)
     const lines = r.out.trim().split('\n')
     expect([...lines].sort()).toEqual(['x', 'y', 'z'])

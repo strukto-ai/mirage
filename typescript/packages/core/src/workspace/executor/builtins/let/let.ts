@@ -20,7 +20,7 @@ import type { ArithResult } from '../../../../shell/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
 import { ensureVarVisible, randomReader, sessionElements } from '../../../session/state.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -36,7 +36,7 @@ import { sessionView } from '../../../session/state.ts'
  */
 export async function handleLet(
   args: string[],
-  session: Session,
+  session: SessionState,
   state: SessionView | null = null,
 ): Promise<Result> {
   if (args.length === 0) {

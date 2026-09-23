@@ -18,7 +18,7 @@ import { dirname, resolve } from 'node:path'
 import {
   MountMode,
   OpsRegistry,
-  S3Resource,
+  S3VFS,
   Workspace,
   type S3Config,
 } from '@struktoai/mirage-node'
@@ -51,7 +51,7 @@ const s3Config: S3Config = {
   accessKeyId: requireEnv('AWS_ACCESS_KEY_ID'),
   secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
 }
-const s3 = new S3Resource(s3Config)
+const s3 = new S3VFS(s3Config)
 const ops = new OpsRegistry()
 for (const op of s3.ops()) ops.register(op)
 const ws = new Workspace({ '/s3/': s3 }, { mode: MountMode.READ, ops })

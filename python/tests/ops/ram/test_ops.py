@@ -18,8 +18,8 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.mkdir import mkdir
 from mirage.ops.ram import OPS
-from mirage.resource.ram.store import RAMStore
 from mirage.types import ContentType, FileType, PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 def _op(name: str):
@@ -40,7 +40,7 @@ truncate = _op("truncate")
 
 
 def _scope(path: str) -> PathSpec:
-    return PathSpec(resource_path=(path).strip("/"),
+    return PathSpec(vfs_path=(path).strip("/"),
                     virtual=path,
                     directory=path,
                     resolved=True)
@@ -139,7 +139,7 @@ async def test_op_unlink_not_found(accessor):
 async def test_op_rmdir(accessor, store):
     await mkdir(
         accessor,
-        PathSpec(resource_path="empty", virtual="/empty", directory="/empty"))
+        PathSpec(vfs_path="empty", virtual="/empty", directory="/empty"))
     await rmdir(accessor, _scope("/empty"))
     assert "/empty" not in store.dirs
 

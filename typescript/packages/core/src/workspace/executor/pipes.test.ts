@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
 import { handleConnection, handlePipe, handleSubshell } from './pipes.ts'
@@ -53,7 +53,7 @@ describe('handlePipe', () => {
       execute,
       [node('a'), node('b'), node('c')],
       [false, false],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
       null,
     )
     expect(io.exitCode).toBe(0)
@@ -87,7 +87,7 @@ describe('handlePipe', () => {
       execute,
       [node('left'), node('right')],
       [false],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
       null,
     )
     const right = calls.find((c) => c.text === 'right')
@@ -96,7 +96,7 @@ describe('handlePipe', () => {
   })
 
   it('shows every segment the status the pipeline started with', async () => {
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     s.lastExitCode = 1
     const seen: number[] = []
     const execute: ExecuteNodeFn = (nd, session) => {
@@ -124,10 +124,10 @@ describe('handlePipe', () => {
         'f() { true; }; false; f | echo $?',
         'false; true | echo $?',
       ]) {
-        const io = await ws.execute(line)
+        const io = await ws.shell(line)
         expect([io.stdoutText, io.exitCode], line).toEqual(['1\n', 0])
       }
-      expect((await ws.execute('false; { false; } | true; echo $?')).stdoutText).toBe('0\n')
+      expect((await ws.shell('false; { false; } | true; echo $?')).stdoutText).toBe('0\n')
     } finally {
       await ws.close()
     }
@@ -144,7 +144,7 @@ describe('handlePipe', () => {
       execute,
       [node('a'), node('b')],
       [],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(await materialize(io.stderr))).toBe('a-err;b-err;')
   })
@@ -180,7 +180,7 @@ describe('handleConnection (&&, ||, ;)', () => {
   }
 
   it('&& runs right when left exits 0', async () => {
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     const [stdout, io] = await handleConnection(
       pickLR(leftOK, right),
       node('l'),
@@ -204,7 +204,7 @@ describe('handleConnection (&&, ||, ;)', () => {
       rightCalled = true
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     const [, io] = await handleConnection(
       pickLR(leftFailFn, rightFn),
       node('l'),
@@ -217,7 +217,7 @@ describe('handleConnection (&&, ||, ;)', () => {
   })
 
   it('|| runs right only when left fails', async () => {
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     const [, io] = await handleConnection(pickLR(leftFail, right), node('l'), NT.OR, node('r'), s)
     expect(io.exitCode).toBe(0)
   })
@@ -228,7 +228,7 @@ describe('handleConnection (&&, ||, ;)', () => {
       rightCalled = true
       return Promise.resolve([null, new IOResult(), new ExecutionNode()])
     }
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     await handleConnection(pickLR(leftOK, rightFn), node('l'), NT.OR, node('r'), s)
     expect(rightCalled).toBe(false)
   })
@@ -239,7 +239,7 @@ describe('handleConnection (&&, ||, ;)', () => {
       rightCalled = true
       return Promise.resolve([encode('r'), new IOResult(), new ExecutionNode()])
     }
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     await handleConnection(pickLR(leftFail, rightFn), node('l'), NT.SEMI, node('r'), s)
     expect(rightCalled).toBe(true)
   })
@@ -247,7 +247,11 @@ describe('handleConnection (&&, ||, ;)', () => {
 
 describe('handleSubshell', () => {
   it('restores cwd and env after body execution', async () => {
-    const s = new Session({ sessionId: 'test', cwd: '/orig', vars: varsFromEnv({ X: 'orig' }) })
+    const s = new SessionState({
+      sessionId: 'test',
+      cwd: '/orig',
+      vars: varsFromEnv({ X: 'orig' }),
+    })
     const execute: ExecuteNodeFn = (_n, session) => {
       session.cwd = '/inside'
       seedVar(session, 'X', 'inside')
@@ -259,7 +263,7 @@ describe('handleSubshell', () => {
   })
 
   it('runs multiple body statements and merges their IOResults', async () => {
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     let i = 0
     const execute: ExecuteNodeFn = () => {
       i++
@@ -275,7 +279,7 @@ describe('handleSubshell', () => {
   })
 
   it('seeds lastExitCode between body commands for $?', async () => {
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     s.lastExitCode = 0
     const seen: number[] = []
     const execute: ExecuteNodeFn = (nd, session) => {
@@ -326,7 +330,7 @@ it.each(['abort', 'timeout'])(
       throw failure
     }
     await expect(
-      handlePipe(execute, [node('cat'), node('wc')], [], new Session({ sessionId: 'test' })),
+      handlePipe(execute, [node('cat'), node('wc')], [], new SessionState({ sessionId: 'test' })),
     ).rejects.toBe(failure)
     expect(closed).toBe(true)
     expect(input.bufferedChunks).toHaveLength(0)
@@ -358,7 +362,12 @@ it('keeps a cache read drainable after a normal early pipeline exit', async () =
     await stdin[Symbol.asyncIterator]().next()
     return [encode('first'), new IOResult(), new ExecutionNode({ command: 'head' })]
   }
-  await handlePipe(execute, [node('cat'), node('head')], [], new Session({ sessionId: 'test' }))
+  await handlePipe(
+    execute,
+    [node('cat'), node('head')],
+    [],
+    new SessionState({ sessionId: 'test' }),
+  )
   expect(closed).toBe(false)
   expect(decode(await input.drain())).toBe('firstrest')
   expect(closed).toBe(true)

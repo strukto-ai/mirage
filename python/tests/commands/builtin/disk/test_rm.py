@@ -14,20 +14,19 @@
 
 import pytest
 
-from mirage import DiskResource, MountMode, Workspace
+from mirage import DiskVFS, MountMode, Workspace
 
 
 @pytest.fixture
 def workspace(tmp_path):
-    return Workspace({"/": DiskResource(root=str(tmp_path))},
-                     mode=MountMode.WRITE)
+    return Workspace({"/": DiskVFS(root=str(tmp_path))}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_rm_v_terminates_verbose_output(workspace):
-    await workspace.fs.write("/a.txt", b"a")
+    await workspace.vfs.write("/a.txt", b"a")
 
-    io = await workspace.execute("rm -v /a.txt")
+    io = await workspace.shell("rm -v /a.txt")
 
     assert io.exit_code == 0
     assert io.stdout == b"removed '/a.txt'\n"

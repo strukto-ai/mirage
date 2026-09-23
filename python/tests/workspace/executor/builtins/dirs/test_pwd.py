@@ -1,12 +1,12 @@
 import pytest
 
 from mirage.workspace.executor.builtins.dirs import handle_pwd
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import change_dir
 
 
-def _session() -> Session:
-    session = Session(session_id="s1")
+def _session() -> SessionState:
+    session = SessionState(session_id="s1")
     change_dir(session, "/data/deep/real", "/data/lk")
     return session
 

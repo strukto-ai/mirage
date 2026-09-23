@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.s3 import S3VFS, S3Config
 
 load_dotenv(".env.development")
 
@@ -38,15 +38,15 @@ deep_config = S3Config(
     key_prefix="subdata/subsubdata/",
 )
 
-resource = S3Resource(config)
-deep_resource = S3Resource(deep_config)
+vfs = S3VFS(config)
+deep_vfs = S3VFS(deep_config)
 
 
 async def main():
     with Workspace(
         {
-            "/s3/": resource,
-            "/deep/": deep_resource
+            "/s3/": vfs,
+            "/deep/": deep_vfs
         },
             mode=MountMode.READ,
     ) as ws:
@@ -78,7 +78,7 @@ async def main():
         print(f"  nonexistent: {os.path.exists('/s3/data/nope.txt')}")
 
         print("\n--- VFS commands ---")
-        result = await ws.execute("grep -c mirage /s3/data/example.jsonl")
+        result = await ws.shell("grep -c mirage /s3/data/example.jsonl")
         print(f"  grep matches: {(await result.stdout_str()).strip()}")
 
         print("\n=== KEY_PREFIX MOUNT (/deep → subdata/subsubdata/) ===\n")
@@ -105,11 +105,11 @@ async def main():
                 print(f"  [{i}] {json.dumps(rec)[:90]}...")
 
         print("\n--- VFS commands against /deep ---")
-        r = await ws.execute("grep -c mirage /deep/example.jsonl")
+        r = await ws.shell("grep -c mirage /deep/example.jsonl")
         print(f"  grep -c mirage     : {(await r.stdout_str()).strip()}")
-        r = await ws.execute("rg -l mirage /deep")
+        r = await ws.shell("rg -l mirage /deep")
         print(f"  rg -l mirage       : {(await r.stdout_str()).strip()}")
-        r = await ws.execute("jq .metadata.version /deep/example.json")
+        r = await ws.shell("jq .metadata.version /deep/example.json")
         print(f"  jq .metadata.version: {(await r.stdout_str()).strip()}")
 
         print("\n--- bash history ---")
@@ -119,7 +119,7 @@ async def main():
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

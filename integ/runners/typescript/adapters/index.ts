@@ -24,30 +24,30 @@ import {
   ListObjectsV2Command,
   S3Client,
 } from '@aws-sdk/client-s3'
-import { OPFSResource, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
-import type { ConsistencyPolicy } from '@struktoai/mirage-node'
+import { OPFSVFS, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
+import type { ReadSpec } from '@struktoai/mirage-node'
 import {
-  AliyunResource,
-  BackblazeResource,
-  BoxResource,
-  CephResource,
-  ChromaResource,
-  DatabricksVolumeResource,
-  DifyResource,
-  DigitalOceanResource,
-  DiscordResource,
-  DiskResource,
-  DropboxResource,
-  EmailResource,
-  GDocsResource,
-  GDriveResource,
-  GmailResource,
-  GCalResource,
-  GCSResource,
-  GitHubResource,
-  GridFSResource,
-  GSheetsResource,
-  GSlidesResource,
+  AliyunVFS,
+  BackblazeVFS,
+  BoxVFS,
+  CephVFS,
+  ChromaVFS,
+  DatabricksVolumeVFS,
+  DifyVFS,
+  DigitalOceanVFS,
+  DiscordVFS,
+  DiskVFS,
+  DropboxVFS,
+  EmailVFS,
+  GDocsVFS,
+  GDriveVFS,
+  GmailVFS,
+  GCalVFS,
+  GCSVFS,
+  GitHubVFS,
+  GridFSVFS,
+  GSheetsVFS,
+  GSlidesVFS,
   DISCORD,
   GWS,
   HIMALAYA,
@@ -57,41 +57,41 @@ import {
   LINEAR,
   NTN,
   SLACK,
-  HfBucketsResource,
-  HfDatasetsResource,
-  HfModelsResource,
-  HfSpacesResource,
-  JaegerResource,
+  HfBucketsVFS,
+  HfDatasetsVFS,
+  HfModelsVFS,
+  HfSpacesVFS,
+  JaegerVFS,
   JobConsole,
-  LanceDBResource,
-  LangfuseResource,
-  LinearResource,
-  MinIOResource,
-  Mem0Resource,
-  MongoDBResource,
-  NotionResource,
+  LanceDBVFS,
+  LangfuseVFS,
+  LinearVFS,
+  MinIOVFS,
+  Mem0VFS,
+  MongoDBVFS,
+  NotionVFS,
   MountMode,
-  NextcloudResource,
-  OCIResource,
-  OneDriveResource,
-  PostgresResource,
-  QdrantResource,
-  QingStorResource,
-  R2Resource,
-  RAMResource,
+  NextcloudVFS,
+  OCIVFS,
+  OneDriveVFS,
+  PostgresVFS,
+  QdrantVFS,
+  QingStorVFS,
+  R2VFS,
+  RAMVFS,
   RedisConsoleStore,
-  RedisResource,
-  type Resource,
-  S3Resource,
-  ScalewayResource,
-  SeaweedFSResource,
-  SharePointResource,
-  SlackResource,
-  SSHResource,
-  SupabaseResource,
-  TencentResource,
-  TrelloResource,
-  WasabiResource,
+  RedisVFS,
+  type VFS,
+  S3VFS,
+  ScalewayVFS,
+  SeaweedFSVFS,
+  SharePointVFS,
+  SlackVFS,
+  SSHVFS,
+  SupabaseVFS,
+  TencentVFS,
+  TrelloVFS,
+  WasabiVFS,
   Workspace,
   type ConsoleFactory,
 } from '@struktoai/mirage-node'
@@ -128,7 +128,7 @@ export interface OpenConsistency extends Open {
 }
 
 export interface OpenOptions {
-  consistency?: ConsistencyPolicy
+  read?: ReadSpec
 }
 
 type MountMap = ConstructorParameters<typeof Workspace>[0]
@@ -142,23 +142,23 @@ interface OpenedWorkspaces {
 /**
  * The workspace an adapter hands back, plus the shadow factory.
  *
- * `build` must return fresh resources on every call: two workspaces sharing
- * resource instances share their caches, and a consistency scenario mutating
+ * `build` must return fresh mounts on every call: two workspaces sharing
+ * VFS instances share their caches, and a consistency scenario mutating
  * through one would invalidate the other's — which is exactly the thing the
  * scenario is there to observe.
  */
 function openWorkspaces(build: () => MountMap, options?: OpenOptions): OpenedWorkspaces {
   const opened: Workspace[] = []
-  const make = (consistency?: ConsistencyPolicy): ExecWorkspace => {
+  const make = (read?: ReadSpec): ExecWorkspace => {
     const ws = new Workspace(build(), {
       mode: MountMode.WRITE,
-      ...(consistency !== undefined ? { consistency } : {}),
+      ...(read !== undefined ? { read } : {}),
     })
     opened.push(ws)
     return ws as unknown as ExecWorkspace
   }
   return {
-    ws: make(options?.consistency),
+    ws: make(options?.read),
     shadow: () => make(),
     closeAll: async (): Promise<void> => {
       for (const ws of opened) await ws.close()
@@ -210,7 +210,7 @@ function installLocalClis(
 // matters because battery cases reap jobs and ids restart at 1; a
 // reused stream would replay the previous case's chunks, ending chunk
 // included. Only the ram opener consults this (main.ts refuses a
-// console block on any other resource), and ws.close() releases the
+// console block on any other VFS), and ws.close() releases the
 // clients through JobTable.closeConsoles.
 function consoleFactoryFor(target: Target): ConsoleFactory | undefined {
   if (target.console?.type !== 'redis') return undefined
@@ -232,7 +232,7 @@ function consoleFactoryFor(target: Target): ConsoleFactory | undefined {
 // the target states, including the per-mount ones; the parser is the
 // one the YAML door uses, so a case runs under exactly what a
 // deployment would write. Only the openers that consult it may declare
-// one (main.ts refuses it on any other resource), the same way the
+// one (main.ts refuses it on any other VFS), the same way the
 // console block rides ram alone: an unwired opener would run the target
 // unbound and it would read as covered.
 /**
@@ -271,8 +271,8 @@ function permissionOptions(target: Target): {
 }
 
 async function openRam(target: Target): Promise<Open> {
-  const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}
-  const built: Record<string, RAMResource> = {}
+  const mounts: Record<string, RAMVFS | [RAMVFS, MountMode]> = {}
+  const built: Record<string, RAMVFS> = {}
   for (const m of target.mounts) {
     // alias_of gives two prefixes one store: the shape that made
     // cross-mount mv copy an object onto itself and then unlink the
@@ -281,14 +281,10 @@ async function openRam(target: Target): Promise<Open> {
     if (m.alias_of !== undefined && existing === undefined) {
       throw new Error(`alias_of names no built mount: ${m.alias_of}`)
     }
-    const resource = existing ?? new RAMResource()
-    built[m.path] = resource
+    const vfs = existing ?? new RAMVFS()
+    built[m.path] = vfs
     mounts[m.path] =
-      m.mode === 'read'
-        ? [resource, MountMode.READ]
-        : m.mode === 'exec'
-          ? [resource, MountMode.EXEC]
-          : resource
+      m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
   }
   const secretsEnv = target.secrets !== undefined ? buildSecretsEnv(target.secrets) : null
   const consoleFactory = consoleFactoryFor(target)
@@ -309,12 +305,12 @@ async function openRam(target: Target): Promise<Open> {
 
 async function openDisk(target: Target): Promise<Open> {
   const roots: string[] = []
-  const mounts: Record<string, DiskResource | [DiskResource, MountMode]> = {}
+  const mounts: Record<string, DiskVFS | [DiskVFS, MountMode]> = {}
   for (const m of target.mounts) {
     const root = mkdtempSync(join(tmpdir(), 'mirage-integ-disk-'))
     roots.push(root)
-    const resource = new DiskResource({ root })
-    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+    const vfs = new DiskVFS({ root })
+    mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE, ...permissionOptions(target) })
   installLocalClis(ws, target)
@@ -327,10 +323,10 @@ async function openDisk(target: Target): Promise<Open> {
 
 async function openRedis(target: Target): Promise<Open> {
   const id = runId()
-  const mounts: Record<string, RedisResource> = {}
+  const mounts: Record<string, RedisVFS> = {}
   for (const m of target.mounts) {
     const safe = m.path.replace(/\/+/g, '-').replace(/^-|-$/g, '') || 'root'
-    mounts[m.path] = new RedisResource({ url: REDIS_URL, keyPrefix: `mirage-integ-${id}-${safe}` })
+    mounts[m.path] = new RedisVFS({ url: REDIS_URL, keyPrefix: `mirage-integ-${id}-${safe}` })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
@@ -338,9 +334,9 @@ async function openRedis(target: Target): Promise<Open> {
 
 async function openOpfs(target: Target): Promise<Open> {
   const restoreNav = installFakeNavigator(() => makeMockRoot())
-  const mounts: Record<string, OPFSResource> = {}
+  const mounts: Record<string, OPFSVFS> = {}
   target.mounts.forEach((m, i) => {
-    mounts[m.path] = i === 0 ? new OPFSResource() : new OPFSResource({ root: `xm${String(i)}` })
+    mounts[m.path] = i === 0 ? new OPFSVFS() : new OPFSVFS({ root: `xm${String(i)}` })
   })
   const ws = new BrowserWorkspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
@@ -355,9 +351,9 @@ async function openGridfs(target: Target, options?: OpenOptions): Promise<Open> 
   const uri = MONGODB_URI
   const database = `mirage_integ_${id}`
   const build = (): MountMap => {
-    const mounts: Record<string, GridFSResource> = {}
+    const mounts: Record<string, GridFSVFS> = {}
     for (const m of target.mounts) {
-      mounts[m.path] = new GridFSResource({
+      mounts[m.path] = new GridFSVFS({
         uri,
         database,
         bucket: String(m.bucket),
@@ -392,7 +388,7 @@ async function openDatabricksVolume(target: Target): Promise<Open> {
   const endpoint = server.endpoint
   const id = runId()
   const token = `integ-${id}`
-  const mounts: Record<string, DatabricksVolumeResource> = {}
+  const mounts: Record<string, DatabricksVolumeVFS> = {}
   for (const m of target.mounts) {
     const volume = `mirage-integ-${id}-${String(m.volume)}`
     const rootPath = m.prefix ?? '/'
@@ -402,7 +398,7 @@ async function openDatabricksVolume(target: Target): Promise<Open> {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!created.ok) throw new Error(`databricks mkdir root failed: ${String(created.status)}`)
-    mounts[m.path] = await DatabricksVolumeResource.create({
+    mounts[m.path] = await DatabricksVolumeVFS.create({
       catalog: 'main',
       schema: 'default',
       volume,
@@ -420,11 +416,7 @@ async function openDatabricksVolume(target: Target): Promise<Open> {
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
-function objectStorageResource(
-  name: string,
-  bucket: string,
-  keyPrefix: string | undefined,
-): S3Resource {
+function objectStorageVfs(name: string, bucket: string, keyPrefix: string | undefined): S3VFS {
   if (S3_ENDPOINT === undefined) throw new Error('s3 target requires S3_ENDPOINT')
   const common = {
     bucket,
@@ -434,24 +426,24 @@ function objectStorageResource(
     secretAccessKey: S3_SECRET,
     ...(keyPrefix !== undefined ? { keyPrefix } : {}),
   }
-  if (name === 's3') return new S3Resource({ ...common, forcePathStyle: true })
-  if (name === 'aliyun') return new AliyunResource({ ...common, forcePathStyle: true })
-  if (name === 'backblaze') return new BackblazeResource({ ...common, forcePathStyle: true })
-  if (name === 'ceph') return new CephResource(common)
+  if (name === 's3') return new S3VFS({ ...common, forcePathStyle: true })
+  if (name === 'aliyun') return new AliyunVFS({ ...common, forcePathStyle: true })
+  if (name === 'backblaze') return new BackblazeVFS({ ...common, forcePathStyle: true })
+  if (name === 'ceph') return new CephVFS(common)
   if (name === 'digitalocean') {
-    return new DigitalOceanResource({ ...common, forcePathStyle: true })
+    return new DigitalOceanVFS({ ...common, forcePathStyle: true })
   }
-  if (name === 'gcs') return new GCSResource({ ...common, forcePathStyle: true })
-  if (name === 'minio') return new MinIOResource(common)
-  if (name === 'oci') return new OCIResource({ ...common, namespace: 'integ' })
-  if (name === 'qingstor') return new QingStorResource({ ...common, forcePathStyle: true })
-  if (name === 'r2') return new R2Resource({ ...common, forcePathStyle: true })
-  if (name === 'scaleway') return new ScalewayResource({ ...common, forcePathStyle: true })
-  if (name === 'seaweedfs') return new SeaweedFSResource(common)
-  if (name === 'supabase') return new SupabaseResource(common)
-  if (name === 'tencent') return new TencentResource({ ...common, forcePathStyle: true })
-  if (name === 'wasabi') return new WasabiResource({ ...common, forcePathStyle: true })
-  throw new Error(`unknown object storage resource: ${name}`)
+  if (name === 'gcs') return new GCSVFS({ ...common, forcePathStyle: true })
+  if (name === 'minio') return new MinIOVFS(common)
+  if (name === 'oci') return new OCIVFS({ ...common, namespace: 'integ' })
+  if (name === 'qingstor') return new QingStorVFS({ ...common, forcePathStyle: true })
+  if (name === 'r2') return new R2VFS({ ...common, forcePathStyle: true })
+  if (name === 'scaleway') return new ScalewayVFS({ ...common, forcePathStyle: true })
+  if (name === 'seaweedfs') return new SeaweedFSVFS(common)
+  if (name === 'supabase') return new SupabaseVFS(common)
+  if (name === 'tencent') return new TencentVFS({ ...common, forcePathStyle: true })
+  if (name === 'wasabi') return new WasabiVFS({ ...common, forcePathStyle: true })
+  throw new Error(`unknown object storage VFS: ${name}`)
 }
 
 async function openS3(target: Target, options?: OpenOptions): Promise<Open> {
@@ -477,9 +469,9 @@ async function openS3(target: Target, options?: OpenOptions): Promise<Open> {
   const resolved: [string, Mount][] = []
   for (const m of target.mounts) resolved.push([await bucketFor(m), m])
   const build = (): MountMap => {
-    const mounts: Record<string, S3Resource> = {}
+    const mounts: Record<string, S3VFS> = {}
     for (const [bucket, m] of resolved) {
-      mounts[m.path] = objectStorageResource(m.resource, bucket, m.prefix)
+      mounts[m.path] = objectStorageVfs(m.vfs, bucket, m.prefix)
     }
     return mounts
   }
@@ -518,9 +510,9 @@ function nextcloudMountUrl(root: string | undefined): string {
 }
 
 async function openNextcloud(target: Target): Promise<Open> {
-  const mounts: Record<string, NextcloudResource> = {}
+  const mounts: Record<string, NextcloudVFS> = {}
   for (const mount of target.mounts) {
-    mounts[mount.path] = new NextcloudResource({
+    mounts[mount.path] = new NextcloudVFS({
       url: nextcloudMountUrl(mount.root),
       username: NEXTCLOUD_USERNAME,
       password: NEXTCLOUD_PASSWORD,
@@ -583,13 +575,13 @@ async function openEmail(target: Target): Promise<Open> {
     body: JSON.stringify(body),
   })
   if (!reset.ok) throw new Error(`mail reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, EmailResource | RAMResource> = {}
+  const mounts: Record<string, EmailVFS | RAMVFS> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
-    mounts[m.path] = new EmailResource({
+    mounts[m.path] = new EmailVFS({
       imapHost: host,
       imapPort: EMAIL_IMAP_PORT,
       smtpHost: host,
@@ -643,11 +635,11 @@ async function openHf(target: Target, options?: OpenOptions): Promise<Open> {
   // named after the run is not a name any real deployment would carry.
   const token = `integ-hf-${runId()}`
   const build = (): MountMap => {
-    const mounts: Record<string, HfBucketsResource> = {}
+    const mounts: Record<string, HfBucketsVFS> = {}
     for (const m of target.mounts) {
       // Buckets auto-create on first touch, exactly as a real one does for a
       // namespace the token owns.
-      mounts[m.path] = new HfBucketsResource({
+      mounts[m.path] = new HfBucketsVFS({
         bucket: `integ/${String(m.bucket)}`,
         token,
         endpoint,
@@ -672,20 +664,17 @@ async function openHfHub(target: Target): Promise<Open> {
   // repository and mounting never creates one, so the repositories the target
   // mounts have to exist before the mount is built. File CONTENT still arrives
   // the ordinary way, through each mount's own `fixture:` seed, which writes
-  // over the resource's commit path rather than behind it.
+  // over the VFS's commit path rather than behind it.
   const reset = await fetch(`${endpoint}/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tenants: [token], fixture: 'v1' }),
   })
   if (!reset.ok) throw new Error(`hf-hub /reset failed: ${String(reset.status)}`)
-  const mounts: Record<
-    string,
-    HfModelsResource | HfDatasetsResource | HfSpacesResource | RAMResource
-  > = {}
+  const mounts: Record<string, HfModelsVFS | HfDatasetsVFS | HfSpacesVFS | RAMVFS> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
     // A Hub mount NAMES a repository, so an absent one is a broken target
@@ -703,14 +692,14 @@ async function openHfHub(target: Target): Promise<Open> {
     // unknown name does not fail: it silently exercises the wrong endpoints
     // and reports the models implementation as the one under test.
     const kinds = {
-      hf_models: HfModelsResource,
-      hf_datasets: HfDatasetsResource,
-      hf_spaces: HfSpacesResource,
+      hf_models: HfModelsVFS,
+      hf_datasets: HfDatasetsVFS,
+      hf_spaces: HfSpacesVFS,
     }
-    const kind = kinds[m.resource as keyof typeof kinds] as
-      | (new (c: typeof config) => HfModelsResource | HfDatasetsResource | HfSpacesResource)
+    const kind = kinds[m.vfs as keyof typeof kinds] as
+      | (new (c: typeof config) => HfModelsVFS | HfDatasetsVFS | HfSpacesVFS)
       | undefined
-    if (kind === undefined) throw new Error(`hf-hub cannot mount ${m.resource}`)
+    if (kind === undefined) throw new Error(`hf-hub cannot mount ${m.vfs}`)
     mounts[m.path] = new kind(config)
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
@@ -793,7 +782,7 @@ async function openBox(target: Target): Promise<Open> {
   // which isolated runs only as far as a name collision.
   const token = `integ-box-${runId()}`
   const root = integRoot()
-  const mounts: Record<string, BoxResource> = {}
+  const mounts: Record<string, BoxVFS> = {}
   for (const m of target.mounts) {
     // Box is read-only through the workspace, so the harness tee-seeding
     // can't run; the fixture is uploaded over the Box API instead (the folder
@@ -823,7 +812,7 @@ async function openBox(target: Target): Promise<Open> {
       // listings must hide it and a direct stat must ENOENT.
       await boxCreateWebLink(endpoint, token, folderId, 'homepage', 'https://example.com/')
     }
-    mounts[m.path] = new BoxResource({
+    mounts[m.path] = new BoxVFS({
       accessToken: token,
       endpoint,
       rootFolderId: folderId,
@@ -850,10 +839,10 @@ async function openDropbox(target: Target, options?: OpenOptions): Promise<Open>
   if (endpoint === '') throw new Error('dropbox target requires DROPBOX_URL')
   const id = runId()
   const build = (): MountMap => {
-    const mounts: Record<string, DropboxResource> = {}
+    const mounts: Record<string, DropboxVFS> = {}
     for (const m of target.mounts) {
       const account = String(m.bucket ?? String(m.path).replace(/^\/+|\/+$/g, ''))
-      mounts[m.path] = new DropboxResource({
+      mounts[m.path] = new DropboxVFS({
         clientId: 'integ-client',
         clientSecret: 'integ-secret',
         refreshToken: `${id}-${account}`,
@@ -931,9 +920,9 @@ async function openOneDrive(target: Target, options?: OpenOptions): Promise<Open
   const base = graphBase()
   const token = `${runId()}-${target.id}`
   const build = (): MountMap => {
-    const mounts: Record<string, OneDriveResource> = {}
+    const mounts: Record<string, OneDriveVFS> = {}
     for (const mount of target.mounts) {
-      mounts[mount.path] = new OneDriveResource({
+      mounts[mount.path] = new OneDriveVFS({
         accessToken: token,
         graphBaseUrl: base,
         ...(mount.prefix !== undefined ? { keyPrefix: mount.prefix } : {}),
@@ -954,9 +943,9 @@ async function openSharePoint(target: Target, options?: OpenOptions): Promise<Op
     if (mount.prefix !== undefined) await makePrefix(base, token, drive, mount.prefix)
   }
   const build = (): MountMap => {
-    const mounts: Record<string, SharePointResource> = {}
+    const mounts: Record<string, SharePointVFS> = {}
     for (const mount of target.mounts) {
-      mounts[mount.path] = new SharePointResource({
+      mounts[mount.path] = new SharePointVFS({
         accessToken: token,
         graphBaseUrl: base,
         site: 'Main',
@@ -984,8 +973,8 @@ async function openNotion(target: Target): Promise<Open> {
   //
   // So the RUN separates the two hosts instead, riding the base URL as a
   // leading `/_run/<id>` segment. That is the only channel available here: the
-  // mount hands this URL to NotionResource and never sees the request, so a
-  // header or a `?_run=` query would have to be threaded through the resource.
+  // mount hands this URL to NotionVFS and never sees the request, so a
+  // header or a `?_run=` query would have to be threaded through the VFS.
   // Each host now gets its own SQLite file under the one shared token, and the
   // two can reset concurrently instead of taking turns.
   const token = NOTION_TOKEN
@@ -996,17 +985,17 @@ async function openNotion(target: Target): Promise<Open> {
     body: JSON.stringify({ tenants: [token] }),
   })
   if (!reset.ok) throw new Error(`notion /reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, NotionResource | RAMResource | [NotionResource, MountMode]> = {}
+  const mounts: Record<string, NotionVFS | RAMVFS | [NotionVFS, MountMode]> = {}
   for (const mount of target.mounts) {
-    if (mount.resource === 'ram') {
-      mounts[mount.path] = new RAMResource()
+    if (mount.vfs === 'ram') {
+      mounts[mount.path] = new RAMVFS()
       continue
     }
-    const resource = new NotionResource({
+    const vfs = new NotionVFS({
       apiKey: token,
       baseUrl: `${scoped}/v1`,
     })
-    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+    mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('ntn') === true) {
@@ -1049,10 +1038,10 @@ async function openLancedb(target: Target): Promise<Open> {
   const db = await lancedb.connect(uri)
   if (window) await db.createTable('wide', lancedbWideRows())
   else await db.createTable('animals', LANCEDB_ROWS as Record<string, unknown>[])
-  const mounts: Record<string, LanceDBResource | [LanceDBResource, MountMode]> = {}
+  const mounts: Record<string, LanceDBVFS | [LanceDBVFS, MountMode]> = {}
   for (const mount of target.mounts) {
-    const resource = window
-      ? new LanceDBResource({
+    const vfs = window
+      ? new LanceDBVFS({
           uri,
           table: 'wide',
           groupBy: ['label'],
@@ -1061,14 +1050,14 @@ async function openLancedb(target: Target): Promise<Open> {
           textColumn: 'name',
           maxRows: LANCEDB_WIDE_CAP,
         })
-      : new LanceDBResource({
+      : new LanceDBVFS({
           uri,
           groupBy: ['label', 'kind'],
           idColumn: 'id',
           titleColumn: 'name',
           textColumn: 'name',
         })
-    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+    mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
@@ -1124,10 +1113,10 @@ async function openQdrant(target: Target): Promise<Open> {
     await client.createPayloadIndex(collection, { field_name: field, field_schema: 'keyword' })
   }
   await new Promise((r) => setTimeout(r, 2000))
-  const mounts: Record<string, QdrantResource | [QdrantResource, MountMode]> = {}
+  const mounts: Record<string, QdrantVFS | [QdrantVFS, MountMode]> = {}
   for (const mount of target.mounts) {
-    const resource = window
-      ? new QdrantResource({
+    const vfs = window
+      ? new QdrantVFS({
           host,
           port,
           collection,
@@ -1136,7 +1125,7 @@ async function openQdrant(target: Target): Promise<Open> {
           textField: 'name',
           maxRows: QDRANT_WIDE_CAP,
         })
-      : new QdrantResource({
+      : new QdrantVFS({
           host,
           port,
           collection,
@@ -1146,7 +1135,7 @@ async function openQdrant(target: Target): Promise<Open> {
           blobField: 'image_bytes',
           blobExt: 'png',
         })
-    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+    mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
@@ -1206,10 +1195,10 @@ async function openChroma(target: Target): Promise<Open> {
   const port = Number.parseInt(process.env.CHROMA_PORT ?? '8000', 10)
   const collectionName = `mirage-integ-${runId()}`
   await seedChroma(host, port, collectionName)
-  const mounts: Record<string, ChromaResource | [ChromaResource, MountMode]> = {}
+  const mounts: Record<string, ChromaVFS | [ChromaVFS, MountMode]> = {}
   for (const mount of target.mounts) {
-    const resource = new ChromaResource({ host, port, collectionName })
-    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+    const vfs = new ChromaVFS({ host, port, collectionName })
+    mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
@@ -1260,17 +1249,17 @@ async function openMongodb(target: Target): Promise<Open> {
   const uri = process.env.MONGODB_URI
   if (uri === undefined) throw new Error('mongodb target requires MONGODB_URI')
   await seedMongodb(uri)
-  const resources: MongoDBResource[] = []
-  const mounts: Record<string, MongoDBResource | [MongoDBResource, MountMode]> = {}
+  const created: MongoDBVFS[] = []
+  const mounts: Record<string, MongoDBVFS | [MongoDBVFS, MountMode]> = {}
   for (const mount of target.mounts) {
-    const resource = new MongoDBResource({ uri, databases: [MONGODB_DB] })
-    resources.push(resource)
-    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+    const vfs = new MongoDBVFS({ uri, databases: [MONGODB_DB] })
+    created.push(vfs)
+    mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
     await ws.close()
-    for (const resource of resources) await resource.close()
+    for (const vfs of created) await vfs.close()
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
@@ -1330,17 +1319,17 @@ async function openPostgres(target: Target): Promise<Open> {
   const dsn = process.env.POSTGRES_DSN
   if (dsn === undefined) throw new Error('postgres target requires POSTGRES_DSN')
   await seedPostgres(dsn)
-  const resources: PostgresResource[] = []
-  const mounts: Record<string, PostgresResource | [PostgresResource, MountMode]> = {}
+  const created: PostgresVFS[] = []
+  const mounts: Record<string, PostgresVFS | [PostgresVFS, MountMode]> = {}
   for (const mount of target.mounts) {
-    const resource = new PostgresResource({ dsn, maxReadRows: 200 })
-    resources.push(resource)
-    mounts[mount.path] = mount.mode === 'read' ? [resource, MountMode.READ] : resource
+    const vfs = new PostgresVFS({ dsn, maxReadRows: 200 })
+    created.push(vfs)
+    mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
     await ws.close()
-    for (const resource of resources) await resource.close()
+    for (const vfs of created) await vfs.close()
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
@@ -1356,9 +1345,9 @@ async function openMem0(target: Target): Promise<Open> {
   // Any future in-process fake belongs behind the same lazy import.
   const { mem0Fake } = await import('../../../server/mem0/fake.ts')
   const server = await startKitFake(mem0Fake)
-  const mounts: Record<string, Mem0Resource> = {}
+  const mounts: Record<string, Mem0VFS> = {}
   for (const mount of target.mounts) {
-    mounts[mount.path] = new Mem0Resource({
+    mounts[mount.path] = new Mem0VFS({
       apiKey: 'integ-key',
       host: server.endpoint,
       userId: 'integ-user',
@@ -1374,7 +1363,7 @@ async function openMem0(target: Target): Promise<Open> {
 }
 
 async function adminExec(ws: Workspace, command: string): Promise<void> {
-  const result = await ws.execute(command)
+  const result = await ws.shell(command)
   if (result.exitCode !== 0) {
     throw new Error(`admin command failed: ${command}: ${new TextDecoder().decode(result.stderr)}`)
   }
@@ -1385,15 +1374,15 @@ async function openSsh(target: Target, options?: OpenOptions): Promise<Open> {
   if (!host) throw new Error('ssh target requires SSH_HOST')
   const port = Number(process.env.SSH_PORT ?? '22')
   const base = `mirage-integ-${runId()}`
-  const adminResource = new SSHResource({ host, port, username: 'integ' })
-  const admin = new Workspace({ '/admin': adminResource }, { mode: MountMode.WRITE })
+  const adminVfs = new SSHVFS({ host, port, username: 'integ' })
+  const admin = new Workspace({ '/admin': adminVfs }, { mode: MountMode.WRITE })
   const paths = target.mounts.map((m) => `/admin/${base}/${String(m.root)}`).join(' ')
   await adminExec(admin, `mkdir -p ${paths}`)
   // A server-side symlink in the /links mount: mirage's shell ln -s only
   // makes namespace links, so the battery needs one created over SFTP to
   // pin that ssh stat follows links (target size, not link-text length).
   // Dangling until the fixture seeds poem.txt.
-  const sftp = await adminResource.accessor.sftp()
+  const sftp = await adminVfs.accessor.sftp()
   for (const m of target.mounts) {
     if (m.root !== 'links') continue
     await new Promise<void>((resolveFn, rejectFn) => {
@@ -1404,9 +1393,9 @@ async function openSsh(target: Target, options?: OpenOptions): Promise<Open> {
     })
   }
   const build = (): MountMap => {
-    const mounts: Record<string, SSHResource> = {}
+    const mounts: Record<string, SSHVFS> = {}
     for (const m of target.mounts) {
-      mounts[m.path] = new SSHResource({
+      mounts[m.path] = new SSHVFS({
         host,
         port,
         username: 'integ',
@@ -1559,20 +1548,20 @@ async function seedGwsCalendar(base: string, entries: CalendarEntry[]): Promise<
   }
 }
 
-function gwsNativeResource(
-  resource: string,
+function gwsNativeVfs(
+  vfs: string,
   base: string,
-): GDocsResource | GSheetsResource | GSlidesResource | GmailResource | GCalResource {
+): GDocsVFS | GSheetsVFS | GSlidesVFS | GmailVFS | GCalVFS {
   // apiBase points the backend at the fake server through the same
   // config field a real embedder uses; nothing is monkey-patched.
   const config = { clientId: 'integ', clientSecret: 'integ', refreshToken: 'integ', apiBase: base }
-  if (resource === 'gdocs') return new GDocsResource(config)
-  if (resource === 'gsheets') return new GSheetsResource(config)
-  if (resource === 'gmail') return new GmailResource(config)
+  if (vfs === 'gdocs') return new GDocsVFS(config)
+  if (vfs === 'gsheets') return new GSheetsVFS(config)
+  if (vfs === 'gmail') return new GmailVFS(config)
   // today is pinned so the rolling window is the same on both hosts and
   // lands on the seeded events.
-  if (resource === 'gcal') return new GCalResource({ ...config, today: '2026-02-11' })
-  return new GSlidesResource(config)
+  if (vfs === 'gcal') return new GCalVFS({ ...config, today: '2026-02-11' })
+  return new GSlidesVFS(config)
 }
 
 async function openGws(target: Target): Promise<Open> {
@@ -1610,19 +1599,17 @@ async function openGws(target: Target): Promise<Open> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(reset),
   })
-  const mounts: Record<
-    string,
-    GDriveResource | GDocsResource | GSheetsResource | GSlidesResource | GmailResource | RAMResource
-  > = {}
+  const mounts: Record<string, GDriveVFS | GDocsVFS | GSheetsVFS | GSlidesVFS | GmailVFS | RAMVFS> =
+    {}
   const driveIds: Record<string, string> = {}
   const folderIds: Record<string, string> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
-    if (m.resource !== 'gdrive') {
-      mounts[m.path] = gwsNativeResource(m.resource, base)
+    if (m.vfs !== 'gdrive') {
+      mounts[m.path] = gwsNativeVfs(m.vfs, base)
       continue
     }
     // A mount may live inside a Shared Drive: the drive is created once
@@ -1640,7 +1627,7 @@ async function openGws(target: Target): Promise<Open> {
     for (const segment of String(m.root).split('/')) {
       parent = await gwsFolder(base, segment, parent)
     }
-    mounts[m.path] = new GDriveResource({
+    mounts[m.path] = new GDriveVFS({
       clientId: 'integ',
       clientSecret: 'integ',
       refreshToken: 'integ',
@@ -1691,13 +1678,13 @@ async function openSlack(target: Target): Promise<Open> {
     body: JSON.stringify({ tenants: [workspace] }),
   })
   if (!reset.ok) throw new Error(`slack /reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, SlackResource | RAMResource> = {}
+  const mounts: Record<string, SlackVFS | RAMVFS> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
-    mounts[m.path] = new SlackResource({
+    mounts[m.path] = new SlackVFS({
       token: `xoxb-${workspace}`,
       searchToken: `xoxp-${workspace}`,
       baseUrl: `${base}/api`,
@@ -1723,7 +1710,7 @@ const GH_CLI_REPO = 'integ/repo-cli'
 
 // The fake api.github.com server (integ/server/github) is a kit fake, external
 // and shared across both hosts, mirroring the fake Slack server. It used to
-// have to be out of process for the python host, whose GitHubResource
+// have to be out of process for the python host, whose GitHubVFS
 // fetched the repo tree with a blocking urlopen from its constructor; that
 // fetch is awaited now, so being shared is the only reason left.
 async function openGitHub(target: Target): Promise<Open> {
@@ -1736,20 +1723,20 @@ async function openGitHub(target: Target): Promise<Open> {
     const reset = await fetch(`${base}/reset`, { method: 'POST' })
     if (!reset.ok) throw new Error(`github /reset failed: ${String(reset.status)}`)
   }
-  const mounts: Record<string, GitHubResource | RAMResource | [GitHubResource, MountMode]> = {}
+  const mounts: Record<string, GitHubVFS | RAMVFS | [GitHubVFS, MountMode]> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
     const [owner, repo] = String(m.repo).split('/')
-    const resource = await GitHubResource.create({
+    const vfs = await GitHubVFS.create({
       token: 'ghp-integ',
       owner: owner ?? '',
       repo: repo ?? '',
       baseUrl: base,
     })
-    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+    mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   if (target.clis?.includes('gh') === true) {
@@ -1771,9 +1758,9 @@ async function openDify(target: Target): Promise<Open> {
   // Prisma client at import time. See the eslint rule in integ/eslint.config.js.
   const { difyFake } = await import('../../../server/dify/fake.ts')
   const server = await startKitFake(difyFake)
-  const mounts: Record<string, DifyResource> = {}
+  const mounts: Record<string, DifyVFS> = {}
   for (const m of target.mounts) {
-    mounts[m.path] = new DifyResource({
+    mounts[m.path] = new DifyVFS({
       apiKey: 'integ-key',
       baseUrl: server.endpoint,
       datasetId: target.dataset ?? 'kb-7f3a',
@@ -1795,13 +1782,13 @@ async function openTrello(target: Target): Promise<Open> {
   // again -- and before the other host's run, which shares this server.
   const reset = await fetch(`${endpoint}/reset`, { method: 'POST' })
   if (!reset.ok) throw new Error(`trello /reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, TrelloResource | RAMResource> = {}
+  const mounts: Record<string, TrelloVFS | RAMVFS> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
-    mounts[m.path] = new TrelloResource({
+    mounts[m.path] = new TrelloVFS({
       apiKey: 'integ-key',
       apiToken: 'integ-token',
       baseUrl: endpoint,
@@ -1818,13 +1805,13 @@ async function openDiscord(target: Target): Promise<Open> {
   // rolled back to the fixture before the write cases run again.
   const reset = await fetch(`${endpoint}/reset`, { method: 'POST' })
   if (!reset.ok) throw new Error(`discord /reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, DiscordResource | RAMResource> = {}
+  const mounts: Record<string, DiscordVFS | RAMVFS> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
-    mounts[m.path] = new DiscordResource({
+    mounts[m.path] = new DiscordVFS({
       token: 'integ-bot-token',
       baseUrl: `${endpoint}/api/v10`,
     })
@@ -1853,13 +1840,13 @@ async function openLinear(target: Target): Promise<Open> {
   const resetUrl = `${origin}/reset`
   const reset = await fetch(resetUrl, { method: 'POST' })
   if (!reset.ok) throw new Error(`linear /reset failed: ${String(reset.status)}`)
-  const mounts: Record<string, LinearResource | RAMResource> = {}
+  const mounts: Record<string, LinearVFS | RAMVFS> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
-    mounts[m.path] = new LinearResource({
+    mounts[m.path] = new LinearVFS({
       apiKey: 'integ-key',
       baseUrl: graphql,
     })
@@ -1876,13 +1863,13 @@ async function openLinear(target: Target): Promise<Open> {
 async function openJaeger(target: Target): Promise<Open> {
   const host = process.env.JAEGER_URL
   if (!host) throw new Error('jaeger target requires JAEGER_URL')
-  const mounts: Record<string, JaegerResource | RAMResource> = {}
+  const mounts: Record<string, JaegerVFS | RAMVFS> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
-    mounts[m.path] = new JaegerResource({ host })
+    mounts[m.path] = new JaegerVFS({ host })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
@@ -1894,13 +1881,13 @@ async function openJaeger(target: Target): Promise<Open> {
 async function openLangfuse(target: Target): Promise<Open> {
   const host = process.env.LANGFUSE_URL
   if (!host) throw new Error('langfuse target requires LANGFUSE_URL')
-  const mounts: Record<string, LangfuseResource | RAMResource> = {}
+  const mounts: Record<string, LangfuseVFS | RAMVFS> = {}
   for (const m of target.mounts) {
-    if (m.resource === 'ram') {
-      mounts[m.path] = new RAMResource()
+    if (m.vfs === 'ram') {
+      mounts[m.path] = new RAMVFS()
       continue
     }
-    mounts[m.path] = new LangfuseResource({
+    mounts[m.path] = new LangfuseVFS({
       publicKey: process.env.LANGFUSE_PUBLIC_KEY ?? 'pk-lf-mirage-integ',
       secretKey: process.env.LANGFUSE_SECRET_KEY ?? 'sk-lf-mirage-integ',
       host,
@@ -1916,12 +1903,12 @@ async function openLangfuse(target: Target): Promise<Open> {
 // targets ever need. github, notion and hf_buckets are absent on purpose:
 // github needs a live repo at construct, notion an OAuth provider, and
 // hf_buckets validates the bucket id.
-const ARG_ERROR_RESOURCES: Record<string, () => Resource> = {
+const ARG_ERROR_VFS: Record<string, () => VFS> = {
   databricks: () =>
-    new DatabricksVolumeResource({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
-  discord: () => new DiscordResource({ token: 'x' }),
+    new DatabricksVolumeVFS({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
+  discord: () => new DiscordVFS({ token: 'x' }),
   email: () =>
-    new EmailResource({
+    new EmailVFS({
       imapHost: 'h',
       imapPort: 993,
       smtpHost: 'h',
@@ -1931,18 +1918,18 @@ const ARG_ERROR_RESOURCES: Record<string, () => Resource> = {
       useSsl: true,
       maxMessages: 200,
     }),
-  gdocs: () => new GDocsResource({ clientId: 'c', refreshToken: 'r' }),
-  gdrive: () => new GDriveResource({ clientId: 'c', refreshToken: 'r' }),
-  gmail: () => new GmailResource({ clientId: 'c', refreshToken: 'r' }),
-  gsheets: () => new GSheetsResource({ clientId: 'c', refreshToken: 'r' }),
-  gslides: () => new GSlidesResource({ clientId: 'c', refreshToken: 'r' }),
-  langfuse: () => new LangfuseResource({ publicKey: 'p', secretKey: 's' }),
-  linear: () => new LinearResource({ apiKey: 'k' }),
-  mem0: () => new Mem0Resource({ apiKey: 'k', userId: 'u' }),
-  onedrive: () => new OneDriveResource({ accessToken: 't' }),
-  sharepoint: () => new SharePointResource({ accessToken: 't' }),
-  slack: () => new SlackResource({ token: 'x' }),
-  trello: () => new TrelloResource({ apiKey: 'k', apiToken: 't' }),
+  gdocs: () => new GDocsVFS({ clientId: 'c', refreshToken: 'r' }),
+  gdrive: () => new GDriveVFS({ clientId: 'c', refreshToken: 'r' }),
+  gmail: () => new GmailVFS({ clientId: 'c', refreshToken: 'r' }),
+  gsheets: () => new GSheetsVFS({ clientId: 'c', refreshToken: 'r' }),
+  gslides: () => new GSlidesVFS({ clientId: 'c', refreshToken: 'r' }),
+  langfuse: () => new LangfuseVFS({ publicKey: 'p', secretKey: 's' }),
+  linear: () => new LinearVFS({ apiKey: 'k' }),
+  mem0: () => new Mem0VFS({ apiKey: 'k', userId: 'u' }),
+  onedrive: () => new OneDriveVFS({ accessToken: 't' }),
+  sharepoint: () => new SharePointVFS({ accessToken: 't' }),
+  slack: () => new SlackVFS({ token: 'x' }),
+  trello: () => new TrelloVFS({ apiKey: 'k', apiToken: 't' }),
 }
 
 // The fixture web server curl and wget fetch from. Exported through
@@ -1956,10 +1943,10 @@ async function openHttp(target: Target): Promise<Open> {
   const { httpFake } = await import('../../../server/http/fake.ts')
   const server = await startKitFake(httpFake)
   process.env.HTTP_ENDPOINT = server.endpoint
-  const mounts: Record<string, RAMResource | [RAMResource, MountMode]> = {}
+  const mounts: Record<string, RAMVFS | [RAMVFS, MountMode]> = {}
   for (const m of target.mounts) {
-    const resource = new RAMResource()
-    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+    const vfs = new RAMVFS()
+    mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   const cleanup = async (): Promise<void> => {
@@ -1971,10 +1958,10 @@ async function openHttp(target: Target): Promise<Open> {
 }
 
 async function openArgError(target: Target): Promise<Open> {
-  const mounts: Record<string, Resource | [Resource, MountMode]> = {}
+  const mounts: Record<string, VFS | [VFS, MountMode]> = {}
   for (const m of target.mounts) {
-    const resource = ARG_ERROR_RESOURCES[m.backend]()
-    mounts[m.path] = m.mode === 'read' ? [resource, MountMode.READ] : resource
+    const vfs = ARG_ERROR_VFS[m.backend]()
+    mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
@@ -2035,18 +2022,18 @@ export const ADAPTERS: Record<string, (target: Target, options?: OpenOptions) =>
  */
 export async function openConsistency(
   target: Target,
-  consistency: ConsistencyPolicy,
+  read: ReadSpec,
 ): Promise<OpenConsistency | null> {
-  const adapter = ADAPTERS[target.mounts[0].resource]
+  const adapter = ADAPTERS[target.mounts[0].vfs]
   if (adapter === undefined) return null
-  const opened = await adapter(target, { consistency })
+  const opened = await adapter(target, { read })
   if (opened.shadow === undefined) {
     await opened.cleanup()
     return null
   }
   const shadow = opened.shadow()
   const mutate = async (path: string, content: Uint8Array): Promise<void> => {
-    const result = await shadow.execute(`tee ${path} > /dev/null`, { stdin: content })
+    const result = await shadow.shell(`tee ${path} > /dev/null`, { stdin: content })
     if (result.exitCode !== 0) {
       throw new Error(new TextDecoder().decode(result.stderr))
     }

@@ -104,12 +104,12 @@ def test_job_streams_become_blob_references_and_empty_becomes_text():
     assert job[JobKey.STDERR] == ""
 
 
-def test_mount_resource_state_is_rewritten_not_passed_through():
+def test_mount_vfs_state_is_rewritten_not_passed_through():
     state = _state()
     state[StateKey.MOUNTS] = [{
         MountKey.INDEX: 0,
         MountKey.PREFIX: "/m",
-        MountKey.RESOURCE_STATE: {
+        MountKey.VFS_STATE: {
             "type": "ram",
             "files": {
                 "/a.txt": b"hi"
@@ -119,5 +119,5 @@ def test_mount_resource_state_is_rewritten_not_passed_through():
 
     manifest, blobs = split_manifest_and_blobs(state)
 
-    files = manifest[StateKey.MOUNTS][0][MountKey.RESOURCE_STATE]["files"]
+    files = manifest[StateKey.MOUNTS][0][MountKey.VFS_STATE]["files"]
     assert blobs[files["/a.txt"][BLOB_REF_KEY]] == b"hi"

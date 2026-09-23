@@ -19,8 +19,8 @@ import pytest
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.search import narrow_paths
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 def make_accessor(root_path: str = "/") -> DropboxAccessor:
@@ -32,11 +32,11 @@ def make_accessor(root_path: str = "/") -> DropboxAccessor:
 
 
 def mount_root() -> PathSpec:
-    return PathSpec(resource_path="", virtual="/data", directory="/data")
+    return PathSpec(vfs_path="", virtual="/data", directory="/data")
 
 
 def subdir() -> PathSpec:
-    return PathSpec(resource_path="docs",
+    return PathSpec(vfs_path="docs",
                     virtual="/data/docs",
                     directory="/data/docs")
 
@@ -51,7 +51,7 @@ async def test_narrow_maps_api_paths_to_mount_paths():
     assert spy.await_args.kwargs["path"] == ""
     assert out is not None
     assert [p.virtual for p in out] == ["/data/Sub/Y.txt", "/data/x.txt"]
-    assert out[1].resource_path == "x.txt"
+    assert out[1].vfs_path == "x.txt"
     assert out[1].resolved
 
 
@@ -96,7 +96,7 @@ async def test_narrow_sorts_results_in_walk_order():
 
 @pytest.mark.asyncio
 async def test_narrow_rebases_raw_onto_the_scope_spelling():
-    scope = PathSpec(resource_path="",
+    scope = PathSpec(vfs_path="",
                      virtual="/data",
                      directory="/data",
                      raw_path=".")

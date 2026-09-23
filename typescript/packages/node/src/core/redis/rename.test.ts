@@ -15,7 +15,7 @@
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
-import { RedisStore } from '../../resource/redis/store.ts'
+import { RedisStore } from '../../vfs/redis/store.ts'
 import { rename } from '@struktoai/mirage-core/core/redis/rename'
 
 const REDIS_URL = process.env.REDIS_URL

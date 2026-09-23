@@ -20,9 +20,9 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.readdir import readdir
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 def make_accessor(root_path: str = "/") -> DropboxAccessor:
@@ -59,9 +59,9 @@ async def test_readdir_root_marks_folders_with_slash(index):
     with patch("mirage.core.dropbox.readdir.list_folder",
                new_callable=AsyncMock,
                return_value=files) as fake:
-        out = await readdir(
-            make_accessor(),
-            PathSpec(resource_path="", virtual="/", directory="/"), index)
+        out = await readdir(make_accessor(),
+                            PathSpec(vfs_path="", virtual="/", directory="/"),
+                            index)
     assert out == ["/docs/", "/notes.txt"]
     assert fake.await_args.args[1] == ""
 
@@ -90,12 +90,12 @@ async def test_readdir_scopes_under_subfolder_root(index):
     accessor = make_accessor("/Team/data")
     with patch("mirage.core.dropbox.readdir.list_folder",
                side_effect=fake_list):
-        root = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+        root = await readdir(accessor,
+                             PathSpec(vfs_path="", virtual="/", directory="/"),
+                             index)
         nested = await readdir(
             accessor,
-            PathSpec(resource_path="docs", virtual="/docs", directory="/docs"),
+            PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
             index)
     assert root == ["/docs/"]
     assert nested == ["/docs/note.md"]
@@ -117,7 +117,7 @@ async def test_readdir_honors_mount_prefix(index):
             make_accessor(),
             PathSpec(virtual="/dropbox",
                      directory="/dropbox",
-                     resource_path=mount_key("/dropbox", "/dropbox")), index)
+                     vfs_path=mount_key("/dropbox", "/dropbox")), index)
     assert out == ["/dropbox/a.txt"]
 
 
@@ -142,7 +142,7 @@ async def test_readdir_maps_409_to_enoent(index):
             with pytest.raises(FileNotFoundError):
                 await readdir(
                     make_accessor(),
-                    PathSpec(resource_path="missing",
+                    PathSpec(vfs_path="missing",
                              virtual="/missing",
                              directory="/missing"), index)
 
@@ -160,7 +160,7 @@ async def test_readdir_under_a_file_is_enotdir(index):
             with pytest.raises(NotADirectoryError):
                 await readdir(
                     make_accessor(),
-                    PathSpec(resource_path="a.txt/x",
+                    PathSpec(vfs_path="a.txt/x",
                              virtual="/a.txt/x",
                              directory="/a.txt/x"), index)
 
@@ -182,7 +182,7 @@ async def test_readdir_on_a_file_is_enotdir_without_walking(index):
             with pytest.raises(NotADirectoryError):
                 await readdir(
                     make_accessor(),
-                    PathSpec(resource_path="docs/a.txt",
+                    PathSpec(vfs_path="docs/a.txt",
                              virtual="/docs/a.txt",
                              directory="/docs/a.txt"), index)
     assert seen == ["/docs/a.txt"]

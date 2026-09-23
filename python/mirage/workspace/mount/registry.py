@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 from typing import Protocol
 from weakref import WeakValueDictionary
 
@@ -22,13 +23,13 @@ from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.context import effective_path_mode, strongest_mode_under
 from mirage.ops.config import OpsMount
 from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
-from mirage.resource.base import BaseResource
-from mirage.resource.dev import DevResource
 from mirage.runtime.base import Runtime
-from mirage.runtime.table import VFSRuntime
-from mirage.types import ConsistencyPolicy, Limit, MountMode, PathSpec
+from mirage.runtime.table import WorkspaceRuntime
+from mirage.types import Limit, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.errors import NoMountError, no_mount
 from mirage.utils.path import owner_prefix
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.dev import DevVFS
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
 
@@ -36,7 +37,7 @@ DEV_PREFIX = "/dev/"
 
 
 class ReadReconciler(Protocol):
-    """The one thing the registry needs from a reconciler.
+    """What the registry needs from a reconciler.
 
     Depending on this local interface (not the concrete ``Reconciler``)
     keeps the dependency pointing down: ``reconcile`` imports the mount
@@ -44,6 +45,9 @@ class ReadReconciler(Protocol):
     """
 
     async def reconcile_read(self, mount: MountEntry, path: str) -> None:
+        ...
+
+    async def may_serve_cached(self, mount: MountEntry, path: str) -> bool:
         ...
 
 
@@ -67,13 +71,13 @@ class MountRegistry:
 
     Given a virtual path like "/s3-prod/data/file.json",
     resolves to the mount at "/s3-prod/" and returns the
-    stripped resource path "/data/file.json".
+    stripped VFS path "/data/file.json".
     """
 
     def __init__(self) -> None:
         self._mounts: list[MountEntry] = []
-        self.retiring_resources: dict[int, asyncio.Task[None]] = {}
-        self.retired_resources: WeakValueDictionary[int, BaseResource] = (
+        self.retiring_mounts: dict[int, asyncio.Task[None]] = {}
+        self.retired_mounts: WeakValueDictionary[int, BaseVFS] = (
             WeakValueDictionary())
         self._root: MountEntry | None = None
         # Workspace-level command -> runtime bindings (first listed
@@ -82,10 +86,10 @@ class MountRegistry:
         # bound runtime only for commands that have one, so it cannot
         # tell python3 from grep.
         self.runtime_bindings: dict[str, Runtime] = {}
-        # The world's vfs runtime, set by Workspace after construction.
+        # The world's workspace runtime, set by Workspace after construction.
         # Catch-all when its captures are empty; explicit captures make
         # unclaimed commands an admission failure (126).
-        self.vfs_runtime: VFSRuntime | None = None
+        self.workspace_runtime: WorkspaceRuntime | None = None
         # The ordered runtime world, set by Workspace after
         # construction and refreshed on add(). The CLI script arm
         # selects an interpreter from it (a runtime: pin or the
@@ -119,10 +123,15 @@ class MountRegistry:
         # that already reaches every dispatch site, same as the
         # runtime fields above.
         self.clis = CLIRegistry()
-        self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
+        # The workspace-level default a mount overrides, kept so the
+        # runtime door (`Workspace.add_mount`) has something to resolve
+        # an unset policy against.
+        self._default_read: ReadSpec = ReadSpec()
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None
-        self.mount(DEV_PREFIX, DevResource(), MountMode.WRITE)
+        # Explicit at the construction site: /dev does not cache reads,
+        # so its policy can only ever be bounded.
+        self.mount(DEV_PREFIX, DevVFS(), MountMode.WRITE, ReadSpec())
 
     async def invalidate_after_external(self) -> None:
         """Refetch cached data after native code may have changed files."""
@@ -130,13 +139,18 @@ class MountRegistry:
             await self._file_cache.clear()
         for mount in self.mounts():
             if mount.cache_manager is not None:
-                await mount.cache_manager.clear_index(mount.resource.index)
+                await mount.cache_manager.clear_index(mount.vfs.index)
             else:
                 async with mount.use():
-                    await mount.resource.index.clear()
+                    await mount.vfs.index.clear()
 
-    def set_consistency(self, consistency: ConsistencyPolicy) -> None:
-        self._consistency = consistency
+    def set_default_read(self, read: ReadSpec) -> None:
+        """Install the workspace-level read policy a mount overrides.
+
+        Args:
+            read (ReadSpec): the default for mounts that declare none.
+        """
+        self._default_read = read
 
     def set_reconciler(self, reconciler: ReadReconciler) -> None:
         self._reconciler = reconciler
@@ -155,47 +169,89 @@ class MountRegistry:
         for m in self._mounts:
             self._attach_manager(m)
 
-    def _attach_manager(self, m: MountEntry) -> None:
-        m.cache_manager = CacheManager(
-            self._file_cache, m.resource.index, m.prefix,
-            m.resource.caches_reads,
-            lambda path: not m.retiring and self.try_mount_for(path) is m)
+    async def _may_serve_cached(self, m: MountEntry, key: str) -> bool:
+        """Run the shared read verdict for one mount's cached entry.
 
-    def check_resource_available(self, resource: BaseResource) -> None:
-        """A removed resource instance cannot start a second lifecycle."""
-        if id(resource) in self.retiring_resources or any(
-                m.resource is resource and m.retiring for m in self._mounts):
-            raise ValueError("resource is being unmounted")
-        if (resource.is_closed
-                or self.retired_resources.get(id(resource)) is resource):
-            raise ValueError(
-                "resource is closed; create a new resource instance")
+        The file cache's door and the dispatcher's door ask the same
+        question, so they ask the same function; a second verdict rule here
+        is what let the two drift apart in the first place. The reconciler
+        is read at call time because ``attach_file_cache`` runs before
+        ``set_reconciler``, and a manager with none trusts its cache.
+
+        A retiring mount answers False rather than probing: ``execute_op``
+        raises EBUSY once teardown has started, and ``owns_path`` cannot
+        catch that on its own because it is read before several awaits.
+        False sends the caller to a cold read, which is exactly where
+        ``owns_path`` already sends it today.
+
+        Args:
+            m (MountEntry): the mount whose cache entry is in question.
+            key (str): mount-absolute cache key.
+        """
+        reconciler = self._reconciler
+        if reconciler is None:
+            return True
+        if m.retiring:
+            return False
+        try:
+            return await reconciler.may_serve_cached(m, key)
+        except OSError as exc:
+            if exc.errno != errno.EBUSY:
+                raise
+            return False
+
+    def _attach_manager(self, m: MountEntry) -> None:
+
+        async def gate(key: str) -> bool:
+            return await self._may_serve_cached(m, key)
+
+        m.cache_manager = CacheManager(
+            self._file_cache, m.vfs.index, m.prefix, m.vfs.caches_reads,
+            lambda path: not m.retiring and self.try_mount_for(path) is m,
+            gate)
+
+    def check_vfs_available(self, vfs: BaseVFS) -> None:
+        """A removed VFS instance cannot start a second lifecycle."""
+        if id(vfs) in self.retiring_mounts or any(m.vfs is vfs and m.retiring
+                                                  for m in self._mounts):
+            raise ValueError("VFS is being unmounted")
+        if (vfs.is_closed or self.retired_mounts.get(id(vfs)) is vfs):
+            raise ValueError("VFS is closed; create a new VFS instance")
 
     def mount(
         self,
         prefix: str,
-        resource: BaseResource,
+        vfs: BaseVFS,
         mode: MountMode = MountMode.READ,
-        consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+        read: ReadSpec | None = None,
     ) -> MountEntry:
-        """Mount a resource and return the Mount object."""
-        self.check_resource_available(resource)
+        """Mount a VFS and return the Mount object.
+
+        Args:
+            prefix (str): the mount prefix.
+            vfs (BaseVFS): the backend to mount.
+            mode (MountMode): the mount's mode.
+            read (ReadSpec | None): the mount's read policy; None takes
+                the workspace default.
+        """
+        self.check_vfs_available(vfs)
         stripped = prefix.strip("/")
         norm_prefix = ("/" + stripped + "/" if stripped else "/")
         for existing in self._mounts:
             if existing.prefix == norm_prefix:
                 raise ValueError(f"duplicate mount prefix: "
                                  f"{norm_prefix!r}")
-        m = MountEntry(norm_prefix, resource, mode, consistency)
+        m = MountEntry(norm_prefix, vfs, mode,
+                       read if read is not None else self._default_read)
         for existing in self._mounts:
-            if existing.resource is resource:
+            if existing.vfs is vfs:
                 m.activity = existing.activity
                 break
-        for cmd in resource.commands():
+        for cmd in vfs.commands():
             m.register(cmd)
         for cmd in GENERAL_COMMANDS:
             m.register_general(cmd)
-        for ro in resource.ops_list():
+        for ro in vfs.ops_list():
             m.register_op(ro)
         if self._file_cache is not None:
             self._attach_manager(m)
@@ -230,15 +286,15 @@ class MountRegistry:
     def resolve(
         self,
         path: str,
-    ) -> tuple[BaseResource, str, MountMode]:
-        """Returns (resource, resource_path, mode)."""
+    ) -> tuple[BaseVFS, str, MountMode]:
+        """Returns (VFS, vfs_path, mode)."""
         m = self.mount_for(path)
         had_trailing = path.endswith("/")
         norm = "/" + path.strip("/")
-        resource_path = "/" + norm[len(m.prefix):]
-        if had_trailing and not resource_path.endswith("/"):
-            resource_path += "/"
-        return m.resource, resource_path, m.mode
+        vfs_path = "/" + norm[len(m.prefix):]
+        if had_trailing and not vfs_path.endswith("/"):
+            vfs_path += "/"
+        return m.vfs, vfs_path, m.mode
 
     def mount_for_prefix(self, prefix: str) -> MountEntry:
         """The mount at exactly this prefix; raises NoMountError for none.
@@ -407,7 +463,7 @@ class MountRegistry:
         Resolution order:
         1. First PathSpec path (or cwd) → mount_for(path)
         2. If mount lacks the command → mount_for_command(cmd_name)
-        3. For a read-only command on a caching backend under ALWAYS
+        3. For a read-only command on a caching backend under `fresh`
            consistency, evict stale entries from the hidden file cache so
            the in-place read-through serves fresh bytes. The command always
            stays on its real mount; the cache is never a mount.
@@ -427,7 +483,7 @@ class MountRegistry:
         if mount is not None and mount.resolve_command(cmd_name) is None:
             if path_scopes:
                 raise MountCommandUnsupported(
-                    cmd_name, mount.resource.name, path_scopes[0].raw_path
+                    cmd_name, mount.vfs.name, path_scopes[0].raw_path
                     or path_scopes[0].virtual)
             mount = self.mount_for_command(cmd_name)
         elif mount is None:
@@ -445,8 +501,8 @@ class MountRegistry:
         # GCs an orphaned overlay when the backend reports the path gone.
         if (self._reconciler is not None and path_scopes
                 and resolved is not None and not resolved.write
-                and mount.resource.caches_reads
-                and self._consistency == ConsistencyPolicy.ALWAYS):
+                and mount.vfs.caches_reads
+                and mount.read.policy is ReadPolicy.FRESH):
             for scope in path_scopes:
                 await self._reconciler.reconcile_read(mount, scope.virtual)
 
@@ -468,37 +524,37 @@ class MountRegistry:
         return [
             OpsMount(
                 prefix=m.prefix,
-                resource_type=m.resource.name,
-                accessor=m.resource.accessor,
-                index=m.resource.index,
+                resource_type=m.vfs.name,
+                accessor=m.vfs.accessor,
+                index=m.vfs.index,
                 mode=m.mode,
-                ops=m.resource.ops_list(),
-                sizes_always_known=m.resource.SIZES_ALWAYS_KNOWN,
+                ops=m.vfs.ops_list(),
+                sizes_always_known=m.vfs.SIZES_ALWAYS_KNOWN,
             ) for m in self._mounts
         ]
 
-    def find_resource_by_name(
+    def find_vfs_by_name(
         self,
-        resource_name: str | None,
-    ) -> BaseResource | None:
-        """Find a resource by its type name."""
-        if resource_name is None:
+        vfs_name: str | None,
+    ) -> BaseVFS | None:
+        """Find a VFS by its type name."""
+        if vfs_name is None:
             return None
         for mount in self._mounts:
-            if mount.resource.name == resource_name:
-                return mount.resource
+            if mount.vfs.name == vfs_name:
+                return mount.vfs
         return None
 
     def get_resource_type(
         self,
         path: str | None,
     ) -> str | None:
-        """Get the resource type for a virtual path."""
+        """Get the VFS type for a virtual path."""
         if path is None:
             return None
         try:
-            resource, _, _ = self.resolve(path)
-            return resource.name
+            vfs, _, _ = self.resolve(path)
+            return vfs.name
         except NoMountError:
             return None
 
@@ -508,14 +564,14 @@ class MountRegistry:
     ) -> list[tuple[MountEntry, list[str]]]:
         """Group virtual paths by their mount.
 
-        Returns list of (mount, resource_paths).
+        Returns list of (mount, vfs_paths).
         """
         groups: dict[int, tuple[MountEntry, list[str]]] = {}
         for path in paths:
             mount = self.mount_for(path)
-            _, resource_path, _ = self.resolve(path)
+            _, vfs_path, _ = self.resolve(path)
             key = id(mount)
             if key not in groups:
                 groups[key] = (mount, [])
-            groups[key][1].append(resource_path)
+            groups[key][1].append(vfs_path)
         return list(groups.values())

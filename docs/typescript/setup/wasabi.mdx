@@ -1,7 +1,7 @@
 ---
 title: Wasabi
 icon: /images/wasabi-logo.svg
-description: Set up Wasabi as a MIRAGE resource from Node or the browser.
+description: Set up Wasabi as a MIRAGE VFS from Node or the browser.
 ---
 
 Wasabi uses the S3 API with AWS Signature V4 against `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`). MIRAGE derives this endpoint from your region automatically.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { MountMode, WasabiResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, WasabiVFS, Workspace } from '@struktoai/mirage-node'
 
-const wasabi = new WasabiResource({
+const wasabi = new WasabiVFS({
   bucket: process.env.WASABI_BUCKET!,
   region: process.env.WASABI_REGION!,
   accessKeyId: process.env.WASABI_ACCESS_KEY_ID!,
@@ -25,7 +25,7 @@ const wasabi = new WasabiResource({
 })
 
 const ws = new Workspace({ '/bucket/': wasabi }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `WasabiResource` is secret-free, your backend signs each operation using your Wasabi keys and returns a URL. Wasabi accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the Wasabi endpoint.
+The browser `WasabiVFS` is secret-free, your backend signs each operation using your Wasabi keys and returns a URL. Wasabi accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the Wasabi endpoint.
 
 ### 1. Server: sign URLs with the Wasabi endpoint
 
@@ -96,9 +96,9 @@ For `us-east-1` the endpoint is `https://s3.wasabisys.com` (no region segment).
 ### 2. Browser: wire it up
 
 ```ts
-import { MountMode, WasabiResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, WasabiVFS, Workspace } from '@struktoai/mirage-browser'
 
-const wasabi = new WasabiResource({
+const wasabi = new WasabiVFS({
   bucket: 'my-bucket',
   region: 'us-east-2',
   presignedUrlProvider: async (path, op, opts) => {
@@ -129,4 +129,4 @@ aws s3api put-bucket-cors --bucket "$WASABI_BUCKET" \
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
 ```
 
-See the [Wasabi resource](/python/resource/wasabi) docs for the equivalent Python wiring.
+See the [Wasabi VFS](/python/vfs/wasabi) docs for the equivalent Python wiring.

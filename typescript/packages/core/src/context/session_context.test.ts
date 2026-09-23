@@ -39,10 +39,10 @@ import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import { Policies } from '../policy/policies.ts'
 import { MountMode, weakerMode } from '../types.ts'
 import { SessionManager } from '../workspace/session/manager.ts'
-import { Session } from '../workspace/session/session.ts'
+import { SessionState } from '../workspace/session/session.ts'
 
-function narrowedSession(): Session {
-  return new Session({
+function narrowedSession(): SessionState {
+  return new SessionState({
     sessionId: 'agent',
     mountModes: new Map([
       ['/ro', MountMode.READ],
@@ -67,7 +67,7 @@ describe('a profile narrows the mounts it names', () => {
   })
 
   it('a profile naming no mount keeps every mode', async () => {
-    await runWithSession(new Session({ sessionId: 'free' }), () => {
+    await runWithSession(new SessionState({ sessionId: 'free' }), () => {
       expect(effectiveMountMode('/s3', MountMode.EXEC)).toBe(MountMode.EXEC)
       return Promise.resolve()
     })
@@ -113,7 +113,7 @@ describe('a binding belongs to the workspace that published it', () => {
   it('answers only its own manager', async () => {
     const mine = new SessionManager('default')
     const theirs = new SessionManager('default')
-    const session = new Session({ sessionId: 'default' })
+    const session = new SessionState({ sessionId: 'default' })
     await runWithSession(
       session,
       () => {
@@ -129,8 +129,8 @@ describe('a binding belongs to the workspace that published it', () => {
   it('a nested bind keeps the owner', async () => {
     // A background job's fork is still the workspace's own session.
     const mine = new SessionManager('default')
-    const outer = new Session({ sessionId: 'default' })
-    const inner = new Session({ sessionId: 'default' })
+    const outer = new SessionState({ sessionId: 'default' })
+    const inner = new SessionState({ sessionId: 'default' })
     await runWithSession(
       outer,
       () =>
@@ -144,7 +144,7 @@ describe('a binding belongs to the workspace that published it', () => {
 
   it('an unowned bind answers nobody', async () => {
     // The op-dispatch binders name no owner, so no line adopts one.
-    await runWithSession(new Session({ sessionId: 'default' }), () => {
+    await runWithSession(new SessionState({ sessionId: 'default' }), () => {
       expect(getCurrentSessionFor(new SessionManager('default'))).toBeNull()
       return Promise.resolve()
     })
@@ -156,7 +156,7 @@ describe('a binding belongs to the workspace that published it', () => {
     // refused, since its session describes that workspace's view.
     const mine = new SessionManager('default')
     const theirs = new SessionManager('default')
-    const session = new Session({ sessionId: 'default' })
+    const session = new SessionState({ sessionId: 'default' })
     expect(getCurrentSessionUnlessForeign(mine)).toBeNull()
     await runWithSession(session, () => {
       expect(getCurrentSessionUnlessForeign(mine)).toBe(session)
@@ -186,7 +186,7 @@ describe('hides', () => {
     // One list per session, built by the compiler from the profile's own
     // `paths.hide` and every mount section's, exact entries and glob
     // patterns told apart once by `classifyPaths`.
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       hiddenPaths: {
         paths: ['/a/secrets', '/shared/finance'],
@@ -208,7 +208,7 @@ describe('hides', () => {
     // A door that holds the session (the admission gate) asks it
     // directly; the bound form is the same answer for the bound
     // session, and no session bound means nothing is hidden.
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       hiddenPaths: { paths: ['/a/secrets'], patterns: ['*.pem'] },
     })
@@ -229,7 +229,7 @@ describe('hides', () => {
     // read gives for that directory, so probing creates cannot map a
     // profile's hidden prefixes; a hidden name under a visible parent
     // is EACCES, the way an existing file the session cannot write is.
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       hiddenPaths: { paths: ['/w/vault', '/w/open/file.txt'], patterns: ['*.key'] },
     })
@@ -250,14 +250,14 @@ describe('hides', () => {
   })
 
   it('a hide activates the gate and a profile without one does not', async () => {
-    const sess = new Session({ sessionId: 'agent', hiddenPaths: { paths: ['/repo/.env'] } })
+    const sess = new SessionState({ sessionId: 'agent', hiddenPaths: { paths: ['/repo/.env'] } })
     await runWithSession(sess, () => {
       expect(hiddenPathsActive()).toBe(true)
       expect(pathAllowed('/repo/.env')).toBe(false)
       expect(pathAllowed('/repo/.envrc')).toBe(true)
       return Promise.resolve()
     })
-    await runWithSession(new Session({ sessionId: 'free' }), () => {
+    await runWithSession(new SessionState({ sessionId: 'free' }), () => {
       expect(hiddenPathsActive()).toBe(false)
       expect(pathAllowed('/repo/.env')).toBe(true)
       return Promise.resolve()
@@ -267,7 +267,7 @@ describe('hides', () => {
 
 describe('the path axis modes', () => {
   it('effectivePathMode is the anchor-depth rule', async () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/repo', MountMode.READ]]),
       shownPaths: {
@@ -294,7 +294,7 @@ describe('the path axis modes', () => {
   })
 
   it('an equal-depth pair takes the weaker', async () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/repo', MountMode.EXEC]]),
       shownPaths: { entries: [{ path: '/repo', mode: MountMode.READ }] },
@@ -306,7 +306,7 @@ describe('the path axis modes', () => {
   })
 
   it('strongestModeUnder counts a show grant', async () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/repo', MountMode.READ]]),
       shownPaths: { entries: [{ path: '/repo/build', mode: MountMode.WRITE }] },
@@ -323,7 +323,7 @@ describe('the path axis modes', () => {
   })
 
   it('readonlyBelow blames the carved anchor', async () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       shownPaths: {
         entries: [
@@ -347,7 +347,7 @@ describe('the path axis modes', () => {
   })
 
   it('readonlyBelow blames the operand for a pattern', async () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       shownPaths: { entries: [{ path: '/repo/*/locked', mode: MountMode.READ }] },
     })
@@ -361,7 +361,7 @@ describe('the path axis modes', () => {
   })
 
   it('requireMountWritable needs the broad grant', async () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/trello', MountMode.READ]]),
       shownPaths: { entries: [{ path: '/trello/board', mode: MountMode.WRITE }] },
@@ -388,7 +388,7 @@ describe('the path axis modes', () => {
 
 describe('the per-operand hide gate', () => {
   it('hiddenPathsIntersect answers per operand', async () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       hiddenPaths: { paths: ['/repo/.env'] },
     })
@@ -402,7 +402,7 @@ describe('the per-operand hide gate', () => {
   })
 
   it('a show reaches the session predicate', () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       hiddenPaths: { paths: ['/repo'] },
       shownPaths: { entries: [{ path: '/repo/public', mode: null }] },

@@ -24,7 +24,7 @@ from mirage.utils.errors import enoent
 async def rm_r(accessor: GDriveAccessor, path: PathSpec) -> None:
     # A Drive folder delete removes its subtree in one call.
     virtual = path.virtual
-    key = path.resource_path
+    key = path.vfs_path
     if not key:
         return
     node = await resolve_key(accessor, key)

@@ -31,7 +31,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("rg", resource="github", spec=SPECS["rg"])
+@command("rg", vfs="github", spec=SPECS["rg"])
 async def rg(accessor: GitHubAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])

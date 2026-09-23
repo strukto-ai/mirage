@@ -8,8 +8,8 @@ import pytest
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.databricks_volume.path import backend_path
-from mirage.resource.databricks_volume import DatabricksVolumeConfig
 from mirage.types import PathSpec
+from mirage.vfs.databricks_volume import DatabricksVolumeConfig
 
 
 class NotFoundError(Exception):

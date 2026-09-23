@@ -15,7 +15,7 @@
 import os
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.ssh import SSHConfig, SSHResource
+from mirage.vfs.ssh import SSHVFS, SSHConfig
 
 # ~/.ssh/config:
 #   Host dev
@@ -29,12 +29,11 @@ config = SSHConfig(
     root="/home/ubuntu/mirage-test",
     known_hosts=None,
 )
-resource = SSHResource(config)
+vfs = SSHVFS(config)
 
-with Workspace({
-        "/ssh/":
-        Mount(resource, mode=MountMode.WRITE, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/ssh/": Mount(vfs, mode=MountMode.WRITE,
+                    backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -76,7 +75,7 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, "
           f"{total} bytes transferred")

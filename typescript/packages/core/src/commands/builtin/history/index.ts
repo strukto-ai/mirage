@@ -17,7 +17,7 @@ import { find as histFind } from '../../../core/history/find.ts'
 import { readdir as histReaddir } from '../../../core/history/readdir.ts'
 import { stat as histStat } from '../../../core/history/stat.ts'
 import { stream as histStream } from '../../../core/history/stream.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { command } from '../../config.ts'
 import { withDefaultProvisions } from '../generic_bind/provision.ts'
@@ -35,11 +35,11 @@ import { treeGeneric } from '../generic/tree.ts'
 import { wcGeneric } from '../generic/wc.ts'
 import { HISTORY_HISTORY } from './history.ts'
 
-const R = ResourceName.HISTORY
+const R = VFSName.HISTORY
 
 const HISTORY_CAT = command({
   name: 'cat',
-  resource: R,
+  vfs: R,
   spec: specOf('cat'),
   fn: (a: HistoryAccessor, paths, texts, opts) =>
     catGeneric(
@@ -54,7 +54,7 @@ const HISTORY_CAT = command({
 
 const HISTORY_GREP = command({
   name: 'grep',
-  resource: R,
+  vfs: R,
   spec: specOf('grep'),
   fn: (a: HistoryAccessor, paths, texts, opts) =>
     grepGeneric(
@@ -71,7 +71,7 @@ const HISTORY_GREP = command({
 
 const HISTORY_RG = command({
   name: 'rg',
-  resource: R,
+  vfs: R,
   spec: specOf('rg'),
   fn: (a: HistoryAccessor, paths, texts, opts) =>
     rgGeneric(
@@ -86,7 +86,7 @@ const HISTORY_RG = command({
 
 const HISTORY_HEAD = command({
   name: 'head',
-  resource: R,
+  vfs: R,
   spec: specOf('head'),
   fn: (a: HistoryAccessor, paths, texts, opts) =>
     headGeneric(
@@ -101,7 +101,7 @@ const HISTORY_HEAD = command({
 
 const HISTORY_TAIL = command({
   name: 'tail',
-  resource: R,
+  vfs: R,
   spec: specOf('tail'),
   fn: (a: HistoryAccessor, paths, texts, opts) =>
     tailGeneric(
@@ -116,7 +116,7 @@ const HISTORY_TAIL = command({
 
 const HISTORY_WC = command({
   name: 'wc',
-  resource: R,
+  vfs: R,
   spec: specOf('wc'),
   fn: (a: HistoryAccessor, paths, texts, opts) =>
     wcGeneric(paths, texts, opts, (p) => histStream(a, p)),
@@ -125,7 +125,7 @@ const HISTORY_WC = command({
 
 const HISTORY_LS = command({
   name: 'ls',
-  resource: R,
+  vfs: R,
   spec: specOf('ls'),
   fn: (a: HistoryAccessor, paths, _texts, opts) =>
     lsGeneric(
@@ -138,14 +138,14 @@ const HISTORY_LS = command({
 
 const HISTORY_STAT = command({
   name: 'stat',
-  resource: R,
+  vfs: R,
   spec: specOf('stat'),
   fn: (a: HistoryAccessor, paths, _texts, opts) => statGeneric(paths, opts, (p) => histStat(a, p)),
 })
 
 const HISTORY_TREE = command({
   name: 'tree',
-  resource: R,
+  vfs: R,
   spec: specOf('tree'),
   fn: (a: HistoryAccessor, paths, _texts, opts) =>
     treeGeneric(
@@ -158,7 +158,7 @@ const HISTORY_TREE = command({
 
 const HISTORY_FIND = command({
   name: 'find',
-  resource: R,
+  vfs: R,
   spec: specOf('find'),
   fn: (a: HistoryAccessor, paths, texts, opts) =>
     findGeneric(paths, texts, opts, (root, options) => histFind(a, root, options)),

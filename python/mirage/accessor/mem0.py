@@ -15,8 +15,8 @@
 from mem0 import AsyncMemoryClient
 
 from mirage.accessor.base import Accessor
-from mirage.resource.mem0.config import Mem0Config
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.mem0.config import Mem0Config
+from mirage.vfs.secrets import reveal_secret
 
 
 class Mem0Accessor(Accessor):

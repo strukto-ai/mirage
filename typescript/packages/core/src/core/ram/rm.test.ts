@@ -21,7 +21,7 @@ import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { CacheManager } from '../../cache/manager.ts'
-import { RAMStore } from '../../resource/ram/store.ts'
+import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
 import { rmR } from './rm.ts'
 

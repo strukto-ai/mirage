@@ -29,7 +29,7 @@ import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import type { PathSpec } from '../../types.ts'
 import { wordText } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { type ExecuteNodeFn, runStatement } from './jobs.ts'
@@ -37,7 +37,7 @@ import type { JobTable } from '../../shell/job_table/index.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 
 function installStdinBuffer(
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
 ): [AsyncLineIterator | null, ByteSource | null] {
   const prev = session.stdinBuffer
@@ -89,7 +89,7 @@ export class ContinueSignal extends Error {
 async function executeBody(
   executeNode: ExecuteNodeFn,
   body: readonly TSNodeLike[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -171,7 +171,7 @@ export async function handleIf(
   executeNode: ExecuteNodeFn,
   branches: readonly [TSNodeLike, TSNodeLike[]][],
   elseBody: TSNodeLike[] | null,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -233,7 +233,7 @@ export async function handleFor(
   variable: string,
   values: readonly (string | PathSpec)[],
   body: readonly TSNodeLike[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   policies: Policies | null = null,
@@ -319,7 +319,7 @@ async function conditionLoop(
   executeNode: ExecuteNodeFn,
   condition: TSNodeLike,
   body: readonly TSNodeLike[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -435,7 +435,7 @@ export async function handleCfor(
   exprs: readonly (readonly TSNodeLike[])[],
   body: readonly TSNodeLike[],
   evalExpr: CforEval,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -538,7 +538,7 @@ export function handleWhile(
   executeNode: ExecuteNodeFn,
   condition: TSNodeLike,
   body: readonly TSNodeLike[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -566,7 +566,7 @@ export function handleUntil(
   executeNode: ExecuteNodeFn,
   condition: TSNodeLike,
   body: readonly TSNodeLike[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -594,7 +594,7 @@ export async function handleCase(
   executeNode: ExecuteNodeFn,
   word: string,
   items: readonly [readonly string[], readonly TSNodeLike[], string][],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
@@ -659,7 +659,7 @@ export async function handleSelect(
   variable: string,
   values: readonly (string | PathSpec)[],
   body: readonly TSNodeLike[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   policies: Policies | null = null,

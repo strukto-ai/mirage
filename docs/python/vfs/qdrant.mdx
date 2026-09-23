@@ -1,0 +1,174 @@
+---
+title: Qdrant
+description: Mount a Qdrant collection as a Mirage filesystem, with payload folders, multimodal blobs, and a semantic search command for Python agents.
+icon: /images/qdrant-logo.svg
+---
+
+The Qdrant VFS exposes a [Qdrant](https://qdrant.tech/) collection as a virtual filesystem mounted
+at some prefix such as `/q/`. Group-by payload fields become nested folders,
+each point becomes a `.json` payload file (plus a `.txt` text file and an optional blob), and semantic search is the
+`search` command, which returns ranked points as canonical file paths.
+
+For connection setup (self-hosted, Qdrant Cloud, search), see
+[Qdrant Setup](/home/setup/qdrant).
+
+## Config
+
+```python
+from mirage import MountMode, Workspace
+from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
+
+config = QdrantConfig(
+    url="https://xyz.cloud.qdrant.io",
+    api_key="...",
+    collection="fashion",
+    group_by=["gender", "articleType", "baseColour"],
+    id_field="id",
+    text_field="productDisplayName",
+    blob_field="image_b64",
+    blob_ext="jpg",
+    search_limit=5,
+)
+vfs = QdrantVFS(config)
+ws = Workspace({"/fashion/": vfs}, mode=MountMode.READ)
+```
+
+The mapping is config-driven; nothing about the dataset is hardcoded. Point
+`group_by` at different payload fields and the folder tree changes.
+
+### Document and chunk lineage
+
+Config fields use Qdrant's dotted nested-key syntax. For example, a LangChain-style
+point can be mounted by source document and named by page:
+
+```json
+{
+  "page_content": "Refunds are processed within 14 days…",
+  "metadata": {
+    "source": "s3://docs/policies/refund-2026.pdf",
+    "page": "004"
+  }
+}
+```
+
+```python
+config = QdrantConfig(
+    collection="company_docs",
+    group_by=["metadata.source"],
+    basename_fields=["metadata.source"],
+    name_field="metadata.page",
+    text_field="page_content",
+)
+```
+
+This produces `refund-2026.pdf/004__<point-id>.txt`. The readable prefix comes
+from `name_field`; the Qdrant point id remains as a stable suffix so duplicate
+page labels cannot collide and a direct read never depends on a warm listing
+cache. Only the stem the listing publishes opens: another label in front of
+the same id reads as absent. A label that is not a string spells as compact
+JSON (`true`, `1`, `1e-7`), the same in Python and TypeScript.
+`basename_fields` strips
+URL/path parents from the named `group_by` fields. Leave a field out to preserve its
+complete value in one path-safe segment: `/` renders as `∕`, and a blank or
+dot-led value is led by `⁄`, so every value has its own segment that lists and
+opens. A basename longer than 255
+bytes, which ext4 and APFS refuse, is cut to fit and ends in `__` plus the md5
+of the whole name, so two long leaves stay two directories. Basenames must be
+unique within their parent group; Mirage refuses an ambiguous listing instead
+of silently merging two source documents, and opening a basename directory
+checks every point of its parent group, so a second source past `max_rows` is
+refused rather than hidden.
+
+## Filesystem layout
+
+Every path is translated into a Qdrant query. Descending a folder adds one
+payload filter; the leaf level lists points.
+
+```text
+/                                  # list collections (omitted when `collection` is pinned)
+/<collection>/                     # distinct group_by[0] values
+  <v1>/                            # distinct group_by[1] where group_by[0]=v1
+    .../<vN>/                      # all group-by fields bound -> point files
+      <id>.json                    # full payload (the metadata)
+      <id>.txt                     # embedded source text (when text_field set)
+      <id>.<ext>                   # raw blob / image bytes (when blob_field set)
+```
+
+`<id>` is the Qdrant point id. When `name_field` is set, leaf stems instead use
+`<name>__<id>`. When `collection` is set the collection level is elided, so the
+mount root is that collection:
+
+```text
+/fashion/
+  Men/
+    Shoes/
+      White/
+        3.json
+        3.txt
+        3.jpg
+```
+
+### Point files
+
+A point is shown as its underlying data in its original format, never as the
+embedding vector:
+
+- `<id>.txt` is the embedded source text (the `text_field` value), exactly what
+  the vector was built from.
+- `<id>.json` is the full payload as compact JSON (the metadata), with the vector
+  and the raw blob omitted.
+- `<id>.<ext>` is the raw blob bytes when `blob_field` is configured.
+
+```text
+$ cat /fashion/Men/Shoes/White/3.txt
+Nike Men White Running Sneakers
+
+$ cat /fashion/Men/Shoes/White/3.json
+{"gender":"Men","articleType":"Shoes","baseColour":"White","productDisplayName":"Nike Men White Running Sneakers","id":3}
+```
+
+## Semantic search
+
+Search is a command, not a path. It returns each ranked point as its **canonical
+content path** (the `.txt`, or `.json` when no `text_field` is set)
+annotated with the similarity score, followed by the content:
+
+```text
+$ search "white running sneakers" /fashion
+/fashion/Men/Shoes/White/3.txt:0.7421
+Nike Men White Running Sneakers
+```
+
+Flags: `--top-k <n>` (default `search_limit`), `--threshold <min-score>`,
+`--method semantic` (the only supported method; `grep`/`rg` stay lexical).
+
+## Supported commands
+
+All commands delegate to Mirage's shared implementations.
+
+| Command         | Behaviour on a Qdrant mount                              |
+| --------------- | -------------------------------------------------------- |
+| `ls`            | list collections, payload folders, or point files        |
+| `cd`            | navigate (each level narrows the filter)                 |
+| `tree`          | render the folder hierarchy                              |
+| `cat`           | print a point's text/JSON, or dump raw blob/image bytes  |
+| `stat`          | directory vs file, blob size, image mime type            |
+| `find`          | walk the tree (e.g. `find /fashion -name '*.txt'`)       |
+| `grep` / `rg`   | lexical search over the text/JSON files                  |
+| `search`        | semantic (vector) search -> ranked content paths + score |
+| `head` / `tail` | first/last lines of a file                               |
+| `wc`            | count lines/bytes of a file                              |
+
+## Access pattern
+
+The mount is **read-only** (`MountMode.READ`); writes are not supported. The two
+read modes are:
+
+- **Browse** by payload folders: scroll filters on `group_by` fields, no embedding.
+- **Search** by meaning: `search "<query>" <path>` runs vector search and returns
+  canonical point paths.
+
+Folder listings are capped by `max_rows`. A filtered listing scrolls first and
+only creates keyword payload indexes for the `group_by` fields if Qdrant reports
+one is required, so already-indexed collections work under read-only keys. Keep
+`group_by` to low-cardinality fields for large collections.

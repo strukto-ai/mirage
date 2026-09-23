@@ -68,7 +68,7 @@ def _keep_visible(
     return kept
 
 
-@command("rg", resource="box", spec=SPECS["rg"])
+@command("rg", vfs="box", spec=SPECS["rg"])
 async def rg(accessor: BoxAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])

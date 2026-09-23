@@ -29,7 +29,7 @@ def _minimal_config() -> dict:
         "config": {
             "mounts": {
                 "/": {
-                    "resource": "ram",
+                    "vfs": "ram",
                     "mode": "WRITE"
                 }
             },
@@ -120,7 +120,7 @@ async def test_get_verbose_internals_with_redis_cache():
         "config": {
             "mounts": {
                 "/": {
-                    "resource": "ram",
+                    "vfs": "ram",
                     "mode": "WRITE"
                 }
             },
@@ -288,10 +288,10 @@ async def test_two_workspaces_run_in_isolation():
         runner_b = registry.get(wid_b).runner
 
         slow = asyncio.create_task(
-            runner_a.call(runner_a.ws.execute("sleep 1.0")))
+            runner_a.call(runner_a.ws.shell("sleep 1.0")))
         await asyncio.sleep(0.05)
         start = time.monotonic()
-        result = await runner_b.call(runner_b.ws.execute("echo quick"))
+        result = await runner_b.call(runner_b.ws.shell("echo quick"))
         elapsed = time.monotonic() - start
         assert result.exit_code == 0
         assert elapsed < 0.5, (
@@ -347,11 +347,11 @@ async def test_create_workspace_bridges_fuse_through_manager(monkeypatch):
             "config": {
                 "mounts": {
                     "/data/": {
-                        "resource": "ram",
+                        "vfs": "ram",
                         "backend": "fuse"
                     },
                     "/pinned/": {
-                        "resource": "ram",
+                        "vfs": "ram",
                         "backend": "fuse",
                         "mountpoint": "/tmp/pinned"
                     },
@@ -389,7 +389,7 @@ async def test_create_workspace_rolls_back_on_fuse_failure(monkeypatch):
             "config": {
                 "mounts": {
                     "/data/": {
-                        "resource": "ram",
+                        "vfs": "ram",
                         "backend": "fuse"
                     },
                 },
@@ -408,8 +408,8 @@ def test_registry_zero_grace_fires_immediately():
     async def _run():
         registry = WorkspaceRegistry(idle_grace_seconds=0)
         from mirage import MountMode, Workspace
-        from mirage.resource.ram import RAMResource
-        ws = Workspace({"/": (RAMResource(), MountMode.WRITE)})
+        from mirage.vfs.ram import RAMVFS
+        ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
         entry = registry.add(ws)
         await registry.remove(entry.id)
         assert registry.exit_event.is_set()
@@ -463,7 +463,7 @@ async def test_create_explicit_store_block_wins_over_disk_default(tmp_path):
 @pytest.mark.asyncio
 async def test_create_with_an_unresolvable_secrets_block_is_a_bad_request():
     """A `secrets:` block naming a source the host cannot resolve is
-    the caller's mistake, like a mount whose resource is unknown."""
+    the caller's mistake, like a mount whose VFS is unknown."""
     app, _ = _make_app_with_short_grace(grace=10.0)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport,
@@ -527,7 +527,7 @@ async def test_load_with_a_non_mapping_secrets_override_is_a_bad_request(
 
 
 @pytest.mark.asyncio
-async def test_load_with_an_unbuildable_resource_override_is_a_bad_request(
+async def test_load_with_an_unbuildable_vfs_override_is_a_bad_request(
         tmp_path):
     """A ref the daemon cannot load is the caller's mistake, so it is
     answered like the other bad overrides; it used to escape as a 500."""
@@ -547,8 +547,7 @@ async def test_load_with_an_unbuildable_resource_override_is_a_bad_request(
                                   "override": {
                                       "mounts": {
                                           "/": {
-                                              "resource":
-                                              f"{tmp_path}/gone.py:Wiki"
+                                              "vfs": f"{tmp_path}/gone.py:Wiki"
                                           }
                                       }
                                   },

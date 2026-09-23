@@ -16,9 +16,9 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_subtree
 from mirage.core.ram.dest import check_dest_parents
 from mirage.core.timeutil import now_iso
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
 from mirage.utils.path import norm
+from mirage.vfs.ram.store import RAMStore
 
 
 def _move_subtree(store: RAMStore, s: str, d: str) -> None:

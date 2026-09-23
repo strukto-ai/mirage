@@ -26,9 +26,9 @@ from camel.types import ModelPlatformType, ModelType
 
 from mirage import MountMode, Workspace
 from mirage.agents.camel import MirageFileToolkit, MirageTerminalToolkit
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
-ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 terminal = MirageTerminalToolkit(ws)
 files = MirageFileToolkit(ws)
@@ -61,12 +61,12 @@ files.close()
 
 ### `MirageTerminalToolkit`
 
-Drop-in replacement for camel's `TerminalToolkit`. Same 6 functions, all routed through `Workspace.execute()`:
+Drop-in replacement for camel's `TerminalToolkit`. Same 6 functions, all routed through `Workspace.shell()`:
 
 | Method | Mirage translation |
 | --- | --- |
-| `shell_exec(id, cmd, block=True)` | `await ws.execute(cmd)` |
-| `shell_exec(id, cmd, block=False)` | `await ws.execute(f"{cmd} &")`, uses Mirage's [JobTable](/python/quickstart) |
+| `shell_exec(id, cmd, block=True)` | `await ws.shell(cmd)` |
+| `shell_exec(id, cmd, block=False)` | `await ws.shell(f"{cmd} &")`, uses Mirage's [JobTable](/python/quickstart) |
 | `shell_view(id)` | `jobs` (status) or `wait %N` (final stdout) |
 | `shell_kill_process(id)` | `kill %N` |
 | `shell_write_content_to_file` | `cat > path` with `stdin=` |
@@ -76,7 +76,7 @@ No docker backend, no env-cloning, no safe-mode allowlist. Mirage Workspace alre
 
 ### `MirageFileToolkit`
 
-Subclasses camel's `FileToolkit`, inherits all 7 public methods *and* every format writer (PDF, DOCX, JSON, CSV, HTML, ipynb, plain text). Path resolution and IO are overridden to route through Mirage; format writers operate on a tempfile and the result is pushed via `Workspace.execute(f"cat > {path}", stdin=...)`.
+Subclasses camel's `FileToolkit`, inherits all 7 public methods *and* every format writer (PDF, DOCX, JSON, CSV, HTML, ipynb, plain text). Path resolution and IO are overridden to route through Mirage; format writers operate on a tempfile and the result is pushed via `Workspace.shell(f"cat > {path}", stdin=...)`.
 
 | Method | Behavior |
 | --- | --- |
@@ -91,7 +91,7 @@ Subclasses camel's `FileToolkit`, inherits all 7 public methods *and* every form
 
 | Symbol | Purpose |
 | --- | --- |
-| `MirageTerminalToolkit` | Camel `BaseToolkit` exposing the 6 shell tools, backed by `Workspace.execute`. |
+| `MirageTerminalToolkit` | Camel `BaseToolkit` exposing the 6 shell tools, backed by `Workspace.shell`. |
 | `MirageFileToolkit` | Subclass of camel's `FileToolkit` routing path/IO through Mirage. |
 
 ## Examples

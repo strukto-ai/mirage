@@ -39,9 +39,9 @@ def test_core_onedrive_commands_registered():
     assert WRITE_COMMANDS <= names
 
 
-def test_onedrive_command_resources_and_write_flags():
+def test_onedrive_command_vfs_names_and_write_flags():
     for command in registered_onedrive_commands():
-        assert command.resource == "onedrive"
+        assert command.vfs == "onedrive"
         if command.name in WRITE_COMMANDS:
             assert command.write
         if command.name in READ_ONLY_COMMANDS:

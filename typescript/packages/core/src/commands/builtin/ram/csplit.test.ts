@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_CSPLIT = RAM_COMMANDS.filter((c) => c.name === 'csplit' && c.filetype == null)
 
@@ -23,24 +23,19 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runCsplit(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   texts: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_CSPLIT[0]
   if (cmd === undefined) throw new Error('csplit not registered')
-  const result = await cmd.fn(
-    (resource as { accessor?: unknown }).accessor as never,
-    paths,
-    texts,
-    {
-      stdin: null,
-      flags,
-      filetypeFns: null,
-      cwd: '/',
-    },
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
+    stdin: null,
+    flags,
+    filetypeFns: null,
+    cwd: '/',
+  })
   if (result === null) return { out: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
@@ -54,12 +49,12 @@ async function runCsplit(
 
 describe('csplit', () => {
   it('splits by line number pattern', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', ENC.encode('a\nb\nc\nd\n'))
-    const r = await runCsplit(resource, [PathSpec.fromStrPath('/f.txt')], ['3'])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', ENC.encode('a\nb\nc\nd\n'))
+    const r = await runCsplit(vfs, [PathSpec.fromStrPath('/f.txt')], ['3'])
     expect(r.exitCode).toBe(0)
-    const xx00 = resource.store.files.get('/xx00')
-    const xx01 = resource.store.files.get('/xx01')
+    const xx00 = vfs.store.files.get('/xx00')
+    const xx01 = vfs.store.files.get('/xx01')
     expect(xx00).toBeDefined()
     expect(xx01).toBeDefined()
     expect(DEC.decode(xx00)).toBe('a\nb\n')

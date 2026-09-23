@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isStdin } from '../utils/stream.ts'
+import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { guardInput } from '../utils/limit.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -152,7 +154,7 @@ function makeSpec(path: string, template: PathSpec): PathSpec {
     virtual: path,
     directory: path,
     resolved: false,
-    resourcePath: mountKey(path, mountPrefixOf(template.virtual, template.resourcePath)),
+    vfsPath: mountKey(path, mountPrefixOf(template.virtual, template.vfsPath)),
   })
 }
 
@@ -165,7 +167,8 @@ export async function grepGeneric(
   readdir: Readdir,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  const cachedStream = cacheAwareStream(stream)
+  stat = stdinStat(stat)
+  const cachedStream = stdinStream(cacheAwareStream(stream), opts.stdin)
   stream = (path) => guardInput(cachedStream(path), opts)
   const fl = new FlagView(opts.flags, specOf('grep'))
   const resolution = await resolvePattern(name, texts, opts.flags, paths, opts.mountPrefix, stream)
@@ -198,7 +201,16 @@ export async function grepGeneric(
     try {
       const source = guardInput(resolveSource(opts.stdin, GREP_NO_PATTERN), opts)
       return [
-        grepInput(source, pat, f, '(standard input)', f.withFilename && !f.noFilename, io),
+        grepInput(
+          source,
+          pat,
+          f,
+          '(standard input)',
+          f.withFilename && !f.noFilename,
+          io,
+          false,
+          opts.signal,
+        ),
         io,
       ]
     } catch (error) {
@@ -206,13 +218,13 @@ export async function grepGeneric(
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
     }
   }
-  const prefix = mountPrefixOf(first.virtual, first.resourcePath)
+  const prefix = mountPrefixOf(first.virtual, first.vfsPath)
   const mounts = opts.ns?.mounts
   const rd = mountParentReaddir((p: string) => readdir(makeSpec(p, first)), mounts)
   const st = mountParentStat((p: string) => stat(makeSpec(p, first)), mounts)
   if (!f.recursive && paths.length === 1 && !(f.filesOnly || f.quiet || f.filesWithoutMatch)) {
     try {
-      const info = await st(first.virtual)
+      const info = isStdin(first) ? await stat(first) : await st(first.virtual)
       if (info.type === FileType.DIRECTORY)
         return [
           new Uint8Array(),
@@ -226,7 +238,16 @@ export async function grepGeneric(
       const source = stream(first)
       const singleIO = new IOResult()
       return [
-        grepInput(source, pat, f, first.rawPath, f.withFilename && !f.noFilename, singleIO),
+        grepInput(
+          source,
+          pat,
+          f,
+          isStdin(first) ? '(standard input)' : first.rawPath,
+          f.withFilename && !f.noFilename,
+          singleIO,
+          false,
+          opts.signal,
+        ),
         singleIO,
       ]
     } catch (error) {
@@ -252,7 +273,7 @@ export async function grepGeneric(
 
   async function* scan(p: PathSpec, walked = false): AsyncIterable<Uint8Array> {
     try {
-      const info = await st(p.virtual)
+      const info = isStdin(p) ? await stat(p) : await st(p.virtual)
       if (info.type === FileType.DIRECTORY) {
         if (!f.recursive) {
           warn(`${name}: ${p.rawPath}: Is a directory`)
@@ -266,7 +287,7 @@ export async function grepGeneric(
           const child = new PathSpec({
             virtual: entry,
             directory: entry,
-            resourcePath: mountKey(entry, prefix),
+            vfsPath: mountKey(entry, prefix),
             rawPath: respellOne(entry, p.virtual, p.rawPath),
           })
           if (!dirAdmitted(entry, f.filters)) {
@@ -289,7 +310,16 @@ export async function grepGeneric(
       if (!fileAdmitted(p.virtual, f.filters)) return
       const fileIO = new IOResult({ exitCode: 1 })
       const show = !f.noFilename && (f.withFilename || walked || paths.length > 1)
-      for await (const chunk of grepInput(stream(p), pat, f, p.rawPath, show, fileIO, printed)) {
+      for await (const chunk of grepInput(
+        stream(p),
+        pat,
+        f,
+        isStdin(p) ? '(standard input)' : p.rawPath,
+        show,
+        fileIO,
+        printed,
+        opts.signal,
+      )) {
         printed = true
         yield chunk
       }

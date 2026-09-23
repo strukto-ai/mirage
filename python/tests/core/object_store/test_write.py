@@ -18,6 +18,7 @@ from dataclasses import replace
 from mirage.cache.context import push_cache_manager
 from mirage.core.object_store.write import (make_create, make_mkdir,
                                             make_truncate, make_write_bytes)
+from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (FakeManager, FakeStore,
                                               make_driver, spec)
 
@@ -138,3 +139,61 @@ def test_a_store_error_that_is_not_a_missing_container_propagates(accessor):
         assert str(exc) == "bucket on fire"
     else:
         raise AssertionError("expected RuntimeError")
+
+
+# ── the backend token the put answered reaches the op record ─────────────
+
+
+async def _put_silently(conn: FakeStore, key: str, data: bytes) -> None:
+    conn.objects[key] = data
+    return None
+
+
+def _recorded(coro):
+    scope = RecordingScope()
+    try:
+        _managed(coro)
+    finally:
+        scope.close()
+    return scope.records
+
+
+def test_write_records_the_token_the_put_returned(accessor):
+    store = FakeStore()
+    records = _recorded(
+        make_write_bytes(make_driver(store))(accessor, spec("/a/b/c.txt"),
+                                             b"hi"))
+    assert [(r.op, r.path, r.fingerprint)
+            for r in records] == [("write", "/a/b/c.txt", "fp-a/b/c.txt")]
+
+
+def test_create_records_the_token_the_put_returned(accessor):
+    store = FakeStore()
+    records = _recorded(
+        make_create(make_driver(store))(accessor, spec("/a/new.txt")))
+    assert [(r.op, r.path, r.fingerprint)
+            for r in records] == [("create", "/a/new.txt", "fp-a/new.txt")]
+
+
+def test_truncate_records_the_token_the_put_returned(accessor):
+    store = FakeStore({"a/cut.txt": b"hello"})
+    records = _recorded(
+        make_truncate(make_driver(store))(accessor, spec("/a/cut.txt"), 2))
+    assert [(r.op, r.path, r.fingerprint)
+            for r in records] == [("truncate", "/a/cut.txt", "fp-a/cut.txt")]
+
+
+def test_write_records_no_token_when_the_store_reports_none(accessor):
+    """A driver whose put answers None (hf, whose opendal write reports
+    nothing) records the same absence it does today."""
+    driver = replace(make_driver(FakeStore()), put=_put_silently)
+    records = _recorded(
+        make_write_bytes(driver)(accessor, spec("/a/c.txt"), b"hi"))
+    assert [r.fingerprint for r in records] == [None]
+
+
+def test_mkdir_records_nothing(accessor):
+    store = FakeStore()
+    records = _recorded(
+        make_mkdir(make_driver(store))(accessor, spec("/a/b"), True))
+    assert records == []

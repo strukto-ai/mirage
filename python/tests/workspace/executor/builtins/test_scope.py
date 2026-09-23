@@ -20,7 +20,7 @@ def test_to_scope_keeps_the_path_and_marks_it_resolved():
     spec = _to_scope("/data/sub/file.txt")
     assert spec.virtual == "/data/sub/file.txt"
     assert spec.directory == "/data/sub/"
-    assert spec.resource_path == ""
+    assert spec.vfs_path == ""
     assert spec.resolved is True
 
 
@@ -46,5 +46,5 @@ def test_scope_path_passes_a_plain_string_through():
 def test_scope_path_reads_the_virtual_path_off_a_pathspec():
     spec = PathSpec(virtual="/data/file.txt",
                     directory="/data/",
-                    resource_path="file.txt")
+                    vfs_path="file.txt")
     assert _scope_path(spec) == "/data/file.txt"

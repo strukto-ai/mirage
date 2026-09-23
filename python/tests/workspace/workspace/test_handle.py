@@ -15,24 +15,24 @@
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
-from mirage.workspace import SessionHandle, Workspace
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Session, Workspace
 from mirage.workspace.session import RAMSessionStore
 
 PROFILES = {"reviewer": {"paths": {"hide": ["/repo/secrets"]}}}
 
 
 def _seeded() -> Workspace:
-    ws = Workspace({"/repo/": RAMResource()},
+    ws = Workspace({"/repo/": RAMVFS()},
                    mode=MountMode.WRITE,
                    profiles=PROFILES)
     return ws
 
 
 async def _seed(ws: Workspace) -> None:
-    await ws.execute("mkdir -p /repo/secrets && echo hello > /repo/README.md"
-                     " && echo PRIVATE > /repo/secrets/key.pem")
+    await ws.shell("mkdir -p /repo/secrets && echo hello > /repo/README.md"
+                   " && echo PRIVATE > /repo/secrets/key.pem")
 
 
 @pytest.mark.asyncio
@@ -44,18 +44,18 @@ async def test_a_handle_binds_both_doors_to_one_session():
     try:
         await _seed(ws)
         reviewer = await ws.session("reviewer", profile="reviewer")
-        assert isinstance(reviewer, SessionHandle)
+        assert isinstance(reviewer, Session)
         assert reviewer.session_id == "reviewer"
         assert reviewer.state is ws.get_session("reviewer")
-        shown = await reviewer.execute("cat /repo/README.md")
+        shown = await reviewer.shell("cat /repo/README.md")
         assert shown.stdout == b"hello\n"
-        hidden = await reviewer.execute("cat /repo/secrets/key.pem")
+        hidden = await reviewer.shell("cat /repo/secrets/key.pem")
         assert hidden.exit_code == 1
-        assert await reviewer.fs.read("/repo/README.md") == b"hello\n"
+        assert await reviewer.vfs.read("/repo/README.md") == b"hello\n"
         with pytest.raises(FileNotFoundError):
-            await reviewer.fs.read("/repo/secrets/key.pem")
-        assert await ws.fs.read("/repo/secrets/key.pem") == b"PRIVATE\n"
-        assert reviewer.fs.records is ws.fs.records
+            await reviewer.vfs.read("/repo/secrets/key.pem")
+        assert await ws.vfs.read("/repo/secrets/key.pem") == b"PRIVATE\n"
+        assert reviewer.vfs.records is ws.vfs.records
     finally:
         await ws.close()
 
@@ -83,11 +83,11 @@ async def test_a_handle_adopts_a_persisted_session_before_creating_one():
     # flush a record that overwrote the stored profile. The door
     # hydrates first, so the stored session is adopted as is.
     store = RAMSessionStore()
-    first = Workspace({"/repo/": RAMResource()},
+    first = Workspace({"/repo/": RAMVFS()},
                       mode=MountMode.WRITE,
                       profiles=PROFILES,
                       session_store=store)
-    second = Workspace({"/repo/": RAMResource()},
+    second = Workspace({"/repo/": RAMVFS()},
                        mode=MountMode.WRITE,
                        profiles=PROFILES,
                        session_store=store)
@@ -110,18 +110,18 @@ async def test_a_handle_forwards_per_call_options():
     try:
         await _seed(ws)
         reviewer = await ws.session("reviewer", profile="reviewer")
-        forked = await reviewer.execute("pwd", cwd="/repo")
+        forked = await reviewer.shell("pwd", cwd="/repo")
         assert forked.stdout == b"/repo\n"
         assert reviewer.state.cwd != "/repo"
-        plan = await reviewer.execute("cat /repo/README.md", provision=True)
+        plan = await reviewer.shell("cat /repo/README.md", provision=True)
         assert plan is not None
         token = set_current_session(ws.get_session(ws.default_session_id))
         try:
             # A session already bound is kept by the op door, so a
             # handle reached from inside the default session's own
             # command reads as that session, never wider.
-            assert await reviewer.fs.read("/repo/secrets/key.pem"
-                                          ) == b"PRIVATE\n"
+            assert await reviewer.vfs.read("/repo/secrets/key.pem"
+                                           ) == b"PRIVATE\n"
         finally:
             reset_current_session(token)
     finally:

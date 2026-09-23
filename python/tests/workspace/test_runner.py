@@ -18,12 +18,12 @@ import time
 import pytest
 
 from mirage import MountMode, Workspace, WorkspaceRunner
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 
 def _make_ws() -> Workspace:
     return Workspace(
-        {"/": (RAMResource(), MountMode.WRITE)},
+        {"/": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
     )
 
@@ -35,7 +35,7 @@ async def test_runner_executes_on_its_own_loop():
     try:
         outer = asyncio.get_running_loop()
         assert runner.loop is not outer
-        result = await runner.call(runner.ws.execute("echo hello"))
+        result = await runner.call(runner.ws.shell("echo hello"))
         assert result.exit_code == 0
         assert (result.stdout or b"").startswith(b"hello")
     finally:
@@ -47,7 +47,7 @@ async def test_runner_call_does_not_block_caller_loop():
     ws = _make_ws()
     runner = WorkspaceRunner(ws)
     try:
-        slow = asyncio.create_task(runner.call(runner.ws.execute("sleep 0.5")))
+        slow = asyncio.create_task(runner.call(runner.ws.shell("sleep 0.5")))
         ticks = 0
         for _ in range(20):
             await asyncio.sleep(0.05)
@@ -68,10 +68,10 @@ async def test_two_runners_are_isolated():
     runner_b = WorkspaceRunner(ws_b)
     try:
         slow = asyncio.create_task(
-            runner_a.call(runner_a.ws.execute("sleep 1.0")))
+            runner_a.call(runner_a.ws.shell("sleep 1.0")))
         await asyncio.sleep(0.05)
         start = time.monotonic()
-        fast_result = await runner_b.call(runner_b.ws.execute("echo quick"))
+        fast_result = await runner_b.call(runner_b.ws.shell("echo quick"))
         elapsed = time.monotonic() - start
         assert fast_result.exit_code == 0
         assert elapsed < 0.5, (
@@ -96,7 +96,7 @@ def test_call_sync_runs_on_workspace_loop():
     ws = _make_ws()
     runner = WorkspaceRunner(ws)
     try:
-        result = runner.call_sync(runner.ws.execute("echo sync"), timeout=5.0)
+        result = runner.call_sync(runner.ws.shell("echo sync"), timeout=5.0)
         assert result.exit_code == 0
         assert (result.stdout or b"").startswith(b"sync")
     finally:

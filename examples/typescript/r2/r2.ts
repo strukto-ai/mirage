@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MountMode, R2Resource, Workspace, type FileStat, type R2Config } from '@struktoai/mirage-node'
+import { MountMode, R2VFS, Workspace, type FileStat, type R2Config } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -46,7 +46,7 @@ async function run(
   ws: Workspace,
   command: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const r = await ws.execute(command)
+  const r = await ws.shell(command)
   return {
     stdout: r.stdoutText,
     stderr: r.stderrText,
@@ -56,8 +56,8 @@ async function run(
 
 async function main(): Promise<void> {
   const config = configFromEnv()
-  const resource = new R2Resource(config)
-  const ws = new Workspace({ '/r2/': resource }, { mode: MountMode.READ })
+  const vfs = new R2VFS(config)
+  const ws = new Workspace({ '/r2/': vfs }, { mode: MountMode.READ })
 
   try {
     console.log('=== ls /r2/ ===')
@@ -252,7 +252,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /r2/data/example.jsonl ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/r2/data/example.jsonl" && chown 500:dev "/r2/data/example.jsonl" && touch -t 202601021530 "/r2/data/example.jsonl"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

@@ -24,7 +24,7 @@ async function truncateImpl(
   path: PathSpec,
   length: number,
 ): Promise<void> {
-  const node = await resolveKey(accessor, path.resourcePath)
+  const node = await resolveKey(accessor, path.vfsPath)
   if (node !== null && isFolder(node)) throw eisdir(path)
   let data: Uint8Array
   if (node === null || isNative(node)) {

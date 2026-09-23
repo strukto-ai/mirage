@@ -6,9 +6,9 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.observe.store import RAMObserverStore
-from mirage.resource.ram import RAMResource
-from mirage.resource.ram.store import RAMStore
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.ram.store import RAMStore
 from mirage.workspace import Workspace
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
@@ -73,7 +73,7 @@ class ProbeWorkspaceStateStore(RAMWorkspaceStateStore):
         await self.session_probe.close()
 
 
-class ProbeRAMResource(RAMResource):
+class ProbeRAMVFS(RAMVFS):
 
     def __init__(self) -> None:
         super().__init__()
@@ -96,47 +96,46 @@ class ProbeRAMAccessor(RAMAccessor):
 
 
 async def stdout(ws: Workspace, command: str) -> str:
-    return await (await ws.execute(command)).stdout_str()
+    return await (await ws.shell(command)).stdout_str()
 
 
 @pytest.mark.asyncio
-async def test_mounted_mktemp_preserves_virtual_and_resource_paths():
-    resource = RAMResource()
-    ws = Workspace({"/scratch": resource}, mode=MountMode.WRITE)
+async def test_mounted_mktemp_preserves_virtual_and_vfs_paths():
+    vfs = RAMVFS()
+    ws = Workspace({"/scratch": vfs}, mode=MountMode.WRITE)
     try:
-        await ws.execute("mkdir -p /scratch/tmp")
+        await ws.shell("mkdir -p /scratch/tmp")
         output = await stdout(ws, "mktemp -p /scratch/tmp agent.XXXX")
         virtual = output.strip()
         assert virtual.startswith("/scratch/tmp/agent.")
         assert await stdout(ws, f"cat {virtual}") == ""
-        assert virtual.removeprefix(
-            "/scratch") in resource.accessor.store.files
+        assert virtual.removeprefix("/scratch") in vfs.accessor.store.files
 
         directory = (await
                      stdout(ws, "mktemp -d -p /scratch/tmp run.XXXX")).strip()
         assert directory.startswith("/scratch/tmp/run.")
         assert directory.removeprefix("/scratch") \
-            in resource.accessor.store.dirs
+            in vfs.accessor.store.dirs
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
 async def test_cache_tracks_overwrite_rename_and_unlink_commands():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        await ws.execute("echo old | tee /data/a.txt > /dev/null")
+        await ws.shell("echo old | tee /data/a.txt > /dev/null")
         assert await stdout(ws, "cat /data/a.txt") == "old\n"
 
-        await ws.execute("echo new | tee /data/a.txt > /dev/null")
+        await ws.shell("echo new | tee /data/a.txt > /dev/null")
         assert await stdout(ws, "cat /data/a.txt") == "new\n"
 
-        await ws.execute("mv /data/a.txt /data/b.txt")
-        missing = await ws.execute("cat /data/a.txt")
+        await ws.shell("mv /data/a.txt /data/b.txt")
+        missing = await ws.shell("cat /data/a.txt")
         assert missing.exit_code == 1
         assert await stdout(ws, "cat /data/b.txt") == "new\n"
 
-        await ws.execute("rm /data/b.txt")
+        await ws.shell("rm /data/b.txt")
         assert "b.txt" not in await stdout(ws, "ls /data")
     finally:
         await ws.close()
@@ -145,16 +144,16 @@ async def test_cache_tracks_overwrite_rename_and_unlink_commands():
 @pytest.mark.asyncio
 async def test_workspace_close_respects_store_ownership_end_to_end():
     shared = ProbeWorkspaceStateStore()
-    first = Workspace({"/": RAMResource()},
+    first = Workspace({"/": RAMVFS()},
                       mode=MountMode.WRITE,
                       store=shared,
                       workspace_id="shared")
-    second = Workspace({"/": RAMResource()},
+    second = Workspace({"/": RAMVFS()},
                        mode=MountMode.WRITE,
                        store=shared,
                        workspace_id="shared")
 
-    await first.execute("echo first")
+    await first.shell("echo first")
     await first.close()
     assert shared.close_calls == 0
     assert shared.namespace_probe.close_calls == 0
@@ -164,11 +163,11 @@ async def test_workspace_close_respects_store_ownership_end_to_end():
     await second.close()
 
     owned = ProbeWorkspaceStateStore()
-    owner = Workspace({"/": RAMResource()},
+    owner = Workspace({"/": RAMVFS()},
                       mode=MountMode.WRITE,
                       store=owned,
                       owns_store=True)
-    await owner.execute("echo owner")
+    await owner.shell("echo owner")
     await owner.close()
     await owner.close()
     assert owned.close_calls == 1
@@ -178,29 +177,29 @@ async def test_workspace_close_respects_store_ownership_end_to_end():
 
 
 @pytest.mark.asyncio
-async def test_close_leaves_resources_shared_with_other_workspaces_open():
-    resource = ProbeRAMResource()
-    ws = Workspace({"/data": resource}, mode=MountMode.WRITE)
-    await ws.execute("echo seed | tee /data/a.txt > /dev/null")
+async def test_close_leaves_mounts_shared_with_other_workspaces_open():
+    vfs = ProbeRAMVFS()
+    ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
+    await ws.shell("echo seed | tee /data/a.txt > /dev/null")
 
     state = await to_state_dict(ws)
-    replica = await Workspace.from_state(state, resources={"/data": resource})
+    replica = await Workspace.from_state(state, mounts={"/data": vfs})
     await replica.close()
-    assert resource.close_calls == 0
+    assert vfs.close_calls == 0
     assert await stdout(ws, "cat /data/a.txt") == "seed\n"
 
     await ws.close()
-    assert resource.close_calls == 1
+    assert vfs.close_calls == 1
 
 
 def test_workspace_context_open_modes_and_cleanup():
-    resource = ProbeRAMResource()
+    vfs = ProbeRAMVFS()
     store = ProbeWorkspaceStateStore()
-    ws = Workspace({"/data": resource},
+    ws = Workspace({"/data": vfs},
                    mode=MountMode.WRITE,
                    store=store,
                    owns_store=True)
-    asyncio.run(ws.fs.write("/data/input.txt", b"original"))
+    asyncio.run(ws.vfs.write("/data/input.txt", b"original"))
 
     with ws:
         with open("/data/input.txt") as readable:
@@ -229,9 +228,9 @@ def test_workspace_context_open_modes_and_cleanup():
         with pytest.raises(ValueError, match="closed file"):
             closed.write("late")
 
-    assert resource.accessor.store.files["/output.txt"] == b"created"
-    assert resource.accessor.store.files["/input.txt"] == b"changedl"
-    assert resource.accessor.store.files["/exclusive.txt"] == b"once"
-    assert resource.close_calls == 1
-    assert resource.accessor.close_calls == 1
+    assert vfs.accessor.store.files["/output.txt"] == b"created"
+    assert vfs.accessor.store.files["/input.txt"] == b"changedl"
+    assert vfs.accessor.store.files["/exclusive.txt"] == b"once"
+    assert vfs.close_calls == 1
+    assert vfs.accessor.close_calls == 1
     assert store.close_calls == 1

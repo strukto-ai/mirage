@@ -9,7 +9,8 @@ from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.tail_counts import (TailCounts, number_flag_error,
                                                  parse_counts, parse_seconds)
 from mirage.commands.builtin.utils.operands import operands_io, split_readable
-from mirage.commands.builtin.utils.stream import resolve_source
+from mirage.commands.builtin.utils.stream import (is_stdin, resolve_source,
+                                                  stdin_stat, stdin_stream)
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
@@ -239,8 +240,9 @@ def tail_multi(
         read (Callable[..., Any]): Bound reader called as ``read(path)``;
             returns bytes, an awaitable of bytes, or an async byte iterator.
     """
+    cached = cache_aware_read(read)
     return _tail_multi(paths,
-                       read=cache_aware_read(read),
+                       read=lambda p: read(p) if is_stdin(p) else cached(p),
                        n=n,
                        c=c,
                        from_line=from_line,
@@ -260,7 +262,8 @@ async def _tail_multi(
 ) -> AsyncIterator[bytes]:
     for i, p in enumerate(paths):
         if show_headers:
-            header = f"==> {p.raw_path} <==\n"
+            label = "(standard input)" if is_stdin(p) else p.raw_path
+            header = f"==> {label} <==\n"
             if i > 0:
                 header = "\n" + header
             yield header.encode()
@@ -458,7 +461,8 @@ async def _follow(
                 waiting.append((slot, p, APPEARED))
             continue
         if show_headers:
-            header = f"==> {p.raw_path} <==\n"
+            label = "(standard input)" if is_stdin(p) else p.raw_path
+            header = f"==> {label} <==\n"
             yield (("\n" if last is not None else "") + header).encode()
         last = slot
         for chunk in chunks:
@@ -593,6 +597,8 @@ async def tail_generic(
             called as ``read_range(path, offset, size)``, for a follow
             that only wants what the file gained; None reads whole.
     """
+    stat = stdin_stat(stat)
+    stream = stdin_stream(stream, opts.stdin)
     try:
         parsed = parse_flags(opts.flags)
     except UsageError as exc:

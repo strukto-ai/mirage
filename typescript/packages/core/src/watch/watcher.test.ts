@@ -12,22 +12,22 @@ class RecordingCache implements CacheInvalidator {
   readonly log: string[] = []
 
   invalidateAfterWrite(path: PathSpec): Promise<void> {
-    this.log.push(`write:${path.virtual}:${path.resourcePath}`)
+    this.log.push(`write:${path.virtual}:${path.vfsPath}`)
     return Promise.resolve()
   }
 
   invalidateAfterUnlink(path: PathSpec): Promise<void> {
-    this.log.push(`unlink:${path.virtual}:${path.resourcePath}`)
+    this.log.push(`unlink:${path.virtual}:${path.vfsPath}`)
     return Promise.resolve()
   }
 
   invalidateSubtree(path: PathSpec): Promise<void> {
-    this.log.push(`subtree:${path.virtual}:${path.resourcePath}`)
+    this.log.push(`subtree:${path.virtual}:${path.vfsPath}`)
     return Promise.resolve()
   }
 
   invalidateAncestors(path: PathSpec): Promise<void> {
-    this.log.push(`ancestors:${path.virtual}:${path.resourcePath}`)
+    this.log.push(`ancestors:${path.virtual}:${path.vfsPath}`)
     return Promise.resolve()
   }
 }
@@ -65,7 +65,7 @@ describe('Watcher', () => {
     await watcher.notify(change(FileChangeKind.CREATE, '/nc/data/sub/x.txt'))
     const delivered = await pending.next
     if (delivered.done === true) throw new Error('watch ended before delivery')
-    expect(delivered.value.path.resourcePath).toBe('data/sub/x.txt')
+    expect(delivered.value.path.vfsPath).toBe('data/sub/x.txt')
     expect(cache.log).toEqual([
       'write:/nc/data/sub/x.txt:data/sub/x.txt',
       'ancestors:/nc/data/sub/x.txt:data/sub/x.txt',

@@ -14,23 +14,23 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
-import { MountMode, PathSpec, ResourceName } from '../types.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { MountMode, PathSpec, VFSName } from '../types.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { runWithRecording } from './context.ts'
 
 function call(
   registry: OpsRegistry,
   name: string,
-  ram: RAMResource,
+  ram: RAMVFS,
   path: string,
   ...args: unknown[]
 ): Promise<unknown> {
-  return registry.call(name, ResourceName.RAM, ram.accessor, PathSpec.fromStrPath(path), args)
+  return registry.call(name, VFSName.RAM, ram.accessor, PathSpec.fromStrPath(path), args)
 }
 
-function setup(): { ram: RAMResource; registry: OpsRegistry } {
-  const ram = new RAMResource()
+function setup(): { ram: RAMVFS; registry: OpsRegistry } {
+  const ram = new RAMVFS()
   const registry = new OpsRegistry()
   new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, ops: registry })
   return { ram, registry }

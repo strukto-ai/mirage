@@ -1,7 +1,7 @@
 from pydantic import SecretStr
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.resource.mem0.config import Mem0Config
+from mirage.vfs.mem0.config import Mem0Config
 
 
 def test_client_is_lazy(monkeypatch):

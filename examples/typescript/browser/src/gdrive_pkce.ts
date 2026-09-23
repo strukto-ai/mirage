@@ -17,7 +17,7 @@
  *
  * 1. Click "Connect Google" — does the PKCE redirect dance.
  * 2. Comes back with a refresh token, persists it in localStorage.
- * 3. Mounts GDriveResource with `{ clientId, refreshToken }` — no client_secret.
+ * 3. Mounts GDriveVFS with `{ clientId, refreshToken }` — no client_secret.
  * 4. Runs `ls /gdrive/` — exercises mirage-core's TokenManager refresh path
  *    (which now omits `client_secret` when absent, per the v0 fix).
  *
@@ -30,7 +30,7 @@
  *  3. `pnpm dev` from `examples/typescript/browser/`.
  *  4. Open http://localhost:5173/gdrive_pkce.html
  */
-import { GDriveResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GDriveVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 import { escapeHtml } from './html.ts'
 
 declare const __GOOGLE_CLIENT_ID__: string
@@ -176,7 +176,7 @@ async function revoke(refresh: string): Promise<void> {
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
-  const res = await ws.execute(cmd)
+  const res = await ws.shell(cmd)
   const out = res.stdoutText.replace(/\s+$/, '')
   if (out !== '') line(out)
   const err = res.stderrText.replace(/\s+$/, '')
@@ -185,9 +185,9 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 }
 
 async function runDemo(tokens: StoredTokens): Promise<void> {
-  // The point: GDriveResource constructed with NO client_secret. mirage-core's
+  // The point: GDriveVFS constructed with NO client_secret. mirage-core's
   // TokenManager will refresh access tokens via the PKCE-style refresh path.
-  const gdrive = new GDriveResource({
+  const gdrive = new GDriveVFS({
     clientId: clientId(),
     // Google's Web client refuses refresh without the secret. The verifier
     // already authenticated us at code-exchange time; the secret here is

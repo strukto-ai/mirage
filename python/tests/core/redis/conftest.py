@@ -19,7 +19,7 @@ import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.resource.redis.store import RedisStore
+from mirage.vfs.redis.store import RedisStore
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 

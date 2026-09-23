@@ -19,7 +19,7 @@ import type { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import { handleCommandProvision } from './command.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import type { ProvisionNodeFn } from './pipes.ts'
 
 /**
@@ -38,7 +38,7 @@ export async function handleRedirectProvision(
   registry: MountRegistry,
   command: unknown,
   targets: readonly [RedirectKind, PathSpec][],
-  session: Session,
+  session: SessionState,
   namespace: Namespace | null = null,
 ): Promise<ProvisionResult> {
   // command is null for the bare `> file` form: nothing to run, only

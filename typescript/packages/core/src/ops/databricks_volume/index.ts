@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DATABRICKS_VOLUME_IO } from '../../commands/builtin/databricks_volume/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
 export const DATABRICKS_VOLUME_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.DATABRICKS_VOLUME,
+  VFSName.DATABRICKS_VOLUME,
   DATABRICKS_VOLUME_IO,
   { mkdirParents: true },
 )

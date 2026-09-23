@@ -19,8 +19,8 @@ import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.du import entries
-from mirage.resource.redis.store import RedisStore
 from mirage.types import PathSpec
+from mirage.vfs.redis.store import RedisStore
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -44,7 +44,7 @@ async def accessor():
 @pytest.mark.asyncio
 async def test_entries_root(accessor):
     found, total = await entries(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"))
+        accessor, PathSpec(vfs_path="", virtual="/", directory="/"))
     assert total == 15
     paths = [e[0] for e in found]
     assert "/a.txt" in paths
@@ -55,7 +55,6 @@ async def test_entries_root(accessor):
 @pytest.mark.asyncio
 async def test_entries_subdir(accessor):
     found, total = await entries(
-        accessor,
-        PathSpec(resource_path="sub", virtual="/sub", directory="/sub"))
+        accessor, PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"))
     assert total == 10
     assert len(found) == 2

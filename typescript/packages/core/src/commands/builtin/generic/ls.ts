@@ -120,7 +120,7 @@ function childSpec(entryPath: string, prefix: string): PathSpec {
     virtual: entryPath,
     directory: entryPath,
     resolved: false,
-    resourcePath: mountKey(entryPath, prefix),
+    vfsPath: mountKey(entryPath, prefix),
   })
 }
 
@@ -435,7 +435,7 @@ async function listDir(
     entries = []
     structureOnly = true
   }
-  const prefix = mountPrefixOf(dir.virtual, dir.resourcePath)
+  const prefix = mountPrefixOf(dir.virtual, dir.vfsPath)
   const settled = await Promise.allSettled(entries.map((p) => stat(childSpec(p, prefix))))
   const stats: FileStat[] = []
   for (let i = 0; i < settled.length; i++) {
@@ -494,7 +494,7 @@ async function derefEntry(
     if (!(err instanceof CycleError)) throw err
     return null
   }
-  const spec = childSpec(target, mountPrefixOf(directory.virtual, directory.resourcePath))
+  const spec = childSpec(target, mountPrefixOf(directory.virtual, directory.vfsPath))
   try {
     const s = await stat(spec)
     return s.with({ name: link.name })
@@ -578,7 +578,7 @@ async function probeOperand(
       const child = await probeOperand(
         readdir,
         stat,
-        childSpec(childPath, mountPrefixOf(path.virtual, path.resourcePath)),
+        childSpec(childPath, mountPrefixOf(path.virtual, path.vfsPath)),
         opts,
         warnings,
         false,
@@ -866,7 +866,7 @@ export async function lsGeneric(
             virtual: opts.cwd,
             directory: opts.cwd,
             resolved: false,
-            resourcePath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
+            vfsPath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
           }),
         ]
   const flags = parseFlags(fl)

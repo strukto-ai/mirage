@@ -37,7 +37,7 @@ SNAPSHOT_NAME = "mirage-fuse"
 WORKSPACE_YAML = """\
 mounts:
   /data:
-    resource: s3
+    vfs: s3
     config:
       bucket: {bucket}
       region: {region}

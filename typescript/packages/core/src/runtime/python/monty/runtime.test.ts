@@ -20,7 +20,7 @@ import { MontyUnavailableError } from './binding.ts'
 import { PyodideRuntime } from '../pyodide/runtime.ts'
 import { buildRuntime } from '../../table.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { ContentType, FileStat, FileType, MountMode } from '../../../types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PrefixResolver } from '../../resolver.ts'
@@ -807,11 +807,11 @@ describe('Workspace with the monty runtime', () => {
       new MontyUnavailableError('install @pydantic/monty'),
     )
     const ws = new Workspace(
-      { '/data': new RAMResource() },
-      { shellParser: await getTestParser(), runtimes: [runtime, 'vfs'] },
+      { '/data': new RAMVFS() },
+      { shellParser: await getTestParser(), runtimes: [runtime, 'workspace'] },
     )
     try {
-      const io = await ws.execute('python3 --version')
+      const io = await ws.shell('python3 --version')
       expect(io.exitCode).toBe(127)
       expect(new TextDecoder().decode(io.stdout)).toBe('')
       expect(new TextDecoder().decode(io.stderr)).toBe('python3: install @pydantic/monty\n')
@@ -822,12 +822,12 @@ describe('Workspace with the monty runtime', () => {
 
   it('does not print Mirage versions for unbound interpreter commands', async () => {
     const ws = new Workspace(
-      { '/data': new RAMResource() },
-      { shellParser: await getTestParser(), runtimes: ['vfs'] },
+      { '/data': new RAMVFS() },
+      { shellParser: await getTestParser(), runtimes: ['workspace'] },
     )
     try {
       for (const name of ['python3', 'python', 'node', 'js']) {
-        const io = await ws.execute(`${name} --version`)
+        const io = await ws.shell(`${name} --version`)
         expect(io.exitCode).toBe(127)
         expect(new TextDecoder().decode(io.stdout)).toBe('')
         expect(new TextDecoder().decode(io.stderr)).toBe(`${name}: command not found\n`)
@@ -839,12 +839,12 @@ describe('Workspace with the monty runtime', () => {
 
   it('reports the guest Python version for --version and -V', async () => {
     const ws = new Workspace(
-      { '/data': new RAMResource() },
-      { shellParser: await getTestParser(), runtimes: ['monty', 'vfs'] },
+      { '/data': new RAMVFS() },
+      { shellParser: await getTestParser(), runtimes: ['monty', 'workspace'] },
     )
     try {
       for (const line of ['python3 --version', 'python -V', 'python3 -VV']) {
-        const io = await ws.execute(line)
+        const io = await ws.shell(line)
         expect(io.exitCode).toBe(0)
         expect(new TextDecoder().decode(io.stdout)).toBe('Python 3.14.0 (monty)\n')
         expect(new TextDecoder().decode(io.stderr)).toBe('')
@@ -856,34 +856,34 @@ describe('Workspace with the monty runtime', () => {
 
   it('python3 reads a virtualized file end to end', async () => {
     const parser = await getTestParser()
-    const data = new RAMResource()
+    const data = new RAMVFS()
     const ws = new Workspace(
       { '/data': data },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'vfs'] },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'workspace'] },
     )
-    await ws.execute('echo virtual-content > /data/a.txt')
-    const io = await ws.execute(
+    await ws.shell('echo virtual-content > /data/a.txt')
+    const io = await ws.shell(
       'python3 -c "from pathlib import Path; print(Path(\'/data/a.txt\').read_text().strip().upper())"',
     )
     expect(new TextDecoder().decode(io.stderr)).toBe('')
     expect(io.exitCode).toBe(0)
     expect(new TextDecoder().decode(io.stdout)).toBe('VIRTUAL-CONTENT\n')
-    const io2 = await ws.execute(
+    const io2 = await ws.shell(
       "python3 -c \"from pathlib import Path; Path('/data/out.txt').write_text('from-monty')\"",
     )
     expect(io2.exitCode).toBe(0)
-    const io3 = await ws.execute('cat /data/out.txt')
+    const io3 = await ws.shell('cat /data/out.txt')
     expect(new TextDecoder().decode(io3.stdout)).toBe('from-monty')
     // The open() builtin, end to end: establish + append on a mount,
     // and a /tmp path served by the per-run scratch tree.
-    const io4 = await ws.execute(
+    const io4 = await ws.shell(
       "python3 -c \"h = open('/data/log.txt', 'w'); h.write('first'); h.close(); print(open('/data/log.txt').read())\"",
     )
     expect(new TextDecoder().decode(io4.stderr)).toBe('')
     expect(new TextDecoder().decode(io4.stdout)).toBe('first\n')
-    const io5 = await ws.execute('cat /data/log.txt')
+    const io5 = await ws.shell('cat /data/log.txt')
     expect(new TextDecoder().decode(io5.stdout)).toBe('first')
-    const io6 = await ws.execute(
+    const io6 = await ws.shell(
       "python3 -c \"from pathlib import Path; Path('/tmp').mkdir(); open('/tmp/s.txt', 'w').write('tmp-side'); print(open('/tmp/s.txt').read())\"",
     )
     expect(new TextDecoder().decode(io6.stderr)).toBe('')
@@ -940,11 +940,11 @@ describe('python3 option table (CPython-pinned)', () => {
   async function run(line: string) {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/': new RAMResource() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'vfs'] },
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'workspace'] },
     )
     try {
-      return await ws.execute(line)
+      return await ws.shell(line)
     } finally {
       await ws.close()
     }
@@ -953,12 +953,12 @@ describe('python3 option table (CPython-pinned)', () => {
   it('takes -u before a script as a flag, not as the script', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/': new RAMResource() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'vfs'] },
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'workspace'] },
     )
     try {
-      await ws.execute("printf 'print(42)\\n' > /s.py")
-      const io = await ws.execute('python3 -u /s.py')
+      await ws.shell("printf 'print(42)\\n' > /s.py")
+      const io = await ws.shell('python3 -u /s.py')
       expect(io.exitCode).toBe(0)
       expect(new TextDecoder().decode(io.stdout)).toBe('42\n')
     } finally {
@@ -983,12 +983,12 @@ describe('python3 option table (CPython-pinned)', () => {
   it('sets argv[0] to the script as typed', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/': new RAMResource() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'vfs'] },
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['monty', 'workspace'] },
     )
     try {
-      await ws.execute("printf 'print(argv[0])\\n' > /s.py")
-      const io = await ws.execute('python3 /s.py')
+      await ws.shell("printf 'print(argv[0])\\n' > /s.py")
+      const io = await ws.shell('python3 /s.py')
       expect(new TextDecoder().decode(io.stdout)).toBe('/s.py\n')
     } finally {
       await ws.close()

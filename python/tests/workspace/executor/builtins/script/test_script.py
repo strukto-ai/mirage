@@ -3,12 +3,12 @@ import pytest
 from mirage.types import FileStat, FileType
 from mirage.utils.errors import enoent
 from mirage.workspace.executor.builtins.script import read_script_text
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 @pytest.mark.asyncio
 async def test_read_script_text_reports_a_missing_file():
-    session = Session(session_id="s", cwd="/")
+    session = SessionState(session_id="s", cwd="/")
 
     async def dispatch(op, path, **kwargs):
         raise enoent(path)
@@ -19,7 +19,7 @@ async def test_read_script_text_reports_a_missing_file():
 
 @pytest.mark.asyncio
 async def test_read_script_text_calls_a_directory_a_directory():
-    session = Session(session_id="s", cwd="/")
+    session = SessionState(session_id="s", cwd="/")
     stat = FileStat(name="sub", path="/sub", type=FileType.DIRECTORY, size=0)
 
     async def dispatch(op, path, **kwargs):
@@ -33,7 +33,7 @@ async def test_read_script_text_calls_a_directory_a_directory():
 
 @pytest.mark.asyncio
 async def test_read_script_text_propagates_a_non_filesystem_failure():
-    session = Session(session_id="s", cwd="/")
+    session = SessionState(session_id="s", cwd="/")
 
     async def dispatch(op, path, **kwargs):
         raise RuntimeError("token expired")

@@ -76,8 +76,8 @@ async def stat(
     index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    key = path.resource_path
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    key = path.vfs_path
     if not key:
         return FileStat(name="/", type=FileType.DIRECTORY)
     if index is NULL_INDEX:
@@ -92,7 +92,7 @@ async def stat(
                 accessor,
                 PathSpec(virtual=parent_virtual,
                          directory=parent_virtual,
-                         resource_path=mount_key(parent_virtual, prefix)),
+                         vfs_path=mount_key(parent_virtual, prefix)),
                 index=index,
             )
         except FileNotFoundError as exc:

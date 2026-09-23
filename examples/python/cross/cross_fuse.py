@@ -21,12 +21,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from mirage import Workspace
-from mirage.resource.disk import DiskResource
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
-from mirage.resource.gmail import GmailConfig, GmailResource
-from mirage.resource.notion import NotionConfig, NotionResource
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.vfs.gmail import GmailConfig, GmailVFS
+from mirage.vfs.notion import NotionConfig, NotionVFS
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
 
@@ -42,18 +42,17 @@ google_kwargs = dict(
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
 
-notion = NotionResource(config=NotionConfig(
-    api_key=os.environ["NOTION_API_KEY"]))
-gdrive = GoogleDriveResource(config=GoogleDriveConfig(**google_kwargs))
-gmail = GmailResource(config=GmailConfig(**google_kwargs))
-local = DiskResource(root=tmp + "/files")
-s3 = S3Resource(config=S3Config(
+notion = NotionVFS(config=NotionConfig(api_key=os.environ["NOTION_API_KEY"]))
+gdrive = GoogleDriveVFS(config=GoogleDriveConfig(**google_kwargs))
+gmail = GmailVFS(config=GmailConfig(**google_kwargs))
+local = DiskVFS(root=tmp + "/files")
+s3 = S3VFS(config=S3Config(
     bucket=os.environ["AWS_S3_BUCKET"],
     region=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
     aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
     aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
 ))
-slack = SlackResource(config=SlackConfig(
+slack = SlackVFS(config=SlackConfig(
     token=os.environ["SLACK_BOT_TOKEN"],
     search_token=os.environ.get("SLACK_USER_TOKEN"),
 ))
@@ -163,6 +162,6 @@ with Workspace({
     except EOFError:
         pass
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

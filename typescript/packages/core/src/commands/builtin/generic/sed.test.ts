@@ -29,7 +29,7 @@ async function runSed(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'ram' } as never,
+    vfs: { kind: 'ram' } as never,
   } as CommandOpts
   const result = await sedGeneric(
     [],

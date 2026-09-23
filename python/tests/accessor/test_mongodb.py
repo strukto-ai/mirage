@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.resource.mongodb.config import MongoDBConfig
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 
 @pytest.fixture

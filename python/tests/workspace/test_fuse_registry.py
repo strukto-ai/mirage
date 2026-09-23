@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 
 class _FakeThread:
@@ -20,11 +20,7 @@ def _fake_mount(monkeypatch):
 
 
 def _ws():
-    return Workspace({
-        "/a/": RAMResource(),
-        "/b/": RAMResource()
-    },
-                     mode=MountMode.WRITE)
+    return Workspace({"/a/": RAMVFS(), "/b/": RAMVFS()}, mode=MountMode.WRITE)
 
 
 def test_no_fuse_mounts_returns_empty_and_none():

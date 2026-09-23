@@ -16,8 +16,8 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.du import entries
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def store():
 @pytest.mark.asyncio
 async def test_entries_root(store):
     found, total = await entries(
-        store, PathSpec(resource_path="", virtual="/", directory="/"))
+        store, PathSpec(vfs_path="", virtual="/", directory="/"))
     assert total == 15
     paths = [e[0] for e in found]
     assert "/a.txt" in paths
@@ -44,6 +44,6 @@ async def test_entries_root(store):
 @pytest.mark.asyncio
 async def test_entries_subdir(store):
     found, total = await entries(
-        store, PathSpec(resource_path="sub", virtual="/sub", directory="/sub"))
+        store, PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"))
     assert total == 10
     assert len(found) == 2

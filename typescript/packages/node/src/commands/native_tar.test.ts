@@ -91,7 +91,7 @@ describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
     try {
       env.createFile('a.txt', ENC.encode('aaa\n'))
       env.ws.cwd = '/data'
-      const io = await env.ws.execute('tar -c -j -f /data/out.tar.bz2 /data/a.txt')
+      const io = await env.ws.shell('tar -c -j -f /data/out.tar.bz2 /data/a.txt')
       expect(io.exitCode).toBe(1)
       expect(DEC.decode(io.stderr)).toBe('tar: bzip2 not supported\n')
     } finally {

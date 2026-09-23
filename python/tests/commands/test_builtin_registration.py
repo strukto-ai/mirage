@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands import COMMANDS
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def test_builtins_registered_by_default():
-    ws = Workspace({"/tmp/": RAMResource()}, mode=MountMode.READ)
+    ws = Workspace({"/tmp/": RAMVFS()}, mode=MountMode.READ)
     mount = ws._registry.mount_for("/tmp/a")
     names = {name for (name, _) in mount._cmds}
     assert "cat" in names
@@ -30,7 +30,7 @@ def test_builtins_registered_by_default():
 
 
 def test_builtin_count_matches_commands_dict():
-    ws = Workspace({"/tmp/": RAMResource()}, mode=MountMode.READ)
+    ws = Workspace({"/tmp/": RAMVFS()}, mode=MountMode.READ)
     mount = ws._registry.mount_for("/tmp/a")
     names = {name for (name, _) in mount._cmds}
     for name in COMMANDS:

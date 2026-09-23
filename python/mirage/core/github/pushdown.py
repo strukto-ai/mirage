@@ -26,7 +26,7 @@ def scope_relative_key(path: PathSpec) -> str:
     Returns:
         str: Repo-relative key with a leading slash; ``/`` for the root.
     """
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     key = path.virtual
     if prefix and key.startswith(prefix):
         key = key[len(prefix):] or "/"

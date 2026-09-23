@@ -16,7 +16,7 @@ import { invalidateAfterWrite } from '../../cache/context.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { ResourceName, type PathSpec } from '../../types.ts'
+import { VFSName, type PathSpec } from '../../types.ts'
 import { dbxFetch } from './client.ts'
 import { ensurePathSpec, parentPath } from './_helpers.ts'
 import { isNotFound, notADirectoryError, notFoundError } from './errors.ts'
@@ -63,6 +63,6 @@ export async function writeBytes(
     if (isNotFound(exc)) throw notFoundError(p.virtual)
     throw exc
   }
-  record('write', p.virtual, ResourceName.DATABRICKS_VOLUME, data.byteLength, timer)
+  record('write', p.virtual, VFSName.DATABRICKS_VOLUME, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

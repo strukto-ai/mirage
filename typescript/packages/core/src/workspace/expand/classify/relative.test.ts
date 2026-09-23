@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { BaseResource, type Resource } from '../../../resource/base.ts'
+import { BaseVFS, type VFS } from '../../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { MountRegistry } from '../../mount/registry.ts'
 import { relativeSpec } from './relative.ts'
 
-class StubResource extends BaseResource implements Resource {
+class StubVFS extends BaseVFS implements VFS {
   readonly kind = 'stub'
   open(): Promise<void> {
     return Promise.resolve()
@@ -29,7 +29,7 @@ class StubResource extends BaseResource implements Resource {
 }
 
 function setup(): MountRegistry {
-  return new MountRegistry({ '/ram': new StubResource() }, MountMode.WRITE)
+  return new MountRegistry({ '/ram': new StubVFS() }, MountMode.WRITE)
 }
 
 describe('relativeSpec', () => {

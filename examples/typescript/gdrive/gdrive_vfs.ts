@@ -17,7 +17,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  GDriveResource,
+  GDriveVFS,
   MountMode,
   patchNodeFs,
   Workspace,
@@ -41,8 +41,8 @@ function buildConfig(): GDriveConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new GDriveResource(buildConfig())
-  const ws = new Workspace({ '/gdrive/': resource }, { mode: MountMode.READ })
+  const vfs = new GDriveVFS(buildConfig())
+  const ws = new Workspace({ '/gdrive/': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Google Drive transparently ===\n')

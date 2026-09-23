@@ -19,9 +19,9 @@ import pytest
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.postgres.io import resolve_glob
-from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
+from mirage.vfs.postgres.config import PostgresConfig
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def accessor():
 
 @pytest.mark.asyncio
 async def test_resolve_glob_resolved_pathspec(accessor, index):
-    p = PathSpec(resource_path="public/tables/users",
+    p = PathSpec(vfs_path="public/tables/users",
                  virtual="/public/tables/users",
                  directory="/public/tables",
                  resolved=True)
@@ -50,7 +50,7 @@ async def test_resolve_glob_pattern_match(accessor, index):
         "/public/tables/users", "/public/tables/orders", "/public/tables/teams"
     ])
     resolve = make_resolve_glob(fake_readdir)
-    p = PathSpec(resource_path="public/tables/u*",
+    p = PathSpec(vfs_path="public/tables/u*",
                  virtual="/public/tables/u*",
                  directory="/public/tables",
                  pattern="u*",
@@ -62,7 +62,7 @@ async def test_resolve_glob_pattern_match(accessor, index):
 
 @pytest.mark.asyncio
 async def test_resolve_glob_unresolved_no_pattern(accessor, index):
-    p = PathSpec(resource_path="public/tables",
+    p = PathSpec(vfs_path="public/tables",
                  virtual="/public/tables",
                  directory="/public",
                  resolved=False,

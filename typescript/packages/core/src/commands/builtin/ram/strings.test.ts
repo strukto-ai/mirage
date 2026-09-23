@@ -15,21 +15,21 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_STRINGS = RAM_COMMANDS.filter((c) => c.name === 'strings' && c.filetype == null)
 
 const DEC = new TextDecoder()
 
 async function runStrings(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_STRINGS[0]
   if (cmd === undefined) throw new Error('strings not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -48,7 +48,7 @@ async function runStrings(
 
 describe('strings', () => {
   it('extracts printable strings from binary data', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const data = new Uint8Array([
       0x00,
       0x00,
@@ -58,31 +58,31 @@ describe('strings', () => {
       ...'test'.split('').map((c) => c.charCodeAt(0)),
       0x00,
     ])
-    resource.store.files.set('/bin', data)
-    const r = await runStrings(resource, [PathSpec.fromStrPath('/bin')])
+    vfs.store.files.set('/bin', data)
+    const r = await runStrings(vfs, [PathSpec.fromStrPath('/bin')])
     expect(r.exitCode).toBe(0)
     expect(r.out).toContain('hello world')
   })
 
   it('respects -n minimum length flag', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const data = new Uint8Array([
       ...'hi'.split('').map((c) => c.charCodeAt(0)),
       0x00,
       ...'longenough'.split('').map((c) => c.charCodeAt(0)),
       0x00,
     ])
-    resource.store.files.set('/bin', data)
-    const r = await runStrings(resource, [PathSpec.fromStrPath('/bin')], { n: '4' })
+    vfs.store.files.set('/bin', data)
+    const r = await runStrings(vfs, [PathSpec.fromStrPath('/bin')], { n: '4' })
     expect(r.exitCode).toBe(0)
     expect(r.out).toContain('longenough')
     expect(r.out).not.toContain('hi\n')
   })
 
   it('reads from stdin when no path', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const data = new Uint8Array([0x00, ...'findme'.split('').map((c) => c.charCodeAt(0)), 0x00])
-    const r = await runStrings(resource, [], {}, data)
+    const r = await runStrings(vfs, [], {}, data)
     expect(r.exitCode).toBe(0)
     expect(r.out).toContain('findme')
   })

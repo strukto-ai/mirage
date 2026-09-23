@@ -1,6 +1,6 @@
 # Browser GitHub demo
 
-Demonstrates the browser `GitHubResource` calling `api.github.com` directly — no proxy server. GitHub's REST API supports CORS and uses an `Authorization` header, so the browser can talk to it directly (same model as Linear).
+Demonstrates the browser `GitHubVFS` calling `api.github.com` directly — no proxy server. GitHub's REST API supports CORS and uses an `Authorization` header, so the browser can talk to it directly (same model as Linear).
 
 ## Run
 

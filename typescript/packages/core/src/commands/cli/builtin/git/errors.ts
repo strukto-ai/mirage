@@ -639,7 +639,7 @@ export class RemovePathError extends GitError {
 /**
  * A working-tree removal that would take a nested mount with it.
  *
- * A mount nested inside the repository is served by another resource entirely,
+ * A mount nested inside the repository is served by another VFS entirely,
  * so removing the directory it stands in empties that backend rather than the
  * repository: the store behind it is gone, and no branch ever recorded a line
  * of it. mirage refuses instead, which is the rule `MountRootPolicy` already

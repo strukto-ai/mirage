@@ -22,12 +22,12 @@ async def test_s3_rm_after_cat_hits_backend_and_evicts_cache():
     objects = {"file.txt": b"hello\n"}
     with patch_async_session(objects):
         ws = make_s3_ws(objects)
-        first = await ws.execute("cat /data/file.txt")
+        first = await ws.shell("cat /data/file.txt")
         assert (await first.stdout_str()) == "hello\n"
 
-        removed = await ws.execute("rm /data/file.txt")
+        removed = await ws.shell("rm /data/file.txt")
         assert removed.exit_code == 0
         assert "file.txt" not in objects
 
-        reread = await ws.execute("cat /data/file.txt")
+        reread = await ws.shell("cat /data/file.txt")
         assert reread.exit_code != 0

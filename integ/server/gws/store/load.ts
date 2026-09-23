@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { JsonValue } from '../../kit/typescript/index.ts'
+import { isObj } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
 import type { C } from './client.ts'
 import { DEFAULT_CALENDAR_TZ, GwsState } from './state.ts'
@@ -45,13 +46,35 @@ function obj(text: string): JsonObj {
   return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {}
 }
 
-function pixelSizes(text: string): Record<string, number> {
+function objs(text: string): JsonObj[] {
+  const parsed = json(text)
+  if (!Array.isArray(parsed) || !parsed.every(isObj)) throw new Error('invalid stored list')
+  return parsed
+}
+
+function byIndex(text: string): Record<string, JsonObj> {
   return Object.fromEntries(
     Object.entries(obj(text)).map(([key, value]) => {
-      if (typeof value !== 'number') throw new Error('invalid stored pixel size')
+      if (!isObj(value)) throw new Error('invalid stored dimension properties')
       return [key, value]
     }),
   )
+}
+
+// A tab's cell rows split back into the value map and the map of everything
+// else a cell holds.
+function tabCells(
+  rows: readonly { row: number; col: number; text: string | null; props: string }[],
+): Pick<SheetTab, 'cells' | 'props'> {
+  const cells = new Map<string, string>()
+  const props = new Map<string, JsonObj>()
+  for (const r of rows) {
+    const key = `${String(r.row)},${String(r.col)}`
+    if (r.text !== null) cells.set(key, r.text)
+    const rest = obj(r.props)
+    if (Object.keys(rest).length > 0) props.set(key, rest)
+  }
+  return { cells, props }
 }
 
 // Prisma hands Bytes back as a Uint8Array, not a Buffer, and every consumer
@@ -230,14 +253,12 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
           title: t.title,
           rows: t.rows,
           cols: t.cols,
-          rowPixels: pixelSizes(t.rowPixels),
-          columnPixels: pixelSizes(t.columnPixels),
-          cells: new Map(
-            (cellsOf.get(`${t.spreadsheetId} ${String(t.sheetId)}`) ?? []).map((c) => [
-              `${String(c.row)},${String(c.col)}`,
-              c.text,
-            ]),
-          ),
+          rowMeta: byIndex(t.rowMeta),
+          columnMeta: byIndex(t.columnMeta),
+          bandedRanges: objs(t.bandedRanges),
+          basicFilter: t.basicFilter === null ? null : obj(t.basicFilter),
+          conditionalFormats: objs(t.conditionalFormats),
+          ...tabCells(cellsOf.get(`${t.spreadsheetId} ${String(t.sheetId)}`) ?? []),
         }),
       ),
     } satisfies Spreadsheet)

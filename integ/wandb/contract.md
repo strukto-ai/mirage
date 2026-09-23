@@ -1,7 +1,7 @@
 # W&B API integration contract
 
 This suite is a service-level HTTP GraphQL mock. Mirage's Python and TypeScript
-resources query the same server and synthetic fixture. It is not an MCP server,
+mounts query the same server and synthetic fixture. It is not an MCP server,
 a Toolathlon capture, or a replacement for the original MCP tool surface.
 
 Run `pnpm run wandb:integ` from `integ/` after installing the Python and TypeScript
@@ -20,7 +20,7 @@ The endpoint never forwards an unhandled request to live W&B.
 
 ## Wire contract
 
-The resource queries follow the official SDK's GraphQL operations, inspected at
+The VFS queries follow the official SDK's GraphQL operations, inspected at
 [wandb v0.21.1](https://github.com/wandb/wandb/tree/v0.21.1/wandb/apis/public):
 
 - `projects.py`: `models(entityName, after, first)` cursor connections.
@@ -69,7 +69,7 @@ Actual parquet exports/downloads are not emulated.
 One **upstream SDK 0.29.0 bug** is an explicit test expectation: a valid `user: null`
 run raises `CommError` because `Run._load_from_attrs` constructs `User(None)`.
 The test requires that exact failure instead of inventing a creator or silently
-skipping the case. SDK 0.21.1 and both Mirage resources read the null-creator run.
+skipping the case. SDK 0.21.1 and both Mirage mounts read the null-creator run.
 
 | Surface                | Audit result / deliberate boundary                                                                                                                                                                           |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -110,7 +110,7 @@ A file catalog fetch populates metadata for all nested directories in the existi
 index. Nested listings and stats reuse it until expiry or invalidation. Reads
 select only the requested run fields, and downloads obtain a fresh URL through an
 exact filename query. Content and download URLs are not retained in the directory
-index. Directory metadata keeps the resource's normal 600-second index TTL.
+index. Directory metadata keeps the VFS's normal 600-second index TTL.
 
 The generic read commands stat operands before reading: a cold `cat summary.json`
 therefore makes an existence query followed by a summary query; a warm read makes

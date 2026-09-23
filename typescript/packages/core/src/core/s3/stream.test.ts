@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { S3Accessor } from '../../accessor/s3.ts'
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { PathSpec } from '../../types.ts'
 import { rangeRead, readRange } from './stream.ts'
 
@@ -135,7 +135,7 @@ describe('core/s3 readRange on the presigned browser path', () => {
 
 describe('core/s3 rangeRead', () => {
   it('takes its fourth argument as one past the last byte', async () => {
-    // The resource-level spelling every other backend and all of python use.
+    // The VFS-level spelling every other backend and all of python use.
     // s3 read it as a length, so this call used to return ten bytes from
     // offset two rather than the four between two and six.
     serve(text(BODY))

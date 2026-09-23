@@ -13,13 +13,13 @@ stream, so an agent reacts instead of rescanning and diffing directories.
 
 ```python
 from mirage import Workspace
-from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
+from mirage.vfs.nextcloud import NextcloudConfig, NextcloudVFS
 
-ws = Workspace({"/nc": NextcloudResource(NextcloudConfig(...))})
+ws = Workspace({"/nc": NextcloudVFS(NextcloudConfig(...))})
 
 async for event in ws.watch("/nc/Documents"):
     print(event.kind, event.path.virtual)   # e.g. "update /nc/Documents/report.txt"
-    result = await ws.execute(f"cat {event.path.virtual}")  # guaranteed fresh
+    result = await ws.shell(f"cat {event.path.virtual}")  # guaranteed fresh
 ```
 
 No setup call is needed: the watch runtime attaches lazily on first use, and an
@@ -97,7 +97,7 @@ the only real work. Three backends ship a mapper for it:
 ```python
 from mirage.core.slack.watch import SlackEventHook
 
-hook = SlackEventHook(resource.accessor)
+hook = SlackEventHook(vfs.accessor)
 
 async def handle(request):                     # your aiohttp/FastAPI route
     event = (await request.json())["event"]
@@ -154,14 +154,14 @@ is [`examples/python/nextcloud/watch.py`](https://github.com/strukto-ai/mirage/b
 ## Pull Mode
 
 Backends that implement `delta_hook()` answer one question:
-*what changed under this root since the last checkpoint?* Eleven resource
+*what changed under this root since the last checkpoint?* Eleven VFS
 families ship one today, listed in the [Watch Matrix](/python/watch-matrix)
 with the fingerprint each one compares on. A baseline pull
 (`checkpoint=None`) emits nothing; every later pull diffs against the
 checkpoint you hand back. The whole consumer poller is:
 
 ```python
-hook = ws.registry.mount_for("/nc").resource.delta_hook()
+hook = ws.registry.mount_for("/nc").vfs.delta_hook()
 checkpoint = None
 while True:
     delta = await hook.pull(root, checkpoint)
@@ -229,8 +229,8 @@ loops end cleanly) and the workspace returns to its idle state; the next
   `ws.notify`.
 - The TypeScript API has the same delivery, queue, and delta-hook design; see
   [TypeScript Watch](/typescript/watch).
-- Pull detection ships for eleven resource families; push mode works with any
+- Pull detection ships for eleven VFS families; push mode works with any
   backend today since `ws.notify` accepts events from any detection you run.
-  See the [Watch Matrix](/python/watch-matrix) for per-resource support.
+  See the [Watch Matrix](/python/watch-matrix) for per-VFS support.
 - Events are in-memory and at-most-once per subscriber; durable queues and
   acknowledgement are future work.

@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
-from mirage.resource.dropbox.config import DropboxConfig
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 class FakeDropboxRpc:

@@ -103,7 +103,7 @@ def test_unknown_top_segment_under_db():
 
 def test_pathspec_with_prefix_root():
     p = PathSpec(
-        resource_path=mount_key("/mongo/", "/mongo"),
+        vfs_path=mount_key("/mongo/", "/mongo"),
         virtual="/mongo/",
         directory="/mongo/",
     )
@@ -113,7 +113,7 @@ def test_pathspec_with_prefix_root():
 
 def test_pathspec_with_prefix_database():
     p = PathSpec(
-        resource_path=mount_key("/mongo/sample_mflix", "/mongo"),
+        vfs_path=mount_key("/mongo/sample_mflix", "/mongo"),
         virtual="/mongo/sample_mflix",
         directory="/mongo/",
     )
@@ -124,7 +124,7 @@ def test_pathspec_with_prefix_database():
 
 def test_pathspec_with_prefix_documents():
     p = PathSpec(
-        resource_path=mount_key(
+        vfs_path=mount_key(
             "/mongo/sample_mflix/collections/movies/documents.jsonl",
             "/mongo"),
         virtual="/mongo/sample_mflix/collections/movies/documents.jsonl",

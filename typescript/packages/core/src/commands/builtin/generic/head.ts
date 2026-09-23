@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isStdin } from '../utils/stream.ts'
+import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
 import { IOResult } from '../../../io/types.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
@@ -163,7 +165,7 @@ async function* headMulti(
     if (p === undefined) continue
     if (showHeaders) {
       const prefix = i > 0 ? '\n' : ''
-      yield ENC.encode(`${prefix}==> ${p.rawPath} <==\n`)
+      yield ENC.encode(`${prefix}==> ${isStdin(p) ? '(standard input)' : p.rawPath} <==\n`)
     }
     const source = stream(p)
     for await (const chunk of headStream(source, lines, bytesMode, zeroTerminated)) yield chunk
@@ -177,7 +179,8 @@ export async function headGeneric(
   stat: Stat,
   stream: Stream,
 ): Promise<CommandFnResult> {
-  stream = cacheAwareStreamEager(stream)
+  stat = stdinStat(stat)
+  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]

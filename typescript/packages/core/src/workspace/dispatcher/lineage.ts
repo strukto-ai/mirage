@@ -58,7 +58,7 @@ export function turfOf(mount: MountEntry | null): string {
  * *backend* that cannot write — notion, github, mem0, postgres, mongodb,
  * every vector store — and symlinks are namespace state, so a link above
  * such a mount needs no write capability from it and is pinned working
- * on four of them (`integ/resources/<svc>/sym.json`). A session grant is a
+ * on four of them (`integ/vfs/<svc>/sym.json`). A session grant is a
  * statement about what this *session* may do, which covers both planes,
  * so it is the one that binds here. The consequence to know:
  * sessionless, a deliberately read-mode mount still takes a link.

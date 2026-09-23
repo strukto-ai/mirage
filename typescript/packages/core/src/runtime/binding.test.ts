@@ -23,7 +23,7 @@ import { RuntimeVFS } from './vfs.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
@@ -40,7 +40,7 @@ const dec = new TextDecoder()
 class Probe extends LanguageRuntime {
   readonly name = 'probe'
   readonly language = 'python' as const
-  override readonly reach = 'vfs' as const
+  override readonly reach = 'workspace' as const
   readonly contexts: RuntimeContext[] = []
   protected override executeCode(request: RunArgs, context?: RuntimeContext): Promise<RunResult> {
     if (context !== undefined) this.contexts.push(context)
@@ -75,7 +75,7 @@ class DenySecret implements Policy {
 async function world(runtimes?: Runtime[]): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
-    { '/data': new RAMResource(), '/secret': new RAMResource() },
+    { '/data': new RAMVFS(), '/secret': new RAMVFS() },
     {
       mode: MountMode.EXEC,
       policies: [new DenySecret()],
@@ -101,7 +101,7 @@ describe('execution bindings', () => {
       }
     }
     const runtime = new EagerProbe()
-    const data = new RAMResource()
+    const data = new RAMVFS()
     data.loadState({ type: 'ram', files: { '/file': enc.encode('ready') } })
     const ws = new Workspace({ '/data': data }, { runtimes: [runtime] })
     try {
@@ -134,7 +134,7 @@ describe('execution bindings', () => {
       env: {},
     } as const
     expect(language.capabilities.languages).toEqual(['python'])
-    expect(language.capabilities.reach).toBe('vfs')
+    expect(language.capabilities.reach).toBe('workspace')
     expect(language.capabilities.shell).toBe(false)
     expect(native.capabilities.shell).toBe(true)
     expect(native.capabilities.process).toBe(false)
@@ -163,7 +163,7 @@ describe('execution bindings', () => {
   it('retains session permissions and gated writes after capture', async () => {
     const ws = await world()
     try {
-      await ws.execute('echo private > /secret/a')
+      await ws.shell('echo private > /secret/a')
       ws.createSession('agent', { profile: { paths: { hide: ['/secret'] } } })
       const context = ws.runtimeContext('agent'),
         other = ws.runtimeContext()
@@ -196,11 +196,11 @@ describe('execution bindings', () => {
   it('projects live mounts, namespace links, and attributes through the binding', async () => {
     const ws = await world()
     try {
-      await ws.execute('echo shared > /data/a; chmod 600 /data/a')
+      await ws.shell('echo shared > /data/a; chmod 600 /data/a')
       const context = ws.runtimeContext()
-      await ws.execute('ln -s /data/a /data/link')
+      await ws.shell('ln -s /data/a /data/link')
       expect(required(context.ns.links).resolve('/data/link')).toBe('/data/a')
-      ws.addMount('/data/nested', new RAMResource(), MountMode.EXEC)
+      ws.addMount('/data/nested', new RAMVFS(), MountMode.EXEC)
       expect(context.resolver.ownerOf('/data/nested/a')).toBe('/data/nested/')
       const vfs = new RuntimeVFS(context.dispatch, context.resolver)
       expect(dec.decode(await vfs.read('/data/link'))).toBe('shared\n')
@@ -253,7 +253,7 @@ it.each([
     )
     const ws = await world([runtime])
     try {
-      await ws.execute('echo shared > /data/file; ln -s /data/file /data/link')
+      await ws.shell('echo shared > /data/file; ln -s /data/file /data/link')
       ws.createSession('one')
       ws.createSession('two')
       const calls: string[][] = [[], []]
@@ -301,14 +301,14 @@ it('command execution supplies its active workspace context', async () => {
   const ws = await world([runtime])
   try {
     ws.createSession('agent')
-    await ws.execute('export PUBLIC=agent; cd /data', { sessionId: 'agent' })
-    const result = await ws.execute('python3 -c hello', { sessionId: 'agent' })
+    await ws.shell('export PUBLIC=agent; cd /data', { sessionId: 'agent' })
+    const result = await ws.shell('python3 -c hello', { sessionId: 'agent' })
     expect(dec.decode(result.stdout)).toBe('hello')
     const captured = required(runtime.contexts.at(-1))
     expect(captured.cwd.virtual).toBe('/data')
     expect(captured.env.PUBLIC).toBe('agent')
     expect(required(captured.sessionView).get('PUBLIC')).toBe('agent')
-    await ws.execute('python3 -c other')
+    await ws.shell('python3 -c other')
     expect(required(runtime.contexts.at(-1)).env.PUBLIC).toBeUndefined()
     expect(required(captured.sessionView).get('PUBLIC')).toBe('agent')
   } finally {

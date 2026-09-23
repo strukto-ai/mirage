@@ -27,10 +27,10 @@ from mirage.utils.errors import enoent, enotempty
 async def rename(accessor: GDriveAccessor, src: PathSpec,
                  dst: PathSpec) -> None:
     token_manager = accessor.token_manager
-    src_node = await resolve_key(accessor, src.resource_path)
+    src_node = await resolve_key(accessor, src.vfs_path)
     if src_node is None:
         raise enoent(src.virtual)
-    dst_node = await resolve_key(accessor, dst.resource_path)
+    dst_node = await resolve_key(accessor, dst.vfs_path)
     if dst_node is not None:
         # GNU mv overwrites the destination: drop a conflicting file (or
         # empty folder) before the move. A non-empty folder conflict is mv's
@@ -45,7 +45,7 @@ async def rename(accessor: GDriveAccessor, src: PathSpec,
         await delete_file(token_manager, dst_node.id)
     src_parent_id, _ = await resolve_parent(accessor, src)
     dst_parent_id, _ = await resolve_parent(accessor, dst)
-    name = drive_target_name(posixpath.basename(dst.resource_path), src_node)
+    name = drive_target_name(posixpath.basename(dst.vfs_path), src_node)
     add_parents = dst_parent_id if dst_parent_id != src_parent_id else None
     remove_parents = src_parent_id if add_parents else None
     await patch_file(token_manager,

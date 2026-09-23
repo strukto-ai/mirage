@@ -14,18 +14,17 @@
 
 import asyncio
 
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.mount.storage import (make_storage_key,
-                                            resource_storage_id)
+from mirage.workspace.mount.storage import make_storage_key, vfs_storage_id
 
 
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0] or "/",
-                    resource_path=virtual.strip("/"))
+                    vfs_path=virtual.strip("/"))
 
 
 def _key(mounts: dict):
@@ -33,26 +32,23 @@ def _key(mounts: dict):
     return make_storage_key(ws.registry)
 
 
-def test_one_resource_at_two_prefixes_is_one_storage():
+def test_one_vfs_at_two_prefixes_is_one_storage():
     """The alias that used to make mv delete the file it moved (#154)."""
-    shared = RAMResource()
+    shared = RAMVFS()
     key = _key({"/m1/": shared, "/m2/": shared})
     assert key(_spec("/m1/x.txt")) == key(_spec("/m2/x.txt"))
 
 
-def test_distinct_resources_are_distinct_storage():
+def test_distinct_mounts_are_distinct_storage():
     """Same basename on two real stores must stay a legitimate move."""
-    key = _key({"/m1/": RAMResource(), "/m2/": RAMResource()})
+    key = _key({"/m1/": RAMVFS(), "/m2/": RAMVFS()})
     assert key(_spec("/m1/x.txt")) != key(_spec("/m2/x.txt"))
 
 
 def test_disk_identity_is_the_resolved_root(tmp_path):
-    """Two DiskResources built on one directory are one store."""
+    """Two DiskVFS instances built on one directory are one store."""
     root = str(tmp_path)
-    key = _key({
-        "/d1/": DiskResource(root=root),
-        "/d2/": DiskResource(root=root)
-    })
+    key = _key({"/d1/": DiskVFS(root=root), "/d2/": DiskVFS(root=root)})
     assert key(_spec("/d1/x.txt")) == key(_spec("/d2/x.txt"))
 
 
@@ -60,23 +56,20 @@ def test_disk_roots_that_differ_stay_separate(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir()
     b.mkdir()
-    key = _key({
-        "/d1/": DiskResource(root=str(a)),
-        "/d2/": DiskResource(root=str(b))
-    })
+    key = _key({"/d1/": DiskVFS(root=str(a)), "/d2/": DiskVFS(root=str(b))})
     assert key(_spec("/d1/x.txt")) != key(_spec("/d2/x.txt"))
 
 
 def test_distinct_paths_in_one_storage_stay_distinct():
     """A real move within one store must not read as a self-move."""
-    shared = RAMResource()
+    shared = RAMVFS()
     key = _key({"/m1/": shared, "/m2/": shared})
     assert key(_spec("/m1/x.txt")) != key(_spec("/m2/other.txt"))
 
 
 def test_key_keeps_the_ancestor_prefix_boundary():
     """cp/mv test containment with startswith(key + "/")."""
-    shared = RAMResource()
+    shared = RAMVFS()
     key = _key({"/m1/": shared, "/m2/": shared})
     assert key(_spec("/m2/dir/sub")).startswith(key(_spec("/m1/dir")) + "/")
     assert not key(_spec("/m2/dirty")).startswith(key(_spec("/m1/dir")) + "/")
@@ -93,8 +86,8 @@ def test_nested_disk_roots_resolve_to_one_key(tmp_path):
     sub = root / "sub"
     sub.mkdir(parents=True)
     key = _key({
-        "/a/": DiskResource(root=str(root)),
-        "/b/": DiskResource(root=str(sub)),
+        "/a/": DiskVFS(root=str(root)),
+        "/b/": DiskVFS(root=str(sub)),
     })
     assert key(_spec("/a/sub/x.txt")) == key(_spec("/b/x.txt"))
 
@@ -106,14 +99,14 @@ def test_nested_roots_do_not_collide_on_a_sibling(tmp_path):
     root.mkdir()
     sibling.mkdir()
     key = _key({
-        "/a/": DiskResource(root=str(root)),
-        "/b/": DiskResource(root=str(sibling)),
+        "/a/": DiskVFS(root=str(root)),
+        "/b/": DiskVFS(root=str(sibling)),
     })
     assert key(_spec("/a/y.txt")) != key(_spec("/b/y.txt"))
 
 
-def test_resource_without_storage_id_keeps_object_identity():
-    """A custom resource may not inherit BaseResource.storage_id.
+def test_vfs_without_storage_id_keeps_object_identity():
+    """A custom VFS may not inherit BaseVFS.storage_id.
 
     Falling back to the mount prefix would give one object two
     identities and let a self-move through.
@@ -123,8 +116,8 @@ def test_resource_without_storage_id_keeps_object_identity():
         pass
 
     shared = _Custom()
-    assert resource_storage_id(shared) == resource_storage_id(shared)
-    assert resource_storage_id(shared) != resource_storage_id(_Custom())
+    assert vfs_storage_id(shared) == vfs_storage_id(shared)
+    assert vfs_storage_id(shared) != vfs_storage_id(_Custom())
 
 
 def test_path_outside_every_mount_falls_back_to_itself():
@@ -145,17 +138,17 @@ def test_path_outside_every_mount_falls_back_to_itself():
 
 def test_aliased_mounts_refuse_the_move_that_used_to_lose_the_file():
     """End to end: the #154 repro must keep the bytes."""
-    shared = RAMResource()
+    shared = RAMVFS()
     ws = Workspace({
         "/m1/": (shared, MountMode.WRITE),
         "/m2/": (shared, MountMode.WRITE)
     })
 
     async def _run():
-        await ws.execute("sh -c 'echo precious > /m1/x.txt'")
-        io = await ws.execute("mv /m1/x.txt /m2/x.txt")
+        await ws.shell("sh -c 'echo precious > /m1/x.txt'")
+        io = await ws.shell("mv /m1/x.txt /m2/x.txt")
         err = await io.stderr_str()
-        kept = await (await ws.execute("cat /m2/x.txt")).stdout_str()
+        kept = await (await ws.shell("cat /m2/x.txt")).stdout_str()
         return err, io.exit_code, kept
 
     err, code, kept = asyncio.run(_run())

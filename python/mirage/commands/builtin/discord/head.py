@@ -62,10 +62,7 @@ async def head_provision(accessor: DiscordAccessor, paths: list[PathSpec],
                                      replace(opts, command=line))
 
 
-@command("head",
-         resource="discord",
-         spec=SPECS["head"],
-         provision=head_provision)
+@command("head", vfs="discord", spec=SPECS["head"], provision=head_provision)
 async def head(accessor: DiscordAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

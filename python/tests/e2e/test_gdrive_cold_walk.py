@@ -17,15 +17,15 @@ from contextlib import ExitStack
 
 import pytest
 
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 
 
-def _resource() -> GoogleDriveResource:
-    return GoogleDriveResource(config=GoogleDriveConfig(
+def _vfs() -> GoogleDriveVFS:
+    return GoogleDriveVFS(config=GoogleDriveConfig(
         client_id="fake",
         client_secret="fake",
         refresh_token="fake",
@@ -45,13 +45,13 @@ def cold():
     fake.add_file("tree/a.txt", b"aaa\n")
     fake.add_file("tree/sub/b.txt", b"bbb\n")
     fake.add_file("tree/sub/deep/c.txt", b"ccc\n")
-    gdrive = _resource()
+    gdrive = _vfs()
     stack = ExitStack()
     stack.enter_context(patch_gdrive((gdrive.config, fake)))
     try:
         yield Workspace({
             "/gdrive/": (gdrive, MountMode.WRITE),
-            "/ram/": (RAMResource(), MountMode.WRITE),
+            "/ram/": (RAMVFS(), MountMode.WRITE),
         })
     finally:
         stack.close()
@@ -60,7 +60,7 @@ def cold():
 def _run(ws: Workspace, cmd: str) -> tuple[str, int]:
 
     async def _inner():
-        io = await ws.execute(cmd)
+        io = await ws.shell(cmd)
         return await io.stdout_str(), io.exit_code
 
     return asyncio.run(_inner())

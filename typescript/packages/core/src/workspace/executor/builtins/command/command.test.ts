@@ -17,7 +17,7 @@ import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { CLIRegistry } from '../../../cli/registry.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import { Session } from '../../../session/session.ts'
+import { SessionState } from '../../../session/session.ts'
 import { handleCommandBuiltin } from './command.ts'
 
 const MOUNT_COMMANDS = new Set(['cat', 'grep', 'ls', 'jq'])
@@ -30,8 +30,8 @@ function makeRegistry(): MountRegistry {
   } as unknown as MountRegistry
 }
 
-function makeSession(): Session {
-  return new Session({ sessionId: 's1' })
+function makeSession(): SessionState {
+  return new SessionState({ sessionId: 's1' })
 }
 
 async function body(out: ByteSource | null): Promise<string> {

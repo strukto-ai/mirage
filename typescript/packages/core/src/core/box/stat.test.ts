@@ -27,7 +27,7 @@ import { BoxApiError, type BoxTokenManager } from './client.ts'
 import { stat } from './stat.ts'
 
 const STUB_TM = {} as BoxTokenManager
-const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
 function makeAccessor(): BoxAccessor {
   return new BoxAccessor({ tokenManager: STUB_TM })

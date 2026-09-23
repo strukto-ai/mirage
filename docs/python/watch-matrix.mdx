@@ -1,6 +1,6 @@
 ---
 title: Watch Matrix
-description: Which resources support watch today, and which detection path (push mapping or pull delta hook) each one has.
+description: Which VFS types support watch today, and which detection path (push mapping or pull delta hook) each one has.
 icon: table-cells
 ---
 
@@ -12,13 +12,13 @@ Watching splits into two halves, and they have different support stories:
   Delivery is notify-driven: any detection you run maps its signal to a
   `FileEvent` and injects it, and Mirage handles invalidation, scope matching,
   and the event stream. No per-backend code is involved.
-- **Detection** is per-backend. The **Pull** column marks resources whose
+- **Detection** is per-backend. The **Pull** column marks mounts whose
   `delta_hook()` ships with Mirage (checkpointed diff, the self-healing truth
   path). The **Push signal** column names the provider mechanism your receiver
   would subscribe to; mapping its payload to a `FileEvent` is consumer code,
   and Mirage ships a sample where marked.
 
-| Resource | Pull (`delta_hook`) | Fingerprint | Push signal (provider-side) | Sample |
+| VFS | Pull (`delta_hook`) | Fingerprint | Push signal (provider-side) | Sample |
 | --- | --- | --- | --- | --- |
 | Nextcloud | ✓ recursive PROPFIND | WebDAV ETag | `webhook_listeners` app (Nextcloud 30+) | [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/nextcloud/watch.py) + integ receiver |
 | S3 / S3-compatible | ✓ recursive `list_objects_v2` | object ETag | S3 Event Notifications (SQS/EventBridge) | — |
@@ -102,7 +102,7 @@ small walk class that lists entries with fingerprints:
 ```python
 class S3Walk:
     async def __call__(self, root):
-        async for obj in list_objects(prefix=root.resource_path):
+        async for obj in list_objects(prefix=root.vfs_path):
             yield WalkEntry(virtual=..., is_dir=False,
                             fingerprint=obj.etag,      # backend-native version
                             size=obj.size, modified=obj.last_modified)

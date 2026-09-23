@@ -5,10 +5,10 @@
       "id": "monty_w_creates_an_empty_file",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
+        "runtimes": ["monty", "workspace"],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
           }
         }
@@ -32,10 +32,10 @@
       "id": "monty_w_truncates_at_open",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
+        "runtimes": ["monty", "workspace"],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": { "seed.txt": "seed\n" }
           }
         }
@@ -59,8 +59,8 @@
       "id": "monty_w_write_flushes_after_the_create",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["monty", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -80,8 +80,8 @@
       "id": "monty_a_creates_then_appends",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["monty", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -109,8 +109,8 @@
       "id": "monty_cannot_spell_exclusive",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["monty", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -126,8 +126,8 @@
       "id": "monty_cannot_spell_update",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["monty", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -143,8 +143,8 @@
       "id": "monty_refuses_a_bad_mode_word",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["monty", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -160,10 +160,10 @@
       "id": "monty_iterdir_classifies_through_stat",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
+        "runtimes": ["monty", "workspace"],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
           }
         }
@@ -185,8 +185,8 @@
       "id": "monty_guest_reads_share_the_shell_ledger",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["monty", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -203,8 +203,8 @@
       "id": "qjs_w_creates_an_empty_file",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["quickjs", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["quickjs", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -225,8 +225,8 @@
       "id": "qjs_w_truncates_at_open",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["quickjs", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["quickjs", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -247,8 +247,8 @@
       "id": "qjs_wx_refuses_an_existing_file",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["quickjs", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["quickjs", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -269,8 +269,8 @@
       "id": "qjs_wx_creates_a_missing_file",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["quickjs", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["quickjs", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -290,8 +290,8 @@
       "id": "qjs_rplus_refuses_a_missing_file",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["quickjs", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["quickjs", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -308,8 +308,8 @@
       "id": "qjs_refuses_a_bad_mode_word",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["quickjs", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["quickjs", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -325,10 +325,10 @@
       "id": "qjs_readdir_classifies_through_stat",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["quickjs", "vfs"],
+        "runtimes": ["quickjs", "workspace"],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
           }
         }
@@ -350,8 +350,8 @@
       "id": "pyodide_w_creates_an_empty_file",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["pyodide", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["pyodide", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -368,8 +368,8 @@
       "id": "pyodide_w_truncates_at_open",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["pyodide", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["pyodide", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -386,8 +386,8 @@
       "id": "pyodide_x_is_exclusive",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["pyodide", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["pyodide", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -411,8 +411,8 @@
       "id": "pyodide_rplus_refuses_a_missing_file",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["pyodide", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["pyodide", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -428,10 +428,10 @@
       "id": "pyodide_listdir_classifies_through_stat",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["pyodide", "vfs"],
+        "runtimes": ["pyodide", "workspace"],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
           }
         }
@@ -454,7 +454,7 @@
       "world": {
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": { "seed.txt": "seed\n", "sub/inner.txt": "in\n" }
           }
         }
@@ -493,7 +493,7 @@
     {
       "id": "facade_append_lands_on_the_one_ledger",
       "world": {
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -507,10 +507,10 @@
       ]
     },
     {
-      "note": "rmdir(2) refuses a non-empty directory, and the refusal has to come from the op, not from the command builder. The shell battery cannot see this: `rmdir` the builtin checks emptiness itself before it calls the op, so it passes on a backend whose op deletes the whole subtree. The facade is the surface FUSE, ws.fs and the sandbox runtimes share, and it calls the op directly.",
+      "note": "rmdir(2) refuses a non-empty directory, and the refusal has to come from the op, not from the command builder. The shell battery cannot see this: `rmdir` the builtin checks emptiness itself before it calls the op, so it passes on a backend whose op deletes the whole subtree. The facade is the surface FUSE, ws.vfs and the sandbox runtimes share, and it calls the op directly.",
       "id": "facade_rmdir_refuses_a_nonempty_directory",
       "world": {
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -530,7 +530,7 @@
     {
       "id": "facade_rmdir_removes_an_empty_directory",
       "world": {
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -550,7 +550,7 @@
     {
       "id": "facade_rmdir_on_a_missing_directory_is_enoent",
       "world": {
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -564,8 +564,8 @@
       "id": "monty_rmdir_refuses_a_nonempty_directory",
       "hosts": ["python"],
       "world": {
-        "runtimes": ["monty", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["monty", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {
@@ -586,8 +586,8 @@
       "id": "qjs_rmdir_refuses_a_nonempty_directory",
       "hosts": ["typescript"],
       "world": {
-        "runtimes": ["quickjs", "vfs"],
-        "mounts": { "/data": { "resource": "ram", "files": { "seed.txt": "seed\n" } } }
+        "runtimes": ["quickjs", "workspace"],
+        "mounts": { "/data": { "vfs": "ram", "files": { "seed.txt": "seed\n" } } }
       },
       "steps": [
         {

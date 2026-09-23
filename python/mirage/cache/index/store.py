@@ -18,9 +18,9 @@ from mirage.cache.index.config import IndexEntry, ListResult, LookupResult
 
 
 class IndexCacheStore:
-    """Per-resource metadata index for remote resources.
+    """Per-VFS metadata index for remote mounts.
 
-    Abstract base. Maps resource paths to IndexEntry metadata.
+    Abstract base. Maps VFS paths to IndexEntry metadata.
     Subclasses implement storage and concurrency.
     """
 
@@ -28,7 +28,7 @@ class IndexCacheStore:
         super().__init__()
         self._closed = False
 
-    async def get(self, resource_path: str) -> LookupResult:
+    async def get(self, vfs_path: str) -> LookupResult:
         raise NotImplementedError
 
     def seed(self, entries: dict[str, IndexEntry],
@@ -39,15 +39,15 @@ class IndexCacheStore:
         """
         raise NotImplementedError
 
-    async def put(self, resource_path: str, entry: IndexEntry) -> None:
+    async def put(self, vfs_path: str, entry: IndexEntry) -> None:
         raise NotImplementedError
 
-    async def list_dir(self, resource_path: str) -> ListResult:
+    async def list_dir(self, vfs_path: str) -> ListResult:
         raise NotImplementedError
 
     async def set_dir(
         self,
-        resource_path: str,
+        vfs_path: str,
         entries: list[tuple[str, IndexEntry]],
         expired_at: datetime | None = None,
     ) -> None:
@@ -56,11 +56,11 @@ class IndexCacheStore:
     async def entries(self) -> dict[str, IndexEntry]:
         raise NotImplementedError
 
-    async def invalidate_dir(self, resource_path: str) -> None:
+    async def invalidate_dir(self, vfs_path: str) -> None:
         raise NotImplementedError
 
-    async def invalidate_prefix(self, resource_path: str) -> None:
-        """Drop ``resource_path`` and everything cached below it.
+    async def invalidate_prefix(self, vfs_path: str) -> None:
+        """Drop ``vfs_path`` and everything cached below it.
 
         ``invalidate_dir`` drops one directory's listing and its direct
         children's entries, which is enough for a mutation that named a
@@ -69,7 +69,7 @@ class IndexCacheStore:
         cached independently and nothing above them expires them.
 
         Args:
-            resource_path (str): Mount-absolute root of the subtree.
+            vfs_path (str): Mount-absolute root of the subtree.
         """
         raise NotImplementedError
 

@@ -15,12 +15,14 @@
 import { isEacces, isEnoent } from '../../utils/errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import {
+  bindTree,
   buildTree,
+  dropPruned,
   hasLinkChildren,
   optionsTree,
-  prefixPathNodes,
+  settlePrunes,
   startBasename,
   treeHasEmpty,
   treeHasType,
@@ -73,7 +75,7 @@ async function statEntry(
     virtual: path,
     directory: path,
     resolved: false,
-    resourcePath: mountKey(path, prefix),
+    vfsPath: mountKey(path, prefix),
   })
   try {
     return await deps.stat(spec, index)
@@ -97,7 +99,7 @@ async function isEmptyEntry(
       virtual: path,
       directory: path,
       resolved: false,
-      resourcePath: mountKey(path, prefix),
+      vfsPath: mountKey(path, prefix),
     })
     try {
       return (await deps.readdir(spec, index)).length === 0
@@ -141,12 +143,7 @@ async function walk(
     if (child.endsWith('/')) {
       isFolder = true
     } else {
-      const s = await statEntry(
-        deps,
-        trimmed,
-        mountPrefixOf(spec.virtual, spec.resourcePath),
-        index,
-      )
+      const s = await statEntry(deps, trimmed, mountPrefixOf(spec.virtual, spec.vfsPath), index)
       isFolder = s !== null && s.type === FileType.DIRECTORY
     }
     out.push({ path: trimmed, depth, file: !isFolder })
@@ -155,7 +152,7 @@ async function walk(
         virtual: trimmed,
         directory: trimmed,
         resolved: false,
-        resourcePath: mountKey(trimmed, mountPrefixOf(spec.virtual, spec.resourcePath)),
+        vfsPath: mountKey(trimmed, mountPrefixOf(spec.virtual, spec.vfsPath)),
       })
       await walk(deps, childSpec, index, maxDepth, depth + 1, out)
     }
@@ -169,7 +166,7 @@ export async function walkFind(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   const collected: WalkEntry[] = []
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   // GNU lists the search root itself at depth 0 (even for the mount
   // root), so `-maxdepth 0` prints just the root and `-name` can match
   // the root's own basename.
@@ -192,8 +189,11 @@ export async function walkFind(
     await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
   }
   const results: string[] = []
-  const tree = prefixPathNodes(optionsTree(options), prefix)
+  const tree = bindTree(optionsTree(options), prefix, path.virtual, path.rawPath)
   const needEmpty = treeHasEmpty(tree)
+  const needSize = options.minSize != null || options.maxSize != null
+  const needMtime = options.mtimeMin != null || options.mtimeMax != null
+  const learned = new Map<string, number | null>()
   collected.sort((a, b) => compareCodePoints(a.path, b.path))
   for (const entry of collected) {
     const name = entry.path.split('/').pop() ?? ''
@@ -205,18 +205,26 @@ export async function walkFind(
     if (needEmpty) {
       isEmpty = await isEmptyEntry(deps, entry.path, !entry.file, prefix, index)
     }
+    // With a time test in the tree the stat comes first, so the entry
+    // answers the test itself and a -prune after it fires only where GNU's
+    // would; the stat that -size alone needs waits for the rows the tree
+    // kept.
+    let st: FileStat | null = null
+    if (needMtime) {
+      st = await statEntry(deps, entry.path, prefix, index)
+      if (st === null) continue
+      learned.set(key, modifiedTs(st.modified))
+    }
     const findEntry: FindEntry = {
       key,
       name,
       kind: entry.file ? 'f' : 'd',
       depth: entry.depth,
       isEmpty,
+      mtime: learned.get(key) ?? null,
     }
     if (!keep(findEntry, tree, options.minDepth)) continue
-    const needSize = options.minSize != null || options.maxSize != null
-    const needMtime = options.mtimeMin != null || options.mtimeMax != null
-    let st: FileStat | null = null
-    if ((needSize && entry.file) || needMtime) {
+    if (needSize && entry.file && st === null) {
       st = await statEntry(deps, entry.path, prefix, index)
       if (st === null) continue
     }
@@ -234,7 +242,8 @@ export async function walkFind(
     }
     results.push(key)
   }
-  return results
+  settlePrunes(tree, learned)
+  return dropPruned(results, tree)
 }
 
 export interface SearchFindDeps<A> {
@@ -380,7 +389,7 @@ export function makeSearchBackedFind<A>(
           deps,
           accessor,
           item,
-          mountPrefixOf(path.virtual, path.resourcePath),
+          mountPrefixOf(path.virtual, path.vfsPath),
           index,
           path.mountPath,
           options,

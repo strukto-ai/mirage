@@ -20,7 +20,7 @@ function spec(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-    resourcePath: virtual.replace(/^\/+/, ''),
+    vfsPath: virtual.replace(/^\/+/, ''),
   })
 }
 
@@ -163,12 +163,12 @@ describe('entryName', () => {
 })
 
 describe('childSpec', () => {
-  it('appends to the resource key', () => {
-    const parent = new PathSpec({ virtual: '/m/d', directory: '/m', resourcePath: 'd' })
+  it('appends to the VFS key', () => {
+    const parent = new PathSpec({ virtual: '/m/d', directory: '/m', vfsPath: 'd' })
     const child = childSpec(parent, 'x')
     expect(child.virtual).toBe('/m/d/x')
-    expect(child.resourcePath).toBe('d/x')
-    const root = new PathSpec({ virtual: '/m', directory: '/', resourcePath: '' })
-    expect(childSpec(root, 'x').resourcePath).toBe('x')
+    expect(child.vfsPath).toBe('d/x')
+    const root = new PathSpec({ virtual: '/m', directory: '/', vfsPath: '' })
+    expect(childSpec(root, 'x').vfsPath).toBe('x')
   })
 })

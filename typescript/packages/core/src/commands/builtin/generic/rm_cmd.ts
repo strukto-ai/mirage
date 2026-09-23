@@ -14,7 +14,7 @@
 
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec, ResourceName } from '../../../types.ts'
+import type { PathSpec, VFSName } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { fsStrerror, isFsError } from '../../../utils/errors.ts'
 import {
@@ -43,7 +43,7 @@ type UnlinkFn<A> = (accessor: A, path: PathSpec, index?: IndexCacheStore) => Pro
  * path axis like the command it stands in for.
  */
 export function makeRm<A extends Accessor>(
-  resource: ResourceName,
+  vfs: VFSName,
   io: CommandIO<A>,
   rawUnlink: UnlinkFn<A>,
 ): RegisteredCommand[] {
@@ -51,7 +51,7 @@ export function makeRm<A extends Accessor>(
   const unlink = withWriteGuards(rawUnlink)
   return command({
     name: 'rm',
-    resource,
+    vfs,
     spec: specOf('rm'),
     write: true,
     fn: async (

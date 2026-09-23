@@ -32,6 +32,7 @@ export const notionFake: Fake<C> = {
     pages: 'NotionPage',
     blocks: 'NotionBlock',
     comments: 'NotionComment',
+    users: 'NotionUser',
   },
   // The token both the conformance runner and the MCP parity run authenticate
   // with. A bare start therefore serves the fixture under the same name the

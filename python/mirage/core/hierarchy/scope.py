@@ -86,7 +86,7 @@ class ScopeMatch:
     Args:
         kind (str): the matched scope's kind, or ``root``/``invalid``.
         slots (dict[str, str]): decoded dynamic segments by name.
-        resource_path (str): the raw path that was classified.
+        vfs_path (str): the raw path that was classified.
         scope (Scope | None): the matched scope; None for root and
             invalid.
         pattern (str | None): the glob the line typed for the directory's
@@ -98,7 +98,7 @@ class ScopeMatch:
             not read.
     """
     kind: str
-    resource_path: str
+    vfs_path: str
     slots: dict[str, str] = field(default_factory=dict)
     scope: Scope | None = None
     pattern: str | None = None
@@ -228,16 +228,16 @@ def make_detect_scope(scopes: tuple[Scope, ...]) -> DetectFn:
         raw = path.mount_path if isinstance(path, PathSpec) else path
         key = raw.strip("/")
         if not key:
-            return ScopeMatch(kind=ROOT, resource_path=raw)
+            return ScopeMatch(kind=ROOT, vfs_path=raw)
         parts = key.split("/")
         if any(p.startswith(".") for p in parts):
-            return ScopeMatch(kind=INVALID, resource_path=raw)
+            return ScopeMatch(kind=INVALID, vfs_path=raw)
         matched = match_scope(scopes, parts)
         if matched is None:
-            return ScopeMatch(kind=INVALID, resource_path=raw)
+            return ScopeMatch(kind=INVALID, vfs_path=raw)
         scope, slots = matched
         return ScopeMatch(kind=scope.kind,
-                          resource_path=raw,
+                          vfs_path=raw,
                           slots=slots,
                           scope=scope)
 

@@ -17,8 +17,8 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.truncate import truncate
 from mirage.observe.context import RecordingScope
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 @pytest.mark.asyncio
@@ -37,6 +37,16 @@ async def test_truncate_extends_with_nul_bytes():
     s.files["/t.txt"] = b"ab"
     await truncate(a, PathSpec.from_str_path("/t.txt"), 4)
     assert s.files["/t.txt"] == b"ab\x00\x00"
+
+
+@pytest.mark.asyncio
+async def test_truncate_onto_a_directory_is_a_directory():
+    s = RAMStore()
+    a = RAMAccessor(s)
+    s.dirs.add("/d")
+    with pytest.raises(IsADirectoryError):
+        await truncate(a, PathSpec.from_str_path("/d"), 0)
+    assert "/d" not in s.files
 
 
 @pytest.mark.asyncio

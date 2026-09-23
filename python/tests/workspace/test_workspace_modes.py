@@ -14,11 +14,11 @@
 
 import asyncio
 
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def test_workspace_default_no_fuse():
-    ws = Workspace(resources={"/data": RAMResource()})
+    ws = Workspace(mounts={"/data": RAMVFS()})
     assert ws.fuse_mountpoint is None
     asyncio.run(ws.close())

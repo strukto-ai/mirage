@@ -74,7 +74,7 @@ async def test_installed_tree_dispatches_send(monkeypatch):
     monkeypatch.setitem(send.__globals__, "send_message", fake_send)
     ws = Workspace({})
     ws.register_cli("discord", DISCORD, CONFIG)
-    io = await ws.execute("discord send --channel C1 --text hello")
+    io = await ws.shell("discord send --channel C1 --text hello")
     assert io.exit_code == 0
     out = json.loads(await materialize(io.stdout))
     assert out["content"] == "hello"

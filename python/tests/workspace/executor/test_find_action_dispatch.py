@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 """Tests for find's action flags (-delete, -print0, -ls).
 
-Per-resource find handlers only emit matched paths. The dispatcher
+Per-VFS find handlers only emit matched paths. The dispatcher
 (`mirage/workspace/executor/find_action_dispatch.py:_apply_find_actions`)
 reads the parsed action flags and applies the corresponding side
 effect or output reformat.
@@ -24,20 +24,20 @@ import re
 import pytest
 
 from mirage.policy import Deny, Policy
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.find_action_dispatch import depth_first_key
 
 
 def _ws() -> Workspace:
-    return Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    return Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 
 def _ws_two_mounts() -> Workspace:
     return Workspace({
-        "/a": (RAMResource(), MountMode.WRITE),
-        "/b": (RAMResource(), MountMode.WRITE),
+        "/a": (RAMVFS(), MountMode.WRITE),
+        "/b": (RAMVFS(), MountMode.WRITE),
     })
 
 
@@ -47,8 +47,8 @@ def _run(coro):
 
 async def _setup_html_files(ws: Workspace) -> None:
     ws.create_session("s")
-    await ws.execute("mkdir -p /a/b", session_id="s")
-    await ws.execute("touch /foo.html /bar.htm /a/b/baz.html", session_id="s")
+    await ws.shell("mkdir -p /a/b", session_id="s")
+    await ws.shell("touch /foo.html /bar.htm /a/b/baz.html", session_id="s")
 
 
 # ── -delete ────────────────────────────────────────────────────
@@ -59,15 +59,15 @@ def test_delete_removes_matched_files() -> None:
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
-        r = await ws.execute("find / -name '*.html' -delete", session_id="s")
+        r = await ws.shell("find / -name '*.html' -delete", session_id="s")
         assert r.exit_code == 0
         assert await r.stdout_str() == ""
         assert await r.stderr_str() == ""
         # html files gone
-        check = await ws.execute("find / -name '*.html'", session_id="s")
+        check = await ws.shell("find / -name '*.html'", session_id="s")
         assert await check.stdout_str() == ""
         # htm preserved
-        htm = await ws.execute("find / -name '*.htm'", session_id="s")
+        htm = await ws.shell("find / -name '*.htm'", session_id="s")
         assert "/bar.htm" in await htm.stdout_str()
 
     _run(_go())
@@ -78,7 +78,7 @@ def test_delete_silent_unless_print() -> None:
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
-        r = await ws.execute("find / -name '*.html' -delete", session_id="s")
+        r = await ws.shell("find / -name '*.html' -delete", session_id="s")
         assert await r.stdout_str() == ""
 
     _run(_go())
@@ -89,8 +89,8 @@ def test_delete_with_print_emits_matches() -> None:
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
-        r = await ws.execute("find / -name '*.html' -print -delete",
-                             session_id="s")
+        r = await ws.shell("find / -name '*.html' -print -delete",
+                           session_id="s")
         out = await r.stdout_str()
         assert "/foo.html" in out
         assert "/a/b/baz.html" in out
@@ -104,14 +104,14 @@ def test_delete_skips_mount_roots() -> None:
     async def _go():
         ws = _ws_two_mounts()
         ws.create_session("s")
-        await ws.execute("touch /a/x.html /b/y.html", session_id="s")
+        await ws.shell("touch /a/x.html /b/y.html", session_id="s")
         # Force mount roots into the match set via -type d, then
         # -delete must skip them while still listing them in find.
         # Without a -name pattern the synthetic /a and /b appear.
-        await ws.execute("find / -type d -delete", session_id="s")
+        await ws.shell("find / -type d -delete", session_id="s")
         # Mount roots survive (delete may report errors for other
         # dir entries, that's fine).
-        ls = await ws.execute("ls /", session_id="s")
+        ls = await ws.shell("ls /", session_id="s")
         out = await ls.stdout_str()
         assert "a" in out
         assert "b" in out
@@ -125,9 +125,9 @@ def test_delete_deepest_first() -> None:
     async def _go():
         ws = _ws()
         ws.create_session("s")
-        await ws.execute("mkdir -p /tmp/a/b", session_id="s")
-        await ws.execute("touch /tmp/a/b/file.txt", session_id="s")
-        r = await ws.execute("find /tmp -name '*.txt' -delete", session_id="s")
+        await ws.shell("mkdir -p /tmp/a/b", session_id="s")
+        await ws.shell("touch /tmp/a/b/file.txt", session_id="s")
+        r = await ws.shell("find /tmp -name '*.txt' -delete", session_id="s")
         assert r.exit_code == 0
 
     _run(_go())
@@ -141,7 +141,7 @@ def test_print0_separates_with_nul() -> None:
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
-        r = await ws.execute("find / -name '*.html' -print0", session_id="s")
+        r = await ws.shell("find / -name '*.html' -print0", session_id="s")
         out = await r.stdout_str()
         assert "\x00" in out
         assert "\n" not in out.replace("\x00", "")
@@ -162,7 +162,7 @@ def test_ls_renders_finds_own_layout_per_match() -> None:
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
-        r = await ws.execute("find / -name '*.html' -ls", session_id="s")
+        r = await ws.shell("find / -name '*.html' -ls", session_id="s")
         out = await r.stdout_str()
         lines = [ln for ln in out.split("\n") if ln]
         assert len(lines) >= 2
@@ -183,7 +183,7 @@ def test_no_action_flag_unchanged() -> None:
     async def _go():
         ws = _ws()
         await _setup_html_files(ws)
-        r = await ws.execute("find / -name '*.html'", session_id="s")
+        r = await ws.shell("find / -name '*.html'", session_id="s")
         out = await r.stdout_str()
         assert "/foo.html" in out
         assert "/a/b/baz.html" in out
@@ -204,7 +204,7 @@ def test_mount_entries_filtered_by_name() -> None:
         ws = _ws_two_mounts()
         ws.create_session("s")
         # /a and /b are mounts; -name 'a' should match only /a.
-        r = await ws.execute("find / -name 'a' -type d", session_id="s")
+        r = await ws.shell("find / -name 'a' -type d", session_id="s")
         lines = (await r.stdout_str()).strip().split("\n")
         assert "/a" in lines
         assert "/b" not in lines
@@ -217,12 +217,12 @@ def test_delete_removes_emptied_directories() -> None:
     async def _go():
         ws = _ws()
         ws.create_session("s")
-        await ws.execute("mkdir -p /tree/deep", session_id="s")
-        await ws.execute("touch /tree/deep/f.txt", session_id="s")
-        r = await ws.execute("find /tree -delete", session_id="s")
+        await ws.shell("mkdir -p /tree/deep", session_id="s")
+        await ws.shell("touch /tree/deep/f.txt", session_id="s")
+        r = await ws.shell("find /tree -delete", session_id="s")
         assert r.exit_code == 0
         assert await r.stderr_str() == ""
-        check = await ws.execute("find / -name tree", session_id="s")
+        check = await ws.shell("find / -name tree", session_id="s")
         assert await check.stdout_str() == ""
         await ws.close()
 
@@ -235,7 +235,7 @@ def test_delete_removes_emptied_directories() -> None:
 async def _exec_ws() -> Workspace:
     ws = _ws()
     ws.create_session("s")
-    await ws.execute(
+    await ws.shell(
         "mkdir -p /w/d/sub; printf 'a\\n' > /w/d/a.txt; "
         "printf 'bb\\n' > /w/d/b.txt; printf x > /w/d/sub/c.txt; cd /w",
         session_id="s")
@@ -243,7 +243,7 @@ async def _exec_ws() -> Workspace:
 
 
 async def _run_line(ws: Workspace, line: str) -> tuple[str, str, int]:
-    r = await ws.execute(line, session_id="s")
+    r = await ws.shell(line, session_id="s")
     return await r.stdout_str(), await r.stderr_str(), r.exit_code
 
 
@@ -349,8 +349,8 @@ async def test_depth_orders_each_start_point_on_its_own():
     # `find b a -depth` is b's tree post-order, then a's: one sort over
     # every row put a's tree first, and -delete removed in that order.
     ws = await _exec_ws()
-    await ws.execute("mkdir -p b a; printf x > b/x; printf y > a/y",
-                     session_id="s")
+    await ws.shell("mkdir -p b a; printf x > b/x; printf y > a/y",
+                   session_id="s")
     assert await _run_line(ws,
                            "find b a -depth") == ("b/x\nb\na/y\na\n", "", 0)
     assert await _run_line(
@@ -376,12 +376,72 @@ async def test_depth_walks_a_nested_or_repeated_start_point_on_its_own():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("line,stdout", [
+    (r"find d -type f -printf '%p\n' -exec cat {} \;",
+     "d/a.txt\na\nd/b.txt\nbb\nd/sub/c.txt\nx"),
+    (r"find d -type f -exec cat {} \; -printf '%f\n'",
+     "a\na.txt\nbb\nb.txt\nxc.txt\n"),
+    ("find d -type f -printf '%p ' -print",
+     "d/a.txt d/a.txt\nd/b.txt d/b.txt\nd/sub/c.txt d/sub/c.txt\n"),
+    ("find d -type f -printf '%f ' -printf '%s\\n'",
+     "a.txt 2\nb.txt 3\nc.txt 1\n"),
+    (r"find d -type f -exec grep -q x {} \; -printf 'hit %p\n'",
+     "hit d/sub/c.txt\n"),
+    (r"find d -type f -exec false \; -printf 'never %p\n'", ""),
+    ("find d -type f -printf '%f\\n' -exec echo batch {} +",
+     "a.txt\nb.txt\nc.txt\nbatch d/a.txt d/b.txt d/sub/c.txt\n"),
+    ("find d -type f -printf '<%f>' -print0",
+     "<a.txt>d/a.txt\0<b.txt>d/b.txt\0<c.txt>d/sub/c.txt\0"),
+])
+async def test_printf_runs_per_row_beside_other_actions(line, stdout):
+    # GNU findutils 4.10 runs the -a chain per row, in the order written:
+    # a failing `-exec ;` ends it before a later -printf, and a batched
+    # `-exec +` runs once after every row.
+    ws = await _exec_ws()
+    assert await _run_line(ws, line) == (stdout, "", 0)
+
+
+@pytest.mark.asyncio
+async def test_printf_measures_from_the_start_point_a_row_came_from():
+    # GNU: `find d d/sub` walks d/sub twice, once under each start point.
+    ws = await _exec_ws()
+    assert await _run_line(
+        ws, "find d d/sub -name c.txt -printf '%P %d|' -print") == (
+            "sub/c.txt 2|d/sub/c.txt\nc.txt 1|d/sub/c.txt\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_depth_orders_printf_rows():
+    ws = await _exec_ws()
+    assert await _run_line(ws, "find d -depth -printf '%p\\n'") == (
+        "d/a.txt\nd/b.txt\nd/sub/c.txt\nd/sub\nd\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_printf_renders_the_stat_find_already_holds():
+    # GNU stats a row once: -printf reads a row an earlier -delete removed
+    # only when a test or an earlier -printf statted it first, and
+    # otherwise reports it gone and exits 1. A format with no stat
+    # directive never looks.
+    ws = await _exec_ws()
+    out, err, _ = await _run_line(
+        ws, "echo 1 > d/f; find d -name f -delete -printf '%s %p\\n'; "
+        "echo rc=$?; echo 1 > d/f; find d -name f -delete -printf '%p\\n'; "
+        "echo rc=$?; echo 1 > d/f; "
+        "find d -name f -printf '%s|' -delete -printf '%s\\n'; echo rc=$?; "
+        "echo 1 > d/f; find d -name f -size -2k -delete -printf '%s\\n'; "
+        "echo rc=$?")
+    assert out == "rc=1\nd/f\nrc=0\n2|2\nrc=0\n2\nrc=0\n"
+    assert err == "find: 'd/f': No such file or directory\n"
+
+
+@pytest.mark.asyncio
 async def test_ls_escapes_the_name_as_findutils_does():
     # GNU findutils 4.10 `-ls` keeps one row on one line: a space, a
     # backslash and a double quote take a backslash, a newline is `\n`,
     # and a byte outside ASCII is octal; `-print` stays raw.
     ws = await _exec_ws()
-    await ws.execute(
+    await ws.shell(
         "touch 'd/a b' 'd/c\\d' 'd/e\"f' \"d/n\nl\" 'd/ü'; "
         "ln -s 'a b' 'd/li nk'",
         session_id="s")
@@ -458,8 +518,8 @@ async def test_exec_isolates_each_invocation(action, terminator):
     # function, so a function head would not run at all.
     ws = await _exec_ws()
     try:
-        await ws.execute('KEEP=parent; set -- original', session_id='s')
-        io = await ws.execute(
+        await ws.shell('KEEP=parent; set -- original', session_id='s')
+        io = await ws.shell(
             f'find d -name "*.txt" -exec {action} {terminator}; '
             'echo "$KEEP:$PWD:$1"; echo "${UNSET_FOR_TEST}"',
             session_id='s')
@@ -514,49 +574,52 @@ async def test_find_refuses_a_test_after_an_action_before_side_effects(action):
                          ["-exec rm {} \\;", "-exec rm {} +", "-delete"])
 async def test_actions_preserve_newline_paths_and_unrelated_files(
         nested, action):
-    mounts = {"/": RAMResource()}
+    mounts = {"/": RAMVFS()}
     if nested:
-        mounts["/d/nested\nmount"] = RAMResource()
+        mounts["/d/nested\nmount"] = RAMVFS()
     ws = Workspace(mounts, mode=MountMode.WRITE)
     root = "d/nested\nmount" if nested else "d"
-    await ws.execute(f'mkdir -p "{root}"; touch "{root}/a\nb" b')
-    io = await ws.execute(f"find d -type f {action}")
+    await ws.shell(f'mkdir -p "{root}"; touch "{root}/a\nb" b')
+    io = await ws.shell(f"find d -type f {action}")
     assert io.exit_code == 0
     assert await io.stderr_str() == ""
-    io = await ws.execute(f'test -f b && test ! -e "{root}/a\nb"')
+    io = await ws.shell(f'test -f b && test ! -e "{root}/a\nb"')
     assert io.exit_code == 0
 
 
 @pytest.mark.asyncio
 async def test_print0_preserves_newlines_through_mount_fanout():
     ws = Workspace({
-        "/": RAMResource(),
-        "/d/nested\nmount": RAMResource()
+        "/": RAMVFS(),
+        "/d/nested\nmount": RAMVFS()
     },
                    mode=MountMode.WRITE)
-    await ws.execute('touch "/d/nested\nmount/a\nb"')
-    io = await ws.execute("find /d -print0")
+    await ws.shell('touch "/d/nested\nmount/a\nb"')
+    io = await ws.shell("find /d -print0")
     assert await io.materialize_stdout(
     ) == b"/d\0/d/nested\nmount\0/d/nested\nmount/a\nb\0"
     assert await io.stderr_str() == ""
 
 
 @pytest.mark.asyncio
-async def test_delete_under_or_is_refused_before_any_file_is_removed():
+async def test_delete_under_or_removes_only_the_other_arm():
+    # GNU findutils 4.10.0: `keep` short-circuits the -o, everything else
+    # reaches -delete, and the directory holding `keep` cannot go.
     ws = _ws()
-    await ws.execute('mkdir d; touch d/keep d/remove')
-    io = await ws.execute('find d -name keep -o -delete')
+    await ws.shell('mkdir d; touch d/keep d/remove')
+    io = await ws.shell('find d -name keep -o -delete')
     assert io.exit_code == 1
-    assert "supported only in a top-level" in await io.stderr_str()
-    io = await ws.execute('test -f d/keep && test -f d/remove')
+    assert await io.stderr_str(
+    ) == "find: cannot delete 'd': Directory not empty\n"
+    io = await ws.shell('test -f d/keep && test ! -e d/remove')
     assert io.exit_code == 0
 
 
 @pytest.mark.asyncio
 async def test_ls_action_receives_the_whole_newline_path():
     ws = _ws()
-    await ws.execute('mkdir d; touch "d/a\nb"')
-    io = await ws.execute('find d -type f -ls')
+    await ws.shell('mkdir d; touch "d/a\nb"')
+    io = await ws.shell('find d -type f -ls')
     assert io.exit_code == 0
     assert await io.stderr_str() == ''
     # -ls escapes the newline, as findutils does; the row stays one line.
@@ -580,8 +643,8 @@ async def test_exec_runs_a_slash_head_through_the_loader():
     # script runs; one that is not there is GNU's execvp line, per
     # match, with find's exit status untouched.
     ws = await _exec_ws()
-    await ws.execute("printf '#!/bin/sh\\necho ran $1\\n' > /w/check.sh",
-                     session_id="s")
+    await ws.shell("printf '#!/bin/sh\\necho ran $1\\n' > /w/check.sh",
+                   session_id="s")
     assert await _run_line(
         ws, r"find d -name a.txt -exec ./check.sh {} \; -print") == (
             "ran d/a.txt\nd/a.txt\n", "", 0)
@@ -598,8 +661,8 @@ async def test_ls_renders_a_symlink_row():
     # A symlink is namespace state no backend stat can see, so the
     # delegated ls needs the link view to render the row at all.
     ws = await _exec_ws()
-    await ws.execute("ln -s a.txt d/link; ln -s nowhere d/dangling",
-                     session_id="s")
+    await ws.shell("ln -s a.txt d/link; ln -s nowhere d/dangling",
+                   session_id="s")
     out, err, code = await _run_line(ws, "find d -type l -ls")
     assert (err, code) == ("", 0)
     rows = out.splitlines()
@@ -615,14 +678,14 @@ async def test_delete_unlinks_a_symlink_through_the_namespace():
     # does; the mount's rm would only report the row absent and leave
     # the link in place.
     ws = await _exec_ws()
-    await ws.execute("ln -s a.txt d/link; ln -s nowhere d/dangling",
-                     session_id="s")
+    await ws.shell("ln -s a.txt d/link; ln -s nowhere d/dangling",
+                   session_id="s")
     assert await _run_line(ws, "find d -type l -delete") == ("", "", 0)
     assert await _run_line(ws, "find d -type l") == ("", "", 0)
     assert await _run_line(ws, "cat d/a.txt") == ("a\n", "", 0)
     # An unfiltered -delete meets the link among the backend rows and
     # removes the whole tree, the directory holding it included.
-    await ws.execute("ln -s a.txt d/sub/link", session_id="s")
+    await ws.shell("ln -s a.txt d/sub/link", session_id="s")
     assert await _run_line(ws, "find d -delete") == ("", "", 0)
     assert await _run_line(
         ws, "find d") == ("", "find: 'd': No such file or directory\n", 1)
@@ -635,7 +698,7 @@ async def test_batched_exec_is_one_invocation_across_mounts():
     # operand's native run.
     ws = _ws_two_mounts()
     ws.create_session("s")
-    await ws.execute("touch /a/x.txt /b/y.txt", session_id="s")
+    await ws.shell("touch /a/x.txt /b/y.txt", session_id="s")
     assert await _run_line(
         ws,
         "find /a /b -maxdepth 0 -exec echo batch {} +") == ("batch /a /b\n",
@@ -694,7 +757,7 @@ async def test_exec_head_is_substituted_before_the_lookup():
     # `-exec {} \;` runs each match itself rather than looking up `{}`.
     ws = _ws()
     try:
-        io = await ws.execute(
+        io = await ws.shell(
             "mkdir -p /data/fh/s; printf 'echo ran\\n' > /data/fh/s/x; "
             "chmod 700 /data/fh/s/x; cd /data/fh; "
             "find s -type f -exec {} \\; ; echo rc=$?")
@@ -711,11 +774,11 @@ async def test_delete_drops_the_rows_node_meta():
     # inherit the removed one's mode.
     ws = _ws()
     try:
-        await ws.execute("mkdir -p /data/m; touch /data/m/f /data/m/d")
+        await ws.shell("mkdir -p /data/m; touch /data/m/f /data/m/d")
         await ws._namespace.set_attrs("/data/m/f", mode=0o600)
         await ws._namespace.set_attrs("/data/m/d", mode=0o700)
         assert ws._namespace.meta_for("/data/m/f") is not None
-        io = await ws.execute("find /data/m -name f -delete; echo rc=$?")
+        io = await ws.shell("find /data/m -name f -delete; echo rc=$?")
         assert await io.stdout_str() == "rc=0\n"
         assert ws._namespace.meta_for("/data/m/f") is None
         assert ws._namespace.meta_for("/data/m/d") is not None
@@ -729,7 +792,7 @@ async def test_exec_runs_a_program_a_function_shadows():
     # hides the program from find nor runs in its place.
     ws = _ws()
     try:
-        io = await ws.execute(
+        io = await ws.shell(
             "mkdir -p /data/sh; printf 'content\\n' > /data/sh/f; "
             "cd /data/sh; "
             "cat() { echo BAD; }; "
@@ -753,11 +816,11 @@ class _NoRmdir(Policy):
 async def test_delete_admits_a_directory_as_rmdir():
     # A rule that refuses rmdir and allows unlink judges `find emptydir
     # -delete` as it judges `rmdir emptydir`.
-    ws = Workspace({"/": RAMResource()},
+    ws = Workspace({"/": RAMVFS()},
                    mode=MountMode.WRITE,
                    policies=[_NoRmdir()])
     try:
-        io = await ws.execute(
+        io = await ws.shell(
             "mkdir -p /data/rd/e; touch /data/rd/f; "
             "find /data/rd/f -delete; echo rc=$?; "
             "find /data/rd/e -delete; echo rc=$?; test -d /data/rd/e; echo $?")
@@ -774,7 +837,7 @@ async def test_exec_children_inherit_finds_stdin():
     # the first child takes it and the next reads EOF.
     ws = _ws()
     try:
-        io = await ws.execute(
+        io = await ws.shell(
             "mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; "
             "cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; "
             "echo rc=$?; printf y | find d -type f -exec cat \\; ; "
@@ -797,8 +860,8 @@ async def test_exec_runs_a_program_an_alias_shadows():
     # An alias is as invisible to execvp as a function: the program runs.
     ws = _ws()
     try:
-        await ws.execute("shopt -s expand_aliases; alias cat='echo BAD'")
-        io = await ws.execute(
+        await ws.shell("shopt -s expand_aliases; alias cat='echo BAD'")
+        io = await ws.shell(
             "mkdir -p /data/al; printf 'content\\n' > /data/al/f; "
             "cd /data/al; find . -type f -exec cat {} \\; ; echo rc=$?; "
             "command cat f")
@@ -838,7 +901,7 @@ async def test_ls_renders_the_stat_find_already_holds():
     # test_a_row_ls_cannot_list_ends_its_chain) reports it gone.
     ws = _ws()
     try:
-        io = await ws.execute(
+        io = await ws.shell(
             "mkdir -p /data/dl; touch /data/dl/f /data/dl/g; cd /data; "
             "find dl/f -delete -ls; echo rc=$?; "
             "find dl -name g -size -1k -delete -ls; echo rc=$?; "
@@ -866,7 +929,7 @@ async def test_exec_runs_the_head_as_a_program():
     # starts is a shell again, so its printf assigns.
     ws = _ws()
     try:
-        io = await ws.execute(
+        io = await ws.shell(
             "mkdir -p /data/fp; touch /data/fp/f; cd /data/fp; "
             "find . -type f -exec printf -v x hi \\; ; echo \"[$x]\"; "
             "find . -type f -exec sh -c 'printf -v y hi; echo \"[$y]\"' \\; ; "

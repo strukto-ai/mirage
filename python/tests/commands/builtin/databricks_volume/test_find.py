@@ -15,8 +15,10 @@
 import pytest
 
 from mirage import MountMode, Workspace
-from tests.resource.databricks_volume.test_databricks_volume import (
-    FakeFiles, make_resource, seed_directory, seed_file)
+from tests.vfs.databricks_volume.test_databricks_volume import (FakeFiles,
+                                                                make_vfs,
+                                                                seed_directory,
+                                                                seed_file)
 
 ROOT = "/Volumes/main/default/agent_files/root"
 
@@ -34,12 +36,12 @@ def dbx_files() -> FakeFiles:
 
 @pytest.fixture
 def ws(dbx_files: FakeFiles) -> Workspace:
-    return Workspace({"/dbx/": make_resource(dbx_files)}, mode=MountMode.READ)
+    return Workspace({"/dbx/": make_vfs(dbx_files)}, mode=MountMode.READ)
 
 
 @pytest.mark.asyncio
 async def test_find_name_glob(ws):
-    io = await ws.execute("find /dbx/ -name '*.txt'")
+    io = await ws.shell("find /dbx/ -name '*.txt'")
 
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -50,7 +52,7 @@ async def test_find_name_glob(ws):
 
 @pytest.mark.asyncio
 async def test_find_type_d(ws):
-    io = await ws.execute("find /dbx/ -type d")
+    io = await ws.shell("find /dbx/ -type d")
 
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -60,7 +62,7 @@ async def test_find_type_d(ws):
 
 @pytest.mark.asyncio
 async def test_find_maxdepth(ws):
-    io = await ws.execute("find /dbx/ -maxdepth 1")
+    io = await ws.shell("find /dbx/ -maxdepth 1")
 
     assert io.exit_code == 0
     out = io.stdout.decode()

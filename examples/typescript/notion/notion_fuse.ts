@@ -21,7 +21,7 @@ import {
   Mount,
   MountBackend,
   MountMode,
-  NotionResource,
+  NotionVFS,
   Workspace,
   type NotionConfig,
 } from "@struktoai/mirage-node";
@@ -38,9 +38,9 @@ function buildConfig(): NotionConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new NotionResource(buildConfig());
+  const vfs = new NotionVFS(buildConfig());
   const ws = new Workspace({
-    "/notion": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/notion": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

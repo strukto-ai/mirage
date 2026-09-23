@@ -45,7 +45,7 @@ export interface SearchEntry {
 
 export interface SearchTarget {
   endpoint: string
-  resourceScope: string
+  vfsScope: string
 }
 
 export interface CompiledPredicate {

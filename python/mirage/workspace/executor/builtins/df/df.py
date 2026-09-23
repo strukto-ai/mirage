@@ -25,7 +25,7 @@ from mirage.workspace.executor.builtins.shared import (fail, ok, operand_text,
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 def _parse_block(text: str) -> tuple[int, str] | None:
@@ -194,7 +194,7 @@ async def _path_exists(dispatch: DispatchFn, spec: PathSpec) -> bool:
 
 
 async def _target_mounts(registry: MountRegistry, dispatch: DispatchFn,
-                         session: Session,
+                         session: SessionState,
                          operands: list[str | PathSpec]) -> list[MountEntry]:
     """Resolve df operands to the mounts to report, deduped and ordered.
 
@@ -206,7 +206,7 @@ async def _target_mounts(registry: MountRegistry, dispatch: DispatchFn,
     Args:
         registry (MountRegistry): mount registry.
         dispatch (DispatchFn): op dispatcher (FILE existence check).
-        session (Session): session providing cwd for relative operands.
+        session (SessionState): session providing cwd for relative operands.
         operands (list[str | PathSpec]): path operands.
     """
     ordered = sorted(registry.mounts(), key=lambda m: m.prefix)
@@ -278,7 +278,7 @@ def _render_table(header: list[str], rows: list[list[str]],
 
 async def handle_df(
     registry: MountRegistry,
-    session: Session,
+    session: SessionState,
     dispatch: DispatchFn,
     args: list[str | PathSpec],
 ) -> Result:
@@ -292,7 +292,7 @@ async def handle_df(
 
     Args:
         registry (MountRegistry): mount registry (mount enumeration).
-        session (Session): session providing cwd for relative operands.
+        session (SessionState): session providing cwd for relative operands.
         dispatch (DispatchFn): op dispatcher (FILE existence check).
         args (list[str | PathSpec]): args after the command name.
     """
@@ -344,10 +344,10 @@ async def handle_df(
     data: list[list[str]] = []
     for mount in mounts:
         async with mount.use():
-            cap = await mount.resource.statfs()
-        cells = [mount.resource.name]
+            cap = await mount.vfs.statfs()
+        cells = [mount.vfs.name]
         if show_type:
-            cells.append(mount.resource.name)
+            cells.append(mount.vfs.name)
         cells += _num_cells(cap, human, si, block, inodes)
         cells.append(_pct_cell(cap, inodes))
         cells.append(mount.prefix.rstrip("/") or "/")

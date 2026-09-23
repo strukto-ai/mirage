@@ -20,34 +20,34 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.commands.cli.builtin.linear import LINEAR
-from mirage.resource.linear import LinearConfig, LinearResource
 from mirage.types import PathSpec
+from mirage.vfs.linear import LinearConfig, LinearVFS
 
 load_dotenv(".env.development")
 
 config = LinearConfig(api_key=os.environ["LINEAR_API_KEY"])
-resource = LinearResource(config=config)
+vfs = LinearVFS(config=config)
 
 
 async def main() -> None:
-    ws = Workspace({"/linear": resource}, mode=MountMode.READ)
+    ws = Workspace({"/linear": vfs}, mode=MountMode.READ)
     ws.register_cli("linear", LINEAR, config.model_dump())
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in ("cat /linear/__nf_missing__.txt",
                 "head /linear/__nf_missing__.txt",
                 "stat /linear/__nf_missing__.txt"):
-        result = await ws.execute(cmd)
+        result = await ws.shell(cmd)
         print(f"$ {cmd}")
         print(f"  exit={result.exit_code}  "
               f"{(await result.stderr_str()).strip()}")
 
     print("=== ls /linear/teams/ ===")
-    result = await ws.execute("ls /linear/teams/")
+    result = await ws.shell("ls /linear/teams/")
     print(await result.stdout_str())
 
     print("=== ls -l /linear/teams/ (mtime from updatedAt) ===")
-    long_result = await ws.execute("ls -l /linear/teams/")
+    long_result = await ws.shell("ls -l /linear/teams/")
     print(await long_result.stdout_str())
 
     first_team = (await result.stdout_str()).strip().splitlines()[0] if (
@@ -59,22 +59,22 @@ async def main() -> None:
     team_key = first_team.split("__", 1)[0]
 
     print("=== linear team list ===")
-    result = await ws.execute("linear team list")
+    result = await ws.shell("linear team list")
     print(await result.stdout_str())
 
     print(f"=== linear team get {team_key} ===")
-    result = await ws.execute(f"linear team get {team_key}")
+    result = await ws.shell(f"linear team get {team_key}")
     print(await result.stdout_str())
 
     print(f"=== cat /linear/teams/{first_team}/team.json ===")
-    result = await ws.execute(f"cat /linear/teams/{first_team}/team.json")
+    result = await ws.shell(f"cat /linear/teams/{first_team}/team.json")
     print(await result.stdout_str())
 
     # chmod/chown/touch never hit the Linear API: attrs land in the
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print(f"=== metadata overlay on /linear/teams/{first_team}/team.json ===")
-    meta_res = await ws.execute(
+    meta_res = await ws.shell(
         f'chmod 640 "/linear/teams/{first_team}/team.json"'
         f' && chown 500:dev "/linear/teams/{first_team}/team.json"'
         f' && touch -t 202601021530 "/linear/teams/{first_team}/team.json"')
@@ -86,12 +86,11 @@ async def main() -> None:
           f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print(f"=== ls /linear/teams/{first_team}/issues/ ===")
-    issue_result = await ws.execute(f"ls /linear/teams/{first_team}/issues/")
+    issue_result = await ws.shell(f"ls /linear/teams/{first_team}/issues/")
     print(await issue_result.stdout_str())
 
     print(f"=== ls /linear/teams/{first_team}/projects/ ===")
-    project_result = await ws.execute(
-        f"ls /linear/teams/{first_team}/projects/")
+    project_result = await ws.shell(f"ls /linear/teams/{first_team}/projects/")
     print(await project_result.stdout_str())
 
     project_names = (await project_result.stdout_str()).strip().splitlines()
@@ -103,7 +102,7 @@ async def main() -> None:
         print(
             f"=== cat /linear/teams/{first_team}/projects/{mirage_project} ==="
         )
-        result = await ws.execute(
+        result = await ws.shell(
             f"cat /linear/teams/{first_team}/projects/{mirage_project}")
         print(await result.stdout_str())
 
@@ -127,104 +126,103 @@ async def main() -> None:
     issue_path = f"/linear/teams/{first_team}/issues/{first_issue}"
 
     print(f"=== linear issue list --team {team_key} ===")
-    result = await ws.execute(f"linear issue list --team {team_key}")
+    result = await ws.shell(f"linear issue list --team {team_key}")
     print(await result.stdout_str())
 
     print(f"=== linear issue get {issue_key} ===")
-    result = await ws.execute(f"linear issue get {issue_key}")
+    result = await ws.shell(f"linear issue get {issue_key}")
     print(await result.stdout_str())
 
     print("=== cat issue.json ===")
-    result = await ws.execute(f"cat {issue_path}/issue.json")
+    result = await ws.shell(f"cat {issue_path}/issue.json")
     print(await result.stdout_str())
 
     print("=== head -n 3 comments.jsonl ===")
-    result = await ws.execute(f"head -n 3 {issue_path}/comments.jsonl")
+    result = await ws.shell(f"head -n 3 {issue_path}/comments.jsonl")
     print(await result.stdout_str())
 
     print("=== tail -n 1 comments.jsonl ===")
-    result = await ws.execute(f"tail -n 1 {issue_path}/comments.jsonl")
+    result = await ws.shell(f"tail -n 1 {issue_path}/comments.jsonl")
     print(await result.stdout_str())
 
     print("=== wc -l comments.jsonl ===")
-    result = await ws.execute(f"wc -l {issue_path}/comments.jsonl")
+    result = await ws.shell(f"wc -l {issue_path}/comments.jsonl")
     print(await result.stdout_str())
 
     print("=== stat issue.json ===")
-    result = await ws.execute(f"stat {issue_path}/issue.json")
+    result = await ws.shell(f"stat {issue_path}/issue.json")
     print(await result.stdout_str())
 
     print("=== jq .title issue.json ===")
-    result = await ws.execute(f'jq ".title" {issue_path}/issue.json')
+    result = await ws.shell(f'jq ".title" {issue_path}/issue.json')
     print(await result.stdout_str())
 
     print("=== jq .state_name issue.json ===")
-    result = await ws.execute(f'jq ".state_name" {issue_path}/issue.json')
+    result = await ws.shell(f'jq ".state_name" {issue_path}/issue.json')
     print(await result.stdout_str())
 
     print("=== tree -L 1 /linear/ ===")
-    result = await ws.execute("tree -L 1 /linear/")
+    result = await ws.shell("tree -L 1 /linear/")
     print(await result.stdout_str())
 
     print(f"=== tree -L 1 teams/{first_team} ===")
-    result = await ws.execute(f"tree -L 1 /linear/teams/{first_team}/")
+    result = await ws.shell(f"tree -L 1 /linear/teams/{first_team}/")
     print(await result.stdout_str())
 
     print("=== find issues -name '*.json' ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f'find /linear/teams/{first_team}/issues/ -name "*.json"'
         " | head -n 5")
     print(await result.stdout_str())
 
     print("=== find teams -type d (directory filter) ===")
-    result = await ws.execute(f"find /linear/teams/{first_team}/ -type d"
-                              " | head -n 5")
+    result = await ws.shell(f"find /linear/teams/{first_team}/ -type d"
+                            " | head -n 5")
     print(await result.stdout_str())
 
     # -path matches the display path; -size counts dirs and sizeless
     # rendered files as 0 (so +0c drops them, -1k keeps them).
     print("=== find team -path '*issues*' ===")
-    result = await ws.execute(f'find /linear/teams/{first_team}/'
-                              f' -path "*issues*" | head -n 5')
+    result = await ws.shell(f'find /linear/teams/{first_team}/'
+                            f' -path "*issues*" | head -n 5')
     print(await result.stdout_str())
 
     print("=== find team -maxdepth 1 -size +0c (dirs drop out) ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f"find /linear/teams/{first_team}/ -maxdepth 1 -size +0c")
     print(f"  exit={result.exit_code}")
     print(await result.stdout_str())
 
     print(f"=== du -s teams/{first_team} (walk fallback) ===")
-    result = await ws.execute(f"du -s /linear/teams/{first_team}/")
+    result = await ws.shell(f"du -s /linear/teams/{first_team}/")
     print(await result.stdout_str())
 
     print("=== grep Mirage issue.json ===")
-    result = await ws.execute(f'grep Mirage {issue_path}/issue.json')
+    result = await ws.shell(f'grep Mirage {issue_path}/issue.json')
     print(await result.stdout_str())
 
     print("=== rg Backlog team.json ===")
-    result = await ws.execute(
-        f"rg Backlog /linear/teams/{first_team}/team.json")
+    result = await ws.shell(f"rg Backlog /linear/teams/{first_team}/team.json")
     print(await result.stdout_str())
 
     print("=== basename ===")
-    result = await ws.execute(f"basename {issue_path}/issue.json")
+    result = await ws.shell(f"basename {issue_path}/issue.json")
     print(await result.stdout_str())
 
     print("=== dirname ===")
-    result = await ws.execute(f"dirname {issue_path}/issue.json")
+    result = await ws.shell(f"dirname {issue_path}/issue.json")
     print(await result.stdout_str())
 
     # ── glob expansion (exercises resolve_glob → readdir) ──
     issues_dir = f"/linear/teams/{first_team}/issues"
     print(f"=== echo {issues_dir}/* (glob) ===")
-    r = await ws.execute(f"echo {issues_dir}/*")
+    r = await ws.shell(f"echo {issues_dir}/*")
     out = (await r.stdout_str()).strip()
     print(f"  {out[:200]}")
 
     print(f"\n=== for f in {issues_dir}/* (glob loop) ===")
-    r = await ws.execute(f"for f in {issues_dir}/*; do echo found:$f; done"
-                         " | head -n 3")
+    r = await ws.shell(f"for f in {issues_dir}/*; do echo found:$f; done"
+                       " | head -n 3")
     out = (await r.stdout_str()).strip()
     for line in out.splitlines():
         print(f"  {line[:120]}")
@@ -232,7 +230,7 @@ async def main() -> None:
     # ── mid-path glob: the team segment is the pattern, the literal
     # tail keeps walking (lists teams once, then filters).
     print("\n=== echo /linear/teams/*/issues (mid-path glob) ===")
-    r = await ws.execute("echo /linear/teams/*/issues")
+    r = await ws.shell("echo /linear/teams/*/issues")
     out = (await r.stdout_str()).strip()
     print(f"  {out[:200]}")
     assert out.endswith("/issues"), "mid-path glob did not expand"
@@ -240,7 +238,7 @@ async def main() -> None:
     # A glob that matches nothing stays the literal word, so the
     # command reports it like GNU coreutils.
     print("\n=== cat /linear/teams/zz-none-*/team.json (no match) ===")
-    r = await ws.execute("cat /linear/teams/zz-none-*/team.json")
+    r = await ws.shell("cat /linear/teams/zz-none-*/team.json")
     err = (await r.stderr_str()).strip()
     print(f"  exit={r.exit_code}  {err[:120]}")
     assert r.exit_code == 1 and "zz-none-*" in err

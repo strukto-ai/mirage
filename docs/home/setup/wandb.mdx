@@ -6,10 +6,10 @@ description: "Read experiment runs, configuration, summaries, history, and run f
 ```python
 import os
 from mirage import Workspace, MountMode
-from mirage.resource.wandb import WandbConfig, WandbResource
+from mirage.vfs.wandb import WandbConfig, WandbVFS
 
 ws = Workspace({
-    "/wandb": WandbResource(WandbConfig(
+    "/wandb": WandbVFS(WandbConfig(
         entities=["my-team"],
         api_key=os.environ["WANDB_API_KEY"],
     )),
@@ -129,4 +129,4 @@ Reads and downloads stream, so `head` can stop before fetching the entire histor
 Exhausting a page budget raises an error instead of returning a complete-looking
 partial result. Recursive `du` is capped at 1000 entries; glob expansion uses
 Mirage's standard traversal limit. API keys use host configuration and are
-redacted from resource state. No write operations or W&B CLI are registered.
+redacted from VFS state. No write operations or W&B CLI are registered.

@@ -7,9 +7,9 @@ icon: /images/huggingface-logo.svg
 Act on the [Hugging Face Hub](https://huggingface.co) in the official
 [CLI](https://github.com/huggingface/huggingface_hub)'s vocabulary. A repo is
 a tree, so mirage already reads one as files: the
-[`hf_models`](/python/resource/hf_models),
-[`hf_datasets`](/python/resource/hf_datasets) and
-[`hf_spaces`](/python/resource/hf_spaces) mounts are the read half, and `ls`,
+[`hf_models`](/python/vfs/hf_models),
+[`hf_datasets`](/python/vfs/hf_datasets) and
+[`hf_spaces`](/python/vfs/hf_spaces) mounts are the read half, and `ls`,
 `cat` and `grep` are how an agent explores one without downloading it. `hf` is
 the write half.
 
@@ -50,17 +50,17 @@ import os
 from mirage import Mount, MountMode, Workspace
 from mirage.commands.cli.builtin.hf import HF
 from mirage.core.hf_hub.config import HfConfig
-from mirage.resource.hf_models import HfModelsConfig, HfModelsResource
-from mirage.resource.ram import RAMResource
+from mirage.vfs.hf_models import HfModelsConfig, HfModelsVFS
+from mirage.vfs.ram import RAMVFS
 
 token = os.environ["HF_TOKEN"]
 ws = Workspace({
-    "/m": HfModelsResource(HfModelsConfig(repo_id="acme/model", token=token)),
-    "/work": Mount(RAMResource(), mode=MountMode.WRITE),
+    "/m": HfModelsVFS(HfModelsConfig(repo_id="acme/model", token=token)),
+    "/work": Mount(RAMVFS(), mode=MountMode.WRITE),
 })
 ws.register_cli("hf", HF, {"token": token})
 
-await ws.execute("hf auth whoami")
+await ws.shell("hf auth whoami")
 ```
 
 `/m` keeps the default read mode, which is all a Hub mount can offer. `/work`
@@ -68,9 +68,9 @@ is the mount that takes `MountMode.WRITE`, and that asymmetry is the workflow
 above rather than an oversight: the Hub half is read-only, the local half is
 where edits live.
 
-The Hub resources need no extra: they speak the Hub API over `aiohttp`, which
+The Hub VFS need no extra: they speak the Hub API over `aiohttp`, which
 mirage already depends on. `mirage-ai[hf-buckets]` is a different product, the
-Xet object store behind [HF Buckets](/python/resource/hf_buckets).
+Xet object store behind [HF Buckets](/python/vfs/hf_buckets).
 
 ## Commands
 

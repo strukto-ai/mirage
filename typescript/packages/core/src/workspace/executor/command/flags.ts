@@ -37,7 +37,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 /**
  * A PathSpec for a path the classifier never saw: a relative value
  * cwd-resolved by `parseCommand`, or a spec-classified PATH operand the
- * upstream classifier left as text. `resourcePath` stays empty on
+ * upstream classifier left as text. `vfsPath` stays empty on
  * purpose: the mount stamps the backend key on every path at execute
  * time (`Mount.executeCmd`), so a parse-time stamp is dead weight —
  * proven in both languages by running the full suite with this field
@@ -47,7 +47,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 function synthesizePathSpec(value: string): PathSpec {
   const slash = value.lastIndexOf('/')
   return new PathSpec({
-    resourcePath: '',
+    vfsPath: '',
     virtual: value,
     directory: slash >= 0 ? value.slice(0, slash + 1) : '/',
     resolved: true,

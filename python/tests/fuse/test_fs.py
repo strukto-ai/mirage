@@ -24,9 +24,9 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 
-from mirage.fuse.fs import MirageFS
-from mirage.resource.ram import RAMResource
+from mirage.fuse.fs import XATTR_CREATE, XATTR_REPLACE, MirageFS
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 try:
@@ -42,28 +42,28 @@ _fuse_available = sys.platform in ("linux", "darwin") and _driver_present
 
 @pytest_asyncio.fixture
 async def seed_ws():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /a.txt", stdin=b"hello world")
-    await ws.execute("mkdir /sub")
-    await ws.execute("tee /sub/b.txt", stdin=b"nested")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /a.txt", stdin=b"hello world")
+    await ws.shell("mkdir /sub")
+    await ws.shell("tee /sub/b.txt", stdin=b"nested")
     return ws
 
 
 @pytest.fixture
 def rw_ws():
-    return Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    return Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_getattr_root(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     attrs = fs.getattr("/")
     assert attrs["st_mode"] & stat.S_IFDIR
 
 
 @pytest.mark.asyncio
 async def test_getattr_file(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     attrs = fs.getattr("/a.txt")
     assert attrs["st_mode"] & stat.S_IFREG
     assert attrs["st_size"] == len(b"hello world")
@@ -71,14 +71,14 @@ async def test_getattr_file(seed_ws):
 
 @pytest.mark.asyncio
 async def test_getattr_dir(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     attrs = fs.getattr("/sub")
     assert attrs["st_mode"] & stat.S_IFDIR
 
 
 @pytest.mark.asyncio
 async def test_getattr_missing(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.getattr("/no_such_file.txt")
     assert exc.value.errno == errno.ENOENT
@@ -86,9 +86,9 @@ async def test_getattr_missing(seed_ws):
 
 @pytest.mark.asyncio
 async def test_getattr_empty_readdir_not_ghost_dir():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("mkdir /emptydir")
-    fs = MirageFS(ws.fs)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /emptydir")
+    fs = MirageFS(ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.getattr("/typo_command")
     assert exc.value.errno == errno.ENOENT
@@ -96,7 +96,7 @@ async def test_getattr_empty_readdir_not_ghost_dir():
 
 @pytest.mark.asyncio
 async def test_readdir_root(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     entries = fs.readdir("/", None)
     assert "." in entries
     assert ".." in entries
@@ -106,14 +106,14 @@ async def test_readdir_root(seed_ws):
 
 @pytest.mark.asyncio
 async def test_readdir_subdir(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     entries = fs.readdir("/sub", None)
     assert "b.txt" in entries
 
 
 @pytest.mark.asyncio
 async def test_readdir_missing(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.readdir("/nope", None)
     assert exc.value.errno == errno.ENOENT
@@ -121,7 +121,7 @@ async def test_readdir_missing(seed_ws):
 
 @pytest.mark.asyncio
 async def test_read_full(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fh = fs.open("/a.txt", os.O_RDONLY)
     data = fs.read("/a.txt", 1024, 0, fh)
     assert data == b"hello world"
@@ -129,7 +129,7 @@ async def test_read_full(seed_ws):
 
 @pytest.mark.asyncio
 async def test_read_offset(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fh = fs.open("/a.txt", os.O_RDONLY)
     data = fs.read("/a.txt", 5, 6, fh)
     assert data == b"world"
@@ -137,7 +137,7 @@ async def test_read_offset(seed_ws):
 
 @pytest.mark.asyncio
 async def test_open_missing(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.open("/missing.txt", os.O_RDONLY)
     assert exc.value.errno == errno.ENOENT
@@ -145,17 +145,17 @@ async def test_open_missing(seed_ws):
 
 @pytest.mark.asyncio
 async def test_create_and_write(rw_ws):
-    fs = MirageFS(rw_ws.fs)
+    fs = MirageFS(rw_ws.vfs)
     fh = fs.create("/new.txt", 0o644)
     fs.write("/new.txt", b"data", 0, fh)
     fs.flush("/new.txt", fh)
-    result = await rw_ws.execute("cat /new.txt")
+    result = await rw_ws.shell("cat /new.txt")
     assert result.stdout == b"data"
 
 
 @pytest.mark.asyncio
 async def test_mkdir(rw_ws):
-    fs = MirageFS(rw_ws.fs)
+    fs = MirageFS(rw_ws.vfs)
     fs.mkdir("/newdir", 0o755)
     entries = fs.readdir("/newdir", None)
     assert "." in entries
@@ -163,8 +163,8 @@ async def test_mkdir(rw_ws):
 
 @pytest.mark.asyncio
 async def test_unlink(rw_ws):
-    await rw_ws.execute("tee /todel.txt", stdin=b"bye")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /todel.txt", stdin=b"bye")
+    fs = MirageFS(rw_ws.vfs)
     fs.unlink("/todel.txt")
     with pytest.raises(OSError) as exc:
         fs.getattr("/todel.txt")
@@ -173,25 +173,25 @@ async def test_unlink(rw_ws):
 
 @pytest.mark.asyncio
 async def test_rename(rw_ws):
-    await rw_ws.execute("tee /old.txt", stdin=b"content")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /old.txt", stdin=b"content")
+    fs = MirageFS(rw_ws.vfs)
     fs.rename("/old.txt", "/new.txt")
-    result = await rw_ws.execute("cat /new.txt")
+    result = await rw_ws.shell("cat /new.txt")
     assert result.stdout == b"content"
 
 
 @pytest.mark.asyncio
 async def test_rmdir_empty(rw_ws):
-    await rw_ws.execute("mkdir /emptydir")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("mkdir /emptydir")
+    fs = MirageFS(rw_ws.vfs)
     fs.rmdir("/emptydir")
 
 
 @pytest.mark.asyncio
 async def test_rmdir_nonempty(rw_ws):
-    await rw_ws.execute("mkdir /nonempty")
-    await rw_ws.execute("tee /nonempty/file.txt", stdin=b"x")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("mkdir /nonempty")
+    await rw_ws.shell("tee /nonempty/file.txt", stdin=b"x")
+    fs = MirageFS(rw_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.rmdir("/nonempty")
     assert exc.value.errno == errno.ENOTEMPTY
@@ -199,30 +199,30 @@ async def test_rmdir_nonempty(rw_ws):
 
 @pytest.mark.asyncio
 async def test_truncate(rw_ws):
-    await rw_ws.execute("tee /f.txt", stdin=b"hello world")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /f.txt", stdin=b"hello world")
+    fs = MirageFS(rw_ws.vfs)
     fs.truncate("/f.txt", 5)
-    result = await rw_ws.execute("cat /f.txt")
+    result = await rw_ws.shell("cat /f.txt")
     assert result.stdout == b"hello"
 
 
 @pytest.mark.asyncio
 async def test_truncate_extend(rw_ws):
-    await rw_ws.execute("tee /f.txt", stdin=b"hi")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /f.txt", stdin=b"hi")
+    fs = MirageFS(rw_ws.vfs)
     fs.truncate("/f.txt", 5)
-    result = await rw_ws.execute("cat /f.txt")
+    result = await rw_ws.shell("cat /f.txt")
     assert result.stdout == b"hi\x00\x00\x00"
 
 
 @pytest.mark.asyncio
 async def test_write_at_offset(rw_ws):
-    await rw_ws.execute("tee /f.txt", stdin=b"hello world")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /f.txt", stdin=b"hello world")
+    fs = MirageFS(rw_ws.vfs)
     fh = fs.open("/f.txt", os.O_RDWR)
     fs.write("/f.txt", b"WORLD", 6, fh)
     fs.flush("/f.txt", fh)
-    result = await rw_ws.execute("cat /f.txt")
+    result = await rw_ws.shell("cat /f.txt")
     assert result.stdout == b"hello WORLD"
 
 
@@ -231,19 +231,19 @@ async def test_open_forwards_o_trunc(rw_ws):
     # The adapter used to drop the open flags, so a fuse3 O_TRUNC open
     # (no separate truncate op arrives) merged the new bytes over the
     # old body (#1032).
-    await rw_ws.execute("tee /f.txt", stdin=b"AAAAAAAAAAAAAAAAAAAA\n")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /f.txt", stdin=b"AAAAAAAAAAAAAAAAAAAA\n")
+    fs = MirageFS(rw_ws.vfs)
     fh = fs.open("/f.txt", os.O_WRONLY | os.O_TRUNC)
     fs.write("/f.txt", b"BB\n", 0, fh)
     fs.flush("/f.txt", fh)
     fs.release("/f.txt", fh)
-    result = await rw_ws.execute("cat /f.txt")
+    result = await rw_ws.shell("cat /f.txt")
     assert result.stdout == b"BB\n"
 
 
 @pytest.mark.asyncio
 async def test_statfs(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     result = fs.statfs("/")
     assert "f_bsize" in result
     assert "f_blocks" in result
@@ -252,19 +252,19 @@ async def test_statfs(seed_ws):
 
 @pytest.mark.asyncio
 async def test_chmod_does_not_raise(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.chmod("/a.txt", 0o644)
 
 
 @pytest.mark.asyncio
 async def test_chown_does_not_raise(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.chown("/a.txt", os.getuid(), os.getgid())
 
 
 @pytest.mark.asyncio
 async def test_utimens_does_not_raise(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.utimens("/a.txt", None)
 
 
@@ -272,13 +272,13 @@ async def test_utimens_does_not_raise(seed_ws):
 async def test_setattr_x_metadata_only_accepts(seed_ws):
     # The FSKit shim finalizes every created item through setattr_x; a
     # metadata-only payload must succeed for create/mkdir to work at all.
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     assert fs.setattr_x("/a.txt", {"mode": 0o644, "uid": 501, "gid": 20}) == 0
 
 
 @pytest.mark.asyncio
 async def test_setattr_x_missing_path_is_enoent(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.setattr_x("/nope.txt", {"mode": 0o644})
     assert exc.value.errno == errno.ENOENT
@@ -286,36 +286,36 @@ async def test_setattr_x_missing_path_is_enoent(seed_ws):
 
 @pytest.mark.asyncio
 async def test_setattr_x_size_truncates(rw_ws):
-    await rw_ws.execute("tee /t.txt", stdin=b"longcontent")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /t.txt", stdin=b"longcontent")
+    fs = MirageFS(rw_ws.vfs)
     assert fs.setattr_x("/t.txt", {"size": 4}) == 0
-    result = await rw_ws.execute("cat /t.txt")
+    result = await rw_ws.shell("cat /t.txt")
     assert result.stdout == b"long"
 
 
 @pytest.mark.asyncio
 async def test_fsetattr_x_routes_to_setattr_x(rw_ws):
-    await rw_ws.execute("tee /t2.txt", stdin=b"longcontent")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /t2.txt", stdin=b"longcontent")
+    fs = MirageFS(rw_ws.vfs)
     assert fs.fsetattr_x("/t2.txt", {"size": 2}, fh=7) == 0
-    result = await rw_ws.execute("cat /t2.txt")
+    result = await rw_ws.shell("cat /t2.txt")
     assert result.stdout == b"lo"
 
 
 @pytest.mark.asyncio
 async def test_renamex_plain(rw_ws):
-    await rw_ws.execute("tee /rx.txt", stdin=b"content")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /rx.txt", stdin=b"content")
+    fs = MirageFS(rw_ws.vfs)
     assert fs.renamex("/rx.txt", "/rx2.txt", 0) == 0
-    result = await rw_ws.execute("cat /rx2.txt")
+    result = await rw_ws.shell("cat /rx2.txt")
     assert result.stdout == b"content"
 
 
 @pytest.mark.asyncio
 async def test_renamex_excl_rejects_existing_target(rw_ws):
-    await rw_ws.execute("tee /src.txt", stdin=b"a")
-    await rw_ws.execute("tee /dst.txt", stdin=b"b")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /src.txt", stdin=b"a")
+    await rw_ws.shell("tee /dst.txt", stdin=b"b")
+    fs = MirageFS(rw_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.renamex("/src.txt", "/dst.txt", 0x4)
     assert exc.value.errno == errno.EEXIST
@@ -323,9 +323,9 @@ async def test_renamex_excl_rejects_existing_target(rw_ws):
 
 @pytest.mark.asyncio
 async def test_renamex_swap_is_enotsup(rw_ws):
-    await rw_ws.execute("tee /s1.txt", stdin=b"a")
-    await rw_ws.execute("tee /s2.txt", stdin=b"b")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /s1.txt", stdin=b"a")
+    await rw_ws.shell("tee /s2.txt", stdin=b"b")
+    fs = MirageFS(rw_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.renamex("/s1.txt", "/s2.txt", 0x2)
     assert exc.value.errno == errno.ENOTSUP
@@ -333,24 +333,24 @@ async def test_renamex_swap_is_enotsup(rw_ws):
 
 @pytest.mark.asyncio
 async def test_access_does_not_raise(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.access("/a.txt", os.R_OK)
 
 
 @pytest.mark.asyncio
 async def test_fsync_delegates_to_flush(rw_ws):
-    await rw_ws.execute("tee /f.txt", stdin=b"before")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /f.txt", stdin=b"before")
+    fs = MirageFS(rw_ws.vfs)
     fh = fs.open("/f.txt", os.O_RDWR)
     fs.write("/f.txt", b"after!", 0, fh)
     fs.fsync("/f.txt", 0, fh)
-    result = await rw_ws.execute("cat /f.txt")
+    result = await rw_ws.shell("cat /f.txt")
     assert result.stdout == b"after!"
 
 
 @pytest.mark.asyncio
 async def test_open_returns_unique_handles(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fh1 = fs.open("/a.txt", os.O_RDONLY)
     fh2 = fs.open("/a.txt", os.O_RDONLY)
     assert fh1 != fh2
@@ -358,7 +358,7 @@ async def test_open_returns_unique_handles(seed_ws):
 
 @pytest.mark.asyncio
 async def test_release_cleans_handles(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fh = fs.open("/a.txt", os.O_RDONLY)
     assert fh in fs.core._handles
     fs.release("/a.txt", fh)
@@ -367,8 +367,8 @@ async def test_release_cleans_handles(seed_ws):
 
 @pytest.mark.asyncio
 async def test_drain_ops_returns_and_clears(rw_ws):
-    await rw_ws.execute("tee /track.txt", stdin=b"x")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /track.txt", stdin=b"x")
+    fs = MirageFS(rw_ws.vfs)
     fh = fs.create("/new.txt", 0o644)
     fs.write("/new.txt", b"y", 0, fh)
     fs.flush("/new.txt", fh)
@@ -380,7 +380,7 @@ async def test_drain_ops_returns_and_clears(rw_ws):
 
 @pytest.mark.asyncio
 async def test_drain_ops_read_deduplication(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fh = fs.open("/a.txt", os.O_RDONLY)
     fs.read("/a.txt", 1024, 0, fh)
     fs.read("/a.txt", 1024, 0, fh)
@@ -391,12 +391,12 @@ async def test_drain_ops_read_deduplication(seed_ws):
 
 @pytest.mark.asyncio
 async def test_fuse_read_uses_cache_when_populated():
-    mem = RAMResource()
+    mem = RAMVFS()
     mem.caches_reads = True
     mem._store.files["/a.txt"] = b"hello world"
     ws = Workspace({"/": mem}, mode=MountMode.WRITE)
-    await ws.execute("cat /a.txt")
-    fs = MirageFS(ws.fs)
+    await ws.shell("cat /a.txt")
+    fs = MirageFS(ws.vfs)
     fh = fs.open("/a.txt", os.O_RDONLY)
     data = fs.read("/a.txt", 5, 0, fh)
     assert data == b"hello"
@@ -405,7 +405,7 @@ async def test_fuse_read_uses_cache_when_populated():
 
 @pytest.mark.asyncio
 async def test_readdir_logs_ls_op(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.readdir("/", None)
     ops = fs.drain_ops()
     assert any(o["op"] == "readdir" and o["path"] == "/" for o in ops)
@@ -413,7 +413,7 @@ async def test_readdir_logs_ls_op(seed_ws):
 
 @pytest.mark.asyncio
 async def test_total_ops_persists_across_drains(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.readdir("/", None)
     first = fs.drain_ops()
     fs.readdir("/sub", None)
@@ -424,8 +424,8 @@ async def test_total_ops_persists_across_drains(seed_ws):
 
 @pytest.mark.asyncio
 async def test_total_ops_counts_reads_and_writes(rw_ws):
-    await rw_ws.execute("tee /f.txt", stdin=b"x")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /f.txt", stdin=b"x")
+    fs = MirageFS(rw_ws.vfs)
     fs.core._ops.records.clear()
     fh = fs.open("/f.txt", os.O_RDONLY)
     fs.read("/f.txt", 1024, 0, fh)
@@ -437,15 +437,15 @@ async def test_total_ops_counts_reads_and_writes(rw_ws):
 
 
 def test_permission_error_logged_on_create():
-    ro_ws = Workspace({"/": RAMResource()}, mode=MountMode.READ)
-    fs = MirageFS(ro_ws.fs)
+    ro_ws = Workspace({"/": RAMVFS()}, mode=MountMode.READ)
+    fs = MirageFS(ro_ws.vfs)
     with pytest.raises(Exception):
         fs.create("/new.txt", 0o644)
 
 
 def test_permission_error_not_counted_as_op():
-    ro_ws = Workspace({"/": RAMResource()}, mode=MountMode.READ)
-    fs = MirageFS(ro_ws.fs)
+    ro_ws = Workspace({"/": RAMVFS()}, mode=MountMode.READ)
+    fs = MirageFS(ro_ws.vfs)
     fs.core._ops.records.clear()
     with pytest.raises(Exception):
         fs.create("/new.txt", 0o644)
@@ -455,7 +455,7 @@ def test_permission_error_not_counted_as_op():
 
 @pytest.mark.asyncio
 async def test_fuse_dispatches_to_backend_hooks(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fh = fs.open("/a.txt", os.O_RDONLY)
     data = fs.read("/a.txt", 1024, 0, fh)
     assert data == b"hello world"
@@ -463,12 +463,12 @@ async def test_fuse_dispatches_to_backend_hooks(seed_ws):
 
 @pytest.mark.asyncio
 async def test_fuse_write_buffered_flush(rw_ws):
-    fs = MirageFS(rw_ws.fs)
-    await rw_ws.execute("tee /f.txt", stdin=b"hello world")
+    fs = MirageFS(rw_ws.vfs)
+    await rw_ws.shell("tee /f.txt", stdin=b"hello world")
     fh = fs.open("/f.txt", os.O_RDWR)
     fs.write("/f.txt", b"HELLO", 0, fh)
     fs.flush("/f.txt", fh)
-    result = await rw_ws.execute("cat /f.txt")
+    result = await rw_ws.shell("cat /f.txt")
     assert result.stdout == b"HELLO world"
 
 
@@ -477,10 +477,10 @@ async def test_fuse_write_buffered_flush(rw_ws):
 @pytest.mark.asyncio
 async def test_mount_background_readable():
     from mirage.fuse.mount import mount_background
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /hello.txt", stdin=b"hi from memory")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /hello.txt", stdin=b"hi from memory")
     with tempfile.TemporaryDirectory() as mountpoint:
-        t = mount_background(ws.fs, mountpoint)
+        t = mount_background(ws.vfs, mountpoint)
         try:
             import time
             time.sleep(1)
@@ -500,14 +500,14 @@ async def test_mount_background_readable():
 
 @pytest.mark.asyncio
 async def test_xattr_set_get_roundtrip(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.setxattr("/a.txt", "user.test", b"value", 0)
     assert fs.getxattr("/a.txt", "user.test") == b"value"
 
 
 @pytest.mark.asyncio
 async def test_xattr_get_missing_raises(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.getxattr("/a.txt", "user.absent")
     assert exc.value.errno in (errno.ENODATA,
@@ -516,7 +516,7 @@ async def test_xattr_get_missing_raises(seed_ws):
 
 @pytest.mark.asyncio
 async def test_xattr_list_and_remove(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.setxattr("/a.txt", "user.one", b"1", 0)
     fs.setxattr("/a.txt", "user.two", b"2", 0)
     assert sorted(fs.listxattr("/a.txt")) == ["user.one", "user.two"]
@@ -526,27 +526,52 @@ async def test_xattr_list_and_remove(seed_ws):
 
 @pytest.mark.asyncio
 async def test_xattr_probe_succeeds(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     assert fs.setxattr("/a.txt", "user.containers._probe", b"x", 0) == 0
     assert fs.removexattr("/a.txt", "user.containers._probe") == 0
 
 
 @pytest.mark.asyncio
 async def test_xattr_cleared_on_unlink(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.setxattr("/a.txt", "user.keep", b"v", 0)
     fs.unlink("/a.txt")
     assert fs.listxattr("/sub") == []
-    assert "/a.txt" not in fs.core._xattrs
+    assert seed_ws.namespace.meta_for("/a.txt") is None
 
 
 @pytest.mark.asyncio
 async def test_xattr_follows_rename(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     fs.setxattr("/a.txt", "user.keep", b"v", 0)
     fs.rename("/a.txt", "/renamed.txt")
     assert fs.getxattr("/renamed.txt", "user.keep") == b"v"
-    assert "/a.txt" not in fs.core._xattrs
+    assert seed_ws.namespace.meta_for("/a.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_xattr_is_the_same_attribute_every_surface_reads(seed_ws):
+    # The kernel's attribute is the door's, not an advisory copy held
+    # for the mount's lifetime: the shell and a guest read what the
+    # mountpoint wrote, and the mountpoint reads what they wrote.
+    fs = MirageFS(seed_ws.vfs)
+    fs.setxattr("/a.txt", "user.kernel", b"k", 0)
+    assert await seed_ws.vfs.getxattr("/a.txt", "user.kernel") == b"k"
+    await seed_ws.vfs.setxattr("/a.txt", "user.door", b"d")
+    assert fs.getxattr("/a.txt", "user.door") == b"d"
+
+
+@pytest.mark.asyncio
+async def test_xattr_create_and_replace_flags_reach_the_door(seed_ws):
+    fs = MirageFS(seed_ws.vfs)
+    fs.setxattr("/a.txt", "user.once", b"1", XATTR_CREATE)
+    with pytest.raises(OSError) as exists:
+        fs.setxattr("/a.txt", "user.once", b"2", XATTR_CREATE)
+    assert exists.value.errno == errno.EEXIST
+    with pytest.raises(OSError) as absent:
+        fs.setxattr("/a.txt", "user.none", b"2", XATTR_REPLACE)
+    assert absent.value.errno in (errno.ENODATA,
+                                  getattr(errno, "ENOATTR", errno.ENODATA))
 
 
 class _SizelessOps:
@@ -575,9 +600,9 @@ _PAYLOAD = b"payload-bytes"
 
 @pytest_asyncio.fixture
 async def sizeless_fs():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /u.json", stdin=_PAYLOAD)
-    ops = _SizelessOps(ws.fs)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /u.json", stdin=_PAYLOAD)
+    ops = _SizelessOps(ws.vfs)
     return MirageFS(ops), ops
 
 
@@ -638,10 +663,10 @@ async def test_unknown_size_truncate_through_a_link_drops_the_targets_cache():
     # The target was opened and released as /u.json, leaving its bytes in
     # the TTL cache; an O_TRUNC open through a link to it must drop that
     # entry too, or the next stat of /u.json serves the old length.
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /u.json", stdin=_PAYLOAD)
-    await ws.execute("ln -s u.json /lk")
-    fs = MirageFS(_SizelessOps(ws.fs))
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /u.json", stdin=_PAYLOAD)
+    await ws.shell("ln -s u.json /lk")
+    fs = MirageFS(_SizelessOps(ws.vfs))
     fh = fs.open("/u.json", os.O_RDONLY)
     fs.release("/u.json", fh)
     assert fs.getattr("/u.json")["st_size"] == len(_PAYLOAD)
@@ -774,8 +799,8 @@ async def test_unlink_drops_prefetch(sizeless_fs):
 
 @pytest.mark.asyncio
 async def test_getattr_symlink(seed_ws):
-    await seed_ws.execute("ln -s /a.txt /lnk")
-    fs = MirageFS(seed_ws.fs)
+    await seed_ws.shell("ln -s /a.txt /lnk")
+    fs = MirageFS(seed_ws.vfs)
     attrs = fs.getattr("/lnk")
     assert stat.S_ISLNK(attrs["st_mode"])
     assert attrs["st_size"] == len("a.txt")
@@ -783,14 +808,14 @@ async def test_getattr_symlink(seed_ws):
 
 @pytest.mark.asyncio
 async def test_readlink_absolute_target_rewritten_relative(seed_ws):
-    await seed_ws.execute("ln -s /sub/b.txt /lnk")
-    fs = MirageFS(seed_ws.fs)
+    await seed_ws.shell("ln -s /sub/b.txt /lnk")
+    fs = MirageFS(seed_ws.vfs)
     assert fs.readlink("/lnk") == "sub/b.txt"
 
 
 @pytest.mark.asyncio
 async def test_readlink_non_link_einval(seed_ws):
-    fs = MirageFS(seed_ws.fs)
+    fs = MirageFS(seed_ws.vfs)
     with pytest.raises(OSError) as exc:
         fs.readlink("/a.txt")
     assert exc.value.errno == errno.EINVAL
@@ -798,22 +823,22 @@ async def test_readlink_non_link_einval(seed_ws):
 
 @pytest.mark.asyncio
 async def test_readdir_lists_link(seed_ws):
-    await seed_ws.execute("ln -s /a.txt /lnk")
-    fs = MirageFS(seed_ws.fs)
+    await seed_ws.shell("ln -s /a.txt /lnk")
+    fs = MirageFS(seed_ws.vfs)
     assert "lnk" in fs.readdir("/", None)
 
 
 @pytest.mark.asyncio
 async def test_read_through_link(seed_ws):
-    await seed_ws.execute("ln -s /a.txt /lnk")
-    fs = MirageFS(seed_ws.fs)
+    await seed_ws.shell("ln -s /a.txt /lnk")
+    fs = MirageFS(seed_ws.vfs)
     assert fs.read("/lnk", 1024, 0, 0) == b"hello world"
 
 
 @pytest.mark.asyncio
 async def test_symlink_create_then_read(rw_ws):
-    await rw_ws.execute("tee /f.txt", stdin=b"data")
-    fs = MirageFS(rw_ws.fs)
+    await rw_ws.shell("tee /f.txt", stdin=b"data")
+    fs = MirageFS(rw_ws.vfs)
     fs.symlink("/lnk", "/f.txt")
     assert fs.readlink("/lnk") == "f.txt"
     assert fs.read("/lnk", 1024, 0, 0) == b"data"
@@ -821,8 +846,8 @@ async def test_symlink_create_then_read(rw_ws):
 
 @pytest.mark.asyncio
 async def test_unlink_link_keeps_target(seed_ws):
-    await seed_ws.execute("ln -s /a.txt /lnk")
-    fs = MirageFS(seed_ws.fs)
+    await seed_ws.shell("ln -s /a.txt /lnk")
+    fs = MirageFS(seed_ws.vfs)
     fs.unlink("/lnk")
     with pytest.raises(OSError):
         fs.getattr("/lnk")
@@ -831,15 +856,15 @@ async def test_unlink_link_keeps_target(seed_ws):
 
 @pytest.mark.asyncio
 async def test_scoped_root_link_display(seed_ws):
-    await seed_ws.execute("ln -s /sub/b.txt /sub/lnk")
-    fs = MirageFS(seed_ws.fs, root_prefix="/sub")
+    await seed_ws.shell("ln -s /sub/b.txt /sub/lnk")
+    fs = MirageFS(seed_ws.vfs, root_prefix="/sub")
     assert fs.readlink("/lnk") == "b.txt"
 
 
 @pytest.mark.asyncio
 async def test_getattr_honors_chmod_overlay(seed_ws):
-    await seed_ws.execute("chmod 640 /a.txt")
-    fs = MirageFS(seed_ws.fs)
+    await seed_ws.shell("chmod 640 /a.txt")
+    fs = MirageFS(seed_ws.vfs)
     attrs = fs.getattr("/a.txt")
     assert stat.S_ISREG(attrs["st_mode"])
     assert stat.S_IMODE(attrs["st_mode"]) == 0o640
@@ -847,8 +872,8 @@ async def test_getattr_honors_chmod_overlay(seed_ws):
 
 @pytest.mark.asyncio
 async def test_getattr_honors_touch_mtime(seed_ws):
-    await seed_ws.execute("touch -t 202603041200 /a.txt")
-    fs = MirageFS(seed_ws.fs)
+    await seed_ws.shell("touch -t 202603041200 /a.txt")
+    fs = MirageFS(seed_ws.vfs)
     stamp = datetime(2026, 3, 4, 12, 0, tzinfo=timezone.utc)
     assert fs.getattr("/a.txt")["st_mtime"] == int(stamp.timestamp()) * 10**9
 
@@ -860,26 +885,26 @@ async def test_session_bound_fs_enforces_grants():
     shell command in that session would."""
     ws = Workspace(
         {
-            "/open": RAMResource(),
-            "/secret": RAMResource()
+            "/open": RAMVFS(),
+            "/secret": RAMVFS()
         },
         mode=MountMode.WRITE,
     )
-    await ws.execute("tee /open/ok.txt", stdin=b"visible")
-    await ws.execute("tee /secret/no.txt", stdin=b"hidden")
+    await ws.shell("tee /open/ok.txt", stdin=b"visible")
+    await ws.shell("tee /secret/no.txt", stdin=b"hidden")
     session = ws.create_session("narrow",
                                 profile={"paths": {
                                     "hide": ["/secret"]
                                 }})
 
-    bound = MirageFS(ws.fs, session=session)
+    bound = MirageFS(ws.vfs, session=session)
     attrs = bound.getattr("/open/ok.txt")
     assert attrs["st_mode"] & stat.S_IFREG
     with pytest.raises(Exception) as excinfo:
         bound.getattr("/secret/no.txt")
     assert excinfo.value is not None
 
-    unbound = MirageFS(ws.fs)
+    unbound = MirageFS(ws.vfs)
     assert unbound.getattr("/secret/no.txt")["st_mode"] & stat.S_IFREG
 
 
@@ -887,11 +912,11 @@ async def test_session_bound_fs_enforces_grants():
 async def test_session_bound_fs_read_narrowing():
     """A session narrowed to read on a mount can read through its
     bound FUSE tree but not write."""
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /data/f.txt", stdin=b"bytes")
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /data/f.txt", stdin=b"bytes")
     session = ws.create_session("ro", mounts={"/data": "read"})
 
-    bound = MirageFS(ws.fs, session=session)
+    bound = MirageFS(ws.vfs, session=session)
     fh = bound.open("/data/f.txt", os.O_RDONLY)
     assert bound.read("/data/f.txt", 100, 0, fh) == b"bytes"
     bound.release("/data/f.txt", fh)

@@ -4,7 +4,7 @@ icon: /images/notion-logo.svg
 description: Mount Notion pages and databases as a Mirage filesystem.
 ---
 
-`NotionResource` exposes a Notion workspace as a filesystem. The Node SDK talks to the Notion REST API with an integration token; the Browser SDK talks to Notion's MCP server with an OAuth client provider so secrets stay off the page.
+`NotionVFS` exposes a Notion workspace as a filesystem. The Node SDK talks to the Notion REST API with an integration token; the Browser SDK talks to Notion's MCP server with an OAuth client provider so secrets stay off the page.
 
 ## Node
 
@@ -13,12 +13,12 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { MountMode, NotionResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, NotionVFS, Workspace } from '@struktoai/mirage-node'
 
-const notion = new NotionResource({ apiKey: process.env.NOTION_API_KEY! })
+const notion = new NotionVFS({ apiKey: process.env.NOTION_API_KEY! })
 
 const ws = new Workspace({ '/notion': notion }, { mode: MountMode.READ })
-await ws.execute('ls /notion/pages/')
+await ws.shell('ls /notion/pages/')
 ```
 
 | Field | Default | Notes |
@@ -33,14 +33,14 @@ pnpm add @struktoai/mirage-browser @modelcontextprotocol/sdk
 ```
 
 ```ts
-import { MountMode, NotionResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, NotionVFS, Workspace } from '@struktoai/mirage-browser'
 
-const notion = new NotionResource({
+const notion = new NotionVFS({
   authProvider, // OAuthClientProvider from @modelcontextprotocol/sdk
 })
 
 const ws = new Workspace({ '/notion': notion }, { mode: MountMode.READ })
-await ws.execute('ls /notion/')
+await ws.shell('ls /notion/')
 ```
 
 | Field | Default | Notes |
@@ -107,4 +107,4 @@ the data source directory to enumerate row pages.
 A database row is itself a page: its `page.json` reports `parent_type` of
 `data_source_id`, and its cell values ride in the same file under
 `properties`. For full `page.json` field details and supported edits see
-the [Python Notion docs](/python/resource/notion).
+the [Python Notion docs](/python/vfs/notion).

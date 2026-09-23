@@ -67,7 +67,7 @@ export async function walk(
   }
 
   for (const child of children) {
-    const childPath = PathSpec.fromStrPath(child, rekey(path.virtual, path.resourcePath, child))
+    const childPath = PathSpec.fromStrPath(child, rekey(path.virtual, path.vfsPath, child))
     results.push(
       ...(await walk(accessor, childPath, index, {
         includeRoot: true,

@@ -14,7 +14,7 @@
 
 import { makeGenericOps } from '@struktoai/mirage-core/ops/generic/factory'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-import { HF_HUB_RESOURCES } from '../../commands/builtin/hf_hub/index.ts'
+import { HF_HUB_VFS_NAMES } from '../../commands/builtin/hf_hub/index.ts'
 import { HF_HUB_IO } from '../../commands/builtin/hf_hub/io.ts'
 
-export const HF_HUB_OPS: readonly RegisteredOp[] = makeGenericOps(HF_HUB_RESOURCES, HF_HUB_IO, {})
+export const HF_HUB_OPS: readonly RegisteredOp[] = makeGenericOps(HF_HUB_VFS_NAMES, HF_HUB_IO, {})

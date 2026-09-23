@@ -2,12 +2,12 @@ import pytest
 
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.unset import handle_unset
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, session_view, set_attr
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
 @pytest.mark.asyncio

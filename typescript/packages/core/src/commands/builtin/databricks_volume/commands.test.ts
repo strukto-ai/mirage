@@ -119,7 +119,7 @@ describe('ls', () => {
       new PathSpec({
         virtual: '/volume/',
         directory: '/volume/',
-        resourcePath: mountKey('/volume/', '/volume'),
+        vfsPath: mountKey('/volume/', '/volume'),
         resolved: false,
       }),
     ])

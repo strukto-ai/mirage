@@ -26,7 +26,7 @@ const FILES: Record<string, string> = {
 }
 
 function opts(flags: Record<string, string | boolean | number | string[]>): CommandOpts {
-  return { stdin: null, flags, filetypeFns: null, cwd: '/', resource: {} } as CommandOpts
+  return { stdin: null, flags, filetypeFns: null, cwd: '/', vfs: {} } as CommandOpts
 }
 
 async function* stream(path: PathSpec): AsyncIterable<Uint8Array> {

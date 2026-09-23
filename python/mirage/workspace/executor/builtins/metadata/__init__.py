@@ -15,14 +15,20 @@
 from mirage.workspace.executor.builtins.metadata.chgrp import handle_chgrp
 from mirage.workspace.executor.builtins.metadata.chmod import handle_chmod
 from mirage.workspace.executor.builtins.metadata.chown import handle_chown
+from mirage.workspace.executor.builtins.metadata.getfattr import \
+    handle_getfattr
 from mirage.workspace.executor.builtins.metadata.metadata import (
     parse_group, parse_owner, parse_touch_stamp)
+from mirage.workspace.executor.builtins.metadata.setfattr import \
+    handle_setfattr
 from mirage.workspace.executor.builtins.metadata.touch import handle_touch
 
 __all__ = [
     "handle_chgrp",
     "handle_chmod",
     "handle_chown",
+    "handle_getfattr",
+    "handle_setfattr",
     "handle_touch",
     "parse_group",
     "parse_owner",

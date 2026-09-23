@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Resource } from '@struktoai/mirage-core/resource/base'
-import { HISTORY_PREFIX } from '@struktoai/mirage-core/resource/history/history'
+import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import { HISTORY_PREFIX } from '@struktoai/mirage-core/vfs/history/history'
 import { normMountPrefix } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceEntry } from './registry.ts'
@@ -37,15 +37,15 @@ function userMounts(ws: Workspace) {
 }
 
 /**
- * Shorten a resource's prompt to the description budget.
+ * Shorten a VFS's prompt to the description budget.
  *
  * The budget counts characters, which python's `len` reads as code points and
  * `String.length` reads as UTF-16 units. Measuring in units would ellipsize a
  * prompt python leaves whole and could cut a surrogate pair in half, so this
  * measures and slices `Array.from` -- the same fix `sanitizeLabel` carries.
  */
-export function describeResource(resource: Resource): string {
-  const raw = resource.prompt ?? ''
+export function describeVfs(vfs: VFS): string {
+  const raw = vfs.prompt ?? ''
   const points = Array.from(raw)
   if (points.length <= DESCRIPTION_MAX) return raw
   const cut = points.slice(0, DESCRIPTION_MAX - 1).join('')
@@ -79,9 +79,9 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
   const mounts = userMounts(ws)
   const mountSummaries: MountSummary[] = mounts.map((m) => ({
     prefix: m.prefix,
-    resource: m.resource.kind,
+    vfs: m.vfs.kind,
     mode: m.mode,
-    description: describeResource(m.resource),
+    description: describeVfs(m.vfs),
   }))
   const sessions: SessionSummary[] = ws.listSessions().map((s) => ({
     sessionId: s.sessionId,

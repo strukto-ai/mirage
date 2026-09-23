@@ -19,8 +19,8 @@ import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.find import find
-from mirage.resource.redis.store import RedisStore
 from mirage.types import PathSpec
+from mirage.vfs.redis.store import RedisStore
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -47,8 +47,8 @@ async def accessor():
 
 @pytest.mark.asyncio
 async def test_find_all(accessor):
-    results = await find(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"))
+    results = await find(accessor,
+                         PathSpec(vfs_path="", virtual="/", directory="/"))
     assert "/readme.md" in results
     assert "/src/main.py" in results
     assert "/src/lib/helper.py" in results
@@ -59,8 +59,7 @@ async def test_find_all(accessor):
 @pytest.mark.asyncio
 async def test_find_by_name(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="", virtual="/",
-                                  directory="/"),
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
                          name="*.py")
     assert results == [
         "/src/lib/helper.py",
@@ -72,7 +71,7 @@ async def test_find_by_name(accessor):
 @pytest.mark.asyncio
 async def test_find_by_type_file(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="src",
+                         PathSpec(vfs_path="src",
                                   virtual="/src",
                                   directory="/src"),
                          type="f")
@@ -83,8 +82,7 @@ async def test_find_by_type_file(accessor):
 @pytest.mark.asyncio
 async def test_find_by_type_dir(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="", virtual="/",
-                                  directory="/"),
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
                          type="d")
     assert "/src" in results
     assert "/src/lib" in results
@@ -94,8 +92,7 @@ async def test_find_by_type_dir(accessor):
 @pytest.mark.asyncio
 async def test_find_maxdepth(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="", virtual="/",
-                                  directory="/"),
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
                          maxdepth=1,
                          type="f")
     assert "/readme.md" in results
@@ -107,8 +104,7 @@ async def test_find_maxdepth(accessor):
 @pytest.mark.asyncio
 async def test_find_mindepth(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="", virtual="/",
-                                  directory="/"),
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
                          mindepth=2,
                          type="f")
     assert "/readme.md" not in results
@@ -119,8 +115,7 @@ async def test_find_mindepth(accessor):
 @pytest.mark.asyncio
 async def test_find_min_size(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="", virtual="/",
-                                  directory="/"),
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
                          min_size=100,
                          type="f")
     assert results == ["/big.bin"]
@@ -129,8 +124,7 @@ async def test_find_min_size(accessor):
 @pytest.mark.asyncio
 async def test_find_max_size(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="", virtual="/",
-                                  directory="/"),
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
                          max_size=10,
                          type="f")
     assert "/readme.md" in results
@@ -141,7 +135,7 @@ async def test_find_max_size(accessor):
 @pytest.mark.asyncio
 async def test_find_name_exclude(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="src",
+                         PathSpec(vfs_path="src",
                                   virtual="/src",
                                   directory="/src"),
                          name="*.py",
@@ -153,8 +147,7 @@ async def test_find_name_exclude(accessor):
 @pytest.mark.asyncio
 async def test_find_or_names(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="", virtual="/",
-                                  directory="/"),
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
                          or_names=["*.py", "*.json"])
     assert "/src/main.py" in results
     assert "/src/lib/data.json" in results
@@ -164,7 +157,7 @@ async def test_find_or_names(accessor):
 @pytest.mark.asyncio
 async def test_find_subdir(accessor):
     results = await find(accessor,
-                         PathSpec(resource_path="src/lib",
+                         PathSpec(vfs_path="src/lib",
                                   virtual="/src/lib",
                                   directory="/src/lib"),
                          type="f")
@@ -181,8 +174,7 @@ async def test_find_empty_result():
     await s.add_dir("/")
     a = RedisAccessor(s)
     results = await find(a,
-                         PathSpec(resource_path="", virtual="/",
-                                  directory="/"),
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
                          name="*.xyz")
     assert results == []
     await s.clear()

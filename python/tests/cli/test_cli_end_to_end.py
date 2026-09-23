@@ -21,7 +21,7 @@ from pathlib import Path
 CONFIG_YAML = """\
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE
 """
 
@@ -217,7 +217,7 @@ def test_env_interpolation_uses_cli_environment(daemon, tmp_path):
     cfg.write_text(
         "mounts:\n"
         "  /:\n"
-        "    resource: ram\n"
+        "    vfs: ram\n"
         "    mode: ${MOUNT_MODE_FROM_ENV}\n",
         encoding="utf-8",
     )
@@ -329,7 +329,7 @@ def test_missing_env_var_fails_fast_before_daemon_call(daemon, tmp_path):
     cfg.write_text(
         "mounts:\n"
         "  /:\n"
-        "    resource: ram\n"
+        "    vfs: ram\n"
         "    mode: ${THIS_VAR_IS_NOT_SET_ANYWHERE}\n",
         encoding="utf-8",
     )
@@ -344,7 +344,7 @@ def test_missing_env_var_fails_fast_before_daemon_call(daemon, tmp_path):
 LIMIT_TRUNCATE_YAML = """\
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE
     command_limits:
       cat:
@@ -355,7 +355,7 @@ mounts:
 LIMIT_ERROR_YAML = """\
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE
     command_limits:
       cat:
@@ -403,7 +403,7 @@ def test_execute_limit_error_exits_1(daemon, tmp_path):
 ASK_PROFILE_YAML = """\
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE
 profiles:
   guarded:

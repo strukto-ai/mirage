@@ -15,7 +15,7 @@
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DiskResource, MountMode, PathSpec, Workspace } from '@struktoai/mirage-node'
+import { DiskVFS, MountMode, PathSpec, Workspace } from '@struktoai/mirage-node'
 
 const MOUNT = '/data'
 
@@ -39,9 +39,9 @@ async function main(): Promise<void> {
   const tmp = mkdtempSync(join(tmpdir(), 'mirage-disk-watch-'))
   seed(tmp)
 
-  const resource = new DiskResource({ root: tmp })
-  const ws = new Workspace({ [MOUNT]: resource }, { mode: MountMode.READ })
-  const hook = resource.deltaHook()
+  const vfs = new DiskVFS({ root: tmp })
+  const ws = new Workspace({ [MOUNT]: vfs }, { mode: MountMode.READ })
+  const hook = vfs.deltaHook()
   const root = PathSpec.fromStrPath(MOUNT, '')
 
   // A baseline pull records state and reports nothing. Hand the
@@ -63,9 +63,9 @@ async function main(): Promise<void> {
   // notify invalidates the caches for the changed path and its ancestor
   // listings before delivering, so a read after an event can never serve
   // pre-change bytes.
-  let result = await ws.execute(`cat ${MOUNT}/reports/q1.txt`)
+  let result = await ws.shell(`cat ${MOUNT}/reports/q1.txt`)
   console.log(`\nread after notify: '${result.stdoutText.trim()}'`)
-  result = await ws.execute(`ls ${MOUNT}/reports`)
+  result = await ws.shell(`ls ${MOUNT}/reports`)
   console.log(`listing: ${result.stdoutText.split(/\s+/).filter(Boolean).join(' ')}`)
 
   await ws.close()

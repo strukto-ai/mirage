@@ -28,7 +28,7 @@ async def test_grep_i_keeps_rendered_google_json(kind, module):
     name = f"Report.{kind}.json"
     path = PathSpec(virtual=f"/drive/{name}",
                     directory=f"/drive/{name}",
-                    resource_path=name,
+                    vfs_path=name,
                     resolved=True)
     await index.set_dir("/drive", [(path.virtual.rsplit("/", 1)[-1],
                                     IndexEntry(id="file1",
@@ -63,7 +63,7 @@ async def test_grep_classifies_raw_drive_download(flags, code):
     index = RAMIndexCacheStore()
     path = PathSpec(virtual="/drive/report.pdf",
                     directory="/drive/report.pdf",
-                    resource_path="report.pdf",
+                    vfs_path="report.pdf",
                     resolved=True)
     await index.set_dir("/drive", [(path.virtual.rsplit("/", 1)[-1],
                                     IndexEntry(id="pdf1",

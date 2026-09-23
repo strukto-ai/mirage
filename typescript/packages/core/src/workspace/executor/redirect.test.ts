@@ -18,7 +18,7 @@ import { Redirect, RedirectKind } from '../../shell/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { makeIntegrationWS, run, runExit, runResult } from '../fixtures/integration_fixture.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import type { ExecuteNodeFn } from './jobs.ts'
@@ -57,7 +57,7 @@ describe('handleRedirect > / >>', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(0)
@@ -85,7 +85,7 @@ describe('handleRedirect > / >>', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('pre-new')
   })
@@ -109,7 +109,7 @@ describe('handleRedirect < (stdin)', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(receivedStdin).not.toBeNull()
     expect(decode(receivedStdin)).toBe('file-contents')
@@ -134,7 +134,7 @@ describe('handleRedirect <<< (herestring)', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(receivedStdin)).toBe('hello world\n')
   })
@@ -163,7 +163,7 @@ describe('handleRedirect 2>&1', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('out-err-')
   })
@@ -191,7 +191,7 @@ describe('handleRedirect 2>&1', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('out-')
     expect(decode((stdout as Uint8Array | null) ?? null)).toBe('err-')
@@ -213,7 +213,7 @@ describe('handleRedirect &> (both to file)', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(writes[0]?.path).toBe('/ram/all.log')
     expect(decode(writes[0]?.data ?? null)).toBe('OUTERR')
@@ -236,7 +236,7 @@ describe('handleRedirect accepts PathSpec targets', () => {
       dispatch,
       STUB_NODE,
       redirects,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(writes[0]?.data ?? null)).toBe('ok')
   })
@@ -257,7 +257,7 @@ describe('fd-table routing end-to-end', () => {
   it('multiple stdout redirects truncate all, write last', async () => {
     const { ws } = await makeIntegrationWS()
     try {
-      await ws.execute('echo body > /data/m1 > /data/m2')
+      await ws.shell('echo body > /data/m1 > /data/m2')
       expect(await run(ws, 'cat /data/m1')).toBe('')
       expect(await run(ws, 'cat /data/m2')).toBe('body\n')
     } finally {
@@ -268,7 +268,7 @@ describe('fd-table routing end-to-end', () => {
   it('2> file creates the file even when stderr is empty', async () => {
     const { ws } = await makeIntegrationWS()
     try {
-      await ws.execute('echo fine 2> /data/errs')
+      await ws.shell('echo fine 2> /data/errs')
       expect(await runExit(ws, 'test -f /data/errs')).toBe(0)
     } finally {
       await ws.close()
@@ -303,8 +303,8 @@ describe('fd-table routing end-to-end', () => {
   it('&>> appends both streams', async () => {
     const { ws } = await makeIntegrationWS()
     try {
-      await ws.execute('echo one &> /data/acc')
-      await ws.execute('echo three &>> /data/acc')
+      await ws.shell('echo one &> /data/acc')
+      await ws.shell('echo three &>> /data/acc')
       expect(await run(ws, 'cat /data/acc')).toBe('one\nthree\n')
     } finally {
       await ws.close()
@@ -471,7 +471,7 @@ describe('handleRedirect missing < source', () => {
         dispatch,
         STUB_NODE,
         redirects,
-        new Session({ sessionId: 'test' }),
+        new SessionState({ sessionId: 'test' }),
         null,
         null,
       ),
@@ -576,7 +576,13 @@ describe('handleRedirect unwritable > target', () => {
       new Redirect({ fd: 1, target: '/ram/out.txt', kind: RedirectKind.STDOUT, append: true }),
     ]
     await expect(
-      handleRedirect(execute, dispatch, STUB_NODE, redirects, new Session({ sessionId: 'test' })),
+      handleRedirect(
+        execute,
+        dispatch,
+        STUB_NODE,
+        redirects,
+        new SessionState({ sessionId: 'test' }),
+      ),
     ).rejects.toThrow('backend exploded')
   })
 
@@ -589,7 +595,13 @@ describe('handleRedirect unwritable > target', () => {
       Promise.resolve([encode('hi'), new IOResult(), new ExecutionNode()])
     const redirects = [new Redirect({ fd: 1, target: '/ram/out.txt', kind: RedirectKind.STDOUT })]
     await expect(
-      handleRedirect(execute, dispatch, STUB_NODE, redirects, new Session({ sessionId: 'test' })),
+      handleRedirect(
+        execute,
+        dispatch,
+        STUB_NODE,
+        redirects,
+        new SessionState({ sessionId: 'test' }),
+      ),
     ).rejects.toThrow('backend exploded')
   })
 })
@@ -688,16 +700,16 @@ it('opens a standard descriptor in the other direction', async () => {
   // 5.2; the file itself stays what the redirect made it.
   const { ws } = await makeIntegrationWS({ input: 'original\n', source: 'readable\n' })
   try {
-    const zero = await ws.execute(
+    const zero = await ws.shell(
       '( exec 0>/data/input; echo rc=$?; cat; echo rc=$?; read v; echo rc=$? )',
     )
     expect(zero.stdoutText).toBe('rc=0\nrc=1\nrc=1\n')
     expect(zero.stderrText).toContain('cat: -: Bad file descriptor')
-    expect((await ws.execute('cat /data/input')).stdoutText).toBe('')
-    const one = await ws.execute('( exec 1</data/source; echo hi; echo rc=$? >&2 )')
+    expect((await ws.shell('cat /data/input')).stdoutText).toBe('')
+    const one = await ws.shell('( exec 1</data/source; echo hi; echo rc=$? >&2 )')
     expect(one.stdoutText).toBe('')
     expect(one.stderrText).toBe('echo: write error: Bad file descriptor\nrc=1\n')
-    const two = await ws.execute('( exec 2</data/source; echo hi >&2; echo rc=$? )')
+    const two = await ws.shell('( exec 2</data/source; echo hi >&2; echo rc=$? )')
     expect(two.stdoutText).toBe('rc=1\n')
   } finally {
     await ws.close()
@@ -707,8 +719,8 @@ it('opens a standard descriptor in the other direction', async () => {
 it('persists an explicit stdin file redirect', async () => {
   const { ws } = await makeIntegrationWS({ input: 'readable\n' })
   try {
-    await ws.execute('exec 0</data/input')
-    expect((await ws.execute('read value; echo $value')).stdoutText).toBe('readable\n')
+    await ws.shell('exec 0</data/input')
+    expect((await ws.shell('read value; echo $value')).stdoutText).toBe('readable\n')
   } finally {
     await ws.close()
   }
@@ -750,5 +762,56 @@ describe('descriptor identities survive dups', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+describe('handleRedirect trailing slash', () => {
+  it('refuses a slashed target before the command runs', async () => {
+    // GNU bash 5.2: open(2) with O_CREAT answers `missing/` with EISDIR
+    // before looking anything up, so the line prints `missing/: Is a
+    // directory`, exits 1, and the command never runs; a plain file behind
+    // the slash gets the same answer and keeps its bytes.
+    const { ws } = await makeIntegrationWS({ reg: 'y' })
+    for (const line of [
+      'echo hi > /data/missing/',
+      'echo hi >> /data/missing/',
+      'echo hi > /data/reg/',
+      'echo hi >> /data/reg/',
+      'touch /data/marker > /data/missing/',
+    ]) {
+      const [code, , err] = await runResult(ws, line)
+      const target = line.split(' ').pop() ?? ''
+      expect([code, err], line).toEqual([1, `${target}: Is a directory\n`])
+    }
+    expect(await runExit(ws, 'test -e /data/missing')).toBe(1)
+    expect(await runExit(ws, 'test -e /data/marker')).toBe(1)
+    expect(await run(ws, 'cat /data/reg')).toBe('y')
+  })
+
+  it('keeps the opens before a slashed refusal', async () => {
+    // bash opens left to right, so `> a > missing/` has created `a`
+    // (empty) by the time the second open refuses.
+    const { ws } = await makeIntegrationWS()
+    const [code, , err] = await runResult(ws, 'echo hi > /data/a > /data/missing/')
+    expect([code, err]).toEqual([1, '/data/missing/: Is a directory\n'])
+    expect(await runExit(ws, 'test -f /data/a')).toBe(0)
+    expect(await run(ws, 'cat /data/a')).toBe('')
+  })
+
+  it('reports an earlier failed open ahead of a later refusal', async () => {
+    // bash stops at the first open it cannot perform, so a redirect under
+    // an absent parent is reported ahead of a slashed or noclobbered
+    // target written after it, and nothing is created.
+    const { ws } = await makeIntegrationWS({ reg: 'y' })
+    for (const line of [
+      'echo hi > /data/nodir/f > /data/missing/',
+      'set -C; echo hi > /data/nodir/f > /data/reg',
+    ]) {
+      const [code, , err] = await runResult(ws, line)
+      expect([code, err], line).toEqual([1, '/data/nodir/f: No such file or directory\n'])
+    }
+    expect(await runExit(ws, 'test -e /data/nodir')).toBe(1)
+    expect(await runExit(ws, 'test -e /data/missing')).toBe(1)
+    expect(await run(ws, 'cat /data/reg')).toBe('y')
   })
 })

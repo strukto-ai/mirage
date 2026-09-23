@@ -80,8 +80,8 @@ export async function read(
 ): Promise<Uint8Array> {
   const offset = options?.offset ?? 0
   const size = options?.size ?? null
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
-  const key = path.resourcePath
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  const key = path.vfsPath
   if (index === undefined) throw enoent(path.virtual)
   const virtualKey = prefix !== '' ? `${prefix}/${key}` : `/${key}`
   const parentKey = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'

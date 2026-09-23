@@ -23,7 +23,7 @@ import { SlackEventHook } from './hook.ts'
 const TS = '1755300600.000100'
 const LATE = '1755320400.000100'
 
-const ROOT = new PathSpec({ virtual: '/s', directory: '/s', resourcePath: '' })
+const ROOT = new PathSpec({ virtual: '/s', directory: '/s', vfsPath: '' })
 
 interface Fake {
   hook: SlackEventHook

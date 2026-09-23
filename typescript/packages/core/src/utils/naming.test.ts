@@ -53,7 +53,7 @@ describe('makeIdName', () => {
 
   it('never trims the id to make room', () => {
     // The label is what gives: a shortened id would stop addressing the
-    // resource, so an id too wide to name is over budget rather than
+    // VFS, so an id too wide to name is over budget rather than
     // silently mangled. Same rule as gcal's event filenames.
     const longId = 'v'.repeat(NAME_MAX_BYTES + 10)
     const name = makeIdName('Some Name', longId)

@@ -19,17 +19,17 @@ from mirage.shell.constants import (SET_OPTION_DEFAULTS, SET_OPTION_NAMES,
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 _USAGE = "shopt: usage: shopt [-pqsu] [-o] [optname ...]"
 
 
-def shopt_enabled(session: Session, name: str) -> bool:
+def shopt_enabled(session: SessionState, name: str) -> bool:
     """Whether a `shopt` option is on for the session.
 
     Args:
-        session (Session): the session holding the option table.
+        session (SessionState): the session holding the option table.
         name (str): the option's `shopt` spelling.
     """
     return session.shopts.get(name, SHOPT_DEFAULTS[name])
@@ -58,7 +58,7 @@ def _row(name: str, on: bool, reusable: bool, set_o: bool) -> str:
 
 async def handle_shopt(
     args: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Set, unset, print or query the `shopt` options.
 
@@ -79,7 +79,7 @@ async def handle_shopt(
 
     Args:
         args (list[str]): the words after `shopt`.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     scan = scan_options(args, "pqosu")
     if scan.bad is not None:

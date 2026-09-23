@@ -72,7 +72,7 @@ def make_dispatch(calls: Calls, roots: frozenset[str] = frozenset()):
 def scope(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual[:virtual.rfind("/") + 1],
-                    resource_path=virtual.lstrip("/"),
+                    vfs_path=virtual.lstrip("/"),
                     resolved=True)
 
 

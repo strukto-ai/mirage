@@ -39,10 +39,9 @@ async def _collect(
         child = PathSpec(virtual=entry,
                          directory=entry,
                          resolved=False,
-                         resource_path=mount_key(
-                             entry,
-                             mount_prefix_of(path.virtual,
-                                             path.resource_path)))
+                         vfs_path=mount_key(
+                             entry, mount_prefix_of(path.virtual,
+                                                    path.vfs_path)))
         await _collect(accessor, child, index, out)
 
 
@@ -88,10 +87,9 @@ async def find(
                                                     empty=empty)
     for entry_path, file_stat in collected:
         rel = entry_path
-        if mount_prefix_of(
-                path.virtual, path.resource_path) and rel.startswith(
-                    mount_prefix_of(path.virtual, path.resource_path)):
-            rel = rel[len(mount_prefix_of(path.virtual, path.resource_path)
+        if mount_prefix_of(path.virtual, path.vfs_path) and rel.startswith(
+                mount_prefix_of(path.virtual, path.vfs_path)):
+            rel = rel[len(mount_prefix_of(path.virtual, path.vfs_path)
                           ):] or "/"
         rel = "/" + rel.strip("/") if rel.strip("/") else "/"
         is_dir = file_stat.type == FileType.DIRECTORY

@@ -30,7 +30,7 @@ import { GSlidesAccessor } from '../../accessor/gslides.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import { walkFind } from '../generic/find.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
@@ -78,7 +78,7 @@ const TREE: Record<string, string[]> = {
   '/shared': [],
 }
 
-const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
 describe('gslides core find', () => {
   beforeEach(() => {

@@ -84,7 +84,7 @@ export class Scope {
  * Where in the hierarchy a path landed.
  *
  * `kind` is the matched scope's kind, or `root`/`invalid`. `slots` holds
- * the decoded dynamic segments by name. `resourcePath` is the raw path that
+ * the decoded dynamic segments by name. `vfsPath` is the raw path that
  * was classified. `scope` is the matched scope; null for root and invalid.
  */
 /**
@@ -98,7 +98,7 @@ export class Scope {
  */
 export interface ScopeMatch {
   readonly kind: string
-  readonly resourcePath: string
+  readonly vfsPath: string
   readonly slots: Record<string, string>
   readonly scope: Scope | null
   readonly pattern: string | null
@@ -214,15 +214,15 @@ export function makeDetectScope(scopes: readonly Scope[]): DetectFn {
   return function detectScope(path: PathSpec | string): ScopeMatch {
     const raw = path instanceof PathSpec ? path.mountPath : path
     const key = stripSlash(raw)
-    if (key === '') return { kind: ROOT, resourcePath: raw, slots: {}, scope: null, pattern: null }
+    if (key === '') return { kind: ROOT, vfsPath: raw, slots: {}, scope: null, pattern: null }
     const parts = key.split('/')
     if (parts.some((p) => p.startsWith('.'))) {
-      return { kind: INVALID, resourcePath: raw, slots: {}, scope: null, pattern: null }
+      return { kind: INVALID, vfsPath: raw, slots: {}, scope: null, pattern: null }
     }
     const matched = matchScope(scopes, parts)
     if (matched === null)
-      return { kind: INVALID, resourcePath: raw, slots: {}, scope: null, pattern: null }
+      return { kind: INVALID, vfsPath: raw, slots: {}, scope: null, pattern: null }
     const [scope, slots] = matched
-    return { kind: scope.kind, resourcePath: raw, slots, scope, pattern: null }
+    return { kind: scope.kind, vfsPath: raw, slots, scope, pattern: null }
   }
 }

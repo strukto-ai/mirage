@@ -36,7 +36,7 @@ from mirage.workspace.executor.jobs import handle_background
 from mirage.workspace.executor.statement import (carry_status,
                                                  finish_statement,
                                                  record_status)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -44,7 +44,7 @@ async def handle_pipe(
     execute_node,
     commands: list[TSNodeLike],
     stderr_flags: list[bool],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -108,7 +108,7 @@ async def handle_pipe(
         raise
     finally:
         # Explicitly close any intermediate generators that may still
-        # be holding resource resources (HTTP connections, file
+        # be holding VFS resources (HTTP connections, file
         # handles). Harmless on exhausted streams.
         for s in intermediate_streams:
             await close_quietly(s)
@@ -166,7 +166,7 @@ async def handle_connection(
     left: TSNodeLike,
     op: str,
     right: TSNodeLike,
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -241,7 +241,7 @@ async def handle_connection(
 async def handle_subshell(
     execute_node,
     body: list[TSNodeLike],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -258,7 +258,7 @@ async def handle_subshell(
         body (list[TSNodeLike]): ALL subshell children, including
             the `&` tokens that mark background statements (named-only
             lists would run `a & b` synchronously and never set `$!`).
-        session (Session): shell session; env/options snapshot-restored.
+        session (SessionState): shell session; env/options snapshot-restored.
         stdin (ByteSource | None): input stream.
         call_stack (CallStack | None): function-call scope, if any.
         job_table (JobTable | None): the subshell's private job table

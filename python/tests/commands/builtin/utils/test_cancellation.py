@@ -54,7 +54,7 @@ async def _clean_coro(probe: _Probe):
 
 
 @pytest.mark.asyncio
-async def test_with_timeout_releases_resource_on_cancel():
+async def test_with_timeout_releases_vfs_on_cancel():
     probe = _Probe()
     with pytest.raises(CommandTimeoutError):
         await materialize(with_timeout(_clean_producer(probe), 0.05, "cat"))
@@ -81,7 +81,7 @@ async def test_with_timeout_unwind_is_handler_controlled():
 
 
 @pytest.mark.asyncio
-async def test_run_with_timeout_releases_resource_on_cancel():
+async def test_run_with_timeout_releases_vfs_on_cancel():
     probe = _Probe()
     with pytest.raises(CommandTimeoutError):
         await run_with_timeout(_clean_coro(probe), 0.05, "stat")

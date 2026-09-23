@@ -16,8 +16,8 @@ import asyncio
 from pathlib import Path
 
 from mirage.core.jq import jq_eval, parse_json_path
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -59,7 +59,7 @@ def jq(backend, path, expression):
 
 
 def mem_ws(files: dict[str, bytes] | None = None) -> Workspace:
-    mem = RAMResource()
+    mem = RAMVFS()
     if files:
         store = mem.accessor.store
         for path, data in files.items():
@@ -78,7 +78,7 @@ def mem_ws(files: dict[str, bytes] | None = None) -> Workspace:
 
 def run_raw(ws, cmd, cwd="/", stdin=None):
     ws._cwd = cwd
-    io = asyncio.run(ws.execute(cmd, stdin=stdin))
+    io = asyncio.run(ws.shell(cmd, stdin=stdin))
     return io.stdout, io
 
 

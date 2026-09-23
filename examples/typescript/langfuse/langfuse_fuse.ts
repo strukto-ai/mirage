@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
-  LangfuseResource,
+  LangfuseVFS,
   Mount,
   MountBackend,
   MountMode,
@@ -53,9 +53,9 @@ function buildConfig(): LangfuseConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new LangfuseResource(buildConfig());
+  const vfs = new LangfuseVFS(buildConfig());
   const ws = new Workspace({
-    "/langfuse": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/langfuse": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

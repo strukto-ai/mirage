@@ -17,7 +17,7 @@ import pytest
 from mirage.accessor.dropbox import (DropboxAccessor,
                                      normalize_dropbox_root_path)
 from mirage.core.dropbox.client import DropboxTokenManager
-from mirage.resource.dropbox.config import DropboxConfig
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 def test_root_spellings_map_to_empty_api_path():

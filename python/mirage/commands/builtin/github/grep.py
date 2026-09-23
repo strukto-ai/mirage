@@ -61,7 +61,7 @@ async def grep_provision(
     total = 0
     ops = 0
     for p in paths:
-        p_prefix = mount_prefix_of(p.virtual, p.resource_path) if isinstance(
+        p_prefix = mount_prefix_of(p.virtual, p.vfs_path) if isinstance(
             p, PathSpec) else ""
         key = p.virtual if isinstance(p, PathSpec) else str(p)
         if p_prefix and key.startswith(p_prefix):
@@ -86,7 +86,7 @@ async def grep_provision(
 
 
 @command("grep",
-         resource="github",
+         vfs="github",
          spec=SPECS["grep"],
          provision=grep_provision,
          aggregate=prefix_aggregate)

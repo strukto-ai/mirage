@@ -34,7 +34,7 @@ import {
   toJsonBytes,
 } from '../../../core/trello/normalize.ts'
 import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import {
   command,
   type CommandFnResult,
@@ -124,7 +124,7 @@ export function makeTrelloReadCommands(): RegisteredCommand[] {
     commands.push(
       ...command({
         name: entry.name,
-        resource: ResourceName.TRELLO,
+        vfs: VFSName.TRELLO,
         spec: entry.spec,
         fn: async (
           accessor,

@@ -41,7 +41,7 @@ function makeAccessor(): DropboxAccessor {
 }
 
 function scope(): PathSpec {
-  return new PathSpec({ virtual: '/data', directory: '/data', resourcePath: '' })
+  return new PathSpec({ virtual: '/data', directory: '/data', vfsPath: '' })
 }
 
 async function runGrep(
@@ -89,7 +89,7 @@ describe('dropbox grep push-down', () => {
       new PathSpec({
         virtual: '/data/a.txt',
         directory: '',
-        resourcePath: 'a.txt',
+        vfsPath: 'a.txt',
         resolved: true,
       }),
     ]
@@ -104,7 +104,7 @@ describe('dropbox grep push-down', () => {
       new PathSpec({
         virtual: '/data/a.txt',
         directory: '',
-        resourcePath: 'a.txt',
+        vfsPath: 'a.txt',
         resolved: true,
       }),
     ]

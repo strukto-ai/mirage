@@ -14,8 +14,8 @@
 
 import posixpath
 
-from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
 from mirage.types import PathSpec
+from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
 
 
 def volume_root(config: DatabricksVolumeConfig) -> str:

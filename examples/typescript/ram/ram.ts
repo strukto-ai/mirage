@@ -15,9 +15,9 @@
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-const resource = new RAMResource()
+const vfs = new RAMVFS()
 
 function print(bytes: Uint8Array): void {
   process.stdout.write(new TextDecoder().decode(bytes) + '\n')
@@ -25,18 +25,18 @@ function print(bytes: Uint8Array): void {
 
 async function runLabeled(ws: Workspace, label: string, cmd: string): Promise<void> {
   console.log(`=== ${label} ===`)
-  const res = await ws.execute(cmd)
+  const res = await ws.shell(cmd)
   print(res.stdout)
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
 
   console.log('=== tee (create files) ===')
-  await ws.execute('echo "hello world" | tee /data/hello.txt')
-  await ws.execute(`echo '{"name": "alice", "age": 30}' | tee /data/user.json`)
-  await ws.execute('mkdir /data/reports')
-  await ws.execute('echo "revenue,100\\nexpense,80" | tee /data/reports/q1.csv')
+  await ws.shell('echo "hello world" | tee /data/hello.txt')
+  await ws.shell(`echo '{"name": "alice", "age": 30}' | tee /data/user.json`)
+  await ws.shell('mkdir /data/reports')
+  await ws.shell('echo "revenue,100\\nexpense,80" | tee /data/reports/q1.csv')
 
   await runLabeled(ws, 'ls /data/', 'ls /data/')
   await runLabeled(ws, 'cat /data/hello.txt', 'cat /data/hello.txt')
@@ -57,18 +57,18 @@ async function main(): Promise<void> {
   await runLabeled(ws, 'tr a-z A-Z < /data/hello.txt', 'cat /data/hello.txt | tr a-z A-Z')
 
   console.log('=== cp /data/hello.txt /data/hello_copy.txt ===')
-  await ws.execute('cp /data/hello.txt /data/hello_copy.txt')
-  const cpOut = await ws.execute('cat /data/hello_copy.txt')
+  await ws.shell('cp /data/hello.txt /data/hello_copy.txt')
+  const cpOut = await ws.shell('cat /data/hello_copy.txt')
   print(cpOut.stdout)
 
   console.log('=== mv /data/hello_copy.txt /data/renamed.txt ===')
-  await ws.execute('mv /data/hello_copy.txt /data/renamed.txt')
-  const mvOut = await ws.execute('ls /data/')
+  await ws.shell('mv /data/hello_copy.txt /data/renamed.txt')
+  const mvOut = await ws.shell('ls /data/')
   print(mvOut.stdout)
 
   console.log('=== rm /data/renamed.txt ===')
-  await ws.execute('rm /data/renamed.txt')
-  const rmOut = await ws.execute('ls /data/')
+  await ws.shell('rm /data/renamed.txt')
+  const rmOut = await ws.shell('ls /data/')
   print(rmOut.stdout)
 
   await runLabeled(ws, 'du /data/', 'du /data/')
@@ -76,8 +76,8 @@ async function main(): Promise<void> {
   await runLabeled(ws, 'awk', `cat /data/reports/q1.csv | awk -F, '{print $1}'`)
 
   console.log('=== uniq ===')
-  await ws.execute('echo "a\\na\\nb\\nb\\nc" | tee /data/dup.txt')
-  const uniqOut = await ws.execute('sort /data/dup.txt | uniq')
+  await ws.shell('echo "a\\na\\nb\\nb\\nc" | tee /data/dup.txt')
+  const uniqOut = await ws.shell('sort /data/dup.txt | uniq')
   print(uniqOut.stdout)
 
   await runLabeled(ws, 'rev', 'cat /data/hello.txt | rev')
@@ -87,23 +87,23 @@ async function main(): Promise<void> {
   console.log('')
   console.log('=== METADATA (chmod / chown / touch) ===')
   console.log('')
-  await ws.execute('chmod 640 /data/hello.txt')
-  await ws.execute('chown 500:staff /data/hello.txt')
-  await ws.execute('touch -t 202601021530 /data/hello.txt')
+  await ws.shell('chmod 640 /data/hello.txt')
+  await ws.shell('chown 500:staff /data/hello.txt')
+  await ws.shell('touch -t 202601021530 /data/hello.txt')
   await runLabeled(
     ws,
     'chmod 640 + chown 500:staff + touch -t 202601021530',
     'ls -l /data/hello.txt',
   )
 
-  await ws.execute('chmod u+x,go-r /data/hello.txt')
+  await ws.shell('chmod u+x,go-r /data/hello.txt')
   await runLabeled(ws, 'chmod u+x,go-r (symbolic, composes on current mode)', 'ls -l /data/hello.txt')
 
   console.log('=== mv carries metadata ===')
-  await ws.execute('mv /data/hello.txt /data/moved.txt')
-  const mvMeta = await ws.execute('ls -l /data/moved.txt')
+  await ws.shell('mv /data/hello.txt /data/moved.txt')
+  const mvMeta = await ws.shell('ls -l /data/moved.txt')
   print(mvMeta.stdout)
-  await ws.execute('mv /data/moved.txt /data/hello.txt')
+  await ws.shell('mv /data/moved.txt /data/hello.txt')
 
   await runLabeled(ws, 'touch -c missing.txt does not create', 'touch -c /data/ghost.txt && ls /data/')
 
@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   console.log('')
   console.log('=== not-found errors show the full virtual path ===')
   for (const cmd of ['cat /data/missing.txt', 'head /data/missing.txt', 'stat /data/missing.txt']) {
-    const res = await ws.execute(cmd)
+    const res = await ws.shell(cmd)
     console.log(`$ ${cmd}`)
     console.log(`  exit=${String(res.exitCode)}  ${new TextDecoder().decode(res.stderr).trim()}`)
   }
@@ -120,9 +120,9 @@ async function main(): Promise<void> {
   console.log('')
   console.log('=== GLOB EXPANSION ===')
   console.log('')
-  await ws.execute('echo "AA" | tee /data/a.txt')
-  await ws.execute('echo "BB" | tee /data/b.txt')
-  await ws.execute('echo "CC" | tee /data/c.md')
+  await ws.shell('echo "AA" | tee /data/a.txt')
+  await ws.shell('echo "BB" | tee /data/b.txt')
+  await ws.shell('echo "CC" | tee /data/c.md')
   await runLabeled(ws, 'cat /data/*.txt', 'cat /data/*.txt')
   await runLabeled(ws, 'ls /data/*.txt', 'ls /data/*.txt')
   await runLabeled(ws, 'grep . /data/*.txt', 'grep . /data/*.txt')
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
   console.log('=== HISTORY (/.bash_history) ===')
   console.log('  every executed command is recorded in GNU bash histfile format')
   console.log('')
-  const log = await ws.execute('tail -n 5 /.bash_history')
+  const log = await ws.shell('tail -n 5 /.bash_history')
   process.stdout.write(log.stdoutText + '\n')
 
   console.log('')
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
     'head /data/hello.txt || cat /data/hello.txt',
     'tee /data/out.txt',
   ]) {
-    const plan = await ws.execute(cmd, { provision: true })
+    const plan = await ws.shell(cmd, { provision: true })
     console.log(
       `  ${cmd}: net=${plan.networkRead} ops=${String(plan.readOps)} ` +
         `precision=${plan.precision}`,
@@ -174,13 +174,13 @@ async function main(): Promise<void> {
     console.log(`  saved → ${snapPath} (${String(size)} bytes)`)
 
     const loaded = await Workspace.load(snapPath, { mode: MountMode.WRITE })
-    const r = await loaded.execute('cat /data/hello.txt')
+    const r = await loaded.shell('cat /data/hello.txt')
     console.log(`  loaded ws cat: ${repr(r.stdoutText.trim())}`)
 
     const cp = await ws.copy()
-    await cp.execute('echo "mutated" | tee /data/hello.txt')
-    const rOrig = await ws.execute('cat /data/hello.txt')
-    const rCp = await cp.execute('cat /data/hello.txt')
+    await cp.shell('echo "mutated" | tee /data/hello.txt')
+    const rOrig = await ws.shell('cat /data/hello.txt')
+    const rCp = await cp.shell('cat /data/hello.txt')
     console.log(`  original:  ${repr(rOrig.stdoutText.trim())}`)
     console.log(`  copy:      ${repr(rCp.stdoutText.trim())}  (local backend → independent)`)
 

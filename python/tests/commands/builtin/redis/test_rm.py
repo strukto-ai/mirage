@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage import MountMode, Workspace
-from mirage.resource.redis import RedisResource
+from mirage.vfs.redis import RedisVFS
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -26,19 +26,19 @@ pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
 
 @pytest_asyncio.fixture()
 async def workspace():
-    resource = RedisResource(url=REDIS_URL, key_prefix="test:rm:")
-    await resource._store.clear()
-    ws = Workspace({"/": resource}, mode=MountMode.WRITE)
+    vfs = RedisVFS(url=REDIS_URL, key_prefix="test:rm:")
+    await vfs._store.clear()
+    ws = Workspace({"/": vfs}, mode=MountMode.WRITE)
     yield ws
-    await resource._store.clear()
-    await resource._store.close()
+    await vfs._store.clear()
+    await vfs._store.close()
 
 
 @pytest.mark.asyncio
 async def test_rm_v_terminates_verbose_output(workspace):
-    await workspace.fs.write("/a.txt", b"a")
+    await workspace.vfs.write("/a.txt", b"a")
 
-    io = await workspace.execute("rm -v /a.txt")
+    io = await workspace.shell("rm -v /a.txt")
 
     assert io.exit_code == 0
     assert io.stdout == b"removed '/a.txt'\n"

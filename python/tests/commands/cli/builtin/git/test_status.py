@@ -33,7 +33,7 @@ async def run(git_ws, line: str) -> bytes:
         git_ws (Workspace): workspace with the repository and CLI.
         line (str): the command line, without the leading directory.
     """
-    result = await git_ws.execute(f"git -C /repo {line}")
+    result = await git_ws.shell(f"git -C /repo {line}")
     assert result.exit_code == 0, result.stderr
     return result.stdout
 

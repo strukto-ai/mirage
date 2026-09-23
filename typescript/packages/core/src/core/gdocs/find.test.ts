@@ -30,7 +30,7 @@ import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TokenManager } from '../google/client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import { walkFind } from '../generic/find.ts'
 import * as readdirMod from './readdir.ts'
 import * as statMod from './stat.ts'
@@ -106,7 +106,7 @@ const STATS: Record<string, { size?: number | null; modified?: string; dir?: boo
   '/owned/Doc_A__d1.gdoc.json': { size: null, modified: RECENT },
 }
 
-const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
 describe('gdocs core find', () => {
   beforeEach(() => {

@@ -21,7 +21,7 @@ import { ScriptSource } from '../../runtime/routing/types.ts'
 import { MountMode } from '../../types.ts'
 import { SessionManager } from './manager.ts'
 import { RAMSessionStore } from './ram.ts'
-import { Session, varsFromEntries } from './session.ts'
+import { SessionState, varsFromEntries } from './session.ts'
 import type { SessionFields } from './store.ts'
 import { VarAttr, type ShellVar } from '../../shell/variable.ts'
 
@@ -528,7 +528,7 @@ describe('hasManagedEnv', () => {
 
   it('a snapshot carrying a pointer flips it', async () => {
     const mgr = new SessionManager('s')
-    const snap = new Session({ sessionId: 'restored', vars: { TOKEN: managed } })
+    const snap = new SessionState({ sessionId: 'restored', vars: { TOKEN: managed } })
     await mgr.replaceFromSnapshot([snap])
     expect(mgr.hasManagedEnv).toBe(true)
   })

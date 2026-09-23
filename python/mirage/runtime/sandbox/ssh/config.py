@@ -21,7 +21,7 @@ from mirage.runtime.sandbox.config import SandboxConfig
 class SSHRuntimeConfig(SandboxConfig):
     """How to reach the machine that runs captured lines.
 
-    The same knobs as the ssh resource's config minus ``root`` (a
+    The same knobs as the ssh VFS's config minus ``root`` (a
     runtime has no mount root) and password auth (an exec surface
     holds keys, never a password). ``host`` doubles as the address
     unless ``hostname`` overrides it, mirroring OpenSSH's Host /

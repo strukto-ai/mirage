@@ -18,14 +18,12 @@ import pytest
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.lancedb.readdir import readdir
-from mirage.resource.lancedb.config import LanceDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 
 def _ps(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory=path,
-                    resource_path=path.strip("/"))
+    return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
 def _names(paths: list[str]) -> set[str]:
@@ -59,7 +57,7 @@ async def test_leaf_lists_row_files(accessor):
 def _globbed(path: str, pattern: str) -> PathSpec:
     return PathSpec(virtual=path,
                     directory=path,
-                    resource_path=path.strip("/"),
+                    vfs_path=path.strip("/"),
                     pattern=pattern)
 
 

@@ -22,7 +22,7 @@ vi.mock('./readdir.ts', () => ({
 }))
 
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { stubMongoDriver } from './_test_util.ts'
 import { resolveGlobOf } from '../../commands/builtin/generic_bind/index.ts'
@@ -44,7 +44,7 @@ describe('resolveGlob', () => {
 
   it('passes through resolved paths unchanged', async () => {
     const p = new PathSpec({
-      resourcePath: 'mongo/app',
+      vfsPath: 'mongo/app',
       virtual: '/mongo/app',
       directory: '/mongo/',
     })
@@ -62,15 +62,15 @@ describe('resolveGlob', () => {
       directory: '/mongo/app/',
       pattern: 'u*.jsonl',
       resolved: false,
-      resourcePath: mountKey('/mongo/app/u*.jsonl', '/mongo'),
+      vfsPath: mountKey('/mongo/app/u*.jsonl', '/mongo'),
     })
     const out = await resolveGlob(makeAccessor(), [p])
     // bash sorts a pathname expansion rather than echoing readdir order
     // (pinned on GNU coreutils 9.7), so the mocked order above does not
     // survive: usage sorts before users.
     expect(out.map((x) => x.virtual)).toEqual(['/mongo/app/usage.jsonl', '/mongo/app/users.jsonl'])
-    expect(
-      out[0] === undefined ? undefined : mountPrefixOf(out[0].virtual, out[0].resourcePath),
-    ).toBe('/mongo')
+    expect(out[0] === undefined ? undefined : mountPrefixOf(out[0].virtual, out[0].vfsPath)).toBe(
+      '/mongo',
+    )
   })
 })

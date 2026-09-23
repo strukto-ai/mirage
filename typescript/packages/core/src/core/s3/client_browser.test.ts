@@ -13,10 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  S3BrowserPresignedUrlProvider,
-  S3BrowserSignOptions,
-} from '../../resource/s3/config.ts'
+import type { S3BrowserPresignedUrlProvider, S3BrowserSignOptions } from '../../vfs/s3/config.ts'
 import { BROWSER_S3_MODULE, createBrowserS3Client } from './client_browser.ts'
 
 interface FetchCall {

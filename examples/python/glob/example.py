@@ -18,9 +18,9 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
-from mirage.resource.github import GitHubConfig, GitHubResource
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.vfs.github import GitHubConfig, GitHubVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 
 load_dotenv(".env.development")
 
@@ -39,41 +39,41 @@ github_config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
 
 # GitHub fetches the repo tree on first read, so building the mount is an
 # ordinary call like every other one here.
-github_resource = GitHubResource(github_config, owner="strukto", repo="mirage")
+github_vfs = GitHubVFS(github_config, owner="strukto", repo="mirage")
 
 ws = Workspace(
     {
-        "/s3/": S3Resource(s3_config),
-        "/gdrive/": GoogleDriveResource(gdrive_config),
-        "/github/": github_resource,
+        "/s3/": S3VFS(s3_config),
+        "/gdrive/": GoogleDriveVFS(gdrive_config),
+        "/github/": github_vfs,
     },
     mode=MountMode.READ,
 )
 
 
 def ops_summary() -> str:
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
 
 async def main():
     # ── prime gdrive cache ──
-    await ws.execute("ls /gdrive/")
-    await ws.execute("ls /gdrive/mirage/")
+    await ws.shell("ls /gdrive/")
+    await ws.shell("ls /gdrive/mirage/")
 
-    # ── plan: directory scans across resources ──
+    # ── plan: directory scans across mounts ──
     print("=== PLAN: DIRECTORY SCANS ===\n")
 
-    dr = await ws.execute("grep mirage /s3/data/example.jsonl", provision=True)
+    dr = await ws.shell("grep mirage /s3/data/example.jsonl", provision=True)
     print(f"s3 single file: network_read={dr.network_read}")
 
-    dr = await ws.execute("grep mirage /gdrive/mirage/example.jsonl",
-                          provision=True)
+    dr = await ws.shell("grep mirage /gdrive/mirage/example.jsonl",
+                        provision=True)
     print(f"gdrive single file: network_read={dr.network_read}")
 
-    dr = await ws.execute("rg import /github/mirage/commands/registry.py",
-                          provision=True)
+    dr = await ws.shell("rg import /github/mirage/commands/registry.py",
+                        provision=True)
     print(f"github single file: network_read={dr.network_read}")
 
     print(f"\nStats after plans (should be 0): {ops_summary()}")
@@ -81,10 +81,10 @@ async def main():
     # ── S3: grep on single file vs directory ──
     print("\n=== S3: SINGLE FILE vs DIRECTORY ===\n")
 
-    r = await ws.execute("grep mirage /s3/data/example.jsonl | wc -l")
+    r = await ws.shell("grep mirage /s3/data/example.jsonl | wc -l")
     print(f"single file: {(await r.stdout_str()).strip()} matches")
 
-    r = await ws.execute("rg -l mirage /s3/data/")
+    r = await ws.shell("rg -l mirage /s3/data/")
     files = (await r.stdout_str()).strip().splitlines()
     print(f"directory rg -l: {len(files)} files match")
     print(f"Stats: {ops_summary()}")
@@ -92,12 +92,12 @@ async def main():
     # ── Google Drive: grep with streaming ──
     print("\n=== GDRIVE: GREP WITH STREAMING ===\n")
 
-    r = await ws.execute(
+    r = await ws.shell(
         "grep queue-operation /gdrive/mirage/example.jsonl | wc -l")
     print(f"grep | wc: {(await r.stdout_str()).strip()} matches")
 
-    r = await ws.execute("grep queue-operation /gdrive/mirage/example.jsonl"
-                         " | head -n 3")
+    r = await ws.shell("grep queue-operation /gdrive/mirage/example.jsonl"
+                       " | head -n 3")
     lines = (await r.stdout_str()).strip().splitlines()
     print(f"grep | head -n 3: {len(lines)} lines")
 
@@ -106,36 +106,34 @@ async def main():
     # ── GitHub: rg with search_code optimization ──
     print("\n=== GITHUB: RG (search_code optimization) ===\n")
 
-    r = await ws.execute(
-        "rg -l workspace /github/mirage/workspace/workspace.py")
+    r = await ws.shell("rg -l workspace /github/mirage/workspace/workspace.py")
     files = (await r.stdout_str()).strip().splitlines()
     print(f"rg -l workspace (single file): {len(files)} files")
     if files:
         print(f"  {files[0]}")
 
-    r = await ws.execute("rg -l import /github/mirage/")
+    r = await ws.shell("rg -l import /github/mirage/")
     if r.stderr:
         print(f"rg on large dir: {r.stderr.decode().strip()}")
     else:
         files = (await r.stdout_str()).strip().splitlines()
         print(f"rg -l import (large dir): {len(files)} files")
 
-    r = await ws.execute("grep -c def /github/mirage/commands/registry.py")
+    r = await ws.shell("grep -c def /github/mirage/commands/registry.py")
     print(f"grep -c def registry.py: {(await r.stdout_str()).strip()}")
 
     print(f"Stats: {ops_summary()}")
 
-    # ── cross-resource consistency ──
-    print("\n=== CROSS-RESOURCE: SAME DATA ===\n")
+    # ── cross-VFS consistency ──
+    print("\n=== CROSS-VFS: SAME DATA ===\n")
 
-    r1 = await ws.execute("wc -l /s3/data/example.jsonl")
-    r2 = await ws.execute("wc -l /gdrive/mirage/example.jsonl")
+    r1 = await ws.shell("wc -l /s3/data/example.jsonl")
+    r2 = await ws.shell("wc -l /gdrive/mirage/example.jsonl")
     print(f"s3 wc -l: {(await r1.stdout_str()).strip()}")
     print(f"gdrive wc -l: {(await r2.stdout_str()).strip()}")
 
-    r1 = await ws.execute("grep -c queue-operation /s3/data/example.jsonl")
-    r2 = await ws.execute(
-        "grep -c queue-operation /gdrive/mirage/example.jsonl")
+    r1 = await ws.shell("grep -c queue-operation /s3/data/example.jsonl")
+    r2 = await ws.shell("grep -c queue-operation /gdrive/mirage/example.jsonl")
     print(f"s3 grep -c queue-operation: {(await r1.stdout_str()).strip()}")
     print(f"gdrive grep -c queue-operation: {(await r2.stdout_str()).strip()}")
 
@@ -145,7 +143,7 @@ async def main():
     print(f"Total ops: {ops_summary()}")
     print(f"Commands recorded: {len(await ws.history())}")
 
-    r = await ws.execute("tail -n 6 /.bash_history")
+    r = await ws.shell("tail -n 6 /.bash_history")
     for line in (await r.stdout_str()).strip().splitlines():
         print(f"  {line[:120]}")
 

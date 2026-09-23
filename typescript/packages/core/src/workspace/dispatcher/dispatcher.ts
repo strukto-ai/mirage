@@ -29,6 +29,8 @@ import {
   enotempty,
   isMissError,
   isMissingOp,
+  noMount,
+  noXattr,
   type FsError,
 } from '../../utils/errors.ts'
 import { Policies, PolicyDenied, postOpsGate, preOpsGate } from '../../policy/index.ts'
@@ -43,14 +45,15 @@ import { type OpKwargs } from '../../ops/registry.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS } from '../../ops/config.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../ops/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../utils/errors.ts'
-import { cachesReads, type Resource } from '../../resource/base.ts'
+import { cachesReads, type VFS } from '../../vfs/base.ts'
 import {
-  ConsistencyPolicy,
+  type CacheFacts,
+  DEFAULT_READ_TTL,
   FileStat,
   FileType,
   MountMode,
   PathSpec,
-  ResourceName,
+  VFSName,
 } from '../../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
@@ -59,6 +62,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { Reconciler } from '../reconcile.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import {
   DISPATCH_READ_OPS,
   DISPATCH_WRITE_OPS,
@@ -67,6 +71,7 @@ import {
   NAMESPACE_TABLE_OPS,
   POLICY_WRITE_OPS,
   SETATTR_KEYS,
+  XATTR_OPS,
 } from './constants.ts'
 import { requireTurfWritable } from './lineage.ts'
 import {
@@ -130,7 +135,7 @@ function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
   ]
 }
 
-export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode]>
+export type ResolveFn = (path: string) => Promise<[VFS, PathSpec, MountMode]>
 
 /**
  * Stamp the caller's report: memory answered, no backend ran.
@@ -138,31 +143,30 @@ export type ResolveFn = (path: string) => Promise<[Resource, PathSpec, MountMode
  * Fires at the moment a warm file-cache hit or a synthetic namespace
  * answer is in hand, before the post gate and any output cap, so
  * whatever those throw cannot erase the fact. The value is
- * `ResourceName.RAM`, which is how a record says "this never crossed
+ * `VFSName.RAM`, which is how a record says "this never crossed
  * the network": `OpRecord.isCache` is defined as that string, and
  * every network/cache total derives from it.
  */
 function memoryAnswered(report: OpReport | undefined, moved: number | null = null): void {
-  report?.served(ResourceName.RAM, moved)
+  report?.served(VFSName.RAM, moved)
 }
 
 export class Dispatcher {
   private readonly namespace: Namespace
-  private readonly cache: FileCache & Resource
+  private readonly cache: FileCache & VFS
   private readonly opsRegistry: OpsRegistry
   private readonly policies: Policies
   // The snapshot drift queue rides along because this is the one door:
   // a strict restore's pending fingerprint checks must run before ANY
-  // op can touch a mount, and FUSE and the fs facade reach here
+  // op can touch a mount, and FUSE and the op facade reach here
   // without passing Workspace.dispatch.
   private readonly drift: DriftQueue | null
   readonly reconciler: Reconciler
 
   constructor(
     namespace: Namespace,
-    cache: FileCache & Resource,
+    cache: FileCache & VFS,
     opsRegistry: OpsRegistry,
-    consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
     policies?: Policies,
     drift?: DriftQueue,
   ) {
@@ -171,7 +175,7 @@ export class Dispatcher {
     this.opsRegistry = opsRegistry
     this.policies = policies ?? new Policies()
     this.drift = drift ?? null
-    this.reconciler = new Reconciler(cache, namespace, opsRegistry, consistency)
+    this.reconciler = new Reconciler(cache, namespace, opsRegistry)
   }
 
   /**
@@ -200,7 +204,7 @@ export class Dispatcher {
     await this.namespace.ensureLoaded()
     // Pending fingerprint checks from a strict snapshot restore run
     // before the op can touch a mount, whichever surface called: FUSE
-    // and the fs facade come straight here, so a drain that lived any
+    // and the op facade come straight here, so a drain that lived any
     // higher would let a first write clobber drifted state. drain()
     // clears pending before it stats, so its own probes cannot recurse
     // into it.
@@ -276,8 +280,11 @@ export class Dispatcher {
         if (!pathAllowed(p.virtual)) throw hiddenRefusal(p.virtual, HIDDEN_CREATE_OPS.has(opName))
       }
     }
+    if (XATTR_OPS.has(opName)) {
+      return [await this.xattrOp(opName, p, kwargs ?? {}, report, issuer), new IOResult()]
+    }
     const resolvedOwner = this.namespace.tryMountFor(p.virtual)
-    let resolved: [Resource, PathSpec, MountMode]
+    let resolved: [VFS, PathSpec, MountMode]
     try {
       resolved = await this.namespace.resolve(p.virtual, false)
     } catch (err) {
@@ -321,7 +328,7 @@ export class Dispatcher {
       const gated = fallbackBound !== null ? await applyOpLimit(fallback, fallbackBound) : fallback
       return [gated, new IOResult()]
     }
-    const [resource, scope, mode] = resolved
+    const [vfs, scope, mode] = resolved
     // resolve() above already threw for a path outside every mount, so
     // this lookup cannot miss.
     const mount = this.namespace.mountFor(p.virtual)
@@ -331,7 +338,7 @@ export class Dispatcher {
     // return below: a cached read must be refused exactly like a cold
     // one, or the cache becomes a policy bypass. This dispatcher is the
     // one door in TypeScript: shell internals, programmatic access, the
-    // fs facade, and FUSE all end up here.
+    // op facade, and FUSE all end up here.
     const opWrite = POLICY_WRITE_OPS.has(opName)
     await preOpsGate(this.policies, opName, p, opWrite, mountPrefix, sessionId(), issuer)
     // A rename's destination is a create there: it passes the same gate
@@ -341,7 +348,7 @@ export class Dispatcher {
     if (opName === 'rename' && dstArg instanceof PathSpec) {
       await preOpsGate(this.policies, opName, dstArg, true, mountPrefix, sessionId(), issuer)
     }
-    const caches = cachesReads(resource)
+    const caches = cachesReads(vfs)
     // The file cache is keyed on the path alone, and what a command put
     // there is the rendered read. A raw read asks for a different value
     // under the same key, so it must not be served from that cache;
@@ -377,7 +384,7 @@ export class Dispatcher {
         return [served, new IOResult({ reads: { [p.virtual]: served } })]
       }
     }
-    if (this.opsRegistry.find(opName, resource)?.write === true) {
+    if (this.opsRegistry.find(opName, vfs)?.write === true) {
       if (effectivePathMode(p.virtual, mountPrefix, mode) === MountMode.READ) {
         throw erofsReadOnly(`mount at '${p.virtual}' is read-only`, p)
       }
@@ -408,7 +415,7 @@ export class Dispatcher {
         new PathSpec({
           virtual: renameDst.virtual,
           directory: renameDst.virtual.slice(0, renameDst.virtual.lastIndexOf('/')) || '/',
-          resourcePath: mountKey(renameDst.virtual, rstripSlash(mountPrefix)),
+          vfsPath: mountKey(renameDst.virtual, rstripSlash(mountPrefix)),
         }),
         ...fullArgs.slice(1),
       ]
@@ -432,11 +439,11 @@ export class Dispatcher {
               runWithTimeout(
                 Promise.resolve(
                   opName === 'setattr'
-                    ? this.applySetattr(resource, scope, p, fullKwargs)
+                    ? this.applySetattr(vfs, scope, p, fullKwargs)
                     : this.opsRegistry.call(
                         opName,
-                        resource,
-                        resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                        vfs,
+                        vfs.accessor ?? NOOP_ACCESSOR_INSTANCE,
                         scope,
                         fullArgs,
                         fullKwargs,
@@ -453,12 +460,12 @@ export class Dispatcher {
     } catch (err) {
       const code = (err as { code?: string }).code
       if (opName === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
-        await this.rmdirRemnants(resource, scope, mountPrefix, mode, err, issuer)
+        await this.rmdirRemnants(vfs, scope, mountPrefix, mode, err, issuer)
         result = null
       } else {
         const fallback = isMissingPath(err) ? this.namespaceResult(opName, p.virtual) : null
         if (fallback === null) {
-          await this.reconciler.onOpMissing(opName, p.virtual, err)
+          await this.reconciler.onOpMissing(mount, opName, p.virtual, err)
           throw err
         }
         result = fallback
@@ -480,6 +487,13 @@ export class Dispatcher {
     if (DISPATCH_WRITE_OPS.has(opName)) {
       const observed = STAMP_WRITE_OPS.has(opName) ? Date.now() / 1000 : null
       await this.invalidateAfterWriteByPath(p.virtual, observed)
+      if (opName === 'unlink' || opName === 'rmdir') {
+        // The name no longer holds that file, so what was set on it
+        // (overlay mode and owner, extended attributes) goes with it, as
+        // the shell's rm already drops it: a file created there next
+        // starts bare on every surface.
+        await this.namespace.dropOverlay(p.virtual)
+      }
       if (renameDst !== null) {
         await this.invalidateAfterRenameByPath(p.virtual, renameDst.virtual)
         // rename(2) replaces the destination, so a node the table holds
@@ -556,7 +570,7 @@ export class Dispatcher {
    * opsRegistry.call outside dispatch is a bug.
    */
   private async fencedCall(
-    resource: Resource,
+    vfs: VFS,
     mountPrefix: string,
     mode: MountMode,
     opName: string,
@@ -564,7 +578,7 @@ export class Dispatcher {
     issuer?: symbol,
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
-    const write = this.opsRegistry.find(opName, resource)?.write === true
+    const write = this.opsRegistry.find(opName, vfs)?.write === true
     if (write) {
       // The same pre-ops admission a dispatched op answers, with the
       // walk's own child path: the gate that admitted the rmdir judged
@@ -592,8 +606,8 @@ export class Dispatcher {
             runWithRevisions(mount.revisions.size > 0 ? mount.revisions : null, () =>
               this.opsRegistry.call(
                 opName,
-                resource,
-                resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+                vfs,
+                vfs.accessor ?? NOOP_ACCESSOR_INSTANCE,
                 spec,
                 [],
                 this.indexKwargs(mount),
@@ -619,18 +633,18 @@ export class Dispatcher {
    * Dispatcher._moved_source_is_dir.
    */
   private async movedSourceIsDir(path: PathSpec, issuer?: symbol): Promise<boolean> {
-    let resolved: [Resource, PathSpec, MountMode]
+    let resolved: [VFS, PathSpec, MountMode]
     try {
       resolved = await this.namespace.resolve(path.virtual, false)
     } catch {
       // No mount to ask; classification fails toward refusal.
       return true
     }
-    const [resource, scope, mode] = resolved
+    const [vfs, scope, mode] = resolved
     let row: unknown
     try {
       row = await this.fencedCall(
-        resource,
+        vfs,
         this.namespace.mountFor(path.virtual).prefix,
         mode,
         'stat',
@@ -665,7 +679,7 @@ export class Dispatcher {
    * cannot resurface from the node table once the hide lifts.
    */
   private async rmdirRemnants(
-    resource: Resource,
+    vfs: VFS,
     path: PathSpec,
     mountPrefix: string,
     mode: MountMode,
@@ -675,7 +689,7 @@ export class Dispatcher {
     if (!hiddenPathsIntersect(path.virtual)) throw refusal
     let entries: unknown
     try {
-      entries = await this.fencedCall(resource, mountPrefix, mode, 'readdir', path, issuer)
+      entries = await this.fencedCall(vfs, mountPrefix, mode, 'readdir', path, issuer)
     } catch {
       // A backend that cannot list (or later, remove) the remnants
       // keeps the original refusal: the door has no way to take them.
@@ -687,15 +701,15 @@ export class Dispatcher {
     if (names.length === 0 || visibleBelow(path.virtual, merged, pathAllowed)) throw refusal
     const channel: RemnantChannel = {
       readdir: async (at) => {
-        const listed = await this.fencedCall(resource, mountPrefix, mode, 'readdir', at, issuer)
+        const listed = await this.fencedCall(vfs, mountPrefix, mode, 'readdir', at, issuer)
         return Array.isArray(listed) ? listed.map(String) : []
       },
-      stat: (at) => this.fencedCall(resource, mountPrefix, mode, 'stat', at, issuer),
+      stat: (at) => this.fencedCall(vfs, mountPrefix, mode, 'stat', at, issuer),
       unlink: async (at) => {
-        await this.fencedCall(resource, mountPrefix, mode, 'unlink', at, issuer)
+        await this.fencedCall(vfs, mountPrefix, mode, 'unlink', at, issuer)
       },
       rmdir: async (at) => {
-        await this.fencedCall(resource, mountPrefix, mode, 'rmdir', at, issuer)
+        await this.fencedCall(vfs, mountPrefix, mode, 'rmdir', at, issuer)
       },
     }
     try {
@@ -811,13 +825,7 @@ export class Dispatcher {
       target = found
       result = found
     }
-    record(
-      opName,
-      path.virtual,
-      ResourceName.RAM,
-      new TextEncoder().encode(target).byteLength,
-      timer,
-    )
+    record(opName, path.virtual, VFSName.RAM, new TextEncoder().encode(target).byteLength, timer)
     memoryAnswered(report)
     const bound = await postOpsGate(this.policies, opName, path, write, owner ?? '', result)
     if (bound !== null) return (await applyOpLimit(result, bound)) as string | null
@@ -930,27 +938,20 @@ export class Dispatcher {
    */
   private async probeOp(
     opName: string,
-    resolved: [Resource, PathSpec, MountMode],
+    resolved: [VFS, PathSpec, MountMode],
     issuer?: symbol,
   ): Promise<unknown> {
-    const [resource, scope] = resolved
+    const [vfs, scope] = resolved
     const mount = this.namespace.tryMountFor(scope.virtual)
     await preOpsGate(this.policies, opName, scope, false, mount?.prefix ?? '', sessionId(), issuer)
     await mount?.ensureReady()
     const filetype = getExtension(scope.virtual)
     try {
       const call = () =>
-        this.opsRegistry.call(
-          opName,
-          resource,
-          resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
-          scope,
-          [],
-          {
-            ...this.indexKwargs(mount),
-            ...(filetype !== null ? { filetype } : {}),
-          },
-        )
+        this.opsRegistry.call(opName, vfs, vfs.accessor ?? NOOP_ACCESSOR_INSTANCE, scope, [], {
+          ...this.indexKwargs(mount),
+          ...(filetype !== null ? { filetype } : {}),
+        })
       return await (mount === null ? call() : mount.use(call))
     } catch (err) {
       // The "nothing here" set exactly, plus a backend with no such op:
@@ -962,29 +963,125 @@ export class Dispatcher {
   }
 
   /**
+   * Answer an extended-attribute op from the node table.
+   *
+   * The attributes a caller sets live on the path's node, so they
+   * survive on a backend that has no such slot and move with a rename;
+   * the backend's own facts are read off its stat on every call and
+   * refused to writers with EPERM, the answer for an attribute the
+   * filesystem keeps for itself. The listing is sorted, so both hosts
+   * and every backend agree on its order. Gated like a setattr: both
+   * admission gates fire on the path's turf, and a write needs a
+   * writable turf. Mirrors Python's Dispatcher._xattr_op.
+   *
+   * Args:
+   *   opName: `getxattr`, `listxattr`, `setxattr` or `removexattr`.
+   *   path: the path, already followed unless the caller asked for its
+   *     link node itself.
+   *   kwargs: `name` for all but listxattr, `value` and the
+   *     `create`/`replace` flags for setxattr.
+   *   report: the caller's report.
+   *   issuer: the mark on the op being served.
+   */
+  private async xattrOp(
+    opName: string,
+    path: PathSpec,
+    kwargs: OpKwargs,
+    report: OpReport | undefined,
+    issuer?: symbol,
+  ): Promise<unknown> {
+    const timer = startOp()
+    const mount = this.namespace.tryMountFor(path.virtual)
+    const owner = mount?.prefix ?? ''
+    const write = POLICY_WRITE_OPS.has(opName)
+    await preOpsGate(this.policies, opName, path, write, owner, sessionId(), issuer)
+    if (write) requireTurfWritable(mount, path)
+    await this.xattrTarget(mount, path)
+    const stored = this.namespace.xattrs(path.virtual)
+    const name = typeof kwargs.name === 'string' ? kwargs.name : ''
+    let result: Uint8Array | string[] | null = null
+    if (opName === 'listxattr') {
+      result = [...stored.keys()].sort(compareCodePoints)
+    } else if (opName === 'getxattr') {
+      const found = stored.get(name)
+      if (found === undefined) throw noXattr(path.virtual)
+      result = found
+    } else if (opName === 'setxattr') {
+      if (kwargs.create === true && stored.has(name)) throw eexist(path.virtual)
+      if (kwargs.replace === true && !stored.has(name)) throw noXattr(path.virtual)
+      const value = kwargs.value instanceof Uint8Array ? kwargs.value : new Uint8Array()
+      await this.namespace.setXattr(path.virtual, name, value)
+    } else {
+      if (!stored.has(name)) throw noXattr(path.virtual)
+      await this.namespace.removeXattr(path.virtual, name)
+    }
+    record(
+      opName,
+      path.virtual,
+      VFSName.RAM,
+      result instanceof Uint8Array ? result.byteLength : 0,
+      timer,
+    )
+    report?.served(null, null)
+    const bound = await postOpsGate(this.policies, opName, path, write, owner, result)
+    return bound !== null ? await applyOpLimit(result, bound) : result
+  }
+
+  /**
+   * Settle that an attribute op's path exists, which it answers first. A
+   * link node's own attributes and a directory that exists only in the
+   * namespace have no backend behind them; anything else the backend's
+   * stat must find, or the op is ENOENT. Mirrors Python's
+   * Dispatcher._xattr_target.
+   */
+  private async xattrTarget(mount: MountEntry | null, path: PathSpec): Promise<void> {
+    if (this.namespace.isLink(path.virtual)) return
+    let stat: FileStat | null = null
+    if (mount !== null) {
+      const [vfs, scope] = await this.namespace.resolve(path.virtual, false)
+      await mount.ensureReady()
+      const filetype = getExtension(scope.virtual)
+      try {
+        const found = await mount.use(() =>
+          this.opsRegistry.call('stat', vfs, vfs.accessor ?? NOOP_ACCESSOR_INSTANCE, scope, [], {
+            ...this.indexKwargs(mount),
+            ...(filetype !== null ? { filetype } : {}),
+          }),
+        )
+        stat = found instanceof FileStat ? found : null
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
+        await this.reconciler.onOpMissing(mount, 'stat', path.virtual, err)
+      }
+    }
+    if (stat !== null || this.namespaceResult('stat', path.virtual) instanceof FileStat) return
+    throw mount === null ? noMount(path.virtual) : enoent(path.virtual)
+  }
+
+  /**
    * Apply attributes natively where the backend can, overlay the rest.
    *
-   * A resource with a registered setattr op applies what it can and
+   * A VFS with a registered setattr op applies what it can and
    * returns the residual; residual fields go to the overlay and
    * natively applied ones are dropped from it, so a stale overlay never
-   * shadows a fresh backend value. A resource without the op, and a
+   * shadows a fresh backend value. A VFS without the op, and a
    * link path (which has no backend inode), overlay everything. The
    * overlay half is the door's own write, so it runs inside the same
    * gates as the native half. Mirrors Python's Dispatcher._apply_setattr.
    */
   private async applySetattr(
-    resource: Resource,
+    vfs: VFS,
     scope: PathSpec,
     p: PathSpec,
     kwargs: OpKwargs,
   ): Promise<Record<string, number | string>> {
-    if (this.namespace.isLink(p.virtual) || this.opsRegistry.find('setattr', resource) === null) {
+    if (this.namespace.isLink(p.virtual) || this.opsRegistry.find('setattr', vfs) === null) {
       return this.overlaySetattr(p, kwargs)
     }
     const raw = await this.opsRegistry.call(
       'setattr',
-      resource,
-      resource.accessor ?? NOOP_ACCESSOR_INSTANCE,
+      vfs,
+      vfs.accessor ?? NOOP_ACCESSOR_INSTANCE,
       scope,
       [],
       kwargs,
@@ -1010,7 +1107,7 @@ export class Dispatcher {
       if (value !== undefined && value !== null) overlay[key] = value as number | string
     }
     await this.writeOverlay(p.virtual, overlay)
-    record('setattr', p.virtual, ResourceName.RAM, 0, timer)
+    record('setattr', p.virtual, VFSName.RAM, 0, timer)
     return overlay
   }
 
@@ -1044,12 +1141,7 @@ export class Dispatcher {
   private managerFor(mount: MountEntry): CacheManager {
     return (
       mount.cacheManager ??
-      new CacheManager(
-        this.cache,
-        mount.resource.index ?? null,
-        mount.prefix,
-        cachesReads(mount.resource),
-      )
+      new CacheManager(this.cache, mount.vfs.index ?? null, mount.prefix, cachesReads(mount.vfs))
     )
   }
 
@@ -1088,16 +1180,24 @@ export class Dispatcher {
   }
 
   // The file cache only holds paths for read-caching mounts, mirroring
-  // Python's is_cacheable_path gate; without it every backend's reads
+  // Python's cache_facts_for gate; without it every backend's reads
   // land in the cache and provision reports phantom cache hits.
-  isCacheablePath = (path: string): boolean => {
+  cacheFactsFor = (path: string): CacheFacts => {
     const mount = this.namespace.tryMountFor(path)
-    if (mount === null) return false
-    return !mount.retiring && cachesReads(mount.resource)
+    if (mount === null || mount.retiring || !cachesReads(mount.vfs)) {
+      return { cacheable: false, ttl: DEFAULT_READ_TTL }
+    }
+    return { cacheable: true, ttl: mount.read.ttl }
   }
 
-  /** Bind deferred command results to the mounts that produced them. */
-  captureCacheablePaths(): (path: string) => boolean {
+  /**
+   * Bind deferred command results to the mounts that produced them.
+   *
+   * The mount table is pinned at command start, so a fill that lands after
+   * the command is stamped with the bound of the mount that produced the
+   * bytes rather than whatever holds the prefix by then.
+   */
+  captureCacheFacts(): (path: string) => CacheFacts {
     const mounts = new Map(
       this.namespace.mountPrefixes().map((p) => [p, this.namespace.mountFor(p)]),
     )
@@ -1105,15 +1205,18 @@ export class Dispatcher {
       const prefix = ownerPrefix(mounts.keys(), path)
       const original = prefix === null ? null : mounts.get(prefix)
       const mount = this.namespace.tryMountFor(path)
-      return mount !== null && original === mount && !mount.retiring && cachesReads(mount.resource)
+      if (mount === null || original !== mount || mount.retiring || !cachesReads(mount.vfs)) {
+        return { cacheable: false, ttl: DEFAULT_READ_TTL }
+      }
+      return { cacheable: true, ttl: mount.read.ttl }
     }
   }
 
   async applyIo(
     io: IOResult,
     records?: readonly OpRecord[],
-    isCacheable: (path: string) => boolean = this.isCacheablePath,
+    cacheFacts: (path: string) => CacheFacts = this.cacheFactsFor,
   ): Promise<void> {
-    await applyIo(this.cache, io, isCacheable, records)
+    await applyIo(this.cache, io, cacheFacts, records)
   }
 }

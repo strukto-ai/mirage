@@ -94,7 +94,7 @@ async def test_day_listing_seals_empty_dir_on_not_in_channel(config, index):
                new=fake_history):
         names = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key(day, "/slack"),
+            PathSpec(vfs_path=mount_key(day, "/slack"),
                      virtual=day,
                      directory=day),
             index,
@@ -132,7 +132,7 @@ async def test_readdir_channel_inaccessible_yields_no_dates(config, index):
          patch("mirage.core.slack.readdir.slack_get", new=fake_get):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/slack/channels", "/slack"),
+            PathSpec(vfs_path=mount_key("/slack/channels", "/slack"),
                      virtual="/slack/channels",
                      directory="/slack/channels/"),
             index,
@@ -140,8 +140,8 @@ async def test_readdir_channel_inaccessible_yields_no_dates(config, index):
         dates = await readdir(
             accessor,
             PathSpec(
-                resource_path=mount_key(
-                    "/slack/channels/private__C_INACCESSIBLE", "/slack"),
+                vfs_path=mount_key("/slack/channels/private__C_INACCESSIBLE",
+                                   "/slack"),
                 virtual="/slack/channels/private__C_INACCESSIBLE",
                 directory="/slack/channels/private__C_INACCESSIBLE/",
             ),

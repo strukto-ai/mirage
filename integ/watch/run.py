@@ -31,8 +31,8 @@ from webhook_server import make_app
 from mirage import MountMode, Workspace
 from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.core.disk.watch import DiskEventHook
-from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
 from mirage.types import FileEvent, PathSpec
+from mirage.vfs.nextcloud import NextcloudConfig, NextcloudVFS
 from mirage.watch import DeltaHook, RAMWatchQueue, Watcher
 
 CASE_DIR = Path(__file__).resolve().parent
@@ -183,8 +183,7 @@ async def _build_nextcloud(
     if not url:
         return None
     config = _nextcloud_config(url)
-    ws = Workspace({spec["mount"]: NextcloudResource(config)},
-                   mode=MountMode.WRITE)
+    ws = Workspace({spec["mount"]: NextcloudVFS(config)}, mode=MountMode.WRITE)
     external = NextcloudAccessor(config).operator()
     return ws, external
 
@@ -206,9 +205,8 @@ async def _build_nextcloud_nested(
     outer = _nextcloud_config(url)
     ws = Workspace(
         {
-            spec["mount"]: NextcloudResource(outer),
-            block["inner_mount"]: NextcloudResource(
-                _nextcloud_config(inner_url)),
+            spec["mount"]: NextcloudVFS(outer),
+            block["inner_mount"]: NextcloudVFS(_nextcloud_config(inner_url)),
         },
         mode=MountMode.WRITE)
     external = NextcloudAccessor(outer).operator()
@@ -238,8 +236,7 @@ def _framed_root(spec: dict) -> PathSpec:
     Args:
         spec (dict): Parsed case file.
     """
-    return PathSpec.from_str_path(spec["watch_dir"],
-                                  resource_path=_watch_rel(spec))
+    return PathSpec.from_str_path(spec["watch_dir"], vfs_path=_watch_rel(spec))
 
 
 async def _mutate(op: ExternalWriter, mutate: dict) -> None:
@@ -389,7 +386,7 @@ class EventStream:
 class ConsumerPoller:
     """The poll loop a consumer runs; mirage runs no loop itself.
 
-    This is the whole pattern: pull a delta from the resource's hook,
+    This is the whole pattern: pull a delta from the VFS's hook,
     feed each change to ``ws.notify``, keep the checkpoint. In
     production this body runs on an interval (or after a webhook
     doorbell). The integ pumps it once per battery to lay down the
@@ -517,7 +514,7 @@ def _disk_notification(expect: dict, mount: str,
     Args:
         expect (dict): Case ``expect`` block ({"kind", "path", ...}).
         mount (str): Mirage mount root.
-        host_root (str): The disk resource's root on the host.
+        host_root (str): The disk VFS's root on the host.
     """
     base = host_root.rstrip("/")
     rel = expect["path"][len(mount.rstrip("/")):]
@@ -845,7 +842,7 @@ async def _run_check(ws: Workspace, check: dict) -> tuple[bool, str]:
         ws (Workspace): Watched workspace.
         check (dict): {"cmd", "contains"?|"absent"?}.
     """
-    result = await ws.execute(check["cmd"])
+    result = await ws.shell(check["cmd"])
     out = (await result.stdout_str()).strip()
     if "contains" in check:
         ok = check["contains"] in out
@@ -874,7 +871,7 @@ async def _run_case(ws: Workspace, op: ExternalWriter, trigger: CaseTrigger,
     """
     want = case["expect"]
     for cmd in case.get("warm", []):
-        await ws.execute(cmd)
+        await ws.shell(cmd)
     await _mutate(op, case["mutate"])
     await trigger(case)
     if want.get("delivered", True):
@@ -918,8 +915,8 @@ async def _seed(ws: Workspace, op: ExternalWriter, spec: dict) -> None:
     root = _watch_rel(spec) + "/"
     await op.create_dir(root)
     await op.remove_all(root)
-    await ws.execute(f"rm -rf {spec['watch_dir']}")
-    await ws.execute(f"mkdir -p {spec['watch_dir']}")
+    await ws.shell(f"rm -rf {spec['watch_dir']}")
+    await ws.shell(f"mkdir -p {spec['watch_dir']}")
     for name in spec["seed"]:
         await op.write(f"data/{name}", b"seed")
 
@@ -1022,7 +1019,7 @@ async def _overflow_workspace(spec: dict) -> tuple[Workspace, ExternalWriter]:
     Args:
         spec (dict): Parsed case file.
     """
-    ws, op = await BUILDERS[spec["resource"]](spec)
+    ws, op = await BUILDERS[spec["vfs"]](spec)
     ws.attach_watch_runtime(
         Watcher(ws.registry,
                 queue_factory=partial(
@@ -1043,8 +1040,8 @@ async def _run_overflow_pull(spec: dict, results: list) -> None:
     ws, op = await _overflow_workspace(spec)
     try:
         await _seed(ws, op, spec)
-        resource = ws.registry.mount_for(spec["mount"]).resource
-        poller = ConsumerPoller(resource.delta_hook(), ws, _framed_root(spec))
+        vfs = ws.registry.mount_for(spec["mount"]).vfs
+        poller = ConsumerPoller(vfs.delta_hook(), ws, _framed_root(spec))
         await poller.pump()
         await _overflow_core(spec, ws, op, PullTrigger(poller,
                                                        _stat_probe(op)),
@@ -1132,7 +1129,7 @@ async def _nested_core(spec: dict, ws: Workspace, op: ExternalWriter,
 
 async def _run_nested_pull(spec: dict, results: list) -> None:
     """Nested-mount battery, pull mode. The poller pulls the OUTER
-    resource's delta hook over the whole subtree; changes under the
+    VFS's delta hook over the whole subtree; changes under the
     inner mount surface there and are reframed to the inner mount by
     ``notify``.
 
@@ -1149,10 +1146,9 @@ async def _run_nested_pull(spec: dict, results: list) -> None:
     block = spec["nested"]
     try:
         await _seed_nested(op, block)
-        resource = ws.registry.mount_for(spec["mount"]).resource
-        root = PathSpec.from_str_path(block["watch"],
-                                      resource_path=block["root"])
-        poller = ConsumerPoller(resource.delta_hook(), ws, root)
+        vfs = ws.registry.mount_for(spec["mount"]).vfs
+        root = PathSpec.from_str_path(block["watch"], vfs_path=block["root"])
+        poller = ConsumerPoller(vfs.delta_hook(), ws, root)
         await poller.pump()
         await _nested_core(spec, ws, op, PullTrigger(poller, _stat_probe(op)),
                            "pull", results)
@@ -1207,13 +1203,13 @@ async def _run_pull(spec: dict, ws: Workspace,
         ws (Workspace): Watched workspace.
         op (ExternalWriter): External writer operator.
     """
-    resource = ws.registry.mount_for(spec["mount"]).resource
+    vfs = ws.registry.mount_for(spec["mount"]).vfs
     hook_root = _framed_root(spec)
     results: list[tuple[str, bool, str]] = []
 
     await _seed(ws, op, spec)
     agen = ws.watch(spec["watch_dir"])
-    poller = ConsumerPoller(resource.delta_hook(), ws, hook_root)
+    poller = ConsumerPoller(vfs.delta_hook(), ws, hook_root)
     await poller.pump()
     results.extend(await _run_battery(ws, op,
                                       PullTrigger(poller, _stat_probe(op)),
@@ -1222,11 +1218,11 @@ async def _run_pull(spec: dict, ws: Workspace,
     for scope in spec.get("scopes", []):
         # A scope whose mutation the backend has no op for (hf has no
         # rename) is declared inapplicable rather than run and excused.
-        if spec["resource"] in scope.get("skip_resources", []):
+        if spec["vfs"] in scope.get("skip_vfs", []):
             continue
         await _seed(ws, op, spec)
         agen = ws.watch(scope["watch"])
-        poller = ConsumerPoller(resource.delta_hook(), ws, hook_root)
+        poller = ConsumerPoller(vfs.delta_hook(), ws, hook_root)
         await poller.pump()
         results.extend(await _run_battery(ws, op,
                                           PullTrigger(poller, _stat_probe(op)),
@@ -1250,9 +1246,9 @@ async def _run_event(spec: dict, ws: Workspace,
     # hook: the payload it has to build is watchdog's, so the call site
     # is disk-specific either way. Push has no vendor-neutral shape, so
     # a generic accessor would buy nothing here.
-    resource = ws.registry.mount_for(spec["mount"]).resource
-    hook = DiskEventHook(resource.accessor)
-    host_root = str(resource.accessor.root)
+    vfs = ws.registry.mount_for(spec["mount"]).vfs
+    hook = DiskEventHook(vfs.accessor)
+    host_root = str(vfs.accessor.root)
     trigger = EventTrigger(ws, hook, _framed_root(spec), spec["mount"],
                            host_root)
     results: list[tuple[str, bool, str]] = []
@@ -1263,7 +1259,7 @@ async def _run_event(spec: dict, ws: Workspace,
                                       "event", "event"))
 
     for scope in spec.get("scopes", []):
-        if spec["resource"] in scope.get("skip_resources", []):
+        if spec["vfs"] in scope.get("skip_vfs", []):
             continue
         await _seed(ws, op, spec)
         agen = ws.watch(scope["watch"])
@@ -1323,9 +1319,9 @@ async def _run_file(spec: dict) -> list[tuple[str, bool, str]]:
     Args:
         spec (dict): Parsed case file.
     """
-    builder = BUILDERS.get(spec["resource"])
+    builder = BUILDERS.get(spec["vfs"])
     if builder is None:
-        return [(spec["resource"], False, "no builder")]
+        return [(spec["vfs"], False, "no builder")]
     modes = {"pull": _run_pull, "push": _run_push, "event": _run_event}
     # Push mode needs a provider that can send a webhook, which only the
     # Nextcloud deployment has; every other backend declares pull only.
@@ -1334,7 +1330,7 @@ async def _run_file(spec: dict) -> list[tuple[str, bool, str]]:
     for name in wanted:
         built = await builder(spec)
         if built is None:
-            print(f"skip [{spec['resource']}]: deployment env absent",
+            print(f"skip [{spec['vfs']}]: deployment env absent",
                   file=sys.stderr)
             return []
         ws, op = built
@@ -1349,19 +1345,19 @@ async def _run_file(spec: dict) -> list[tuple[str, bool, str]]:
 
 
 def _expand(spec: dict) -> list[dict]:
-    """Fan one case file out over the resources it names.
+    """Fan one case file out over the mounts it names.
 
-    A file that declares ``resources`` runs its whole body once per
+    A file that declares ``mounts`` runs its whole body once per
     backend, so the shared batteries are written down once rather than
     copied per target.
 
     Args:
         spec (dict): Parsed case file.
     """
-    names = spec.get("resources")
+    names = spec.get("mounts")
     if not names:
         return [spec]
-    return [{**spec, "resource": name} for name in names]
+    return [{**spec, "vfs": name} for name in names]
 
 
 class StepSummary:
@@ -1521,7 +1517,7 @@ async def main() -> None:
         for spec in _expand(json.loads(path.read_text())):
             for case_id, ok, detail in await _run_file(spec):
                 status = "PASS" if ok else "FAIL"
-                line = f"{status} [{spec['resource']}] {case_id}: {detail}"
+                line = f"{status} [{spec['vfs']}] {case_id}: {detail}"
                 print(line)
                 results.add(line)
                 if not ok:

@@ -21,7 +21,7 @@ from mirage.workspace.session import SessionManager
 class KernelMounts:
     """The workspace's real mountpoints, one FuseManager per subtree.
 
-    A ``vfs`` mount lives only inside mirage; a ``fuse`` or ``fskit``
+    A ``workspace`` mount lives only inside mirage; a ``fuse`` or ``fskit``
     mount also registers a mountpoint with the kernel. This owns the
     set of those: which prefix is exposed where, and the manager
     serving it. Keys are ``prefix`` or ``prefix@session_id``, so the

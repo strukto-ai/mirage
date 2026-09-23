@@ -46,7 +46,7 @@ async def _execute_with_timeout(
     command: str,
     timeout: float,
 ) -> Any:
-    return await asyncio.wait_for(ws.execute(command), timeout=timeout)
+    return await asyncio.wait_for(ws.shell(command), timeout=timeout)
 
 
 class _AsyncBridge:
@@ -184,7 +184,7 @@ class MirageWorkspace(LocalWorkspace):
             parent = str(Path(dst).parent)
             if parent and parent not in (".", "/"):
                 self._ensure_parent(parent)
-            self._bridge.run(self._ws.fs.write(dst, data))
+            self._bridge.run(self._ws.vfs.write(dst, data))
             return FileOperationResult(
                 success=True,
                 source_path=str(src),
@@ -208,7 +208,7 @@ class MirageWorkspace(LocalWorkspace):
         src = str(source_path)
         dst = Path(destination_path)
         try:
-            data = self._bridge.run(self._ws.fs.read(src))
+            data = self._bridge.run(self._ws.vfs.read(src))
             if isinstance(data, str):
                 data = data.encode("utf-8")
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -231,16 +231,16 @@ class MirageWorkspace(LocalWorkspace):
     def git_changes(self, path: str | Path) -> list[GitChange]:
         raise NotImplementedError(
             "Mirage workspaces do not expose git semantics over their "
-            "virtual mounts; query the underlying resource directly.")
+            "virtual mounts; query the underlying VFS directly.")
 
     def git_diff(self, path: str | Path) -> GitDiff:
         raise NotImplementedError(
             "Mirage workspaces do not expose git semantics over their "
-            "virtual mounts; query the underlying resource directly.")
+            "virtual mounts; query the underlying VFS directly.")
 
     def _ensure_parent(self, parent: str) -> None:
         result = self._bridge.run(
-            self._ws.execute(f"mkdir -p {shlex.quote(parent)}"))
+            self._ws.shell(f"mkdir -p {shlex.quote(parent)}"))
         exit_code = int(getattr(result, "exit_code", 0) or 0)
         if exit_code != 0:
             stderr = self._coerce_text(getattr(result, "stderr", b""))

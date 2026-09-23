@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { translateClasses } from '../../../../utils/posix.ts'
 import { randomReader, seedVar, sessionElements } from '../../../session/state.ts'
 import { evaluateArith } from '../../../../shell/arith.ts'
 import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
@@ -63,7 +64,7 @@ async function evalCondBinary(
       : node.right
     let match: RegExpExecArray | null
     try {
-      match = new RegExp(pattern).exec(node.left)
+      match = new RegExp(translateClasses(pattern)).exec(node.left)
     } catch {
       throw new CondError('mirage: syntax error in conditional expression')
     }

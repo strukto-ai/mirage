@@ -23,7 +23,7 @@ export const config = parseConfig({
   defaultPort: 5092,
   // The volume is partitioned by the access token, which both hosts already
   // send as an ordinary `Authorization: Bearer`, so no mirage-only header
-  // reaches the resource under test. Each run takes its own token and
+  // reaches the VFS under test. Each run takes its own token and
   // therefore its own tenant, which is what lets one server answer both hosts.
   tenantKind: 'pk-column',
   tenantFromBearer: true,

@@ -21,8 +21,8 @@ from mirage.accessor.redis import RedisAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.redis.mkdir import mkdir
 from mirage.ops.redis import OPS
-from mirage.resource.redis.store import RedisStore
 from mirage.types import ContentType, FileType, PathSpec
+from mirage.vfs.redis.store import RedisStore
 
 
 def _op(name: str):
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
 
 
 def _scope(path: str) -> PathSpec:
-    return PathSpec(resource_path=(path).strip("/"),
+    return PathSpec(vfs_path=(path).strip("/"),
                     virtual=path,
                     directory=path,
                     resolved=True)
@@ -145,7 +145,7 @@ async def test_op_unlink_not_found(accessor):
 async def test_op_rmdir(accessor):
     await mkdir(
         accessor,
-        PathSpec(resource_path="empty", virtual="/empty", directory="/empty"))
+        PathSpec(vfs_path="empty", virtual="/empty", directory="/empty"))
     await rmdir(accessor, _scope("/empty"))
     assert not await accessor.store.has_dir("/empty")
 

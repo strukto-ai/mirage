@@ -88,7 +88,7 @@ def test_every_wired_find_core_forks_to_the_guarded_walk():
         if "find_core=" not in source:
             continue
         if GATE not in source or "find_walk_generic" not in source:
-            offenders.append(f"{cmd.resource}/{cmd.name} ({source_file})")
+            offenders.append(f"{cmd.vfs}/{cmd.name} ({source_file})")
     assert not offenders, (
         "these find wrappers wire a native core without forking to the "
         f"guarded walk under {GATE}: {offenders}")
@@ -111,7 +111,7 @@ def test_every_native_search_routes_through_the_gated_factory():
             continue
         source = inspect.getsource(inspect.getmodule(fn))
         if "SEARCHERS" in source and "make_search(" not in source:
-            offenders.append(f"{cmd.resource}/{cmd.name} ({source_file})")
+            offenders.append(f"{cmd.vfs}/{cmd.name} ({source_file})")
     assert not offenders, (
         "these search wrappers wire native searchers around the gated "
         f"make_search chokepoint: {offenders}")

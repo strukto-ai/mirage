@@ -26,10 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("cat",
-         resource="history",
-         spec=SPECS["cat"],
-         aggregate=concat_aggregate)
+@command("cat", vfs="history", spec=SPECS["cat"], aggregate=concat_aggregate)
 async def cat(accessor: HistoryAccessor, paths: list[PathSpec],
               texts: list[str],
               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

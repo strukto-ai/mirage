@@ -17,7 +17,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  LinearResource,
+  LinearVFS,
   MountMode,
   patchNodeFs,
   Workspace,
@@ -39,8 +39,8 @@ function buildConfig(): LinearConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new LinearResource(buildConfig())
-  const ws = new Workspace({ '/linear': resource }, { mode: MountMode.READ })
+  const vfs = new LinearVFS(buildConfig())
+  const ws = new Workspace({ '/linear': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Linear transparently ===\n')

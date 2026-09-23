@@ -14,6 +14,8 @@
 
 import re
 
+from mirage.utils.posix import POSIX_CLASSES
+
 # The strings glibc's `regerror` produces, which every GNU tool that
 # compiles a BRE prints verbatim after its own `<prog>: ` prefix. Measured
 # pattern by pattern on glibc 2.39 through BOTH `expr abc : PAT` and
@@ -46,20 +48,6 @@ SPACE_CHARS = " \\t\\n\\v\\f\\r"
 # locale, so every class is the ASCII set and can be inlined into a host
 # bracket expression, which is the only form python `re` and JavaScript
 # `RegExp` both understand.
-POSIX_CLASSES = {
-    "alnum": "0-9A-Za-z",
-    "alpha": "A-Za-z",
-    "blank": " \\t",
-    "cntrl": "\\x00-\\x1f\\x7f",
-    "digit": "0-9",
-    "graph": "!-~",
-    "lower": "a-z",
-    "print": " -~",
-    "punct": "!-/:-@\\[-`{-~",
-    "space": SPACE_CHARS,
-    "upper": "A-Z",
-    "xdigit": "0-9A-Fa-f",
-}
 
 # GNU's `\w`/`\W`/`\s`/`\S` are expanded rather than passed through
 # because python's own `\w` is Unicode-aware by default while GNU's is

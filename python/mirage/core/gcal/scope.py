@@ -15,8 +15,8 @@
 from mirage.core.gcal.day import valid_day
 from mirage.core.hierarchy.codec import Codec
 from mirage.core.hierarchy.scope import Scope, Slot, make_detect_scope
-from mirage.resource.gcal.event_entry import EVENT_SUFFIX
 from mirage.types import ContentType
+from mirage.vfs.gcal.event_entry import EVENT_SUFFIX
 
 
 def is_event_name(text: str) -> bool:

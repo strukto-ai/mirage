@@ -34,7 +34,7 @@ function path(virtual: string, raw = ''): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-    resourcePath: virtual,
+    vfsPath: virtual,
     resolved: true,
     rawPath: raw,
   })

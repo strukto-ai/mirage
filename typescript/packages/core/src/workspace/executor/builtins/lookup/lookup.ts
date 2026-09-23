@@ -14,7 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { classifyAll, describe, locations } from './classify.ts'
@@ -45,7 +45,7 @@ function optionError(cmd: string, bad: string, usage: string): Result {
  */
 export function handleType(
   args: readonly string[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
 ): Result {
   const scan = scanOptions(args, TYPE_OPTIONS)
@@ -99,7 +99,7 @@ export function handleType(
  */
 export function handleWhich(
   args: readonly string[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
 ): Result {
   const scan = scanOptions(args, WHICH_OPTIONS)

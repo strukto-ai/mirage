@@ -24,7 +24,7 @@ vi.mock('./client.ts', () => ({
 
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { stubMongoDriver } from './_test_util.ts'
@@ -37,7 +37,7 @@ function makeAccessor(): MongoDBAccessor {
 }
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ virtual: p, directory: p, resourcePath: mountKey(p, '/mongo') })
+  return new PathSpec({ virtual: p, directory: p, vfsPath: mountKey(p, '/mongo') })
 }
 
 describe('readdir', () => {

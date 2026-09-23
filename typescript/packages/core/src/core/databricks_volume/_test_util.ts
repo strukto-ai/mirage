@@ -14,7 +14,7 @@
 
 import { mountKey } from '../../utils/key_prefix.ts'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import { normalizeDatabricksVolumeConfig } from '../../resource/databricks_volume/config.ts'
+import { normalizeDatabricksVolumeConfig } from '../../vfs/databricks_volume/config.ts'
 import { PathSpec } from '../../types.ts'
 
 export const TEST_ROOT = '/Volumes/main/default/agent_files/root'

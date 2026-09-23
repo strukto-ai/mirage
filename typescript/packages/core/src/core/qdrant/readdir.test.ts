@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { resolveQdrantConfig } from '../../resource/qdrant/config.ts'
+import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import type { QdrantRow } from './client.ts'
 import { readdir } from './readdir.ts'
@@ -50,7 +50,7 @@ function accessor(): QdrantAccessor {
 }
 
 function spec(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: virtual.replace(/^\//, '') })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: virtual.replace(/^\//, '') })
 }
 
 describe('qdrant readdir sizes', () => {
@@ -185,7 +185,7 @@ function globbed(virtual: string, pattern: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: virtual.replace(/^\//, ''),
+    vfsPath: virtual.replace(/^\//, ''),
     pattern,
   })
 }

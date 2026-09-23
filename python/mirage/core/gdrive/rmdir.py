@@ -32,7 +32,7 @@ async def rmdir(accessor: GDriveAccessor,
     check is the only thing separating them. Without it ``rmdir``
     destroyed the whole subtree for every caller that does not pre-check
     emptiness itself, and the command builders are the only callers that
-    do: FUSE, ``ws.fs`` and the sandbox runtimes all reach the op
+    do: FUSE, ``ws.vfs`` and the sandbox runtimes all reach the op
     directly. The probe is the one ``rename`` already makes before it
     overwrites a directory, bounded to a single entry.
 
@@ -43,7 +43,7 @@ async def rmdir(accessor: GDriveAccessor,
             unused.
     """
     virtual = path.virtual
-    key = path.resource_path
+    key = path.vfs_path
     if not key:
         return
     node = await resolve_key(accessor, key)

@@ -96,7 +96,7 @@ describe('readdir on inaccessible channel', () => {
       new PathSpec({
         virtual: '/slack/channels',
         directory: '/slack/channels',
-        resourcePath: mountKey('/slack/channels', '/slack'),
+        vfsPath: mountKey('/slack/channels', '/slack'),
       }),
       idx,
     )
@@ -105,7 +105,7 @@ describe('readdir on inaccessible channel', () => {
       new PathSpec({
         virtual: '/slack/channels/private__C_INACCESSIBLE',
         directory: '/slack/channels/private__C_INACCESSIBLE',
-        resourcePath: mountKey('/slack/channels/private__C_INACCESSIBLE', '/slack'),
+        vfsPath: mountKey('/slack/channels/private__C_INACCESSIBLE', '/slack'),
       }),
       idx,
     )

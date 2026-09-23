@@ -18,8 +18,8 @@ from typing import Any
 import lancedb
 
 from mirage.accessor.base import Accessor
-from mirage.resource.lancedb.config import LanceDBConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.lancedb.config import LanceDBConfig
+from mirage.vfs.secrets import reveal_secret
 
 
 class LanceDBAccessor(Accessor):

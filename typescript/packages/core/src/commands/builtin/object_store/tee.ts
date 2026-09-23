@@ -25,10 +25,7 @@ import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 const ENC = new TextEncoder()
 
 /** Build the write-tracking tee override for one keyed store. */
-export function makeTee<A extends Accessor>(
-  resource: string,
-  io: CommandIO<A>,
-): RegisteredCommand[] {
+export function makeTee<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
   const readStream = io.readStream
   const writeBytes = requireOp(io.write, 'write')
   const resolveGlob = resolveGlobOf(io)
@@ -56,7 +53,7 @@ export function makeTee<A extends Accessor>(
 
   return command<A>({
     name: 'tee',
-    resource,
+    vfs,
     spec: specOf('tee'),
     fn: teeCommand,
     write: true,

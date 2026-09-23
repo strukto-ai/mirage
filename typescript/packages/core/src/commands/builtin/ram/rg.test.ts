@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_RG = RAM_COMMANDS.filter((c) => c.name === 'rg' && c.filetype == null)
 
@@ -23,7 +23,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runRg(
-  resource: RAMResource,
+  vfs: RAMVFS,
   texts: string[],
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
@@ -31,17 +31,12 @@ async function runRg(
 ): Promise<{ lines: string[]; out: string; exitCode: number }> {
   const cmd = RAM_RG[0]
   if (cmd === undefined) throw new Error('rg not registered')
-  const result = await cmd.fn(
-    (resource as { accessor?: unknown }).accessor as never,
-    paths,
-    texts,
-    {
-      stdin,
-      flags,
-      filetypeFns: null,
-      cwd: '/',
-    },
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
+    stdin,
+    flags,
+    filetypeFns: null,
+    cwd: '/',
+  })
   if (result === null) return { lines: [], out: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
@@ -63,19 +58,19 @@ describe('rg', () => {
     [{ args_I: true }, ''],
     [{ H: true, args_I: true }, ''],
   ])('keeps rg filename flags separate from grep binary flags: %j', async (flags, prefix) => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/binary.txt', ENC.encode('needle\0tail\n'))
-    const r = await runRg(resource, ['needle'], [PathSpec.fromStrPath('/tmp/binary.txt')], flags)
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/binary.txt', ENC.encode('needle\0tail\n'))
+    const r = await runRg(vfs, ['needle'], [PathSpec.fromStrPath('/tmp/binary.txt')], flags)
     expect(r.out).toBe(`${prefix}needle\0tail\n`)
     expect(r.exitCode).toBe(0)
   })
 
   it('-I keeps NUL-containing matches across multiple files', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('needle\0a\n'))
-    resource.store.files.set('/tmp/b.txt', ENC.encode('needle\0b\n'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('needle\0a\n'))
+    vfs.store.files.set('/tmp/b.txt', ENC.encode('needle\0b\n'))
     const r = await runRg(
-      resource,
+      vfs,
       ['needle'],
       [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
       { args_I: true },
@@ -85,62 +80,62 @@ describe('rg', () => {
   })
 
   it('matches basic pattern in single file', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar\nhello again\n'))
-    const r = await runRg(resource, ['hello'], [PathSpec.fromStrPath('/tmp/a.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar\nhello again\n'))
+    const r = await runRg(vfs, ['hello'], [PathSpec.fromStrPath('/tmp/a.txt')])
     expect(r.lines).toContain('hello world')
     expect(r.lines).toContain('hello again')
     expect(r.lines).not.toContain('foo bar')
   })
 
   it('no match returns exit code 1', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar\n'))
-    const r = await runRg(resource, ['xyz'], [PathSpec.fromStrPath('/tmp/a.txt')])
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('hello world\nfoo bar\n'))
+    const r = await runRg(vfs, ['xyz'], [PathSpec.fromStrPath('/tmp/a.txt')])
     expect(r.exitCode).toBe(1)
   })
 
   it('-i ignores case', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('Hello World\nhello world\nHELLO\n'))
-    const r = await runRg(resource, ['hello'], [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('Hello World\nhello world\nHELLO\n'))
+    const r = await runRg(vfs, ['hello'], [PathSpec.fromStrPath('/tmp/a.txt')], {
       i: true,
     })
     expect(r.lines.length).toBe(3)
   })
 
   it('-v inverts match', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('hello\nworld\nhello again\n'))
-    const r = await runRg(resource, ['hello'], [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('hello\nworld\nhello again\n'))
+    const r = await runRg(vfs, ['hello'], [PathSpec.fromStrPath('/tmp/a.txt')], {
       v: true,
     })
     expect(r.lines).toEqual(['world'])
   })
 
   it('-c gives count only', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\nfoo baz\n'))
-    const r = await runRg(resource, ['foo'], [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\nfoo baz\n'))
+    const r = await runRg(vfs, ['foo'], [PathSpec.fromStrPath('/tmp/a.txt')], {
       c: true,
     })
     expect(r.lines).toEqual(['2'])
   })
 
   it('-c on a zero-match file omits the count and exits 1 (unlike grep -c)', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\n'))
-    const r = await runRg(resource, ['zzz'], [PathSpec.fromStrPath('/tmp/a.txt')], { c: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\n'))
+    const r = await runRg(vfs, ['zzz'], [PathSpec.fromStrPath('/tmp/a.txt')], { c: true })
     expect(r.lines).toEqual([])
     expect(r.exitCode).toBe(1)
   })
 
   it('-c across files lists only files with matches', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/a.txt', ENC.encode('foo\nfoo\n'))
-    resource.store.files.set('/tmp/b.txt', ENC.encode('bar\n'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('foo\nfoo\n'))
+    vfs.store.files.set('/tmp/b.txt', ENC.encode('bar\n'))
     const r = await runRg(
-      resource,
+      vfs,
       ['foo'],
       [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
       { c: true },
@@ -150,26 +145,26 @@ describe('rg', () => {
   })
 
   it('-n prepends line numbers in stdin mode', async () => {
-    const resource = new RAMResource()
-    const r = await runRg(resource, ['foo'], [], { n: true }, ENC.encode('foo\nbar\nfoo baz\n'))
+    const vfs = new RAMVFS()
+    const r = await runRg(vfs, ['foo'], [], { n: true }, ENC.encode('foo\nbar\nfoo baz\n'))
     expect(r.lines).toContain('1:foo')
     expect(r.lines).toContain('3:foo baz')
   })
 
   it('reads from stdin when no path', async () => {
-    const resource = new RAMResource()
-    const r = await runRg(resource, ['foo'], [], {}, ENC.encode('foo\nbar\nfoo baz\n'))
+    const vfs = new RAMVFS()
+    const r = await runRg(vfs, ['foo'], [], {}, ENC.encode('foo\nbar\nfoo baz\n'))
     expect(r.lines).toContain('foo')
     expect(r.lines).toContain('foo baz')
   })
 
   it('-l files-only mode (via args_l)', async () => {
-    const resource = new RAMResource()
-    resource.store.dirs.add('/tmp')
-    resource.store.dirs.add('/tmp/sub')
-    resource.store.files.set('/tmp/a.txt', ENC.encode('hello\n'))
-    resource.store.files.set('/tmp/sub/b.txt', ENC.encode('world\n'))
-    const r = await runRg(resource, ['hello'], [PathSpec.fromStrPath('/tmp')], {
+    const vfs = new RAMVFS()
+    vfs.store.dirs.add('/tmp')
+    vfs.store.dirs.add('/tmp/sub')
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('hello\n'))
+    vfs.store.files.set('/tmp/sub/b.txt', ENC.encode('world\n'))
+    const r = await runRg(vfs, ['hello'], [PathSpec.fromStrPath('/tmp')], {
       args_l: true,
     })
     expect(r.lines.some((l) => l.includes('/tmp/a.txt'))).toBe(true)
@@ -177,8 +172,8 @@ describe('rg', () => {
   })
 
   it('missing pattern returns exit code 2', async () => {
-    const resource = new RAMResource()
-    const r = await runRg(resource, [], [])
+    const vfs = new RAMVFS()
+    const r = await runRg(vfs, [], [])
     expect(r.exitCode).toBe(2)
   })
 })

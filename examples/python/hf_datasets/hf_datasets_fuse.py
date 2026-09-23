@@ -17,7 +17,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.hf_datasets import HfDatasetsConfig, HfDatasetsResource
+from mirage.vfs.hf_datasets import HfDatasetsConfig, HfDatasetsVFS
 
 load_dotenv(".env.development")
 
@@ -26,10 +26,10 @@ config = HfDatasetsConfig(
                            "AlienKevin/SWE-ZERO-12M-trajectories"),
     token=os.environ.get("HF_TOKEN"),
 )
-resource = HfDatasetsResource(config)
+vfs = HfDatasetsVFS(config)
 
 with Workspace(
-    {"/ds/": Mount(resource, mode=MountMode.READ,
+    {"/ds/": Mount(vfs, mode=MountMode.READ,
                    backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
     print(f"=== FUSE: mounted at {mp} ===\n")
@@ -58,6 +58,6 @@ with Workspace(
     except EOFError:
         pass
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

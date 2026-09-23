@@ -51,7 +51,7 @@ function spec(mountPath: string): PathSpec {
   return new PathSpec({
     virtual: key !== '' ? `/h${mountPath}` : '/h',
     directory: '/h/',
-    resourcePath: key,
+    vfsPath: key,
   })
 }
 

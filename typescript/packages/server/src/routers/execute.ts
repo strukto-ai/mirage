@@ -14,7 +14,7 @@
 
 import { Buffer } from 'node:buffer'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { z } from '@struktoai/mirage-core/resource/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { JobStatus, type JobTable } from '../jobs.ts'
 import { ioResultToDict } from '../io_serde.ts'
@@ -93,7 +93,7 @@ export function registerExecuteRoutes(app: FastifyInstance, deps: ExecuteRoutesD
       const background = req.query.background === 'true'
       const entry = deps.registry.get(wsId)
       const job = deps.jobs.submit(wsId, body.command, async (signal) =>
-        entry.runner.ws.execute(body.command, {
+        entry.runner.ws.shell(body.command, {
           ...(body.sessionId !== undefined ? { sessionId: body.sessionId } : {}),
           ...(body.agentId !== undefined ? { agentId: body.agentId } : {}),
           ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),

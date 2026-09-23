@@ -70,7 +70,7 @@ def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
                     resolved=False,
-                    resource_path=virtual)
+                    vfs_path=virtual)
 
 
 @pytest.mark.asyncio

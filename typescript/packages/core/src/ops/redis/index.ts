@@ -14,7 +14,7 @@
 
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { REDIS_IO } from '../../commands/builtin/redis/io.ts'
 
-export const REDIS_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.REDIS, REDIS_IO)
+export const REDIS_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.REDIS, REDIS_IO)

@@ -144,7 +144,7 @@ function cwdSpec(cwd: string, mountPrefix?: string): PathSpec {
   // the cwd with the mount prefix removed: from /ram the backend must be
   // asked for its own root, not for a 'ram' entry inside itself.
   return new PathSpec({
-    resourcePath: mountPrefix === undefined ? stripSlash(dir) : mountKey(dir, mountPrefix),
+    vfsPath: mountPrefix === undefined ? stripSlash(dir) : mountKey(dir, mountPrefix),
     virtual: dir,
     directory: dir,
     resolved: false,
@@ -182,9 +182,9 @@ async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Pro
  * A failed stat is not proof of absence, and du runs bound to one backend, so
  * its own stat cannot see two things that make a path a real directory: a
  * mount nested below it and a symlink below it are both namespace state, held
- * in another resource or in no resource at all. `statPath` is the channel that
+ * in another VFS or in no VFS at all. `statPath` is the channel that
  * knows, because it resolves through the dispatcher rather than one accessor,
- * and it is the same probe `find` classifies its start point with. Session
+ * and it is the same probe `find` classifies its start point with. SessionState
  * filtering rides along with it: a mount the session may not see contributes
  * no directory here, so absence stays the answer for it.
  *
@@ -300,7 +300,7 @@ function depthOf(entryPath: string, basePath: string): number {
  * recover it.
  */
 export function toVirtual(entries: [string, number][], path: PathSpec): [string, number][] {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   if (!prefix) return [...entries]
   return entries.map(([entry, size]) => [`${prefix}/${lstripSlash(entry)}`, size])
 }

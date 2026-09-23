@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountBackend, MountMode } from '@struktoai/mirage-core/types'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
@@ -44,7 +44,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
   })
 
   it('exposes a lone fuse Mount as fuseMountpoint after fuseReady', async () => {
-    const ws = new Workspace({ '/a': new Mount(new RAMResource(), { backend: MountBackend.FUSE }) })
+    const ws = new Workspace({ '/a': new Mount(new RAMVFS(), { backend: MountBackend.FUSE }) })
     await ws.fuseReady()
 
     expect(ws.fuseMountpoint).toBe('/tmp/fake-_a')
@@ -55,7 +55,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
 
   it('pins the mountpoint when fuse is a string', async () => {
     const ws = new Workspace({
-      '/a': new Mount(new RAMResource(), { backend: MountBackend.FUSE, mountpoint: '/tmp/pinned' }),
+      '/a': new Mount(new RAMVFS(), { backend: MountBackend.FUSE, mountpoint: '/tmp/pinned' }),
     })
     await ws.fuseReady()
 
@@ -70,8 +70,8 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
 
   it('exposes multiple fuse Mounts via fuseMountpoints; fuseMountpoint throws', async () => {
     const ws = new Workspace({
-      '/a': new Mount(new RAMResource(), { backend: MountBackend.FUSE }),
-      '/b': new Mount(new RAMResource(), { backend: MountBackend.FUSE }),
+      '/a': new Mount(new RAMVFS(), { backend: MountBackend.FUSE }),
+      '/b': new Mount(new RAMVFS(), { backend: MountBackend.FUSE }),
     })
     await ws.fuseReady()
 
@@ -84,8 +84,8 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
     await ws.close()
   })
 
-  it('does not fuse a bare Resource value', async () => {
-    const ws = new Workspace({ '/a': new RAMResource() })
+  it('does not fuse a bare VFS value', async () => {
+    const ws = new Workspace({ '/a': new RAMVFS() })
     await ws.fuseReady()
 
     expect(ws.fuseMountpoints).toEqual({})
@@ -96,7 +96,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
   })
 
   it('does not fuse a Mount without fuse, and applies the mode override', async () => {
-    const ws = new Workspace({ '/a': new Mount(new RAMResource(), { mode: MountMode.READ }) })
+    const ws = new Workspace({ '/a': new Mount(new RAMVFS(), { mode: MountMode.READ }) })
     await ws.fuseReady()
 
     expect(ws.fuseMountpoints).toEqual({})
@@ -109,7 +109,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
   })
 
   it('unmounts on close so fuseMountpoints empties', async () => {
-    const ws = new Workspace({ '/a': new Mount(new RAMResource(), { backend: MountBackend.FUSE }) })
+    const ws = new Workspace({ '/a': new Mount(new RAMVFS(), { backend: MountBackend.FUSE }) })
     await ws.fuseReady()
     expect(ws.fuseMountpoints).toEqual({ '/a': '/tmp/fake-_a' })
 
@@ -119,7 +119,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
   })
 
   it('addFuseMount registers each mount; rejects a colliding pinned path before mounting', async () => {
-    const ws = new Workspace({ '/a': new RAMResource(), '/b': new RAMResource() })
+    const ws = new Workspace({ '/a': new RAMVFS(), '/b': new RAMVFS() })
     await ws.addFuseMount('/a', '/tmp/shared')
     expect(ws.fuseMountpoints).toEqual({ '/a': '/tmp/shared' })
 
@@ -132,7 +132,7 @@ describe('Workspace Mount spec (per-mount fuse, without a real mount)', () => {
   })
 
   it('removeFuseMount unmounts and deregisters a single prefix', async () => {
-    const ws = new Workspace({ '/a': new RAMResource(), '/b': new RAMResource() })
+    const ws = new Workspace({ '/a': new RAMVFS(), '/b': new RAMVFS() })
     await ws.addFuseMount('/a', '/tmp/mp-a')
     await ws.addFuseMount('/b', '/tmp/mp-b')
     expect(ws.fuseMountpoints).toEqual({ '/a': '/tmp/mp-a', '/b': '/tmp/mp-b' })

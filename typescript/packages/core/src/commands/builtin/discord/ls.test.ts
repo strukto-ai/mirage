@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeDiscordTransport, makeFakeResource, seedChannel, seedGuild } from './_test_util.ts'
+import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
 import { DISCORD_COMMANDS } from './index.ts'
 
 const DISCORD_LS = DISCORD_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
@@ -37,8 +37,8 @@ async function runLs(
   const cmd = DISCORD_LS[0]
   if (cmd === undefined) throw new Error('ls not registered')
   const transport = options.transport ?? new FakeDiscordTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -72,7 +72,7 @@ describe('discord ls', () => {
           virtual: '/mnt/discord/My Server__G1',
           directory: '/mnt/discord/My Server__G1',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1', '/mnt/discord'),
         }),
       ],
       {},
@@ -94,7 +94,7 @@ describe('discord ls', () => {
           virtual: '/mnt/discord/My Server__G1/channels',
           directory: '/mnt/discord/My Server__G1/channels',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
         }),
       ],
       {},
@@ -119,7 +119,7 @@ describe('discord ls', () => {
           virtual: '/mnt/discord/My Server__G1/channels/general__C1',
           directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         }),
       ],
       {},

@@ -22,7 +22,7 @@ import pytest
 from mirage.cache.index.config import (IndexConfig, IndexEntry, LookupStatus,
                                        RedisIndexConfig)
 from mirage.ops.registry import RegisteredOp
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -40,11 +40,11 @@ async def test_late_index_write_cannot_cross_mount_ownership(
         if not url:
             pytest.skip("REDIS_URL not set")
         config = RedisIndexConfig(url=url, key_prefix=f"lifecycle:{uuid4()}:")
-    resource = RAMResource()
+    vfs = RAMVFS()
     prefix = "/" if shadow else "/data"
-    ws = Workspace({prefix: resource}, index=config)
-    ws.add_mount("/alias", resource)
-    index = resource.index
+    ws = Workspace({prefix: vfs}, index=config)
+    ws.add_mount("/alias", vfs)
+    index = vfs.index
     entry = IndexEntry(id="old", name="stale", resource_type="file")
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -83,17 +83,17 @@ async def test_late_index_write_cannot_cross_mount_ownership(
 
     ws.mount(prefix).register_op(
         RegisteredOp(name="readdir",
-                     resource="ram",
+                     vfs="ram",
                      filetype=None,
                      fn=delayed_readdir))
-    reading = asyncio.create_task(ws.fs.readdir("/data"))
+    reading = asyncio.create_task(ws.vfs.readdir("/data"))
     changing = None
-    replacement = RAMResource()
+    replacement = RAMVFS()
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
         if shadow:
             ws.add_mount("/data", replacement)
-            changing = asyncio.create_task(ws.fs.readdir("/data"))
+            changing = asyncio.create_task(ws.vfs.readdir("/data"))
         else:
             changing = asyncio.create_task(ws.unmount("/data"))
         await asyncio.sleep(0)
@@ -103,7 +103,7 @@ async def test_late_index_write_cannot_cross_mount_ownership(
         await asyncio.wait_for(changing, timeout=5)
         if not shadow:
             ws.add_mount("/data", replacement)
-            await ws.fs.readdir("/data")
+            await ws.vfs.readdir("/data")
         fresh = IndexEntry(id="new", name="fresh", resource_type="file")
         await replacement.index.put("/data/fresh", fresh)
         release.set()

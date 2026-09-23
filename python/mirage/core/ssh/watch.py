@@ -87,7 +87,7 @@ class SSHWalk:
             root (PathSpec): Watch root (mount-virtual path).
         """
         accessor = self._accessor
-        prefix = mount_prefix_of(root.virtual, root.resource_path)
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         sftp = await accessor.sftp()
         async for relative, is_dir, modified, size in _descend(
                 sftp, accessor.config, root.mount_path):

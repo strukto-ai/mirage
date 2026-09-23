@@ -13,7 +13,7 @@ can already `ssh` into works, with nothing to install on it. See the
 
 The other providers need Mirage and FUSE inside the sandbox to serve the
 workspace's mounts. SSH is the one provider whose machine usually **is** the
-fileserver: the [ssh resource](/python/resource/ssh) already mounts that
+fileserver: the [ssh VFS](/python/vfs/ssh) already mounts that
 machine's directory over SFTP. Mount it at a prefix **equal to its remote
 absolute path**, and the two sides agree about every path with no FUSE, no
 remote Mirage install, and no path rewriting anywhere:
@@ -21,7 +21,7 @@ remote Mirage install, and no path rewriting anywhere:
 ```yaml
 mounts:
   /home/user/proj:            # prefix == the remote absolute path
-    resource: ssh
+    vfs: ssh
     config:
       host: mybox
       root: /home/user/proj
@@ -31,7 +31,7 @@ runtimes:
     captures: ["python3"]
     config:
       host: mybox             # the same machine
-  - vfs
+  - workspace
 ```
 
 The agent lists and greps `/home/user/proj` through the workspace (SFTP),
@@ -56,22 +56,22 @@ prefixes.
 
 ```python
 from mirage import MountMode, Workspace
-from mirage.resource.ssh import SSHConfig, SSHResource
+from mirage.vfs.ssh import SSHConfig, SSHVFS
 from mirage.runtime.sandbox.ssh import SSHRuntime
 
 runtime = SSHRuntime(captures=["python3"],
                      config={"host": "mybox", "username": "deploy",
                              "identity_file": "~/.ssh/id_ed25519"})
-proj = SSHResource(SSHConfig(host="mybox", username="deploy",
+proj = SSHVFS(SSHConfig(host="mybox", username="deploy",
                              identity_file="~/.ssh/id_ed25519",
                              root="/home/deploy/proj"))
 ws = Workspace({"/home/deploy/proj": proj},
                mode=MountMode.EXEC,
-               runtimes=[runtime, "vfs"])
-await ws.execute("python3 train.py", cwd="/home/deploy/proj")
+               runtimes=[runtime, "workspace"])
+await ws.shell("python3 train.py", cwd="/home/deploy/proj")
 ```
 
-The config carries the ssh resource's fields minus `root`: `host` (required,
+The config carries the ssh VFS's fields minus `root`: `host` (required,
 also the address unless `hostname` overrides it, and matched against
 `~/.ssh/config`), `port`, `username`, `identity_file`, `timeout`, and the
 shared `env`. Auth is keys or an agent, never a password. Unknown config

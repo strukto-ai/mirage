@@ -14,11 +14,11 @@ npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @de
 
 ## Compose
 
-Four Cordis plugins. `MirageService` owns the workspace; the providers inject it. Mix any resources, such as Slack and Redis beside a scratch RAM mount:
+Four Cordis plugins. `MirageService` owns the workspace; the providers inject it. Mix any mounts, such as Slack and Redis beside a scratch RAM mount:
 
 ```ts
 import { Context } from '@deepseek-ai/cordis'
-import { buildRuntime, MountMode, RAMResource, RedisResource, SlackResource, Workspace } from '@struktoai/mirage-node'
+import { buildRuntime, MountMode, RAMVFS, RedisVFS, SlackVFS, Workspace } from '@struktoai/mirage-node'
 import {
   MirageFileSystem,
   MirageService,
@@ -28,9 +28,9 @@ import {
 
 const ws = new Workspace(
   {
-    '/tmp': [new RAMResource(), MountMode.EXEC],
-    '/redis': [new RedisResource({ url: redisUrl }), MountMode.WRITE],
-    '/slack': [new SlackResource({ token: slackBotToken }), MountMode.EXEC],
+    '/tmp': [new RAMVFS(), MountMode.EXEC],
+    '/redis': [new RedisVFS({ url: redisUrl }), MountMode.WRITE],
+    '/slack': [new SlackVFS({ token: slackBotToken }), MountMode.EXEC],
   },
   { runtimes: [buildRuntime('monty', { captures: ['python', 'python3'] })] },
 )
@@ -74,7 +74,7 @@ const result = await shell.run(shell.resolve({ command: 'pwd; echo $TOKEN', work
 
 ## Run Python with monty
 
-The `runtimes` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3`; the catch-all `vfs` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into Redis:
+The `runtimes` entry above sets [monty](https://github.com/pydantic/monty), a sandboxed Python interpreter with no host access, up to capture `python` and `python3`; the catch-all `workspace` runtime serving the shell commands is always present and needs no entry. A captured invocation (a script file, inline `-c` code, or code piped on stdin) runs inside the workspace, never on the machine. A script can live on any mount: upload `example.py` to a Slack channel and run it straight off the mount, with the shell's redirection filing its stdout back into Redis:
 
 ```ts
 const script = await shell.run(
@@ -95,15 +95,15 @@ dsh plugin --profile web add @struktoai/mirage-dsh
 dsh --profile web
 ```
 
-The bundle's default world is one RAM scratch mount at `/tmp`. Mount real resources by overriding the `mirage` row in the profile's own `cordis.patch.yml`, in declarative form (the resource registry name, a mode, and the resource's config; `!!js` expressions resolve at mount time):
+The bundle's default world is one RAM scratch mount at `/tmp`. Mount real sources by overriding the `mirage` row in the profile's own `cordis.patch.yml`, in declarative form (the VFS registry name, a mode, and the VFS's config; `!!js` expressions resolve at mount time):
 
 ```yaml
 - id: mirage
   config:
     mounts:
-      /tmp: { resource: ram, mode: exec }
+      /tmp: { vfs: ram, mode: exec }
       /slack:
-        resource: slack
+        vfs: slack
         mode: read
         config: { token: !!js process.env.SLACK_BOT_TOKEN }
     runtimes:
@@ -112,7 +112,7 @@ The bundle's default world is one RAM scratch mount at `/tmp`. Mount real resour
 
 The same blocks work in code, beside live instances, in `MirageService`'s `mounts`.
 
-Both seams tell dsh they are a `workspace-write` sandbox, which is what lets dsh's permission presets compose over them. The claim holds only while every runtime stays inside the VFS (each runtime's `reach` is `vfs`). Add a host-reaching one, such as `local` Python, and both seams drop the claim, since a script could then act outside the mounts: dsh is better told there is no sandbox than a false one.
+Both seams tell dsh they are a `workspace-write` sandbox, which is what lets dsh's permission presets compose over them. The claim holds only while every runtime stays inside the VFS (each runtime's `reach` is `workspace`). Add a host-reaching one, such as `local` Python, and both seams drop the claim, since a script could then act outside the mounts: dsh is better told there is no sandbox than a false one.
 
 The claim is enforced per call, not merely advertised. dsh resolves a policy for every command and every file edit, and Mirage applies it. Under `read-only` the shell runs in a twin of its own session with every grant narrowed to read, so a session already confined to some mounts stays confined (the twin narrows, it never widens), and `ctx.fs` refuses a write or an edit with `FS_SANDBOX_DENIED`, the same error dsh's own sandboxed backend raises:
 
@@ -250,22 +250,22 @@ It spends no approval, records no question and never reaches the human, so it is
 
 ## Custom backends
 
-A mount is not limited to the builtin resources (`ram`, `s3`, `slack`, `redis`, ...). Register your own resource factory host-side and its name becomes usable in a `mounts` block exactly like a builtin:
+A mount is not limited to the builtin VFS (`ram`, `s3`, `slack`, `redis`, ...). Register your own VFS factory host-side and its name becomes usable in a `mounts` block exactly like a builtin:
 
 ```ts
-import { registerResourceFactory } from '@struktoai/mirage-node'
+import { registerVfsFactory } from '@struktoai/mirage-node'
 
-registerResourceFactory('acme', (config) => new AcmeResource(config))
+registerVfsFactory('acme', (config) => new AcmeVFS(config))
 ```
 
 ```yaml
 - id: mirage
   config:
     mounts:
-      /acme: { resource: acme, mode: read, config: { token: !!js process.env.ACME_TOKEN } }
+      /acme: { vfs: acme, mode: read, config: { token: !!js process.env.ACME_TOKEN } }
 ```
 
-The registration must run before the workspace builds, since a `mounts` block only names a resource, it does not construct one. In a dsh bundle that means a small plugin the profile loads alongside `@struktoai/mirage-dsh` (or a plain import in code, before `MirageService` starts), not the declarative patch. A builtin name cannot be shadowed, so a custom backend needs its own name. Nothing else changes: the shell, the commands, and the sandbox claim treat a custom mount like any other.
+The registration must run before the workspace builds, since a `mounts` block only names a VFS, it does not construct one. In a dsh bundle that means a small plugin the profile loads alongside `@struktoai/mirage-dsh` (or a plain import in code, before `MirageService` starts), not the declarative patch. A builtin name cannot be shadowed, so a custom backend needs its own name. Nothing else changes: the shell, the commands, and the sandbox claim treat a custom mount like any other.
 
 ## Background commands
 

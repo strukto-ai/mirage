@@ -1,5 +1,4 @@
 mode: WRITE
-consistency: LAZY
 
 # The file cache on Redis rather than RAM: `workspace snapshot` has to
 # serialize a workspace whose cache holds no snapshot entries (it used to
@@ -15,10 +14,10 @@ index:
 
 mounts:
   /ram:
-    resource: ram
+    vfs: ram
 
   /minio:
-    resource: minio
+    vfs: minio
     config:
       bucket: ${S3_BUCKET}
       endpoint_url: ${S3_ENDPOINT}

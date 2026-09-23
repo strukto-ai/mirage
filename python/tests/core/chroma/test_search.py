@@ -12,8 +12,7 @@ async def test_search_segments_scopes_folder_to_candidate_slugs(
         chroma_accessor,
         "setup",
         [
-            PathSpec(resource_path=mount_key("/knowledge/guides",
-                                             "/knowledge"),
+            PathSpec(vfs_path=mount_key("/knowledge/guides", "/knowledge"),
                      virtual="/knowledge/guides",
                      directory="/knowledge/guides")
         ],

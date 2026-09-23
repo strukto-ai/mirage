@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
 const RAM_EXPAND = RAM_COMMANDS.filter((c) => c.name === 'expand' && c.filetype == null)
 const RAM_UNEXPAND = RAM_COMMANDS.filter((c) => c.name === 'unexpand' && c.filetype == null)
@@ -25,14 +25,14 @@ const DEC = new TextDecoder()
 
 async function runCmd(
   cmdArr: typeof RAM_EXPAND,
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = cmdArr[0]
   if (cmd === undefined) throw new Error('command not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -51,15 +51,15 @@ async function runCmd(
 
 describe('expand', () => {
   it('default tab size of 8', async () => {
-    const resource = new RAMResource()
-    const r = await runCmd(RAM_EXPAND, resource, [], {}, ENC.encode('a\tb'))
+    const vfs = new RAMVFS()
+    const r = await runCmd(RAM_EXPAND, vfs, [], {}, ENC.encode('a\tb'))
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('a       b')
   })
 
   it('-t 4', async () => {
-    const resource = new RAMResource()
-    const r = await runCmd(RAM_EXPAND, resource, [], { tabs: '4' }, ENC.encode('a\tb'))
+    const vfs = new RAMVFS()
+    const r = await runCmd(RAM_EXPAND, vfs, [], { tabs: '4' }, ENC.encode('a\tb'))
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('a   b')
   })
@@ -67,14 +67,8 @@ describe('expand', () => {
 
 describe('unexpand', () => {
   it('-a -t 4', async () => {
-    const resource = new RAMResource()
-    const r = await runCmd(
-      RAM_UNEXPAND,
-      resource,
-      [],
-      { all: true, tabs: '4' },
-      ENC.encode('    hello'),
-    )
+    const vfs = new RAMVFS()
+    const r = await runCmd(RAM_UNEXPAND, vfs, [], { all: true, tabs: '4' }, ENC.encode('    hello'))
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('\thello')
   })

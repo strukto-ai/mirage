@@ -74,7 +74,7 @@ class MirageToolkit(Toolkit):
         return self._run(self.aexecute(command))
 
     async def aexecute(self, command: str) -> str:
-        io = await self._ws.execute(command)
+        io = await self._ws.shell(command)
         return io_to_str(io)
 
     # -- read --------------------------------------------------------------
@@ -88,7 +88,7 @@ class MirageToolkit(Toolkit):
         return self._run(self.aread(path))
 
     async def aread(self, path: str) -> str:
-        io = await self._ws.execute(f"cat {shlex.quote(path)}")
+        io = await self._ws.shell(f"cat {shlex.quote(path)}")
         return io_to_str(io)
 
     # -- write -------------------------------------------------------------
@@ -104,11 +104,11 @@ class MirageToolkit(Toolkit):
 
     async def awrite(self, path: str, content: str) -> str:
         parent = dirname(path) or "/"
-        mkdir = await self._ws.execute(f"mkdir -p {shlex.quote(parent)}")
+        mkdir = await self._ws.shell(f"mkdir -p {shlex.quote(parent)}")
         if mkdir.exit_code != 0:
             return io_to_str(mkdir)
-        io = await self._ws.execute(f"tee {shlex.quote(path)}",
-                                    stdin=content.encode("utf-8"))
+        io = await self._ws.shell(f"tee {shlex.quote(path)}",
+                                  stdin=content.encode("utf-8"))
         return io_to_str(io)
 
     # -- ls ------------------------------------------------------------------
@@ -122,7 +122,7 @@ class MirageToolkit(Toolkit):
         return self._run(self.als(path))
 
     async def als(self, path: str = "/") -> str:
-        io = await self._ws.execute(f"ls {shlex.quote(path)}")
+        io = await self._ws.shell(f"ls {shlex.quote(path)}")
         return io_to_str(io)
 
     # -- grep ---------------------------------------------------------------
@@ -139,6 +139,6 @@ class MirageToolkit(Toolkit):
         return self._run(self.agrep(pattern, path))
 
     async def agrep(self, pattern: str, path: str) -> str:
-        io = await self._ws.execute(
+        io = await self._ws.shell(
             f"grep -r {shlex.quote(pattern)} {shlex.quote(path)}")
         return io_to_str(io)

@@ -45,6 +45,6 @@ export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<s
   }
   const base = norm(virtual)
   const dirPrefix = base === '/' ? '/' : `${base}/`
-  const mountPrefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const mountPrefix = mountPrefixOf(path.virtual, path.vfsPath)
   return names.map((n) => `${mountPrefix}${dirPrefix}${n}`).sort(compareCodePoints)
 }

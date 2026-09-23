@@ -6,17 +6,17 @@ from mirage.commands.builtin.generic.stat import stat
 from mirage.io.types import materialize
 from mirage.ops.types import LinkView
 from mirage.policy.profile import SessionProfile
-from mirage.resource.ram import RAMResource
 from mirage.types import (DEVICE_NUMBERS_KEY, LINK_TARGET_KEY, ContentType,
                           FileStat, FileType, MountMode, PathSpec)
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 _MTIME = "2026-01-02T15:30:45Z"
 _MTIME_EPOCH = "1767367845"
 
 
-class _OverlayRAMResource(RAMResource):
-    """RAM resource with native setattr stripped, standing in for an API
+class _OverlayRAMVFS(RAMVFS):
+    """RAM VFS with native setattr stripped, standing in for an API
     backend whose chmod/chown/touch live only in the namespace overlay."""
 
     def __init__(self) -> None:
@@ -63,7 +63,7 @@ async def _render_named(fmt: str, name: str) -> str:
 
 
 async def _run(ws: Workspace, cmd: str) -> tuple[int, str, str]:
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return r.exit_code, await r.stdout_str(), await r.stderr_str()
 
 
@@ -287,10 +287,9 @@ async def test_f_flag_shares_c_formatter():
 
 @pytest.mark.asyncio
 async def test_stat_reflects_overlay_chmod_chown():
-    resource = _OverlayRAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
-                   mode=MountMode.WRITE)
+    vfs = _OverlayRAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     await _run(ws, "chmod 600 /data/f.txt")
     await _run(ws, "chown 501:staff /data/f.txt")
     code, out, _ = await _run(ws, 'stat -c "%a %u %g" /data/f.txt')
@@ -300,9 +299,9 @@ async def test_stat_reflects_overlay_chmod_chown():
 
 @pytest.mark.asyncio
 async def test_owner_defaults_to_workspace_agent():
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    agent_id="agent7")
     code, out, _ = await _run(ws, 'stat -c "%U:%G" /data/f.txt')
@@ -314,9 +313,9 @@ async def test_owner_defaults_to_workspace_agent():
 
 @pytest.mark.asyncio
 async def test_group_is_the_session_profile():
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    agent_id="agent7",
                    profiles={"admin": SessionProfile()},
@@ -328,10 +327,9 @@ async def test_group_is_the_session_profile():
 
 @pytest.mark.asyncio
 async def test_owner_falls_back_to_dash_when_unclaimed():
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
-                   mode=MountMode.WRITE)
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, out, _ = await _run(ws, 'stat -c "%U:%G" /data/f.txt')
     assert code == 0
     assert out == "-:-\n"
@@ -339,9 +337,9 @@ async def test_owner_falls_back_to_dash_when_unclaimed():
 
 @pytest.mark.asyncio
 async def test_stat_and_ls_agree_on_owner():
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    agent_id="agent7")
     _, stat_owner, _ = await _run(ws, 'stat -c "%U %G" /data/f.txt')

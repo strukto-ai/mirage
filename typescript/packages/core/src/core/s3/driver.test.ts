@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import type { S3Module } from './client.ts'
 import { DRIVER, type S3Conn } from './driver.ts'
 

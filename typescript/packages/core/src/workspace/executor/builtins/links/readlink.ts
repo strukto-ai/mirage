@@ -17,7 +17,7 @@ import { CycleError, norm } from '../../../../utils/path.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { absPath, fail, result, splitFlags } from '../shared.ts'
 import { pathExists } from './probe.ts'
 import type { Result } from '../types.ts'
@@ -42,7 +42,7 @@ function readlinkRefused(err: unknown): boolean {
 export async function handleReadlink(
   namespace: Namespace,
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   args: (string | PathSpec)[],
 ): Promise<Result> {
   const [flags, operands] = splitFlags(args, 'fenm')

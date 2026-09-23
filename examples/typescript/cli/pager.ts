@@ -20,7 +20,7 @@ import {
   IOResult,
   Operand,
   Option,
-  RAMResource,
+  RAMVFS,
   Workspace,
   z,
   type CommandFnResult,
@@ -128,14 +128,14 @@ export const PAGER = new CLISpec({
 
 async function show(ws: Workspace, line: string): Promise<void> {
   console.log(`$ ${line}`)
-  const result = await ws.execute(line)
+  const result = await ws.shell(line)
   if (result.stdoutText !== '') process.stdout.write(result.stdoutText)
   if (result.stderrText !== '') process.stdout.write(result.stderrText)
   console.log()
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/workspace': new RAMResource() })
+  const ws = new Workspace({ '/workspace': new RAMVFS() })
 
   // One immutable program tree can be installed more than once. Each head
   // word gets independently validated configuration: two accounts, one CLI.

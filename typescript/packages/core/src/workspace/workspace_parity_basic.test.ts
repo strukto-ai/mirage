@@ -23,7 +23,7 @@ import {
 describe('workspace: basic commands', () => {
   it('cat reads a file', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat /s3/report.csv')
+    const io = await ws.shell('cat /s3/report.csv')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('alice')
     await ws.close()
@@ -31,21 +31,21 @@ describe('workspace: basic commands', () => {
 
   it('cat missing file returns non-zero exit', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat /s3/nonexistent.txt')
+    const io = await ws.shell('cat /s3/nonexistent.txt')
     expect(io.exitCode).not.toBe(0)
     await ws.close()
   })
 
   it('ls on a directory', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('ls /disk/')
+    const io = await ws.shell('ls /disk/')
     expect(io.exitCode).toBe(0)
     await ws.close()
   })
 
   it('head reads a file', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('head /ram/notes.txt')
+    const io = await ws.shell('head /ram/notes.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('line1')
     await ws.close()
@@ -55,15 +55,15 @@ describe('workspace: basic commands', () => {
 describe('workspace: export / env', () => {
   it('export sets session env', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('export MSG=hello')
+    await ws.shell('export MSG=hello')
     expect(ws.getSession(ws.defaultSessionId).env.MSG).toBe('hello')
     await ws.close()
   })
 
   it('exported var used in command', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('export DIR=/s3')
-    const io = await ws.execute('cat $DIR/report.csv')
+    await ws.shell('export DIR=/s3')
+    const io = await ws.shell('cat $DIR/report.csv')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('alice')
     await ws.close()
@@ -73,14 +73,14 @@ describe('workspace: export / env', () => {
 describe('workspace: cd', () => {
   it('cd sets cwd', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('cd /disk')
+    await ws.shell('cd /disk')
     expect(ws.getSession(ws.defaultSessionId).cwd).toBe('/disk')
     await ws.close()
   })
 
   it('cd to nonexistent returns non-zero', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cd /nonexistent')
+    const io = await ws.shell('cd /nonexistent')
     expect(io.exitCode).not.toBe(0)
     await ws.close()
   })
@@ -89,14 +89,14 @@ describe('workspace: cd', () => {
 describe('workspace: pipeline', () => {
   it('cat | sort', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat /s3/report.csv | sort')
+    const io = await ws.shell('cat /s3/report.csv | sort')
     expect(io.exitCode).toBe(0)
     await ws.close()
   })
 
   it('cat | wc', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat /ram/notes.txt | wc')
+    const io = await ws.shell('cat /ram/notes.txt | wc')
     expect(io.exitCode).toBe(0)
     await ws.close()
   })
@@ -105,18 +105,18 @@ describe('workspace: pipeline', () => {
 describe('workspace: redirect', () => {
   it('write with >', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat /s3/data.txt > /disk/out.txt')
+    const io = await ws.shell('cat /s3/data.txt > /disk/out.txt')
     expect(io.exitCode).toBe(0)
-    const io2 = await ws.execute('cat /disk/out.txt')
+    const io2 = await ws.shell('cat /disk/out.txt')
     expect(stdoutStr(io2)).toContain('hello from s3')
     await ws.close()
   })
 
   it('append with >>', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('cat /s3/data.txt > /disk/log.txt')
-    await ws.execute('cat /s3/report.csv >> /disk/log.txt')
-    const io = await ws.execute('cat /disk/log.txt')
+    await ws.shell('cat /s3/data.txt > /disk/log.txt')
+    await ws.shell('cat /s3/report.csv >> /disk/log.txt')
+    const io = await ws.shell('cat /disk/log.txt')
     const out = stdoutStr(io)
     expect(out).toContain('hello from s3')
     expect(out).toContain('alice')
@@ -127,28 +127,28 @@ describe('workspace: redirect', () => {
 describe('workspace: control flow', () => {
   it('if true', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('if true; then export R=yes; fi')
+    await ws.shell('if true; then export R=yes; fi')
     expect(ws.getSession(ws.defaultSessionId).env.R).toBe('yes')
     await ws.close()
   })
 
   it('if false else', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('if false; then export R=yes; else export R=no; fi')
+    await ws.shell('if false; then export R=yes; else export R=no; fi')
     expect(ws.getSession(ws.defaultSessionId).env.R).toBe('no')
     await ws.close()
   })
 
   it('for loop', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('for x in a b c; do export LAST=$x; done')
+    await ws.shell('for x in a b c; do export LAST=$x; done')
     expect(ws.getSession(ws.defaultSessionId).env.LAST).toBe('c')
     await ws.close()
   })
 
   it('while false', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('while false; do export RAN=yes; done')
+    const io = await ws.shell('while false; do export RAN=yes; done')
     expect(io.exitCode).toBe(0)
     expect('RAN' in ws.getSession(ws.defaultSessionId).env).toBe(false)
     await ws.close()
@@ -156,7 +156,7 @@ describe('workspace: control flow', () => {
 
   it('case match', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('case hello in hello) export M=yes;; esac')
+    await ws.shell('case hello in hello) export M=yes;; esac')
     expect(ws.getSession(ws.defaultSessionId).env.M).toBe('yes')
     await ws.close()
   })
@@ -165,7 +165,7 @@ describe('workspace: control flow', () => {
 describe('workspace: operators', () => {
   it('semicolons chain', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('export A=1; export B=2; export C=3')
+    await ws.shell('export A=1; export B=2; export C=3')
     const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('1')
     expect(s.env.B).toBe('2')
@@ -175,21 +175,21 @@ describe('workspace: operators', () => {
 
   it('&& chain', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('true && export OK=yes')
+    await ws.shell('true && export OK=yes')
     expect(ws.getSession(ws.defaultSessionId).env.OK).toBe('yes')
     await ws.close()
   })
 
   it('&& short-circuits on false', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('false && export SKIP=yes')
+    await ws.shell('false && export SKIP=yes')
     expect('SKIP' in ws.getSession(ws.defaultSessionId).env).toBe(false)
     await ws.close()
   })
 
   it('|| fallback', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('false || export FALL=yes')
+    await ws.shell('false || export FALL=yes')
     expect(ws.getSession(ws.defaultSessionId).env.FALL).toBe('yes')
     await ws.close()
   })
@@ -198,15 +198,15 @@ describe('workspace: operators', () => {
 describe('workspace: subshell', () => {
   it('subshell isolates env', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('export X=outer')
-    await ws.execute('(export X=inner)')
+    await ws.shell('export X=outer')
+    await ws.shell('(export X=inner)')
     expect(ws.getSession(ws.defaultSessionId).env.X).toBe('outer')
     await ws.close()
   })
 
   it('$? updates between commands inside a subshell', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('(false; echo subshell=$?)')
+    const io = await ws.shell('(false; echo subshell=$?)')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('subshell=1\n')
     await ws.close()
@@ -214,7 +214,7 @@ describe('workspace: subshell', () => {
 
   it('$? sees lazily finalized exit codes inside a subshell', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('(grep missing /ram/notes.txt; echo s=$?)')
+    const io = await ws.shell('(grep missing /ram/notes.txt; echo s=$?)')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('s=1\n')
     await ws.close()
@@ -224,14 +224,14 @@ describe('workspace: subshell', () => {
 describe('workspace: function', () => {
   it('define and call', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('greet() { export MSG=hello; }; greet')
+    await ws.shell('greet() { export MSG=hello; }; greet')
     expect(ws.getSession(ws.defaultSessionId).env.MSG).toBe('hello')
     await ws.close()
   })
 
   it('with args', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('f() { export A=$1; export B=$2; }; f x y')
+    await ws.shell('f() { export A=$1; export B=$2; }; f x y')
     const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('x')
     expect(s.env.B).toBe('y')
@@ -242,14 +242,14 @@ describe('workspace: function', () => {
 describe('workspace: negation', () => {
   it('! true -> exit 1', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('! true')
+    const io = await ws.shell('! true')
     expect(io.exitCode).toBe(1)
     await ws.close()
   })
 
   it('! false -> exit 0', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('! false')
+    const io = await ws.shell('! false')
     expect(io.exitCode).toBe(0)
     await ws.close()
   })
@@ -258,7 +258,7 @@ describe('workspace: negation', () => {
 describe('workspace: brace group', () => {
   it('{ ... } runs sequentially in same session', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('{ export A=1; export B=2; }')
+    await ws.shell('{ export A=1; export B=2; }')
     const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('1')
     expect(s.env.B).toBe('2')
@@ -267,7 +267,7 @@ describe('workspace: brace group', () => {
 
   it('$? updates between commands inside a brace group', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('{ false; echo group=$?; }')
+    const io = await ws.shell('{ false; echo group=$?; }')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('group=1\n')
     await ws.close()
@@ -275,7 +275,7 @@ describe('workspace: brace group', () => {
 
   it('$? sees lazily finalized exit codes inside a brace group', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('{ grep missing /ram/notes.txt; echo s=$?; }')
+    const io = await ws.shell('{ grep missing /ram/notes.txt; echo s=$?; }')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('s=1\n')
     await ws.close()
@@ -297,7 +297,7 @@ describe('workspace: $? in construct bodies', () => {
   for (const cmd of cases) {
     it(`tracks the previous statement: ${cmd}`, async () => {
       const { ws } = await makeWorkspace()
-      const io = await ws.execute(cmd)
+      const io = await ws.shell(cmd)
       expect(io.exitCode).toBe(0)
       expect(stdoutStr(io)).toBe('s=1\n')
       await ws.close()
@@ -322,7 +322,7 @@ describe('workspace: $? for negation, background, assignments', () => {
   for (const [cmd, want] of cases) {
     it(`matches bash: ${cmd}`, async () => {
       const { ws } = await makeWorkspace()
-      const io = await ws.execute(cmd)
+      const io = await ws.shell(cmd)
       expect(stdoutStr(io)).toBe(want)
       await ws.close()
     })
@@ -349,7 +349,7 @@ describe('workspace: C-style for', () => {
   for (const [cmd, want] of cases) {
     it(`matches bash: ${cmd}`, async () => {
       const { ws } = await makeWorkspace()
-      const io = await ws.execute(cmd)
+      const io = await ws.shell(cmd)
       expect(stdoutStr(io)).toBe(want)
       await ws.close()
     })
@@ -357,14 +357,14 @@ describe('workspace: C-style for', () => {
 
   it('aborts with status 1 on an arithmetic error', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('for ((i=@;i<1;i++)); do echo x; done; echo c=$?')
+    const io = await ws.shell('for ((i=@;i<1;i++)); do echo x; done; echo c=$?')
     expect(stdoutStr(io)).toBe('c=1\n')
     await ws.close()
   })
 
   it('aborts with status 1 when a slot assigns to a readonly variable', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('readonly i=5; for ((i=0;i<2;i++)); do echo x; done; echo c=$?')
+    const io = await ws.shell('readonly i=5; for ((i=0;i<2;i++)); do echo x; done; echo c=$?')
     expect(stdoutStr(io)).toBe('c=1\n')
     expect(new TextDecoder().decode(io.stderr)).toBe('bash: i: readonly variable\n')
     await ws.close()
@@ -372,7 +372,7 @@ describe('workspace: C-style for', () => {
 
   it('keeps the output of iterations that ran before a readonly update', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       'readonly i=5; for ((;i<10;i++)); do echo hi; done; echo c=$?; echo i=$i',
     )
     expect(stdoutStr(io)).toBe('hi\nc=1\ni=5\n')
@@ -383,8 +383,8 @@ describe('workspace: C-style for', () => {
 describe('workspace: variable expansion', () => {
   it('$F expands to full path', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('export F=/s3/report.csv')
-    const io = await ws.execute('cat $F')
+    await ws.shell('export F=/s3/report.csv')
+    const io = await ws.shell('cat $F')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('alice')
     await ws.close()
@@ -392,8 +392,8 @@ describe('workspace: variable expansion', () => {
 
   it('$DIR concatenates with /file', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('export DIR=/s3')
-    const io = await ws.execute('cat $DIR/data.txt')
+    await ws.shell('export DIR=/s3')
+    const io = await ws.shell('cat $DIR/data.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('hello from s3')
     await ws.close()
@@ -403,15 +403,15 @@ describe('workspace: variable expansion', () => {
 describe('workspace: assignment', () => {
   it('bare assignment X=hello', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('X=hello')
+    await ws.shell('X=hello')
     expect(ws.getSession(ws.defaultSessionId).env.X).toBe('hello')
     await ws.close()
   })
 
   it('assignment expands vars', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('export BASE=/s3')
-    await ws.execute('OUT=$BASE/result.txt')
+    await ws.shell('export BASE=/s3')
+    await ws.shell('OUT=$BASE/result.txt')
     expect(ws.getSession(ws.defaultSessionId).env.OUT).toBe('/s3/result.txt')
     await ws.close()
   })
@@ -420,7 +420,7 @@ describe('workspace: assignment', () => {
 describe('workspace: while read', () => {
   it('reads stdin lines', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('while read LINE; do export LAST=$LINE; done', {
+    await ws.shell('while read LINE; do export LAST=$LINE; done', {
       stdin: new TextEncoder().encode('a\nb\nc\n'),
     })
     expect(ws.getSession(ws.defaultSessionId).env.LAST).toBe('c')
@@ -431,8 +431,8 @@ describe('workspace: while read', () => {
 describe('workspace: cross-mount', () => {
   it('cat from different mounts', async () => {
     const { ws } = await makeWorkspace()
-    const io1 = await ws.execute('cat /s3/report.csv')
-    const io2 = await ws.execute('cat /ram/notes.txt')
+    const io1 = await ws.shell('cat /s3/report.csv')
+    const io2 = await ws.shell('cat /ram/notes.txt')
     expect(io1.exitCode).toBe(0)
     expect(io2.exitCode).toBe(0)
     expect(stdoutStr(io1)).toContain('alice')
@@ -444,19 +444,19 @@ describe('workspace: cross-mount', () => {
 describe('workspace: complex pipeline + redirect + expansion', () => {
   it('expansion + pipeline + redirect', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('export DIR=/disk')
-    const io = await ws.execute('cat /s3/report.csv | grep alice > $DIR/result.txt')
+    await ws.shell('export DIR=/disk')
+    const io = await ws.shell('cat /s3/report.csv | grep alice > $DIR/result.txt')
     expect(io.exitCode).toBe(0)
-    const io2 = await ws.execute('cat /disk/result.txt')
+    const io2 = await ws.shell('cat /disk/result.txt')
     expect(stdoutStr(io2)).toContain('alice')
     await ws.close()
   })
 
   it('for with redirect', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('for name in hello world; do echo $name > /disk/$name.txt; done')
-    const io1 = await ws.execute('cat /disk/hello.txt')
-    const io2 = await ws.execute('cat /disk/world.txt')
+    await ws.shell('for name in hello world; do echo $name > /disk/$name.txt; done')
+    const io1 = await ws.shell('cat /disk/hello.txt')
+    const io2 = await ws.shell('cat /disk/world.txt')
     expect(stdoutStr(io1)).toContain('hello')
     expect(stdoutStr(io2)).toContain('world')
     await ws.close()
@@ -467,7 +467,7 @@ describe('workspace: session isolation', () => {
   it('separate sessions have separate envs', async () => {
     const { ws } = await makeWorkspace()
     ws.createSession('worker')
-    await ws.execute('export X=default')
+    await ws.shell('export X=default')
     expect('X' in ws.getSession('worker').env).toBe(false)
     await ws.close()
   })
@@ -476,16 +476,16 @@ describe('workspace: session isolation', () => {
 describe('workspace: exit code', () => {
   it('true → 0, false → 1', async () => {
     const { ws } = await makeWorkspace()
-    expect((await ws.execute('true')).exitCode).toBe(0)
-    expect((await ws.execute('false')).exitCode).toBe(1)
+    expect((await ws.shell('true')).exitCode).toBe(0)
+    expect((await ws.shell('false')).exitCode).toBe(1)
     await ws.close()
   })
 
   it('last_exit_code tracks last command', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('true')
+    await ws.shell('true')
     expect(ws.getSession(ws.defaultSessionId).lastExitCode).toBe(0)
-    await ws.execute('false')
+    await ws.shell('false')
     expect(ws.getSession(ws.defaultSessionId).lastExitCode).toBe(1)
     await ws.close()
   })
@@ -498,8 +498,8 @@ describe('workspace: exit code', () => {
 describe('workspace: complex nested patterns', () => {
   it('ETL pipeline: cat | grep > disk, then verify', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('cat /s3/report.csv | grep alice > /disk/filtered.txt')
-    const io = await ws.execute('cat /disk/filtered.txt')
+    await ws.shell('cat /s3/report.csv | grep alice > /disk/filtered.txt')
+    const io = await ws.shell('cat /disk/filtered.txt')
     const out = stdoutStr(io)
     expect(out).toContain('alice')
     expect(out).not.toContain('bob')
@@ -508,11 +508,11 @@ describe('workspace: complex nested patterns', () => {
 
   it('multi-step processing with env + for', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute(
+    await ws.shell(
       'export SRC=/s3; export DST=/disk; for f in report.csv data.txt; do cat $SRC/$f > $DST/$f; done',
     )
-    const io1 = await ws.execute('cat /disk/report.csv')
-    const io2 = await ws.execute('cat /disk/data.txt')
+    const io1 = await ws.shell('cat /disk/report.csv')
+    const io2 = await ws.shell('cat /disk/data.txt')
     expect(stdoutStr(io1)).toContain('alice')
     expect(stdoutStr(io2)).toContain('hello from s3')
     await ws.close()
@@ -520,18 +520,18 @@ describe('workspace: complex nested patterns', () => {
 
   it('conditional processing: if pipeline success; then write', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute(
+    await ws.shell(
       'if cat /s3/report.csv | grep alice; then echo found > /disk/status.txt; else echo missing > /disk/status.txt; fi',
     )
-    const io = await ws.execute('cat /disk/status.txt')
+    const io = await ws.shell('cat /disk/status.txt')
     expect(stdoutStr(io)).toContain('found')
     await ws.close()
   })
 
   it('function with pipeline and redirect', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('process() { cat $1 | sort > $2; }; process /ram/notes.txt /disk/sorted.txt')
-    const io = await ws.execute('cat /disk/sorted.txt')
+    await ws.shell('process() { cat $1 | sort > $2; }; process /ram/notes.txt /disk/sorted.txt')
+    const io = await ws.shell('cat /disk/sorted.txt')
     const out = stdoutStr(io)
     expect(out).toContain('line1')
     const lines = out.trim().split('\n')
@@ -541,11 +541,11 @@ describe('workspace: complex nested patterns', () => {
 
   it('while read with conditional write (case)', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute(
+    await ws.shell(
       'while read LINE; do case $LINE in alice*) echo $LINE >> /disk/matches.txt;; esac; done',
       { stdin: new TextEncoder().encode('alice,30\nbob,25\nalice,40\n') },
     )
-    const io = await ws.execute('cat /disk/matches.txt')
+    const io = await ws.shell('cat /disk/matches.txt')
     const out = stdoutBytes(io)
     expect(countOccurrences(out, 'alice')).toBe(2)
     expect(stdoutStr(io)).not.toContain('bob')
@@ -555,7 +555,7 @@ describe('workspace: complex nested patterns', () => {
   it('nested for across mounts', async () => {
     const { ws } = await makeWorkspace()
     const s = ws.getSession(ws.defaultSessionId)
-    await ws.execute(
+    await ws.shell(
       'for src in /s3 /ram; do for f in report.csv notes.txt; do cat $src/$f && export FOUND=$src/$f; done; done',
     )
     expect('FOUND' in s.env).toBe(true)
@@ -564,29 +564,29 @@ describe('workspace: complex nested patterns', () => {
 
   it('background sleep + foreground work', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('sleep 0.01 & export A=1; export B=2; cat /s3/report.csv > /disk/copy.txt')
+    await ws.shell('sleep 0.01 & export A=1; export B=2; cat /s3/report.csv > /disk/copy.txt')
     const s = ws.getSession(ws.defaultSessionId)
     expect(s.env.A).toBe('1')
     expect(s.env.B).toBe('2')
-    const io = await ws.execute('cat /disk/copy.txt')
+    const io = await ws.shell('cat /disk/copy.txt')
     expect(stdoutStr(io)).toContain('alice')
     await ws.close()
   })
 
   it('subshell pipeline redirect', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('(export TMP=inner; cat /s3/report.csv) | sort > /disk/out.txt')
+    await ws.shell('(export TMP=inner; cat /s3/report.csv) | sort > /disk/out.txt')
     const s = ws.getSession(ws.defaultSessionId)
     expect('TMP' in s.env).toBe(false)
-    const io = await ws.execute('cat /disk/out.txt')
+    const io = await ws.shell('cat /disk/out.txt')
     expect(stdoutBytes(io).byteLength).toBeGreaterThan(0)
     await ws.close()
   })
 
   it('brace group pipeline', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('{ echo header; cat /s3/report.csv; } | sort > /disk/combined.txt')
-    const io = await ws.execute('cat /disk/combined.txt')
+    await ws.shell('{ echo header; cat /s3/report.csv; } | sort > /disk/combined.txt')
+    const io = await ws.shell('cat /disk/combined.txt')
     const out = stdoutStr(io)
     expect(out).toContain('header')
     expect(out).toContain('alice')
@@ -595,9 +595,9 @@ describe('workspace: complex nested patterns', () => {
 
   it('for with numbered file redirects', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('for n in 1 2 3; do echo "file $n" > /disk/f$n.txt; done')
-    const io1 = await ws.execute('cat /disk/f1.txt')
-    const io3 = await ws.execute('cat /disk/f3.txt')
+    await ws.shell('for n in 1 2 3; do echo "file $n" > /disk/f$n.txt; done')
+    const io1 = await ws.shell('cat /disk/f1.txt')
+    const io3 = await ws.shell('cat /disk/f3.txt')
     expect(stdoutStr(io1)).toContain('file 1')
     expect(stdoutStr(io3)).toContain('file 3')
     await ws.close()
@@ -605,14 +605,14 @@ describe('workspace: complex nested patterns', () => {
 
   it('multi pipeline chain with &&', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat /s3/report.csv | grep alice && echo found')
+    const io = await ws.shell('cat /s3/report.csv | grep alice && echo found')
     expect(stdoutStr(io)).toContain('found')
     await ws.close()
   })
 
   it('error handling with || fallback', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('cat /s3/missing.txt || echo fallback')
+    const io = await ws.shell('cat /s3/missing.txt || echo fallback')
     expect(stdoutStr(io)).toContain('fallback')
     await ws.close()
   })
@@ -625,10 +625,10 @@ describe('workspace: complex nested patterns', () => {
       'cat $SRC/report.csv | sort > $DST/sorted.txt; ' +
       'echo done > $DST/status.txt; ' +
       'else echo no_data > $DST/status.txt; fi'
-    await ws.execute(script)
-    const ioStatus = await ws.execute('cat /disk/status.txt')
+    await ws.shell(script)
+    const ioStatus = await ws.shell('cat /disk/status.txt')
     expect(stdoutStr(ioStatus)).toContain('done')
-    const ioSorted = await ws.execute('cat /disk/sorted.txt')
+    const ioSorted = await ws.shell('cat /disk/sorted.txt')
     const out = stdoutStr(ioSorted)
     expect(out).toContain('alice')
     const lines = out.trim().split('\n')
@@ -643,7 +643,7 @@ describe('expanded arithmetic diagnostics', () => {
     async (line) => {
       const { ws } = await makeWorkspace()
       try {
-        const io = await ws.execute(line)
+        const io = await ws.shell(line)
         expect(io.exitCode).toBe(1)
         expect(io.stdoutText).toBe('')
         expect(io.stderrText).toBe('bash: 1/0: division by 0\n')

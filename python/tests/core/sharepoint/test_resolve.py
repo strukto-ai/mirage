@@ -19,7 +19,7 @@ def _accessor() -> SharePointAccessor:
 
 @pytest.mark.asyncio
 async def test_resolve_root():
-    path = PathSpec(resource_path=mount_key("/sp/", "/sp"),
+    path = PathSpec(vfs_path=mount_key("/sp/", "/sp"),
                     virtual="/sp/",
                     directory="/sp/")
     result = await resolve(_accessor(), path)
@@ -30,7 +30,7 @@ async def test_resolve_root():
 async def test_resolve_site():
     accessor = _accessor()
     accessor.site_cache["Engineering"] = _SITE_ID
-    path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
+    path = PathSpec(vfs_path=mount_key("/sp/Engineering", "/sp"),
                     virtual="/sp/Engineering",
                     directory="/sp/Engineering")
     result = await resolve(accessor, path)
@@ -43,8 +43,7 @@ async def test_resolve_drive():
     accessor = _accessor()
     accessor.site_cache["Engineering"] = _SITE_ID
     accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
-    path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
-                                            "/sp"),
+    path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents", "/sp"),
                     virtual="/sp/Engineering/Documents",
                     directory="/sp/Engineering/Documents")
     result = await resolve(accessor, path)
@@ -57,7 +56,7 @@ async def test_resolve_item():
     accessor = _accessor()
     accessor.site_cache["Engineering"] = _SITE_ID
     accessor.drive_cache[(_SITE_ID, "Documents")] = _DRIVE_ID
-    path = PathSpec(resource_path=mount_key(
+    path = PathSpec(vfs_path=mount_key(
         "/sp/Engineering/Documents/sub/file.txt", "/sp"),
                     virtual="/sp/Engineering/Documents/sub/file.txt",
                     directory="/sp/Engineering/Documents/sub/file.txt")
@@ -80,7 +79,7 @@ async def test_resolve_unknown_site():
                       },
                   ]
               })
-        path = PathSpec(resource_path=mount_key("/sp/NoSuchSite", "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/NoSuchSite", "/sp"),
                         virtual="/sp/NoSuchSite",
                         directory="/sp/NoSuchSite")
         result = await resolve(_accessor(), path)
@@ -127,7 +126,7 @@ def _seed_scoped(accessor: SharePointAccessor) -> None:
 
 
 def _spec(virtual: str) -> PathSpec:
-    return PathSpec(resource_path=mount_key(virtual, "/sp"),
+    return PathSpec(vfs_path=mount_key(virtual, "/sp"),
                     virtual=virtual,
                     directory=virtual)
 

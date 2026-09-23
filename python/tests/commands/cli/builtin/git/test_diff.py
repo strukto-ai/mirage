@@ -17,7 +17,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_two_revisions_diff_against_each_other(git_ws):
-    result = await git_ws.execute("git -C /repo diff HEAD~1 HEAD")
+    result = await git_ws.shell("git -C /repo diff HEAD~1 HEAD")
     text = result.stdout.decode()
     assert result.exit_code == 0
     assert "diff --git a/a.txt b/a.txt" in text
@@ -27,14 +27,14 @@ async def test_two_revisions_diff_against_each_other(git_ws):
 
 @pytest.mark.asyncio
 async def test_one_revision_diffs_it_against_head(git_ws):
-    result = await git_ws.execute("git -C /repo diff HEAD~1")
+    result = await git_ws.shell("git -C /repo diff HEAD~1")
     assert result.exit_code == 0
     assert "+one changed" in result.stdout.decode()
 
 
 @pytest.mark.asyncio
 async def test_a_revision_against_itself_prints_nothing(git_ws):
-    result = await git_ws.execute("git -C /repo diff HEAD HEAD")
+    result = await git_ws.shell("git -C /repo diff HEAD HEAD")
     assert result.exit_code == 0
     assert result.stdout == b""
 
@@ -44,14 +44,14 @@ async def test_no_operand_prints_nothing_yet(git_ws):
     # Comparing against the working tree needs the index and a worktree
     # scan, neither of which exists. Until then a bare `git diff` is
     # silent rather than wrong.
-    result = await git_ws.execute("git -C /repo diff")
+    result = await git_ws.shell("git -C /repo diff")
     assert result.exit_code == 0
     assert result.stdout == b""
 
 
 @pytest.mark.asyncio
 async def test_a_file_added_between_two_revisions_shows_as_new(git_ws):
-    result = await git_ws.execute("git -C /repo diff HEAD~2 HEAD~1")
+    result = await git_ws.shell("git -C /repo diff HEAD~2 HEAD~1")
     text = result.stdout.decode()
     assert "diff --git a/b.txt b/b.txt" in text
     assert "new file mode" in text
@@ -61,7 +61,7 @@ async def test_a_file_added_between_two_revisions_shows_as_new(git_ws):
 @pytest.mark.asyncio
 async def test_the_older_side_may_be_named_second(git_ws):
     # Argument order decides direction, so this is the reverse patch.
-    result = await git_ws.execute("git -C /repo diff HEAD HEAD~1")
+    result = await git_ws.shell("git -C /repo diff HEAD HEAD~1")
     text = result.stdout.decode()
     assert "-one changed" in text
     assert "+one" in text
@@ -69,6 +69,6 @@ async def test_the_older_side_may_be_named_second(git_ws):
 
 @pytest.mark.asyncio
 async def test_an_unknown_revision_is_a_fatal(git_ws):
-    result = await git_ws.execute("git -C /repo diff nope HEAD")
+    result = await git_ws.shell("git -C /repo diff nope HEAD")
     assert result.exit_code == 128
     assert result.stderr.startswith(b"fatal: ambiguous argument 'nope'")

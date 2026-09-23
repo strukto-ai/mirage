@@ -20,7 +20,7 @@ from mirage.core.dropbox import api
 from mirage.core.dropbox.api import (continue_folder, list_folder,
                                      list_folder_state, search_files)
 from mirage.core.dropbox.client import DropboxTokenManager
-from mirage.resource.dropbox.config import DropboxConfig
+from mirage.vfs.dropbox.config import DropboxConfig
 
 TM = DropboxTokenManager(
     DropboxConfig(client_id="c", client_secret="s", refresh_token="r"))

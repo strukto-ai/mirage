@@ -24,7 +24,7 @@ from mirage.utils.remnants import (VisibleRemnant, child_spec, entry_name,
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0] or "/",
-                    resource_path=virtual.lstrip("/"))
+                    vfs_path=virtual.lstrip("/"))
 
 
 def _nothing_visible(virtual: str) -> bool:
@@ -141,10 +141,10 @@ def test_entry_name_takes_the_last_component():
     assert entry_name("plain") == "plain"
 
 
-def test_child_spec_appends_to_the_resource_key():
-    parent = PathSpec(virtual="/m/d", directory="/m", resource_path="d")
+def test_child_spec_appends_to_the_vfs_key():
+    parent = PathSpec(virtual="/m/d", directory="/m", vfs_path="d")
     child = child_spec(parent, "x")
     assert child.virtual == "/m/d/x"
-    assert child.resource_path == "d/x"
-    root = PathSpec(virtual="/m", directory="/", resource_path="")
-    assert child_spec(root, "x").resource_path == "x"
+    assert child.vfs_path == "d/x"
+    root = PathSpec(virtual="/m", directory="/", vfs_path="")
+    assert child_spec(root, "x").vfs_path == "x"

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MountMode, PostgresResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, PostgresVFS, Workspace } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -32,7 +32,7 @@ const DEC = new TextDecoder()
 
 async function dump(ws: Workspace, label: string, cmd: string): Promise<void> {
   console.log(`\n--- ${label} ---`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   if (r.exitCode !== 0) {
     console.log(`(exit=${String(r.exitCode)}) ${DEC.decode(r.stderr)}`)
     return
@@ -42,12 +42,12 @@ async function dump(ws: Workspace, label: string, cmd: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const resource = new PostgresResource({
+  const vfs = new PostgresVFS({
     dsn,
     maxReadRows: 200,
     maxReadBytes: 1024 * 1024,
   })
-  const ws = new Workspace({ '/pg/': resource }, { mode: MountMode.READ })
+  const ws = new Workspace({ '/pg/': vfs }, { mode: MountMode.READ })
 
   try {
     console.log('=== VFS MODE: shell pipelines transparently read Postgres ===')
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     await dump(ws, 'ls /pg/public', 'ls /pg/public')
     await dump(ws, 'ls /pg/public/tables (first 5)', 'ls /pg/public/tables | head -n 5')
 
-    const tablesOut = await ws.execute('ls /pg/public/tables')
+    const tablesOut = await ws.shell('ls /pg/public/tables')
     const tables = DEC.decode(tablesOut.stdout).split('\n').filter((s) => s.length > 0)
     if (tables.length === 0) {
       console.log('\nno tables in public; stopping')
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     )
   } finally {
     await ws.close()
-    await resource.close()
+    await vfs.close()
   }
 }
 

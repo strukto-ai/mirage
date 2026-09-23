@@ -21,7 +21,7 @@ import { CommandSpec, Operand, Option } from '../../../commands/spec/types.ts'
 import { optionError, parseFlags } from './flags.ts'
 
 function path(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: '', resolved: true })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: '', resolved: true })
 }
 
 describe('parseFlags', () => {
@@ -46,14 +46,14 @@ describe('parseFlags', () => {
     const first = new PathSpec({
       virtual: '/data/2026',
       directory: '/data/',
-      resourcePath: '',
+      vfsPath: '',
       resolved: true,
       rawPath: '2026/',
     })
     const second = new PathSpec({
       virtual: '/data/2026',
       directory: '/data/',
-      resourcePath: '',
+      vfsPath: '',
       resolved: true,
       rawPath: 'lnk/',
     })
@@ -69,21 +69,21 @@ describe('parseFlags', () => {
     const out = new PathSpec({
       virtual: '/data/out.tar',
       directory: '/data/',
-      resourcePath: '',
+      vfsPath: '',
       resolved: true,
       rawPath: 'out.tar',
     })
     const base = new PathSpec({
       virtual: '/data/dir',
       directory: '/data/',
-      resourcePath: '',
+      vfsPath: '',
       resolved: true,
       rawPath: 'dir',
     })
     const dot = new PathSpec({
       virtual: '/data/dir',
       directory: '/data/',
-      resourcePath: '',
+      vfsPath: '',
       resolved: true,
       rawPath: '.',
     })
@@ -98,7 +98,7 @@ describe('parseFlags', () => {
     const climbing = new PathSpec({
       virtual: '/data/b/../a/f.txt',
       directory: '/data/b/../a/',
-      resourcePath: '',
+      vfsPath: '',
       resolved: true,
       rawPath: '/data/b/link',
     })
@@ -108,11 +108,11 @@ describe('parseFlags', () => {
 
   it('synthesized paths leave the backend key to the mount', () => {
     // A spec-classified PATH operand the classifier left as text; the
-    // mount stamps resourcePath at execute time (sentinel-proven in
+    // mount stamps vfsPath at execute time (sentinel-proven in
     // both languages).
     const parsed = parseFlags(['b.txt'], SPECS.cat ?? null, 'cat', '/data')
     expect(parsed.paths.length).toBe(1)
-    expect(parsed.paths[0]?.resourcePath).toBe('')
+    expect(parsed.paths[0]?.vfsPath).toBe('')
   })
 })
 

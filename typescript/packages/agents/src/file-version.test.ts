@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it } from 'vitest'
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { FileVersionTracker, StaleMirageFileError } from './file-version.ts'
 
 let ws: Workspace
 
 beforeEach(() => {
-  ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+  ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 })
 
 // A read seam that answers with something other than the stored bytes.
@@ -30,14 +30,14 @@ beforeEach(() => {
 function renderingWs(inner: Workspace): Workspace {
   const prefix = new TextEncoder().encode('rendered:')
   return {
-    fs: {
+    vfs: {
       readFile: async (path: string): Promise<Uint8Array> => {
-        const stored = await inner.fs.readFile(path, { raw: true })
+        const stored = await inner.vfs.readFile(path, { raw: true })
         return new Uint8Array([...prefix, ...stored])
       },
       writeFile: (path: string, content: string | Uint8Array): Promise<void> =>
-        inner.fs.writeFile(path, content),
-      exists: (path: string): Promise<boolean> => inner.fs.exists(path),
+        inner.vfs.writeFile(path, content),
+      exists: (path: string): Promise<boolean> => inner.vfs.exists(path),
     },
     namespace: inner.namespace,
   } as unknown as Workspace
@@ -46,19 +46,19 @@ function renderingWs(inner: Workspace): Workspace {
 describe('FileVersionTracker', () => {
   it('refuses a write to a file that changed underneath', async () => {
     const tracker = new FileVersionTracker(ws)
-    await ws.fs.writeFile('/a.txt', 'one')
+    await ws.vfs.writeFile('/a.txt', 'one')
     await tracker.read('/a.txt')
-    await ws.fs.writeFile('/a.txt', 'moved underneath')
+    await ws.vfs.writeFile('/a.txt', 'moved underneath')
     await expect(tracker.write('/a.txt', 'two')).rejects.toThrow(StaleMirageFileError)
   })
 
   it('allows a write that follows its own write', async () => {
     const tracker = new FileVersionTracker(ws)
-    await ws.fs.writeFile('/a.txt', 'one')
+    await ws.vfs.writeFile('/a.txt', 'one')
     await tracker.read('/a.txt')
     await tracker.write('/a.txt', 'two')
     await tracker.write('/a.txt', 'three')
-    expect(await ws.fs.readFileText('/a.txt')).toBe('three')
+    expect(await ws.vfs.readFileText('/a.txt')).toBe('three')
   })
 
   it('stamps what a later read returns, not the bytes handed in', async () => {
@@ -68,7 +68,7 @@ describe('FileVersionTracker', () => {
     const tracker = new FileVersionTracker(renderingWs(ws))
     await tracker.write('/a.txt', 'one')
     await tracker.write('/a.txt', 'two')
-    expect(await ws.fs.readFileText('/a.txt')).toBe('two')
+    expect(await ws.vfs.readFileText('/a.txt')).toBe('two')
   })
 
   it('reads for edit after its own write on a rendering mount', async () => {
@@ -82,29 +82,29 @@ describe('FileVersionTracker', () => {
     // file. Keyed by spelling, the write below would find no stamp for
     // '/a.txt' and clobber a change the agent never saw.
     const tracker = new FileVersionTracker(ws)
-    await ws.fs.writeFile('/a.txt', 'one')
-    expect((await ws.execute('ln -s /a.txt /alias.txt')).exitCode).toBe(0)
+    await ws.vfs.writeFile('/a.txt', 'one')
+    expect((await ws.shell('ln -s /a.txt /alias.txt')).exitCode).toBe(0)
     await tracker.read('/alias.txt')
-    await ws.fs.writeFile('/a.txt', 'moved underneath')
+    await ws.vfs.writeFile('/a.txt', 'moved underneath')
     await expect(tracker.write('/a.txt', 'two')).rejects.toThrow(StaleMirageFileError)
-    expect(await ws.fs.readFileText('/a.txt')).toBe('moved underneath')
+    expect(await ws.vfs.readFileText('/a.txt')).toBe('moved underneath')
   })
 
   it('sees the target read when the edit arrives through the alias', async () => {
     const tracker = new FileVersionTracker(ws)
-    await ws.fs.writeFile('/a.txt', 'one')
-    expect((await ws.execute('ln -s /a.txt /alias.txt')).exitCode).toBe(0)
+    await ws.vfs.writeFile('/a.txt', 'one')
+    expect((await ws.shell('ln -s /a.txt /alias.txt')).exitCode).toBe(0)
     await tracker.read('/a.txt')
-    await ws.fs.writeFile('/a.txt', 'moved underneath')
+    await ws.vfs.writeFile('/a.txt', 'moved underneath')
     await expect(tracker.readForEdit('/alias.txt')).rejects.toThrow(StaleMirageFileError)
   })
 
   it('serves every call unchecked when disabled', async () => {
     const tracker = new FileVersionTracker(ws, false)
-    await ws.fs.writeFile('/a.txt', 'one')
+    await ws.vfs.writeFile('/a.txt', 'one')
     await tracker.read('/a.txt')
-    await ws.fs.writeFile('/a.txt', 'moved underneath')
+    await ws.vfs.writeFile('/a.txt', 'moved underneath')
     await tracker.write('/a.txt', 'two')
-    expect(await ws.fs.readFileText('/a.txt')).toBe('two')
+    expect(await ws.vfs.readFileText('/a.txt')).toBe('two')
   })
 })

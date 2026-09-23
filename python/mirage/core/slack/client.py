@@ -20,7 +20,7 @@ import aiohttp
 
 from mirage.core.api.client import SessionArg, api_request
 from mirage.core.slack.config import SlackConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 def _auth_token(config: SlackConfig, method: str) -> str:

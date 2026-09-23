@@ -17,7 +17,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  GSheetsResource,
+  GSheetsVFS,
   MountMode,
   patchNodeFs,
   Workspace,
@@ -41,8 +41,8 @@ function buildConfig(): GSheetsConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new GSheetsResource(buildConfig())
-  const ws = new Workspace({ '/gsheets/': resource }, { mode: MountMode.READ })
+  const vfs = new GSheetsVFS(buildConfig())
+  const ws = new Workspace({ '/gsheets/': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Google Docs transparently ===\n')

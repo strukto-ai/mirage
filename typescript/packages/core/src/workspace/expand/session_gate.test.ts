@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Policy } from '../../policy/base.ts'
 import type { Action, SessionContext } from '../../policy/types.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -33,7 +33,7 @@ class DenyAws implements Policy {
 async function guarded(): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
-    { '/ram': new RAMResource() },
+    { '/ram': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       shellParserFactory: () => Promise.resolve(parser),
@@ -68,10 +68,10 @@ describe('every session writer clears the pre_session gate', () => {
     it(`refuses ${line}`, async () => {
       const ws = await guarded()
       try {
-        const result = await ws.execute(line)
+        const result = await ws.shell(line)
         expect(result.exitCode, `${line} was not refused`).not.toBe(0)
         expect(DEC.decode(result.stderr)).toContain('not yours to set')
-        const after = await ws.execute(`echo [$${name}]`)
+        const after = await ws.shell(`echo [$${name}]`)
         expect(DEC.decode(after.stdout).trim(), `${line} wrote anyway`).toBe('[]')
       } finally {
         await ws.close()
@@ -83,8 +83,8 @@ describe('every session writer clears the pre_session gate', () => {
     it(`still writes ${line}`, async () => {
       const ws = await guarded()
       try {
-        await ws.execute(line)
-        const after = await ws.execute(`echo [$${name}]`)
+        await ws.shell(line)
+        const after = await ws.shell(`echo [$${name}]`)
         expect(DEC.decode(after.stdout).trim()).toBe(expected)
       } finally {
         await ws.close()
@@ -101,10 +101,10 @@ describe('a session write states itself as a whole variable', () => {
     // could not refuse.
     const ws = await guarded()
     try {
-      const result = await ws.execute("printf -v 'AWS_KEY[0]' %s x")
+      const result = await ws.shell("printf -v 'AWS_KEY[0]' %s x")
       expect(result.exitCode).not.toBe(0)
       expect(DEC.decode(result.stderr)).toContain('not yours to set')
-      const after = await ws.execute('echo "[${AWS_KEY[0]}]"')
+      const after = await ws.shell('echo "[${AWS_KEY[0]}]"')
       expect(DEC.decode(after.stdout).trim()).toBe('[]')
     } finally {
       await ws.close()
@@ -125,7 +125,7 @@ describe('a session write states itself as a whole variable', () => {
     it(`keeps the other elements: ${line}`, async () => {
       const ws = await guarded()
       try {
-        const result = await ws.execute(line)
+        const result = await ws.shell(line)
         expect(DEC.decode(result.stdout).trim()).toBe(expected)
       } finally {
         await ws.close()

@@ -94,7 +94,7 @@ describe('gdrive sed', () => {
       makeAccessor() as never,
       [
         new PathSpec({
-          resourcePath: 'test/file.txt',
+          vfsPath: 'test/file.txt',
           virtual: '/test/file.txt',
           directory: '/test',
         }),
@@ -115,7 +115,7 @@ describe('gdrive sed', () => {
       makeAccessor() as never,
       [
         new PathSpec({
-          resourcePath: 'test/file.txt',
+          vfsPath: 'test/file.txt',
           virtual: '/test/file.txt',
           directory: '/test',
         }),
@@ -160,7 +160,7 @@ describe('gdrive sed', () => {
       makeAccessor() as never,
       [
         new PathSpec({
-          resourcePath: 'test/file.txt',
+          vfsPath: 'test/file.txt',
           virtual: '/test/file.txt',
           directory: '/test',
         }),

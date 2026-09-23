@@ -19,9 +19,9 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
-from mirage.resource.ram import RAMResource
 from mirage.shell.errors import ArithError
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
 from mirage.workspace.executor.builtins.shared import (  # yapf: disable
@@ -30,7 +30,7 @@ from mirage.workspace.executor.builtins.shared import (  # yapf: disable
     refusal, require_view, split_flags, split_value_flags)
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 
 
@@ -122,8 +122,8 @@ def test_split_value_flags_reports_unknown():
 
 @pytest.mark.asyncio
 async def test_expand_operands_globs():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("echo a > /data/a.txt && echo b > /data/b.txt")
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo a > /data/a.txt && echo b > /data/b.txt")
     namespace = ws._namespace
     glob_spec = replace(PathSpec.from_str_path("/data/*.txt"),
                         pattern="*.txt",
@@ -134,7 +134,7 @@ async def test_expand_operands_globs():
 
 
 def test_require_view_returns_the_threaded_view():
-    session = Session(session_id="s1")
+    session = SessionState(session_id="s1")
     view = session_view(session)
     assert require_view(view) is view
 
@@ -192,7 +192,7 @@ def test_read_only_error_names_the_owning_mount():
     # table renders it for a symlink, so `rm f.txt` and `rm lk` under one
     # read grant answer identically.
     ws = Workspace({
-        "/data": (RAMResource(), MountMode.WRITE),
+        "/data": (RAMVFS(), MountMode.WRITE),
     })
     ns = ws.namespace
     owned = PathSpec.from_str_path("/data/lk")

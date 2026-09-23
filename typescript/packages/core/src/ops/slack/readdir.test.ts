@@ -16,7 +16,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { SlackResponse, SlackTransport } from '../../core/slack/client.ts'
-import { PathSpec, ResourceName } from '../../types.ts'
+import { PathSpec, VFSName } from '../../types.ts'
 import { SLACK_OPS } from './index.ts'
 
 const readdirOp = SLACK_OPS.find((o) => o.name === 'readdir' && o.filetype === null)
@@ -32,14 +32,14 @@ class FakeTransport implements SlackTransport {
 }
 
 describe('ops/slack/readdir', () => {
-  it('is registered against ResourceName.SLACK as a non-write readdir op', () => {
+  it('is registered against VFSName.SLACK as a non-write readdir op', () => {
     expect(readdirOp.name).toBe('readdir')
-    expect(readdirOp.resource).toBe(ResourceName.SLACK)
+    expect(readdirOp.vfs).toBe(VFSName.SLACK)
     expect(readdirOp.write).toBe(false)
     expect(readdirOp.filetype).toBeNull()
   })
 
-  it('dispatches to coreReaddir using the resource accessor', async () => {
+  it('dispatches to coreReaddir using the VFS accessor', async () => {
     const t = new FakeTransport(() => ({ ok: true }))
     const accessor = new SlackAccessor(t)
     const out = await readdirOp.fn(
@@ -47,7 +47,7 @@ describe('ops/slack/readdir', () => {
       new PathSpec({
         virtual: '/mnt/slack',
         directory: '/mnt/slack',
-        resourcePath: mountKey('/mnt/slack', '/mnt/slack'),
+        vfsPath: mountKey('/mnt/slack', '/mnt/slack'),
       }),
       [],
       {},

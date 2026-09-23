@@ -24,10 +24,10 @@ from dotenv import load_dotenv
 from mirage import MountMode, Workspace
 from mirage.agents.openai_agents import MirageSandboxClient
 from mirage.commands.cli.builtin.linear import LINEAR
-from mirage.resource.github import GitHubConfig, GitHubResource
-from mirage.resource.linear import LinearConfig, LinearResource
-from mirage.resource.ram import RAMResource
-from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.vfs.github import GitHubConfig, GitHubVFS
+from mirage.vfs.linear import LinearConfig, LinearVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
 
@@ -43,21 +43,21 @@ GITHUB_REF = os.environ.get("MIRAGE_GITHUB_REF", "main")
 
 
 async def main() -> None:
-    slack = SlackResource(config=SlackConfig(
+    slack = SlackVFS(config=SlackConfig(
         token=os.environ["SLACK_BOT_TOKEN"],
         search_token=os.environ.get("SLACK_USER_TOKEN"),
     ))
-    github = GitHubResource(
+    github = GitHubVFS(
         config=GitHubConfig(token=os.environ["GITHUB_TOKEN"]),
         owner=GITHUB_OWNER,
         repo=GITHUB_REPO,
         ref=GITHUB_REF,
     )
-    linear = LinearResource(config=LinearConfig(
+    linear = LinearVFS(config=LinearConfig(
         api_key=os.environ["LINEAR_API_KEY"]))
 
     ws = Workspace({
-        "/": (RAMResource(), MountMode.WRITE),
+        "/": (RAMVFS(), MountMode.WRITE),
         "/slack": (slack, MountMode.READ),
         "/github": (github, MountMode.READ),
         "/linear": (linear, MountMode.WRITE),
@@ -66,7 +66,7 @@ async def main() -> None:
         "linear", LINEAR,
         LinearConfig(api_key=os.environ["LINEAR_API_KEY"]).model_dump())
 
-    _orig_exec = ws.execute
+    _orig_exec = ws.shell
 
     async def _trace_exec(cmd_str, *args, **kwargs):
         print(f"[shell] {cmd_str}", flush=True)
@@ -76,7 +76,7 @@ async def main() -> None:
             print(f"[shell] -> {out!r}", flush=True)
         return result
 
-    ws.execute = _trace_exec  # type: ignore[assignment]
+    ws.shell = _trace_exec  # type: ignore[assignment]
 
     client = MirageSandboxClient(ws)
 

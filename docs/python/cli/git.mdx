@@ -20,12 +20,12 @@ distribute that source; its independent implementation uses
 ```python
 from mirage import Workspace
 from mirage.commands.cli.builtin.git import GIT
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
-ws = Workspace({"/repo": RAMResource()})
+ws = Workspace({"/repo": RAMVFS()})
 ws.register_cli("git", GIT)
 
-await ws.execute("git -C /repo status --short")
+await ws.shell("git -C /repo status --short")
 ```
 
 In YAML the same install rides the `clis:` section; see the

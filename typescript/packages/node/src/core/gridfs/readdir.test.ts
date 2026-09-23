@@ -22,7 +22,7 @@ vi.mock('./client.ts', async () => {
 
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
-import type { GridFSConfig } from '../../resource/gridfs/config.ts'
+import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
 import type { GridFSFileDoc } from './client.ts'
 import * as clientMod from './client.ts'
 import { readdir } from './readdir.ts'
@@ -62,7 +62,7 @@ function mockBucket(names: string[]): void {
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({
-    resourcePath: virtual.replace(/^\/+|\/+$/g, ''),
+    vfsPath: virtual.replace(/^\/+|\/+$/g, ''),
     virtual,
     directory: virtual,
   })

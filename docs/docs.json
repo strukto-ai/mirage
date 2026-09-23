@@ -71,8 +71,9 @@
             "pages": [
               "home/architecture",
               "home/bash",
-              "home/resource-matrix",
+              "home/vfs-matrix",
               "home/cache",
+              "home/yaml",
               "home/snapshot",
               "home/observer",
               "home/permissions",
@@ -88,13 +89,13 @@
             ]
           },
           {
-            "group": "Resources",
+            "group": "VFS",
             "pages": [
               {
                 "group": "Providers",
                 "icon": "grid-2",
                 "pages": [
-                  "home/setup/resources",
+                  "home/setup/vfs",
                   {
                     "group": "Object Storage",
                     "icon": "cloud",
@@ -262,106 +263,106 @@
             ]
           },
           {
-            "group": "Resources",
+            "group": "VFS",
             "pages": [
               {
                 "group": "Providers",
                 "icon": "grid-2",
                 "pages": [
-                  "python/resource/index",
+                  "python/vfs/index",
                   {
                     "group": "Infrastructure",
                     "icon": "server",
                     "pages": [
-                      "python/resource/disk",
-                      "python/resource/ram",
-                      "python/resource/redis",
-                      "python/resource/ssh"
+                      "python/vfs/disk",
+                      "python/vfs/ram",
+                      "python/vfs/redis",
+                      "python/vfs/ssh"
                     ]
                   },
                   {
                     "group": "Object Storage",
                     "icon": "cloud",
                     "pages": [
-                      "python/resource/s3",
-                      "python/resource/r2",
-                      "python/resource/gcs",
-                      "python/resource/supabase",
-                      "python/resource/oci",
-                      "python/resource/minio",
-                      "python/resource/ceph",
-                      "python/resource/seaweedfs",
-                      "python/resource/wasabi",
-                      "python/resource/backblaze",
-                      "python/resource/digitalocean",
-                      "python/resource/tencent",
-                      "python/resource/aliyun",
-                      "python/resource/scaleway",
-                      "python/resource/qingstor"
+                      "python/vfs/s3",
+                      "python/vfs/r2",
+                      "python/vfs/gcs",
+                      "python/vfs/supabase",
+                      "python/vfs/oci",
+                      "python/vfs/minio",
+                      "python/vfs/ceph",
+                      "python/vfs/seaweedfs",
+                      "python/vfs/wasabi",
+                      "python/vfs/backblaze",
+                      "python/vfs/digitalocean",
+                      "python/vfs/tencent",
+                      "python/vfs/aliyun",
+                      "python/vfs/scaleway",
+                      "python/vfs/qingstor"
                     ]
                   },
                   {
                     "group": "Hugging Face",
                     "icon": "/images/huggingface-logo.svg",
                     "pages": [
-                      "python/resource/hf_buckets",
-                      "python/resource/hf_datasets",
-                      "python/resource/hf_models",
-                      "python/resource/hf_spaces"
+                      "python/vfs/hf_buckets",
+                      "python/vfs/hf_datasets",
+                      "python/vfs/hf_models",
+                      "python/vfs/hf_spaces"
                     ]
                   },
                   {
                     "group": "Cloud & Productivity",
                     "icon": "folder-open",
                     "pages": [
-                      "python/resource/gmail",
-                      "python/resource/gdrive",
-                      "python/resource/gdocs",
-                      "python/resource/gsheets",
-                      "python/resource/gslides",
-                      "python/resource/onedrive",
-                      "python/resource/sharepoint",
-                      "python/resource/box",
-                      "python/resource/dropbox",
-                      "python/resource/nextcloud",
-                      "python/resource/databricks_volume"
+                      "python/vfs/gmail",
+                      "python/vfs/gdrive",
+                      "python/vfs/gdocs",
+                      "python/vfs/gsheets",
+                      "python/vfs/gslides",
+                      "python/vfs/onedrive",
+                      "python/vfs/sharepoint",
+                      "python/vfs/box",
+                      "python/vfs/dropbox",
+                      "python/vfs/nextcloud",
+                      "python/vfs/databricks_volume"
                     ]
                   },
                   {
                     "group": "Developer & Messaging",
                     "icon": "code",
                     "pages": [
-                      "python/resource/github",
-                      "python/resource/linear",
-                      "python/resource/langfuse",
-                      "python/resource/slack",
-                      "python/resource/discord",
-                      "python/resource/email"
+                      "python/vfs/github",
+                      "python/vfs/linear",
+                      "python/vfs/langfuse",
+                      "python/vfs/slack",
+                      "python/vfs/discord",
+                      "python/vfs/email"
                     ]
                   },
                   {
                     "group": "Data & AI",
                     "icon": "database",
                     "pages": [
-                      "python/resource/mongodb",
-                      "python/resource/gridfs",
-                      "python/resource/postgres",
-                      "python/resource/chroma",
-                      "python/resource/lancedb",
-                      "python/resource/qdrant",
-                      "python/resource/dify",
-                      "python/resource/mem0"
+                      "python/vfs/mongodb",
+                      "python/vfs/gridfs",
+                      "python/vfs/postgres",
+                      "python/vfs/chroma",
+                      "python/vfs/lancedb",
+                      "python/vfs/qdrant",
+                      "python/vfs/dify",
+                      "python/vfs/mem0"
                     ]
                   },
                   {
                     "group": "Notes & Tasks",
                     "icon": "book",
                     "pages": [
-                      "python/resource/notion",
-                      "python/resource/trello"
+                      "python/vfs/notion",
+                      "python/vfs/trello"
                     ]
                   },
-                  "python/resource/new"
+                  "python/vfs/new"
                 ]
               }
             ]
@@ -458,13 +459,13 @@
             ]
           },
           {
-            "group": "Resources",
+            "group": "VFS",
             "pages": [
               {
                 "group": "Providers",
                 "icon": "grid-2",
                 "pages": [
-                  "typescript/setup/resources",
+                  "typescript/setup/vfs",
                   {
                     "group": "Infrastructure",
                     "icon": "server",
@@ -557,7 +558,7 @@
                       "typescript/setup/trello"
                     ]
                   },
-                  "typescript/resource/new"
+                  "typescript/vfs/new"
                 ]
               }
             ]

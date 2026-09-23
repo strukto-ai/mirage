@@ -28,9 +28,9 @@ from pydantic_ai_backends import create_console_toolset
 
 from mirage import MountMode, Workspace
 from mirage.agents.pydantic_ai import PydanticAIWorkspace, build_system_prompt
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
-ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 backend = PydanticAIWorkspace(ws)
 
 
@@ -67,7 +67,7 @@ print(result.output)
 | `PydanticAIWorkspace` | `SandboxProtocol` implementation backed by a Mirage workspace. |
 | `build_system_prompt` | Generates a system prompt that describes mounted paths to the model. |
 
-`PydanticAIWorkspace` routes file operations through the Ops layer directly and shell operations through `Workspace.execute()` for full pipe and flag support. Enable `image_support` and `document_support` on the console toolset to pass images and PDFs from any Mirage mount to multimodal models as native `BinaryContent`.
+`PydanticAIWorkspace` routes file operations through the Ops layer directly and shell operations through `Workspace.shell()` for full pipe and flag support. Enable `image_support` and `document_support` on the console toolset to pass images and PDFs from any Mirage mount to multimodal models as native `BinaryContent`.
 
 ## Examples
 

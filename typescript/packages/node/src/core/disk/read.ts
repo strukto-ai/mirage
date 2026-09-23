@@ -15,7 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { open, readFile } from 'node:fs/promises'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import { resolveSafe } from './utils.ts'
@@ -35,7 +35,7 @@ export async function read(accessor: DiskAccessor, path: PathSpec): Promise<Uint
     }
     throw err
   }
-  record('read', virtual, ResourceName.DISK, data.byteLength, timer)
+  record('read', virtual, VFSName.DISK, data.byteLength, timer)
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
 }
 
@@ -76,7 +76,7 @@ export async function readRange(
       const buf = Buffer.allocUnsafe(size)
       const { bytesRead } = await handle.read(buf, 0, size, offset)
       const out = new Uint8Array(buf.buffer, buf.byteOffset, bytesRead)
-      record('read', virtual, ResourceName.DISK, bytesRead, timer)
+      record('read', virtual, VFSName.DISK, bytesRead, timer)
       return out
     }
     const parts: Buffer[] = []
@@ -91,7 +91,7 @@ export async function readRange(
       at += bytesRead
     }
     const joined = Buffer.concat(parts, total)
-    record('read', virtual, ResourceName.DISK, total, timer)
+    record('read', virtual, VFSName.DISK, total, timer)
     return new Uint8Array(joined.buffer, joined.byteOffset, joined.byteLength)
   } finally {
     await handle.close()

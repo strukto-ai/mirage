@@ -26,9 +26,9 @@ from mirage.agents.langchain import (
     build_system_prompt,
     extract_text,
 )
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
-ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 agent = create_deep_agent(
     model=ChatAnthropic(model="claude-sonnet-4-20250514"),

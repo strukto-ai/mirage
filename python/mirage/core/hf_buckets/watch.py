@@ -19,7 +19,7 @@ from mirage.watch.delta import ListingDeltaHook
 
 
 def build_delta_hook(accessor: _HfAccessor) -> DeltaHook:
-    """Build the delta hook shared by every Hugging Face resource.
+    """Build the delta hook shared by every Hugging Face VFS.
 
     One recursive tree listing per pull, fingerprinted on the Hub's
     ETag. A mount pinned to an immutable ``revision`` cannot report a
@@ -28,6 +28,6 @@ def build_delta_hook(accessor: _HfAccessor) -> DeltaHook:
 
     Args:
         accessor (_HfAccessor): Backend handle for any of the four hf
-            resources.
+            VFS classes.
     """
     return ListingDeltaHook(OpendalWalk(accessor))

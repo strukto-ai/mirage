@@ -5,8 +5,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.sharepoint import SharePointConfig, SharePointResource
 from mirage.types import PathSpec
+from mirage.vfs.sharepoint import SharePointConfig, SharePointVFS
 
 load_dotenv(".env.development")
 
@@ -15,7 +15,7 @@ token = os.environ["MS_GRAPH_DRIVE_TOKEN"]
 
 
 async def _pick_site_and_drive(ws: Workspace) -> tuple[str, str]:
-    r = await ws.execute("ls /sharepoint/")
+    r = await ws.shell("ls /sharepoint/")
     sites = [
         s.strip() for s in (await r.stdout_str()).strip().splitlines()
         if s.strip()
@@ -23,7 +23,7 @@ async def _pick_site_and_drive(ws: Workspace) -> tuple[str, str]:
     if not sites:
         raise RuntimeError("No SharePoint sites accessible")
     site = sites[0]
-    r = await ws.execute(f'ls "/sharepoint/{site}/"')
+    r = await ws.shell(f'ls "/sharepoint/{site}/"')
     drives = [
         d.strip() for d in (await r.stdout_str()).strip().splitlines()
         if d.strip()
@@ -138,7 +138,7 @@ def build_tests(base: str, test_dir: str, test_file: str):
 async def run_test(ws: Workspace, name: str,
                    cmd: str) -> tuple[str, str, bool, str, str]:
     try:
-        r = await ws.execute(cmd)
+        r = await ws.shell(cmd)
         stdout = (await r.stdout_str()) or ""
         stderr = (await r.stderr_str()) or ""
         ok = r.exit_code == 0
@@ -211,10 +211,7 @@ async def main():
     print("Token loaded ✓\n")
 
     ws = Workspace(
-        {
-            "/sharepoint/":
-            SharePointResource(SharePointConfig(access_token=token))
-        },
+        {"/sharepoint/": SharePointVFS(SharePointConfig(access_token=token))},
         mode=MountMode.WRITE,
     )
 
@@ -240,9 +237,9 @@ async def main():
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print(f"=== metadata overlay on {test_file} ===")
-    meta_res = await ws.execute(f'chmod 640 "{test_file}"'
-                                f' && chown 500:dev "{test_file}"'
-                                f' && touch -t 202601021530 "{test_file}"')
+    meta_res = await ws.shell(f'chmod 640 "{test_file}"'
+                              f' && chown 500:dev "{test_file}"'
+                              f' && touch -t 202601021530 "{test_file}"')
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch("stat",
                                    PathSpec.from_str_path(f"{test_file}"))
@@ -251,7 +248,7 @@ async def main():
 
     # Cleanup
     print("\n=== Cleanup ===")
-    await ws.execute(f'rm -r "{test_dir}"')
+    await ws.shell(f'rm -r "{test_dir}"')
     print("  done")
 
     write_report(site, drive, cmd_results, pipe_results, shell_results)

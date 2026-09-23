@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GSLIDES_IO } from '../../commands/builtin/gslides/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 import { readOp } from './read.ts'
@@ -21,7 +21,7 @@ import { readOp } from './read.ts'
 // The only read is the rendered filetype op, so the factory's plain
 // read is suppressed via overrides.
 export const GSLIDES_OPS: readonly RegisteredOp[] = [
-  ...makeGenericOps(ResourceName.GSLIDES, GSLIDES_IO, {
+  ...makeGenericOps(VFSName.GSLIDES, GSLIDES_IO, {
     overrides: new Set(['read']),
   }),
   readOp,

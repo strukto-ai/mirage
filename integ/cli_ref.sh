@@ -47,7 +47,7 @@ write_yaml() {
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
 clis:
   tally:
     cli: $ref

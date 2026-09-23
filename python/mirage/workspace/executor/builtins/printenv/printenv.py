@@ -15,14 +15,14 @@
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_printenv(
     name: str | None,
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     # The process view, not the shell view: GNU printenv is a separate
     # binary, so the only names it can possibly see are the exported

@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
-  DropboxResource,
+  DropboxVFS,
   Mount,
   MountBackend,
   MountMode,
@@ -45,9 +45,9 @@ function buildConfig(): DropboxConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new DropboxResource(buildConfig());
+  const vfs = new DropboxVFS(buildConfig());
   const ws = new Workspace({
-    "/dropbox": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/dropbox": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

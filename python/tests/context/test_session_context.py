@@ -27,17 +27,17 @@ from mirage.context import (effective_mount_mode, effective_path_mode,
 from mirage.types import (HiddenPaths, MountMode, ShowEntry, ShownPaths,
                           weaker_mode)
 from mirage.utils.errors import ReadOnlyError
-from mirage.workspace.session import Session, SessionManager
+from mirage.workspace.session import SessionManager, SessionState
 
 
 @pytest.fixture
 def bound_session():
-    sess = Session(session_id="agent",
-                   mount_modes={
-                       "/ro": MountMode.READ,
-                       "/rw": MountMode.WRITE,
-                       "/ex": MountMode.EXEC,
-                   })
+    sess = SessionState(session_id="agent",
+                        mount_modes={
+                            "/ro": MountMode.READ,
+                            "/rw": MountMode.WRITE,
+                            "/ex": MountMode.EXEC,
+                        })
     token = set_current_session(sess)
     yield sess
     reset_current_session(token)
@@ -57,7 +57,7 @@ def test_no_session_is_unrestricted():
 
 
 def test_unrestricted_session_keeps_mount_mode():
-    token = set_current_session(Session(session_id="free"))
+    token = set_current_session(SessionState(session_id="free"))
     try:
         assert effective_mount_mode("/s3", MountMode.EXEC) == MountMode.EXEC
     finally:
@@ -91,7 +91,7 @@ def test_ownership_gates_the_binding():
     """A binding answers only the manager that published it."""
     mine = SessionManager("default")
     theirs = SessionManager("default")
-    sess = Session(session_id="default")
+    sess = SessionState(session_id="default")
     token = set_current_session(sess, owner=mine)
     try:
         assert get_current_session_for(mine) is sess
@@ -104,8 +104,8 @@ def test_ownership_gates_the_binding():
 def test_a_nested_binding_keeps_the_owner():
     """A background job's fork is still the workspace's own session."""
     mine = SessionManager("default")
-    outer = Session(session_id="default")
-    inner = Session(session_id="default")
+    outer = SessionState(session_id="default")
+    inner = SessionState(session_id="default")
     outer_token = set_current_session(outer, owner=mine)
     inner_token = set_current_session(inner)
     try:
@@ -117,7 +117,7 @@ def test_a_nested_binding_keeps_the_owner():
 
 def test_an_unowned_binding_answers_nobody():
     """The op-dispatch binders name no owner, so no line adopts one."""
-    token = set_current_session(Session(session_id="default"))
+    token = set_current_session(SessionState(session_id="default"))
     try:
         assert get_current_session_for(SessionManager("default")) is None
     finally:
@@ -132,7 +132,7 @@ def test_a_roles_hides_reach_the_predicate_as_paths_and_patterns():
     from mirage.types import HiddenPaths
     hidden = HiddenPaths(paths=("/a/secrets", "/shared/finance"),
                          patterns=("/repo/*.pem", ))
-    sess = Session(session_id="agent", hidden_paths=hidden)
+    sess = SessionState(session_id="agent", hidden_paths=hidden)
     token = set_current_session(sess)
     try:
         assert hidden_paths_active()
@@ -151,9 +151,9 @@ def test_the_explicit_session_predicate_answers_without_a_binding():
     # session, and no session bound means nothing is hidden.
     from mirage.context import path_allowed, session_path_allowed
     from mirage.types import HiddenPaths
-    sess = Session(session_id="agent",
-                   hidden_paths=HiddenPaths(paths=("/a/secrets", ),
-                                            patterns=("*.pem", )))
+    sess = SessionState(session_id="agent",
+                        hidden_paths=HiddenPaths(paths=("/a/secrets", ),
+                                                 patterns=("*.pem", )))
     assert get_current_session() is None
     assert not session_path_allowed(sess, "/a/secrets/x")
     assert not session_path_allowed(sess, "/repo/k.pem")
@@ -170,8 +170,8 @@ def test_the_explicit_session_predicate_answers_without_a_binding():
 def test_a_hide_activates_the_gate_and_a_role_without_one_does_not():
     from mirage.context import hidden_paths_active, path_allowed
     from mirage.types import HiddenPaths
-    sess = Session(session_id="agent",
-                   hidden_paths=HiddenPaths(paths=("/repo/.env", )))
+    sess = SessionState(session_id="agent",
+                        hidden_paths=HiddenPaths(paths=("/repo/.env", )))
     token = set_current_session(sess)
     try:
         assert hidden_paths_active()
@@ -179,7 +179,7 @@ def test_a_hide_activates_the_gate_and_a_role_without_one_does_not():
         assert path_allowed("/repo/.envrc")
     finally:
         reset_current_session(token)
-    free = Session(session_id="free")
+    free = SessionState(session_id="free")
     token = set_current_session(free)
     try:
         assert not hidden_paths_active()
@@ -241,12 +241,12 @@ def test_the_op_policies_binding_is_scoped_to_one_command():
 
 
 def test_effective_path_mode_is_the_anchor_depth_rule():
-    sess = Session(session_id="agent",
-                   mount_modes={"/repo": MountMode.READ},
-                   shown_paths=ShownPaths(entries=(
-                       ShowEntry("/repo/build", MountMode.WRITE),
-                       ShowEntry("/repo/tools", MountMode.EXEC),
-                   )))
+    sess = SessionState(session_id="agent",
+                        mount_modes={"/repo": MountMode.READ},
+                        shown_paths=ShownPaths(entries=(
+                            ShowEntry("/repo/build", MountMode.WRITE),
+                            ShowEntry("/repo/tools", MountMode.EXEC),
+                        )))
     token = set_current_session(sess)
     try:
         # The mount cap holds where no deeper entry speaks...
@@ -270,7 +270,7 @@ def test_effective_path_mode_without_a_session_is_the_mounts_own():
 
 
 def test_an_equal_depth_pair_takes_the_weaker():
-    sess = Session(
+    sess = SessionState(
         session_id="agent",
         mount_modes={"/repo": MountMode.EXEC},
         shown_paths=ShownPaths(entries=(ShowEntry("/repo", MountMode.READ), )))
@@ -283,10 +283,11 @@ def test_an_equal_depth_pair_takes_the_weaker():
 
 
 def test_strongest_mode_under_counts_a_show_grant():
-    sess = Session(session_id="agent",
-                   mount_modes={"/repo": MountMode.READ},
-                   shown_paths=ShownPaths(
-                       entries=(ShowEntry("/repo/build", MountMode.WRITE), )))
+    sess = SessionState(
+        session_id="agent",
+        mount_modes={"/repo": MountMode.READ},
+        shown_paths=ShownPaths(
+            entries=(ShowEntry("/repo/build", MountMode.WRITE), )))
     token = set_current_session(sess)
     try:
         # The mount-wide mode is READ, but a deeper grant makes a write
@@ -303,11 +304,12 @@ def test_strongest_mode_under_counts_a_show_grant():
 
 
 def test_readonly_below_blames_the_carved_anchor():
-    sess = Session(session_id="agent",
-                   shown_paths=ShownPaths(entries=(
-                       ShowEntry("/repo/tree/locked", MountMode.READ),
-                       ShowEntry("/repo/tree/locked/pub", MountMode.WRITE),
-                   )))
+    sess = SessionState(
+        session_id="agent",
+        shown_paths=ShownPaths(entries=(
+            ShowEntry("/repo/tree/locked", MountMode.READ),
+            ShowEntry("/repo/tree/locked/pub", MountMode.WRITE),
+        )))
     token = set_current_session(sess)
     try:
         # The anchor lies strictly below the operand, so a subtree
@@ -327,7 +329,7 @@ def test_readonly_below_blames_the_carved_anchor():
 
 
 def test_readonly_below_blames_the_operand_for_a_pattern():
-    sess = Session(
+    sess = SessionState(
         session_id="agent",
         shown_paths=ShownPaths(
             entries=(ShowEntry("/repo/*/locked", MountMode.READ), )))
@@ -343,7 +345,7 @@ def test_readonly_below_blames_the_operand_for_a_pattern():
 
 
 def test_require_mount_writable_needs_the_broad_grant():
-    sess = Session(
+    sess = SessionState(
         session_id="agent",
         mount_modes={"/trello": MountMode.READ},
         shown_paths=ShownPaths(
@@ -369,8 +371,8 @@ def test_require_mount_writable_needs_the_broad_grant():
 
 
 def test_hidden_paths_intersect_is_per_operand():
-    sess = Session(session_id="agent",
-                   hidden_paths=HiddenPaths(paths=("/repo/.env", )))
+    sess = SessionState(session_id="agent",
+                        hidden_paths=HiddenPaths(paths=("/repo/.env", )))
     token = set_current_session(sess)
     try:
         assert hidden_paths_intersect("/repo")
@@ -382,7 +384,7 @@ def test_hidden_paths_intersect_is_per_operand():
 
 
 def test_a_show_reaches_the_session_predicate():
-    sess = Session(
+    sess = SessionState(
         session_id="agent",
         hidden_paths=HiddenPaths(paths=("/repo", )),
         shown_paths=ShownPaths(entries=(ShowEntry("/repo/public", None), )))
@@ -396,10 +398,10 @@ def test_hidden_refusal_answers_a_create_by_its_parent():
     # gives for that directory, so probing creates cannot map a
     # profile's hidden prefixes; a hidden name under a visible parent is
     # EACCES, the way an existing file the session cannot write is.
-    sess = Session(session_id="agent",
-                   hidden_paths=HiddenPaths(paths=("/w/vault",
-                                                   "/w/open/file.txt"),
-                                            patterns=("*.key", )))
+    sess = SessionState(session_id="agent",
+                        hidden_paths=HiddenPaths(paths=("/w/vault",
+                                                        "/w/open/file.txt"),
+                                                 patterns=("*.key", )))
     token = set_current_session(sess)
     try:
         under = hidden_refusal("/w/vault/new.txt", create=True)
@@ -427,7 +429,7 @@ def test_the_op_door_keeps_any_bind_but_another_owners():
     # refused, since its session describes that workspace's view.
     mine = SessionManager("default")
     theirs = SessionManager("default")
-    sess = Session(session_id="default")
+    sess = SessionState(session_id="default")
     assert get_current_session_unless_foreign(mine) is None
     token = set_current_session(sess)
     try:

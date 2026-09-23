@@ -14,7 +14,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '../../workspace.ts'
 import { RedisSessionStore } from './redis.ts'
@@ -91,11 +91,11 @@ describe.skipIf(skip)('RedisSessionStore', () => {
     const storeA = makeStore(prefix)
     const storeB = makeStore(prefix)
     const wsA = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       { mode: MountMode.EXEC, sessionStore: storeA },
     )
     const wsB = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       { mode: MountMode.EXEC, sessionStore: storeB },
     )
     try {

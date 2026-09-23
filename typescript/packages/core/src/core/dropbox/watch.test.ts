@@ -34,7 +34,7 @@ function accessor(rootPath: string): DropboxAccessor {
 }
 
 function root(): PathSpec {
-  return new PathSpec({ virtual: '/m', directory: '/m', resourcePath: '' })
+  return new PathSpec({ virtual: '/m', directory: '/m', vfsPath: '' })
 }
 
 async function collect(walk: DropboxWalk, at: PathSpec): Promise<WalkEntry[]> {

@@ -17,10 +17,10 @@ from unittest.mock import MagicMock
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.readdir import readdir as ram_readdir
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.expand.globs import resolve_globs
@@ -39,9 +39,9 @@ def _mock_registry(resolve_result=None):
         # dir-shaped ask with the directory itself.
         return [s for s in scopes if not s.pattern]
 
-    resource = RAMResource()
-    resource.resolve_glob = _resolve_glob
-    mount = MountEntry("/data/", resource, MountMode.READ)
+    vfs = RAMVFS()
+    vfs.resolve_glob = _resolve_glob
+    mount = MountEntry("/data/", vfs, MountMode.READ)
 
     reg = MagicMock()
     reg.file_cache = None
@@ -64,7 +64,7 @@ def test_text_passes_through():
 
 def test_pathspec_without_pattern_preserved():
     reg = _mock_registry()
-    ps = PathSpec(resource_path="data/file.txt",
+    ps = PathSpec(vfs_path="data/file.txt",
                   virtual="/data/file.txt",
                   directory="/data/",
                   resolved=True)
@@ -78,14 +78,14 @@ def test_pathspec_without_pattern_preserved():
 
 def test_glob_pathspec_resolved_to_pathspec():
     resolved_ps = PathSpec(
-        resource_path=mount_key("/data/a.txt", "/data"),
+        vfs_path=mount_key("/data/a.txt", "/data"),
         virtual="/data/a.txt",
         directory="/data/",
         resolved=True,
     )
     reg = _mock_registry(resolve_result=[resolved_ps])
     glob_ps = PathSpec(
-        resource_path="data/*.txt",
+        vfs_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -101,18 +101,18 @@ def test_glob_pathspec_resolved_to_pathspec():
 
 def test_glob_multiple_matches_expand():
     matches = [
-        PathSpec(resource_path="data/a.txt",
+        PathSpec(vfs_path="data/a.txt",
                  virtual="/data/a.txt",
                  directory="/data/",
                  resolved=True),
-        PathSpec(resource_path="data/b.txt",
+        PathSpec(vfs_path="data/b.txt",
                  virtual="/data/b.txt",
                  directory="/data/",
                  resolved=True),
     ]
     reg = _mock_registry(resolve_result=matches)
     glob_ps = PathSpec(
-        resource_path="data/*.txt",
+        vfs_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -130,7 +130,7 @@ def test_glob_multiple_matches_expand():
 def test_glob_string_result_wrapped_in_pathspec():
     reg = _mock_registry(resolve_result=["/a.txt"])
     glob_ps = PathSpec(
-        resource_path="data/*.txt",
+        vfs_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -146,7 +146,7 @@ def test_glob_string_result_wrapped_in_pathspec():
 def test_glob_no_match_keeps_literal_word():
     reg = _mock_registry(resolve_result=[])
     glob_ps = PathSpec(
-        resource_path="data/*.xyz",
+        vfs_path="data/*.xyz",
         virtual="/data/*.xyz",
         directory="/data/",
         pattern="*.xyz",
@@ -170,18 +170,18 @@ def test_match_named_like_the_glob_word_survives():
     match was thrown away.
     """
     matches = [
-        PathSpec(resource_path="*a.txt",
+        PathSpec(vfs_path="*a.txt",
                  virtual="/data/*a.txt",
                  directory="/data/",
                  resolved=True),
-        PathSpec(resource_path="xa.txt",
+        PathSpec(vfs_path="xa.txt",
                  virtual="/data/xa.txt",
                  directory="/data/",
                  resolved=True),
     ]
     reg = _mock_registry(resolve_result=matches)
     glob_ps = PathSpec(
-        resource_path="*a.txt",
+        vfs_path="*a.txt",
         virtual="/data/*a.txt",
         directory="/data/",
         pattern="*a.txt",
@@ -192,17 +192,17 @@ def test_match_named_like_the_glob_word_survives():
     assert all(not r.pattern for r in result[1:])
 
 
-def test_resource_reinstating_the_literal_itself_yields_no_match():
+def test_vfs_reinstating_the_literal_itself_yields_no_match():
     """``resolve_glob`` is a public hook, so the shape is not a contract.
 
-    A resource that implements nullglob-off on its own answers a
+    A VFS that implements nullglob-off on its own answers a
     no-match ask with the spec it was handed, which is now the directory.
     That is not a child of the directory, so it is no match, and the word
     stays literal rather than expanding to ``/data/``.
     """
     reg = _mock_registry(resolve_result=list)
     glob_ps = PathSpec(
-        resource_path="*.nope",
+        vfs_path="*.nope",
         virtual="/data/*.nope",
         directory="/data/",
         pattern="*.nope",
@@ -216,7 +216,7 @@ def test_resource_reinstating_the_literal_itself_yields_no_match():
 
 def test_mixed_text_and_pathspec():
     reg = _mock_registry()
-    ps = PathSpec(resource_path="data/file.txt",
+    ps = PathSpec(vfs_path="data/file.txt",
                   virtual="/data/file.txt",
                   directory="/data/",
                   resolved=True)
@@ -233,7 +233,7 @@ def test_resolve_error_returns_original_pathspec():
     reg = _mock_registry()
     reg.try_mount_for = MagicMock(return_value=None)
     glob_ps = PathSpec(
-        resource_path="unknown/*.txt",
+        vfs_path="unknown/*.txt",
         virtual="/unknown/*.txt",
         directory="/unknown/",
         pattern="*.txt",
@@ -247,7 +247,7 @@ def test_resolve_error_returns_original_pathspec():
 
 def test_pathspec_dir_carries_pattern():
     ps = PathSpec(
-        resource_path=mount_key("/data/*.txt", "/data"),
+        vfs_path=mount_key("/data/*.txt", "/data"),
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -256,12 +256,12 @@ def test_pathspec_dir_carries_pattern():
     d = ps.dir
     assert d.virtual == "/data/"
     assert d.pattern == "*.txt"
-    assert d.resource_path == ""
+    assert d.vfs_path == ""
 
 
 def test_pathspec_dir_no_pattern():
     ps = PathSpec(
-        resource_path="data/file.txt",
+        vfs_path="data/file.txt",
         virtual="/data/file.txt",
         directory="/data/",
         resolved=True,
@@ -274,13 +274,13 @@ def test_pathspec_dir_no_pattern():
 def test_scope_error_truncates_instead_of_crash():
     ram_resolve_glob = make_resolve_glob(ram_readdir, 5)
 
-    resource = RAMResource()
+    vfs = RAMVFS()
     for i in range(20):
-        resource._store.files[f"/f{i:02d}.txt"] = b""
-    resource._store.dirs.add("/")
+        vfs._store.files[f"/f{i:02d}.txt"] = b""
+    vfs._store.dirs.add("/")
     index = RAMIndexCacheStore()
     glob_ps = PathSpec(
-        resource_path="*.txt",
+        vfs_path="*.txt",
         virtual="/*.txt",
         directory="/",
         pattern="*.txt",
@@ -288,7 +288,7 @@ def test_scope_error_truncates_instead_of_crash():
     )
 
     async def _run():
-        return await ram_resolve_glob(resource.accessor, [glob_ps], index)
+        return await ram_resolve_glob(vfs.accessor, [glob_ps], index)
 
     result = asyncio.run(_run())
     assert len(result) == 5
@@ -296,14 +296,14 @@ def test_scope_error_truncates_instead_of_crash():
 
 def test_relative_glob_matches_spelled_as_typed():
     matches = [
-        PathSpec(resource_path="data/sub/a.txt",
+        PathSpec(vfs_path="data/sub/a.txt",
                  virtual="/data/sub/a.txt",
                  directory="/data/sub/",
                  resolved=True),
     ]
     reg = _mock_registry(resolve_result=matches)
     glob_ps = PathSpec(
-        resource_path="data/sub/*.txt",
+        vfs_path="data/sub/*.txt",
         virtual="/data/sub/*.txt",
         directory="/data/sub/",
         pattern="*.txt",
@@ -318,14 +318,14 @@ def test_relative_glob_matches_spelled_as_typed():
 
 def test_absolute_glob_matches_keep_virtual():
     matches = [
-        PathSpec(resource_path="data/a.txt",
+        PathSpec(vfs_path="data/a.txt",
                  virtual="/data/a.txt",
                  directory="/data/",
                  resolved=True),
     ]
     reg = _mock_registry(resolve_result=matches)
     glob_ps = PathSpec(
-        resource_path="data/*.txt",
+        vfs_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -339,14 +339,14 @@ def test_absolute_glob_matches_keep_virtual():
 
 def test_bare_relative_glob_raw_has_no_dir_prefix():
     matches = [
-        PathSpec(resource_path="data/a.txt",
+        PathSpec(vfs_path="data/a.txt",
                  virtual="/data/a.txt",
                  directory="/data/",
                  resolved=True),
     ]
     reg = _mock_registry(resolve_result=matches)
     glob_ps = PathSpec(
-        resource_path="data/*.txt",
+        vfs_path="data/*.txt",
         virtual="/data/*.txt",
         directory="/data/",
         pattern="*.txt",
@@ -361,8 +361,8 @@ def test_bare_relative_glob_raw_has_no_dir_prefix():
 def _ws():
     """Workspace with a nested mount and a symlink under /base."""
     ws = Workspace({
-        "/": RAMResource(),
-        "/base/inner": RAMResource()
+        "/": RAMVFS(),
+        "/base/inner": RAMVFS()
     },
                    mode=MountMode.WRITE)
     ws.create_session("s")
@@ -370,15 +370,15 @@ def _ws():
 
 
 async def _seed(ws):
-    await ws.execute("mkdir -p /base/sub", session_id="s")
-    await ws.execute("printf 111 > /base/f1", session_id="s")
-    await ws.execute("printf 2222222 > /base/sub/f2", session_id="s")
-    await ws.execute("printf 3333333 > /base/inner/g1", session_id="s")
-    await ws.execute("ln -s /base/sub/f2 /base/link", session_id="s")
+    await ws.shell("mkdir -p /base/sub", session_id="s")
+    await ws.shell("printf 111 > /base/f1", session_id="s")
+    await ws.shell("printf 2222222 > /base/sub/f2", session_id="s")
+    await ws.shell("printf 3333333 > /base/inner/g1", session_id="s")
+    await ws.shell("ln -s /base/sub/f2 /base/link", session_id="s")
 
 
 def _out(ws, line):
-    r = _run(ws.execute(line, session_id="s"))
+    r = _run(ws.shell(line, session_id="s"))
     return r.stdout.decode()
 
 
@@ -444,8 +444,8 @@ def test_glob_keeps_a_match_spelled_like_the_word():
     """
     ws = _ws()
     _run(_seed(ws))
-    _run(ws.execute("touch '/base/*a.txt'", session_id="s"))
-    _run(ws.execute("touch /base/xa.txt", session_id="s"))
+    _run(ws.shell("touch '/base/*a.txt'", session_id="s"))
+    _run(ws.shell("touch /base/xa.txt", session_id="s"))
     assert _out(
         ws, "echo /base/*a.txt").split() == ["/base/*a.txt", "/base/xa.txt"]
 
@@ -462,9 +462,9 @@ def test_glob_lists_a_directory_whose_name_holds_a_quoted_glob_char():
     """
     ws = _ws()
     _run(_seed(ws))
-    _run(ws.execute("mkdir '/base/*d'", session_id="s"))
-    _run(ws.execute("touch '/base/*d/one.txt'", session_id="s"))
-    _run(ws.execute("touch '/base/*d/two.txt'", session_id="s"))
+    _run(ws.shell("mkdir '/base/*d'", session_id="s"))
+    _run(ws.shell("touch '/base/*d/one.txt'", session_id="s"))
+    _run(ws.shell("touch '/base/*d/two.txt'", session_id="s"))
     assert _out(ws, "echo '/base/*d'/*.txt").split() == [
         "/base/*d/one.txt", "/base/*d/two.txt"
     ]
@@ -509,8 +509,8 @@ def test_glob_produced_mount_root_is_refused():
     """
     ws = _ws()
     _run(_seed(ws))
-    typed = _run(ws.execute("tar -cf /out.tar /base/inner", session_id="s"))
-    globbed = _run(ws.execute("tar -cf /out2.tar /base/i*", session_id="s"))
+    typed = _run(ws.shell("tar -cf /out.tar /base/inner", session_id="s"))
+    globbed = _run(ws.shell("tar -cf /out2.tar /base/i*", session_id="s"))
     assert globbed.stderr == typed.stderr
     assert globbed.exit_code == typed.exit_code
     assert b"Device or resource busy" in globbed.stderr
@@ -518,8 +518,8 @@ def test_glob_produced_mount_root_is_refused():
 
 def _seed_links(ws):
     _run(_seed(ws))
-    _run(ws.execute("ln -s /base/sub /base/dlink", session_id="s"))
-    _run(ws.execute("ln -s /base/inner /base/mlink", session_id="s"))
+    _run(ws.shell("ln -s /base/sub /base/dlink", session_id="s"))
+    _run(ws.shell("ln -s /base/inner /base/mlink", session_id="s"))
 
 
 def test_glob_descends_a_symlinked_directory():
@@ -566,8 +566,8 @@ def test_midpath_glob_does_not_descend_into_a_file():
 def _dirs_ws():
     """Workspace whose /data/records holds directories, a file and links."""
     ws = Workspace({
-        "/": RAMResource(),
-        "/data/records/inner": RAMResource()
+        "/": RAMVFS(),
+        "/data/records/inner": RAMVFS()
     },
                    mode=MountMode.WRITE)
     ws.create_session("s")
@@ -575,16 +575,16 @@ def _dirs_ws():
 
 
 async def _seed_dirs(ws):
-    await ws.execute(
+    await ws.shell(
         "mkdir -p /data/records/2026-09-10 /data/records/2026-09-11",
         session_id="s")
-    await ws.execute("echo sample > /data/records/2026-09-10/sample.txt",
-                     session_id="s")
-    await ws.execute("echo plain > /data/records/plain.txt", session_id="s")
-    await ws.execute("ln -s /data/records/2026-09-10 /data/records/lnk",
-                     session_id="s")
-    await ws.execute("ln -s /data/records/nowhere /data/records/broken",
-                     session_id="s")
+    await ws.shell("echo sample > /data/records/2026-09-10/sample.txt",
+                   session_id="s")
+    await ws.shell("echo plain > /data/records/plain.txt", session_id="s")
+    await ws.shell("ln -s /data/records/2026-09-10 /data/records/lnk",
+                   session_id="s")
+    await ws.shell("ln -s /data/records/nowhere /data/records/broken",
+                   session_id="s")
 
 
 # Trailing-slash pathname expansion, pinned against bash 5.2.37

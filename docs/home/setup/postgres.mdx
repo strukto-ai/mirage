@@ -1,7 +1,7 @@
 ---
 title: Postgres
 icon: /images/postgres-logo.svg
-description: Set up a Postgres connection for the Postgres resource.
+description: Set up a Postgres connection for the Postgres VFS.
 ---
 
 ## Credentials
@@ -32,7 +32,7 @@ DATABASE_URL=postgres://user:pass@host:5432/db?sslmode=require
 
 ## Permissions
 
-The Postgres resource is read-only. Grant the role you connect with at minimum:
+The Postgres VFS is read-only. Grant the role you connect with at minimum:
 
 ```sql
 GRANT USAGE ON SCHEMA public TO mirage_reader;
@@ -40,7 +40,7 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_reader;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_reader;
 ```
 
-If you only want to expose a subset of schemas, set `schemas` in the resource config:
+If you only want to expose a subset of schemas, set `schemas` in the VFS config:
 
 ```python
 PostgresConfig(dsn=os.environ["DATABASE_URL"], schemas=["public", "analytics"])
@@ -48,7 +48,7 @@ PostgresConfig(dsn=os.environ["DATABASE_URL"], schemas=["public", "analytics"])
 
 ## Limits
 
-The resource has built-in safety limits to keep an agent from accidentally pulling a whole table:
+The VFS has built-in safety limits to keep an agent from accidentally pulling a whole table:
 
 - `default_row_limit` (1,000): default LIMIT applied to ad-hoc reads.
 - `max_read_rows` (10,000): hard ceiling per read.

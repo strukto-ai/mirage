@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_SED = RAM_COMMANDS.filter((c) => c.name === 'sed' && c.filetype == null)
 
@@ -23,7 +23,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runSed(
-  resource: RAMResource,
+  vfs: RAMVFS,
   texts: string[],
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
@@ -31,12 +31,12 @@ async function runSed(
 ): Promise<string> {
   const cmd = RAM_SED[0]
   if (cmd === undefined) throw new Error('sed not registered')
-  const result = await cmd.fn(
-    (resource as { accessor?: unknown }).accessor as never,
-    paths,
-    texts,
-    { stdin, flags, filetypeFns: null, cwd: '/' },
-  )
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
+    stdin,
+    flags,
+    filetypeFns: null,
+    cwd: '/',
+  })
   if (result === null) return ''
   const [out] = result
   if (out === null) return ''
@@ -46,30 +46,30 @@ async function runSed(
 
 describe('sed -f', () => {
   it('reads the script from a file', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\n'))
-    resource.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
-    const out = await runSed(resource, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\n'))
+    vfs.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
+    const out = await runSed(vfs, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
       f: ['/tmp/prog.sed'],
     })
     expect(out).toBe('HI world\n')
   })
 
   it('applies multiple commands from the script file', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\ns/world/EARTH/\n'))
-    resource.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
-    const out = await runSed(resource, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\ns/world/EARTH/\n'))
+    vfs.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
+    const out = await runSed(vfs, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
       f: ['/tmp/prog.sed'],
     })
     expect(out).toBe('HI EARTH\n')
   })
 
   it('combines -e and -f (e then f)', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/prog.sed', ENC.encode('s/world/EARTH/\n'))
-    resource.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
-    const out = await runSed(resource, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/prog.sed', ENC.encode('s/world/EARTH/\n'))
+    vfs.store.files.set('/tmp/in.txt', ENC.encode('hello world\n'))
+    const out = await runSed(vfs, [], [PathSpec.fromStrPath('/tmp/in.txt')], {
       e: 's/hello/HI/',
       f: ['/tmp/prog.sed'],
     })
@@ -77,78 +77,72 @@ describe('sed -f', () => {
   })
 
   it('reads the script file in stdin mode', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\n'))
-    const out = await runSed(
-      resource,
-      [],
-      [],
-      { f: ['/tmp/prog.sed'] },
-      ENC.encode('hello world\n'),
-    )
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/tmp/prog.sed', ENC.encode('s/hello/HI/\n'))
+    const out = await runSed(vfs, [], [], { f: ['/tmp/prog.sed'] }, ENC.encode('hello world\n'))
     expect(out).toBe('HI world\n')
   })
 })
 
 describe('sed -i beyond s and d', () => {
   it('c writes the changed text to the file', async () => {
-    const resource = new RAMResource()
-    resource.store.dirs.add('/tmp')
-    resource.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
-    const out = await runSed(resource, ['c chg'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
+    const vfs = new RAMVFS()
+    vfs.store.dirs.add('/tmp')
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
+    const out = await runSed(vfs, ['c chg'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
     expect(out).toBe('')
-    expect(DEC.decode(resource.store.files.get('/tmp/a.txt'))).toBe('chg\nchg\n')
+    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('chg\nchg\n')
   })
 
   it('i writes the inserted line to the file', async () => {
-    const resource = new RAMResource()
-    resource.store.dirs.add('/tmp')
-    resource.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\nthree\n'))
-    const out = await runSed(resource, ['2i inserted'], [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.dirs.add('/tmp')
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\nthree\n'))
+    const out = await runSed(vfs, ['2i inserted'], [PathSpec.fromStrPath('/tmp/a.txt')], {
       i: true,
     })
     expect(out).toBe('')
-    expect(DEC.decode(resource.store.files.get('/tmp/a.txt'))).toBe('one\ninserted\ntwo\nthree\n')
+    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('one\ninserted\ntwo\nthree\n')
   })
 
   it('p doubles every line in the file', async () => {
-    const resource = new RAMResource()
-    resource.store.dirs.add('/tmp')
-    resource.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
-    const out = await runSed(resource, ['p'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
+    const vfs = new RAMVFS()
+    vfs.store.dirs.add('/tmp')
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
+    const out = await runSed(vfs, ['p'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
     expect(out).toBe('')
-    expect(DEC.decode(resource.store.files.get('/tmp/a.txt'))).toBe('one\none\ntwo\ntwo\n')
+    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('one\none\ntwo\ntwo\n')
   })
 
   it('q truncates the file at the quit line', async () => {
-    const resource = new RAMResource()
-    resource.store.dirs.add('/tmp')
-    resource.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\nthree\n'))
-    const out = await runSed(resource, ['2q'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
+    const vfs = new RAMVFS()
+    vfs.store.dirs.add('/tmp')
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\nthree\n'))
+    const out = await runSed(vfs, ['2q'], [PathSpec.fromStrPath('/tmp/a.txt')], { i: true })
     expect(out).toBe('')
-    expect(DEC.decode(resource.store.files.get('/tmp/a.txt'))).toBe('one\ntwo\n')
+    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('one\ntwo\n')
   })
 
   it('y transliterates the file in place', async () => {
-    const resource = new RAMResource()
-    resource.store.dirs.add('/tmp')
-    resource.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
-    const out = await runSed(resource, ['y/o/0/'], [PathSpec.fromStrPath('/tmp/a.txt')], {
+    const vfs = new RAMVFS()
+    vfs.store.dirs.add('/tmp')
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('one\ntwo\n'))
+    const out = await runSed(vfs, ['y/o/0/'], [PathSpec.fromStrPath('/tmp/a.txt')], {
       i: true,
     })
     expect(out).toBe('')
-    expect(DEC.decode(resource.store.files.get('/tmp/a.txt'))).toBe('0ne\ntw0\n')
+    expect(DEC.decode(vfs.store.files.get('/tmp/a.txt'))).toBe('0ne\ntw0\n')
   })
 })
 
 describe('sed multi-file output', () => {
   it('concatenates per-file output without a separator', async () => {
-    const resource = new RAMResource()
-    resource.store.dirs.add('/tmp')
-    resource.store.files.set('/tmp/a.txt', ENC.encode('A\n'))
-    resource.store.files.set('/tmp/b.txt', ENC.encode('B\n'))
+    const vfs = new RAMVFS()
+    vfs.store.dirs.add('/tmp')
+    vfs.store.files.set('/tmp/a.txt', ENC.encode('A\n'))
+    vfs.store.files.set('/tmp/b.txt', ENC.encode('B\n'))
     const out = await runSed(
-      resource,
+      vfs,
       ['p'],
       [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
     )

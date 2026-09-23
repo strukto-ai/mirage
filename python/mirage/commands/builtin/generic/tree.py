@@ -141,8 +141,8 @@ async def _walk(
         entry_spec = PathSpec(virtual=entry,
                               directory=entry,
                               resolved=False,
-                              resource_path=rekey(path.virtual,
-                                                  path.resource_path, entry))
+                              vfs_path=rekey(path.virtual, path.vfs_path,
+                                             entry))
         crossing = entry in child_mounts and cross_readdir is not None
         if crossing:
             # The mount table already says this is a directory, and the
@@ -178,7 +178,7 @@ async def _walk(
         if max_depth is not None and depth + 1 >= max_depth:
             continue
         extension = _INDENT if is_last else _VERTICAL
-        # Past a mount root the subtree belongs to another resource, so
+        # Past a mount root the subtree belongs to another VFS, so
         # the rest of this branch reads through the dispatcher. Deeper
         # mounts under it need no second switch: the dispatcher already
         # routes every path to its owner.

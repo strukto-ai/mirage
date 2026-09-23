@@ -28,7 +28,7 @@ from mirage.types import Producer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.execute_node import execute_node
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -40,7 +40,7 @@ async def run_command_tree(
     execute_fn: Callable[..., Any],
     agent_id: str,
     ast: Any,
-    session: Session,
+    session: SessionState,
     stdin: Any,
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision | None = None,
@@ -65,7 +65,7 @@ async def run_command_tree(
         execute_fn (Callable): recursive execute (for source/eval).
         agent_id (str): current agent ID for jobs.
         ast (Any): parsed tree-sitter root node.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (Any): input stream.
         cancel (asyncio.Event | None): event used to abort mid-flight.
         routing_decision (RouteDecision | None): the typed line's routing

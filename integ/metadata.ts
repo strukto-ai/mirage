@@ -17,7 +17,7 @@
 // them on 22 backends instead of the four here. What is left are the three
 // scenarios the declarative harness cannot express: it can run commands and
 // stat paths, but it cannot snapshot a workspace, reload it onto a fresh
-// resource, or mutate a backend out of band. Retiring these needs snapshot
+// VFS, or mutate a backend out of band. Retiring these needs snapshot
 // and namespace support in the harness, not another case file.
 //
 // Emits its result as one JSON line for integ/check_json.py, the same truth
@@ -31,14 +31,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FileStat } from '@struktoai/mirage-node'
 import {
-  ConsistencyPolicy,
+  DEFAULT_READ_TTL,
   MountMode,
-  RAMResource,
-  S3Resource,
+  RAMVFS,
+  ReadPolicy,
+  S3VFS,
   Workspace,
 } from '@struktoai/mirage-node'
 
-function s3ResourceFromEnv(keyPrefix: string): S3Resource {
+function s3VfsFromEnv(keyPrefix: string): S3VFS {
   const bucket = process.env.S3_BUCKET
   if (bucket === undefined || bucket === '') {
     throw new Error('S3_BUCKET env required (point at MinIO or AWS bucket)')
@@ -47,7 +48,7 @@ function s3ResourceFromEnv(keyPrefix: string): S3Resource {
   const region = process.env.S3_REGION ?? 'us-east-1'
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
-  return new S3Resource({
+  return new S3VFS({
     bucket,
     region,
     keyPrefix,
@@ -73,13 +74,13 @@ function overlayStatFields(st: FileStat): Record<string, string | null> {
 
 async function runOverlaySnapshotRoundtrip(
   ws: Workspace,
-  fresh: S3Resource,
+  fresh: S3VFS,
 ): Promise<Record<string, string | null>> {
   // Overlay attrs live in namespace NODES, so they must survive a
-  // snapshot even though the s3 resource is rebuilt fresh at load
-  // (s3 snapshots redact creds and require a resource override).
-  await ws.execute('echo alpha > /data/f.txt')
-  await ws.execute(
+  // snapshot even though the s3 VFS is rebuilt fresh at load
+  // (s3 snapshots redact creds and require a VFS override).
+  await ws.shell('echo alpha > /data/f.txt')
+  await ws.shell(
     'chmod 601 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202601021530 /data/f.txt',
   )
   const dir = mkdtempSync(join(tmpdir(), 'mirage-meta-osnap-'))
@@ -87,7 +88,7 @@ async function runOverlaySnapshotRoundtrip(
   await ws.snapshot(snap)
   const restored = await Workspace.load(snap, {}, { '/data': fresh })
   const st = (await restored.dispatch('stat', '/data/f.txt')) as FileStat
-  await restored.execute('rm /data/f.txt')
+  await restored.shell('rm /data/f.txt')
   await restored.close()
   rmSync(dir, { recursive: true, force: true })
   return overlayStatFields(st)
@@ -96,19 +97,19 @@ async function runOverlaySnapshotRoundtrip(
 async function runOverlayOrphanGc(keyPrefix: string): Promise<Record<string, boolean>> {
   // A chmod on a slot-less backend (s3) creates an attribute overlay. When
   // the object is deleted out-of-band (raw op, another agent), the overlay
-  // is orphaned. Under ALWAYS, a single-mount shell stat the backend reports
+  // is orphaned. Under `read: fresh`, a single-mount shell stat the backend reports
   // gone must GC that orphaned node.
   const ws = new Workspace(
-    { '/data': s3ResourceFromEnv(keyPrefix) },
-    { mode: MountMode.WRITE, consistency: ConsistencyPolicy.ALWAYS },
+    { '/data': s3VfsFromEnv(keyPrefix) },
+    { mode: MountMode.WRITE, read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL } },
   )
   try {
-    await ws.execute('echo alpha > /data/g.txt && chmod 601 /data/g.txt')
+    await ws.shell('echo alpha > /data/g.txt && chmod 601 /data/g.txt')
     const before = ws.namespace.metaFor('/data/g.txt') !== null
     // Out-of-band delete: dispatch the raw unlink op (not the rm command, which
     // would drop the namespace node itself), leaving the overlay orphaned.
     await ws.dispatch('unlink', '/data/g.txt')
-    await ws.execute('stat /data/g.txt')
+    await ws.shell('stat /data/g.txt')
     const after = ws.namespace.metaFor('/data/g.txt') !== null
     return { overlay_orphan_before: before, overlay_orphan_after: after }
   } finally {
@@ -117,16 +118,16 @@ async function runOverlayOrphanGc(keyPrefix: string): Promise<Record<string, boo
 }
 
 async function runSnapshotRoundtrip(): Promise<Record<string, string>> {
-  const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
-  await ws.execute('echo alpha > /data/f.txt')
-  await ws.execute(
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.shell('echo alpha > /data/f.txt')
+  await ws.shell(
     'chmod 601 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202601021530 /data/f.txt',
   )
   const dir = mkdtempSync(join(tmpdir(), 'mirage-meta-snap-'))
   const snap = join(dir, 'ws.tar')
   await ws.snapshot(snap)
   const restored = await Workspace.load(snap)
-  const result = await restored.execute('ls -l /data')
+  const result = await restored.shell('ls -l /data')
   const line = new TextDecoder().decode(result.stdout).trimEnd()
   await ws.close()
   await restored.close()
@@ -136,10 +137,10 @@ async function runSnapshotRoundtrip(): Promise<Record<string, string>> {
 
 async function main(): Promise<void> {
   const prefix = `mirage-integ-meta-${randomUUID().slice(0, 8)}/`
-  const s3Ws = new Workspace({ '/data': s3ResourceFromEnv(prefix) }, { mode: MountMode.WRITE })
+  const s3Ws = new Workspace({ '/data': s3VfsFromEnv(prefix) }, { mode: MountMode.WRITE })
   const result: Record<string, string | boolean | null> = {}
   try {
-    Object.assign(result, await runOverlaySnapshotRoundtrip(s3Ws, s3ResourceFromEnv(prefix)))
+    Object.assign(result, await runOverlaySnapshotRoundtrip(s3Ws, s3VfsFromEnv(prefix)))
   } finally {
     await s3Ws.close()
   }

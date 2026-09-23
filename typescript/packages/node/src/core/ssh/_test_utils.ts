@@ -23,7 +23,7 @@ import type {
   WriteStreamOptions,
 } from 'ssh2'
 import { SSHAccessor } from '../../accessor/ssh.ts'
-import type { SSHConfig } from '../../resource/ssh/config.ts'
+import type { SSHConfig } from '../../vfs/ssh/config.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 const S_IFDIR = 0o040000

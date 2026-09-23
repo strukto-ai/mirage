@@ -31,7 +31,7 @@ def test_file_directory_collision_fails() -> None:
 
 
 def path(key: str) -> PathSpec:
-    return PathSpec.from_str_path("/wandb/" + key, resource_path=key)
+    return PathSpec.from_str_path("/wandb/" + key, vfs_path=key)
 
 
 @pytest.mark.asyncio

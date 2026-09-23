@@ -19,7 +19,7 @@ async function createWs(app: ReturnType<typeof buildApp>, id: string): Promise<v
   await app.inject({
     method: 'POST',
     url: '/v1/workspaces',
-    payload: { id, config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+    payload: { id, config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
   })
 }
 

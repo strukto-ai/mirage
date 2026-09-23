@@ -29,7 +29,7 @@ export async function readdir(
   pathSpec: PathSpec,
   index?: IndexCacheStore,
 ): Promise<string[]> {
-  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.resourcePath)
+  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.vfsPath)
   const target = pathSpec.pattern === null ? pathSpec : pathSpec.dir
   const path = target.mountPath
   const found = await lookup(accessor, index, prefix, keyOf(prefix, path))

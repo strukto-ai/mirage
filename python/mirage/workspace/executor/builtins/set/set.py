@@ -18,14 +18,14 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import SET_OPTION_DEFAULTS, SET_OPTION_NAMES
 from mirage.shell.options import parse_option_word
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import visible_env
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_set(
     args: list[str],
-    session: Session,
+    session: SessionState,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     if not args:
@@ -73,7 +73,7 @@ async def handle_set(
     return None, IOResult(), ExecutionNode(command="set", exit_code=0)
 
 
-def _option_listing(session: Session, plus: bool) -> bytes:
+def _option_listing(session: SessionState, plus: bool) -> bytes:
     """Render `set -o` or `set +o` with no name after it.
 
     GNU 5.2.37 prints every option it knows, alphabetically, whether or
@@ -84,7 +84,7 @@ def _option_listing(session: Session, plus: bool) -> bytes:
     own `%-15s\\t%s` and not a special case.
 
     Args:
-        session (Session): the session holding the shell options.
+        session (SessionState): the session holding the shell options.
         plus (bool): render the `set +o` re-readable spelling.
     """
     lines = []

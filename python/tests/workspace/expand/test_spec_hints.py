@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.spec import SPECS
 from mirage.workspace.expand.spec_hints import (spec_for_command,
                                                 spec_word_kinds)
@@ -24,21 +24,21 @@ TEXT = "str"
 
 
 def test_spec_for_command_prefers_cwd_mount():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     mount = ws._registry.mount_for("/")
     spec = spec_for_command("grep", ws._registry, "/")
     assert spec is mount.spec_for("grep")
 
 
 def test_spec_for_command_falls_back_to_shared_specs():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     mount = ws._registry.mount_for("/")
     name = next(n for n in SPECS if mount.spec_for(n) is None)
     assert spec_for_command(name, ws._registry, "/") is SPECS[name]
 
 
 def test_spec_for_command_unknown_name_is_none():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     assert spec_for_command("no-such-command", ws._registry, "/") is None
 
 
@@ -120,11 +120,11 @@ def test_duplicate_word_text_and_path_slots():
 
 @pytest.mark.asyncio
 async def test_du_max_depth_equals_at_root_mount():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("mkdir -p /data/sub")
-    await ws.execute("tee /data/sub/n.txt > /dev/null", stdin=b"x\n")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /data/sub")
+    await ws.shell("tee /data/sub/n.txt > /dev/null", stdin=b"x\n")
 
-    io = await ws.execute("du --max-depth=1 /data/sub")
+    io = await ws.shell("du --max-depth=1 /data/sub")
     out = (io.stdout or b"").decode()
     assert "--max-depth" not in out
     assert "/data/sub" in out

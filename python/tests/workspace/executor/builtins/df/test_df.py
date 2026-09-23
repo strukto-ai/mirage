@@ -20,13 +20,13 @@ deterministic (real disk free space is machine-specific).
 """
 import pytest
 
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
 from mirage.types import CapacityResult, CapacityState, MountMode
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
-class _QuotaResource(RAMResource):
+class _QuotaVFS(RAMVFS):
     """RAM backend that reports a fixed quota, standing in for a real
     filesystem / a provider that exposes storage numbers."""
 
@@ -47,21 +47,21 @@ class _QuotaResource(RAMResource):
 def _ws() -> Workspace:
     return Workspace(
         {
-            "/mem": (RAMResource(), MountMode.WRITE),
-            "/q": (_QuotaResource(), MountMode.WRITE),
+            "/mem": (RAMVFS(), MountMode.WRITE),
+            "/q": (_QuotaVFS(), MountMode.WRITE),
         },
         mode=MountMode.WRITE,
     )
 
 
 async def _run(ws: Workspace, cmd: str) -> tuple[int, str]:
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return r.exit_code, await r.stdout_str()
 
 
 def test_capacity_default_state_is_unknown():
     import asyncio
-    cap = asyncio.run(RAMResource().statfs())
+    cap = asyncio.run(RAMVFS().statfs())
     assert cap.state == CapacityState.UNKNOWN
     assert cap.total is None
 
@@ -179,7 +179,7 @@ async def test_df_invalid_option():
 @pytest.mark.asyncio
 async def test_disk_statfs_real_quota(tmp_path):
     # The real disk backend reports real numbers (QUOTA), not fabricated.
-    cap = await DiskResource(root=str(tmp_path)).statfs()
+    cap = await DiskVFS(root=str(tmp_path)).statfs()
     assert cap.state == CapacityState.QUOTA
     assert cap.total and cap.total > 0
     assert cap.available is not None and cap.available >= 0
@@ -193,7 +193,7 @@ async def test_df_rejects_zero_block_size():
     code, out = await _run(ws, "df -B0 /q")
     assert code == 1
     assert out == ""
-    err = await (await ws.execute("df -B0 /q")).stderr_str()
+    err = await (await ws.shell("df -B0 /q")).stderr_str()
     assert err == "df: invalid -B argument '0'\n"
 
 
@@ -216,14 +216,14 @@ async def test_df_missing_file_operand_errors():
     # GNU df errors on a missing FILE; an existing path (and the mount root)
     # report normally.
     ws = _ws()
-    await ws.execute("mkdir -p /mem/sub")
-    await ws.execute("sh -c 'echo hi > /mem/sub/f.txt'")
+    await ws.shell("mkdir -p /mem/sub")
+    await ws.shell("sh -c 'echo hi > /mem/sub/f.txt'")
     assert (await _run(ws, "df /mem/sub/f.txt"))[0] == 0
     assert (await _run(ws, "df /mem"))[0] == 0
     code, out = await _run(ws, "df /mem/missing")
     assert code == 1
     assert out == ""
-    err = await (await ws.execute("df /mem/missing")).stderr_str()
+    err = await (await ws.shell("df /mem/missing")).stderr_str()
     assert err == "df: /mem/missing: No such file or directory\n"
 
 
@@ -232,7 +232,7 @@ async def test_df_follows_symlink_to_target_mount():
     # GNU df follows a FILE operand, so a symlink reports the mount of its
     # target, not the mount holding the link.
     ws = _ws()
-    await ws.execute("ln -s /q /mem/link")
+    await ws.shell("ln -s /q /mem/link")
     code, out = await _run(ws, "df /mem/link")
     assert code == 0
     assert out.splitlines()[-1].split()[-1] == "/q"

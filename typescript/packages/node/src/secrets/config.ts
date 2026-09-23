@@ -14,9 +14,9 @@
 
 // Through core's re-export, never a direct 'zod' import: a second zod
 // instance makes every ZodObject here structurally unrelated to core's
-// (see resource/secrets.ts), which still type-checks but takes minutes
+// (see VFS/secrets.ts), which still type-checks but takes minutes
 // and defeats the registry's nominal ZodType pairing.
-import { z } from '@struktoai/mirage-core/resource/secrets'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 
 /**
  * AWS Secrets Manager source config: the five AWS credential fields

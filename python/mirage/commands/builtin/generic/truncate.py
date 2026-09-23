@@ -76,10 +76,30 @@ async def truncate(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     truncate_fn: Callable[[PathSpec, int], Awaitable[None]],
 ) -> tuple[ByteSource | None, IOResult]:
+    """Set each operand's length, GNU ``truncate -s``.
+
+    GNU opens the operand with O_CREAT before it looks at anything, so a
+    name typed with a slash is settled by the open: ``missing/`` and
+    ``reg/`` are both ``Is a directory`` and nothing is created. The size
+    is read first here only because a relative spec needs it, so for a
+    slashed operand a stat that misses is not the verdict; the truncate
+    op answers, as the open would.
+
+    Args:
+        paths (list[PathSpec]): the file operands.
+        size (str): the ``-s`` spec.
+        stat (Callable): stats a path; raises when missing.
+        truncate_fn (Callable): sets a path's length in bytes.
+    """
     if not paths:
         raise ValueError("truncate: missing file operand")
     for path in paths:
-        current = (await stat(path)).size or 0
+        try:
+            current = (await stat(path)).size or 0
+        except (FileNotFoundError, NotADirectoryError):
+            if not path.raw_path.endswith("/"):
+                raise
+            current = 0
         await truncate_fn(path, parse_size(size, current))
     return None, IOResult()
 

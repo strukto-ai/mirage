@@ -37,14 +37,14 @@ function makeAccessor(): BoxAccessor {
 }
 
 function scope(): PathSpec {
-  return new PathSpec({ virtual: '/data', directory: '/data', resourcePath: '' })
+  return new PathSpec({ virtual: '/data', directory: '/data', vfsPath: '' })
 }
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: '',
-    resourcePath: virtual.replace(/^\/data\//, ''),
+    vfsPath: virtual.replace(/^\/data\//, ''),
     resolved: true,
   })
 }
@@ -89,7 +89,7 @@ describe('keepVisible', () => {
     const hiddenScope = new PathSpec({
       virtual: '/data/.cfg',
       directory: '/data/.cfg',
-      resourcePath: '.cfg',
+      vfsPath: '.cfg',
     })
     const kept = keepVisible([spec('/data/.cfg/a.txt')], [hiddenScope], false)
     expect(kept.map((p) => p.virtual)).toEqual(['/data/.cfg/a.txt'])

@@ -121,7 +121,7 @@ def path_safe_name(name: str) -> str:
     boundary, and leads a name that starts with ``.`` with
     ``ESCAPE_LEAD`` (``⁄``, U+2044), since the hierarchy classifies a
     dot-led segment as hidden: it would be dropped from every listing
-    and refused as a path. Use this for resource directory and file
+    and refused as a path. Use this for VFS directory and file
     names where keeping the original display name matters more than
     shell ergonomics.
 

@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -41,9 +41,9 @@ async function* slowStdin(): AsyncGenerator<Uint8Array> {
 }
 
 function buildWs(): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(ram)
+  registry.registerVfs(ram)
   return new Workspace(
     { '/data': ram },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
@@ -55,7 +55,7 @@ describe('pipeline timeout', () => {
     const ws = buildWs()
     ws.getSession(ws.defaultSessionId).pipelineTimeoutSeconds = 0.1
     try {
-      const r = await ws.execute('cat | cat', { stdin: slowStdin() })
+      const r = await ws.shell('cat | cat', { stdin: slowStdin() })
       expect(r.exitCode).toBe(124)
       expect(DEC.decode(r.stderr)).toContain('pipeline: timed out after 0.1s')
     } finally {
@@ -66,7 +66,7 @@ describe('pipeline timeout', () => {
   it('is unbounded without a budget', async () => {
     const ws = buildWs()
     try {
-      const r = await ws.execute('cat | cat', { stdin: ENC.encode('hi\n') })
+      const r = await ws.shell('cat | cat', { stdin: ENC.encode('hi\n') })
       expect(r.exitCode).toBe(0)
       expect(DEC.decode(r.stdout)).toBe('hi\n')
     } finally {

@@ -22,12 +22,12 @@ import { readWorkspaceFile } from '../read-file.ts'
 async function ensureParent(ws: Workspace, path: string): Promise<void> {
   const parent = gnuDirname(path)
   if (parent === '/' || parent === '' || parent === '.') return
-  if (await ws.fs.exists(parent)) return
+  if (await ws.vfs.exists(parent)) return
   await ensureParent(ws, parent)
   try {
-    await ws.fs.mkdir(parent)
+    await ws.vfs.mkdir(parent)
   } catch (err) {
-    if (!(await ws.fs.exists(parent))) throw err
+    if (!(await ws.vfs.exists(parent))) throw err
   }
 }
 
@@ -73,7 +73,7 @@ export function mirageTools(ws: Workspace): ToolSet {
         command: z.string().describe('The shell command to execute.'),
       }),
       execute: async ({ command }) => {
-        const io = await ws.execute(command)
+        const io = await ws.shell(command)
         return {
           stdout: io.stdoutText,
           stderr: io.stderrText,
@@ -123,7 +123,7 @@ export function mirageTools(ws: Workspace): ToolSet {
       }),
       execute: async ({ path, content }) => {
         await ensureParent(ws, path)
-        await ws.fs.writeFile(path, content)
+        await ws.vfs.writeFile(path, content)
         return { path }
       },
     }),
@@ -143,7 +143,7 @@ export function mirageTools(ws: Workspace): ToolSet {
       execute: async ({ path, oldString, newString, replaceAll }) => {
         let current: string
         try {
-          current = await ws.fs.readFileText(path)
+          current = await ws.vfs.readFileText(path)
         } catch {
           return { error: `Error: file '${path}' not found` }
         }
@@ -160,7 +160,7 @@ export function mirageTools(ws: Workspace): ToolSet {
           replaceAll === true
             ? current.split(oldString).join(newString)
             : current.replace(oldString, newString)
-        await ws.fs.writeFile(path, next)
+        await ws.vfs.writeFile(path, next)
         return { path, occurrences: replaceAll === true ? count : 1 }
       },
     }),
@@ -173,13 +173,13 @@ export function mirageTools(ws: Workspace): ToolSet {
       execute: async ({ path }) => {
         let entries: string[]
         try {
-          entries = await ws.fs.readdir(path)
+          entries = await ws.vfs.readdir(path)
         } catch (err) {
           return { error: err instanceof Error ? err.message : String(err) }
         }
         const files: { path: string; is_dir: boolean }[] = []
         for (const entry of entries) {
-          const isDir = await ws.fs.isDir(entry)
+          const isDir = await ws.vfs.isDir(entry)
           files.push({ path: entry, is_dir: isDir })
         }
         return { files }

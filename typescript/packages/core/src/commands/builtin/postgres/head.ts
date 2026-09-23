@@ -19,7 +19,7 @@ import { POSTGRES_IO } from './io.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { stat as postgresStat } from '../../../core/postgres/stat.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { headGeneric } from '../generic/head.ts'
@@ -69,7 +69,7 @@ async function headCommand(
 
 export const POSTGRES_HEAD = command({
   name: 'head',
-  resource: ResourceName.POSTGRES,
+  vfs: VFSName.POSTGRES,
   spec: specOf('head'),
   fn: headCommand,
 })

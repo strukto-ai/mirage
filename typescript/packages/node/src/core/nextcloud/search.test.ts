@@ -47,7 +47,7 @@ describe('Nextcloud Files Search query', () => {
       searchTarget('https://cloud.example/nextcloud/remote.php/dav/files/alice/team%20docs/'),
     ).toEqual({
       endpoint: 'https://cloud.example/nextcloud/remote.php/dav/',
-      resourceScope: '/files/alice/team docs',
+      vfsScope: '/files/alice/team docs',
     })
     expect(searchTarget('https://cloud.example/webdav/')).toBeNull()
   })

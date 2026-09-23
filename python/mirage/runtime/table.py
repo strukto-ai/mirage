@@ -34,7 +34,7 @@ RUNTIMES: tuple[type[Runtime], ...] = (MontyRuntime, WasiRuntime, LocalRuntime,
                                        QuickJsRuntime)
 
 
-class VFSRuntime(Runtime):
+class WorkspaceRuntime(Runtime):
     """The workspace's built-in command engine as a routing marker.
 
     By default it captures nothing and serves every command no other
@@ -46,20 +46,20 @@ class VFSRuntime(Runtime):
     it; pass your own instance to customize it.
 
     It is a pure routing marker, so it carries no capability mixin: a
-    line resolved to vfs runs on the workspace executor inline, the
+    line resolved to workspace runs on the workspace executor inline, the
     path the line takes anyway, so there is no interpreter door (run)
     and no delegate door (run_line) to implement.
 
     Constructed like every runtime (captures, config, script), with
-    two vfs readings: captures None (the default) keeps the catch-all
+    two workspace readings: captures None (the default) keeps the catch-all
     behavior, an empty sequence serves nothing (full lockdown); and
     the config has no fields today, the slot exists for uniformity.
     """
 
-    name = "vfs"
-    # A vfs-routed line runs on the workspace executor itself: it IS
+    name = "workspace"
+    # A workspace-routed line runs on the workspace executor itself: it IS
     # the gate, so there is no door around it.
-    reach: RuntimeReach = "vfs"
+    reach: RuntimeReach = "workspace"
     captures: tuple[str, ...] = ()
 
     def __init__(
@@ -74,7 +74,7 @@ class VFSRuntime(Runtime):
 
 
 NAMED: dict[str, type[Runtime]] = {cls.name: cls for cls in RUNTIMES}
-NAMED[VFSRuntime.name] = VFSRuntime
+NAMED[WorkspaceRuntime.name] = WorkspaceRuntime
 NAMED[SandlockRuntime.name] = SandlockRuntime
 
 # Sandbox runtimes resolve on first use. Their provider SDKs are heavy
@@ -90,15 +90,15 @@ SANDBOX_MODULES: dict[str, str] = {
 }
 
 # The names mirage ships, frozen before any host registers its own, so
-# `register_runtime` can refuse to shadow one the way `register_resource`
-# and `register_cli_spec` refuse a builtin resource or CLI name.
+# `register_runtime` can refuse to shadow one the way `register_vfs`
+# and `register_cli_spec` refuse a builtin VFS or CLI name.
 BUILTIN_RUNTIMES: frozenset[str] = frozenset({*NAMED, *SANDBOX_MODULES})
 
 
 def register_runtime(name: str, cls: type[Runtime]) -> None:
     """Register a host's runtime class under a config name.
 
-    Host-side only, like ``register_resource`` and ``register_cli_spec``:
+    Host-side only, like ``register_vfs`` and ``register_cli_spec``:
     the embedding program calls it, never a line the agent types. Once
     registered the name works everywhere a builtin's does: a ``runtimes:``
     entry in workspace YAML, a string in ``Workspace(runtimes=[...])``,
@@ -143,7 +143,7 @@ DEFAULT_PYTHON: str = MontyRuntime.name
 # `local` is deliberately absent: a sandboxed default must never
 # silently escalate to host execution.
 DEFAULT_ENTRIES: tuple[str, ...] = (DEFAULT_PYTHON, QuickJsRuntime.name,
-                                    VFSRuntime.name)
+                                    WorkspaceRuntime.name)
 
 # TypeScript-only runtime names a cross-language config may carry.
 TS_ONLY_HINTS: dict[str, str] = {
@@ -193,12 +193,13 @@ def runtime_bindings_for(entries: list[Runtime],
         name (str): the workspace runtime entry to bind to.
 
     Raises:
-        ValueError: the name is vfs (captures nothing, so there is
+        ValueError: the name is workspace (captures nothing, so there is
             nothing to rebind) or not a workspace entry.
     """
-    if name == VFSRuntime.name:
+    if name == WorkspaceRuntime.name:
         raise ValueError(
-            "'vfs' is the default executor, not a runtime you can select")
+            "'workspace' is the default executor, not a runtime you can select"
+        )
     for entry in entries:
         if entry.name == name:
             return {command: entry for command in entry.captures}
@@ -210,8 +211,8 @@ def runtime_bindings_for(entries: list[Runtime],
 def bind_commands(entries: list[Runtime]) -> dict[str, Runtime]:
     """Resolve the ordered world into a command -> runtime binding map.
 
-    A command binds to the FIRST entry that captures it; a default vfs
-    runtime captures nothing, so only a vfs with declared captures
+    A command binds to the FIRST entry that captures it; a default workspace
+    runtime captures nothing, so only a workspace entry with declared captures
     appears in the map. Duplicate names are rejected: a second entry
     under the same name could never bind anything and always signals a
     config mistake.
@@ -244,7 +245,7 @@ def whole_line_runtime(
     Only an explicit "*" capture claims a whole line. Named captures
     and EXTERNAL_COMMANDS execute individual commands. Vfs never matches
     here because it carries no mixin: the workspace executor IS the
-    path a vfs-resolved line takes anyway, so there is no delegate.
+    path a workspace-resolved line takes anyway, so there is no delegate.
 
     Args:
         bindings (Mapping[str, Runtime | None]): the line's resolved
@@ -259,7 +260,7 @@ def whole_line_runtime(
 def catch_all(entries: list[Runtime]) -> Runtime | None:
     """The runtime that serves commands no entry captures, if any.
 
-    That is the world's VFSRuntime, unless it declares captures (then
+    That is the world's WorkspaceRuntime, unless it declares captures (then
     it is an ordinary capturer and nothing is catch-all) or it is not
     among the given entries (refused the line / omitted).
 
@@ -267,6 +268,6 @@ def catch_all(entries: list[Runtime]) -> Runtime | None:
         entries (list[Runtime]): runtime instances to search.
     """
     for entry in entries:
-        if isinstance(entry, VFSRuntime) and not entry.restricted:
+        if isinstance(entry, WorkspaceRuntime) and not entry.restricted:
             return entry
     return None

@@ -14,22 +14,22 @@ Providing `cwd` or `env` runs the command in an ephemeral session clone, like a 
   <Tab title="Python​" icon="/images/python-logo.svg">
     ```python
     # Persistent mutation (no options): like `cd /data; cmd`
-    await ws.execute("cd /data")
-    await ws.execute("ls")  # sees /data
+    await ws.shell("cd /data")
+    await ws.shell("ls")  # sees /data
 
     # One-shot subshell (with cwd): like `(cd /data && cmd)`
-    await ws.execute("ls", cwd="/data")
+    await ws.shell("ls", cwd="/data")
     # ws.cwd is unchanged; mutations inside don't leak
     ```
   </Tab>
   <Tab title="TypeScript​" icon="/images/typescript-logo.svg">
     ```typescript
     // Persistent mutation
-    await ws.execute("cd /data")
-    await ws.execute("ls")  // sees /data
+    await ws.shell("cd /data")
+    await ws.shell("ls")  // sees /data
 
     // One-shot subshell
-    await ws.execute("ls", { cwd: "/data" })
+    await ws.shell("ls", { cwd: "/data" })
     // ws.cwd is unchanged; mutations inside don't leak
     ```
   </Tab>
@@ -74,7 +74,7 @@ Both bindings support cooperative cancellation. TypeScript observes the signal a
 
     asyncio.create_task(trigger())
     try:
-        await ws.execute("sleep 5", cancel=cancel)
+        await ws.shell("sleep 5", cancel=cancel)
     except MirageAbortError:
         print("aborted")
     ```
@@ -82,7 +82,7 @@ Both bindings support cooperative cancellation. TypeScript observes the signal a
   <Tab title="TypeScript​​" icon="/images/typescript-logo.svg">
     ```typescript
     try {
-      await ws.execute("sleep 5", { signal: AbortSignal.timeout(100) })
+      await ws.shell("sleep 5", { signal: AbortSignal.timeout(100) })
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") {
         console.log("aborted")
@@ -108,6 +108,8 @@ Both bindings support cooperative cancellation. TypeScript observes the signal a
 | Many isolated commands sharing scoped state | `session_id=...` (Py) / `sessionId` (TS) | a separate terminal |
 | Persistent shell mutations | run without options | `cd /data; cmd` |
 
+A session runs one line at a time, the way one bash process does. Two `execute()` calls on the same session share its env, cwd and `$?`, so the second waits for the first to finish rather than interleaving with it; a `for f` loop never reads a value another loop on that session just set. A call with `cwd` / `env` overrides still runs on a clone, so nothing it does leaks back, but it takes its turn on the session like any other line. For independent streams of commands that should run at the same time, give each its own session.
+
 ## JSON with `jq`
 
 `jq` reads a **stream of JSON values** and runs the program once per
@@ -131,7 +133,7 @@ jq -c -s 'map(.id)' /data/events.json
 ```
 
 Because evaluation is per document, commands that emit newline-delimited
-JSON (such as [paginated `gws` list calls](/python/resource/gdrive#pagination))
+JSON (such as [paginated `gws` list calls](/python/vfs/gdrive#pagination))
 pipe straight into `jq` with no reshaping.
 
 Output arity follows the program, not the input. A jq program emits a
@@ -228,10 +230,20 @@ reported gone.
 Predicates must precede actions: `find d -name '*.txt' -exec echo {} \;`
 works, while a test following `-exec`, `-print`, `-delete`, or another action
 is refused because backend filtering cannot preserve that evaluation order.
-All actions (`-exec`, `-print`, `-print0`, `-printf`, `-ls`, and `-delete`)
-refuse placement under `-o`, negation, or parentheses. Tests may be grouped
-before a trailing action. Action operands retain whole filenames, including
-embedded newlines, across mount boundaries. `-printf` must be the only action;
+Under `-o` or parentheses an action ends its `-a` chain and the whole
+expression holds one action, so `find . -path ./skip -prune -o -type f -print`
+and `-name a -print -o -name b -print` run as GNU runs them, while `-print`
+on one arm and `-print0` or a different `-exec` on the other, an action that
+is not last in its chain, or an action under `!` is refused. `-exec ... \;`
+is true only when its command exits 0, which is learned after the walk, so
+under `-o` it may stand only where nothing follows it (`-type d -exec false
+\; -o -prune` is refused), while `-exec ... {} +` is true regardless, as in
+GNU, and sits anywhere an action may. `-prune` skips a
+directory's contents, a mount nested under that directory included (and a
+file it reaches skips nothing); it does nothing under `-depth`, and GNU's
+refusal of `-prune` with `-delete` is kept unless `-depth` is spelled out. `-path` matches the row as it prints, under the
+operand as typed. Action operands retain whole filenames, including embedded
+newlines, across mount boundaries. `-printf` must be the only action;
 combining it with other actions or repeating it is refused.
 `-delete` runs where it is written, so a later `-exec` sees the row gone, and
 it turns on `-depth`, which lists a directory after its contents. `-newer FILE`
@@ -243,8 +255,12 @@ dates are refused. `-newer` and `-newermt` must be in a top-level AND chain;
 placing them under OR, negation, or parentheses is refused. Repeated time
 tests in that chain intersect, so `-newer old -newer new` keeps only what is
 newer than both; `-mtime` tests under `-o` widen to the union of their
-windows, which can match more than GNU. A repeated `-print` prints each row
-once per occurrence, as in GNU.
+windows, which can match more than GNU, while a `-prune` on the other arm
+still fires exactly where GNU's does. A time test keeps its place before
+or after `-prune`: `find d -newermt X -prune` skips the contents of the
+directories newer than X alone, and `-prune -newermt X` skips every
+directory's contents and prints the newer ones, as GNU orders them. A
+repeated `-print` prints each row once per occurrence, as in GNU.
 
 ## Supported bash syntax
 
@@ -261,7 +277,7 @@ Mirage Bash is a tree-sitter-bash parser plus a custom executor. It implements t
 - **Builtins:** `cd`, `pwd`, `echo`, `printf`, `printenv`, `read`, `source`, `.`, `eval`, `export`, `unset`, `local`, `declare` (including `-A`), `let`, `set`, `shopt`, `alias`, `umask`, `mapfile`, `shift`, `exec` (redirect-only form), `disown`, `trap` (no-op), `test`, `[`, `[[`, `true`, `false`, `sleep`, `xargs`, `timeout`, `bash`, `sh`, `python`, `python3`, `man`, `command`, `type`, `which`.
 - **Builtin options (GNU semantics):** `echo -n/-e/-E` (leading-word option rule: `echo hi -n` prints `hi -n`), `read -r`, `xargs -n/-0/-d/-r/--` (batching, GNU exit codes: `123` when an invocation fails, `126`/`127` stop the run), `timeout DURATION` with `s`/`m`/`h`/`d` suffixes (kills at the deadline with exit `124`, usage errors exit `125`). `shift` and `return` report bash's `numeric argument required` errors, and `shift` past `$#` is bash's silent exit `1`. `test`/`[`/`[[` support the file-pair operators `-nt`, `-ot` and `-ef` (`-ef` means the same resolved path: a mount has no device or inode).
 - **Name lookup:** `type name` reports what a name resolves to (`type -t` prints one of `keyword`, `function`, `cli`, `builtin`; `type -a` lists every layer holding the name), `which name` prints the name of anything runnable (there is no PATH, so there is no path to print) and reports a miss through exit `1` alone, and `man name` renders a page: a command's spec, or an installed CLI's own `--help` tree (`man linear issue create`).
-- **Globs:** `*`, `?`, `[...]` classes and `[!...]` negation (Python `fnmatch` semantics in both implementations), resolved by the shell or pushed down to the resource.
+- **Globs:** `*`, `?`, `[...]` classes and `[!...]` negation (Python `fnmatch` semantics in both implementations), resolved by the shell or pushed down to the VFS.
 - **Comments:** `#`.
 
 ### Unsupported (returns clear error)
@@ -291,7 +307,7 @@ Keeping a session away from a mount entirely is a **hide**, written in the role 
 
 This is a soft boundary, enforced inside the daemon process, not an OS or process-level isolation. Use it to shrink the blast radius of prompt-injection in multi-agent workspaces: a Slack-only agent cannot pivot to read `/linear`, `/github`, or any other mount its role hides. A FUSE mountpoint is served under the default unrestricted view unless it was added for a session (`add_fuse_mount(prefix, session_id=...)` in Python, `addFuseMount(prefix, mountpoint, sessionId)` in TypeScript), in which case every op through it runs under that session's grants.
 
-Both halves fire for every code path that reaches a mount: shell commands (`cat`, `ls`, ...), redirects (`>`, `<`), cross-mount `cp`/`mv`, `wget -O`, `curl -o`, command substitution `$(...)`, subshells `(...)`, pipes, `&&`/`||` chains, background jobs, and the programmatic `ws.fs.read/write/...` API. The history view (`/.bash_history`, which the `history` builtin and the GNU histfile render from) and the implicit scratch root (`/`, where stateless text-processing commands like `wc` resolve when given no path) stay reachable unless a role hides them.
+Both halves fire for every code path that reaches a mount: shell commands (`cat`, `ls`, ...), redirects (`>`, `<`), cross-mount `cp`/`mv`, `wget -O`, `curl -o`, command substitution `$(...)`, subshells `(...)`, pipes, `&&`/`||` chains, background jobs, and the programmatic `ws.vfs.read/write/...` API. The history view (`/.bash_history`, which the `history` builtin and the GNU histfile render from) and the implicit scratch root (`/`, where stateless text-processing commands like `wc` resolve when given no path) stay reachable unless a role hides them.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -307,8 +323,8 @@ Both halves fire for every code path that reaches a mount: shell commands (`cat`
                       profile={"paths": {"hide": ["/linear", "/s3"]}})
     ws.create_session("data-agent", mounts={"/s3": "rw", "/github": "r"})
 
-    await ws.execute("ls /slack", session_id="slack-agent")  # ok
-    await ws.execute("cat /linear/issues/SEC-42",
+    await ws.shell("ls /slack", session_id="slack-agent")  # ok
+    await ws.shell("cat /linear/issues/SEC-42",
                      session_id="slack-agent")
     # exit_code=1, stderr=b"cat: /linear/issues/SEC-42: "
     #                     b"No such file or directory\n"
@@ -342,7 +358,7 @@ Agent harnesses commonly fan out tool calls in parallel, each with its own `cwd`
     async def tool_call(cmd: str, cwd: str, env: dict[str, str], timeout: float):
         cancel = asyncio.Event()
         asyncio.get_event_loop().call_later(timeout, cancel.set)
-        return await ws.execute(cmd, cwd=cwd, env=env, cancel=cancel)
+        return await ws.shell(cmd, cwd=cwd, env=env, cancel=cancel)
 
     results = await asyncio.gather(
         tool_call("ls", "/data", {"DEBUG": "1"}, 5.0),
@@ -358,7 +374,7 @@ Agent harnesses commonly fan out tool calls in parallel, each with its own `cwd`
       env: Record<string, string>,
       timeoutMs: number,
     ) {
-      return ws.execute(cmd, { cwd, env, signal: AbortSignal.timeout(timeoutMs) })
+      return ws.shell(cmd, { cwd, env, signal: AbortSignal.timeout(timeoutMs) })
     }
 
     const results = await Promise.all([

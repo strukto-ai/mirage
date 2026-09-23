@@ -30,8 +30,8 @@ from mirage.runtime.sandbox.smolvm import SmolvmRuntime
 runtime = SmolvmRuntime(captures=["python3"],
                         config={"machine": "mirage-box"})
 ws = Workspace({"/data": ...}, mode=MountMode.EXEC,
-               runtimes=[runtime, "vfs"])
-await ws.execute("python3 job.py", cwd="/data")
+               runtimes=[runtime, "workspace"])
+await ws.shell("python3 job.py", cwd="/data")
 ```
 
 The smolvm CLI is the transport, so there is no SDK dependency or Mirage

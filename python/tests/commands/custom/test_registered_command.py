@@ -27,21 +27,19 @@ def test_registered_command_dataclass():
     rc = RegisteredCommand(
         name="cat",
         spec=SPECS["cat"],
-        resource="s3",
+        vfs="s3",
         filetype=None,
         fn=dummy,
     )
     assert rc.name == "cat"
-    assert rc.resource == "s3"
+    assert rc.vfs == "s3"
     assert rc.filetype is None
     assert rc.fn is dummy
 
 
 def test_command_decorator_attaches_metadata():
 
-    @command("myls",
-             resource="s3",
-             spec=CommandSpec(rest=Operand(type="path")))
+    @command("myls", vfs="s3", spec=CommandSpec(rest=Operand(type="path")))
     async def my_ls(backend, paths, *texts, stdin=None, **flags):
         return b"ok", IOResult()
 
@@ -49,26 +47,26 @@ def test_command_decorator_attaches_metadata():
     assert len(my_ls._registered_commands) == 1
     rc = my_ls._registered_commands[0]
     assert rc.name == "myls"
-    assert rc.resource == "s3"
+    assert rc.vfs == "s3"
     assert rc.filetype is None
 
 
 def test_command_decorator_stacking():
 
-    @command("cat", resource="s3", spec=SPECS["cat"])
-    @command("cat", resource="ram", spec=SPECS["cat"])
+    @command("cat", vfs="s3", spec=SPECS["cat"])
+    @command("cat", vfs="ram", spec=SPECS["cat"])
     async def cat_impl(backend, paths, *texts, stdin=None, **flags):
         return b"ok", IOResult()
 
     assert len(cat_impl._registered_commands) == 2
-    backends = {rc.resource for rc in cat_impl._registered_commands}
+    backends = {rc.vfs for rc in cat_impl._registered_commands}
     assert backends == {"s3", "ram"}
 
 
 def test_command_decorator_with_filetype():
 
     @command("cat",
-             resource="s3",
+             vfs="s3",
              filetype=".avro",
              spec=CommandSpec(rest=Operand(type="path")))
     async def cat_avro(backend, paths, *texts, stdin=None, **flags):
@@ -76,12 +74,12 @@ def test_command_decorator_with_filetype():
 
     rc = cat_avro._registered_commands[0]
     assert rc.filetype == ".avro"
-    assert rc.resource == "s3"
+    assert rc.vfs == "s3"
 
 
 def test_command_decorator_requires_spec():
     with pytest.raises(TypeError):
 
-        @command("myls", resource="s3")
+        @command("myls", vfs="s3")
         async def my_ls(backend, paths, *texts, stdin=None, **flags):
             return b"ok", IOResult()

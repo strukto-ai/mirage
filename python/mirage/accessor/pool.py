@@ -166,7 +166,7 @@ class LoopClientCache:
         cannot skip the rest, and the entry that failed stays for a later
         attempt. The failure is then raised rather than logged, because a
         caller that swallows it goes on to record itself as closed (see
-        `Resource.close`), and a closed resource returns early the next time,
+        `VFS.close`), and a closed VFS returns early the next time,
         so nothing could ever reach the retained entry again.
 
         Raises:

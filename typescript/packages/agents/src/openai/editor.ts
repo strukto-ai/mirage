@@ -20,13 +20,13 @@ import type { ApplyPatchOperation, ApplyPatchResult, Editor } from '@openai/agen
 async function ensureParent(ws: Workspace, path: string): Promise<void> {
   const parent = gnuDirname(path)
   if (parent === '/' || parent === '' || parent === '.') return
-  if (await ws.fs.exists(parent)) return
+  if (await ws.vfs.exists(parent)) return
   await ensureParent(ws, parent)
   try {
-    await ws.fs.mkdir(parent)
+    await ws.vfs.mkdir(parent)
   } catch (err) {
     // Tolerate mkdir race: another caller may have created the dir between exists() and mkdir().
-    if (!(await ws.fs.exists(parent))) throw err
+    if (!(await ws.vfs.exists(parent))) throw err
   }
 }
 
@@ -38,7 +38,7 @@ export class MirageEditor implements Editor {
   ): Promise<ApplyPatchResult> {
     await ensureParent(this.ws, op.path)
     const content = applyDiff('', op.diff, 'create')
-    await this.ws.fs.writeFile(op.path, content)
+    await this.ws.vfs.writeFile(op.path, content)
     return { status: 'completed' }
   }
 
@@ -47,22 +47,22 @@ export class MirageEditor implements Editor {
   ): Promise<ApplyPatchResult> {
     let current: string
     try {
-      current = await this.ws.fs.readFileText(op.path)
+      current = await this.ws.vfs.readFileText(op.path)
     } catch {
       return { status: 'failed', output: `File not found: ${op.path}` }
     }
     const next = applyDiff(current, op.diff)
-    await this.ws.fs.writeFile(op.path, next)
+    await this.ws.vfs.writeFile(op.path, next)
     return { status: 'completed' }
   }
 
   async deleteFile(
     op: Extract<ApplyPatchOperation, { type: 'delete_file' }>,
   ): Promise<ApplyPatchResult> {
-    if (!(await this.ws.fs.exists(op.path))) {
+    if (!(await this.ws.vfs.exists(op.path))) {
       return { status: 'failed', output: `File not found: ${op.path}` }
     }
-    await this.ws.fs.unlink(op.path)
+    await this.ws.vfs.unlink(op.path)
     return { status: 'completed' }
   }
 }

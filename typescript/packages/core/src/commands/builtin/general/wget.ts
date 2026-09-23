@@ -129,7 +129,7 @@ async function wgetCommand(
 
 export const GENERAL_WGET = command({
   name: 'wget',
-  resource: null,
+  vfs: null,
   spec: specOf('wget'),
   fn: wgetCommand,
 })

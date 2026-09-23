@@ -14,14 +14,14 @@
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { buildTree, emitStartPath, keep, startBasename } from '../../commands/builtin/find_eval.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 function strip(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let p = path.virtual
   if (prefix !== '' && p.startsWith(prefix)) p = p.slice(prefix.length) || '/'
   return stripSlash(p)

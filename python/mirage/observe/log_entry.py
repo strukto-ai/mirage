@@ -36,7 +36,7 @@ class LogEntry:
         timestamp (int): UTC epoch milliseconds.
         op (str | None): Operation name (for type="op").
         path (str | None): Virtual path (for type="op").
-        source (str | None): Resource name (for type="op").
+        source (str | None): VFS name (for type="op").
         bytes (int | None): Bytes transferred (for type="op").
         duration_ms (int | None): Duration in ms (for type="op").
         command (str | None): Shell command (for type="command").

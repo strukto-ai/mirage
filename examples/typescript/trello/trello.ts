@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
   MountMode,
-  TrelloResource,
+  TrelloVFS,
   Workspace,
   type FileStat,
   type TrelloConfig,
@@ -40,7 +40,7 @@ function buildConfig(): TrelloConfig {
 
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   if (r.exitCode !== 0 && r.stderrText !== '') {
     console.log(`  STDERR: ${r.stderrText.slice(0, 200)}`)
   }
@@ -53,7 +53,7 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 
 async function main(): Promise<void> {
   const ws = new Workspace(
-    { '/trello': new TrelloResource(buildConfig()) },
+    { '/trello': new TrelloVFS(buildConfig()) },
     { mode: MountMode.WRITE },
   )
   try {
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     // ── glob expansion: the workspace segment is the pattern, the
     // literal tail keeps walking (lists workspaces once, then filters).
     console.log('\n=== echo /trello/workspaces/*/boards (mid-path glob) ===')
-    const globR = await ws.execute('echo /trello/workspaces/*/boards')
+    const globR = await ws.shell('echo /trello/workspaces/*/boards')
     const globOut = globR.stdoutText.trim()
     console.log(`  ${globOut.slice(0, 200)}`)
     if (!globOut.endsWith('/boards')) {
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
     // A glob that matches nothing stays the literal word, so the
     // command reports it like GNU coreutils.
     console.log('\n=== cat /trello/workspaces/zz-none-*/workspace.json (no match) ===')
-    const litR = await ws.execute('cat /trello/workspaces/zz-none-*/workspace.json')
+    const litR = await ws.shell('cat /trello/workspaces/zz-none-*/workspace.json')
     const litErr = litR.stderrText.trim()
     console.log(`  exit=${litR.exitCode}  ${litErr.slice(0, 120)}`)
     if (litR.exitCode !== 1 || !litErr.includes('zz-none-*')) {
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`\n=== metadata overlay on ${wsBase}/workspace.json ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "${wsBase}/workspace.json" && chown 500:dev "${wsBase}/workspace.json" && touch -t 202601021530 "${wsBase}/workspace.json"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

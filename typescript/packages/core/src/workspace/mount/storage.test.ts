@@ -13,21 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { BaseResource, type Resource } from '../../resource/base.ts'
+import { BaseVFS, type VFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from './registry.ts'
-import { makeStorageKey, resourceStorageId } from './storage.ts'
+import { makeStorageKey, vfsStorageId } from './storage.ts'
 
-class StoreResource extends BaseResource implements Resource {
+class StoreVFS extends BaseVFS implements VFS {
   readonly kind = 'ram'
   open(): Promise<void> {
     return Promise.resolve()
   }
 }
 
-// A resource pinned by config, the way disk/s3/redis are: two instances
+// A VFS pinned by config, the way disk/s3/redis are: two instances
 // naming one target must compare equal.
-class RootedResource extends BaseResource implements Resource {
+class RootedVFS extends BaseVFS implements VFS {
   readonly kind = 'disk'
   constructor(readonly root: string) {
     super()
@@ -40,10 +40,10 @@ class RootedResource extends BaseResource implements Resource {
   }
 }
 
-// Implements Resource without extending BaseResource, so it has no
+// Implements VFS without extending BaseVFS, so it has no
 // storageId at all — and has to spell the state pair the base would
 // otherwise supply.
-class BareResource implements Resource {
+class BareVFS implements VFS {
   readonly kind = 'bare'
   open(): Promise<void> {
     return Promise.resolve()
@@ -63,57 +63,57 @@ const spec = (virtual: string): PathSpec =>
   new PathSpec({
     virtual,
     directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-    resourcePath: virtual.replace(/^\/+/, ''),
+    vfsPath: virtual.replace(/^\/+/, ''),
   })
 
-const keyFor = (mounts: Record<string, Resource>): ((p: PathSpec) => string) =>
+const keyFor = (mounts: Record<string, VFS>): ((p: PathSpec) => string) =>
   makeStorageKey(new MountRegistry(mounts, MountMode.WRITE))
 
 describe('makeStorageKey', () => {
-  it('treats one resource at two prefixes as one storage (#154)', () => {
-    const shared = new StoreResource()
+  it('treats one VFS at two prefixes as one storage (#154)', () => {
+    const shared = new StoreVFS()
     const key = keyFor({ '/m1': shared, '/m2': shared })
     expect(key(spec('/m1/x.txt'))).toBe(key(spec('/m2/x.txt')))
   })
 
-  it('keeps distinct resources distinct so a real move still works', () => {
-    const key = keyFor({ '/m1': new StoreResource(), '/m2': new StoreResource() })
+  it('keeps distinct mounts distinct so a real move still works', () => {
+    const key = keyFor({ '/m1': new StoreVFS(), '/m2': new StoreVFS() })
     expect(key(spec('/m1/x.txt'))).not.toBe(key(spec('/m2/x.txt')))
   })
 
   it('uses the config identity, so two instances on one root match', () => {
-    const key = keyFor({ '/d1': new RootedResource('/tmp/r'), '/d2': new RootedResource('/tmp/r') })
+    const key = keyFor({ '/d1': new RootedVFS('/tmp/r'), '/d2': new RootedVFS('/tmp/r') })
     expect(key(spec('/d1/x.txt'))).toBe(key(spec('/d2/x.txt')))
   })
 
   it('keeps different roots separate', () => {
-    const key = keyFor({ '/d1': new RootedResource('/tmp/a'), '/d2': new RootedResource('/tmp/b') })
+    const key = keyFor({ '/d1': new RootedVFS('/tmp/a'), '/d2': new RootedVFS('/tmp/b') })
     expect(key(spec('/d1/x.txt'))).not.toBe(key(spec('/d2/x.txt')))
   })
 
   it('keeps distinct paths in one storage distinct', () => {
-    const shared = new StoreResource()
+    const shared = new StoreVFS()
     const key = keyFor({ '/m1': shared, '/m2': shared })
     expect(key(spec('/m1/x.txt'))).not.toBe(key(spec('/m2/other.txt')))
   })
 
   it('preserves the ancestor boundary cp/mv test with startsWith(key + "/")', () => {
-    const shared = new StoreResource()
+    const shared = new StoreVFS()
     const key = keyFor({ '/m1': shared, '/m2': shared })
     expect(key(spec('/m2/dir/sub')).startsWith(`${key(spec('/m1/dir'))}/`)).toBe(true)
     expect(key(spec('/m2/dirty')).startsWith(`${key(spec('/m1/dir'))}/`)).toBe(false)
   })
 
-  it('keeps distinct bare resources distinct', () => {
-    const key = keyFor({ '/b1': new BareResource(), '/b2': new BareResource() })
+  it('keeps distinct bare mounts distinct', () => {
+    const key = keyFor({ '/b1': new BareVFS(), '/b2': new BareVFS() })
     expect(key(spec('/b1/x.txt'))).not.toBe(key(spec('/b2/x.txt')))
   })
 
   it('gives one storageId-less object one identity across two prefixes', () => {
-    // Browser resources implement Resource directly and have no
+    // Browser VFS classes implement VFS directly and have no
     // storageId. Keying on the mount prefix handed the same object two
     // identities, so a self-move still relayed a write then an unlink.
-    const shared = new BareResource()
+    const shared = new BareVFS()
     const key = keyFor({ '/b1': shared, '/b2': shared })
     expect(key(spec('/b1/x.txt'))).toBe(key(spec('/b2/x.txt')))
   })
@@ -122,23 +122,23 @@ describe('makeStorageKey', () => {
     // /a rooted at /srv/data and /b at /srv/data/sub make /a/sub/x and
     // /b/x one file; separate key components kept them apart.
     const key = keyFor({
-      '/a': new RootedResource('/srv/data'),
-      '/b': new RootedResource('/srv/data/sub'),
+      '/a': new RootedVFS('/srv/data'),
+      '/b': new RootedVFS('/srv/data/sub'),
     })
     expect(key(spec('/a/sub/x.txt'))).toBe(key(spec('/b/x.txt')))
   })
 
   it('does not fuse roots that merely share a name prefix', () => {
     const key = keyFor({
-      '/a': new RootedResource('/srv/data'),
-      '/b': new RootedResource('/srv/dataX'),
+      '/a': new RootedVFS('/srv/data'),
+      '/b': new RootedVFS('/srv/dataX'),
     })
     expect(key(spec('/a/y.txt'))).not.toBe(key(spec('/b/y.txt')))
   })
 
-  it('resourceStorageId is stable per object', () => {
-    const bare = new BareResource()
-    expect(resourceStorageId(bare)).toBe(resourceStorageId(bare))
-    expect(resourceStorageId(bare)).not.toBe(resourceStorageId(new BareResource()))
+  it('vfsStorageId is stable per object', () => {
+    const bare = new BareVFS()
+    expect(vfsStorageId(bare)).toBe(vfsStorageId(bare))
+    expect(vfsStorageId(bare)).not.toBe(vfsStorageId(new BareVFS()))
   })
 })

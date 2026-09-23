@@ -39,7 +39,7 @@ probe() {
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
 env:
   APP_NAME: lit-app-name
   EDITOR:
@@ -86,7 +86,7 @@ YML
   cat > "$work/bad.yaml" <<YML
 mounts:
   /data:
-    resource: ram
+    vfs: ram
 env:
   X:
     value: v

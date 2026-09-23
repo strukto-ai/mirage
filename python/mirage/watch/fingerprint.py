@@ -20,8 +20,9 @@ def stat_fingerprint(etag: str | None, modified: str | None,
     The size always, joined to the backend's native version (ETag/rev,
     the same value backends put in ``FileStat.fingerprint``) when the
     listing carries one and to the last-modified stamp when it does
-    not. Distinct from ``mirage.cache.file.utils.default_fingerprint``,
-    which hashes the content bytes themselves.
+    not. Distinct from the file cache's stored fingerprint
+    (``mirage.cache.file.entry.CacheEntry.fingerprint``), which is
+    whatever token the backend returned for the bytes it cached, or None.
 
     The size rides along with the ETag because a native version is not
     a sufficient validator on its own: a backend can report current

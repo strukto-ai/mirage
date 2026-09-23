@@ -1,6 +1,6 @@
-from mirage.commands.builtin.grep_offsets import (decode_line, encode_line,
-                                                  line_offsets, match_offset,
-                                                  prefix_of)
+from mirage.commands.builtin.grep_offsets import (MatchOffsets, decode_line,
+                                                  encode_line, line_offsets,
+                                                  match_offset, prefix_of)
 
 
 def test_line_offsets_count_the_stripped_terminator():
@@ -72,3 +72,8 @@ def test_line_offsets_are_exact_over_an_invalid_byte():
 def test_match_offset_counts_an_invalid_byte_as_one():
     # `grep -bo a` over `\xffa\n` is `1:a` on GNU grep 3.11.
     assert match_offset(0, decode_line(b"\xffa"), 1) == 1
+
+
+def test_incremental_offsets_preserve_unicode_and_escaped_bytes():
+    offsets = MatchOffsets(10, "é😀a\udcffé😀a")
+    assert [offsets.at(2), offsets.at(6)] == [16, 24]

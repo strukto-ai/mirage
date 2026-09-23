@@ -32,7 +32,7 @@ async function runSplit(
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'ram' } as never,
+    vfs: { kind: 'ram' } as never,
   } as CommandOpts
   await splitGeneric(
     [],

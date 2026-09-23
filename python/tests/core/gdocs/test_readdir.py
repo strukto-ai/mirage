@@ -38,7 +38,7 @@ def index():
 async def test_readdir_root(accessor, index):
     result = await readdir(
         accessor,
-        PathSpec(resource_path=mount_key("/gdocs", "/gdocs"),
+        PathSpec(vfs_path=mount_key("/gdocs", "/gdocs"),
                  virtual="/gdocs",
                  directory="/gdocs"), index)
     assert result == ["/gdocs/owned", "/gdocs/shared"]
@@ -63,7 +63,7 @@ async def test_readdir_owned(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned"), index)
         assert len(result) == 1
@@ -89,7 +89,7 @@ async def test_readdir_shared(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/shared", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/shared", "/gdocs"),
                      virtual="/gdocs/shared",
                      directory="/gdocs/shared"), index)
         assert len(result) == 1
@@ -101,8 +101,8 @@ async def test_readdir_file_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned/file.gdoc.json",
-                                             "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned/file.gdoc.json",
+                                        "/gdocs"),
                      virtual="/gdocs/owned/file.gdoc.json",
                      directory="/gdocs/owned/file.gdoc.json"), index)
 
@@ -112,7 +112,7 @@ async def test_readdir_invalid_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/bogus", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/bogus", "/gdocs"),
                      virtual="/gdocs/bogus",
                      directory="/gdocs/bogus"), index)
 
@@ -129,8 +129,7 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
     with patch("mirage.core.gdocs.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned/2026-05-*",
-                                             "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned/2026-05-*", "/gdocs"),
                      virtual="/gdocs/owned/2026-05-*",
                      directory="/gdocs/owned",
                      pattern="2026-05-*"), index)
@@ -173,14 +172,13 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
     with patch("mirage.core.gdocs.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned/2026-05-*",
-                                             "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned/2026-05-*", "/gdocs"),
                      virtual="/gdocs/owned/2026-05-*",
                      directory="/gdocs/owned",
                      pattern="2026-05-*"), index)
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned"), index)
 
@@ -225,13 +223,12 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
     with patch("mirage.core.gdocs.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned"), index)
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned/2026-05-*",
-                                             "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned/2026-05-*", "/gdocs"),
                      virtual="/gdocs/owned/2026-05-*",
                      directory="/gdocs/owned",
                      pattern="2026-05-*"), index)
@@ -250,7 +247,7 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
     with patch("mirage.core.gdocs.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned"), index)
 
@@ -269,7 +266,7 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
     with patch("mirage.core.gdocs.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned/*foo*", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned/*foo*", "/gdocs"),
                      virtual="/gdocs/owned/*foo*",
                      directory="/gdocs/owned",
                      pattern="*foo*"), index)
@@ -295,8 +292,7 @@ async def test_readdir_filtered_then_stat_succeeds(accessor, index):
     ) as mock_list:
         listed = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/shared/2026-05-*",
-                                             "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/shared/2026-05-*", "/gdocs"),
                      virtual="/gdocs/shared/2026-05-*",
                      directory="/gdocs/shared",
                      pattern="2026-05-*"), index)
@@ -304,7 +300,7 @@ async def test_readdir_filtered_then_stat_succeeds(accessor, index):
         matched = listed[0]
         result = await stat(
             accessor,
-            PathSpec(resource_path=mount_key(matched, "/gdocs"),
+            PathSpec(vfs_path=mount_key(matched, "/gdocs"),
                      virtual=matched,
                      directory=matched),
             index,
@@ -350,12 +346,12 @@ async def test_readdir_owned_newest_first_across_cache(accessor, index):
     ) as mock_list:
         first = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned"), index)
         second = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned"), index)
         assert mock_list.call_count == 1
@@ -385,7 +381,7 @@ async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned"), index)
 
@@ -418,7 +414,7 @@ async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
     async def fake_list(token_manager, mime_type=None, **kwargs):
         return files, complete["v"]
 
-    owned = PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+    owned = PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned")
     with patch("mirage.core.gdocs.readdir.list_all_files", new=fake_list):

@@ -88,7 +88,7 @@ async def read_stream(
 
 async def range_read(accessor: S3Accessor, path_spec: PathSpec, start: int,
                      end: int) -> bytes:
-    """Read a byte range, in the resource API's end-exclusive spelling.
+    """Read a byte range, in the VFS API's end-exclusive spelling.
 
     Args:
         accessor (S3Accessor): S3 accessor.

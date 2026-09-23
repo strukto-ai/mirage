@@ -34,7 +34,7 @@ import { isDirEntry } from './tree_entry.ts'
  */
 function hfHubWalk(accessor: HfHubAccessor) {
   return async function* walk(root: PathSpec): AsyncIterable<WalkEntry> {
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const tree = await fetchTree(accessor)
     // The tree just fetched is exactly what the accessor holds, and find, du
     // and every no-index read consult it. Discarding it here would leave them

@@ -17,7 +17,7 @@ import { materialize, IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
 import { eisdir, fsStrerror } from '../../../../utils/errors.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { resolvePathStat } from '../links/index.ts'
@@ -94,7 +94,7 @@ export async function readScriptFile(
   dispatch: DispatchFn,
   name: string,
   path: string,
-  session: Session,
+  session: SessionState,
 ): Promise<[string, null] | [null, Result]> {
   try {
     return [await readScriptText(dispatch, path, session.cwd), null]

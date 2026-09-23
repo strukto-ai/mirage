@@ -18,8 +18,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 
 load_dotenv(".env.development")
 
@@ -30,8 +30,8 @@ config = S3Config(
     aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
 )
 
-s3 = S3Resource(config)
-mem = RAMResource()
+s3 = S3VFS(config)
+mem = RAMVFS()
 ws = Workspace(
     {
         "/s3/": s3,
@@ -56,21 +56,21 @@ for i, line in enumerate(lines[:5]):
 async def main():
     print("=== Python exec: read first 5 lines of JSONL from S3 ===\n")
 
-    await ws.execute("mkdir /work/scripts")
-    await ws.execute(f"echo '{SCRIPT}' > /work/scripts/read_jsonl.py")
+    await ws.shell("mkdir /work/scripts")
+    await ws.shell(f"echo '{SCRIPT}' > /work/scripts/read_jsonl.py")
 
     print("--- python3 /work/scripts/read_jsonl.py ---")
-    result = await ws.execute("python3 /work/scripts/read_jsonl.py")
+    result = await ws.shell("python3 /work/scripts/read_jsonl.py")
     print(await result.stdout_str())
     if result.stderr:
         print("STDERR:", await result.stderr_str())
     print(f"Exit code: {result.exit_code}")
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"Stats: {len(records)} ops, {total} bytes transferred")
 
     print("\n--- shell equivalent: head -n 5 ---")
-    result = await ws.execute("head -n 5 /s3/data/example.jsonl")
+    result = await ws.shell("head -n 5 /s3/data/example.jsonl")
     print(await result.stdout_str())
 
 

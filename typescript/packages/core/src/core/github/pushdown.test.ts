@@ -32,7 +32,7 @@ describe('scopeRelativeKey', () => {
     const p = new PathSpec({
       virtual: '/github/src',
       directory: '/github',
-      resourcePath: mountKey('/github/src', '/github'),
+      vfsPath: mountKey('/github/src', '/github'),
     })
     expect(scopeRelativeKey(p)).toBe('/src')
   })
@@ -41,13 +41,13 @@ describe('scopeRelativeKey', () => {
     const p = new PathSpec({
       virtual: '/github',
       directory: '/',
-      resourcePath: mountKey('/github', '/github'),
+      vfsPath: mountKey('/github', '/github'),
     })
     expect(scopeRelativeKey(p)).toBe('/')
   })
 
   it('passes through unprefixed paths', () => {
-    const p = new PathSpec({ resourcePath: 'src', virtual: '/src', directory: '/' })
+    const p = new PathSpec({ vfsPath: 'src', virtual: '/src', directory: '/' })
     expect(scopeRelativeKey(p)).toBe('/src')
   })
 })

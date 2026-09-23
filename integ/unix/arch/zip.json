@@ -255,6 +255,101 @@
         "r",
         "y"
       ]
+    },
+    {
+      "id": "arch_zip_dot_stores_its_contents_at_the_root",
+      "seq": 910090,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zdot/sub && echo one > /data/zdot/a.txt && echo two > /data/zdot/sub/b.txt && (cd /data/zdot && zip -r /data/zdot.zip .) && unzip -Z1 /data/zdot.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "  adding: a.txt\n  adding: sub/\n  adding: sub/b.txt\na.txt\nsub/\nsub/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
+    },
+    {
+      "id": "arch_zip_dot_slash_glob_stores_bare_names",
+      "seq": 910091,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zstar/sub && echo one > /data/zstar/a.txt && echo two > /data/zstar/sub/b.txt && (cd /data/zstar && zip -qr /data/zstar.zip ./*) && unzip -Z1 /data/zstar.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nsub/\nsub/b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q",
+        "r"
+      ]
+    },
+    {
+      "id": "arch_zip_dot_without_r_has_nothing_to_do",
+      "seq": 910092,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/znr && echo one > /data/znr/a.txt && (cd /data/znr && zip -q /data/znr.zip .)",
+      "expect": {
+        "exit": 12,
+        "stdout": "",
+        "stderr": "\nzip error: Nothing to do! (/data/znr.zip)\n"
+      },
+      "flags": [
+        "q"
+      ]
+    },
+    {
+      "id": "arch_zip_repeated_name_refuses_the_run",
+      "seq": 910093,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zrep && echo one > /data/zrep/a.txt && (cd /data/zrep && zip /data/zrep.zip ./a.txt a.txt)",
+      "expect": {
+        "exit": 16,
+        "stdout": "",
+        "stderr": "\tzip warning:   first full name: ./a.txt\n                      second full name: a.txt\n                     name in zip file repeated: a.txt\n\nzip error: Invalid command arguments (cannot repeat names in zip file)\n"
+      }
+    },
+    {
+      "id": "arch_zip_exclude_pattern_loses_its_dot_slash",
+      "seq": 910094,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "mkdir -p /data/zx/sub && echo one > /data/zx/a.txt && echo two > /data/zx/sub/b.txt && (cd /data/zx && zip -qr /data/zx.zip . -x './sub/*') && unzip -Z1 /data/zx.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "q",
+        "r",
+        "x"
+      ]
     }
   ]
 }

@@ -17,10 +17,10 @@ independent Slack implementation uses
 
 ```typescript
 import { SLACK } from '@struktoai/mirage-core'
-import { SlackResource, Workspace } from '@struktoai/mirage-node'
+import { SlackVFS, Workspace } from '@struktoai/mirage-node'
 
 const config = { token: 'xoxb-...', searchToken: 'xoxp-...' }
-const ws = new Workspace({ '/slack': new SlackResource(config) })
+const ws = new Workspace({ '/slack': new SlackVFS(config) })
 ws.registerCli('slack', SLACK, config)
 ```
 

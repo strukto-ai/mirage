@@ -16,7 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
 import { setAttr } from '../../../session/state.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { exportedNames } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -32,7 +32,7 @@ import {
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
 
-function exportLines(session: Session, flags: Set<string>): string[] {
+function exportLines(session: SessionState, flags: Set<string>): string[] {
   // The exported set, not every shell variable: `X=hello` is absent and
   // `export Y=world` is present, which is what bash prints. -f selects
   // shell functions; mirage tracks no export attribute on functions, so
@@ -52,7 +52,7 @@ function exportLines(session: Session, flags: Set<string>): string[] {
 
 export async function handleExport(
   assignments: string[],
-  session: Session,
+  session: SessionState,
   state: SessionView | null = null,
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
 ): Promise<Result> {

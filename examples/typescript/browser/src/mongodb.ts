@@ -14,7 +14,7 @@
 
 import {
   HttpMongoDriver,
-  MongoDBResource,
+  MongoDBVFS,
   MountMode,
   Workspace,
 } from '@struktoai/mirage-browser'
@@ -30,7 +30,7 @@ function line(text: string, cls?: string): void {
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   const out = r.stdoutText.replace(/\s+$/, '')
   if (out !== '') line(out)
   const err = r.stderrText.replace(/\s+$/, '')
@@ -42,16 +42,16 @@ async function main(): Promise<void> {
   line('=== MongoDB via HTTP proxy (Vite middleware → mongodb driver in node) ===', 'ok')
 
   const driver = new HttpMongoDriver({ endpoint: '/api/mongo' })
-  const resource = new MongoDBResource({
+  const vfs = new MongoDBVFS({
     config: { uri: 'http://proxy', defaultDocLimit: 200 },
     driver,
   })
-  const ws = new Workspace({ '/mongodb/': resource }, { mode: MountMode.READ })
+  const ws = new Workspace({ '/mongodb/': vfs }, { mode: MountMode.READ })
 
   try {
     await run(ws, 'ls /mongodb')
 
-    const dbsRes = await ws.execute('ls /mongodb')
+    const dbsRes = await ws.shell('ls /mongodb')
     const dbs = dbsRes.stdoutText.split('\n').filter((s) => s.length > 0)
     if (dbs.length === 0) {
       line('no databases visible — set MONGODB_URI in .env.development', 'err')
@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     const target = dbs[0]!
     await run(ws, `ls /mongodb/${target}`)
 
-    const colsRes = await ws.execute(`ls /mongodb/${target}`)
+    const colsRes = await ws.shell(`ls /mongodb/${target}`)
     const cols = colsRes.stdoutText.split('\n').filter((s) => s.endsWith('.jsonl'))
     if (cols.length === 0) {
       line(`no collections in ${target}`, 'err')

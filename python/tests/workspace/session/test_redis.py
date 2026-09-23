@@ -19,8 +19,8 @@ import uuid
 import pytest
 import pytest_asyncio
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session.redis import RedisSessionStore
 from mirage.workspace.session.store import SessionStore
@@ -100,10 +100,10 @@ async def test_sessions_shared_across_workspaces(prefix):
     pointed at the same key prefix, with its mount grants intact."""
     store_a = RedisSessionStore(url=REDIS_URL, key_prefix=prefix)
     store_b = RedisSessionStore(url=REDIS_URL, key_prefix=prefix)
-    ws_a = Workspace({"/data": RAMResource()},
+    ws_a = Workspace({"/data": RAMVFS()},
                      mode=MountMode.EXEC,
                      session_store=store_a)
-    ws_b = Workspace({"/data": RAMResource()},
+    ws_b = Workspace({"/data": RAMVFS()},
                      mode=MountMode.EXEC,
                      session_store=store_b)
     try:

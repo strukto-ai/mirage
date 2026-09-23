@@ -35,7 +35,7 @@ function accessor(transport: LangfuseTransport) {
 }
 
 function spec(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: stripSlash(virtual) })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: stripSlash(virtual) })
 }
 
 const TRACES = { '/api/public/traces': { data: [{ id: 'present' }] } }

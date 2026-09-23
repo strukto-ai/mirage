@@ -38,7 +38,7 @@ afterEach(() => {
 describe('MirageOpenCodePlugin', () => {
   it('loads a workspace config and registers native tools', async () => {
     const dir = mkTempDir()
-    writeFileSync(join(dir, 'mirage.yaml'), 'mounts:\n  /:\n    resource: ram\n')
+    writeFileSync(join(dir, 'mirage.yaml'), 'mounts:\n  /:\n    vfs: ram\n')
 
     const hooks = await MirageOpenCodePlugin(pluginInput(dir))
 

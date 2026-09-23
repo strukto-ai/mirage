@@ -18,7 +18,7 @@ import type { PathSpec } from '../../types.ts'
 import type { TreeEntry } from './tree_entry.ts'
 
 export function scopeRelativeKey(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let key = path.virtual
   if (prefix !== '' && key.startsWith(prefix)) {
     key = key.slice(prefix.length) || '/'

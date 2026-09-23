@@ -1,18 +1,18 @@
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.stream import materialize
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.declare import handle_export
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, session_view, set_attr
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
-def seed_exported(session: Session, name: str, value: str) -> None:
+def seed_exported(session: SessionState, name: str, value: str) -> None:
     """Seed a variable the process-view printers will actually list.
 
     `env`, `printenv` and `export -p` show exported names only, so a
@@ -21,7 +21,7 @@ def seed_exported(session: Session, name: str, value: str) -> None:
     plain shell variable, which those three rightly never print.
 
     Args:
-        session (Session): the session being seeded.
+        session (SessionState): the session being seeded.
         name (str): variable name.
         value (str): the value to store.
     """
@@ -92,16 +92,16 @@ async def test_export_p_with_name_does_not_print():
 
 @pytest.mark.asyncio
 async def test_export_p_via_workspace():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute('export ZEP1=v1; export -p | grep ZEP1')
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell('export ZEP1=v1; export -p | grep ZEP1')
     assert io.exit_code == 0
     assert (io.stdout or b"") == b'declare -x ZEP1="v1"\n'
 
 
 @pytest.mark.asyncio
 async def test_export_invalid_option_via_workspace():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("export -z")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("export -z")
     assert io.exit_code == 2
     assert b"invalid option" in (io.stderr or b"")
 
@@ -158,7 +158,7 @@ async def test_export_reports_first_invalid_option():
 
 @pytest.mark.asyncio
 async def test_export_p_terminator_via_workspace():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute('export ZEP5=v5; export -p -- | grep ZEP5')
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell('export ZEP5=v5; export -p -- | grep ZEP5')
     assert io.exit_code == 0
     assert (io.stdout or b"") == b'declare -x ZEP5="v5"\n'

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import SessionAccessor
-from mirage.resource.trello.config import TrelloConfig
+from mirage.vfs.trello.config import TrelloConfig
 
 
 class TrelloAccessor(SessionAccessor):

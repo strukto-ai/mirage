@@ -20,14 +20,14 @@ import { detectScope, entityKind } from './scope.ts'
 import { EntityKind } from './types.ts'
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p })
+  return new PathSpec({ vfsPath: stripSlash(p), virtual: p, directory: p })
 }
 
 describe('detectScope', () => {
   it('returns root for "/"', () => {
     const s = detectScope(ps('/'))
     expect(s.kind).toBe('root')
-    expect(s.resourcePath).toBe('/')
+    expect(s.vfsPath).toBe('/')
   })
 
   it('returns root for empty string', () => {
@@ -114,7 +114,7 @@ describe('detectScope (path prefix)', () => {
     const path = new PathSpec({
       virtual: '/mongo/app/collections/users/documents.jsonl',
       directory: '/mongo/app/collections/users/',
-      resourcePath: mountKey('/mongo/app/collections/users/documents.jsonl', '/mongo'),
+      vfsPath: mountKey('/mongo/app/collections/users/documents.jsonl', '/mongo'),
     })
     const s = detectScope(path)
     expect(s.kind).toBe('documents')

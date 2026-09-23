@@ -1,7 +1,7 @@
 ---
 title: OCI Object Storage
 icon: server
-description: Set up Oracle Cloud Object Storage as a MIRAGE resource from Node or the browser.
+description: Set up Oracle Cloud Object Storage as a MIRAGE VFS from Node or the browser.
 ---
 
 OCI's S3 Compatibility API accepts AWS Signature V4 against `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com`. MIRAGE derives this endpoint from your namespace + region automatically.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { MountMode, OCIResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OCIVFS, Workspace } from '@struktoai/mirage-node'
 
-const oci = new OCIResource({
+const oci = new OCIVFS({
   bucket: process.env.OCI_BUCKET!,
   namespace: process.env.OCI_NAMESPACE!,
   region: process.env.OCI_REGION!,
@@ -26,7 +26,7 @@ const oci = new OCIResource({
 })
 
 const ws = new Workspace({ '/bucket/': oci }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -36,7 +36,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `OCIResource` is secret-free, your backend signs each operation using your OCI customer secret keys and returns a URL. OCI's S3-compat endpoint accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the OCI endpoint.
+The browser `OCIVFS` is secret-free, your backend signs each operation using your OCI customer secret keys and returns a URL. OCI's S3-compat endpoint accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the OCI endpoint.
 
 ### 1. Server: sign URLs with the OCI endpoint
 
@@ -99,9 +99,9 @@ OCI requires **path-style** URLs (`forcePathStyle: true`), virtual-hosted style 
 ### 2. Browser: wire it up
 
 ```ts
-import { MountMode, OCIResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, OCIVFS, Workspace } from '@struktoai/mirage-browser'
 
-const oci = new OCIResource({
+const oci = new OCIVFS({
   bucket: 'my-oci-bucket',
   namespace: 'idsiqbdbcr4i',
   region: 'us-ashburn-1',
@@ -135,4 +135,4 @@ oci os bucket update --bucket-name $OCI_BUCKET \
 OCI's CORS is **not** configurable via the S3-compat `PutBucketCors` call, the schema differs. Use the native OCI Console or CLI.
 </Note>
 
-See the [OCI resource](/python/resource/oci) docs for the equivalent Python wiring.
+See the [OCI VFS](/python/vfs/oci) docs for the equivalent Python wiring.

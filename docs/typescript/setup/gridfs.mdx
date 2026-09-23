@@ -4,7 +4,7 @@ icon: /images/mongodb-logo.svg
 description: Mount a MongoDB GridFS bucket as a MIRAGE filesystem from Node.
 ---
 
-`GridFSResource` mounts a MongoDB GridFS bucket (file metadata in `<bucket>.files`, content chunks in `<bucket>.chunks`) as a read-write filesystem. Files are keyed by slash-separated filenames, writes keep old revisions, and `find` pushes `-name`/`-type`/`-size` filters into the `fs.files` query server-side.
+`GridFSVFS` mounts a MongoDB GridFS bucket (file metadata in `<bucket>.files`, content chunks in `<bucket>.chunks`) as a read-write filesystem. Files are keyed by slash-separated filenames, writes keep old revisions, and `find` pushes `-name`/`-type`/`-size` filters into the `fs.files` query server-side.
 
 Setup steps for the connection URI live at [GridFS Credentials](/home/setup/gridfs).
 
@@ -15,26 +15,26 @@ pnpm add @struktoai/mirage-node mongodb
 ```
 
 ```ts
-import { GridFSResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { GridFSVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const gridfs = new GridFSResource({
+const gridfs = new GridFSVFS({
   uri: process.env.MONGODB_URI!,
   database: 'app',
   bucket: 'assets', // default "fs"
 })
 
 const ws = new Workspace({ '/gridfs/': gridfs }, { mode: MountMode.WRITE })
-await ws.execute('echo hello | tee /gridfs/notes/a.txt > /dev/null')
-const res = await ws.execute("find /gridfs/ -name '*.txt'")
+await ws.shell('echo hello | tee /gridfs/notes/a.txt > /dev/null')
+const res = await ws.shell("find /gridfs/ -name '*.txt'")
 console.log(res.stdoutText)
 ```
 
-The `mongodb` driver is an optional peer dependency; it is only loaded when a `GridFSResource` is constructed.
+The `mongodb` driver is an optional peer dependency; it is only loaded when a `GridFSVFS` is constructed.
 
 ## Scoping to a key prefix
 
 ```ts
-const scoped = new GridFSResource({
+const scoped = new GridFSVFS({
   uri: process.env.MONGODB_URI!,
   database: 'app',
   bucket: 'shared',
@@ -46,4 +46,4 @@ Every operation is transparently scoped to that subpath: agents see `/data/notes
 
 ## Browser
 
-GridFS requires a direct MongoDB connection, so `GridFSResource` ships in `@struktoai/mirage-node` only. Browser workspaces can reach GridFS content through a Node-side MIRAGE server instead.
+GridFS requires a direct MongoDB connection, so `GridFSVFS` ships in `@struktoai/mirage-node` only. Browser workspaces can reach GridFS content through a Node-side MIRAGE server instead.

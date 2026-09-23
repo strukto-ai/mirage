@@ -43,10 +43,10 @@ async function copyChildren(tm: TokenManager, src: DriveNode, dstFolderId: strin
 
 async function copyImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager
-  const srcNode = await resolveKey(accessor, src.resourcePath)
+  const srcNode = await resolveKey(accessor, src.vfsPath)
   if (srcNode === null) throw enoent(src)
-  let dstNode = await resolveKey(accessor, dst.resourcePath)
-  const dstKey = dst.resourcePath
+  let dstNode = await resolveKey(accessor, dst.vfsPath)
+  const dstKey = dst.vfsPath
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
   if (isFolder(srcNode)) {
     if (dstNode !== null && !isFolder(dstNode)) throw enotdir(dst)

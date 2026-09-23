@@ -23,10 +23,21 @@ import type { DriveItem, Permission, Revision } from '../store/types.ts'
 import { asObj, asStr, asStrArr, asBool } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
 import { FOLDER_MIME, OWNER } from '../wire/mime.ts'
-import { NOT_FOUND, googleError, header, media, noContent, ok } from '../wire/reply.ts'
+import {
+  NOT_FOUND,
+  driveError,
+  fileNotFound,
+  googleError,
+  header,
+  isReply,
+  media,
+  noContent,
+  ok,
+} from '../wire/reply.ts'
 import type { Ctx } from '../../kit/typescript/index.ts'
 import { createDriveItem, deleteTree, fmtFile, pushRevision } from './item.ts'
 import { exportFile, listFiles } from './list.ts'
+import { followParentDrive, movedParents, refuseParents } from './parents.ts'
 
 // The old fake spelled a resource id `[^/:]+`, so a path whose id half holds
 // an in-segment verb matched no route rather than being read as an id.
@@ -48,8 +59,14 @@ function fmtRevision(r: Revision): JsonObj {
   }
 }
 
-function fileOr404(ctx: GwsCtx, key = 'id'): DriveItem | null {
-  return ctx.db.files.get(ctx.params[key] ?? '') ?? null
+function fileOr404(ctx: GwsCtx, key = 'id'): DriveItem | Reply {
+  const id = ctx.params[key] ?? ''
+  return ctx.db.files.get(id) ?? fileNotFound(id)
+}
+
+// A comma-separated id list as addParents and removeParents spell one.
+function idList(raw: string | null): string[] {
+  return raw === null ? [] : raw.split(',').filter((id) => id !== '')
 }
 
 function uploadCreate(ctx: GwsCtx): Reply {
@@ -59,11 +76,14 @@ function uploadCreate(ctx: GwsCtx): Reply {
       header(ctx.headers, 'content-type'),
     )
     const meta = asObj(JSON.parse(metadata) as JsonValue)
+    const parents = asStrArr(meta.parents) ?? []
+    const refused = refuseParents(ctx.db, parents)
+    if (refused !== null) return refused
     const item = createDriveItem(
       ctx.db,
       String(meta.name ?? 'Untitled'),
       String(meta.mimeType ?? 'application/octet-stream'),
-      asStrArr(meta.parents) ?? [],
+      parents,
       bytes,
     )
     return ok(fmtFile(item))
@@ -74,7 +94,7 @@ function uploadCreate(ctx: GwsCtx): Reply {
 
 function uploadPatch(ctx: GwsCtx): Reply {
   const item = fileOr404(ctx)
-  if (item === null) return NOT_FOUND
+  if (isReply(item)) return item
   item.content = ctx.body
   item.modifiedTime = ctx.db.now()
   pushRevision(item)
@@ -89,11 +109,14 @@ function createFile(ctx: GwsCtx): Reply {
   if (pinned !== undefined && ctx.db.files.has(pinned)) {
     return googleError(409, 'A file with that id already exists.', 'ALREADY_EXISTS')
   }
+  const parents = asStrArr(body.parents) ?? []
+  const refused = refuseParents(ctx.db, parents)
+  if (refused !== null) return refused
   const item = createDriveItem(
     ctx.db,
     String(body.name ?? 'Untitled'),
     String(body.mimeType ?? 'application/octet-stream'),
-    asStrArr(body.parents) ?? [],
+    parents,
     Buffer.alloc(0),
     pinned,
   )
@@ -149,8 +172,28 @@ function deleteDrive(ctx: GwsCtx): Reply {
 
 function patchFile(ctx: GwsCtx): Reply {
   const item = fileOr404(ctx)
-  if (item === null) return NOT_FOUND
+  if (isReply(item)) return item
   const body = asObj(ctx.json())
+  if ('parents' in body) {
+    return driveError(
+      403,
+      'The parents field is not directly writable in update requests. ' +
+        'Use the addParents and removeParents parameters instead.',
+      'fieldNotWritable',
+    )
+  }
+  // Judged before anything is applied: a refused parent leaves the whole
+  // file as it was, name and trash state included.
+  const parents = movedParents(
+    ctx.db,
+    item,
+    idList(ctx.query.get('addParents')),
+    idList(ctx.query.get('removeParents')),
+  )
+  if (isReply(parents)) return parents
+  const moved = parents[0] !== item.parents[0]
+  item.parents = parents
+  if (moved) followParentDrive(ctx.db, item)
   const name = asStr(body.name)
   if (name !== undefined) {
     item.name = name
@@ -163,27 +206,22 @@ function patchFile(ctx: GwsCtx): Reply {
   }
   const trashed = asBool(body.trashed)
   if (trashed !== undefined) item.trashed = trashed
-  const add = ctx.query.get('addParents')
-  const remove = ctx.query.get('removeParents')
-  if (add !== null) item.parents.push(...add.split(','))
-  if (remove !== null) {
-    const removed = new Set(remove.split(','))
-    item.parents = item.parents.filter((p) => !removed.has(p))
-    if (item.parents.length === 0) item.parents = ['root']
-  }
   item.modifiedTime = ctx.db.now()
   return ok(fmtFile(item))
 }
 
 function copyFile(ctx: GwsCtx): Reply {
   const src = fileOr404(ctx)
-  if (src === null) return NOT_FOUND
+  if (isReply(src)) return src
   const body = asObj(ctx.json())
+  const parents = asStrArr(body.parents) ?? [...src.parents]
+  const refused = refuseParents(ctx.db, parents)
+  if (refused !== null) return refused
   const copy = createDriveItem(
     ctx.db,
     String(body.name ?? `Copy of ${src.name}`),
     src.mimeType,
-    asStrArr(body.parents) ?? [...src.parents],
+    parents,
     Buffer.from(src.content),
   )
   const srcDoc = ctx.db.docs.get(src.id)
@@ -195,7 +233,7 @@ function copyFile(ctx: GwsCtx): Reply {
     ctx.db.sheets.set(copy.id, {
       title: copy.name,
       nextSheetId: srcSheet.nextSheetId,
-      tabs: srcSheet.tabs.map((t) => ({ ...t, cells: new Map(t.cells) })),
+      tabs: structuredClone(srcSheet.tabs),
     })
   }
   const srcPres = ctx.db.presentations.get(src.id)
@@ -210,7 +248,7 @@ function copyFile(ctx: GwsCtx): Reply {
 
 function addPermission(ctx: GwsCtx): Reply {
   const item = fileOr404(ctx)
-  if (item === null) return NOT_FOUND
+  if (isReply(item)) return item
   const body = asObj(ctx.json())
   const email = asStr(body.emailAddress)
   const permission: Permission = {
@@ -225,7 +263,7 @@ function addPermission(ctx: GwsCtx): Reply {
 
 function findPermission(ctx: GwsCtx): [DriveItem, Permission] | Reply {
   const item = fileOr404(ctx)
-  if (item === null) return NOT_FOUND
+  if (isReply(item)) return item
   const permission = item.permissions.find((p) => p.id === ctx.params.permissionId)
   if (permission === undefined) return googleError(404, 'Permission not found.', 'NOT_FOUND')
   return [item, permission]
@@ -295,18 +333,19 @@ export function driveRoutes(): KitRoute<C>[] {
     route('POST', '/drive/v3/files/:id/copy', copyFile, { write: true }),
     route('GET', '/drive/v3/files/:id/export', (ctx) => {
       const item = fileOr404(ctx)
-      if (item === null) return NOT_FOUND
+      if (isReply(item)) return item
       return exportFile(ctx.db, item, ctx.query.get('mimeType') ?? '')
     }),
     route('GET', '/drive/v3/files/:id/revisions', (ctx) => {
       const item = fileOr404(ctx)
-      if (item === null) return NOT_FOUND
+      if (isReply(item)) return item
       return ok({ kind: 'drive#revisionList', revisions: item.revisions.map(fmtRevision) })
     }),
     route('GET', '/drive/v3/files/:id/revisions/:revisionId', (ctx) => {
       const item = fileOr404(ctx)
-      const revision = item?.revisions.find((r) => r.id === ctx.params.revisionId)
-      if (item === null || revision === undefined) return NOT_FOUND
+      if (isReply(item)) return item
+      const revision = item.revisions.find((r) => r.id === ctx.params.revisionId)
+      if (revision === undefined) return NOT_FOUND
       if (ctx.query.get('alt') === 'media') {
         return media(revision.content, header(ctx.headers, 'range'))
       }
@@ -317,7 +356,7 @@ export function driveRoutes(): KitRoute<C>[] {
       '/drive/v3/files/:id/revisions/:revisionId',
       (ctx) => {
         const item = fileOr404(ctx)
-        if (item === null) return NOT_FOUND
+        if (isReply(item)) return item
         const before = item.revisions.length
         item.revisions = item.revisions.filter((r) => r.id !== ctx.params.revisionId)
         if (item.revisions.length === before) {
@@ -329,7 +368,7 @@ export function driveRoutes(): KitRoute<C>[] {
     ),
     route('GET', '/drive/v3/files/:id/permissions', (ctx) => {
       const item = fileOr404(ctx)
-      if (item === null) return NOT_FOUND
+      if (isReply(item)) return item
       return ok({
         kind: 'drive#permissionList',
         permissions: item.permissions.map((p) => ({ ...p })),
@@ -372,7 +411,7 @@ export function driveRoutes(): KitRoute<C>[] {
       '/drive/v3/files/:id',
       (ctx) => {
         const item = fileOr404(ctx)
-        if (item === null) return NOT_FOUND
+        if (isReply(item)) return item
         if (ctx.query.get('alt') === 'media') {
           return media(item.content, header(ctx.headers, 'range'))
         }
@@ -386,7 +425,7 @@ export function driveRoutes(): KitRoute<C>[] {
       '/drive/v3/files/:id',
       (ctx) => {
         const item = fileOr404(ctx)
-        if (item === null) return NOT_FOUND
+        if (isReply(item)) return item
         deleteTree(ctx.db, item.id)
         return noContent()
       },

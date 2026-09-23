@@ -27,7 +27,7 @@ CHANNEL = "My Server__G001/channels/general__C001"
 def spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.lstrip("/"))
+                    vfs_path=virtual.lstrip("/"))
 
 
 async def test_date_dir_contents_lists_chat_and_files(api, accessor, index):
@@ -63,7 +63,7 @@ async def test_files_under_a_sealed_day_is_enoent(api, accessor, index):
 def globbed(virtual: str, pattern: str) -> PathSpec:
     return PathSpec(virtual=f"{virtual}/{pattern}",
                     directory=f"{virtual}/",
-                    resource_path=f"{virtual.lstrip('/')}/{pattern}",
+                    vfs_path=f"{virtual.lstrip('/')}/{pattern}",
                     pattern=pattern)
 
 

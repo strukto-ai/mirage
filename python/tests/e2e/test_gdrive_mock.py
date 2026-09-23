@@ -14,8 +14,8 @@
 
 import pytest
 
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
 from mirage.types import MountMode
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 
@@ -31,8 +31,8 @@ def gdrive_ws():
         client_secret="fake-secret",
         refresh_token="fake-refresh",
     )
-    resource = GoogleDriveResource(config)
-    ws = Workspace({"/gd": resource}, mode=MountMode.READ)
+    vfs = GoogleDriveVFS(config)
+    ws = Workspace({"/gd": vfs}, mode=MountMode.READ)
     with patch_gdrive(fake):
         yield ws, fake
 
@@ -40,8 +40,8 @@ def gdrive_ws():
 @pytest.mark.asyncio
 async def test_gdrive_mock_cat(gdrive_ws):
     ws, _ = gdrive_ws
-    await ws.execute("ls /gd")
-    r = await ws.execute("cat /gd/hello.txt")
+    await ws.shell("ls /gd")
+    r = await ws.shell("cat /gd/hello.txt")
     assert (await r.stdout_str()) == "hello world\n", (
         f"exit={r.exit_code} stderr={await r.stderr_str()!r}")
 
@@ -49,7 +49,7 @@ async def test_gdrive_mock_cat(gdrive_ws):
 @pytest.mark.asyncio
 async def test_gdrive_mock_ls(gdrive_ws):
     ws, _ = gdrive_ws
-    r = await ws.execute("ls /gd")
+    r = await ws.shell("ls /gd")
     out = await r.stdout_str()
     assert "hello.txt" in out
     assert "data" in out
@@ -58,9 +58,9 @@ async def test_gdrive_mock_ls(gdrive_ws):
 @pytest.mark.asyncio
 async def test_gdrive_mock_grep(gdrive_ws):
     ws, _ = gdrive_ws
-    await ws.execute("ls /gd")
-    await ws.execute("ls /gd/data")
-    r = await ws.execute("grep two /gd/data/numbers.txt")
+    await ws.shell("ls /gd")
+    await ws.shell("ls /gd/data")
+    r = await ws.shell("grep two /gd/data/numbers.txt")
     assert "two" in (await r.stdout_str())
 
 
@@ -74,7 +74,7 @@ async def test_gdrive_mock_find_directory(gdrive_ws):
     API mid-test.
     """
     ws, _ = gdrive_ws
-    r = await ws.execute("find /gd/data")
+    r = await ws.shell("find /gd/data")
     assert r.exit_code == 0, f"stderr={await r.stderr_str()!r}"
     assert (await r.stdout_str()) == "/gd/data\n/gd/data/numbers.txt\n"
 
@@ -87,12 +87,12 @@ async def test_gdrive_mock_find_file_start_point(gdrive_ws):
     `-type f` matches it while `-type d` does not.
     """
     ws, _ = gdrive_ws
-    r = await ws.execute("find /gd/hello.txt")
+    r = await ws.shell("find /gd/hello.txt")
     assert r.exit_code == 0, f"stderr={await r.stderr_str()!r}"
     assert (await r.stdout_str()) == "/gd/hello.txt\n"
-    r = await ws.execute("find /gd/hello.txt -type f")
+    r = await ws.shell("find /gd/hello.txt -type f")
     assert (await r.stdout_str()) == "/gd/hello.txt\n"
-    r = await ws.execute("find /gd/hello.txt -type d")
+    r = await ws.shell("find /gd/hello.txt -type d")
     assert (await r.stdout_str()) == ""
     assert r.exit_code == 0
 
@@ -107,6 +107,6 @@ async def test_gdrive_mock_find_missing_start_point(gdrive_ws):
     answered by the fake rather than by a live 401.
     """
     ws, _ = gdrive_ws
-    r = await ws.execute("find /gd/nope")
+    r = await ws.shell("find /gd/nope")
     assert (await r.stdout_str()) == ""
     assert "401" not in (await r.stderr_str())

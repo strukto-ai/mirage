@@ -20,7 +20,7 @@ from mirage.utils.errors import FS_ERRORS, eisdir, fs_strerror
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.links import resolve_path_stat
 from mirage.workspace.executor.builtins.scope import _to_scope
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -89,7 +89,7 @@ async def read_script_file(
     dispatch: DispatchFn,
     name: str,
     path: str,
-    session: Session,
+    session: SessionState,
 ) -> tuple[str, None] | tuple[None, tuple[None, IOResult, ExecutionNode]]:
     """Read a script file operand, or the failure bash reports for it.
 
@@ -108,7 +108,7 @@ async def read_script_file(
         dispatch (DispatchFn): op dispatcher, used to read the file.
         name (str): the head word, used as the diagnostic prefix.
         path (str): the script operand, as typed.
-        session (Session): shell session state, for the working directory.
+        session (SessionState): shell session state, for the working directory.
     """
     try:
         return await read_script_text(dispatch, path, session.cwd), None

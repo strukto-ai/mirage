@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
-  GitHubResource,
+  GitHubVFS,
   Mount,
   MountBackend,
   MountMode,
@@ -44,9 +44,9 @@ function buildConfig(): GitHubConfig {
 async function main(): Promise<void> {
   const cfg = buildConfig();
   console.log(`Loading ${cfg.owner}/${cfg.repo} …`);
-  const resource = await GitHubResource.create(cfg);
+  const vfs = await GitHubVFS.create(cfg);
   const ws = new Workspace({
-    "/github": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/github": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

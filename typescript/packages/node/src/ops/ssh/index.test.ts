@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { SSH_OPS } from './index.ts'
 
 describe('SSH_OPS', () => {
-  it('registers the expected 12 ops with resource=ssh', () => {
+  it('registers the expected 12 ops with VFS=ssh', () => {
     expect(SSH_OPS).toHaveLength(12)
-    for (const op of SSH_OPS) expect(op.resource).toBe(ResourceName.SSH)
+    for (const op of SSH_OPS) expect(op.vfs).toBe(VFSName.SSH)
   })
 
   it('contains all ssh op names', () => {

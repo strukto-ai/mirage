@@ -22,9 +22,9 @@ import { Precision, ProvisionResult } from '../../provision/types.ts'
 import { PathSpec } from '../../types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import type { Accessor } from '../../accessor/base.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import type { CommandOpts } from '../../commands/config.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
@@ -95,7 +95,7 @@ function mountGroups(registry: MountRegistry, parts: readonly (string | PathSpec
 export async function handleCommandProvision(
   registry: MountRegistry,
   parts: readonly (string | PathSpec)[],
-  session: Session,
+  session: SessionState,
   namespace: Namespace | null = null,
 ): Promise<ProvisionResult> {
   if (parts.length === 0) return new ProvisionResult({ precision: Precision.EXACT })
@@ -159,7 +159,7 @@ export async function handleCommandProvision(
 
     const mountPrefix = rstripSlash(mount.prefix)
     const scopedParts: (string | PathSpec)[] = [parts2[0] ?? '']
-    const resourceScopes: PathSpec[] = []
+    const vfsScopes: PathSpec[] = []
     for (let i = 1; i < parts2.length; i++) {
       const p = parts2[i]
       if (p instanceof PathSpec) {
@@ -168,10 +168,10 @@ export async function handleCommandProvision(
           directory: p.directory,
           pattern: p.pattern,
           resolved: p.resolved,
-          resourcePath: mountKey(p.virtual, mountPrefix),
+          vfsPath: mountKey(p.virtual, mountPrefix),
         })
         scopedParts.push(scoped)
-        resourceScopes.push(scoped)
+        vfsScopes.push(scoped)
       } else if (p !== undefined) {
         scopedParts.push(p)
       }
@@ -189,8 +189,8 @@ export async function handleCommandProvision(
       textArgs = scopedParts.slice(1).filter((p): p is string => typeof p === 'string')
     }
 
-    const resource = mount.resource as Resource & { accessor?: Accessor }
-    const accessor = resource.accessor
+    const vfs = mount.vfs as VFS & { accessor?: Accessor }
+    const accessor = vfs.accessor
     if (accessor === undefined) {
       return new ProvisionResult({ command: cmdStr, precision: Precision.UNKNOWN })
     }
@@ -207,7 +207,7 @@ export async function handleCommandProvision(
       index: rawIndex,
     }
 
-    const raw = await cmd.provisionFn(accessor, resourceScopes, textArgs, opts)
+    const raw = await cmd.provisionFn(accessor, vfsScopes, textArgs, opts)
     const result = raw instanceof ProvisionResult ? raw : new ProvisionResult({ command: cmdStr })
     if (result.command === '') {
       result.command = cmdStr

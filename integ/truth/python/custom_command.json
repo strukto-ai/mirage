@@ -10,8 +10,8 @@
   "exit": 0,
   "lines": [
     "=== decorator-level bindings on greet ===",
-    "  resource='ram'       name='greet'",
-    "  resource='disk'      name='greet'",
+    "  VFS='ram'       name='greet'",
+    "  VFS='disk'      name='greet'",
     "",
     "=== greet on /ram/ (RAMAccessor wins) ===",
     "hello from RAMAccessor: /ram/note.txt",

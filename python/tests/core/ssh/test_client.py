@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.ssh.client import _abs, _connect_kwargs, _key
-from mirage.resource.ssh.ssh import SSHConfig
+from mirage.vfs.ssh.ssh import SSHConfig
 
 
 def test_key_strips_slash():

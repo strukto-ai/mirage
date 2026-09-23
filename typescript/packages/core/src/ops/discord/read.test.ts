@@ -18,7 +18,7 @@ import { DiscordAccessor } from '../../accessor/discord.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from '../../core/discord/client.ts'
-import { PathSpec, ResourceName } from '../../types.ts'
+import { PathSpec, VFSName } from '../../types.ts'
 import { DISCORD_OPS } from './index.ts'
 
 const readOp = DISCORD_OPS.find((o) => o.name === 'read' && o.filetype === null)
@@ -37,14 +37,14 @@ class FakeDiscordTransport implements DiscordTransport {
 }
 
 describe('ops/discord/read', () => {
-  it('is registered against ResourceName.DISCORD as a non-write read op', () => {
+  it('is registered against VFSName.DISCORD as a non-write read op', () => {
     expect(readOp.name).toBe('read')
-    expect(readOp.resource).toBe(ResourceName.DISCORD)
+    expect(readOp.vfs).toBe(VFSName.DISCORD)
     expect(readOp.write).toBe(false)
     expect(readOp.filetype).toBeNull()
   })
 
-  it('dispatches to coreRead using the resource accessor', async () => {
+  it('dispatches to coreRead using the VFS accessor', async () => {
     const idx = new RAMIndexCacheStore()
     await idx.setDir('/mnt/discord', [
       [
@@ -80,7 +80,7 @@ describe('ops/discord/read', () => {
       new PathSpec({
         virtual: '/mnt/discord/My Server__G1/members/alice__U1.json',
         directory: '/mnt/discord/My Server__G1/members/alice__U1.json',
-        resourcePath: mountKey('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
+        vfsPath: mountKey('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
       }),
       [],
       { index: idx },

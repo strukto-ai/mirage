@@ -2,8 +2,8 @@ import asyncio
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.watch import S3Walk, build_delta_hook
-from mirage.resource.s3 import S3Config
 from mirage.types import FileChangeKind, PathSpec
+from mirage.vfs.s3 import S3Config
 from tests.e2e.s3_mock import patch_s3_multi
 
 BUCKET = "watch-bucket"
@@ -18,10 +18,8 @@ def _accessor(key_prefix: str | None = None) -> S3Accessor:
                  key_prefix=key_prefix))
 
 
-def _root(virtual: str, resource_path: str) -> PathSpec:
-    return PathSpec(virtual=virtual,
-                    directory=virtual,
-                    resource_path=resource_path)
+def _root(virtual: str, vfs_path: str) -> PathSpec:
+    return PathSpec(virtual=virtual, directory=virtual, vfs_path=vfs_path)
 
 
 async def _collect(walk, root):
@@ -124,4 +122,4 @@ def test_changed_path_carries_the_mount_framing():
         second = asyncio.run(hook.pull(root, first.checkpoint))
     changed = second.changes[0].path
     assert changed.virtual == "/s3/data/a.txt"
-    assert changed.resource_path == "data/a.txt"
+    assert changed.vfs_path == "data/a.txt"

@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { LocalRuntime, Workspace, parseSessionProfile } from '@struktoai/mirage-node'
 import { MirageService } from './service.ts'
@@ -34,10 +34,10 @@ async function makeShell(
   seed: Record<string, string> = {},
   config: MirageShellConfig = {},
 ): Promise<{ shell: MirageShellExecutor; ws: Workspace }> {
-  const ws = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+  const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
   workspaces.push(ws)
   for (const [path, content] of Object.entries(seed)) {
-    await ws.fs.writeFile(`/data/${path}`, content)
+    await ws.vfs.writeFile(`/data/${path}`, content)
   }
   return { shell: await attachShell(ws, config), ws }
 }
@@ -151,7 +151,7 @@ describe('sandbox policy', () => {
     expect(result.exitCode).not.toBe(0)
     expect(result.sandbox?.mode).toBe('read-only')
     expect(result.sandbox?.denied).toBe(true)
-    expect(await ws.fs.exists('/data/x.txt')).toBe(false)
+    expect(await ws.vfs.exists('/data/x.txt')).toBe(false)
   })
 
   it('refuses a mutating command under a read-only policy', async () => {
@@ -218,17 +218,17 @@ describe('sandbox policy', () => {
     await proc.done
     expect(proc.exitCode).not.toBe(0)
     expect(proc.sandbox?.mode).toBe('read-only')
-    expect(await ws.fs.exists('/data/bg.txt')).toBe(false)
+    expect(await ws.vfs.exists('/data/bg.txt')).toBe(false)
   })
 
   it('narrows a confined session without widening it', async () => {
     const ws = new Workspace({
-      '/allowed': [new RAMResource(), MountMode.WRITE],
-      '/secret': [new RAMResource(), MountMode.WRITE],
+      '/allowed': [new RAMVFS(), MountMode.WRITE],
+      '/secret': [new RAMVFS(), MountMode.WRITE],
     })
     workspaces.push(ws)
-    await ws.fs.writeFile('/allowed/a.txt', 'granted')
-    await ws.fs.writeFile('/secret/a.txt', 'classified')
+    await ws.vfs.writeFile('/allowed/a.txt', 'granted')
+    await ws.vfs.writeFile('/secret/a.txt', 'classified')
     // Exclusion is a hide: a mount the profile does not name keeps its own
     // mode, so confining a session to /allowed means hiding /secret.
     ws.createSession('confined', {
@@ -268,7 +268,7 @@ describe('sandbox policy', () => {
 
   it("carries the bound session's command rules into the read-only twin", async () => {
     const ws = new Workspace(
-      { '/data': [new RAMResource(), MountMode.WRITE] },
+      { '/data': [new RAMVFS(), MountMode.WRITE] },
       {
         profiles: {
           scoped: parseSessionProfile(
@@ -284,8 +284,8 @@ describe('sandbox policy', () => {
       },
     )
     workspaces.push(ws)
-    await ws.fs.mkdir('/data/notes')
-    await ws.fs.writeFile('/data/notes/a.txt', 'private')
+    await ws.vfs.mkdir('/data/notes')
+    await ws.vfs.writeFile('/data/notes/a.txt', 'private')
     ws.createSession('agent', { profile: 'scoped' })
     const shell = await attachShell(ws, { sessionId: 'agent' })
     // The profile refuses this read, and read-only is not a way around it:
@@ -388,7 +388,7 @@ describe('run', () => {
     expect(result.aborted).toBe(true)
     expect(result.timedOut).toBe(false)
     expect(result.exitCode).toBeNull()
-    expect(await ws.fs.exists('/data/out.txt')).toBe(false)
+    expect(await ws.vfs.exists('/data/out.txt')).toBe(false)
   })
 })
 
@@ -434,7 +434,7 @@ describe('session binding', () => {
   })
 
   it('keeps differently bound executors apart on one workspace', async () => {
-    const ws = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+    const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
     workspaces.push(ws)
     const alpha = await attachShell(ws, { sessionId: 'alpha' })
     const beta = await attachShell(ws, { sessionId: 'beta' })
@@ -443,15 +443,15 @@ describe('session binding', () => {
     expect(cross.stdout.text.trim()).toBe('[]')
     const back = await alpha.run(alpha.resolve({ command: 'echo "[$WHO]"' }))
     expect(back.stdout.text.trim()).toBe('[alpha]')
-    const direct = await ws.execute('echo "[$WHO]"')
+    const direct = await ws.shell('echo "[$WHO]"')
     expect(direct.stdoutText.trim()).toBe('[]')
   })
 
   it('adopts an existing session instead of recreating it', async () => {
-    const ws = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+    const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
     workspaces.push(ws)
     ws.createSession('pre')
-    await ws.execute('export SEED=planted', { sessionId: 'pre' })
+    await ws.shell('export SEED=planted', { sessionId: 'pre' })
     const shell = await attachShell(ws, { sessionId: 'pre' })
     const out = await shell.run(shell.resolve({ command: 'echo "$SEED"' }))
     expect(out.stdout.text.trim()).toBe('planted')
@@ -530,7 +530,7 @@ describe('start', () => {
     await proc.done
     expect(proc.status).toBe('killed')
     expect(proc.exitCode).toBeNull()
-    expect(await ws.fs.exists('/data/out.txt')).toBe(false)
+    expect(await ws.vfs.exists('/data/out.txt')).toBe(false)
   })
 })
 
@@ -610,7 +610,7 @@ describe('spill', () => {
     if (stdoutPath === undefined) throw new Error('expected a stdout spill path')
     // The delta kept only the tail; the spill file has the whole stream.
     expect(out.delta).not.toContain('aaaa')
-    const full = await ws.fs.readFileText(stdoutPath)
+    const full = await ws.vfs.readFileText(stdoutPath)
     expect(full).toContain('aaaa')
     expect(full).toContain('dddd')
   })
@@ -626,8 +626,8 @@ describe('spill', () => {
     const stderrPath = out.stderrSpillPath
     if (stdoutPath === undefined) throw new Error('expected a stdout spill path')
     if (stderrPath === undefined) throw new Error('expected a stderr spill path')
-    expect(await ws.fs.readFileText(stdoutPath)).toContain('out1')
-    expect(await ws.fs.readFileText(stderrPath)).toContain('err1')
+    expect(await ws.vfs.readFileText(stdoutPath)).toContain('out1')
+    expect(await ws.vfs.readFileText(stderrPath)).toContain('err1')
   })
 
   it('spills both commands when two overrun into a missing directory at once', async () => {
@@ -643,7 +643,7 @@ describe('spill', () => {
     expect(paths[0]).not.toBe(paths[1])
     for (const path of paths) {
       if (path === undefined) throw new Error('expected a stdout spill path')
-      expect(await ws.fs.readFileText(path)).toContain('aaaa')
+      expect(await ws.vfs.readFileText(path)).toContain('aaaa')
     }
   })
 
@@ -654,7 +654,7 @@ describe('spill', () => {
     const path = proc.readOutput().stdoutSpillPath
     if (path === undefined) throw new Error('expected a stdout spill path')
     expect(path.startsWith('/data/runs/spill/')).toBe(true)
-    expect(await ws.fs.readFileText(path)).toContain('aaaa')
+    expect(await ws.vfs.readFileText(path)).toContain('aaaa')
   })
 })
 
@@ -741,7 +741,7 @@ describe('foreground output fidelity', () => {
     expect(result.stdout.text).toBe('bbbbb')
     const path = result.stdout.spillPath
     if (path === undefined) throw new Error('expected a spill path')
-    expect(await ws.fs.readFileText(path)).toBe('aaaaabbbbb')
+    expect(await ws.vfs.readFileText(path)).toBe('aaaaabbbbb')
   })
 
   it('keeps a foreground stream larger than any console retention budget', async () => {
@@ -755,7 +755,7 @@ describe('foreground output fidelity', () => {
     expect(result.stdout.text).toBe('x'.repeat(64))
     const path = result.stdout.spillPath
     if (path === undefined) throw new Error('expected a spill path')
-    expect(await ws.fs.readFileText(path)).toBe('x'.repeat(4000))
+    expect(await ws.vfs.readFileText(path)).toBe('x'.repeat(4000))
   })
 
   it('leaves spillPath unset when nothing was truncated', async () => {

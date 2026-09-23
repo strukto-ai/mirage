@@ -24,7 +24,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 Result = tuple[ByteSource | None, IOResult, ExecutionNode]
@@ -42,7 +42,7 @@ class BuiltinCall:
     Args:
         argv (Argv): the expanded line: name, text args, classified
             operands, and the words as typed.
-        session (Session): the shell session the builtin acts on.
+        session (SessionState): the shell session the builtin acts on.
         stdin (ByteSource | None): the line's standard input, if piped.
         call_stack (CallStack | None): the function-call stack, which
             holds the positional parameters.
@@ -58,7 +58,7 @@ class BuiltinCall:
             session (``eval``, ``source``, ``xargs``, ...).
     """
     argv: Argv
-    session: Session
+    session: SessionState
     stdin: ByteSource | None
     call_stack: CallStack | None
     cancel: asyncio.Event | None

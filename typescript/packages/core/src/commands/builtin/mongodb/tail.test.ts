@@ -37,7 +37,7 @@ import * as clientModule from '../../../core/mongodb/client.ts'
 import * as readModule from '../../../core/mongodb/read.ts'
 import * as statModule from '../../../core/mongodb/stat.ts'
 import * as streamModule from '../../../core/mongodb/stream.ts'
-import { resolveMongoDBConfig } from '../../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../../../vfs/mongodb/config.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { MONGODB_TAIL } from './tail.ts'
@@ -56,7 +56,7 @@ function docs(name: string): PathSpec {
     virtual,
     directory: `/mongo/app/collections/${name}/`,
     resolved: true,
-    resourcePath: mountKey(virtual, '/mongo'),
+    vfsPath: mountKey(virtual, '/mongo'),
   })
 }
 

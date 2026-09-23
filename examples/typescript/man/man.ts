@@ -13,27 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  GmailResource,
+  GmailVFS,
   MountMode,
-  S3Resource,
-  SlackResource,
+  S3VFS,
+  SlackVFS,
   Workspace,
 } from '@struktoai/mirage-node'
-import { RAMResource } from '@struktoai/mirage-core'
+import { RAMVFS } from '@struktoai/mirage-core'
 
 async function main(): Promise<void> {
   const ws = new Workspace(
     {
-      '/ram': new RAMResource(),
-      '/s3': new S3Resource({ bucket: 'demo', region: 'us-east-1' }),
-      '/slack': new SlackResource({ token: 'xoxb-demo' }),
-      '/gmail': new GmailResource({ clientId: 'demo', clientSecret: 'demo', refreshToken: 'demo' }),
+      '/ram': new RAMVFS(),
+      '/s3': new S3VFS({ bucket: 'demo', region: 'us-east-1' }),
+      '/slack': new SlackVFS({ token: 'xoxb-demo' }),
+      '/gmail': new GmailVFS({ clientId: 'demo', clientSecret: 'demo', refreshToken: 'demo' }),
     },
     { mode: MountMode.WRITE },
   )
 
   const show = async (label: string, cmd: string): Promise<void> => {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     console.log(`\n========== ${label} (exit ${r.exitCode}) ==========`)
     if (r.stdoutText !== '') console.log(r.stdoutText)
     if (r.stderrText !== '') console.log(`[stderr] ${r.stderrText}`)

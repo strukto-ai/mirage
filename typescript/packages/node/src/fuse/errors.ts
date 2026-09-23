@@ -54,7 +54,9 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
   EIO,
   EBUSY: osConstants.errno.EBUSY,
   EROFS,
-  NO_XATTR: osConstants.errno.ENODATA,
+  // "Attribute not set": ENOATTR on macOS, which node:os does not name,
+  // and ENODATA on linux. Mirrors python's errors/posix.py.
+  NO_XATTR: process.platform === 'darwin' ? 93 : osConstants.errno.ENODATA,
 }
 
 const MESSAGE_ERRNO: [string[], number][] = [

@@ -51,8 +51,8 @@ export function readlinkGeneric(
   const results: string[] = []
   for (const p of paths) {
     let vp =
-      mountPrefixOf(p.virtual, p.resourcePath) !== ''
-        ? mountPrefixOf(p.virtual, p.resourcePath) + '/' + lstripSlash(p.virtual)
+      mountPrefixOf(p.virtual, p.vfsPath) !== ''
+        ? mountPrefixOf(p.virtual, p.vfsPath) + '/' + lstripSlash(p.virtual)
         : p.virtual
     if (normalize) vp = normPath(vp)
     results.push(vp)

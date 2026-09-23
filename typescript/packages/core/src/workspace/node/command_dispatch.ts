@@ -25,7 +25,7 @@ import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch, mergeSignals } from '../abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import {
@@ -61,8 +61,10 @@ import {
   handleChown,
   handleDf,
   handleExecPath,
+  handleGetfattr,
   handleLn,
   handleReadlink,
+  handleSetfattr,
   handleTouch,
   prepareMv,
   stripLinkOperands,
@@ -81,7 +83,7 @@ import {
   followsLastComponent,
 } from '../lookup/index.ts'
 import { Admitted, admit } from './admission.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { ensureVarVisible, sessionView } from '../session/state.ts'
 import { preSessionGate } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
@@ -91,7 +93,7 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
 export async function executeCommand(
   recurse: (
     n: TSNodeLike,
-    s: Session,
+    s: SessionState,
     i: ByteSource | null,
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
@@ -101,11 +103,11 @@ export async function executeCommand(
   namespace: Namespace,
   executeFn: ExecuteFn,
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  ensureOpen?: (resource: Resource) => Promise<void>,
+  ensureOpen?: (vfs: VFS) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signal?: AbortSignal,
@@ -303,7 +305,7 @@ export async function executeCommand(
 async function runCommandBody(
   recurse: (
     n: TSNodeLike,
-    s: Session,
+    s: SessionState,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -314,11 +316,11 @@ async function runCommandBody(
   node: TSNodeLike,
   parts: TSNodeLike[],
   name: string,
-  session: Session,
+  session: SessionState,
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  ensureOpen?: (resource: Resource) => Promise<void>,
+  ensureOpen?: (vfs: VFS) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signalIn?: AbortSignal,
@@ -474,7 +476,7 @@ function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
 async function runArgv(
   recurse: (
     n: TSNodeLike,
-    s: Session,
+    s: SessionState,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -483,11 +485,11 @@ async function runArgv(
   namespace: Namespace,
   executeFn: ExecuteFn,
   argv: Argv,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  ensureOpen?: (resource: Resource) => Promise<void>,
+  ensureOpen?: (vfs: VFS) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision,
   signal?: AbortSignal,
@@ -508,7 +510,7 @@ async function runArgv(
 
   // A glob whose directory holds a child mount cannot be pushed down to
   // one backend: the mount root is a child of that directory but its keys
-  // live in another resource, so the backend reports "no such file" for a
+  // live in another VFS, so the backend reports "no such file" for a
   // name its own listing shows. Expanding such a word here lets the
   // matches route per mount. It has to happen before the admission
   // policies below, not just before the follow policy: a word left
@@ -627,7 +629,7 @@ export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
 async function routeArgv(
   recurse: (
     n: TSNodeLike,
-    s: Session,
+    s: SessionState,
     i: ByteSource | null,
     cs: CallStack | null,
   ) => Promise<Result>,
@@ -636,11 +638,11 @@ async function routeArgv(
   namespace: Namespace,
   executeFn: ExecuteFn,
   argv: Argv,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  ensureOpen: ((resource: Resource) => Promise<void>) | undefined,
+  ensureOpen: ((vfs: VFS) => Promise<void>) | undefined,
   runtimeBindings: Record<string, Runtime> | undefined,
   routingDecision: RouteDecision | undefined,
   signal: AbortSignal | undefined,
@@ -744,6 +746,15 @@ async function routeArgv(
   }
   if (name === 'readlink') {
     return await handleReadlink(namespace, dispatch, session, operands)
+  }
+
+  // Extended attributes: the door's node table and the backend's own
+  // facts; they read -h themselves.
+  if (name === 'getfattr') {
+    return await handleGetfattr(dispatch, session, operands)
+  }
+  if (name === 'setfattr') {
+    return await handleSetfattr(dispatch, session, operands)
   }
 
   // Metadata commands (namespace-routed: resolve-then-setattr with

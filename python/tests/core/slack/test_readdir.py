@@ -42,9 +42,7 @@ def index():
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
     result = await readdir(accessor,
-                           PathSpec(resource_path="",
-                                    virtual="/",
-                                    directory="/"),
+                           PathSpec(vfs_path="", virtual="/", directory="/"),
                            index=index)
     assert result == ["/channels", "/dms", "/users"]
 
@@ -67,7 +65,7 @@ async def test_readdir_channels(accessor, index):
             return_value=channels,
     ):
         result = await readdir(accessor,
-                               PathSpec(resource_path="channels",
+                               PathSpec(vfs_path="channels",
                                         virtual="/channels",
                                         directory="/channels"),
                                index=index)
@@ -94,7 +92,7 @@ async def test_readdir_users(accessor, index):
             return_value=users,
     ):
         result = await readdir(accessor,
-                               PathSpec(resource_path="users",
+                               PathSpec(vfs_path="users",
                                         virtual="/users",
                                         directory="/users"),
                                index=index)
@@ -122,7 +120,7 @@ async def test_readdir_channel_dates(accessor, index):
                new_callable=AsyncMock,
                return_value=now.timestamp()):
         result = await readdir(accessor,
-                               PathSpec(resource_path="channels/general__C001",
+                               PathSpec(vfs_path="channels/general__C001",
                                         virtual="/channels/general__C001",
                                         directory="/channels/general__C001"),
                                index=index)
@@ -195,7 +193,7 @@ async def test_readdir_channels_stores_created(accessor, index):
             return_value=channels,
     ):
         await readdir(accessor,
-                      PathSpec(resource_path="channels",
+                      PathSpec(vfs_path="channels",
                                virtual="/channels",
                                directory="/channels"),
                       index=index)
@@ -224,7 +222,7 @@ async def test_readdir_channel_dates_with_created(accessor, index):
                new_callable=AsyncMock,
                return_value=now.timestamp()):
         result = await readdir(accessor,
-                               PathSpec(resource_path="channels/general__C001",
+                               PathSpec(vfs_path="channels/general__C001",
                                         virtual="/channels/general__C001",
                                         directory="/channels/general__C001"),
                                index=index)
@@ -253,7 +251,7 @@ async def test_readdir_channel_dates_cached_in_entries(accessor, index):
                new_callable=AsyncMock,
                return_value=now.timestamp()):
         await readdir(accessor,
-                      PathSpec(resource_path="channels/general__C001",
+                      PathSpec(vfs_path="channels/general__C001",
                                virtual="/channels/general__C001",
                                directory="/channels/general__C001"),
                       index=index)
@@ -294,7 +292,7 @@ async def test_readdir_date_dir_returns_chat_and_files(accessor, index):
                return_value=[]):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="channels/general__C001/2026-04-10",
+            PathSpec(vfs_path="channels/general__C001/2026-04-10",
                      virtual="/channels/general__C001/2026-04-10",
                      directory="/channels/general__C001/2026-04-10"),
             index=index,
@@ -360,7 +358,7 @@ async def test_readdir_skips_unreadable_file_payloads(accessor, index):
                return_value=messages):
         await readdir(
             accessor,
-            PathSpec(resource_path="channels/general__C001/2026-04-10",
+            PathSpec(vfs_path="channels/general__C001/2026-04-10",
                      virtual="/channels/general__C001/2026-04-10",
                      directory="/channels/general__C001/2026-04-10"),
             index=index,

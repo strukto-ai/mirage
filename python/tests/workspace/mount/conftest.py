@@ -16,15 +16,15 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3.s3 import S3Config, S3Resource
 from mirage.types import MountMode
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3.s3 import S3VFS, S3Config
 from mirage.workspace.mount import MountRegistry
 
 
-def _ram_write(p: RAMResource, path: str, data: bytes) -> None:
-    """Write file to RAMResource store directly (sync, for test setup)."""
+def _ram_write(p: RAMVFS, path: str, data: bytes) -> None:
+    """Write file to RAMVFS store directly (sync, for test setup)."""
     key = "/" + path.strip("/")
     parts = key.strip("/").split("/")
     for i in range(len(parts) - 1):
@@ -33,9 +33,9 @@ def _ram_write(p: RAMResource, path: str, data: bytes) -> None:
 
 
 @pytest.fixture
-def ram_resource():
-    """A RAMResource with test data."""
-    p = RAMResource()
+def ram_vfs():
+    """A RAMVFS with test data."""
+    p = RAMVFS()
     _ram_write(p, "/hello.txt", b"hello world\n")
     _ram_write(p, "/nums.txt", b"3\n1\n2\n")
     _ram_write(p, "/sub/nested.txt", b"nested\n")
@@ -43,26 +43,26 @@ def ram_resource():
 
 
 @pytest.fixture
-def empty_resource():
-    """An empty RAMResource."""
-    return RAMResource()
+def empty_vfs():
+    """An empty RAMVFS."""
+    return RAMVFS()
 
 
 @pytest.fixture
-def disk_resource(tmp_path):
-    """A DiskResource backed by a temporary directory."""
+def disk_vfs(tmp_path):
+    """A DiskVFS backed by a temporary directory."""
     data_dir = tmp_path / "disk_data"
     data_dir.mkdir()
     (data_dir / "readme.txt").write_bytes(b"disk file\n")
     sub = data_dir / "sub"
     sub.mkdir()
     (sub / "deep.txt").write_bytes(b"deep content\n")
-    return DiskResource(root=str(data_dir))
+    return DiskVFS(root=str(data_dir))
 
 
 @pytest.fixture
-def s3_resource():
-    """An S3Resource backed by moto mock."""
+def s3_vfs():
+    """An S3VFS backed by moto mock."""
     with mock_aws():
         conn = boto3.client("s3", region_name="us-east-1")
         conn.create_bucket(Bucket="test-bucket")
@@ -78,33 +78,33 @@ def s3_resource():
             region="us-east-1",
             endpoint_url=None,
         )
-        yield S3Resource(config)
+        yield S3VFS(config)
 
 
 @pytest.fixture
-def registry(ram_resource):
-    """MountRegistry with /data/ mounted to RAMResource."""
+def registry(ram_vfs):
+    """MountRegistry with /data/ mounted to RAMVFS."""
     reg = MountRegistry()
-    reg.mount("/data/", ram_resource, MountMode.WRITE)
+    reg.mount("/data/", ram_vfs, MountMode.WRITE)
     return reg
 
 
 @pytest.fixture
-def multi_registry(s3_resource, disk_resource, ram_resource):
+def multi_registry(s3_vfs, disk_vfs, ram_vfs):
     """MountRegistry with S3, disk, and RAM mounts."""
     reg = MountRegistry()
-    reg.mount("/s3/", s3_resource, MountMode.READ)
-    reg.mount("/disk/", disk_resource, MountMode.WRITE)
-    reg.mount("/ram/", ram_resource, MountMode.WRITE)
+    reg.mount("/s3/", s3_vfs, MountMode.READ)
+    reg.mount("/disk/", disk_vfs, MountMode.WRITE)
+    reg.mount("/ram/", ram_vfs, MountMode.WRITE)
     return reg
 
 
 @pytest.fixture
 def nested_registry():
     """MountRegistry with nested prefixes."""
-    p1 = RAMResource()
+    p1 = RAMVFS()
     p1._store.files["/file.txt"] = b"outer\n"
-    p2 = RAMResource()
+    p2 = RAMVFS()
     p2._store.files["/deep.txt"] = b"inner\n"
 
     reg = MountRegistry()

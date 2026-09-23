@@ -18,7 +18,7 @@ import asyncio
 import os
 
 from mirage import MountMode, Workspace
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.s3 import S3VFS, S3Config
 
 
 async def run():
@@ -28,16 +28,16 @@ async def run():
         aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
     )
-    with Workspace({"/s3/": S3Resource(cfg)}, mode=MountMode.READ) as ws:
-        r = await ws.execute("ls /s3/")
+    with Workspace({"/s3/": S3VFS(cfg)}, mode=MountMode.READ) as ws:
+        r = await ws.shell("ls /s3/")
         print("--- ls /s3/ ---")
         print((await r.stdout_str()).rstrip())
 
-        r = await ws.execute("grep -c mirage /s3/data/example.jsonl")
+        r = await ws.shell("grep -c mirage /s3/data/example.jsonl")
         print("\n--- grep -c mirage /s3/data/example.jsonl ---")
         print((await r.stdout_str()).rstrip())
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(rec.bytes for rec in records)
         print(f"\nremote stats: {len(records)} ops, {total} bytes")
 

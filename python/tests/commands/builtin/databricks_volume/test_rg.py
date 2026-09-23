@@ -15,8 +15,10 @@
 import pytest
 
 from mirage import MountMode, Workspace
-from tests.resource.databricks_volume.test_databricks_volume import (
-    FakeFiles, make_resource, seed_directory, seed_file)
+from tests.vfs.databricks_volume.test_databricks_volume import (FakeFiles,
+                                                                make_vfs,
+                                                                seed_directory,
+                                                                seed_file)
 
 ROOT = "/Volumes/main/default/agent_files/root"
 
@@ -33,12 +35,12 @@ def dbx_files() -> FakeFiles:
 
 @pytest.fixture
 def ws(dbx_files: FakeFiles) -> Workspace:
-    return Workspace({"/dbx/": make_resource(dbx_files)}, mode=MountMode.READ)
+    return Workspace({"/dbx/": make_vfs(dbx_files)}, mode=MountMode.READ)
 
 
 @pytest.mark.asyncio
 async def test_rg_searches_path_recursively(ws):
-    io = await ws.execute("rg alpha /dbx/")
+    io = await ws.shell("rg alpha /dbx/")
 
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -48,7 +50,7 @@ async def test_rg_searches_path_recursively(ws):
 
 @pytest.mark.asyncio
 async def test_rg_count_only(ws):
-    io = await ws.execute("rg -c alpha /dbx/words.txt")
+    io = await ws.shell("rg -c alpha /dbx/words.txt")
 
     assert io.exit_code == 0
     assert b"2" in io.stdout
@@ -56,6 +58,6 @@ async def test_rg_count_only(ws):
 
 @pytest.mark.asyncio
 async def test_rg_no_match_exits_nonzero(ws):
-    io = await ws.execute("rg zeta /dbx/words.txt")
+    io = await ws.shell("rg zeta /dbx/words.txt")
 
     assert io.exit_code != 0

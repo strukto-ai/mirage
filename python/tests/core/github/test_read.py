@@ -95,7 +95,7 @@ async def test_read_refills_an_expired_index(monkeypatch):
     accessor.truncated = False
     out = await read(
         accessor,
-        PathSpec(resource_path="src/main.py",
+        PathSpec(vfs_path="src/main.py",
                  virtual="/src/main.py",
                  directory="/src"), index)
     assert out == b"hi\n"
@@ -117,7 +117,7 @@ async def test_read_does_not_refill_on_a_real_miss(monkeypatch):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            PathSpec(resource_path="src/gone.py",
+            PathSpec(vfs_path="src/gone.py",
                      virtual="/src/gone.py",
                      directory="/src"), index)
     assert calls == []

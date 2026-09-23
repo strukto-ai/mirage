@@ -16,12 +16,12 @@ from typing import Any, cast
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.io import IOResult
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.workspace.executor.builtins.condition import CondContext, eval_flat
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 class _StubNamespace:
@@ -95,20 +95,20 @@ def _stub_ctx(dispatch: Any) -> CondContext:
     """
     return CondContext(dispatch=dispatch,
                        namespace=cast(Namespace, _StubNamespace()),
-                       session=cast(Session, _StubSession()),
+                       session=cast(SessionState, _StubSession()),
                        name="test")
 
 
 async def _workspace() -> Workspace:
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("mkdir -p /data/sub")
-    await ws.execute("tee /data/plain.txt > /dev/null", stdin=b"y\n")
-    await ws.execute("cd /data")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /data/sub")
+    await ws.shell("tee /data/plain.txt > /dev/null", stdin=b"y\n")
+    await ws.shell("cd /data")
     return ws
 
 
 async def _rc(ws: Workspace, cmd: str) -> int:
-    io = await ws.execute(cmd)
+    io = await ws.shell(cmd)
     return io.exit_code
 
 
@@ -127,7 +127,7 @@ async def test_f_relative_missing():
 @pytest.mark.asyncio
 async def test_f_relative_with_dotdot():
     ws = await _workspace()
-    await ws.execute("cd /data/sub")
+    await ws.shell("cd /data/sub")
     assert await _rc(ws, "test -f ../plain.txt") == 0
 
 
@@ -190,7 +190,7 @@ async def test_file_unary_operators(cmd: str, rc: int):
 @pytest.mark.asyncio
 async def test_s_empty_file_false():
     ws = await _workspace()
-    await ws.execute("printf '' > /data/zero.txt")
+    await ws.shell("printf '' > /data/zero.txt")
     assert await _rc(ws, "[ -s /data/zero.txt ]") == 1
 
 
@@ -228,15 +228,15 @@ async def test_e_unknown_size_no_read():
 @pytest.mark.asyncio
 async def test_x_true_after_chmod():
     ws = await _workspace()
-    await ws.execute("chmod +x /data/plain.txt")
+    await ws.shell("chmod +x /data/plain.txt")
     assert await _rc(ws, "[ -x /data/plain.txt ]") == 0
 
 
 @pytest.mark.asyncio
 async def test_symlink_L_and_dangling():
     ws = await _workspace()
-    await ws.execute("ln -s /data/plain.txt /data/zl && ln -s /data/nope "
-                     "/data/zd")
+    await ws.shell("ln -s /data/plain.txt /data/zl && ln -s /data/nope "
+                   "/data/zd")
     assert await _rc(ws, "[ -L /data/zl ]") == 0
     assert await _rc(ws, "[ -h /data/zl ]") == 0
     assert await _rc(ws, "[ -L /data/plain.txt ]") == 1
@@ -287,7 +287,7 @@ async def test_flat_arity_and_combinators(cmd: str, rc: int):
 ])
 async def test_flat_errors_exit_two(cmd: str, message: str):
     ws = await _workspace()
-    io = await ws.execute(cmd)
+    io = await ws.shell(cmd)
     assert io.exit_code == 2
     assert message in await io.stderr_str()
 
@@ -330,29 +330,29 @@ async def test_double_bracket_semantics(cmd: str, rc: int):
 @pytest.mark.asyncio
 async def test_double_bracket_pattern_from_variable():
     ws = await _workspace()
-    io = await ws.execute("p='a*'; [[ abc == $p ]]; echo $?;"
-                          " [[ abc == \"$p\" ]]; echo $?")
+    io = await ws.shell("p='a*'; [[ abc == $p ]]; echo $?;"
+                        " [[ abc == \"$p\" ]]; echo $?")
     assert await io.stdout_str() == "0\n1\n"
 
 
 @pytest.mark.asyncio
 async def test_double_bracket_arith_variable():
     ws = await _workspace()
-    io = await ws.execute("n=3; [[ n -eq 3 ]]; echo $?")
+    io = await ws.shell("n=3; [[ n -eq 3 ]]; echo $?")
     assert await io.stdout_str() == "0\n"
 
 
 @pytest.mark.asyncio
 async def test_double_bracket_no_word_splitting():
     ws = await _workspace()
-    io = await ws.execute("v='a b'; [[ $v == 'a b' ]]; echo $?")
+    io = await ws.shell("v='a b'; [[ $v == 'a b' ]]; echo $?")
     assert await io.stdout_str() == "0\n"
 
 
 @pytest.mark.asyncio
 async def test_single_bracket_word_splits_expansion():
     ws = await _workspace()
-    io = await ws.execute("v='a b'; [ $v = 'a b' ]; echo $?")
+    io = await ws.shell("v='a b'; [ $v = 'a b' ]; echo $?")
     assert io.exit_code == 0
     assert await io.stdout_str() == "2\n"
     assert "too many arguments" in await io.stderr_str()
@@ -361,14 +361,14 @@ async def test_single_bracket_word_splits_expansion():
 @pytest.mark.asyncio
 async def test_double_bracket_rematch():
     ws = await _workspace()
-    io = await ws.execute("[[ abc =~ b. ]] && echo m:${BASH_REMATCH[0]}")
+    io = await ws.shell("[[ abc =~ b. ]] && echo m:${BASH_REMATCH[0]}")
     assert await io.stdout_str() == "m:bc\n"
 
 
 @pytest.mark.asyncio
 async def test_double_bracket_bad_operator_kills_line():
     ws = await _workspace()
-    io = await ws.execute("[[ a -bogus b ]]; echo after")
+    io = await ws.shell("[[ a -bogus b ]]; echo after")
     assert io.exit_code == 2
     assert "conditional binary operator expected" in await io.stderr_str()
     assert await io.stdout_str() == ""
@@ -377,7 +377,7 @@ async def test_double_bracket_bad_operator_kills_line():
 @pytest.mark.asyncio
 async def test_unsupported_operator_fails_loudly():
     ws = await _workspace()
-    io = await ws.execute("[ -p /data/plain.txt ]")
+    io = await ws.shell("[ -p /data/plain.txt ]")
     assert io.exit_code == 2
     assert "[: -p: unsupported operator" in await io.stderr_str()
 
@@ -385,8 +385,8 @@ async def test_unsupported_operator_fails_loudly():
 @pytest.mark.asyncio
 async def test_if_integration():
     ws = await _workspace()
-    io = await ws.execute(
+    io = await ws.shell(
         "if [ -e /data/plain.txt ]; then echo yes; else echo no; fi")
     assert await io.stdout_str() == "yes\n"
-    io = await ws.execute("if [[ plain.txt == *.txt ]]; then echo yes; fi")
+    io = await ws.shell("if [[ plain.txt == *.txt ]]; then echo yes; fi")
     assert await io.stdout_str() == "yes\n"

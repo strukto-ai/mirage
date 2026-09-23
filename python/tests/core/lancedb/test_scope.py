@@ -16,8 +16,8 @@ from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.hierarchy.scope import INVALID, ROOT, make_detect_scope
 from mirage.core.lancedb.scope import (detect_for, filters_of, scopes_for,
                                        table_of)
-from mirage.resource.lancedb.config import LanceDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 
 def _cfg(**kw) -> LanceDBConfig:
@@ -33,9 +33,7 @@ def _cfg(**kw) -> LanceDBConfig:
 
 
 def _ps(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory=path,
-                    resource_path=path.strip("/"))
+    return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
 def _detect(config: LanceDBConfig):

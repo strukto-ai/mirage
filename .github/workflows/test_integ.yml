@@ -2,6 +2,7 @@ name: Integ
 
 permissions:
   contents: read
+  actions: read
 
 "on":
   push:
@@ -62,28 +63,28 @@ jobs:
               - '.github/actions/integ-battery-setup/action.yml'
               - '.github/actions/nextcloud-tune/action.yml'
             database:
-              - 'integ/resources/mongodb/**'
-              - 'integ/resources/postgres/**'
+              - 'integ/vfs/mongodb/**'
+              - 'integ/vfs/postgres/**'
               - 'integ/targets.json'
               - 'integ/runners/**'
-              - 'integ/resources/chroma/**'
+              - 'integ/vfs/chroma/**'
               - 'python/mirage/accessor/mongodb.py'
               - 'python/mirage/core/mongodb/**'
               - 'python/mirage/commands/builtin/mongodb/**'
-              - 'python/mirage/resource/mongodb/**'
+              - 'python/mirage/vfs/mongodb/**'
               - 'python/mirage/accessor/postgres.py'
               - 'python/mirage/core/postgres/**'
               - 'python/mirage/commands/builtin/postgres/**'
-              - 'python/mirage/resource/postgres/**'
+              - 'python/mirage/vfs/postgres/**'
               - 'python/mirage/accessor/chroma.py'
               - 'python/mirage/core/chroma/**'
               - 'python/mirage/commands/builtin/chroma/**'
-              - 'python/mirage/resource/chroma/**'
-              - 'integ/resources/qdrant/**'
+              - 'python/mirage/vfs/chroma/**'
+              - 'integ/vfs/qdrant/**'
               - 'python/mirage/accessor/qdrant.py'
               - 'python/mirage/core/qdrant/**'
               - 'python/mirage/commands/builtin/qdrant/**'
-              - 'python/mirage/resource/qdrant/**'
+              - 'python/mirage/vfs/qdrant/**'
               - 'typescript/**'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
@@ -99,7 +100,7 @@ jobs:
               - 'integ/server/langfuse_compose.yml'
               - 'integ/server/langfuse_seed.py'
               - 'integ/server/jaeger_seed.py'
-              - 'integ/resources/observability/**'
+              - 'integ/vfs/observability/**'
               - 'integ/targets.json'
               - 'integ/runners/**'
               - 'python/mirage/accessor/langfuse.py'
@@ -108,14 +109,14 @@ jobs:
               - 'python/mirage/core/jaeger/**'
               - 'python/mirage/commands/builtin/langfuse/**'
               - 'python/mirage/commands/builtin/jaeger/**'
-              - 'python/mirage/resource/langfuse/**'
-              - 'python/mirage/resource/jaeger/**'
+              - 'python/mirage/vfs/langfuse/**'
+              - 'python/mirage/vfs/jaeger/**'
               - 'typescript/packages/core/src/core/langfuse/**'
               - 'typescript/packages/core/src/core/jaeger/**'
               - 'typescript/packages/core/src/accessor/langfuse.ts'
               - 'typescript/packages/core/src/accessor/jaeger.ts'
-              - 'typescript/packages/node/src/resource/langfuse/**'
-              - 'typescript/packages/node/src/resource/jaeger/**'
+              - 'typescript/packages/node/src/vfs/langfuse/**'
+              - 'typescript/packages/node/src/vfs/jaeger/**'
               - '.github/workflows/test_integ.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
             fuse:
@@ -284,6 +285,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -371,6 +373,14 @@ jobs:
       - name: Run notion MCP/REST parity check (TS)
         working-directory: integ
         run: pnpm exec tsx notion_mcp_parity.ts
+
+      # Every Notion call MCP-Atlas recorded against live Notion, replayed
+      # against the fake seeded with the workspace those replies show. A reply
+      # the fake answers differently is a divergence from live Notion, not a
+      # golden to refresh; scripts/gen_notion_atlas.py rebuilds the recordings.
+      - name: Replay live Notion recordings (MCP-Atlas) against the fake
+        working-directory: integ
+        run: pnpm run notion:atlas
 
       # Runs every cli-ntn case through the REAL Notion CLI against the same
       # fake, so the goldens the battery asserts are by construction what the
@@ -565,6 +575,17 @@ jobs:
         working-directory: integ
         run: pnpm run gws:selftest
 
+      - name: Assert the notion fake (block writes and validation)
+        working-directory: integ
+        run: pnpm run notion:selftest
+
+      # slack-mcp-server's own calls, which the battery never makes because
+      # mirage does not: auth.test, client.userBoot, conversations.replies, a
+      # paged conversations.list, and arguments sent as a form body.
+      - name: Assert the slack fake (auth.test, threads, paged channels)
+        working-directory: integ
+        run: pnpm run slack:selftest
+
       # github's corpus coverage is the `gh` porcelain, which never builds
       # history: a client that does calls POST /git/trees then /git/commits, and
       # that is the only path on which a commit can state its own author and
@@ -699,6 +720,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -1038,6 +1060,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -1366,6 +1389,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -1497,6 +1521,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -1591,6 +1616,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 

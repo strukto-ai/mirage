@@ -35,7 +35,7 @@ export async function exerciseCancellation(
     const path = `/home/user/mirage-cancel-${crypto.randomUUID()}.pid`
     const command = `exec python3 -c 'import os,time; from pathlib import Path; Path("${path}").write_text(str(os.getpid())); time.sleep(60)'`
     const abort = new AbortController()
-    const outcome = workspace.execute(command, { cwd: '/home/user', signal: abort.signal }).then(
+    const outcome = workspace.shell(command, { cwd: '/home/user', signal: abort.signal }).then(
       (result) => ({ code: result.exitCode, error: '' }),
       (error: unknown) => ({
         code: -1,

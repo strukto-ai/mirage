@@ -8,7 +8,7 @@ from mirage.utils.key_prefix import mount_key
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(resource_path=(path).strip("/"),
+    return PathSpec(vfs_path=(path).strip("/"),
                     virtual=path,
                     directory=path,
                     resolved=True)
@@ -29,7 +29,7 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
 
     async def readdir(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
-            resource_path=(path).strip("/"), virtual=path, directory=path)
+            vfs_path=(path).strip("/"), virtual=path, directory=path)
         p = spec.virtual.rstrip("/") or "/"
         if p not in inferred_dirs:
             raise FileNotFoundError(p)
@@ -51,7 +51,7 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
 
     async def stat(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
-            resource_path=(path).strip("/"), virtual=path, directory=path)
+            vfs_path=(path).strip("/"), virtual=path, directory=path)
         p = spec.virtual
         if p in files:
             return FileStat(name=p.rsplit("/", 1)[-1] or p,
@@ -65,7 +65,7 @@ def _make_backend(files: dict[str, bytes], dirs: set[str] | None = None):
 
     async def read_bytes(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
-            resource_path=(path).strip("/"), virtual=path, directory=path)
+            vfs_path=(path).strip("/"), virtual=path, directory=path)
         if spec.virtual not in files:
             raise FileNotFoundError(spec.virtual)
         return files[spec.virtual]
@@ -301,7 +301,7 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
 
     async def readdir(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
-            resource_path=(path).strip("/"), virtual=path, directory=path)
+            vfs_path=(path).strip("/"), virtual=path, directory=path)
         p = _full(spec.virtual).rstrip("/") or "/"
         if p not in inferred_dirs:
             raise FileNotFoundError(p)
@@ -320,7 +320,7 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
 
     async def stat(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
-            resource_path=(path).strip("/"), virtual=path, directory=path)
+            vfs_path=(path).strip("/"), virtual=path, directory=path)
         p = _full(spec.virtual)
         if p in full_files:
             return FileStat(name=p.rsplit("/", 1)[-1],
@@ -334,7 +334,7 @@ def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
 
     async def read_bytes(path):
         spec = path if isinstance(path, PathSpec) else PathSpec(
-            resource_path=(path).strip("/"), virtual=path, directory=path)
+            vfs_path=(path).strip("/"), virtual=path, directory=path)
         p = _full(spec.virtual)
         if p not in full_files:
             raise FileNotFoundError(p)
@@ -352,7 +352,7 @@ async def test_grep_recursive_files_only_mount_prefix():
         },
         mount_prefix="/s3",
     )
-    p = PathSpec(resource_path=mount_key("/dir", "/s3"),
+    p = PathSpec(vfs_path=mount_key("/dir", "/s3"),
                  virtual="/dir",
                  directory="/dir",
                  resolved=True)

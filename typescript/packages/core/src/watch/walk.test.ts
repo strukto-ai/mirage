@@ -18,8 +18,8 @@ import { FileStat, FileType, PathSpec, type WalkEntry } from '../types.ts'
 import { enoent } from '../utils/errors.ts'
 import { entryOf, ReaddirWalk, synthDirs } from './walk.ts'
 
-function root(virtual: string, resourcePath: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath })
+function root(virtual: string, vfsPath: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath })
 }
 
 describe('synthDirs', () => {

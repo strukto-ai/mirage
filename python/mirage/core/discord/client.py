@@ -21,7 +21,7 @@ from mirage.core.api.client import (RetryPolicy, SessionArg, api_request,
                                     status_error)
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.constants import DISCORD_API, MAX_RETRIES
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 # GET is the only verb that waits out a 429: reads are safe to repeat, and
 # the delay comes from the JSON body's retry_after (Discord's convention).

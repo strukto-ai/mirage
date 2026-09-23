@@ -97,7 +97,7 @@ function selectField(
  * instance is left alone: a config field may hold a live object (a
  * notion `authProvider`, a client someone constructed), and rebuilding
  * one from its own entries drops every prototype method and accessor
- * the resource then calls. Python needs no such check -- its walk asks
+ * the VFS then calls. Python needs no such check -- its walk asks
  * `isinstance(value, Mapping)`, which an instance already fails.
  */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -183,7 +183,7 @@ async function resolveValue(
   if (isPlainObject(value)) {
     // fromEntries, not keyed assignment: a config key named
     // `__proto__` would otherwise assign through the prototype setter
-    // and never reach the resource's own schema.
+    // and never reach the VFS's own schema.
     const pairs: [string, unknown][] = []
     for (const [key, child] of Object.entries(value)) {
       pairs.push([key, await resolveValue(child, `${label}.${key}`, fetched, sources)])
@@ -199,7 +199,7 @@ async function resolveValue(
  * The same `configValue` a source's own config goes through, over the
  * config of a thing that reaches one. Resolved **before** the config is
  * parsed, so a credential stays the plain `string` its client already
- * reads and no resource, accessor or backend learns this plane exists.
+ * reads and no VFS, accessor or backend learns this plane exists.
  *
  * One `fetched` cache spans the whole config, so two fields naming one
  * secret cost one call and cannot straddle a rotation.

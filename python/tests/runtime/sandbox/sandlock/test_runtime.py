@@ -19,7 +19,7 @@ import sys
 
 import pytest
 
-from mirage import RAMResource, Workspace
+from mirage import RAMVFS, Workspace
 from mirage.runtime.sandbox.sandlock import SandlockRuntime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import ProcessExecution
@@ -80,10 +80,10 @@ async def test_argv_environment_cwd_and_stdin_reach_cli(cli, monkeypatch):
 @pytest.mark.asyncio
 async def test_workspace_routes_named_programs_as_argv(cli):
     runtime = SandlockRuntime(captures=("python3", "node"))
-    ws = Workspace({"/": RAMResource()}, runtimes=[runtime])
+    ws = Workspace({"/": RAMVFS()}, runtimes=[runtime])
     try:
         for line in ("python3 --version", "node --version"):
-            io = await ws.execute(line)
+            io = await ws.shell(line)
             assert io.exit_code == 0
             data = json.loads(await io.stdout_str())
             assert data["argv"][-3:] == ["--", *line.split()]

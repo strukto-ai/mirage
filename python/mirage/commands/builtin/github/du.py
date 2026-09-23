@@ -40,7 +40,7 @@ def _subtree(accessor: GitHubAccessor,
         accessor (GitHubAccessor): backend handle holding the tree.
         path (PathSpec): subtree root.
     """
-    key = path.resource_path.strip("/")
+    key = path.vfs_path.strip("/")
     prefix = key + "/" if key else ""
     found = [("/" + p, entry.size) for p, entry in accessor.tree.items()
              if (p == key or p.startswith(prefix)) and entry.size is not None]
@@ -74,7 +74,7 @@ async def _stat(accessor: GitHubAccessor, index: IndexCacheStore,
     return await IO.stat(accessor, path, index)
 
 
-@command("du", resource="github", spec=SPECS["du"], provision=du_provision)
+@command("du", vfs="github", spec=SPECS["du"], provision=du_provision)
 async def du(accessor: GitHubAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     # `_subtree` reads accessor.tree directly rather than the index, so

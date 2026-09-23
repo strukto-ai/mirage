@@ -32,7 +32,7 @@ def test_registered_command_has_provision_fn():
     rc = RegisteredCommand(
         name="mycmd",
         spec=CommandSpec(),
-        resource="ram",
+        vfs="ram",
         filetype=None,
         fn=my_cmd,
         provision_fn=my_cmd_dry_run,
@@ -44,7 +44,7 @@ def test_registered_command_provision_fn_defaults_none():
     rc = RegisteredCommand(
         name="mycmd",
         spec=CommandSpec(),
-        resource="ram",
+        vfs="ram",
         filetype=None,
         fn=my_cmd,
     )
@@ -53,10 +53,7 @@ def test_registered_command_provision_fn_defaults_none():
 
 def test_command_decorator_with_dry_run():
 
-    @command("mycmd",
-             resource="ram",
-             spec=CommandSpec(),
-             provision=my_cmd_dry_run)
+    @command("mycmd", vfs="ram", spec=CommandSpec(), provision=my_cmd_dry_run)
     async def mycmd(backend, paths, *texts, **_extra):
         return b"ok", IOResult()
 
@@ -67,7 +64,7 @@ def test_command_decorator_with_dry_run():
 
 def test_command_decorator_without_dry_run():
 
-    @command("mycmd2", resource="ram", spec=CommandSpec())
+    @command("mycmd2", vfs="ram", spec=CommandSpec())
     async def mycmd2(backend, paths, *texts, **_extra):
         return b"ok", IOResult()
 

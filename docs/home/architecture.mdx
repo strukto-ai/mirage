@@ -17,7 +17,7 @@ The agent (or any application embedding Mirage) issues bash commands, VFS calls,
 
 ## 2. Mirage Bash and VFS
 
-The action surface. **Mirage Bash** parses commands with tree-sitter and runs them against the **Mirage VFS**, a unified filesystem API over every mount. A **FUSE Adapter** exposes the same tree to host tools when you want it. A **Command Registry** and **VFS Registry** describe what verbs and resources are available.
+The action surface. **Mirage Bash** parses commands with tree-sitter and runs them against the **Mirage VFS**, a unified filesystem API over every mount. A **FUSE Adapter** exposes the same tree to host tools when you want it. A **Command Registry** and **VFS Registry** describe what verbs and mounts are available.
 
 ## 3. Dispatcher & Cache
 
@@ -27,10 +27,10 @@ The **Mirage Dispatcher** routes each operation to the mount that owns the path,
 
 Whatever you mount: RAM, Disk, Redis, S3 / R2 / GCS / OCI / Supabase, Gmail / GDrive / GDocs / GSheets / GSlides, GitHub / Linear / Notion / Trello, Slack / Discord / Email, MongoDB / Postgres / LanceDB / Qdrant, SSH, and more. Each speaks the same filesystem semantics from the agent's point of view.
 
-Browse the [Resource Matrix](/home/resource-matrix) for the full list.
+Browse the [VFS Matrix](/home/vfs-matrix) for the full list.
 
 ## Where to go next
 
-- [Resource Matrix](/home/resource-matrix) to pick a backend to mount.
+- [VFS Matrix](/home/vfs-matrix) to pick a backend to mount.
 - [Python Quickstart](/python/quickstart) for working code in minutes.
 - [TypeScript Quickstart](/typescript/quickstart) for the same Workspace API in Node, browser, or edge.

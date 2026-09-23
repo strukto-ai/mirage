@@ -22,17 +22,17 @@ export abstract class IndexCacheStore {
     expiresAt: Date,
   ): void
   abstract entries(): Promise<Map<string, IndexEntry>>
-  abstract get(resourcePath: string): Promise<LookupResult>
-  abstract put(resourcePath: string, entry: IndexEntry): Promise<void>
-  abstract listDir(resourcePath: string): Promise<ListResult>
+  abstract get(vfsPath: string): Promise<LookupResult>
+  abstract put(vfsPath: string, entry: IndexEntry): Promise<void>
+  abstract listDir(vfsPath: string): Promise<ListResult>
   abstract setDir(
-    resourcePath: string,
+    vfsPath: string,
     entries: readonly [string, IndexEntry][],
     expiredAt?: Date | null,
   ): Promise<void>
-  abstract invalidateDir(resourcePath: string): Promise<void>
+  abstract invalidateDir(vfsPath: string): Promise<void>
   /**
-   * Drop `resourcePath` and everything cached below it.
+   * Drop `vfsPath` and everything cached below it.
    *
    * `invalidateDir` drops one directory's listing and its direct children's
    * entries, which is enough for a mutation that named a path. A push
@@ -42,7 +42,7 @@ export abstract class IndexCacheStore {
    *
    * Mirrors Python `IndexCacheStore.invalidate_prefix`.
    */
-  abstract invalidatePrefix(resourcePath: string): Promise<void>
+  abstract invalidatePrefix(vfsPath: string): Promise<void>
   /**
    * Mark every entry stale without discarding it.
    *
@@ -60,7 +60,7 @@ export abstract class IndexCacheStore {
    * Release whatever the store holds open. The default is a no-op:
    * an in-memory index owns nothing. A store backed by a connection
    * (redis) overrides this and must be idempotent — `close()` is
-   * called once per owning resource, and a resource shared between
+   * called once per owning VFS, and a VFS shared between
    * workspaces is closed by whichever one owns it.
    *
    * Mirrors Python `IndexCacheStore.close` (`cache/index/store.py`).

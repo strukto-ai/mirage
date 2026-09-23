@@ -19,8 +19,8 @@ import aiohttp
 import pytest
 
 from mirage.core.api.client import SessionPool
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -62,13 +62,13 @@ def _drain_session_pools(monkeypatch):
 
 @pytest.fixture
 def memory_backend():
-    return RAMResource()
+    return RAMVFS()
 
 
 @pytest.fixture
 def write_ws():
     ws = Workspace(
-        {"/tmp/": RAMResource()},
+        {"/tmp/": RAMVFS()},
         mode=MountMode.WRITE,
     )
     ws.get_session(ws.default_session_id).cwd = "/"

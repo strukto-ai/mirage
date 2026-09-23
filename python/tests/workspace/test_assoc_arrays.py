@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 # Every expectation is pinned against GNU bash 5.2.37 on
@@ -427,9 +427,9 @@ ALL_CASES = CASES + ATTR_CASES + FUNC_JOB_CASES + REVIEW_CASES
 def test_assoc_case(case_id, cmd, out, err, code):
 
     async def run():
-        ws = Workspace({"data": RAMResource()})
+        ws = Workspace({"data": RAMVFS()})
         try:
-            io = await ws.execute(cmd)
+            io = await ws.shell(cmd)
             stdout = await io.stdout_str()
             stderr = io.stderr or b""
             if isinstance(stderr, bytes):

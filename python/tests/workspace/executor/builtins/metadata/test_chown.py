@@ -1,18 +1,18 @@
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _make_ws(mode: MountMode = MountMode.WRITE) -> Workspace:
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    return Workspace({"/data/": (resource, mode)}, mode=MountMode.WRITE)
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    return Workspace({"/data/": (vfs, mode)}, mode=MountMode.WRITE)
 
 
 async def _run(ws: Workspace, cmd: str) -> tuple[int, str, str]:
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return r.exit_code, await r.stdout_str(), await r.stderr_str()
 
 

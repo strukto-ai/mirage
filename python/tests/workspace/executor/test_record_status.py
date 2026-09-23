@@ -17,11 +17,11 @@ import re
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.parse import parse
 from mirage.workspace.executor.statement import record_status
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 _SRC = pathlib.Path(__file__).resolve().parents[3] / "mirage"
 
@@ -40,7 +40,7 @@ def test_every_status_write_goes_through_the_door():
 
 
 def test_record_status_claims_a_parked_pipeline():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     s._pipe_status_pending = (1, 0)
     record_status(s, 0)
     assert (s.last_exit_code, s.pipe_status) == (0, (1, 0))
@@ -50,7 +50,7 @@ def test_record_status_claims_a_parked_pipeline():
 
 
 def test_transparent_statement_keeps_the_inner_record():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     record_status(s, 1)
     s._pipe_status_pending = (1, 0)
     record_status(s, 0, transparent=True)
@@ -87,7 +87,7 @@ def test_pipeline_transparent(line, transparent):
 
 async def _out(ws: Workspace, line: str) -> str:
     ws.create_session(line)
-    io = await ws.execute(line, session_id=line)
+    io = await ws.shell(line, session_id=line)
     return (await io.stdout_str()).strip()
 
 
@@ -169,12 +169,12 @@ async def _out(ws: Workspace, line: str) -> str:
 async def test_pipestatus_matches_bash(line, expected):
     # Every expectation here was pinned against GNU bash 5.2 on
     # debian:stable-slim.
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     assert await _out(ws, line) == expected
 
 
 @pytest.mark.asyncio
 async def test_pipestatus_is_not_listed_by_declare():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("declare -p PIPESTATUS")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("declare -p PIPESTATUS")
     assert io.exit_code == 1

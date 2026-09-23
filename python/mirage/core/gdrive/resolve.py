@@ -256,7 +256,7 @@ async def resolve_parent(accessor: GDriveAccessor,
     Returns:
         tuple[str, str | None]: (parent folder id, shared drive id or None).
     """
-    key = path.resource_path
+    key = path.vfs_path
     parent_key = posixpath.dirname(key)
     parent_virtual = posixpath.dirname(path.virtual.rstrip("/")) or "/"
     return await resolve_dir(accessor, parent_key, parent_virtual)

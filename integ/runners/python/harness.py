@@ -28,8 +28,8 @@ from mirage.types import FileStat, PathSpec
 
 # integ/runtime holds the runtime suite (its own schema and runners,
 # integ/runtime/run.{py,ts} + cli.sh), not battery cases; keep it out.
-CASE_DIRS = ("unix", "bash", "crossmount", "resources", "cli", "session",
-             "console", "secrets")
+CASE_DIRS = ("unix", "bash", "crossmount", "vfs", "cli", "session", "console",
+             "secrets")
 
 # A service entry names the env vars each host needs, and may declare
 # ``shared``: the fake behind it holds ONE world rather than a namespace per
@@ -265,8 +265,8 @@ async def seed_fixture(ws, fixture: str | None, mount_path: str,
             rel = src.relative_to(base).as_posix()
             dest = f"{mount_path.rstrip('/')}/{rel}"
             parent = dest.rsplit("/", 1)[0]
-            await ws.execute(f"mkdir -p {parent}")
-            await ws.execute(f"tee {dest} > /dev/null", stdin=src.read_bytes())
+            await ws.shell(f"mkdir -p {parent}")
+            await ws.shell(f"tee {dest} > /dev/null", stdin=src.read_bytes())
     finally:
         if holder is not None:
             holder.cleanup()
@@ -288,8 +288,8 @@ async def seed_mount_root(ws, mount_path: str) -> None:
         mount_path (str): the mount to materialise.
     """
     marker = f"{mount_path.rstrip('/')}/.seed"
-    await ws.execute(f"tee {marker} > /dev/null", stdin=b"seed\n")
-    await ws.execute(f"rm {marker}")
+    await ws.shell(f"tee {marker} > /dev/null", stdin=b"seed\n")
+    await ws.shell(f"rm {marker}")
 
 
 def _check_field(st: FileStat, name: str) -> str:
@@ -552,17 +552,17 @@ async def run_case(
     """
     if case.get("clear_cache"):
         # A full clear means the file cache AND every mount's index cache:
-        # remote listings live in the per-resource index, and a listing
+        # remote listings live in the per-VFS index, and a listing
         # populated by an earlier case must not leak into this one.
-        # Resources without an index cache have nothing to clear.
+        # mounts without an index cache have nothing to clear.
         await ws.cache.clear()
         for mount in ws.mounts():
-            store = getattr(mount.resource, "index", None)
+            store = getattr(mount.vfs, "index", None)
             if store is not None:
                 await store.clear()
     start = time.monotonic()
     if case.get("provision"):
-        plan = await ws.execute(case["command"], provision=True)
+        plan = await ws.shell(case["command"], provision=True)
         return 0, provision_line(
             plan) + "\n", "", time.monotonic() - start, None, []
     if case.get("answer") is not None:
@@ -576,7 +576,7 @@ async def run_case(
         # question, and charging that to the dry run would fail every
         # ask case.
         recorded = len(ws.decisions.pending()) - before
-    result = await ws.execute(case["command"], session_id=case.get("session"))
+    result = await ws.shell(case["command"], session_id=case.get("session"))
     elapsed = time.monotonic() - start
     out = await result.stdout_str()
     err = await result.stderr_str()
@@ -597,7 +597,7 @@ async def run_scenario(read_ws, mutate, steps: list[dict]) -> tuple[int, str]:
             spec = step["mutate"]
             await mutate(spec["path"], spec["content"].encode())
             continue
-        result = await read_ws.execute(step["command"])
+        result = await read_ws.shell(step["command"])
         outs.append(await result.stdout_str())
         exit_code = result.exit_code
     return exit_code, "".join(outs)

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { LANCEDB_IO } from '../../commands/builtin/lancedb/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const LANCEDB_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.LANCEDB, LANCEDB_IO)
+export const LANCEDB_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.LANCEDB, LANCEDB_IO)

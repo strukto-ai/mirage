@@ -18,7 +18,7 @@ import { Accessor } from '@struktoai/mirage-core/accessor/index'
 import { homedir } from 'node:os'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { SSHConfig } from '../resource/ssh/config.ts'
+import type { SSHConfig } from '../vfs/ssh/config.ts'
 
 function expandHome(p: string): string {
   if (p === '~') return homedir()
@@ -52,7 +52,7 @@ export class SSHAccessor extends Accessor {
       ssh2Mod = await import('ssh2')
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      throw new Error(`ssh2 is required for the SSH resource — install it as a peer dep: ${msg}`)
+      throw new Error(`ssh2 is required for the SSH VFS — install it as a peer dep: ${msg}`)
     }
     const { Client: ClientCtor } = ssh2Mod
     const c = new ClientCtor()

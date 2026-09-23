@@ -43,7 +43,7 @@ def resolve_script(name: str, cwd: PathSpec | str | None) -> PathSpec:
     path = resolve_path(name, base)
     last_slash = path.rfind("/")
     directory = path[:last_slash + 1] if last_slash >= 0 else "/"
-    return PathSpec(resource_path=path.strip("/"),
+    return PathSpec(vfs_path=path.strip("/"),
                     virtual=path,
                     directory=directory,
                     resolved=True)
@@ -63,4 +63,4 @@ def default_paths(paths: list[PathSpec],
         return paths
     if cwd is not None:
         return [cwd]
-    return [PathSpec(resource_path="", virtual="/", directory="/")]
+    return [PathSpec(vfs_path="", virtual="/", directory="/")]

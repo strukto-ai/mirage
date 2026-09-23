@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { NO_FOLLOW_OPS, STAMP_WRITE_OPS, type NamespaceLinks } from './config.ts'
@@ -61,7 +61,7 @@ describe('NamespaceLinks', () => {
   it('is still satisfied by the workspace Namespace', () => {
     // Narrowing the seam must not cost the structural match, and the
     // concrete Namespace keeps the mutators the door calls on it.
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     const links: NamespaceLinks = ws.namespace
     expect(links.symlinkTargets()).toBeInstanceOf(Map)
     expect(typeof ws.namespace.symlink).toBe('function')

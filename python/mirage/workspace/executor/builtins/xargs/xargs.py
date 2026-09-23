@@ -21,7 +21,7 @@ from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 _UNSUPPORTED = ("I", "P")
@@ -53,7 +53,7 @@ def _split_items(data: bytes, flags: dict[str, str | bool]) -> list[str]:
 async def handle_xargs(
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a command with words read from stdin appended (GNU xargs).
@@ -67,7 +67,7 @@ async def handle_xargs(
         execute_fn (Callable): shell evaluator for the inner line.
         args (list[str]): options, then command name and initial
             arguments; the command defaults to ["echo"] like GNU.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (ByteSource | None): input whose words become arguments.
     """
     parse = parse_shell_options(SHELL_SPECS["xargs"], args or [])

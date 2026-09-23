@@ -9,9 +9,7 @@ from mirage.types import ContentType, FileType, PathSpec
 
 
 def _ps(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory=path,
-                    resource_path=path.strip("/"))
+    return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
 @pytest.mark.asyncio

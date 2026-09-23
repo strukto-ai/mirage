@@ -59,8 +59,8 @@ __all__ = [
 
 
 def split_path(path: PathSpec) -> tuple[str, str]:
-    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
-    return prefix, path.resource_path
+    prefix = mount_prefix_of(path.virtual, path.vfs_path) or ""
+    return prefix, path.vfs_path
 
 
 def drive_base(config: OneDriveConfig) -> str:
@@ -110,7 +110,7 @@ def item_url(config: OneDriveConfig, path: str, action: str = "") -> str:
 
 
 def drive_ref_path(config: OneDriveConfig, folder: str = "") -> str:
-    # `folder` is resource-relative; the key_prefix must apply here exactly
+    # `folder` is VFS-relative; the key_prefix must apply here exactly
     # like item_url, or copy/rename destinations land at the drive root.
     base = drive_base(config)[len(graph_api(config)):]
     full = _full_path(config, folder)

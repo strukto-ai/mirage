@@ -105,7 +105,7 @@ class RouteContext:
         ``command``/``builtin`` become the first stage the runtime
         captures, so `ctx.command == 'python3'` means what it reads as
         even on `cat x | python3`. A runtime with no captured stage on
-        the line (including the catch-all vfs) keeps the line's first
+        the line (including the catch-all workspace) keeps the line's first
         stage.
 
         Args:
@@ -212,7 +212,7 @@ class RouteContext:
 #     def wants(ctx: RouteContext) -> bool:
 #         return ctx.builtin and "/secret" not in ctx.line
 #
-#     VFSRuntime(script=wants)
+#     WorkspaceRuntime(script=wants)
 #
 #     # workspace yaml: guard.py next to the config file
 #     runtimes:
@@ -289,7 +289,7 @@ class RouteDecision:
     """The one-line placement decision the dispatcher consults.
 
     Both fields hold runtimes: the decision IS "which runtime runs
-    which command". The vfs runtime is a legal value in either; a
+    which command". The workspace runtime is a legal value in either; a
     command placed on it is served by the workspace executor itself.
 
     Args:
@@ -298,7 +298,7 @@ class RouteDecision:
             or None when its capturers all refused (admission failure,
             exit 126, never a silent fallback to the workspace).
         fallback (Runtime | None): where commands no entry captures
-            run: the catch-all vfs runtime, or None when the vfs
+            run: the catch-all workspace runtime, or None when the workspace
             runtime refused the line or declares captures; unbound
             commands then exit 126.
     """

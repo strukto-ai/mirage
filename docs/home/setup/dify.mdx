@@ -1,7 +1,7 @@
 ---
 title: Dify
 icon: /images/dify-logo.svg
-description: Set up a Dify Knowledge API key and dataset for the Dify resource.
+description: Set up a Dify Knowledge API key and dataset for the Dify VFS.
 ---
 
 ## Credentials
@@ -61,7 +61,7 @@ virtual path below the Mirage mount. The default field name is `slug`.
 | Support Policy | `policies/support.md` | `/knowledge/policies/support.md` |
 
 If your Dify metadata field is named `path`, set `slug_metadata_name="path"` in
-the Dify resource config and use `name: path` in Dify metadata.
+the Dify VFS config and use `name: path` in Dify metadata.
 
 Guidelines:
 
@@ -106,4 +106,4 @@ cannot filter retrieval by `document_name`.
 For the most predictable behavior, add the configured slug metadata field to
 every document and use slug-based paths.
 
-For Python configuration, see the [Python Dify resource](/python/resource/dify) page.
+For Python configuration, see the [Python Dify VFS](/python/vfs/dify) page.

@@ -17,7 +17,7 @@ from mirage.context import (get_current_session, get_current_session_for,
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.ram import RAMSessionStore
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import (ensure_var_visible, env_snapshot,
                                             exported_names, session_view,
                                             visible_arrays, visible_env)
@@ -34,7 +34,7 @@ __all__ = [
     "visible_env",
     "RedisSessionStore",
     "S3SessionStore",
-    "Session",
+    "SessionState",
     "SessionFields",
     "SessionManager",
     "SessionStore",

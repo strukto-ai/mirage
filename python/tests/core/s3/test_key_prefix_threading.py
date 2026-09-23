@@ -5,8 +5,8 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.s3.find import find
 from mirage.core.s3.read import read_bytes
 from mirage.core.s3.readdir import readdir
-from mirage.resource.s3 import S3Config
 from mirage.types import PathSpec
+from mirage.vfs.s3 import S3Config
 from tests.e2e.s3_mock import patch_s3_multi
 
 
@@ -25,7 +25,7 @@ def test_readdir_no_prefix_backward_compat():
     with patch_s3_multi(store):
         config = _make_config(key_prefix=None)
         accessor = S3Accessor(config)
-        path = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
+        path = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
         index = RAMIndexCacheStore()
         entries = asyncio.run(readdir(accessor, path, index=index))
     assert any(e.endswith("/a.txt") for e in entries)
@@ -37,7 +37,7 @@ def test_readdir_strips_key_prefix_from_entries():
     with patch_s3_multi(store):
         config = _make_config(key_prefix="prod")
         accessor = S3Accessor(config)
-        path = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
+        path = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
         index = RAMIndexCacheStore()
         entries = asyncio.run(readdir(accessor, path, index=index))
     for e in entries:
@@ -49,7 +49,7 @@ def test_read_bytes_with_key_prefix():
     with patch_s3_multi(store):
         config = _make_config(key_prefix="prod")
         accessor = S3Accessor(config)
-        path = PathSpec(resource_path="hello.txt",
+        path = PathSpec(vfs_path="hello.txt",
                         virtual="/hello.txt",
                         directory="/hello.txt")
         data = asyncio.run(read_bytes(accessor, path))
@@ -61,7 +61,7 @@ def test_find_strips_key_prefix_from_results():
     with patch_s3_multi(store):
         config = _make_config(key_prefix="prod")
         accessor = S3Accessor(config)
-        path = PathSpec(resource_path="dir", virtual="/dir", directory="/dir")
+        path = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
         results = asyncio.run(find(accessor, path))
     for r in results:
         assert "prod" not in r, f"key_prefix leaked into find result: {r}"

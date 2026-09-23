@@ -19,7 +19,7 @@ import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
 import { sessionEntry } from '../../../session/session.ts'
 import { deref } from '../../../session/state.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { envGet, subscriptIndex, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -39,7 +39,7 @@ import { TARGET_RE } from '../constants.ts'
  * `session.arrays` before narrowing, so a hidden array exists and is
  * as much the host's to keep as the scalar the view protected.
  */
-function unsetVariable(session: Session, name: string): void {
+function unsetVariable(session: SessionState, name: string): void {
   if (!varHidden(session.hiddenVars, name)) {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete session.vars[name]
@@ -69,7 +69,11 @@ function unsetVariable(session: Session, name: string): void {
  * `subscriptIndex` whose failure ends the line, in bash's words: `unset
  * 'a[1/0]'` aborts with `1/0: division by 0`.
  */
-async function fatalIndex(session: Session, subscript: string, view: SessionView): Promise<number> {
+async function fatalIndex(
+  session: SessionState,
+  subscript: string,
+  view: SessionView,
+): Promise<number> {
   try {
     return await subscriptIndex(session, subscript, view)
   } catch (err) {
@@ -81,7 +85,7 @@ async function fatalIndex(session: Session, subscript: string, view: SessionView
 }
 
 async function unsetElement(
-  session: Session,
+  session: SessionState,
   view: SessionView,
   base: string,
   subscript: string,
@@ -132,7 +136,7 @@ async function unsetElement(
  */
 export async function handleUnset(
   args: string[],
-  session: Session,
+  session: SessionState,
   state: SessionView | null = null,
 ): Promise<Result> {
   let mode: 'auto' | 'v' | 'f' | 'n' = 'auto'

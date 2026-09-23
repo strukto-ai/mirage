@@ -21,4 +21,4 @@ class HfSpacesConfig(HfRepoConfig):
 
 class HfSpacesAccessor(HfHubAccessor):
     REPO_TYPE = "space"
-    RESOURCE_NAME = "hf_spaces"
+    VFS_NAME = "hf_spaces"

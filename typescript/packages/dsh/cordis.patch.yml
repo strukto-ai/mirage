@@ -1,20 +1,20 @@
 # The mirage bundle patch. Applied over dsh-base by `dsh --profile <name>`
 # after `dsh plugin --profile <name> add @struktoai/mirage-dsh`: it swaps
 # the filesystem and shell providers for mirage-backed ones, so dsh's file
-# tools and bash tool operate on a workspace of mounted resources instead
+# tools and bash tool operate on a workspace of mounted VFS instead
 # of the host disk.
 #
 # Override the `mirage` row's config in the profile's own cordis.patch.yml
-# to mount real resources (the block form is `resource` registry name,
-# `mode`, and the resource's `config`; `!!js` expressions resolve env vars
+# to mount real VFS (the block form is `vfs` registry name,
+# `mode`, and the VFS's `config`; `!!js` expressions resolve env vars
 # at mount time):
 #
 #   - id: mirage
 #     config:
 #       mounts:
-#         /tmp: { resource: ram, mode: exec }
+#         /tmp: { VFS: ram, mode: exec }
 #         /slack:
-#           resource: slack
+#           VFS: slack
 #           mode: read
 #           config: { token: !!js process.env.SLACK_BOT_TOKEN }
 #       runtimes:
@@ -125,7 +125,7 @@
       name: '@struktoai/mirage-dsh/service'
       config:
         mounts:
-          /tmp: { resource: ram, mode: exec }
+          /tmp: { vfs: ram, mode: exec }
 
     - id: mirage-fs
       name: '@struktoai/mirage-dsh/fs'

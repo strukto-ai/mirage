@@ -4,7 +4,7 @@ icon: google
 description: Mount Google Drive as a Mirage filesystem from Node or the browser.
 ---
 
-`GDriveResource` exposes a user's Drive (My Drive plus shared drives the user can see) as a tree.
+`GDriveVFS` exposes a user's Drive (My Drive plus shared drives the user can see) as a tree.
 
 Setup steps for OAuth credentials live at [Google Workspace Credentials](/home/setup/google).
 
@@ -15,16 +15,16 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { GDriveResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { GDriveVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const drive = new GDriveResource({
+const drive = new GDriveVFS({
   clientId: process.env.GOOGLE_CLIENT_ID!,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
   refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
 })
 
 const ws = new Workspace({ '/drive': drive }, { mode: MountMode.WRITE })
-await ws.execute('ls /drive/')
+await ws.shell('ls /drive/')
 ```
 
 ## Browser
@@ -34,9 +34,9 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { GDriveResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GDriveVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const drive = new GDriveResource({
+const drive = new GDriveVFS({
   clientId: GOOGLE_CLIENT_ID,
   clientSecret: GOOGLE_CLIENT_SECRET,
   refreshToken: localStorage.getItem('gdrive.refresh_token')!,
@@ -63,4 +63,4 @@ The browser examples in `examples/typescript/browser/src/gdrive_pkce.ts` show a 
 
 A Shared Drive is writable on the same terms as My Drive: every Drive call carries `supportsAllDrives`, so what you may change is decided by your role on that drive rather than by the mount, and a role that forbids the change fails with `EACCES` on that operand.
 
-For the mounted layout, the `gws` command reference, and snapshot behavior see the [Python Drive docs](/python/resource/gdrive).
+For the mounted layout, the `gws` command reference, and snapshot behavior see the [Python Drive docs](/python/vfs/gdrive).

@@ -44,9 +44,9 @@ Language: TypeAlias = Literal["python", "js"]
 # workspace dispatch is a gate: it checks mount modes, session grants,
 # and policy, records the op, and only then touches the real backend
 # behind the mount (s3, disk, an API). Reach states whether that gate
-# is avoidable, not where bytes physically end up; a "vfs" write to an
+# is avoidable, not where bytes physically end up; a "workspace" write to an
 # s3 mount still lands in real s3, but only after the gate said yes.
-# - "vfs": the gate is the code's only door. The engine runs as an
+# - "workspace": the gate is the code's only door. The engine runs as an
 #   in-process guest with no syscalls, so its I/O can only travel the
 #   VFS bridge (or the workspace executor itself) and a mount-mode or
 #   policy refusal is final.
@@ -56,7 +56,7 @@ Language: TypeAlias = Literal["python", "js"]
 #   everything else) without the gate seeing it.
 # - "remote": the code runs on another machine and acts on that
 #   machine's world; the gate never sees those effects.
-RuntimeReach: TypeAlias = Literal["vfs", "process", "remote"]
+RuntimeReach: TypeAlias = Literal["workspace", "process", "remote"]
 
 
 class DispatchFn(Protocol):

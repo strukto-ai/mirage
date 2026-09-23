@@ -6,7 +6,7 @@
     "bash",
     "fuse",
     "typescript",
-    "vfs",
+    "workspace",
     "ai-agents",
     "agent-sandbox",
     "langchain",

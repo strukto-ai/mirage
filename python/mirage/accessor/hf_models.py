@@ -21,4 +21,4 @@ class HfModelsConfig(HfRepoConfig):
 
 class HfModelsAccessor(HfHubAccessor):
     REPO_TYPE = "model"
-    RESOURCE_NAME = "hf_models"
+    VFS_NAME = "hf_models"

@@ -32,11 +32,11 @@ async function channelEntry(
   index: IndexCacheStore | undefined,
 ): Promise<IndexEntry | null> {
   const virtual = path.virtual.replace(/\/+$/, '').split('/').slice(0, -2).join('/')
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const spec = new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: mountKey(virtual, prefix),
+    vfsPath: mountKey(virtual, prefix),
   })
   return resolveEntry(readdir, accessor, spec, index)
 }

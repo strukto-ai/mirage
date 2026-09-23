@@ -284,7 +284,7 @@ def main() -> int:
         for line in problems:
             print(f"  {line}")
         print("\nThe mirage CLI pays every one of these on every spawn. "
-              "See 'CLIs' in CLAUDE.md.")
+              "See 'CLI tier' in CLAUDE.md.")
         return 1
     print(f"cli cold start: {len(gated_entries())} entries reach no heavy "
           f"package; no cli source imports the server barrel bare")

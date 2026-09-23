@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { DISK_OPS } from './index.ts'
 
 describe('DISK_OPS', () => {
-  it('registers the expected 12 ops with resource=disk', () => {
+  it('registers the expected 12 ops with VFS=disk', () => {
     expect(DISK_OPS).toHaveLength(12)
-    for (const op of DISK_OPS) expect(op.resource).toBe(ResourceName.DISK)
+    for (const op of DISK_OPS) expect(op.vfs).toBe(VFSName.DISK)
   })
 
   it('contains all disk op names', () => {

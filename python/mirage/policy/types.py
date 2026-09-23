@@ -629,7 +629,7 @@ class CommandContext:
 class OpsContext:
     """Facts about one VFS op, as pre_ops hooks see it.
 
-    Fires at the op doors (the ``ws.fs`` facade, which also serves
+    Fires at the op doors (the ``ws.vfs`` facade, which also serves
     FUSE, and the shell's internal dispatcher), before any backend or
     cache I/O, so it holds however the mount is reached.
 

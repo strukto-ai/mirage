@@ -27,10 +27,10 @@ from mirage.core.lancedb.query import (ValueTest, distinct_values, list_tables,
                                        table_exists)
 from mirage.core.lancedb.render import render_card
 from mirage.core.lancedb.scope import detect_for, filters_of, table_of
-from mirage.resource.lancedb.config import LanceDBConfig
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import (glob_prefix, glob_stem_prefix,
                                     has_glob_prefix)
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 GROUP_TYPE = "lancedb/group"
 

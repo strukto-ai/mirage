@@ -913,6 +913,84 @@
         "stdout": "",
         "stderr": "sed: /ghost: No such file or directory\n"
       }
+    },
+    {
+      "id": "nest_find_prune_skips_the_mount_under_a_pruned_directory",
+      "seq": 950075,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find / -path /ghost -prune -o -name '*.txt' -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner/leaf.txt\n/data/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_prune_at_the_start_point_is_one_row",
+      "seq": 950076,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find /data -type d -prune",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_prune_of_a_mount_root_under_or_hides_it",
+      "seq": 950077,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find /data -path /data/inner -prune -o -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/top.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_prune_of_a_mount_root_names_it",
+      "seq": 950078,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find /data -path /data/inner -prune",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_mindepth_keeps_the_prune_below_the_start",
+      "seq": 950079,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find /data -mindepth 1 -type d -prune",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_find_prune_of_a_namespace_ancestor_names_it",
+      "seq": 950080,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "find / -path /ghost -prune",
+      "expect": {
+        "exit": 0,
+        "stdout": "/ghost\n",
+        "stderr": ""
+      }
     }
   ]
 }

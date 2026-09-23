@@ -25,8 +25,8 @@ from mirage.core.google.constants import (CALENDAR_API_BASE, DOCS_API_BASE,
                                           FORMS_API_BASE, GMAIL_API_BASE,
                                           SHEETS_API_BASE, SLIDES_API_BASE,
                                           TOKEN_BUFFER_SECONDS, TOKEN_URL)
-from mirage.resource.secrets import reveal_secret
 from mirage.utils.ranges import ByteWindow
+from mirage.vfs.secrets import reveal_secret
 
 
 def google_error_message(body: str, status: int, reason: str | None) -> str:

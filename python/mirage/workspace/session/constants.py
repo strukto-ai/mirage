@@ -17,7 +17,7 @@
 DEFAULT_PROFILE = "default"
 
 # What a fork of a session carries over. Written down once because
-# `Session.fork` builds a copy from it and
+# `SessionState.fork` builds a copy from it and
 # `tests/workspace/session/test_session.py` asserts that every dataclass
 # field is either here or in TRANSIENT_FIELDS, so a field added later
 # cannot be silently dropped by a hand-written literal the way

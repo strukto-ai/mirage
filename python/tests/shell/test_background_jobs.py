@@ -15,16 +15,16 @@
 import asyncio
 
 from mirage.io.types import IOResult
-from mirage.resource.ram import RAMResource
 from mirage.shell.console import Channel
 from mirage.shell.job_table import JobStatus, JobTable
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.types import ExecutionNode
 
 
 async def _failing_run(job):
-    raise RuntimeError("resource API error")
+    raise RuntimeError("VFS API error")
 
 
 async def _successful_run(job):
@@ -98,7 +98,7 @@ def test_wait_handles_task_exception():
         assert job.status == JobStatus.COMPLETED
         assert job.exit_code == 1
         stderr = await job.console.snapshot(Channel.STDERR)
-        assert b"resource API error" in stderr
+        assert b"VFS API error" in stderr
 
     asyncio.run(_run())
 
@@ -197,13 +197,13 @@ def test_kill_all_stops_every_running_job():
 def test_background_does_not_consume_stdin():
 
     async def _run():
-        mem = RAMResource()
+        mem = RAMVFS()
         ws = Workspace(
             {"/data": (mem, MountMode.WRITE)},
             mode=MountMode.WRITE,
         )
         ws.get_session(ws.default_session_id).cwd = "/data"
-        io = await ws.execute("sleep 0 & cat", stdin=b"hello\n")
+        io = await ws.shell("sleep 0 & cat", stdin=b"hello\n")
         assert (await io.stdout_str()).strip() == "hello"
 
     asyncio.run(_run())

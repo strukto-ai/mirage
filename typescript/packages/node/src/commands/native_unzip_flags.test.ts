@@ -100,7 +100,7 @@ describe.each(NATIVE_BACKENDS)('native unzip flags (%s backend)', (kind) => {
       env.createFile('a.txt', ENC.encode('hello\n'))
       await env.mirage('zip /data/out.zip /data/a.txt')
       env.ws.cwd = '/data'
-      const io = await env.ws.execute('unzip -p /data/out.zip NOSUCHFILE.xml')
+      const io = await env.ws.shell('unzip -p /data/out.zip NOSUCHFILE.xml')
       expect(io.exitCode).toBe(11)
       expect(new TextDecoder().decode(io.stdout)).toBe('')
       expect(new TextDecoder().decode(io.stderr)).toBe(

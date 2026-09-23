@@ -26,7 +26,7 @@ KEYS_TS = (REPO_ROOT / "typescript" / "packages" / "core" / "src" /
 
 # These five have a typescript twin in `keys.ts`; the rest of the module
 # is spelled as literals over there, so only these can be diffed.
-SHARED = ["StateKey", "MountKey", "CacheKey", "JobKey", "ResourceStateKey"]
+SHARED = ["StateKey", "MountKey", "CacheKey", "JobKey", "VFSStateKey"]
 
 
 def _typescript_tables() -> dict[str, dict[str, str]]:

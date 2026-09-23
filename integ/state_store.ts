@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource, type SessionStore } from '@struktoai/mirage-core'
+import { MountMode, RAMVFS, type SessionStore } from '@struktoai/mirage-core'
 import { seedVar } from '@struktoai/mirage-core/workspace/session/state'
 import { RedisWorkspaceStateStore, S3WorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
 
@@ -55,7 +55,7 @@ function check(name: string, ok: boolean, detail = ''): void {
 function makeWorkspace(prefix: string): { ws: Workspace; store: RedisWorkspaceStateStore } {
   const store = makeStateStore(prefix)
   const ws = new Workspace(
-    { '/data': new RAMResource() },
+    { '/data': new RAMVFS() },
     { mode: MountMode.EXEC, workspaceId: WORKSPACE_ID, store },
   )
   return { ws, store }
@@ -65,13 +65,13 @@ function makeWorkspace(prefix: string): { ws: Workspace; store: RedisWorkspaceSt
 // sessions (narrowed grant), and the workspace metadata record.
 async function write(prefix: string): Promise<void> {
   const { ws, store } = makeWorkspace(prefix)
-  const marker = await ws.execute(`echo ${MARKER}`)
+  const marker = await ws.shell(`echo ${MARKER}`)
   check('ts write: marker command', marker.exitCode === 0)
-  const seed = await ws.execute('tee /data/f.txt', {
+  const seed = await ws.shell('tee /data/f.txt', {
     stdin: new TextEncoder().encode('shared-bytes\n'),
   })
   check('ts write: seed file', seed.exitCode === 0)
-  const link = await ws.execute('ln -s /data/f.txt /data/l.txt')
+  const link = await ws.shell('ln -s /data/f.txt /data/l.txt')
   check('ts write: symlink', link.exitCode === 0)
   ws.createSession('narrow', { mounts: { '/data': 'read' } })
   const shared = ws.createSession('shared')
@@ -113,9 +113,9 @@ async function read(prefix: string): Promise<void> {
     ws.defaultSessionId === pointer,
     `got ${ws.defaultSessionId} want ${String(pointer)}`,
   )
-  const history = await ws.execute('history')
+  const history = await ws.shell('history')
   check('ts read: history has marker', history.stdoutText.includes(MARKER), history.stdoutText)
-  const target = await ws.execute('readlink /data/l.txt')
+  const target = await ws.shell('readlink /data/l.txt')
   check('ts read: symlink target', target.stdoutText.trim() === '/data/f.txt', target.stdoutText)
   await ws.ensureSessionsLoaded()
   const session = ws.getSession('narrow')
@@ -128,7 +128,7 @@ async function read(prefix: string): Promise<void> {
     session.generation >= 1,
     `got ${String(session.generation)}`,
   )
-  const denied = await ws.execute('echo blocked > /data/x.txt', { sessionId: 'narrow' })
+  const denied = await ws.shell('echo blocked > /data/x.txt', { sessionId: 'narrow' })
   check('ts read: narrowed write denied', denied.exitCode !== 0)
 
   // CAS against the record the other language wrote: the Lua compare

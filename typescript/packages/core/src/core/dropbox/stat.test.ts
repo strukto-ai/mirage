@@ -65,7 +65,7 @@ describe('dropbox stat', () => {
     vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
     const out = await stat(
       makeAccessor(),
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       new RAMIndexCacheStore(),
     )
     expect(out.type).toBe(FileType.DIRECTORY)
@@ -164,7 +164,7 @@ describe('dropbox stat', () => {
     vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
     const out = await stat(
       makeAccessor(),
-      new PathSpec({ resourcePath: 'a.txt', virtual: '/a.txt', directory: '/' }),
+      new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
       new RAMIndexCacheStore(),
     )
     expect(out.content).toBe(ContentType.TEXT)
@@ -187,12 +187,12 @@ describe('dropbox stat', () => {
     const accessor = makeAccessor()
     const fileOut = await stat(
       accessor,
-      new PathSpec({ resourcePath: 'a.txt', virtual: '/a.txt', directory: '/' }),
+      new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' }),
       index,
     )
     const dirOut = await stat(
       accessor,
-      new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/' }),
+      new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/' }),
       index,
     )
     expect(fileOut.content).toBe(ContentType.TEXT)
@@ -216,7 +216,7 @@ describe('dropbox stat', () => {
     await expect(
       stat(
         makeAccessor(),
-        new PathSpec({ resourcePath: 'note.txt', virtual: '/note.txt', directory: '/' }),
+        new PathSpec({ vfsPath: 'note.txt', virtual: '/note.txt', directory: '/' }),
         new RAMIndexCacheStore(),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT', virtualPath: '/note.txt' })
@@ -231,7 +231,7 @@ describe('dropbox stat', () => {
       new PathSpec({
         virtual: '/dropbox/a.txt',
         directory: '/dropbox',
-        resourcePath: mountKey('/dropbox/a.txt', '/dropbox'),
+        vfsPath: mountKey('/dropbox/a.txt', '/dropbox'),
       }),
       new RAMIndexCacheStore(),
     )
@@ -250,7 +250,7 @@ describe('dropbox stat', () => {
       stat(
         makeAccessor(),
         new PathSpec({
-          resourcePath: 'ghost/missing.txt',
+          vfsPath: 'ghost/missing.txt',
           virtual: '/ghost/missing.txt',
           directory: '/ghost',
         }),
@@ -271,7 +271,7 @@ describe('dropbox stat', () => {
       stat(
         makeAccessor(),
         new PathSpec({
-          resourcePath: 'ghost/missing.txt',
+          vfsPath: 'ghost/missing.txt',
           virtual: '/ghost/missing.txt',
           directory: '/ghost',
         }),
@@ -298,7 +298,7 @@ describe('dropbox stat', () => {
     await expect(
       stat(
         makeAccessor(),
-        new PathSpec({ resourcePath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt' }),
+        new PathSpec({ vfsPath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt' }),
         new RAMIndexCacheStore(),
       ),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })

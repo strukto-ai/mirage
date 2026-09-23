@@ -28,11 +28,11 @@ from mirage.policy.errors import PolicyError
 from mirage.policy.match import Outcome
 from mirage.policy.profile import SessionProfile
 from mirage.policy.types import CommandRule, HideReason
-from mirage.resource.ram import RAMResource
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult, ScriptSource
 from mirage.types import HiddenPaths, HiddenVars, MountMode, ShowEntry
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.session.state import seed_var
@@ -628,11 +628,11 @@ def test_a_mount_sections_show_must_lie_under_that_mount():
 
 
 def _ws() -> Workspace:
-    a = RAMResource()
+    a = RAMVFS()
     a._store.files["/x.txt"] = b"public\n"
     a._store.files["/secrets/token.txt"] = b"s3cr3t\n"
     a._store.dirs.add("/secrets")
-    b = RAMResource()
+    b = RAMVFS()
     b._store.files["/y.txt"] = b"other\n"
     return Workspace({
         "/a": (a, MountMode.WRITE),
@@ -693,10 +693,9 @@ def test_profiled_session_is_narrowed_end_to_end():
     ws.create_session("agent", profile=ANALYST)
 
     async def run():
-        listing = await ws.execute("ls /a", session_id="agent")
-        denied = await ws.execute("cat /a/secrets/token.txt",
-                                  session_id="agent")
-        profile = await ws.execute('echo "$ROLE"', session_id="agent")
+        listing = await ws.shell("ls /a", session_id="agent")
+        denied = await ws.shell("cat /a/secrets/token.txt", session_id="agent")
+        profile = await ws.shell('echo "$ROLE"', session_id="agent")
         return (await listing.stdout_str(), denied, await profile.stdout_str())
 
     listing_out, denied, role_out = asyncio.run(run())
@@ -715,7 +714,7 @@ def test_profile_env_reaches_the_process_view():
     ws.create_session("agent", profile=ANALYST)
 
     async def run():
-        listed = await ws.execute("env", session_id="agent")
+        listed = await ws.shell("env", session_id="agent")
         return await listed.stdout_str()
 
     assert "ROLE=analyst\n" in asyncio.run(run())
@@ -743,14 +742,14 @@ PROFILES = {
 
 
 def _profiled_ws() -> Workspace:
-    a = RAMResource()
+    a = RAMVFS()
     a._store.files["/x.txt"] = b"public\n"
     a._store.files["/secrets/token.txt"] = b"s3cr3t\n"
     a._store.dirs.add("/secrets")
     return Workspace(
         {
             "/a": (a, MountMode.WRITE),
-            "/b": (RAMResource(), MountMode.WRITE)
+            "/b": (RAMVFS(), MountMode.WRITE)
         },
         mode=MountMode.WRITE,
         profiles=PROFILES,
@@ -787,8 +786,8 @@ def test_default_profile_shapes_the_workspace_session_too():
     # that session as it always was.
     ws = Workspace(
         {
-            "/a": (RAMResource(), MountMode.WRITE),
-            "/b": (RAMResource(), MountMode.WRITE)
+            "/a": (RAMVFS(), MountMode.WRITE),
+            "/b": (RAMVFS(), MountMode.WRITE)
         },
         mode=MountMode.WRITE,
         profiles={
@@ -807,10 +806,10 @@ def test_default_profile_shapes_the_workspace_session_too():
     assert default.cwd == "/b"
 
     async def run():
-        pwd = await ws.execute("pwd")
-        pager = await ws.execute('echo "$PAGER"')
-        other = await ws.execute("ls /a")
-        vault = await ws.execute("mkdir /b/vault")
+        pwd = await ws.shell("pwd")
+        pager = await ws.shell('echo "$PAGER"')
+        other = await ws.shell("ls /a")
+        vault = await ws.shell("mkdir /b/vault")
         return (await pwd.stdout_str(), await
                 pager.stdout_str(), other.exit_code, vault.exit_code)
 
@@ -832,8 +831,8 @@ def test_a_role_keeps_a_mount_away_by_hiding_it_not_by_omitting_it():
     # the profile cannot see.
     ws = Workspace(
         {
-            "/a": (RAMResource(), MountMode.WRITE),
-            "/b": (RAMResource(), MountMode.WRITE)
+            "/a": (RAMVFS(), MountMode.WRITE),
+            "/b": (RAMVFS(), MountMode.WRITE)
         },
         mode=MountMode.WRITE,
         profiles={
@@ -844,8 +843,8 @@ def test_a_role_keeps_a_mount_away_by_hiding_it_not_by_omitting_it():
     )
 
     async def run():
-        listed = await ws.execute("ls /a")
-        root = await ws.execute("ls /")
+        listed = await ws.shell("ls /a")
+        root = await ws.shell("ls /")
         return (listed.exit_code, await listed.stderr_str(), await
                 root.stdout_str())
 
@@ -865,8 +864,8 @@ def test_workspace_names_a_default_role_by_name():
     # created without one, including its own.
     ws = Workspace(
         {
-            "/a": (RAMResource(), MountMode.WRITE),
-            "/b": (RAMResource(), MountMode.WRITE)
+            "/a": (RAMVFS(), MountMode.WRITE),
+            "/b": (RAMVFS(), MountMode.WRITE)
         },
         mode=MountMode.WRITE,
         profiles=PROFILES,
@@ -876,7 +875,7 @@ def test_workspace_names_a_default_role_by_name():
         ws.default_session_id).mount_modes["/a"] == (MountMode.READ)
     assert ws.create_session("agent").mount_modes["/a"] == MountMode.READ
     with pytest.raises(PolicyError, match="unknown profile 'gone'"):
-        Workspace({"/a": (RAMResource(), MountMode.WRITE)},
+        Workspace({"/a": (RAMVFS(), MountMode.WRITE)},
                   profiles=PROFILES,
                   profile="gone")
 
@@ -918,7 +917,7 @@ def test_profile_cwd_is_where_the_session_starts():
     ws.create_session("agent", profile="reviewer")
 
     async def run():
-        out = await ws.execute("pwd", session_id="agent")
+        out = await ws.shell("pwd", session_id="agent")
         return await out.stdout_str()
 
     assert asyncio.run(run()) == "/b\n"
@@ -971,15 +970,15 @@ REVIEWER_COMMANDS = {
 
 
 def _commands_ws() -> Workspace:
-    # The frozen subtree is seeded on the resource: the pure path rule
-    # holds at every op door, the host's `ws.fs` included.
-    repo = RAMResource()
+    # The frozen subtree is seeded on the VFS: the pure path rule
+    # holds at every op door, the host's `ws.vfs` included.
+    repo = RAMVFS()
     repo._store.dirs.add("/locked")
     repo._store.files["/locked/y"] = b"y\n"
     ws = Workspace(
         {
             "/repo/": (repo, MountMode.WRITE),
-            "/scratch/": (RAMResource(), MountMode.WRITE),
+            "/scratch/": (RAMVFS(), MountMode.WRITE),
         },
         mode=MountMode.WRITE,
         profiles={
@@ -992,8 +991,8 @@ def _commands_ws() -> Workspace:
 
 
 async def _line(ws: Workspace, line: str, sid: str | None = None):
-    r = (await ws.execute(line, session_id=sid)
-         if sid is not None else await ws.execute(line))
+    r = (await ws.shell(line, session_id=sid)
+         if sid is not None else await ws.shell(line))
     return (r.exit_code, await
             r.stdout_str(), with_refusal(await r.stderr_str(), r.refusal))
 
@@ -1002,7 +1001,7 @@ async def _line(ws: Workspace, line: str, sid: str | None = None):
 async def test_allow_list_hides_unlisted_tools_from_dispatch_and_enumerators():
     ws = _commands_ws()
     try:
-        await ws.execute("mkdir -p /repo/d && touch /repo/d/x")
+        await ws.shell("mkdir -p /repo/d && touch /repo/d/x")
         # An unlisted tool is not a command for the session: 127 before
         # any admission hook, and every enumerator agrees.
         assert await _line(ws,
@@ -1039,7 +1038,7 @@ async def test_a_profiles_allow_list_is_the_only_one_a_session_reads():
     ws = _commands_ws()
     ws.create_session("rev", profile="reviewer")
     try:
-        await ws.execute("mkdir -p /repo/d && touch /repo/d/x")
+        await ws.shell("mkdir -p /repo/d && touch /repo/d/x")
         # The reviewer profile lists `cat` and not python3, whatever the
         # default profile lists; it lists `git log`, so `git` is visible but
         # a `git commit` line is covered by nothing (a refusal that names
@@ -1090,7 +1089,7 @@ async def test_a_profiles_allow_list_is_the_only_one_a_session_reads():
 async def test_deny_rules_by_source_scope_and_voice():
     ws = _commands_ws()
     try:
-        await ws.execute("mkdir -p /repo/d && touch /repo/d/x /scratch/z")
+        await ws.shell("mkdir -p /repo/d && touch /repo/d/x /scratch/z")
         # Operand-scoped: the GNU voice at 1, the operand as typed.
         assert await _line(
             ws,
@@ -1102,8 +1101,8 @@ async def test_deny_rules_by_source_scope_and_voice():
             ws,
             "cat /repo/locked/y") == (1, "", "cat: /repo/locked/y: frozen\n")
         with pytest.raises(PermissionError):
-            await ws.fs.write("/repo/locked/y", b"changed")
-        assert await ws.fs.read("/repo/d/x") == b""
+            await ws.vfs.write("/repo/locked/y", b"changed")
+        assert await ws.vfs.read("/repo/d/x") == b""
         # A mount section's rule applies when the line works inside the
         # mount (cwd under it, or a path under it), whole command; the
         # verb walk reads `-C /repo reset --hard` as `git reset --hard`.
@@ -1129,15 +1128,15 @@ async def test_find_delete_is_gated_at_the_op_door_not_by_a_named_rule():
     # does, at the op door the removal clears.
     ws = _commands_ws()
     try:
-        await ws.execute("mkdir -p /repo/d && touch /repo/d/x")
-        await ws.execute("find /repo/d -name x -delete")
+        await ws.shell("mkdir -p /repo/d && touch /repo/d/x")
+        await ws.shell("find /repo/d -name x -delete")
         assert (await _line(ws, "cat /repo/d/x"))[0] != 0
         assert await _line(ws, "find /repo/locked -name y -delete") == (
             1, "", "find: cannot delete '/repo/locked/y': frozen\n")
         assert (await _line(ws, "cat /repo/locked/y"))[0] == 1
         # The same rule holds for the host's own door, read or write.
         with pytest.raises(PermissionError):
-            await ws.fs.read("/repo/locked/y")
+            await ws.vfs.read("/repo/locked/y")
     finally:
         await ws.close()
 
@@ -1166,13 +1165,13 @@ async def test_a_command_scoped_path_rule_reads_the_path_the_command_touches():
     # plane has to see the path the command will actually touch: for a
     # command that follows links (open(2)) that is the target, for one
     # that acts on the link itself (rm, lstat(2)) it is the link.
-    ws = Workspace({"/data/": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data/": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    profiles={"default": LINK_DOC})
     try:
-        await ws.execute("echo top > /data/secret && "
-                         "ln -s /data/secret /data/link && "
-                         "ln -s /data/secret /data/other")
+        await ws.shell("echo top > /data/secret && "
+                       "ln -s /data/secret /data/link && "
+                       "ln -s /data/secret /data/other")
         assert await _line(
             ws, "cat /data/secret") == (1, "", "cat: /data/secret: sealed\n")
         # Through the link: refused, the operand named as typed.
@@ -1215,12 +1214,12 @@ async def test_redirect_targets_are_judged_with_the_line():
     # admitted command's gate window, so the targets are judged at the
     # line's admission: the refused read never happens and the refused
     # write never truncates.
-    ws = Workspace({"/data/": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data/": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    profiles={"default": SEALED_REDIRECT_DOC})
     try:
-        await ws.execute("echo top > /data/secret && "
-                         "printf 'one\\n' > /data/audit.log")
+        await ws.shell("echo top > /data/secret && "
+                       "printf 'one\\n' > /data/audit.log")
         assert await _line(
             ws, "cat < /data/secret") == (1, "", "cat: /data/secret: sealed\n")
         assert await _line(ws, "echo two > /data/audit.log") == (
@@ -1243,9 +1242,9 @@ async def test_a_mount_rule_speaks_on_a_walk_from_above():
     # is not its business.
     ws = Workspace(
         {
-            "/scratch/": (RAMResource(), MountMode.WRITE),
-            "/scratch/child/": (RAMResource(), MountMode.WRITE),
-            "/elsewhere/": (RAMResource(), MountMode.WRITE),
+            "/scratch/": (RAMVFS(), MountMode.WRITE),
+            "/scratch/child/": (RAMVFS(), MountMode.WRITE),
+            "/elsewhere/": (RAMVFS(), MountMode.WRITE),
         },
         mode=MountMode.WRITE,
         profiles={
@@ -1263,8 +1262,8 @@ async def test_a_mount_rule_speaks_on_a_walk_from_above():
             }
         })
     try:
-        await ws.execute("echo x > /scratch/a && echo x > /elsewhere/a && "
-                         "echo x > /scratch/child/c")
+        await ws.shell("echo x > /scratch/a && echo x > /elsewhere/a && "
+                       "echo x > /scratch/child/c")
         assert await _line(ws, "grep -r x /scratch") == (
             126, "", "grep: Permission denied\npolicy denied: boxed\n")
         code, out, _ = await _line(ws, "grep -r x /elsewhere")
@@ -1303,13 +1302,13 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
     # and the approval door before the runtime sees a byte, so a
     # captured line cannot run what the tree would refuse.
     box = _Box()
-    ws = Workspace({"/repo/": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/repo/": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    profiles={
                        "default": COMMANDS_DOC,
                        "reviewer": REVIEWER_COMMANDS
                    },
-                   runtimes=[box, "vfs"])
+                   runtimes=[box, "workspace"])
     ws.register_cli("git", cli_spec_for("git"))
     try:
         assert await _line(ws, "sort /repo/x") == (127, "",
@@ -1360,10 +1359,10 @@ async def test_a_whole_line_runtime_reads_only_literal_words():
     # where a rule reads that command's arguments, and a line a word
     # runs that the gate cannot see into.
     box = _Box()
-    ws = Workspace({"/repo/": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/repo/": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    profiles={"default": LITERAL_DOC},
-                   runtimes=[box, "vfs"])
+                   runtimes=[box, "workspace"])
     ws.register_cli("git", cli_spec_for("git"))
     try:
         unread = ("Permission denied\n"
@@ -1413,7 +1412,7 @@ async def test_a_bare_listing_in_a_ruled_directory_is_refused():
     # `ls`, `find`, `du`, `tree` and `grep -r` typed bare read the
     # working directory: the executor injects that operand after the
     # gate, so the gate supplies it itself, typed as `.`.
-    ws = Workspace({"/repo/": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/repo/": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    profiles={
                        "default": {
@@ -1430,7 +1429,7 @@ async def test_a_bare_listing_in_a_ruled_directory_is_refused():
                        }
                    })
     try:
-        await ws.execute("mkdir -p /repo/sealed && echo x > /repo/sealed/f")
+        await ws.shell("mkdir -p /repo/sealed && echo x > /repo/sealed/f")
         assert await _line(ws,
                            "ls /repo/sealed") == (1, "",
                                                   "ls: /repo/sealed: sealed\n")
@@ -1487,12 +1486,12 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
     # never raised for it, and the door answers ENOENT as for any
     # absent path. The same lines under a session that sees them meet
     # the rules as usual.
-    ws = Workspace({"/repo/": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/repo/": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    profiles={"default": VEILED_DOC})
     try:
-        await ws.execute("mkdir -p /repo/private /repo/shared && "
-                         "echo k > /repo/private/k && touch /repo/shared/a")
+        await ws.shell("mkdir -p /repo/private /repo/shared && "
+                       "echo k > /repo/private/k && touch /repo/shared/a")
         # The same rules plus three hides: what the hides cover is gone
         # before any rule is asked.
         ws.create_session(
@@ -1562,8 +1561,8 @@ class AskWc(Policy):
 def _ask_ws(**kwargs) -> Workspace:
     ws = Workspace(
         {
-            "/repo/": (RAMResource(), MountMode.WRITE),
-            "/scratch/": (RAMResource(), MountMode.WRITE),
+            "/repo/": (RAMVFS(), MountMode.WRITE),
+            "/scratch/": (RAMVFS(), MountMode.WRITE),
         },
         mode=MountMode.WRITE,
         profiles={"default": ASK_DOC},
@@ -1577,7 +1576,7 @@ def _ask_ws(**kwargs) -> Workspace:
 async def test_an_asked_line_is_refused_until_the_host_answers():
     ws = _ask_ws()
     try:
-        await ws.execute("mkdir -p /repo/d && touch /repo/d/x /scratch/z")
+        await ws.shell("mkdir -p /repo/d && touch /repo/d/x /scratch/z")
         # Asked: 126 in the requires-approval voice, quoting an id; the
         # request is on ws.decisions with what was asked; a retry quotes
         # the same id and adds nothing.
@@ -1596,7 +1595,7 @@ async def test_an_asked_line_is_refused_until_the_host_answers():
         # workspace's default agent, so a shared workspace attributes an
         # approval to whoever raised it.
         assert request.agent_id == ""
-        by_bob = await ws.execute("rm /scratch/z2", agent_id="bob")
+        by_bob = await ws.shell("rm /scratch/z2", agent_id="bob")
         assert by_bob.exit_code == 126
         assert [r.agent_id for r in ws.decisions.pending()] == ["", "bob"]
         # The agent rides with the execution, not the workspace: a line
@@ -1607,11 +1606,10 @@ async def test_an_asked_line_is_refused_until_the_host_answers():
         # the line is refused whole rather than running `echo` over an
         # empty substitution and exiting 0, which used to leave the
         # agent reading success for a removal that never happened.
-        nested = await ws.execute("echo $(rm /scratch/z3)", agent_id="carol")
+        nested = await ws.shell("echo $(rm /scratch/z3)", agent_id="carol")
         assert nested.exit_code == 126
-        await asyncio.gather(
-            ws.execute("rm /scratch/z4", agent_id="dan"),
-            ws.execute("eval 'rm /scratch/z5'", agent_id="eve"))
+        await asyncio.gather(ws.shell("rm /scratch/z4", agent_id="dan"),
+                             ws.shell("eval 'rm /scratch/z5'", agent_id="eve"))
         by_agent = {
             r.command + " " + " ".join(r.argv): r.agent_id
             for r in ws.decisions.pending()
@@ -1657,8 +1655,8 @@ async def test_an_asked_line_is_refused_until_the_host_answers():
 async def test_a_session_grant_covers_the_rule_and_a_deny_is_never_reopened():
     ws = _ask_ws()
     try:
-        await ws.execute("mkdir -p /repo/d && touch /repo/d/x /scratch/y "
-                         "/scratch/z")
+        await ws.shell("mkdir -p /repo/d && touch /repo/d/x /scratch/y "
+                       "/scratch/z")
         code, _, _ = await _line(ws, "rm /scratch/y")
         assert code == 126
         (request, ) = ws.decisions.pending()
@@ -1680,7 +1678,7 @@ async def test_a_session_grant_covers_the_rule_and_a_deny_is_never_reopened():
         stored = default.to_dict()["decisions"][0]
         assert (stored["outcome"], stored["scope"]) == ("allow", "session")
         ws.create_session("other")
-        await ws.execute("touch /scratch/w", session_id="other")
+        await ws.shell("touch /scratch/w", session_id="other")
         code, _, err = await _line(ws, "rm /scratch/w", "other")
         assert code == 126 and "requires approval" in err
     finally:
@@ -1691,7 +1689,7 @@ async def test_a_session_grant_covers_the_rule_and_a_deny_is_never_reopened():
 async def test_a_coded_ask_routes_to_the_same_door():
     ws = _ask_ws()
     try:
-        await ws.execute("touch /scratch/z")
+        await ws.shell("touch /scratch/z")
         code, _, err = await _line(ws, "wc -c /scratch/z")
         assert code == 126
         (request, ) = ws.decisions.pending()
@@ -1713,7 +1711,7 @@ async def test_a_coded_ask_routes_to_the_same_door():
 async def test_a_grant_is_consumed_through_a_fork():
     ws = _ask_ws()
     try:
-        await ws.execute("touch /scratch/z")
+        await ws.shell("touch /scratch/z")
         code, _, _ = await _line(ws, "rm /scratch/z")
         assert code == 126
         (request, ) = ws.decisions.pending()
@@ -1721,7 +1719,7 @@ async def test_a_grant_is_consumed_through_a_fork():
         # execute(env=) runs the line in a fork of the session: the once
         # grant is read and consumed through the manager, so the fork
         # spends it for the session it forked from.
-        forked = await ws.execute("rm /scratch/z", env={"X": "1"})
+        forked = await ws.shell("rm /scratch/z", env={"X": "1"})
         assert forked.exit_code == 0
         code, _, err = await _line(ws, "rm /scratch/z")
         assert code == 126 and "requires approval" in err
@@ -1744,14 +1742,14 @@ async def test_a_blocking_host_answers_inside_the_line():
     # with an outcome set.
     ws = _ask_ws(on_ask=_host_allows_once)
     try:
-        await ws.execute("touch /scratch/z")
+        await ws.shell("touch /scratch/z")
         assert (await _line(ws, "rm /scratch/z"))[0] == 0
         assert ws.decisions.pending() == ()
     finally:
         await ws.close()
     ws = _ask_ws(on_ask=_host_denies)
     try:
-        await ws.execute("touch /scratch/z")
+        await ws.shell("touch /scratch/z")
         assert await _line(ws, "rm /scratch/z") == (
             126, "", "rm: Permission denied\npolicy denied: sign-off\n")
         assert (await _line(ws, "cat /scratch/z"))[0] == 0
@@ -1774,9 +1772,8 @@ async def test_a_host_still_deciding_does_not_outlive_the_run():
     cancel = asyncio.Event()
     ws = _ask_ws(on_ask=never)
     try:
-        await ws.execute("touch /scratch/z")
-        line = asyncio.ensure_future(ws.execute("rm /scratch/z",
-                                                cancel=cancel))
+        await ws.shell("touch /scratch/z")
+        line = asyncio.ensure_future(ws.shell("rm /scratch/z", cancel=cancel))
         await started.wait()
         cancel.set()
         with pytest.raises(MirageAbortError):
@@ -1801,13 +1798,13 @@ async def test_a_compound_line_asked_before_it_runs_is_killable_too():
     cancel = asyncio.Event()
     ws = _ask_ws(on_ask=never)
     try:
-        await ws.execute("touch /scratch/z")
+        await ws.shell("touch /scratch/z")
         # More than one command, so the question is put by the prejudge
         # pass rather than the per-command gate. That pass took no kill
         # channel, so this shape sat on the host after the single
         # command one stopped doing so.
         line = asyncio.ensure_future(
-            ws.execute("rm /scratch/z; echo done", cancel=cancel))
+            ws.shell("rm /scratch/z; echo done", cancel=cancel))
         await started.wait()
         cancel.set()
         with pytest.raises(MirageAbortError):
@@ -1855,7 +1852,7 @@ WALK_DOC = {
 def _walk_ws() -> Workspace:
     # The rules live on a profile so the tree can be seeded under the
     # unrestricted default session; every probe runs as "g".
-    ws = Workspace({"/data/": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data/": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    profiles={"guarded": WALK_DOC})
     ws.create_session("g", profile="guarded")
@@ -1863,7 +1860,7 @@ def _walk_ws() -> Workspace:
 
 
 async def _seed_walk_tree(ws: Workspace) -> None:
-    await ws.execute(
+    await ws.shell(
         "mkdir -p /data/t/private /data/t/sealed/deep /data/t/locked "
         "/data/t/open /data/t/asked /data/t/ghost && "
         "echo k > /data/t/private/k && echo s > /data/t/sealed/s && "
@@ -1970,11 +1967,11 @@ async def test_the_op_door_stats_a_refused_entry_and_withholds_its_content():
         sess = ws.get_session("g")
         token = set_current_session(sess)
         try:
-            assert (await ws.fs.stat("/data/t/locked/y")).size == 2
+            assert (await ws.vfs.stat("/data/t/locked/y")).size == 2
             with pytest.raises(PermissionError):
-                await ws.fs.read("/data/t/locked/y")
+                await ws.vfs.read("/data/t/locked/y")
             with pytest.raises(FileNotFoundError):
-                await ws.fs.stat("/data/t/ghost/g")
+                await ws.vfs.stat("/data/t/ghost/g")
         finally:
             reset_current_session(token)
     finally:
@@ -1989,8 +1986,8 @@ async def test_every_permissions_door_accepts_the_plain_document():
     # a built model still passes unchanged.
     ws = Workspace(
         {
-            "/data/": (RAMResource(), MountMode.WRITE),
-            "/box/": (RAMResource(), MountMode.WRITE),
+            "/data/": (RAMVFS(), MountMode.WRITE),
+            "/box/": (RAMVFS(), MountMode.WRITE),
         },
         mode=MountMode.WRITE,
         profiles={
@@ -2040,8 +2037,8 @@ async def test_every_permissions_door_accepts_the_plain_document():
 
 def test_a_misspelled_document_field_fails_at_construction():
     with pytest.raises(ValidationError):
-        Workspace({"/data/": RAMResource()}, profiles={"g": {"commandz": {}}})
-    ws = Workspace({"/data/": RAMResource()})
+        Workspace({"/data/": RAMVFS()}, profiles={"g": {"commandz": {}}})
+    ws = Workspace({"/data/": RAMVFS()})
     with pytest.raises(ValidationError):
         ws.create_session("x", permissions={"command": {"deny": []}})
 

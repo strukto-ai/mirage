@@ -32,7 +32,7 @@ function spec(path: string): PathSpec {
     virtual: path,
     directory: '/d',
     resolved: true,
-    resourcePath: mountKey(path, ''),
+    vfsPath: mountKey(path, ''),
   })
 }
 
@@ -42,7 +42,7 @@ function opts(flags: Record<string, string | boolean>, signal?: AbortSignal): Co
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: null,
+    vfs: null,
     signal,
   } as unknown as CommandOpts
 }
@@ -238,7 +238,7 @@ describe('tail -f', () => {
       virtual: '/s3/a.txt',
       directory: '/s3/',
       resolved: true,
-      resourcePath: mountKey('/s3/a.txt', '/s3/'),
+      vfsPath: mountKey('/s3/a.txt', '/s3/'),
     })
     const cache = new RAMFileCacheStore()
     await cache.set('/s3/a.txt', ENC.encode('stale\n'))

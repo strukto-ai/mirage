@@ -10,7 +10,7 @@ from mirage.utils.key_prefix import mount_key
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, prefix),
+    return PathSpec(vfs_path=mount_key(path, prefix),
                     virtual=path,
                     directory=path,
                     resolved=True)
@@ -268,7 +268,7 @@ async def test_patch_apply():
     _, io_res = await patch([],
                             read_bytes=rb,
                             write_bytes=wb,
-                            has_resource=True,
+                            has_vfs=True,
                             stdin=diff_text,
                             p="1")
     assert b"universe" in store["/hello.txt"]
@@ -283,7 +283,7 @@ async def test_patch_reverse():
     await patch([],
                 read_bytes=rb,
                 write_bytes=wb,
-                has_resource=True,
+                has_vfs=True,
                 stdin=diff_text,
                 R=True,
                 p="1")
@@ -293,10 +293,7 @@ async def test_patch_reverse():
 @pytest.mark.asyncio
 async def test_patch_missing_input():
     rb, wb, _, _, store = _make_backend({})
-    out, io = await patch([],
-                          read_bytes=rb,
-                          write_bytes=wb,
-                          has_resource=False)
+    out, io = await patch([], read_bytes=rb, write_bytes=wb, has_vfs=False)
     assert out is None
     assert io.exit_code == 0
     assert not store

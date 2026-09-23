@@ -27,7 +27,7 @@ def to_pathspec(path: Any, prefix: str = "") -> PathSpec:
         return path
     return PathSpec(virtual=path,
                     directory=path,
-                    resource_path=mount_key(path, prefix))
+                    vfs_path=mount_key(path, prefix))
 
 
 def mount_parent_readdir(

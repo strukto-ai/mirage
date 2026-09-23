@@ -337,7 +337,7 @@ async def _walk_files(accessor, index):
         current = stack.pop()
         listing = await readdir(
             accessor,
-            PathSpec(resource_path=current.strip("/"),
+            PathSpec(vfs_path=current.strip("/"),
                      virtual=current,
                      directory=current), index)
         for path in listing:

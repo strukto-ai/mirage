@@ -44,7 +44,7 @@ await ws.snapshot("run.tar.gz", compress="gz")
 restored = await Workspace.load("run.tar")                    # STRICT default
 restored = await Workspace.load("run.tar", drift_policy=DriftPolicy.OFF)
 
-# in-process duplicate (shares remote resources, restores local content fresh)
+# in-process duplicate (shares remote VFS, restores local content fresh)
 cp = await ws.copy()
 ```
 
@@ -97,7 +97,7 @@ See the [CLI versioning reference](/home/cli#versioning) for `log`, `diff`, `bra
 
 <Columns cols={2}>
   <Card title="Captured" icon="check">
-    - Mount configs (creds redacted; restore via `resources=` override)
+    - Mount configs (creds redacted; restore via `mounts=` override)
     - Sessions, history, finished jobs
     - Cache bytes for touched paths
     - One fingerprint per remote read (ETag-equivalent)
@@ -112,11 +112,11 @@ See the [CLI versioning reference](/home/cli#versioning) for `log`, `diff`, `bra
 
 ## Drift Detection
 
-On the first `dispatch` or `execute` after `load`, Mirage stats every fingerprinted path against the live source in parallel. If any path's live fingerprint differs from the recorded one, the workspace raises `ContentDriftError`:
+On the first `dispatch` or `shell` after `load`, Mirage stats every fingerprinted path against the live source in parallel. If any path's live fingerprint differs from the recorded one, the workspace raises `ContentDriftError`:
 
 ```python
 try:
-    await ws.execute("cat /s3/data.csv")
+    await ws.shell("cat /s3/data.csv")
 except ContentDriftError as exc:
     print(exc.path, exc.snapshot_fingerprint, exc.live_fingerprint)
 ```
@@ -139,7 +139,7 @@ Snapshots interact with two existing caches:
 | Cache | Holds | Snapshotted? |
 | --- | --- | --- |
 | **File cache** (`Workspace._cache`) | raw bytes per virtual path | ✅ bytes for touched paths are serialized into the tar |
-| **Index cache** (`Resource._index`) | `FileStat` entries for listings | ❌ rebuilt lazily after load |
+| **Index cache** (`VFS._index`) | `FileStat` entries for listings | ❌ rebuilt lazily after load |
 
 **Only files the agent actually read are fingerprinted.** Capture walks `ws._ops.records` for `op == "read"` and dedups by path. Files that were listed but never opened, or touched only by `stat` / `readdir`, do not carry a fingerprint or a revision.
 
@@ -161,27 +161,27 @@ The same three states under each policy:
 
 The cache is the optimization, the fingerprint is the verifier, and the pin is the recovery — three independent guarantees that "what you replay equals what you captured."
 
-## Resource Support Matrix
+## VFS Support Matrix
 
-Remote drift detection is opt-in per resource through `SUPPORTS_SNAPSHOT` in Python and `supportsSnapshot` in TypeScript. A working adapter must also attach a fingerprint to each read record; a revision is optional and enables pinned replay.
+Remote drift detection is opt-in per VFS through `SUPPORTS_SNAPSHOT` in Python and `supportsSnapshot` in TypeScript. A working adapter must also attach a fingerprint to each read record; a revision is optional and enables pinned replay.
 
-Legend: ✅ = implemented · 🟡 = resource opts in, but recorded reads do not yet carry the fingerprint · ❌ = live-only · — = unavailable in that runtime.
+Legend: ✅ = implemented · 🟡 = VFS opts in, but recorded reads do not yet carry the fingerprint · ❌ = live-only · — = unavailable in that runtime.
 
-### Remote Resources
+### Remote VFS
 
-| Resource family | Python | TS Node | TS Browser | Revision pin | Notes |
+| VFS family | Python | TS Node | TS Browser | Revision pin | Notes |
 | --- | :---: | :---: | :---: | :---: | --- |
 | S3 and S3-compatible object stores | ✅ | ✅ | ✅ | When `VersionId` is available | Uses `ETag`; compatible providers without object versions still get drift detection. |
 | OneDrive | ✅ | — | — | ✅ | Uses Microsoft Graph `cTag` plus the current version id. |
 | SharePoint | ✅ | — | — | ✅ | Same Microsoft Graph version flow as OneDrive. |
-| Hugging Face resources | 🟡 | 🟡 | — | ❌ | Resources opt in, but read records do not yet include the stat fingerprint. |
-| Nextcloud | 🟡 | — | — | ❌ | The resource opts in, but read records do not yet include the WebDAV ETag. |
+| Hugging Face mounts | 🟡 | 🟡 | — | ❌ | mounts opt in, but read records do not yet include the stat fingerprint. |
+| Nextcloud | 🟡 | — | — | ❌ | The VFS opts in, but read records do not yet include the WebDAV ETag. |
 | GitHub and Google Drive | ❌ | ❌ | ❌ | ❌ | Current reads are live-only; revision-aware replay is not wired yet. |
-| Other remote resources | ❌ | ❌ | ❌ | ❌ | Snapshot restores their config/state, then reads current remote content. |
+| Other remote mounts | ❌ | ❌ | ❌ | ❌ | Snapshot restores their config/state, then reads current remote content. |
 
 ### Local State
 
-RAM, Disk, and Redis serialize their resource state into the snapshot. They do not need a remote drift check or revision pin: replay restores the captured state directly. Credentials and connection details remain redacted and may require a resource override at load time.
+RAM, Disk, and Redis serialize their VFS state into the snapshot. They do not need a remote drift check or revision pin: replay restores the captured state directly. Credentials and connection details remain redacted and may require a VFS override at load time.
 
 ## Extending To A New Backend
 
@@ -189,11 +189,11 @@ Three steps in Python:
 
 ```python
 from mirage.observe.context import record, revision_for
-from mirage.resource.base import BaseResource
+from mirage.vfs.base import BaseVFS
 from mirage.types import FileStat
 
 
-class MyResource(BaseResource):
+class MyVFS(BaseVFS):
     SUPPORTS_SNAPSHOT = True  # 1. opt in
 
     async def stat(self, ...) -> FileStat:
@@ -221,7 +221,7 @@ async def read_bytes(accessor, virtual_path, ...):
 ```
 
 At load time the workspace writes each manifest entry straight into
-``mount.revisions`` — no per-resource hook required. If your backend
+``mount.revisions`` — no per-VFS hook required. If your backend
 has no stable revision, skip steps 3 and 6; drift detection still
 works on the fingerprint alone.
 

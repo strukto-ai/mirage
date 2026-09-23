@@ -69,7 +69,7 @@ describe('core/disk/readdir', () => {
     const prefixed = new PathSpec({
       virtual: '/data/',
       directory: '/data/',
-      resourcePath: mountKey('/data/', '/data'),
+      vfsPath: mountKey('/data/', '/data'),
     })
     const cold = await readdir(accessor, prefixed, index)
     const warm = await readdir(accessor, prefixed, index)
@@ -83,12 +83,12 @@ describe('core/disk/readdir', () => {
     const slashed = new PathSpec({
       virtual: '/data/',
       directory: '/data/',
-      resourcePath: mountKey('/data/', '/data'),
+      vfsPath: mountKey('/data/', '/data'),
     })
     const bare = new PathSpec({
       virtual: '/data',
       directory: '/data',
-      resourcePath: mountKey('/data', '/data'),
+      vfsPath: mountKey('/data', '/data'),
     })
     const first = await readdir(accessor, slashed, index)
     const second = await readdir(accessor, bare, index)

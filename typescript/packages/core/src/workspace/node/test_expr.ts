@@ -20,7 +20,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import { expandNode } from '../expand/node.ts'
 import { expandPattern } from '../expand/pattern.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 
 const CONTAINER_TYPES = new Set<string>([
   NT.BINARY_EXPRESSION,
@@ -42,7 +42,7 @@ const SPLIT_TYPES = new Set<string>([NT.SIMPLE_EXPANSION, NT.EXPANSION])
  */
 export async function expandTestExpr(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
@@ -61,7 +61,7 @@ export async function expandTestExpr(
 async function flatten(
   node: TSNodeLike,
   out: string[],
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
@@ -128,7 +128,7 @@ function negativeNumberChild(node: TSNodeLike): TSNodeLike | null {
 /** Build a structured condition tree from a `[[ ... ]]` node. */
 export async function expandDoubleBracket(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
@@ -141,7 +141,7 @@ export async function expandDoubleBracket(
 /** Recursively translate one expression node into a CondNode. */
 async function buildCond(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
@@ -164,7 +164,7 @@ async function buildCond(
 /** Translate a unary/negation expression node. */
 async function buildUnary(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,
@@ -197,7 +197,7 @@ async function buildUnary(
 /** Translate a binary expression node (logical or comparison). */
 async function buildBinary(
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn,
   cs: CallStack | null,
   view?: SessionView,

@@ -58,8 +58,8 @@ from mirage.shell.types import ProcessSubDirection  # isort: skip
 
 from mirage.workspace.executor.builtins import (  # isort: skip
     accepts_line, follow_paths, handle_chgrp, handle_exec_path, handle_chmod,
-    handle_chown, handle_df, handle_ln, handle_readlink, handle_touch,
-    prepare_mv, strip_link_operands)
+    handle_chown, handle_df, handle_getfattr, handle_ln, handle_readlink,
+    handle_setfattr, handle_touch, prepare_mv, strip_link_operands)
 
 
 async def execute_command(
@@ -377,7 +377,7 @@ async def _run_argv(
     # ── boundary globs ──────────────────────────
     # A glob whose directory holds a child mount cannot be pushed down
     # to one backend: the mount root is a child of that directory but
-    # its keys live in another resource, so the backend reports "no such
+    # its keys live in another VFS, so the backend reports "no such
     # file" for a name its own listing shows. Expanding such a word here
     # lets the matches route per mount. It has to happen before the
     # admission policies below, not just before the follow policy: a
@@ -582,6 +582,13 @@ async def _route_argv(
 
     if name == "readlink":
         return await handle_readlink(namespace, dispatch, session, operands)
+
+    # ── extended attributes (the door's node table and the backend's
+    #    own facts; they read -h themselves) ──
+    if name == "getfattr":
+        return await handle_getfattr(dispatch, session, operands)
+    if name == "setfattr":
+        return await handle_setfattr(dispatch, session, operands)
 
     # ── metadata commands (namespace-routed: resolve-then-setattr with
     #    overlay fallback; they run their own link follow) ──

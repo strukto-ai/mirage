@@ -13,7 +13,7 @@ Create a `mirage.yaml` in your project:
 ```yaml mirage.yaml
 mounts:
   /:
-    resource: ram
+    vfs: ram
 ```
 
 Add the plugin to `opencode.json`:
@@ -62,10 +62,10 @@ bun add @struktoai/mirage-agents @struktoai/mirage-node @opencode-ai/plugin
 Create `.opencode/plugins/mirage.ts`:
 
 ```ts .opencode/plugins/mirage.ts
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { miragePlugin } from '@struktoai/mirage-agents/opencode'
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })

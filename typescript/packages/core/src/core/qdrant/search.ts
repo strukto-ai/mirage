@@ -14,7 +14,7 @@
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
 import type { QdrantRow } from './client.ts'
-import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
+import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import type { PathSpec } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { renderJson, renderText } from './render.ts'

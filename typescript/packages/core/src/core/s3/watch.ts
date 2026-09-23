@@ -57,7 +57,7 @@ export class S3Walk {
 
   async *walk(root: PathSpec): AsyncGenerator<WalkEntry> {
     const config = this.accessor.config
-    const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const stem = rstripSlash(s3Key(rawPathOf(root), config))
     const base = stem !== '' ? `${stem}/` : ''
     const files: string[] = []

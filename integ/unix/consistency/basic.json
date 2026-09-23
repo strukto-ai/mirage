@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "consistency_lazy_serves_stale",
+      "id": "read_bounded_serves_stale",
       "seq": 310000,
       "targets": [
         "s3",
@@ -13,7 +13,8 @@
         "sharepoint-prefix",
         "ssh"
       ],
-      "consistency": "lazy",
+      "read": "bounded",
+      "ttl": 600,
       "scenario": [
         {
           "mutate": {
@@ -41,18 +42,13 @@
       }
     },
     {
-      "id": "consistency_always_revalidates",
+      "id": "read_fresh_revalidates",
       "seq": 310001,
       "targets": [
         "s3",
-        "s3-prefix",
-        "dropbox",
-        "onedrive",
-        "sharepoint",
-        "sharepoint-prefix",
-        "ssh"
+        "s3-prefix"
       ],
-      "consistency": "always",
+      "read": "fresh",
       "scenario": [
         {
           "mutate": {
@@ -77,7 +73,8 @@
         "exit": 0,
         "stdout": "v1\nv2\n",
         "stderr": ""
-      }
+      },
+      "note": "Narrowed to the backends that may declare `read: fresh`: the other five cache reads but stamp no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list."
     }
   ]
 }

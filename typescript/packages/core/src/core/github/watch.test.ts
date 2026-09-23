@@ -46,7 +46,7 @@ function accessor(tree: TreeItem[], stale: Record<string, TreeEntry>, truncated 
 }
 
 function root(): PathSpec {
-  return new PathSpec({ virtual: '/gh', directory: '/gh', resourcePath: '' })
+  return new PathSpec({ virtual: '/gh', directory: '/gh', vfsPath: '' })
 }
 
 async function collect(walk: GitHubWalk, at: PathSpec): Promise<WalkEntry[]> {

@@ -245,6 +245,8 @@ def test_all_commands_have_specs():
         "paste",
         "ln",
         "readlink",
+        "getfattr",
+        "setfattr",
         "basename",
         "dirname",
         "realpath",

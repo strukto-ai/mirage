@@ -17,7 +17,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.hf_models import HfModelsConfig, HfModelsResource
+from mirage.vfs.hf_models import HfModelsConfig, HfModelsVFS
 
 load_dotenv(".env.development")
 
@@ -25,11 +25,10 @@ config = HfModelsConfig(
     repo_id=os.environ.get("HF_MODEL_REPO", "sapientinc/HRM-Text-1B"),
     token=os.environ.get("HF_TOKEN"),
 )
-resource = HfModelsResource(config)
+vfs = HfModelsVFS(config)
 
 with Workspace(
-    {"/m/": Mount(resource, mode=MountMode.READ,
-                  backend=MountBackend.FUSE)}) as ws:
+    {"/m/": Mount(vfs, mode=MountMode.READ, backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
     print(f"=== FUSE: mounted at {mp} ===\n")
 
@@ -55,6 +54,6 @@ with Workspace(
     except EOFError:
         pass
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

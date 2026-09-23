@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.hf_models import HfModelsAccessor, HfModelsConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 def test_config_defaults():

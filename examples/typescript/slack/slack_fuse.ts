@@ -21,7 +21,7 @@ import {
   Mount,
   MountBackend,
   MountMode,
-  SlackResource,
+  SlackVFS,
   Workspace,
   type SlackConfig,
 } from "@struktoai/mirage-node";
@@ -38,9 +38,9 @@ function buildConfig(): SlackConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new SlackResource(buildConfig());
+  const vfs = new SlackVFS(buildConfig());
   const ws = new Workspace({
-    "/slack": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/slack": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

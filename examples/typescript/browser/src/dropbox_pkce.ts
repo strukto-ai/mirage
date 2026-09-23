@@ -17,7 +17,7 @@
  *
  * 1. Click "Connect Dropbox" — does the PKCE redirect dance.
  * 2. Comes back with a refresh token, persists it in localStorage.
- * 3. Mounts DropboxResource with `{ clientId, refreshToken }` — no client_secret.
+ * 3. Mounts DropboxVFS with `{ clientId, refreshToken }` — no client_secret.
  * 4. Runs `ls /dropbox/` — exercises the TokenManager refresh path.
  *
  * Setup:
@@ -30,7 +30,7 @@
  *  3. `pnpm dev` from `examples/typescript/browser/`.
  *  4. Open http://localhost:5173/dropbox_pkce.html
  */
-import { DropboxResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { DropboxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 import { escapeHtml } from './html.ts'
 
 declare const __DROPBOX_CLIENT_ID__: string
@@ -154,7 +154,7 @@ async function exchangeCode(code: string, state: string): Promise<StoredTokens> 
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
-  const res = await ws.execute(cmd)
+  const res = await ws.shell(cmd)
   const out = res.stdoutText.replace(/\s+$/, '')
   if (out !== '') line(out)
   const err = res.stderrText.replace(/\s+$/, '')
@@ -163,7 +163,7 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 }
 
 async function runDemo(tokens: StoredTokens): Promise<void> {
-  const dropbox = new DropboxResource({
+  const dropbox = new DropboxVFS({
     clientId: clientId(),
     refreshToken: tokens.refresh,
   })

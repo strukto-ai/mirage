@@ -15,8 +15,8 @@
 import asyncio
 
 from mirage import Deny, MountMode, Policy, SessionContext, Workspace
-from mirage.resource.ram import RAMResource
 from mirage.runtime.types import ScriptSource
+from mirage.vfs.ram import RAMVFS
 
 # A release workspace under two policies, one through each door code
 # has, and the point of the example is what each door is for:
@@ -112,8 +112,8 @@ def answer(out: bytes, err: bytes, code: int) -> str:
 async def main() -> None:
     ws = Workspace(
         {
-            "/repo/": RAMResource(),
-            "/scratch/": RAMResource(),
+            "/repo/": RAMVFS(),
+            "/scratch/": RAMVFS(),
         },
         mode=MountMode.WRITE,
         policies=[OperatorOwnsCredentials()],
@@ -128,12 +128,12 @@ async def main() -> None:
     )
     try:
         for line in SEED:
-            await ws.execute(line)
+            await ws.shell(line)
         ws.create_session("reviewer", profile="reviewer")
 
         for who, line, note in LINES:
-            res = await ws.execute(line,
-                                   session_id=None if who == "host" else who)
+            res = await ws.shell(line,
+                                 session_id=None if who == "host" else who)
             outcome = answer(res.stdout or b"", res.stderr or b"",
                              res.exit_code)
             print(f"{who:9} {line:30} {outcome}")

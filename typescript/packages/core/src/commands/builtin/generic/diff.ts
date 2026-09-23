@@ -48,7 +48,7 @@ function childSpec(parent: PathSpec, name: string): PathSpec {
     virtual: childPath,
     directory: childPath,
     resolved: false,
-    resourcePath: mountKey(childPath, mountPrefixOf(parent.virtual, parent.resourcePath)),
+    vfsPath: mountKey(childPath, mountPrefixOf(parent.virtual, parent.vfsPath)),
   })
 }
 

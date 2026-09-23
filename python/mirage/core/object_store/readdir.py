@@ -48,7 +48,7 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
     async def readdir(accessor: A,
                       path_spec: PathSpec,
                       index: IndexCacheStore = NULL_INDEX) -> list[str]:
-        prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+        prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
         # When called from resolve_glob with a pattern (e.g. *.txt),
         # use path.directory for the listing. Direct callers (ls, ops)
         # pass pattern=None so path.virtual is used.
@@ -100,7 +100,7 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
         if len(names) > driver.scope_error:
             logger.warning(
                 "%s readdir: %s returned %d entries (limit %d)",
-                driver.resource,
+                driver.vfs,
                 virtual_key,
                 len(names),
                 driver.scope_error,

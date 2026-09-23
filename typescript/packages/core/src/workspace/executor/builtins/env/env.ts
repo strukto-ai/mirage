@@ -17,7 +17,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { ownRecord, varsFromEnv } from '../../../session/session.ts'
 import type { ShellVar } from '../../../../shell/variable.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { ENV_HELP_HINT } from './constants.ts'
@@ -35,7 +35,7 @@ function envError(message: string): Result {
 export async function handleEnv(
   executeFn: ExecuteStringFn,
   args: string[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
 ): Promise<Result> {
   let ignoreEnv = false

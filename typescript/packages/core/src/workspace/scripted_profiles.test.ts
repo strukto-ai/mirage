@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ScriptSource } from '../runtime/routing/types.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
@@ -61,7 +61,7 @@ async function build(
 ): Promise<Workspace> {
   const shellParser = await getTestParser()
   return new Workspace(
-    { '/data/': new RAMResource() },
+    { '/data/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       shellParser,
@@ -76,10 +76,10 @@ describe('profile policies', () => {
   it('judges each command, with the facts as ctx', async () => {
     const ws = await build(scripted())
     try {
-      await ws.execute('mkdir -p /data/sealed && echo k > /data/sealed/k')
+      await ws.shell('mkdir -p /data/sealed && echo k > /data/sealed/k')
       ws.createSession('s', { profile: 'release' })
-      expect((await ws.execute('echo hi', { sessionId: 's' })).exitCode).toBe(0)
-      const denied = await ws.execute('cat /data/sealed/k', { sessionId: 's' })
+      expect((await ws.shell('echo hi', { sessionId: 's' })).exitCode).toBe(0)
+      const denied = await ws.shell('cat /data/sealed/k', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
       expect(denied.stderrText).toBe('cat: Permission denied\n')
       expect(denied.refusal).toMatchObject({ kind: 'deny', reason: 'sealed by release' })
@@ -94,7 +94,7 @@ describe('profile policies', () => {
     const ws = await build(scripted())
     try {
       ws.createSession('s', { profile: 'release' })
-      const denied = await ws.execute('cd /data && cat sealed/k', { sessionId: 's' })
+      const denied = await ws.shell('cd /data && cat sealed/k', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
       expect(denied.stderrText).toBe('cat: Permission denied\n')
     } finally {
@@ -107,9 +107,9 @@ describe('profile policies', () => {
     // runs whenever the script stays silent on it.
     const ws = await build(scripted())
     try {
-      await ws.execute('echo x > /data/x')
+      await ws.shell('echo x > /data/x')
       ws.createSession('s', { profile: 'release' })
-      expect((await ws.execute('rm /data/x', { sessionId: 's' })).exitCode).toBe(0)
+      expect((await ws.shell('rm /data/x', { sessionId: 's' })).exitCode).toBe(0)
     } finally {
       await ws.close()
     }
@@ -124,8 +124,8 @@ describe('profile policies', () => {
     })
     try {
       ws.createSession('s', { profile: 'release' })
-      expect((await ws.execute('rm /data/x', { sessionId: 's' })).exitCode).toBe(127)
-      const denied = await ws.execute('cat /data/sealed/k', { sessionId: 's' })
+      expect((await ws.shell('rm /data/x', { sessionId: 's' })).exitCode).toBe(127)
+      const denied = await ws.shell('cat /data/sealed/k', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
       expect(denied.stderrText).toBe('cat: Permission denied\n')
     } finally {
@@ -137,7 +137,7 @@ describe('profile policies', () => {
     const ws = await build(scripted())
     try {
       ws.createSession('s', { profile: 'release' })
-      const held = await ws.execute('shred /data/x', { sessionId: 's' })
+      const held = await ws.shell('shred /data/x', { sessionId: 's' })
       expect(held.exitCode).toBe(126)
       expect(held.stderrText).toBe('shred: Permission denied\n')
       expect(held.refusal).toMatchObject({ kind: 'pending', reason: 'sign-off' })
@@ -150,9 +150,9 @@ describe('profile policies', () => {
   it('leaves other sessions alone', async () => {
     const ws = await build(scripted())
     try {
-      await ws.execute('mkdir -p /data/sealed && echo k > /data/sealed/k')
+      await ws.shell('mkdir -p /data/sealed && echo k > /data/sealed/k')
       ws.createSession('s', { profile: 'release' })
-      const read = await ws.execute('cat /data/sealed/k')
+      const read = await ws.shell('cat /data/sealed/k')
       expect(read.exitCode).toBe(0)
     } finally {
       await ws.close()
@@ -162,8 +162,8 @@ describe('profile policies', () => {
   it('a scripted default profile shapes the default session', async () => {
     const ws = await build(scripted(), undefined, 'release')
     try {
-      expect((await ws.execute('echo hi')).exitCode).toBe(0)
-      const denied = await ws.execute('cat /data/sealed/k')
+      expect((await ws.shell('echo hi')).exitCode).toBe(0)
+      const denied = await ws.shell('cat /data/sealed/k')
       expect(denied.exitCode).toBe(126)
       expect(denied.stderrText).toBe('cat: Permission denied\n')
     } finally {
@@ -175,7 +175,7 @@ describe('profile policies', () => {
     const ws = await build(scripted(JUDGE_PY, 'monty', 'python'))
     try {
       ws.createSession('s', { profile: 'release' })
-      const denied = await ws.execute('cat /data/sealed/k', { sessionId: 's' })
+      const denied = await ws.shell('cat /data/sealed/k', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
       expect(denied.stderrText).toBe('cat: Permission denied\n')
     } finally {
@@ -190,15 +190,15 @@ describe('profile policies', () => {
     // without the marker runs.
     const ws = await build(scripted(READER_PY, 'monty', 'python'))
     try {
-      await ws.execute(
+      await ws.shell(
         "mkdir -p /data/in && printf 'subject: invoice\\n\\na payload\\n' > /data/in/mail.txt && echo plain > /data/in/note.txt",
       )
       ws.createSession('s', { profile: 'release' })
-      const held = await ws.execute('cat /data/in/mail.txt', { sessionId: 's' })
+      const held = await ws.shell('cat /data/in/mail.txt', { sessionId: 's' })
       expect(held.exitCode).toBe(126)
       expect(held.refusal).toMatchObject({ kind: 'pending', reason: 'sign-off on payload' })
-      expect((await ws.execute('cat /data/in/note.txt', { sessionId: 's' })).exitCode).toBe(0)
-      expect((await ws.execute('ls /data/in', { sessionId: 's' })).exitCode).toBe(0)
+      expect((await ws.shell('cat /data/in/note.txt', { sessionId: 's' })).exitCode).toBe(0)
+      expect((await ws.shell('ls /data/in', { sessionId: 's' })).exitCode).toBe(0)
     } finally {
       await ws.close()
     }
@@ -208,10 +208,10 @@ describe('profile policies', () => {
     // A profile is operator configuration, so the engine that judges
     // for it is a property of the profile, built fresh and never
     // resolved out of the runtime world.
-    const ws = await build(scripted(), ['vfs'])
+    const ws = await build(scripted(), ['workspace'])
     try {
       ws.createSession('s', { profile: 'release' })
-      const denied = await ws.execute('cat /data/sealed/k', { sessionId: 's' })
+      const denied = await ws.shell('cat /data/sealed/k', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
       expect(denied.stderrText).toBe('cat: Permission denied\n')
     } finally {
@@ -225,21 +225,21 @@ describe('profile policies', () => {
     const ws = await build(scripted("function preCommand() { throw new Error('boom') }"))
     try {
       ws.createSession('s', { profile: 'release' })
-      const refused = await ws.execute('echo hi', { sessionId: 's' })
+      const refused = await ws.shell('echo hi', { sessionId: 's' })
       expect(refused.exitCode).toBe(126)
       expect(refused.stderrText).toBe('echo: Permission denied\n')
       expect(refused.refusal?.reason).toMatch(/profile 'release' policy failed/)
-      expect((await ws.execute('echo hi')).exitCode).toBe(0)
+      expect((await ws.shell('echo hi')).exitCode).toBe(0)
     } finally {
       await ws.close()
     }
   })
 
   it('an engine that cannot evaluate fails closed', async () => {
-    const ws = await build(scripted(JUDGE, 'vfs'))
+    const ws = await build(scripted(JUDGE, 'workspace'))
     try {
       ws.createSession('s', { profile: 'release' })
-      const refused = await ws.execute('echo hi', { sessionId: 's' })
+      const refused = await ws.shell('echo hi', { sessionId: 's' })
       expect(refused.exitCode).toBe(126)
       expect(refused.stderrText).toBe('echo: Permission denied\n')
       expect(refused.refusal?.reason).toMatch(/cannot evaluate one/)
@@ -303,22 +303,22 @@ describe('profile policies at the op and session doors', () => {
   it('judges the op door with the facts of the op', async () => {
     const ws = await build(scripted(GATES))
     try {
-      await ws.execute('mkdir -p /data/frozen && echo keep > /data/frozen/k')
+      await ws.shell('mkdir -p /data/frozen && echo keep > /data/frozen/k')
       ws.createSession('s', { profile: 'release' })
       // No command hook, so a command is silence; a read is not a write.
-      expect((await ws.execute('echo hi', { sessionId: 's' })).exitCode).toBe(0)
-      const read = await ws.execute('cat /data/frozen/k', { sessionId: 's' })
+      expect((await ws.shell('echo hi', { sessionId: 's' })).exitCode).toBe(0)
+      const read = await ws.shell('cat /data/frozen/k', { sessionId: 's' })
       expect(read.exitCode).toBe(0)
       expect(read.stdoutText).toBe('keep\n')
-      const refused = await ws.execute('echo x > /data/frozen/f', { sessionId: 's' })
+      const refused = await ws.shell('echo x > /data/frozen/f', { sessionId: 's' })
       expect(refused.exitCode).toBe(1)
       expect(refused.stderrText).toContain('Permission denied')
-      const removed = await ws.execute('rm /data/frozen/k', { sessionId: 's' })
+      const removed = await ws.shell('rm /data/frozen/k', { sessionId: 's' })
       expect(removed.exitCode).toBe(1)
       expect(removed.stderrText).toContain('Permission denied')
-      expect((await ws.execute('cat /data/frozen/k')).stdoutText).toBe('keep\n')
+      expect((await ws.shell('cat /data/frozen/k')).stdoutText).toBe('keep\n')
       // Another session is not judged by it.
-      expect((await ws.execute('echo x > /data/frozen/f')).exitCode).toBe(0)
+      expect((await ws.shell('echo x > /data/frozen/f')).exitCode).toBe(0)
     } finally {
       await ws.close()
     }
@@ -328,10 +328,10 @@ describe('profile policies at the op and session doors', () => {
     const ws = await build(scripted(GATES))
     try {
       ws.createSession('s', { profile: 'release' })
-      const refused = await ws.execute('export AWS_SECRET=x', { sessionId: 's' })
+      const refused = await ws.shell('export AWS_SECRET=x', { sessionId: 's' })
       expect(refused.exitCode).toBe(1)
       expect(refused.stderrText).toBe('credentials are set by the operator\n')
-      const landed = await ws.execute('export SAFE=1 && echo $SAFE', { sessionId: 's' })
+      const landed = await ws.shell('export SAFE=1 && echo $SAFE', { sessionId: 's' })
       expect(landed.exitCode).toBe(0)
       expect(landed.stdoutText).toBe('1\n')
     } finally {
@@ -346,15 +346,15 @@ describe('profile policies at the op and session doors', () => {
     // the content verdict lands and the op hook still refuses a write.
     const ws = await build(scripted(READER_AND_GATE_PY, 'monty', 'python'))
     try {
-      await ws.execute(
+      await ws.shell(
         "mkdir -p /data/in && printf 'subject: invoice\\n\\na payload\\n' > /data/in/mail.txt && echo plain > /data/in/note.txt",
       )
       ws.createSession('s', { profile: 'release' })
-      const held = await ws.execute('cat /data/in/mail.txt', { sessionId: 's' })
+      const held = await ws.shell('cat /data/in/mail.txt', { sessionId: 's' })
       expect(held.exitCode).toBe(126)
       expect(held.refusal).toMatchObject({ kind: 'pending', reason: 'sign-off on payload' })
-      expect((await ws.execute('cat /data/in/note.txt', { sessionId: 's' })).exitCode).toBe(0)
-      const refused = await ws.execute('echo x > /data/frozen/f', { sessionId: 's' })
+      expect((await ws.shell('cat /data/in/note.txt', { sessionId: 's' })).exitCode).toBe(0)
+      const refused = await ws.shell('echo x > /data/frozen/f', { sessionId: 's' })
       expect(refused.exitCode).toBe(1)
       expect(refused.stderrText).toContain('Permission denied')
     } finally {
@@ -388,13 +388,13 @@ describe('a profile policy reads as the session it judges for', () => {
       sighted: { policy },
     })
     try {
-      await ws.execute('mkdir -p /data/secret && echo k > /data/secret/k')
+      await ws.shell('mkdir -p /data/secret && echo k > /data/secret/k')
       ws.createSession('b', { profile: 'blind' })
       ws.createSession('s', { profile: 'sighted' })
-      const ran = await ws.execute('echo hi && echo there', { sessionId: 'b' })
+      const ran = await ws.shell('echo hi && echo there', { sessionId: 'b' })
       expect(ran.exitCode).toBe(0)
       expect(ran.stdoutText).toBe('hi\nthere\n')
-      const denied = await ws.execute('echo hi && echo there', { sessionId: 's' })
+      const denied = await ws.shell('echo hi && echo there', { sessionId: 's' })
       expect(denied.exitCode).toBe(126)
       expect(denied.refusal).toMatchObject({ kind: 'deny', reason: 'saw k' })
     } finally {

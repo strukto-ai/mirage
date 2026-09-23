@@ -20,8 +20,8 @@ import pytest
 from mirage.accessor.trello import TrelloAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.read import read
-from mirage.resource.trello.config import TrelloConfig
 from mirage.types import PathSpec
+from mirage.vfs.trello.config import TrelloConfig
 
 
 @pytest.fixture

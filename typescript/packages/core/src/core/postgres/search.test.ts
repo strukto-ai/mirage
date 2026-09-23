@@ -27,7 +27,7 @@ vi.mock('./client.ts', async () => {
 })
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
-import { resolvePostgresConfig } from '../../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import { formatGrepResults, searchEntity, searchKind } from './search.ts'

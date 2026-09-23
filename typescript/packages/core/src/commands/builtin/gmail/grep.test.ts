@@ -25,7 +25,7 @@ const generic = vi.mocked(grepGeneric)
 const path = new PathSpec({
   virtual: '/gmail/INBOX',
   directory: '/gmail/INBOX',
-  resourcePath: 'INBOX',
+  vfsPath: 'INBOX',
 })
 
 async function run(flags: Record<string, FlagValue>) {

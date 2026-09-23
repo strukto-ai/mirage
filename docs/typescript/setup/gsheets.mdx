@@ -4,7 +4,7 @@ icon: google
 description: Mount Google Sheets spreadsheets as Mirage files from Node or the browser.
 ---
 
-`GSheetsResource` exposes Google Sheets as `.gsheet.json` and CSV-style files. Reads return cell values; writes update ranges via the Sheets API.
+`GSheetsVFS` exposes Google Sheets as `.gsheet.json` and CSV-style files. Reads return cell values; writes update ranges via the Sheets API.
 
 Setup steps for OAuth credentials live at [Google Workspace Credentials](/home/setup/google).
 
@@ -15,16 +15,16 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { GSheetsResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { GSheetsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const sheets = new GSheetsResource({
+const sheets = new GSheetsVFS({
   clientId: process.env.GOOGLE_CLIENT_ID!,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
   refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
 })
 
 const ws = new Workspace({ '/sheets': sheets }, { mode: MountMode.READ })
-await ws.execute('ls /sheets/owned/')
+await ws.shell('ls /sheets/owned/')
 ```
 
 ## Browser
@@ -34,9 +34,9 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { GSheetsResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GSheetsVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const sheets = new GSheetsResource({
+const sheets = new GSheetsVFS({
   clientId: GOOGLE_CLIENT_ID,
   clientSecret: GOOGLE_CLIENT_SECRET,
   refreshToken: localStorage.getItem('gsheets.refresh_token')!,
@@ -56,4 +56,4 @@ const sheets = new GSheetsResource({
 
 `read`, partial write (range updates).
 
-For the layout, sheet/tab structure, and write semantics see the [Python Sheets docs](/python/resource/gsheets).
+For the layout, sheet/tab structure, and write semantics see the [Python Sheets docs](/python/vfs/gsheets).

@@ -22,22 +22,13 @@ import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 
 // integ/runtime holds the runtime suite (its own schema and runners,
 // integ/runtime/run.{py,ts} + cli.sh), not battery cases; keep it out.
-const CASE_DIRS = [
-  'unix',
-  'bash',
-  'crossmount',
-  'resources',
-  'cli',
-  'session',
-  'console',
-  'secrets',
-]
+const CASE_DIRS = ['unix', 'bash', 'crossmount', 'vfs', 'cli', 'session', 'console', 'secrets']
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 export interface Mount {
   path: string
-  resource: string
+  vfs: string
   backend: string
   mode?: string
   fixture?: string
@@ -116,12 +107,12 @@ export interface Target {
   facet?: string
   // Where background-job consoles live: { type: 'redis' } puts each
   // job's console on its own Redis stream (REDIS_URL). Only the ram
-  // opener consults it; main.ts refuses it on any other resource.
+  // opener consults it; main.ts refuses it on any other VFS.
   console?: { type?: string }
   // The env plane fixture this target declares: 'healthy' registers the
   // counting fake source and builds the managed env block, 'dead' a
   // source whose every fetch fails. Only the ram opener consults it;
-  // main.ts refuses it on any other resource.
+  // main.ts refuses it on any other VFS.
   secrets?: string
   clis?: string[]
   // Scope an installed account CLI to this mount's folder, so the CLI and
@@ -175,7 +166,11 @@ export interface Case {
   check?: StatCheck
   provision?: boolean
   clear_cache?: boolean
-  consistency?: 'always' | 'lazy'
+  // A scenario selector, not a config value: a case names the read policy
+  // its two workspaces run under. `ttl` rides beside it because `bounded`
+  // takes a bound.
+  read?: 'fresh' | 'bounded'
+  ttl?: number
   session?: string
   // The host's answer to every approval waiting on the workspace, given
   // before the command runs: `allow_once`, `allow_session` or `deny`.
@@ -204,7 +199,7 @@ export interface ProvisionInfo {
 }
 
 interface ProvisionExec {
-  execute(cmd: string, opts: { provision: true }): Promise<ProvisionInfo>
+  shell(cmd: string, opts: { provision: true }): Promise<ProvisionInfo>
 }
 
 export interface ExplainRow {
@@ -234,7 +229,7 @@ export interface ExecWorkspace {
     kwargs?: Record<string, unknown>,
   ): Promise<unknown>
   cache: { clear(): Promise<void> }
-  mounts(): readonly { resource: { index?: { clear(): Promise<void> } } }[]
+  mounts(): readonly { vfs: { index?: { clear(): Promise<void> } } }[]
   createSession(
     sessionId: string,
     options: { profile?: string | SessionProfile; permissions?: SessionProfile },
@@ -462,8 +457,8 @@ async function seedFrom(ws: ExecWorkspace, base: string, mountPath: string): Pro
     const rel = relative(base, file).split(sep).join('/')
     const dest = `${mountPath.replace(/\/+$/, '')}/${rel}`
     const parent = dest.slice(0, dest.lastIndexOf('/'))
-    await ws.execute(`mkdir -p ${parent}`)
-    await ws.execute(`tee ${dest} > /dev/null`, { stdin: new Uint8Array(readFileSync(file)) })
+    await ws.shell(`mkdir -p ${parent}`)
+    await ws.shell(`tee ${dest} > /dev/null`, { stdin: new Uint8Array(readFileSync(file)) })
   }
 }
 
@@ -476,8 +471,8 @@ export async function seedMountRoot(ws: ExecWorkspace, mountPath: string): Promi
   // the upload auto-creates the folder chain and the delete leaves the
   // folders behind, so the mount lists as empty like every other target.
   const marker = `${mountPath.replace(/\/+$/, '')}/.seed`
-  await ws.execute(`tee ${marker} > /dev/null`, { stdin: ENC.encode('seed\n') })
-  await ws.execute(`rm ${marker}`)
+  await ws.shell(`tee ${marker} > /dev/null`, { stdin: ENC.encode('seed\n') })
+  await ws.shell(`rm ${marker}`)
 }
 
 export async function runScenario(
@@ -492,7 +487,7 @@ export async function runScenario(
       await mutate(step.mutate.path, ENC.encode(step.mutate.content))
       continue
     }
-    const result = await ws.execute(step.command)
+    const result = await ws.shell(step.command)
     outputs.push(DEC.decode(result.stdout))
     exitCode = result.exitCode
   }
@@ -739,15 +734,15 @@ export async function runCase(
 }> {
   if (c.clear_cache === true) {
     // A full clear means the file cache AND every mount's index cache:
-    // remote listings live in the per-resource index, and a listing
-    // populated by an earlier case must not leak into this one. Resources
+    // remote listings live in the per-VFS index, and a listing
+    // populated by an earlier case must not leak into this one. mounts
     // without an index cache (e.g. opfs) have nothing to clear.
     await ws.cache.clear()
-    for (const m of ws.mounts()) await m.resource.index?.clear()
+    for (const m of ws.mounts()) await m.vfs.index?.clear()
   }
   const start = performance.now()
   if (c.provision === true) {
-    const plan = await (ws as unknown as ProvisionExec).execute(c.command, { provision: true })
+    const plan = await (ws as unknown as ProvisionExec).shell(c.command, { provision: true })
     return {
       exitCode: 0,
       out: provisionLine(plan) + '\n',
@@ -768,7 +763,7 @@ export async function runCase(
     // and charging that to the dry run would fail every ask case.
     recorded = ws.decisions.pending().length - before
   }
-  const result = await ws.execute(c.command, { sessionId: c.session })
+  const result = await ws.shell(c.command, { sessionId: c.session })
   const elapsed = (performance.now() - start) / 1000
   const out = DEC.decode(result.stdout)
   const err = DEC.decode(result.stderr)

@@ -23,12 +23,12 @@ from mirage.core.ram.mkdir import mkdir as mem_mkdir
 from mirage.core.ram.write import write_bytes as mem_write
 from mirage.core.redis.mkdir import mkdir as redis_mkdir
 from mirage.core.redis.write import write_bytes as redis_write
-from mirage.resource.disk import DiskResource
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
-from mirage.resource.ram import RAMResource
-from mirage.resource.redis import RedisResource
-from mirage.resource.s3 import S3Config, S3Resource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.redis import RedisVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import patch_s3_multi
@@ -63,25 +63,25 @@ def _supports_delete(ptype: str) -> bool:
     return ptype in WRITABLE
 
 
-def _make_s3_resource(bucket: str) -> S3Resource:
+def _make_s3_vfs(bucket: str) -> S3VFS:
     config = S3Config(bucket=bucket,
                       region="us-east-1",
                       aws_access_key_id="testing",
                       aws_secret_access_key="testing")
-    return S3Resource(config)
+    return S3VFS(config)
 
 
-def _make_redis_resource(prefix: str) -> RedisResource:
-    return RedisResource(url=REDIS_URL, key_prefix=prefix)
+def _make_redis_vfs(prefix: str) -> RedisVFS:
+    return RedisVFS(url=REDIS_URL, key_prefix=prefix)
 
 
-def _make_gdrive_resource() -> GoogleDriveResource:
+def _make_gdrive_vfs() -> GoogleDriveVFS:
     config = GoogleDriveConfig(
         client_id="fake-id",
         client_secret="fake-secret",
         refresh_token="fake-refresh",
     )
-    return GoogleDriveResource(config)
+    return GoogleDriveVFS(config)
 
 
 class _MountState:
@@ -94,7 +94,7 @@ class _MountState:
         self.s3_bucket: str | None = None
         self.gdrive: FakeGDrive | None = None
         self.redis_prefix: str | None = None
-        self.resource = None
+        self.vfs = None
         self.accessor = None
 
 
@@ -102,25 +102,25 @@ def _build_mount(ptype: str, mount_path: str, tmp_path,
                  idx: int) -> _MountState:
     state = _MountState(ptype, mount_path, idx)
     if ptype == "ram":
-        state.resource = RAMResource()
-        state.accessor = state.resource.accessor
+        state.vfs = RAMVFS()
+        state.accessor = state.vfs.accessor
     elif ptype == "disk":
         root = tmp_path / f"disk{idx}"
         root.mkdir()
         state.disk_root = root
-        state.resource = DiskResource(root=str(root))
+        state.vfs = DiskVFS(root=str(root))
     elif ptype == "redis":
         prefix = f"mirage:test:{uuid.uuid4().hex}:{idx}:"
         state.redis_prefix = prefix
-        state.resource = _make_redis_resource(prefix)
+        state.vfs = _make_redis_vfs(prefix)
     elif ptype == "s3":
         state.s3_bucket = f"test-bucket-{idx}"
-        state.resource = _make_s3_resource(state.s3_bucket)
+        state.vfs = _make_s3_vfs(state.s3_bucket)
     elif ptype == "gdrive":
         state.gdrive = FakeGDrive()
-        state.resource = _make_gdrive_resource()
+        state.vfs = _make_gdrive_vfs()
     else:
-        raise ValueError(f"unknown resource: {ptype}")
+        raise ValueError(f"unknown VFS: {ptype}")
     return state
 
 
@@ -143,11 +143,11 @@ async def _populate_file_async(state: _MountState, name: str,
         if len(parts) > 1:
             # mkdir -p the parent chain, like the disk branch above: plain
             # mkdir refuses a directory that is already there (GNU).
-            await redis_mkdir(state.resource.accessor,
+            await redis_mkdir(state.vfs.accessor,
                               PathSpec.from_str_path("/" +
                                                      "/".join(parts[:-1])),
                               parents=True)
-        await redis_write(state.resource.accessor,
+        await redis_write(state.vfs.accessor,
                           PathSpec.from_str_path("/" + name), content)
 
 
@@ -172,8 +172,8 @@ async def _ls_for_index(ws: Workspace, state: "_MountState",
         # write path that would normally invalidate the parent listing, so a
         # previously warmed (now stale) index entry must be dropped before the
         # ls re-lists it.
-        await state.resource.index.invalidate_dir(path)
-        await ws.execute(f"ls {path}")
+        await state.vfs.index.invalidate_dir(path)
+        await ws.shell(f"ls {path}")
 
 
 class CrossMountEnv:
@@ -202,19 +202,19 @@ class CrossMountEnv:
     def run(self, cmd: str) -> str:
 
         async def _inner():
-            io = await self.ws.execute(cmd)
+            io = await self.ws.shell(cmd)
             return await io.stdout_str()
 
         return asyncio.run(_inner())
 
     def exit(self, cmd: str) -> int:
-        io = asyncio.run(self.ws.execute(cmd))
+        io = asyncio.run(self.ws.shell(cmd))
         return io.exit_code
 
     def cleanup_redis(self) -> None:
         for state in (self.m1, self.m2):
             if state.ptype == "redis":
-                asyncio.run(state.resource._store.clear())
+                asyncio.run(state.vfs._store.clear())
 
 
 def _pair_id(pair: tuple[str, str]) -> str:
@@ -242,8 +242,8 @@ def cross(request, tmp_path):
 
     ws = Workspace(
         {
-            "/m1": (m1.resource, MountMode.WRITE),
-            "/m2": (m2.resource, MountMode.WRITE),
+            "/m1": (m1.vfs, MountMode.WRITE),
+            "/m2": (m2.vfs, MountMode.WRITE),
         },
         mode=MountMode.WRITE,
     )
@@ -263,9 +263,9 @@ def cross(request, tmp_path):
     if "gdrive" in pair:
         gd_pairs = []
         if m1.ptype == "gdrive":
-            gd_pairs.append((m1.resource._token_manager, m1.gdrive))
+            gd_pairs.append((m1.vfs._token_manager, m1.gdrive))
         if m2.ptype == "gdrive":
-            gd_pairs.append((m2.resource._token_manager, m2.gdrive))
+            gd_pairs.append((m2.vfs._token_manager, m2.gdrive))
         stack.enter_context(patch_gdrive(*gd_pairs))
 
     with stack:

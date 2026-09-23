@@ -15,7 +15,7 @@
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import { readdir } from './readdir.ts'
@@ -38,7 +38,7 @@ async function collect(
       virtual: entry,
       directory: entry,
       resolved: false,
-      resourcePath: mountKey(entry, mountPrefixOf(path.virtual, path.resourcePath)),
+      vfsPath: mountKey(entry, mountPrefixOf(path.virtual, path.vfsPath)),
     })
     await collect(accessor, child, index, out)
   }
@@ -74,10 +74,10 @@ export async function find(
   for (const [entryPath, fileStat] of collected) {
     let rel = entryPath
     if (
-      mountPrefixOf(path.virtual, path.resourcePath) !== '' &&
-      rel.startsWith(mountPrefixOf(path.virtual, path.resourcePath))
+      mountPrefixOf(path.virtual, path.vfsPath) !== '' &&
+      rel.startsWith(mountPrefixOf(path.virtual, path.vfsPath))
     ) {
-      rel = rel.slice(mountPrefixOf(path.virtual, path.resourcePath).length) || '/'
+      rel = rel.slice(mountPrefixOf(path.virtual, path.vfsPath).length) || '/'
     }
     const relStripped = stripSlash(rel)
     rel = relStripped !== '' ? `/${relStripped}` : '/'

@@ -3,9 +3,12 @@ import time
 
 import pytest
 
-from mirage.commands.builtin.find_eval import (And, Empty, Name, Not, Or, Path,
-                                               TrueNode, Type, eval_predicate)
+from mirage.commands.builtin.find_eval import (Action, And, Empty, Mtime, Name,
+                                               Not, Or, Path, Prune, TrueNode,
+                                               Type, eval_predicate,
+                                               tree_has_action)
 from mirage.commands.builtin.find_parse import parse_find_expression
+from mirage.commands.builtin.types import ExecAction, PrintfAction, RowAction
 from mirage.commands.errors import FindParseError
 
 
@@ -149,12 +152,63 @@ def _ent(name="a", kind="f"):
     ["-boguspredicate"],
     ["-regex", ".*deep.*"],
     ["-perm", "644"],
-    ["-prune"],
     ["-nam", "*.txt"],
 ])
 def test_unsupported_predicate_raises(tokens):
-    with pytest.raises(FindParseError):
+    with pytest.raises(FindParseError, match="unknown predicate"):
         parse_find_expression(tokens)
+
+
+def test_prune_is_a_tree_node_that_short_circuits_past_the_print():
+    expr = parse_find_expression(
+        ["-path", "./skip", "-prune", "-o", "-type", "f", "-print"])
+    assert expr.tree == Or(
+        [And([Path("./skip"), Prune()]),
+         And([Type("f"), Action("print")])])
+    assert expr.actions == [RowAction("print")]
+    assert expr.depth_first is False
+
+
+def test_time_tests_sit_in_the_tree_at_their_position():
+    expr = parse_find_expression(["-newermt", "2010-01-01", "-prune"])
+    assert isinstance(expr.tree, And)
+    assert expr.tree.kids == [Mtime(expr.mtime_min, expr.mtime_max), Prune()]
+    assert expr.mtime_min is not None and expr.mtime_max is None
+    expr = parse_find_expression(["-prune", "-mtime", "+3650"])
+    assert expr.tree.kids == [Prune(), Mtime(expr.mtime_min, expr.mtime_max)]
+    assert expr.mtime_max is not None
+    # -newer stays a plain true until the executor resolves it into
+    # -newermt, since only the dispatcher can stat the reference.
+    expr = parse_find_expression(["-newer", "ref", "-prune"])
+    assert expr.tree.kids == [TrueNode(), Prune()]
+    assert expr.newer == ["ref"]
+
+
+def test_prune_is_inert_under_an_explicit_depth():
+    expr = parse_find_expression(
+        ["-depth", "-path", "./skip", "-prune", "-o", "-type", "f", "-print"])
+    assert expr.tree == Or([
+        And([TrueNode(), Path("./skip"),
+             TrueNode()]),
+        And([Type("f"), Action("print")])
+    ])
+    assert expr.depth_first is True
+
+
+def test_prune_with_delete_is_gnus_refusal():
+    # GNU findutils 4.10.0, pinned on debian:stable-slim.
+    message = ("find: The -delete action automatically turns on -depth, but "
+               "-prune does nothing when -depth is in effect.  If you want "
+               "to carry on anyway, just explicitly use the -depth option.")
+    with pytest.raises(FindParseError) as exc:
+        parse_find_expression(
+            ["-path", "./skip", "-prune", "-o", "-name", "*.tmp", "-delete"])
+    assert str(exc.value) == message
+    expr = parse_find_expression([
+        "-depth", "-path", "./skip", "-prune", "-o", "-name", "*.tmp",
+        "-delete"
+    ])
+    assert expr.actions == [RowAction("delete")]
 
 
 @pytest.mark.parametrize("ftype", ["b", "c", "d", "p", "f", "l", "s"])
@@ -216,9 +270,9 @@ def test_operator_closed_by_paren_names_both(tokens, op):
         parse_find_expression(tokens)
 
 
-def test_printf_stores_format():
+def test_printf_stores_format_on_its_action():
     expr = parse_find_expression(["-printf", "%p\\n"])
-    assert expr.printf == "%p\\n"
+    assert expr.actions == [PrintfAction("%p\\n")]
 
 
 def test_printf_missing_argument():
@@ -228,7 +282,40 @@ def test_printf_missing_argument():
 
 def test_printf_combines_with_tests():
     expr = parse_find_expression(["-name", "*.txt", "-printf", "%f\\n"])
-    assert expr.printf == "%f\\n"
+    assert expr.actions == [PrintfAction("%f\\n")]
+
+
+@pytest.mark.parametrize("tokens,actions", [
+    (["-printf", "%p\\n", "-exec", "cat", "{}", ";"],
+     [PrintfAction("%p\\n"), ExecAction(("cat", "{}"))]),
+    (["-exec", "cat", "{}", ";", "-printf", "%p\\n"
+      ], [ExecAction(
+          ("cat", "{}")), PrintfAction("%p\\n")]),
+    (["-printf", "%p ", "-print"], [PrintfAction("%p "),
+                                    RowAction("print")]),
+    (["-print0", "-printf", "%p"], [RowAction("print0"),
+                                    PrintfAction("%p")]),
+    (["-printf", "%p", "-ls"], [PrintfAction("%p"),
+                                RowAction("ls")]),
+    (["-printf", "%p", "-delete"], [PrintfAction("%p"),
+                                    RowAction("delete")]),
+    (["-printf", "%p ", "-printf", "%s\\n"
+      ], [PrintfAction("%p "), PrintfAction("%s\\n")]),
+])
+def test_printf_runs_beside_other_actions_in_order(tokens, actions):
+    # GNU runs every action of the -a chain per row, in the order written.
+    assert parse_find_expression(tokens).actions == actions
+
+
+def test_printf_formats_under_or_must_agree():
+    with pytest.raises(FindParseError) as exc:
+        parse_find_expression(
+            ["-name", "a", "-printf", "A", "-o", "-name", "b", "-printf", "B"])
+    assert str(exc.value) == ("find: -printf may print only one format "
+                              "under -o, ! or parentheses")
+    expr = parse_find_expression(
+        ["-name", "a", "-printf", "%p", "-o", "-name", "b", "-printf", "%p"])
+    assert expr.actions == [PrintfAction("%p")]
 
 
 def test_exec_per_match_and_batched():
@@ -236,10 +323,11 @@ def test_exec_per_match_and_batched():
     expr = parse_find_expression(
         ["-name", "*.txt", "-exec", "echo", "got", "{}", ";"])
     assert expr.execs == [ExecAction(("echo", "got", "{}"), batch=False)]
-    # The action is a TrueNode in the tree, as every action is.
-    assert expr.tree == And([Name("*.txt"), TrueNode()])
+    # The action is an Action node in the tree, as every action is.
+    assert expr.tree == And([Name("*.txt"), Action("exec")])
     expr = parse_find_expression(["-exec", "echo", "{}", "+"])
     assert expr.execs == [ExecAction(("echo", "{}"), batch=True)]
+    assert expr.tree == Action("exec", batch=True)
 
 
 @pytest.mark.parametrize("tokens,message", [
@@ -252,20 +340,20 @@ def test_exec_per_match_and_batched():
      "specified 'x{}y'"),
     (["-exec", "echo", "{}", "{}", "+"
       ], "find: Only one instance of {} is supported with -exec ... +"),
-    (["-name", "a", "-o", "-exec", "echo", "{}", ";"
-      ], "find: -exec is supported only in a top-level -a chain, not under "
-     "-o, ! or parentheses"),
-    (["!", "-exec", "false", ";"
-      ], "find: -exec is supported only in a top-level -a chain, not under "
-     "-o, ! or parentheses"),
-    (["(", "-exec", "false", ";", ")"
-      ], "find: -exec is supported only in a top-level -a chain, not under "
-     "-o, ! or parentheses"),
+    (["!", "-exec", "false", ";"], "find: -exec is not supported under !"),
     (["-exec", "false", "{}", ";", "-o", "-print"
-      ], "find: -exec is supported only in a top-level -a chain, not under "
-     "-o, ! or parentheses"),
-    (["-exec", "echo", "{}", ";", "-printf", "%p"
-      ], "find: -exec cannot be combined with -printf"),
+      ], "find: -exec and -print cannot be combined under -o, ! or "
+     "parentheses"),
+    (["-name", "a", "-exec", "true", ";", "-o", "-exec", "false", ";"
+      ], "find: -exec may run only one command under -o, ! or parentheses"),
+    (["-name", "a", "-o", "-exec", "echo", "{}", ";", "-name", "b"
+      ], "find: -exec must end its -a chain under -o, ! or parentheses"),
+    (["-type", "d", "-exec", "false", "{}", ";", "-o", "-prune"
+      ], "find: -exec must end the expression under -o, ! or parentheses"),
+    (["-exec", "echo", "{}", ";", "-o", "-exec", "echo", "{}", ";"
+      ], "find: -exec must end the expression under -o, ! or parentheses"),
+    (["(", "-name", "a", "-exec", "echo", "{}", ";", ")", "-o", "-name", "b"
+      ], "find: -exec must end the expression under -o, ! or parentheses"),
     (["-newermt", "nope"],
      "find: I cannot figure out how to interpret 'nope' as a date or time"),
     (["-newer"], "find: missing argument to '-newer'"),
@@ -275,12 +363,69 @@ def test_exec_and_newer_refusals(tokens, message):
         parse_find_expression(tokens)
 
 
+def test_batched_exec_is_true_whatever_the_command_exits():
+    # GNU: `-exec ... {} +` always returns true, so the next arm never
+    # sees a row through it and the executor's late status is harmless.
+    expr = parse_find_expression(
+        ["-type", "d", "-exec", "echo", "{}", "+", "-o", "-prune"])
+    assert expr.tree == Or(
+        [And([Type("d"), Action("exec", batch=True)]),
+         Prune()])
+
+
 def test_exec_allowed_after_a_parenthesized_or():
     expr = parse_find_expression([
         "(", "-name", "a", "-o", "-name", "b", ")", "-exec", "echo", "{}", ";"
     ])
     assert len(expr.execs) == 1
-    assert expr.tree == And([Or([Name("a"), Name("b")]), TrueNode()])
+    assert expr.tree == And([Or([Name("a"), Name("b")]), Action("exec")])
+
+
+def test_one_action_may_end_any_arm():
+    # The tree decides per entry which arm reaches the action; the
+    # executor then runs that one action on every row kept, so the
+    # arms must agree on it and nothing may follow it.
+    expr = parse_find_expression(
+        ["-name", "a", "-print", "-o", "-name", "b", "-print"])
+    assert expr.tree == Or(
+        [And([Name("a"), Action("print")]),
+         And([Name("b"), Action("print")])])
+    assert expr.actions == [RowAction("print")]
+    expr = parse_find_expression(
+        ["-name", "a", "-o", "-exec", "echo", "{}", ";"])
+    assert expr.actions == [ExecAction(("echo", "{}"))]
+    expr = parse_find_expression(["(", "-exec", "false", ";", ")"])
+    assert expr.tree == Action("exec")
+    expr = parse_find_expression(
+        ["-path", "./skip", "-prune", "-o", "-type", "f", "-printf", "%p"])
+    assert expr.actions == [PrintfAction("%p")]
+    assert expr.tree == Or(
+        [And([Path("./skip"), Prune()]),
+         And([Type("f"), Action("printf")])])
+
+
+@pytest.mark.parametrize("tokens, message", [
+    (["-name", "a", "-print", "-o", "-name", "b", "-print0"
+      ], "find: -print and -print0 cannot be combined under -o, ! or "
+     "parentheses"),
+    (["(", "-name", "a", "-print", ")", "-print"
+      ], "find: -print must end its -a chain under -o, ! or parentheses"),
+    (["!", "-print"], "find: -print is not supported under !"),
+    (["!", "(", "-name", "a", "-print", ")"
+      ], "find: -print is not supported under !"),
+    (["-name", "a", "-o", "-print", "-name", "b"
+      ], "find: -print must end its -a chain under -o, ! or parentheses"),
+    (["-name", "a", "-o", "-print", "-prune"
+      ], "find: -print must end its -a chain under -o, ! or parentheses"),
+    (["-print", "-o", "-delete"
+      ], "find: -print and -delete cannot be combined under -o, ! or "
+     "parentheses"),
+])
+def test_positional_actions_that_could_fire_twice_or_differ_are_refused(
+        tokens, message):
+    with pytest.raises(FindParseError) as exc:
+        parse_find_expression(tokens)
+    assert str(exc.value) == message
 
 
 def test_actions_are_recorded_in_order():
@@ -346,8 +491,7 @@ def test_newermt_accepts_an_epoch_timestamp():
     ['-newermt', 'yesterday'],
     ['-newer', 'ref'],
     ['-empty'],
-    ['!', '-name', '*.txt'],
-    ['(', '-name', '*.txt', ')'],
+    ['-prune'],
 ])
 def test_predicate_after_action_is_refused(action, test):
     with pytest.raises(FindParseError,
@@ -362,16 +506,19 @@ def test_predicate_after_action_is_refused(action, test):
     ["-delete"],
     ["-printf", "%p"],
 ])
-@pytest.mark.parametrize("position", ["left", "right", "not", "group"])
-def test_row_actions_refuse_detachment_from_the_predicate(action, position):
+@pytest.mark.parametrize("position", ["left", "right", "group"])
+def test_row_actions_may_end_an_arm(action, position):
     expressions = {
-        "left": [*action, "-o", "-print"],
+        "left": [*action, "-o", "-name", "keep"],
         "right": ["-name", "keep", "-o", *action],
-        "not": ["!", *action],
         "group": ["(", *action, ")"],
     }
-    with pytest.raises(FindParseError, match="supported only in a top-level"):
-        parse_find_expression(expressions[position])
+    expr = parse_find_expression(expressions[position])
+    assert tree_has_action(expr.tree)
+    assert expr.actions == [
+        PrintfAction("%p")
+        if action[0] == "-printf" else RowAction(action[0][1:])
+    ]
     parse_find_expression(
         ["(", "-name", "a", "-o", "-name", "b", ")", *action])
 
@@ -419,30 +566,8 @@ def test_newermt_rejects_invalid_calendar_fields(value):
       'not under -o, ! or parentheses'),
      (['(', '-newermt', '2000-01-01', ')'
        ], 'find: -newermt is supported only in a top-level -a chain, '
-      'not under -o, ! or parentheses'),
-     (['-printf', '%p\\n', '-exec', 'true', '{}', ';'
-       ], 'find: -exec cannot be combined with -printf'),
-     (['-exec', 'true', '{}', ';', '-printf', '%p\\n'
-       ], 'find: -exec cannot be combined with -printf'),
-     (['-printf', '%p\\n', '-print'
-       ], 'find: -printf cannot be combined with other actions'),
-     (['-print', '-printf', '%p\\n'
-       ], 'find: -printf cannot be combined with other actions'),
-     (['-printf', '%p\\n', '-print0'
-       ], 'find: -printf cannot be combined with other actions'),
-     (['-print0', '-printf', '%p\\n'
-       ], 'find: -printf cannot be combined with other actions'),
-     (['-printf', '%p\\n', '-ls'
-       ], 'find: -printf cannot be combined with other actions'),
-     (['-ls', '-printf', '%p\\n'
-       ], 'find: -printf cannot be combined with other actions'),
-     (['-printf', '%p\\n', '-delete'
-       ], 'find: -printf cannot be combined with other actions'),
-     (['-delete', '-printf', '%p\\n'
-       ], 'find: -printf cannot be combined with other actions'),
-     (['-printf', '%p', '-printf', '%f'
-       ], 'find: multiple -printf actions are not supported')])
-def test_newer_placement_and_mixed_printf_refusals(tokens, message):
+      'not under -o, ! or parentheses')])
+def test_newer_placement_refusals(tokens, message):
     with pytest.raises(FindParseError) as exc:
         parse_find_expression(tokens)
     assert str(exc.value) == message

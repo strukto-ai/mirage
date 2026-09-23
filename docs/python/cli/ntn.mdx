@@ -19,10 +19,10 @@ implementation uses
 from mirage import Workspace
 from mirage.commands.cli.builtin.ntn import NTN
 from mirage.core.notion.config import NotionConfig
-from mirage.resource.notion import NotionResource
+from mirage.vfs.notion import NotionVFS
 
 config = NotionConfig(api_key="secret_...")
-ws = Workspace({"/notion": NotionResource(config)})
+ws = Workspace({"/notion": NotionVFS(config)})
 ws.register_cli("ntn", NTN, config.model_dump())
 ```
 

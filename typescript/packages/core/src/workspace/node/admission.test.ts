@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { getTestParser, voicedStderr } from '../fixtures/workspace_fixture.ts'
@@ -62,7 +62,7 @@ afterEach(async () => {
 async function ws(profile: SessionProfile | null = DOC): Promise<Workspace> {
   const parser = await getTestParser()
   const w = new Workspace(
-    { '/data': new RAMResource() },
+    { '/data': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       shellParser: parser,
@@ -81,7 +81,7 @@ function virtuals(w: Workspace, name: string, ...args: string[]): string[] {
 describe('admission', () => {
   it('policy scopes follow links only for a following command', async () => {
     const w = await ws()
-    await w.execute('echo top > /data/secret && ln -s /data/secret /data/link')
+    await w.shell('echo top > /data/secret && ln -s /data/secret /data/link')
     // cat opens the target: the typed path first, then what it resolves
     // to; rm and `ls -l` act on the link itself.
     expect(virtuals(w, 'cat', '/data/link')).toEqual(['/data/link', '/data/secret'])
@@ -101,7 +101,7 @@ describe('admission', () => {
     // an operand the executor injects after the gate; a rule on that
     // directory has to see it here, as the operand typed `.`.
     const w = await ws()
-    await w.execute('mkdir -p /data/private && echo x > /data/private/f')
+    await w.shell('mkdir -p /data/private && echo x > /data/private/f')
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const run = async (name: string, args: string[], stdin: Uint8Array | null = null) => {
       const words = classifyParts([name, ...args], w.registry, session.cwd)
@@ -118,7 +118,7 @@ describe('admission', () => {
       return refusal instanceof Admitted ? null : [refusal.exitCode, DEC.decode(refusal.stderr)]
     }
     expect(await run('ls', [])).toBeNull()
-    await w.execute('cd /data/private')
+    await w.shell('cd /data/private')
     expect(await run('ls', [])).toEqual([1, 'ls: .: private\n'])
     // A named operand replaces the implied one.
     expect(await run('ls', ['/data'])).toBeNull()
@@ -134,7 +134,7 @@ describe('admission', () => {
     // rule: the gate drops the operand before any hook, the rule does
     // not fire, and the line goes on to the door, which answers ENOENT.
     const w = await ws()
-    await w.execute('mkdir -p /data/private && echo s > /data/secret')
+    await w.shell('mkdir -p /data/private && echo s > /data/secret')
     const veiled = w.createSession('veiled', {
       profile: { paths: { hide: ['/data/secret', '/data/private'] } },
     })
@@ -149,12 +149,12 @@ describe('admission', () => {
     expect(await run(plain, 'ls', '/data/private')).toEqual([1, 'ls: /data/private: private\n'])
     expect(await run(veiled, 'ls', '/data/private')).toBeNull()
     // The followed target and the implied operand are dropped too.
-    await w.execute('ln -s /data/secret /data/l')
+    await w.shell('ln -s /data/secret /data/l')
     expect(await run(plain, 'cat', '/data/l')).toEqual([1, 'cat: /data/l: sealed\n'])
     expect(await run(veiled, 'cat', '/data/l')).toBeNull()
     // Whatever the session sees is still read as before.
     expect(await run(veiled, 'cat', '/data/a')).toBeNull()
-    await w.execute('echo x > /data/private/f')
+    await w.shell('echo x > /data/private/f')
     expect(await run(plain, 'grep', '-r', 'x', '/data/private')).toEqual([
       1,
       'grep: /data/private: private\n',
@@ -260,7 +260,7 @@ describe('admission', () => {
     // spec: the bare word has no path shape for the heuristics, and the
     // runtime resolves it against the cwd exactly as the spec hints do.
     const w = await ws()
-    await w.execute('cd /data')
+    await w.shell('cd /data')
     const parser = await getTestParser()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const line = (text: string) =>

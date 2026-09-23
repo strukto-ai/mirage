@@ -37,7 +37,7 @@ _search = make_search("grep",
                       stream=True)
 
 
-@command("grep", resource="mongodb", spec=SPECS["grep"])
+@command("grep", vfs="mongodb", spec=SPECS["grep"])
 async def grep(accessor: MongoDBAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

@@ -12,7 +12,7 @@ Install the Node package:
 pnpm add @struktoai/mirage-node
 ```
 
-This ships the base runtime (Workspace, RAM resource, Disk resource, the shell executor) and is enough to follow the [TypeScript Quickstart](/typescript/quickstart).
+This ships the base runtime (Workspace, RAM VFS, Disk VFS, the shell executor) and is enough to follow the [TypeScript Quickstart](/typescript/quickstart).
 
 `npm install` and `yarn add` work identically; examples below use pnpm because the FUSE binding's install script needs pnpm's `onlyBuiltDependencies` allow-list.
 
@@ -31,7 +31,7 @@ Mirage keeps native and network-heavy dependencies as **optional peers** so cons
     Then follow the [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDependencies` allow-list and the macOS 4+ symlink workaround.
   </Tab>
   <Tab title="Redis">
-    Required for `RedisResource`, `RedisFileCacheStore`, and `RedisIndexCacheStore`.
+    Required for `RedisVFS`, `RedisFileCacheStore`, and `RedisIndexCacheStore`.
 
     ```bash
     pnpm add redis
@@ -40,42 +40,42 @@ Mirage keeps native and network-heavy dependencies as **optional peers** so cons
     Any `redis@^5` client works.
   </Tab>
   <Tab title="Postgres">
-    Required for `PostgresResource`.
+    Required for `PostgresVFS`.
 
     ```bash
     pnpm add pg
     ```
   </Tab>
   <Tab title="MongoDB">
-    Required for `MongoDBResource` and `GridFSResource`.
+    Required for `MongoDBVFS` and `GridFSVFS`.
 
     ```bash
     pnpm add mongodb
     ```
   </Tab>
   <Tab title="LanceDB">
-    Required for `LanceDBResource`.
+    Required for `LanceDBVFS`.
 
     ```bash
     pnpm add @lancedb/lancedb
     ```
   </Tab>
   <Tab title="Qdrant">
-    Required for `QdrantResource`.
+    Required for `QdrantVFS`.
 
     ```bash
     pnpm add @qdrant/js-client-rest
     ```
   </Tab>
   <Tab title="SSH">
-    Required for `SSHResource`.
+    Required for `SSHVFS`.
 
     ```bash
     pnpm add ssh2
     ```
   </Tab>
   <Tab title="Email">
-    Required for `EmailResource` (IMAP read, SMTP send, MIME parsing).
+    Required for `EmailVFS` (IMAP read, SMTP send, MIME parsing).
 
     ```bash
     pnpm add imapflow mailparser nodemailer
@@ -86,13 +86,13 @@ Mirage keeps native and network-heavy dependencies as **optional peers** so cons
 ## Verify
 
 ```ts
-import { MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
-  { '/data': new RAMResource() },
+  { '/data': new RAMVFS() },
   { mode: MountMode.WRITE },
 )
-const res = await ws.execute('echo "hello" | tee /data/x.txt')
+const res = await ws.shell('echo "hello" | tee /data/x.txt')
 console.log(res.stdoutText) // hello
 await ws.close()
 ```

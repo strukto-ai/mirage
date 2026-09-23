@@ -15,7 +15,7 @@
 import type { Db, MongoClient } from 'mongodb'
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
 import { loadOptionalPeer } from '../optional_peer.ts'
-import type { GridFSConfig } from '../resource/gridfs/config.ts'
+import type { GridFSConfig } from '../vfs/gridfs/config.ts'
 
 interface MongoModule {
   MongoClient: new (uri: string) => MongoClient
@@ -42,7 +42,7 @@ export class GridFSAccessor extends Accessor {
 
   private async _connect(): Promise<MongoClient> {
     const mod = await loadOptionalPeer(() => import('mongodb') as unknown as Promise<MongoModule>, {
-      feature: 'GridFSResource',
+      feature: 'GridFSVFS',
       packageName: 'mongodb',
     })
     const client = new mod.MongoClient(this.config.uri)

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { exists } from '../../core/opfs/exists.ts'
 import { makeMockAccessor, spec } from '../../test-utils.ts'
@@ -43,8 +43,8 @@ describe('OPFS_OPS', () => {
     )
   })
 
-  it('every op targets ResourceName.OPFS', () => {
-    for (const op of OPFS_OPS) expect(op.resource).toBe(ResourceName.OPFS)
+  it('every op targets VFSName.OPFS', () => {
+    for (const op of OPFS_OPS) expect(op.vfs).toBe(VFSName.OPFS)
   })
 
   it('write-side ops are flagged write:true', () => {

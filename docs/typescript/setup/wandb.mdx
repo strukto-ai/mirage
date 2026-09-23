@@ -4,17 +4,17 @@ description: "Read experiment runs, configuration, summaries, history, and run f
 ---
 
 ```typescript
-import { Workspace, MountMode, WandbResource, normalizeWandbConfig } from '@struktoai/mirage-node'
+import { Workspace, MountMode, WandbVFS, normalizeWandbConfig } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
-  '/wandb': new WandbResource(normalizeWandbConfig({
+  '/wandb': new WandbVFS(normalizeWandbConfig({
     entities: ['my-team'],
     api_key: process.env.WANDB_API_KEY,
   })),
 }, { mode: MountMode.READ })
 ```
 
-The resource also ships in `@struktoai/mirage-browser`; its implementation uses
+The VFS also ships in `@struktoai/mirage-browser`; its implementation uses
 standard `fetch`. Browser access depends on the service's CORS configuration.
 
 The mount exposes `/<entity>/<project>/<run-id>/` with `run.json`,
@@ -130,4 +130,4 @@ Reads and downloads stream, so `head` can stop before fetching the entire histor
 Exhausting a page budget raises an error instead of returning a complete-looking
 partial result. Recursive `du` is capped at 1000 entries; glob expansion uses
 Mirage's standard traversal limit. API keys use host configuration and are
-redacted from resource state. No write operations or W&B CLI are registered.
+redacted from VFS state. No write operations or W&B CLI are registered.

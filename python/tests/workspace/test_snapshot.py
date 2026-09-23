@@ -23,12 +23,12 @@ from pydantic import BaseModel, SecretStr
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.cli.types import CLIInvocation, CLISpec
 from mirage.io import IOResult
-from mirage.resource.disk import DiskResource
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.secrets import REDACTED_SECRET
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.secrets import REDACTED_SECRET
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.snapshot.keys import CLIKey, ScriptKey, StateKey
@@ -42,8 +42,8 @@ def _load(*args, **kwargs):
 def _seed(ws, mount: str = "/m") -> None:
 
     async def _do():
-        await ws.execute(f"echo hello > {mount}/a.txt")
-        await ws.execute(
+        await ws.shell(f"echo hello > {mount}/a.txt")
+        await ws.shell(
             f"mkdir -p {mount}/sub && echo world > {mount}/sub/b.txt")
 
     asyncio.run(_do())
@@ -52,7 +52,7 @@ def _seed(ws, mount: str = "/m") -> None:
 def _read(ws, path: str) -> str:
 
     async def _do():
-        r = await ws.execute(f"cat {path}")
+        r = await ws.shell(f"cat {path}")
         return await r.stdout_str()
 
     return asyncio.run(_do())
@@ -62,8 +62,7 @@ def _read(ws, path: str) -> str:
 
 
 def test_save_load_ram_round_trip(tmp_path):
-    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                    mode=MountMode.WRITE)
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
     _seed(src)
     snap = tmp_path / "ram.tar"
     asyncio.run(src.snapshot(snap))
@@ -75,10 +74,9 @@ def test_save_load_ram_round_trip(tmp_path):
 
 
 def test_history_survives_snapshot_round_trip(tmp_path):
-    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                    mode=MountMode.WRITE)
-    asyncio.run(src.execute("echo one"))
-    asyncio.run(src.execute("echo two"))
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    asyncio.run(src.shell("echo one"))
+    asyncio.run(src.shell("echo two"))
     assert len(asyncio.run(src.history())) == 2
     snap = tmp_path / "history.tar"
     asyncio.run(src.snapshot(snap))
@@ -89,8 +87,7 @@ def test_history_survives_snapshot_round_trip(tmp_path):
 
 
 def test_from_state_rebuilds_in_process_without_tar():
-    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                    mode=MountMode.WRITE)
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
     _seed(src)
 
     dst = asyncio.run(Workspace.from_state(asyncio.run(to_state_dict(src))))
@@ -99,8 +96,7 @@ def test_from_state_rebuilds_in_process_without_tar():
 
 
 def test_save_load_ram_compressed_gz(tmp_path):
-    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                    mode=MountMode.WRITE)
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
     _seed(src)
     snap = tmp_path / "ram.tar.gz"
     asyncio.run(src.snapshot(snap, compress="gz"))
@@ -115,9 +111,8 @@ def test_save_load_ram_compressed_gz(tmp_path):
 def test_save_load_disk_round_trip(tmp_path):
     src_root = tmp_path / "src"
     src_root.mkdir()
-    src = Workspace(
-        {"/m": (DiskResource(root=str(src_root)), MountMode.WRITE)},
-        mode=MountMode.WRITE)
+    src = Workspace({"/m": (DiskVFS(root=str(src_root)), MountMode.WRITE)},
+                    mode=MountMode.WRITE)
     _seed(src)
     snap = tmp_path / "disk.tar"
     asyncio.run(src.snapshot(snap))
@@ -130,16 +125,15 @@ def test_save_load_disk_round_trip(tmp_path):
 def test_save_load_disk_with_override_root(tmp_path):
     src_root = tmp_path / "src"
     src_root.mkdir()
-    src = Workspace(
-        {"/m": (DiskResource(root=str(src_root)), MountMode.WRITE)},
-        mode=MountMode.WRITE)
+    src = Workspace({"/m": (DiskVFS(root=str(src_root)), MountMode.WRITE)},
+                    mode=MountMode.WRITE)
     _seed(src)
     snap = tmp_path / "disk.tar"
     asyncio.run(src.snapshot(snap))
 
     dst_root = tmp_path / "dst"
     dst_root.mkdir()
-    dst = _load(snap, resources={"/m": DiskResource(root=str(dst_root))})
+    dst = _load(snap, mounts={"/m": DiskVFS(root=str(dst_root))})
     assert (dst_root / "a.txt").read_bytes() == b"hello\n"
     assert (dst_root / "sub" / "b.txt").read_bytes() == b"world\n"
     assert _read(dst, "/m/a.txt") == "hello\n"
@@ -148,30 +142,30 @@ def test_save_load_disk_with_override_root(tmp_path):
 # ── redacted secret override enforcement ─────────────────────────────
 
 
-def test_redacted_secret_missing_resource_raises(tmp_path):
+def test_redacted_secret_missing_vfs_raises(tmp_path):
     cfg = S3Config(bucket="b",
                    region="us-east-1",
                    aws_access_key_id="AKIA-LEAK",
                    aws_secret_access_key="SECRET-LEAK")
-    src = Workspace({"/s3": (S3Resource(cfg), MountMode.WRITE)},
+    src = Workspace({"/s3": (S3VFS(cfg), MountMode.WRITE)},
                     mode=MountMode.WRITE)
     snap = tmp_path / "s3.tar"
     asyncio.run(src.snapshot(snap))
 
-    with pytest.raises(ValueError, match=r"resources="):
+    with pytest.raises(ValueError, match=r"mounts="):
         _load(snap)
 
 
 def test_redacted_secret_lists_all_missing(tmp_path):
     src = Workspace(
         {
-            "/ram": (RAMResource(), MountMode.WRITE),
-            "/s3a": (S3Resource(
+            "/ram": (RAMVFS(), MountMode.WRITE),
+            "/s3a": (S3VFS(
                 S3Config(bucket="a",
                          region="us-east-1",
                          aws_access_key_id="x",
                          aws_secret_access_key="x")), MountMode.WRITE),
-            "/s3b": (S3Resource(
+            "/s3b": (S3VFS(
                 S3Config(bucket="b",
                          region="us-east-1",
                          aws_access_key_id="x",
@@ -190,15 +184,15 @@ def test_redacted_secret_lists_all_missing(tmp_path):
 
 def test_s3_without_inline_secret_loads_without_override(tmp_path):
     cfg = S3Config(bucket="b", region="us-east-1", aws_profile="dev")
-    src = Workspace({"/s3": (S3Resource(cfg), MountMode.WRITE)},
+    src = Workspace({"/s3": (S3VFS(cfg), MountMode.WRITE)},
                     mode=MountMode.WRITE)
     snap = tmp_path / "s3-profile.tar"
     asyncio.run(src.snapshot(snap))
 
     dst = _load(snap)
     mount = dst._registry.mount_for("/s3/")
-    assert isinstance(mount.resource, S3Resource)
-    assert mount.resource.config.aws_profile == "dev"
+    assert isinstance(mount.vfs, S3VFS)
+    assert mount.vfs.config.aws_profile == "dev"
 
 
 # ── cred redaction in raw bytes ─────────────────────────────────────
@@ -209,7 +203,7 @@ def test_no_real_creds_in_tar_bytes(tmp_path):
                    region="us-east-1",
                    aws_access_key_id="AKIA-OBVIOUS-LEAK",
                    aws_secret_access_key="SECRET-OBVIOUS-LEAK")
-    src = Workspace({"/s3": (S3Resource(cfg), MountMode.WRITE)},
+    src = Workspace({"/s3": (S3VFS(cfg), MountMode.WRITE)},
                     mode=MountMode.WRITE)
     snap = tmp_path / "s3.tar"
     asyncio.run(src.snapshot(snap))
@@ -224,8 +218,7 @@ def test_no_real_creds_in_tar_bytes(tmp_path):
 
 
 def test_manifest_is_valid_json(tmp_path):
-    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                    mode=MountMode.WRITE)
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
     _seed(src)
     snap = tmp_path / "snap.tar"
     asyncio.run(src.snapshot(snap))
@@ -241,9 +234,8 @@ def test_manifest_is_valid_json(tmp_path):
 def test_disk_files_extractable_from_tar(tmp_path):
     src_root = tmp_path / "src"
     src_root.mkdir()
-    src = Workspace(
-        {"/m": (DiskResource(root=str(src_root)), MountMode.WRITE)},
-        mode=MountMode.WRITE)
+    src = Workspace({"/m": (DiskVFS(root=str(src_root)), MountMode.WRITE)},
+                    mode=MountMode.WRITE)
     _seed(src)
     snap = tmp_path / "disk.tar"
     asyncio.run(src.snapshot(snap))
@@ -282,8 +274,8 @@ def test_load_rejects_path_traversal_in_blob_ref(tmp_path):
             "prefix": "/m",
             "mode": "WRITE",
             "consistency": "LAZY",
-            "resource_class": "mirage.resource.ram.RAMResource",
-            "resource_state": {
+            "vfs_class": "mirage.vfs.ram.RAMVFS",
+            "vfs_state": {
                 "type": "ram",
                 "files": {
                     "/x": {
@@ -316,20 +308,18 @@ def test_load_rejects_path_traversal_in_blob_ref(tmp_path):
 
 
 def test_workspace_copy_independence_ram():
-    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                    mode=MountMode.WRITE)
-    asyncio.run(src.execute("echo hi > /m/a.txt"))
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    asyncio.run(src.shell("echo hi > /m/a.txt"))
 
     cp = asyncio.run(src.copy())
-    asyncio.run(cp.execute("echo bye > /m/a.txt"))
+    asyncio.run(cp.shell("echo bye > /m/a.txt"))
 
     assert _read(src, "/m/a.txt") == "hi\n"
     assert _read(cp, "/m/a.txt") == "bye\n"
 
 
 def test_workspace_copy_preserves_max_drain_bytes():
-    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                    mode=MountMode.WRITE)
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
     src.max_drain_bytes = 1234
     cp = asyncio.run(src.copy())
     assert cp.max_drain_bytes == 1234
@@ -339,8 +329,7 @@ def test_workspace_copy_preserves_max_drain_bytes():
 
 
 def test_to_state_dict_shape():
-    ws = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                   mode=MountMode.WRITE)
+    ws = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
     state = asyncio.run(to_state_dict(ws))
     assert state["version"] == FORMAT_VERSION
     assert state["mirage_version"] == importlib.metadata.version("mirage-ai")
@@ -351,7 +340,7 @@ def test_to_state_dict_shape():
 
 
 def test_snapshot_round_trip_no_sync_policy(tmp_path):
-    ws = Workspace({"/data": RAMResource()})
+    ws = Workspace({"/data": RAMVFS()})
     target = tmp_path / "snap.tar"
     asyncio.run(ws.snapshot(str(target)))
     restored = _load(str(target))
@@ -362,20 +351,19 @@ def test_snapshot_round_trip_no_sync_policy(tmp_path):
 
 
 def test_ram_round_trip_filenames_with_spaces(tmp_path):
-    src = Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                    mode=MountMode.WRITE)
-    src._registry.mount_for("/m/").resource._store.files["/my file.txt"] = (
+    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    src._registry.mount_for("/m/").vfs._store.files["/my file.txt"] = (
         b"with spaces")
-    src._registry.mount_for("/m/").resource._store.files[
+    src._registry.mount_for("/m/").vfs._store.files[
         "/dir with space/data.txt"] = b"nested with space"
-    src._registry.mount_for("/m/").resource._store.files["/数据.txt"] = (
+    src._registry.mount_for("/m/").vfs._store.files["/数据.txt"] = (
         "你好".encode())
 
     snap = tmp_path / "spaces.tar"
     asyncio.run(src.snapshot(snap))
     dst = _load(snap)
 
-    files = dst._registry.mount_for("/m/").resource._store.files
+    files = dst._registry.mount_for("/m/").vfs._store.files
     assert files["/my file.txt"] == b"with spaces"
     assert files["/dir with space/data.txt"] == b"nested with space"
     assert files["/数据.txt"].decode() == "你好"
@@ -389,15 +377,14 @@ def test_disk_round_trip_filenames_with_spaces(tmp_path):
     (src_root / "dir with space" / "data.txt").write_bytes(b"deep space")
     (src_root / "数据.txt").write_bytes("你好".encode())
 
-    src = Workspace(
-        {"/m": (DiskResource(root=str(src_root)), MountMode.WRITE)},
-        mode=MountMode.WRITE)
+    src = Workspace({"/m": (DiskVFS(root=str(src_root)), MountMode.WRITE)},
+                    mode=MountMode.WRITE)
     snap = tmp_path / "disk-spaces.tar"
     asyncio.run(src.snapshot(snap))
 
     dst_root = tmp_path / "dst"
     dst_root.mkdir()
-    _load(snap, resources={"/m": DiskResource(root=str(dst_root))})
+    _load(snap, mounts={"/m": DiskVFS(root=str(dst_root))})
     assert (dst_root / "my file.txt").read_bytes() == b"hello space"
     assert ((dst_root / "dir with space" /
              "data.txt").read_bytes() == b"deep space")
@@ -427,7 +414,7 @@ def test_redis_round_trip_filenames_with_spaces(tmp_path):
 
     import redis as sync_redis
 
-    from mirage.resource.redis import RedisResource
+    from mirage.vfs.redis import RedisVFS
     redis_url = os.environ["REDIS_URL"]
     src_prefix = f"mirage:test:src:{uuid.uuid4().hex}:"
     dst_prefix = f"mirage:test:dst:{uuid.uuid4().hex}:"
@@ -440,15 +427,15 @@ def test_redis_round_trip_filenames_with_spaces(tmp_path):
 
     src = Workspace(
         {
-            "/m": (RedisResource(url=redis_url,
-                                 key_prefix=src_prefix), MountMode.WRITE)
+            "/m":
+            (RedisVFS(url=redis_url, key_prefix=src_prefix), MountMode.WRITE)
         },
         mode=MountMode.WRITE)
     snap = tmp_path / "redis-spaces.tar"
     asyncio.run(src.snapshot(snap))
 
-    dst_resource = RedisResource(url=redis_url, key_prefix=dst_prefix)
-    _load(snap, resources={"/m": dst_resource})
+    dst_vfs = RedisVFS(url=redis_url, key_prefix=dst_prefix)
+    _load(snap, mounts={"/m": dst_vfs})
 
     sc = sync_redis.Redis.from_url(redis_url)
     try:
@@ -481,7 +468,7 @@ _CLI_SPEC = CLISpec(name="snapcli",
 async def test_cli_registry_snapshots_with_redacted_config():
     register_cli_spec(_CLI_SPEC)
     try:
-        ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+        ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
         ws.register_cli("snapcli",
                         _CLI_SPEC,
                         config={
@@ -505,7 +492,7 @@ async def test_cli_registry_snapshots_with_redacted_config():
                 "token": "sek2",
                 "channel": "eng"
             }})
-        io = await ws2.execute("snapcli run")
+        io = await ws2.shell("snapcli run")
         assert io.exit_code == 0
         assert io.stdout == b"tok=sek2\n"
         await ws.close()
@@ -518,10 +505,10 @@ async def test_cli_registry_snapshots_with_redacted_config():
 async def test_copy_shares_live_cli_secrets():
     register_cli_spec(_CLI_SPEC)
     try:
-        ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+        ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
         ws.register_cli("snapcli", _CLI_SPEC, config={"token": "sek"})
         clone = await ws.copy()
-        io = await clone.execute("snapcli run")
+        io = await clone.shell("snapcli run")
         assert io.exit_code == 0
         assert io.stdout == b"tok=sek\n"
         await ws.close()
@@ -533,11 +520,11 @@ async def test_copy_shares_live_cli_secrets():
 @pytest.mark.asyncio
 async def test_copy_carries_a_directly_installed_spec():
     # The spec is never named in the global registry: copy() must share
-    # the live spec like a live resource, not resolve it by name.
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    # the live spec like a live VFS, not resolve it by name.
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     ws.register_cli("snapcli", _CLI_SPEC, config={"token": "sek"})
     clone = await ws.copy()
-    io = await clone.execute("snapcli run")
+    io = await clone.shell("snapcli run")
     assert io.exit_code == 0
     assert io.stdout == b"tok=sek\n"
     await ws.close()
@@ -566,7 +553,7 @@ _NESTED_SPEC = CLISpec(name="nestcli",
 async def test_nested_cli_secrets_redact_and_demand_an_override():
     register_cli_spec(_NESTED_SPEC)
     try:
-        ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+        ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
         ws.register_cli("nestcli",
                         _NESTED_SPEC,
                         config={"auth": {
@@ -578,7 +565,7 @@ async def test_nested_cli_secrets_redact_and_demand_an_override():
         with pytest.raises(ValueError, match="clis= must include"):
             await Workspace.from_state(state)
         clone = await ws.copy()
-        io = await clone.execute("nestcli run")
+        io = await clone.shell("nestcli run")
         assert io.exit_code == 0
         assert io.stdout == b"tok=sek\n"
         await ws.close()
@@ -592,7 +579,7 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
     # A script install resolves under no registry name, so the embedded
     # program rides in the snapshot and load rebuilds the spec from it.
     # The install also proves the manifest carries the clis key at all.
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     spec = CLISpec(name="pager",
                    script=ScriptSource(
                        "import os\n"
@@ -608,7 +595,7 @@ async def test_script_cli_survives_a_tar_snapshot(tmp_path):
     assert entry[CLIKey.SCRIPT][ScriptKey.MODULE] is False
 
     restored = await Workspace.load(str(path))
-    io = await restored.execute("pager b.txt")
+    io = await restored.shell("pager b.txt")
     assert io.exit_code == 0
     assert io.stdout == b'b.txt {"width": 80}\n'
     await ws.close()
@@ -620,7 +607,7 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
     # A script spec declares no config_model, so nothing declares which
     # keys are secret: the mapping is captured as-is rather than
     # crashing on model_dump or being guessed at.
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     spec = CLISpec(name="pager", script=ScriptSource("print('hi')"))
     ws.register_cli("pager", spec, config={"width": 80})
     state = await to_state_dict(ws)
@@ -628,7 +615,7 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
     # copy() reveals secrets through the same helper, so it must not
     # crash on a mapping config either.
     clone = await ws.copy()
-    io = await clone.execute("pager")
+    io = await clone.shell("pager")
     assert io.exit_code == 0
     await ws.close()
     await clone.close()
@@ -636,7 +623,7 @@ async def test_script_cli_config_captures_verbatim_without_a_schema():
 
 @pytest.mark.asyncio
 async def test_script_cli_runtime_pin_and_module_bit_round_trip():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     spec = CLISpec(name="pager",
                    script=ScriptSource("x", language="js", module=True),
                    runtime="quickjs")

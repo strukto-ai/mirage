@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb._schema_json import build_collection_schema_json
-from mirage.resource.mongodb.config import MongoDBConfig
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("MIRAGE_RUN_INTEGRATION_MONGO") != "1",

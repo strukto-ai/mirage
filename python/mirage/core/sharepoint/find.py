@@ -64,7 +64,7 @@ async def _find_namespace(
     mindepth: int | None,
     empty: bool,
 ) -> list[str]:
-    base = path.resource_path.strip("/")
+    base = path.vfs_path.strip("/")
     at_root = resolved.level == "root"
     offset = 1 if at_root else 0
     sites = (await site_entries(accessor)

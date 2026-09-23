@@ -25,7 +25,7 @@ flowchart LR
     A[cat /Volumes/.../file] --> K[kernel VFS]
     K -->|backend=fuse| X[macFUSE kext] --> L[libfuse]
     K -->|backend=fskit| F[fskitd + macFUSE FSKit module] --> L
-    L --> M[MirageFS] --> R[resource]
+    L --> M[MirageFS] --> R[vfs]
 ```
 
 Same upper half either way; only the kernel-to-userspace hop changes.

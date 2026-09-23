@@ -52,7 +52,7 @@ export function classifyWord(
     if (wordHasGlob) {
       const lastSlash = path.lastIndexOf('/')
       return new PathSpec({
-        resourcePath: stripSlash(path),
+        vfsPath: stripSlash(path),
         virtual: path,
         directory: path.slice(0, lastSlash + 1),
         pattern: path.slice(lastSlash + 1),
@@ -62,7 +62,7 @@ export function classifyWord(
     }
     if (isDir) {
       return new PathSpec({
-        resourcePath: stripSlash(path),
+        vfsPath: stripSlash(path),
         virtual: path,
         directory: `${path}/`,
         rawPath: word,
@@ -71,7 +71,7 @@ export function classifyWord(
     }
     const lastSlash = path.lastIndexOf('/')
     return new PathSpec({
-      resourcePath: stripSlash(path),
+      vfsPath: stripSlash(path),
       virtual: path,
       directory: path.slice(0, lastSlash + 1),
       rawPath: word,

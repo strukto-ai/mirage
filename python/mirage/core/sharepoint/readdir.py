@@ -11,7 +11,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def readdir(accessor: SharePointAccessor,
                   path: PathSpec,
                   index: IndexCacheStore = NULL_INDEX) -> list[str]:
-    prefix = mount_prefix_of(path.virtual, path.resource_path) or ""
+    prefix = mount_prefix_of(path.virtual, path.vfs_path) or ""
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
         rest = raw[len(prefix):]

@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createRequire } from 'node:module'
-import { MountMode, RAMResource, Workspace, patchNodeFs } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace, patchNodeFs } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
 
-const resource = new RAMResource()
+const vfs = new RAMVFS()
 
 async function exists(p: string): Promise<boolean> {
   try {
@@ -38,12 +38,12 @@ async function isDir(p: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
   patchNodeFs(ws)
 
-  await ws.execute('echo "hello world" | tee /data/hello.txt')
-  await ws.execute('mkdir /data/sub')
-  await ws.execute('echo "nested" | tee /data/sub/nested.txt')
+  await ws.shell('echo "hello world" | tee /data/hello.txt')
+  await ws.shell('mkdir /data/sub')
+  await ws.shell('echo "nested" | tee /data/sub/nested.txt')
 
   console.log('=== VFS MODE (via require("fs")) ===\n')
 

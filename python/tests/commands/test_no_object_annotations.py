@@ -30,8 +30,8 @@ ALLOWED = {
     ("agents/openai_agents/sandbox.py", "deserialize_session_state"),
     ("io/types.py", "__setattr__"),
     ("commands/cli/builtin/git/objects.py", "__contains__"),
-    ("resource/dev/dev.py", "__contains__"),
-    ("resource/dev/dev.py", "pop"),
+    ("vfs/dev/dev.py", "__contains__"),
+    ("vfs/dev/dev.py", "pop"),
     ("workspace/workspace/guard.py", "reject_config_script"),
 }
 

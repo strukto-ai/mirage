@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../../workspace/mount/registry.ts'
 import { MountRootPolicy, hasParentsFlag, lnFlagPresent } from './mount_root.ts'
@@ -22,14 +22,14 @@ import { renderDeny } from '../policies.ts'
 import type { CommandContext, Deny } from '../types.ts'
 
 function registry(): MountRegistry {
-  return new MountRegistry({ '/data': new RAMResource() }, MountMode.WRITE, {})
+  return new MountRegistry({ '/data': new RAMVFS() }, MountMode.WRITE, {})
 }
 
 function path(virtual: string, raw?: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: '',
+    vfsPath: '',
     rawPath: raw ?? virtual,
     resolved: true,
   })

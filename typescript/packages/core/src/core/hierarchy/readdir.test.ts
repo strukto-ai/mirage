@@ -53,7 +53,7 @@ function spec(mountPath: string): PathSpec {
   return new PathSpec({
     virtual: key !== '' ? `/h${mountPath}` : '/h',
     directory: '/h/',
-    resourcePath: key,
+    vfsPath: key,
   })
 }
 
@@ -360,7 +360,7 @@ function globbed(mountPath: string, pattern: string): PathSpec {
   return new PathSpec({
     virtual: `${base.virtual}/${pattern}`,
     directory: `${base.virtual}/`,
-    resourcePath: `${base.resourcePath}/${pattern}`,
+    vfsPath: `${base.vfsPath}/${pattern}`,
     pattern,
   })
 }

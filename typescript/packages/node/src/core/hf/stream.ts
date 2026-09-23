@@ -40,7 +40,7 @@ export async function* stream(
   const rawPath = rawPathOf(path)
   const key = hfKey(rawPath)
   const op = await accessor.operator()
-  const rec = recordStream('read', virtual, accessor.resourceName)
+  const rec = recordStream('read', virtual, accessor.vfsName)
   let reader
   try {
     reader = await op.reader(key)

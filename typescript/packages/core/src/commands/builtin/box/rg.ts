@@ -17,7 +17,7 @@ import { stream as boxStream } from '../../../core/box/read.ts'
 import { readdir as boxReaddir } from '../../../core/box/readdir.ts'
 import { stat as boxStat } from '../../../core/box/stat.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, ResourceName, type PathSpec } from '../../../types.ts'
+import { type FileStat, VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { patternArg } from '../grep_pattern.ts'
@@ -99,7 +99,7 @@ async function rgCommand(
 
 export const BOX_RG = command({
   name: 'rg',
-  resource: ResourceName.BOX,
+  vfs: VFSName.BOX,
   spec: specOf('rg'),
   fn: rgCommand,
   // Same cost estimate the generic-bound rg carried; narrowing only ever

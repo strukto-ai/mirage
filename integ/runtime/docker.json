@@ -17,7 +17,7 @@
               "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -43,7 +43,7 @@
               "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -68,7 +68,7 @@
               "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -98,7 +98,7 @@
               }
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -124,11 +124,11 @@
               "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
             }
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "limits": {
               "sleep": {
                 "timeout_seconds": 1
@@ -159,7 +159,7 @@
               "container": "${MIRAGE_INTEG_DOCKER_CONTAINER}"
             }
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [

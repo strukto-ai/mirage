@@ -35,7 +35,7 @@ ROWS = [{
 
 def _label_scope() -> PathSpec:
     original = "/gmail/INBOX"
-    return PathSpec(resource_path=mount_key(original, "/gmail"),
+    return PathSpec(vfs_path=mount_key(original, "/gmail"),
                     virtual=original,
                     directory=original)
 
@@ -99,7 +99,7 @@ def _glob_scope() -> PathSpec:
     # A glob whose directory IS searchable, so only the glob half of the gate
     # can defer it.
     original = "/gmail/INBOX/2026-01-01/*.gmail.json"
-    return PathSpec(resource_path=mount_key(original, "/gmail"),
+    return PathSpec(vfs_path=mount_key(original, "/gmail"),
                     virtual=original,
                     directory="/gmail/INBOX/2026-01-01",
                     pattern="*.gmail.json",
@@ -111,7 +111,7 @@ async def test_grep_second_operand_defers_to_generic():
     # The push-down answers for one label, so a second operand used to be
     # dropped in silence: this line reported INBOX and never mentioned Sent.
     accessor = AsyncMock()
-    sent = PathSpec(resource_path=mount_key("/gmail/Sent", "/gmail"),
+    sent = PathSpec(vfs_path=mount_key("/gmail/Sent", "/gmail"),
                     virtual="/gmail/Sent",
                     directory="/gmail/Sent")
     with patch("mirage.commands.builtin.gmail.grep.search_messages",
@@ -129,7 +129,7 @@ async def test_grep_second_operand_defers_to_generic():
 @pytest.mark.asyncio
 async def test_rg_second_operand_defers_to_generic():
     accessor = AsyncMock()
-    sent = PathSpec(resource_path=mount_key("/gmail/Sent", "/gmail"),
+    sent = PathSpec(vfs_path=mount_key("/gmail/Sent", "/gmail"),
                     virtual="/gmail/Sent",
                     directory="/gmail/Sent")
     with patch("mirage.commands.builtin.gmail.rg.search_messages",

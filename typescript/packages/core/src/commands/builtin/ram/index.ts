@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../../accessor/ram.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { RAM_IO } from './io.ts'
 
 export const RAM_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<RAMAccessor>(ResourceName.RAM, RAM_IO),
+  ...makeGenericCommands<RAMAccessor>(VFSName.RAM, RAM_IO),
 ]

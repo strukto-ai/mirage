@@ -22,8 +22,8 @@ import asyncio
 
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -32,7 +32,7 @@ def _run(coro):
 
 
 def _ws_with_paths():
-    ram = RAMResource()
+    ram = RAMVFS()
     ram._store.files["/plain.txt"] = b"plain content\n"
     ram._store.files["/my folder/note.txt"] = b"in spaced folder\n"
     ram._store.files["/my folder/My File.txt"] = b"camelcase with space\n"
@@ -40,7 +40,7 @@ def _ws_with_paths():
     ram._store.files["/数据/中文.txt"] = b"unicode path content\n"
     ram._store.dirs.add("/my folder")
     ram._store.dirs.add("/数据")
-    ws = Workspace(resources={"/data/": (ram, MountMode.WRITE)}, )
+    ws = Workspace(mounts={"/data/": (ram, MountMode.WRITE)}, )
     ws.get_session(ws.default_session_id).cwd = "/data"
     return ws
 
@@ -54,7 +54,7 @@ def _stdout(io) -> bytes:
 
 
 def _exec(ws, cmd, **kw):
-    return _run(ws.execute(cmd, **kw))
+    return _run(ws.shell(cmd, **kw))
 
 
 # ── paths with spaces ──────────────────────────────────────
@@ -235,7 +235,7 @@ def test_consecutive_quoted_strings():
 def test_grep_pattern_with_escaped_quote():
     """`grep "she said \\"hi\\"" file` — literal embedded double quote."""
     ws = _ws_with_paths()
-    ram = ws.mount("/data/").resource
+    ram = ws.mount("/data/").vfs
     ram._store.files['/quote.txt'] = b'she said "hi"\n'
     io = _exec(ws, 'grep "she said \\"hi\\"" /data/quote.txt')
     assert b"hi" in _stdout(io)
@@ -653,10 +653,10 @@ def test_control_char_survives_command_substitution():
 
 
 def _ws_with_globbables():
-    ram = RAMResource()
+    ram = RAMVFS()
     ram._store.files["/a.txt"] = b"hello\n"
     ram._store.files["/b.txt"] = b"world\n"
-    ws = Workspace(resources={"/data/": (ram, MountMode.WRITE)}, )
+    ws = Workspace(mounts={"/data/": (ram, MountMode.WRITE)}, )
     ws.get_session(ws.default_session_id).cwd = "/"
     return ws
 
@@ -735,10 +735,10 @@ def test_quoted_brace_alternative_stays_literal():
 
 
 def _ws_with_metachar_names():
-    ram = RAMResource()
+    ram = RAMVFS()
     for name in ("*a.txt", "xa.txt", "a.txt", "?b.txt", "[c].txt"):
         ram._store.files["/" + name] = b"x\n"
-    ws = Workspace(resources={"/data/": (ram, MountMode.WRITE)}, )
+    ws = Workspace(mounts={"/data/": (ram, MountMode.WRITE)}, )
     ws.get_session(ws.default_session_id).cwd = "/data"
     return ws
 

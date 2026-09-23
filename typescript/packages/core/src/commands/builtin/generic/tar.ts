@@ -111,7 +111,7 @@ function makePathSpec(virtual: string, prefix: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: mountKey(virtual, prefix),
+    vfsPath: mountKey(virtual, prefix),
     resolved: true,
   })
 }

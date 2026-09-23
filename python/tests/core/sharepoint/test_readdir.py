@@ -43,7 +43,7 @@ async def test_readdir_root_lists_sites():
                       },
                   ]
               })
-        path = PathSpec(resource_path=mount_key("/sp/", "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/", "/sp"),
                         virtual="/sp/",
                         directory="/sp/")
         names = await readdir(_accessor(), path, index)
@@ -68,7 +68,7 @@ async def test_readdir_site_lists_drives():
                       },
                   ]
               })
-        path = PathSpec(resource_path=mount_key("/sp/Engineering", "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/Engineering", "/sp"),
                         virtual="/sp/Engineering",
                         directory="/sp/Engineering")
         names = await readdir(_accessor(), path, index)
@@ -101,8 +101,7 @@ async def test_readdir_drive_root_lists_children():
                       },
                   ]
               })
-        path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
-                                                "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents", "/sp"),
                         virtual="/sp/Engineering/Documents",
                         directory="/sp/Engineering/Documents")
         names = await readdir(_accessor(), path, index)
@@ -126,8 +125,7 @@ async def test_readdir_populates_index_with_metadata():
                       },
                   ]
               })
-        path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
-                                                "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents", "/sp"),
                         virtual="/sp/Engineering/Documents",
                         directory="/sp/Engineering/Documents")
         await readdir(_accessor(), path, index)
@@ -152,8 +150,8 @@ async def test_readdir_subfolder():
                       },
                   ]
               })
-        path = PathSpec(resource_path=mount_key(
-            "/sp/Engineering/Documents/src", "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents/src",
+                                           "/sp"),
                         virtual="/sp/Engineering/Documents/src",
                         directory="/sp/Engineering/Documents/src")
         names = await readdir(_accessor(), path, index)
@@ -177,8 +175,8 @@ async def test_readdir_of_file_raises_not_a_directory():
                   "size": 3,
                   "file": {}
               })
-        path = PathSpec(resource_path=mount_key(
-            "/sp/Engineering/Documents/a.txt", "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents/a.txt",
+                                           "/sp"),
                         virtual="/sp/Engineering/Documents/a.txt",
                         directory="/sp/Engineering/Documents")
         with pytest.raises(NotADirectoryError):
@@ -200,8 +198,7 @@ async def test_readdir_cache_hit():
                       },
                   ]
               })
-        path = PathSpec(resource_path=mount_key("/sp/Engineering/Documents",
-                                                "/sp"),
+        path = PathSpec(vfs_path=mount_key("/sp/Engineering/Documents", "/sp"),
                         virtual="/sp/Engineering/Documents",
                         directory="/sp/Engineering/Documents")
         await readdir(_accessor(), path, index)

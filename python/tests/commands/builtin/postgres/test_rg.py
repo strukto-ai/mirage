@@ -22,8 +22,8 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.postgres.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
-from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import PathSpec
+from mirage.vfs.postgres.config import PostgresConfig
 
 GENERICS = "mirage.commands.builtin.generic_bind.search._GENERICS"
 SEARCH_ENTITY = "mirage.core.postgres.search.search_entity"
@@ -59,7 +59,7 @@ def _guard_reads(monkeypatch):
 
 
 def _path(s: str = "/public/tables/books/rows.jsonl") -> PathSpec:
-    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
+    return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
 @pytest.mark.asyncio

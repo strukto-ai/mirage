@@ -20,7 +20,7 @@ from mirage.commands.config import CommandOpts
 from mirage.context import (reset_current_session, reset_mount_gate,
                             set_current_session, set_mount_gate)
 from mirage.types import MountMode, PathSpec, ShowEntry, ShownPaths
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 class FakeAccessor:
@@ -38,7 +38,7 @@ def _make_rm(files: set[str], calls: list[tuple]):
             raise FileNotFoundError(path.virtual)
         files.remove(path.virtual)
 
-    return make_rm(resource="gdocs", glob_fn=resolve_glob, unlink=unlink)
+    return make_rm(vfs="gdocs", glob_fn=resolve_glob, unlink=unlink)
 
 
 @pytest.mark.asyncio
@@ -83,10 +83,11 @@ async def test_rm_holds_each_path_to_its_regions_mode():
     files = {"/gdocs/plain.json", "/gdocs/build/a.json"}
     calls: list[tuple] = []
     rm = _make_rm(files, calls)
-    sess = Session(session_id="agent",
-                   mount_modes={"/gdocs": MountMode.READ},
-                   shown_paths=ShownPaths(
-                       entries=(ShowEntry("/gdocs/build", MountMode.WRITE), )))
+    sess = SessionState(
+        session_id="agent",
+        mount_modes={"/gdocs": MountMode.READ},
+        shown_paths=ShownPaths(
+            entries=(ShowEntry("/gdocs/build", MountMode.WRITE), )))
     session_token = set_current_session(sess)
     gate_token = set_mount_gate("/gdocs", MountMode.WRITE)
     try:

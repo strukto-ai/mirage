@@ -60,7 +60,7 @@ def spec(mount_path: str) -> PathSpec:
     key = mount_path.strip("/")
     return PathSpec(virtual="/h" + mount_path if key else "/h",
                     directory="/h/",
-                    resource_path=key)
+                    vfs_path=key)
 
 
 async def list_rooms(accessor: FakeAccessor,

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../../accessor/slack.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { metadataProvision } from './_provision.ts'
@@ -24,7 +24,7 @@ import { SLACK_RG } from './rg.ts'
 const SLACK_OVERRIDES = new Set(['grep', 'rg'])
 
 export const SLACK_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<SlackAccessor>(ResourceName.SLACK, SLACK_IO, {
+  ...makeGenericCommands<SlackAccessor>(VFSName.SLACK, SLACK_IO, {
     overrides: SLACK_OVERRIDES,
     provisionOverrides: {
       ls: metadataProvision as ProvisionFn,

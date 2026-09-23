@@ -21,7 +21,7 @@ vi.mock('./client.ts', async () => {
 })
 
 import { S3Accessor } from '../../accessor/s3.ts'
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 import { FileChangeKind, PathSpec, type WalkEntry } from '../../types.ts'
 import * as clientMod from './client.ts'
 import { buildDeltaHook, S3Walk } from './watch.ts'
@@ -66,8 +66,8 @@ function accessor(keyPrefix?: string): S3Accessor {
   } as S3Config)
 }
 
-function root(virtual: string, resourcePath: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath })
+function root(virtual: string, vfsPath: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath })
 }
 
 async function collect(walk: S3Walk, spec: PathSpec): Promise<WalkEntry[]> {
@@ -194,6 +194,6 @@ describe('s3 delta hook', () => {
     mockListing([{ key: 'data/a.txt', size: 5, etag: 'etag-a2' }])
     const second = await hook.pull(spec, first.checkpoint)
     expect(second.changes[0]?.path.virtual).toBe('/s3/data/a.txt')
-    expect(second.changes[0]?.path.resourcePath).toBe('data/a.txt')
+    expect(second.changes[0]?.path.vfsPath).toBe('data/a.txt')
   })
 })

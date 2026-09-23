@@ -21,7 +21,7 @@ import {
   eventTitle,
   makeCalendarDirname,
   makeEventFilename,
-} from '../../resource/gcal/event_entry.ts'
+} from '../../vfs/gcal/event_entry.ts'
 import type { JsonValue, PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
@@ -66,8 +66,8 @@ export function calendarPayload(entry: CalendarEntryRow, tz: string): Uint8Array
 
 /** Split a path into `[mount prefix, mount-relative key, virtual key]`. */
 export function normalize(path: PathSpec): [string, string, string] {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
-  const key = (path.pattern !== null ? path.dir : path).resourcePath
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  const key = (path.pattern !== null ? path.dir : path).vfsPath
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
   return [prefix, key, virtualKey]
 }

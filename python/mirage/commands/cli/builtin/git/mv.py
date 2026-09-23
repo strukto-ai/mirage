@@ -176,7 +176,7 @@ def clashing(move: Move, claimed: set[str]) -> tuple[str, str] | None:
 def spanning(mounts: MountView | None, path: str, landing: str) -> bool:
     """Whether renaming a path would leave a mount behind.
 
-    A mount nested in the repository is served by another resource, and
+    A mount nested in the repository is served by another VFS, and
     the rename op reaches only the backend holding the parent path: that
     backend cannot see the child's keys, so it moves everything except
     them and the index is then re-keyed onto files that never moved. The

@@ -1,15 +1,15 @@
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.stream import materialize
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.declare import handle_readonly
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import seed_var, set_attr
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
 @pytest.mark.asyncio
@@ -40,8 +40,8 @@ async def test_readonly_invalid_option_exit_2():
 
 @pytest.mark.asyncio
 async def test_readonly_p_via_workspace():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute('readonly ZRP1=7; readonly -p | grep ZRP1')
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell('readonly ZRP1=7; readonly -p | grep ZRP1')
     assert io.exit_code == 0
     assert (io.stdout or b"") == b'declare -r ZRP1="7"\n'
 
@@ -71,7 +71,7 @@ async def test_readonly_f_and_A_list_nothing():
 
 @pytest.mark.asyncio
 async def test_readonly_a_via_workspace():
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("readonly ZRS1=1; readonly -a ZRA1=(x); readonly -a")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("readonly ZRS1=1; readonly -a ZRA1=(x); readonly -a")
     assert io.exit_code == 0
     assert (io.stdout or b"") == b'declare -ar ZRA1=([0]="x")\n'

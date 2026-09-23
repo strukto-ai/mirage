@@ -35,10 +35,11 @@ import { MountMode, PathSpec } from '../types.ts'
 import type { CommandRule } from '../policy/types.ts'
 import type { Policies } from '../policy/policies.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
-import { Session } from '../workspace/session/session.ts'
+import { SessionState } from '../workspace/session/session.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { getTestParser } from '../workspace/fixtures/workspace_fixture.ts'
+import { Session } from '../workspace/workspace/handle.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 
@@ -124,7 +125,7 @@ describe('the mount gate on the fallback storage', () => {
   })
 
   it('requireMountWritable answers for the named mount, not a concurrent one', async () => {
-    const sess = new Session({
+    const sess = new SessionState({
       sessionId: 'agent',
       mountModes: new Map([['/trello', MountMode.READ]]),
     })
@@ -146,11 +147,11 @@ describe('the mount gate on the fallback storage', () => {
 
 describe('session predicates on the fallback storage', () => {
   it('a hide holds while a concurrent session shadows the newest frame', async () => {
-    const hider = new Session({
+    const hider = new SessionState({
       sessionId: 'hider',
       hiddenPaths: { paths: ['/repo/.env'] },
     })
-    const other = new Session({ sessionId: 'other' })
+    const other = new SessionState({ sessionId: 'other' })
     const [hold, release] = gate()
     let allowedBesideHider: boolean | undefined
     const long = runWithSession(hider, async () => {
@@ -173,11 +174,11 @@ describe('session predicates on the fallback storage', () => {
     // its saved (empty) slot, and the still-running hider's predicates
     // all read "no session", which fails open — the hidden path turns
     // visible mid-command.
-    const hider = new Session({
+    const hider = new SessionState({
       sessionId: 'hider',
       hiddenPaths: { paths: ['/repo/.env'] },
     })
-    const other = new Session({ sessionId: 'other' })
+    const other = new SessionState({ sessionId: 'other' })
     const [hold, release] = gate()
     let seen: boolean | undefined
     const first = runWithSession(other, async () => {
@@ -195,11 +196,11 @@ describe('session predicates on the fallback storage', () => {
   it('getCurrentSessionFor answers by owner while another workspace is live', async () => {
     const ownerA = {} as unknown as SessionManager
     const ownerB = {} as unknown as SessionManager
-    const sessA = new Session({ sessionId: 'a' })
-    const sessB = new Session({ sessionId: 'b' })
+    const sessA = new SessionState({ sessionId: 'a' })
+    const sessB = new SessionState({ sessionId: 'b' })
     const [hold, release] = gate()
-    let forA: Session | null = null
-    let forB: Session | null = null
+    let forA: SessionState | null = null
+    let forB: SessionState | null = null
     const runA = runWithSession(
       sessA,
       async () => {
@@ -226,9 +227,9 @@ describe('session predicates on the fallback storage', () => {
   })
 
   it('the umask ORs across live sessions, clearing toward the tighter mode', async () => {
-    const loose = new Session({ sessionId: 'loose' })
+    const loose = new SessionState({ sessionId: 'loose' })
     loose.umask = 0o022
-    const tight = new Session({ sessionId: 'tight' })
+    const tight = new SessionState({ sessionId: 'tight' })
     tight.umask = 0o077
     const [hold, release] = gate()
     let masked: number | undefined
@@ -385,10 +386,10 @@ describe('a named facade session on the fallback storage', () => {
     // take that frame for its ambient context: a wide session held
     // live by a concurrent task would otherwise judge the named
     // session's ops. The unnamed door keeps the ambient frame, which
-    // is what a command's runtime reaching `ws.fs` relies on.
+    // is what a command's runtime reaching `ws.vfs` relies on.
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/data': [new RAMResource(), MountMode.WRITE] as const },
+      { '/data': [new RAMVFS(), MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -398,14 +399,14 @@ describe('a named facade session on the fallback storage', () => {
     )
     try {
       const host = ws.createSession('host', { profile: parseSessionProfile({}) })
-      const wide = ws.fs.forSession(host.sessionId)
+      const wide = new Session(ws, host.sessionId).vfs
       await wide.mkdir('/data/vault')
       await wide.writeFile('/data/vault/secret', 'top\n')
       const [held, release] = gate()
       const holding = runWithSession(host, () => held, ws.sessionManager)
-      const named = ws.fs.forSession(ws.defaultSessionId)
+      const named = new Session(ws, ws.defaultSessionId).vfs
       await expect(named.readFile('/data/vault/secret')).rejects.toMatchObject({ code: 'ENOENT' })
-      expect(await ws.fs.readFileText('/data/vault/secret')).toBe('top\n')
+      expect(await ws.vfs.readFileText('/data/vault/secret')).toBe('top\n')
       release()
       await holding
     } finally {

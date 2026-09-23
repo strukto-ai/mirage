@@ -7,10 +7,8 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.watch.walk import ReaddirWalk, entry_of, synth_dirs
 
 
-def _root(virtual: str, resource_path: str) -> PathSpec:
-    return PathSpec(virtual=virtual,
-                    directory=virtual,
-                    resource_path=resource_path)
+def _root(virtual: str, vfs_path: str) -> PathSpec:
+    return PathSpec(virtual=virtual, directory=virtual, vfs_path=vfs_path)
 
 
 def test_synth_dirs_emits_every_ancestor_excluding_the_root():

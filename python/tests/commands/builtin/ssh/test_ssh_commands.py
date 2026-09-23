@@ -20,8 +20,8 @@ from unittest.mock import MagicMock
 import asyncssh
 import pytest
 
-from mirage.resource.ssh import SSHConfig, SSHResource
 from mirage.types import MountMode
+from mirage.vfs.ssh import SSHVFS, SSHConfig
 from mirage.workspace import Workspace
 
 
@@ -186,14 +186,14 @@ class SSHTestEnv:
 
     def __init__(self):
         self.config = SSHConfig(host="mock", root="/data", known_hosts=None)
-        self.resource = SSHResource(self.config)
+        self.vfs = SSHVFS(self.config)
         self._files: dict[str, bytes] = {}
         self._dirs: set[str] = {"/data"}
         self._sftp = MockSFTPClient(self._files, self._dirs)
-        self.resource.accessor._sftp = self._sftp
-        self.resource.accessor._conn = MagicMock()
+        self.vfs.accessor._sftp = self._sftp
+        self.vfs.accessor._conn = MagicMock()
         self.ws = Workspace(
-            {"/ssh": (self.resource, MountMode.WRITE)},
+            {"/ssh": (self.vfs, MountMode.WRITE)},
             mode=MountMode.WRITE,
         )
 
@@ -206,7 +206,7 @@ class SSHTestEnv:
         self._files[path] = content
 
     def run(self, cmd: str, stdin: bytes | None = None) -> str:
-        io = asyncio.run(self.ws.execute(cmd, stdin=stdin))
+        io = asyncio.run(self.ws.shell(cmd, stdin=stdin))
         stdout = io.stdout
         if stdout is None:
             return ""
@@ -216,10 +216,10 @@ class SSHTestEnv:
         return b"".join(chunks).decode(errors="replace")
 
     def run_io(self, cmd: str, stdin: bytes | None = None):
-        return asyncio.run(self.ws.execute(cmd, stdin=stdin))
+        return asyncio.run(self.ws.shell(cmd, stdin=stdin))
 
     def run_io_provision(self, cmd: str):
-        return asyncio.run(self.ws.execute(cmd, provision=True))
+        return asyncio.run(self.ws.shell(cmd, provision=True))
 
 
 async def _drain(ait):

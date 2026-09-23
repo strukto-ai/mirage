@@ -31,7 +31,7 @@ _search = make_search("rg",
                       qualify=pushdown_operand)
 
 
-@command("rg", resource="langfuse", spec=SPECS["rg"])
+@command("rg", vfs="langfuse", spec=SPECS["rg"])
 async def rg(accessor: LangfuseAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

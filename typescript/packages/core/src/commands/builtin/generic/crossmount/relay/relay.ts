@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { runCmp } from './cmp.ts'
 import { runComm } from './comm.ts'
@@ -23,6 +24,7 @@ import { runMv } from './mv.ts'
 import { runPaste } from './paste.ts'
 import { runTar } from './tar.ts'
 import { runUnzip } from './unzip.ts'
+import { runZip } from './zip_cmd.ts'
 import { Cmd, type CrossResult, type DispatchFn } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { NamespaceView, SessionView } from '../../../../../ops/types.ts'
@@ -42,20 +44,23 @@ export async function runRelay(
   // single store.
   storageKey?: (path: PathSpec) => string,
   // Name-plane facts for the generics that render them (ls: links, attr
-  // overlay, child mounts).
+  // overlay, child mounts) and for the archivers' scan (tar, zip: links,
+  // mount boundaries).
   ns?: NamespaceView,
   // The session plane's door, for the generic that renders the session's
   // profile (ls -l).
   sessionView?: SessionView,
+  stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
   if (cmdName === Cmd.LS) return runLs(scopes, flagKwargs, dispatch, ns, sessionView)
   if (cmdName === Cmd.CP) return runCp(scopes, flagKwargs, dispatch, storageKey)
   if (cmdName === Cmd.MV) return runMv(scopes, flagKwargs, dispatch, storageKey)
   if (cmdName === Cmd.DIFF) return runDiff(scopes, flagKwargs, dispatch)
-  if (cmdName === Cmd.PASTE) return runPaste(scopes, flagKwargs, dispatch)
+  if (cmdName === Cmd.PASTE) return runPaste(scopes, flagKwargs, dispatch, stdin)
   if (cmdName === Cmd.COMM) return runComm(scopes, flagKwargs, dispatch)
   if (cmdName === Cmd.JOIN) return runJoin(scopes, flagKwargs, dispatch)
-  if (cmdName === Cmd.TAR) return runTar(textArgs, flagKwargs, dispatch)
+  if (cmdName === Cmd.TAR) return runTar(scopes, textArgs, flagKwargs, dispatch, ns)
   if (cmdName === Cmd.UNZIP) return runUnzip(scopes, textArgs, flagKwargs, dispatch)
+  if (cmdName === Cmd.ZIP) return runZip(scopes, flagKwargs, dispatch, ns)
   return runCmp(scopes, flagKwargs, dispatch)
 }

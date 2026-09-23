@@ -20,8 +20,8 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.du import entries
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
+from mirage.vfs.dropbox.config import DropboxConfig
 
 _TREE = {
     "": [{
@@ -76,9 +76,8 @@ def index():
 async def test_entries_lists_files_with_total(accessor, index):
     with patch("mirage.core.dropbox.readdir.list_folder", new=_fake_list):
         found, total = await entries(
-            accessor,
-            PathSpec(resource_path="data", virtual="/data", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="data", virtual="/data",
+                               directory="/"), index)
     assert found == [
         ("/data/a.txt", 27),
         ("/data/sub/b.txt", 12),
@@ -91,7 +90,7 @@ async def test_entries_on_file_returns_empty(accessor, index):
     with patch("mirage.core.dropbox.readdir.list_folder", new=_fake_list):
         found, total = await entries(
             accessor,
-            PathSpec(resource_path="data/a.txt",
+            PathSpec(vfs_path="data/a.txt",
                      virtual="/data/a.txt",
                      directory="/data"), index)
     assert found == []

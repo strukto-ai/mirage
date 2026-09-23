@@ -16,4 +16,4 @@ from mirage.commands.builtin.generic.rm_cmd import make_rm
 from mirage.commands.builtin.gsheets.io import resolve_glob
 from mirage.core.gsheets.unlink import unlink
 
-rm = make_rm(resource="gsheets", glob_fn=resolve_glob, unlink=unlink)
+rm = make_rm(vfs="gsheets", glob_fn=resolve_glob, unlink=unlink)

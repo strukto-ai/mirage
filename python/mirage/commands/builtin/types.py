@@ -44,4 +44,16 @@ class RowAction:
     kind: RowActionKind
 
 
-FindAction = ExecAction | RowAction
+@dataclass(frozen=True, slots=True)
+class PrintfAction:
+    """One ``-printf`` action: each row it reaches, rendered through a
+    format.
+
+    Args:
+        format (str): the format as typed, escapes and directives
+            unexpanded.
+    """
+    format: str
+
+
+FindAction = ExecAction | RowAction | PrintfAction

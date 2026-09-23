@@ -16,8 +16,8 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.stream import stream
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 @pytest.mark.asyncio

@@ -21,8 +21,8 @@ import pytest
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.rm import rm_r
 from mirage.core.s3.rmdir import rmdir
-from mirage.resource.s3 import S3Config
 from mirage.types import PathSpec
+from mirage.vfs.s3 import S3Config
 from tests.e2e.s3_mock import patch_s3_multi
 
 
@@ -40,7 +40,7 @@ def _accessor(key_prefix: str | None = None) -> S3Accessor:
 def _path(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.strip("/"))
+                    vfs_path=virtual.strip("/"))
 
 
 def _run(fn, store: dict[str, bytes], virtual: str, key_prefix: str = ""):

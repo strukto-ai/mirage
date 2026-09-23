@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class StatusWriter:
     """Opaque per-line identity for status writes.
 
-    Minted once per ``Workspace.execute`` and carried on the line's
+    Minted once per ``Workspace.shell`` and carried on the line's
     ``LineFrame``, so ``record_status`` can say whose ``$?`` the session
     is holding and a cancelled line puts back only what it overwrote.
     """
@@ -151,7 +151,7 @@ async def run_cancellable(coro: Coroutine[Any, Any, _T],
 
     The contract for a handler or store author is that
     ``CancelledError`` must propagate. A body that swallows both
-    deliveries cannot be forced to finish, and it holds ``execute``
+    deliveries cannot be forced to finish, and it holds ``shell``
     until it returns, exactly as it holds ``asyncio.wait_for``, a
     ``TaskGroup`` and ``asyncio.run``'s shutdown. The wait is not
     silent: it is logged as a warning every

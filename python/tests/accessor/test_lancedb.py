@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from mirage.accessor.lancedb import LanceDBAccessor
-from mirage.resource.lancedb.config import LanceDBConfig
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 
 @pytest.mark.asyncio

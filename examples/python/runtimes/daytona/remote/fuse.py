@@ -19,7 +19,7 @@ import subprocess
 import time
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.s3 import S3VFS, S3Config
 
 cfg = S3Config(
     bucket=os.environ["AWS_S3_BUCKET"],
@@ -29,7 +29,7 @@ cfg = S3Config(
 )
 
 with Workspace(
-    {"/s3/": Mount(S3Resource(cfg), backend=MountBackend.FUSE)},
+    {"/s3/": Mount(S3VFS(cfg), backend=MountBackend.FUSE)},
         mode=MountMode.READ,
 ) as ws:
     time.sleep(1)

@@ -47,8 +47,8 @@ async def test_unlink_calls_delete_with_doc_id(accessor, index):
                new_callable=AsyncMock) as mock_delete:
         await unlink(
             accessor,
-            PathSpec(resource_path=mount_key(
-                "/gdocs/owned/Foo__doc1.gdoc.json", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned/Foo__doc1.gdoc.json",
+                                        "/gdocs"),
                      virtual="/gdocs/owned/Foo__doc1.gdoc.json",
                      directory="/gdocs/owned/Foo__doc1.gdoc.json"), index)
         mock_delete.assert_awaited_once()
@@ -62,7 +62,7 @@ async def test_unlink_virtual_dir_raises(accessor, index):
     with pytest.raises(IsADirectoryError):
         await unlink(
             accessor,
-            PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+            PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                      virtual="/gdocs/owned",
                      directory="/gdocs/owned"), index)
 
@@ -76,7 +76,7 @@ async def test_unlink_missing_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await unlink(
                 accessor,
-                PathSpec(resource_path=mount_key(
+                PathSpec(vfs_path=mount_key(
                     "/gdocs/owned/Nope__doc9.gdoc.json", "/gdocs"),
                          virtual="/gdocs/owned/Nope__doc9.gdoc.json",
                          directory="/gdocs/owned/Nope__doc9.gdoc.json"), index)

@@ -48,12 +48,12 @@ class TestRegisteredCommand:
         rc = RegisteredCommand(
             name="cat",
             spec=CommandSpec(rest=Operand(type="path")),
-            resource="ram",
+            vfs="ram",
             filetype=None,
             fn=lambda: None,
         )
         assert rc.name == "cat"
-        assert rc.resource == "ram"
+        assert rc.vfs == "ram"
         assert rc.filetype is None
         assert rc.provision_fn is None
 
@@ -61,7 +61,7 @@ class TestRegisteredCommand:
         rc = RegisteredCommand(
             name="grep",
             spec=CommandSpec(),
-            resource="s3",
+            vfs="s3",
             filetype=".parquet",
             fn=lambda: None,
         )
@@ -73,7 +73,7 @@ class TestCommandDecorator:
     def test_decorator_attaches_registered_commands(self):
         spec = CommandSpec(rest=Operand(type="path"))
 
-        @command("mytest", resource="ram", spec=spec)
+        @command("mytest", vfs="ram", spec=spec)
         async def my_fn(backend, paths, *texts, **kw):
             pass
 
@@ -81,7 +81,7 @@ class TestCommandDecorator:
         assert len(my_fn._registered_commands) == 1
         rc = my_fn._registered_commands[0]
         assert rc.name == "mytest"
-        assert rc.resource == "ram"
+        assert rc.vfs == "ram"
 
     def test_decorator_with_provision(self):
         spec = CommandSpec()
@@ -89,7 +89,7 @@ class TestCommandDecorator:
         async def my_provision(*a, **kw):
             pass
 
-        @command("mytest", resource="ram", spec=spec, provision=my_provision)
+        @command("mytest", vfs="ram", spec=spec, provision=my_provision)
         async def my_fn(backend, paths, *texts, **kw):
             pass
 
@@ -97,11 +97,10 @@ class TestCommandDecorator:
         assert rc.provision_fn is my_provision
 
     def test_wrapping_a_registered_function_does_not_mutate_it(self):
-        original = command("cat", resource="s3",
-                           spec=CommandSpec())(_noop_handler)
+        original = command("cat", vfs="s3", spec=CommandSpec())(_noop_handler)
         original_registrations = list(original._registered_commands)
 
-        wrapped = command("cat", resource="s3", spec=CommandSpec())(original)
+        wrapped = command("cat", vfs="s3", spec=CommandSpec())(original)
 
         assert original._registered_commands == original_registrations
         assert (wrapped._registered_commands
@@ -112,7 +111,7 @@ class TestCommandDecorator:
         rc = RegisteredCommand(
             name="cat",
             spec=CommandSpec(rest=Operand(type="path")),
-            resource="ram",
+            vfs="ram",
             filetype=None,
             fn=lambda: None,
         )
@@ -122,7 +121,7 @@ class TestCommandDecorator:
         rc = RegisteredCommand(
             name="rm",
             spec=CommandSpec(),
-            resource="s3",
+            vfs="s3",
             filetype=None,
             fn=lambda: None,
             write=True,
@@ -135,7 +134,7 @@ class TestCommandDecoratorWrite:
     def test_write_flag_passed_through(self):
         spec = CommandSpec()
 
-        @command("rm", resource="ram", spec=spec, write=True)
+        @command("rm", vfs="ram", spec=spec, write=True)
         async def my_rm(backend, paths, *texts, **kw):
             pass
 
@@ -145,7 +144,7 @@ class TestCommandDecoratorWrite:
     def test_write_flag_defaults_false(self):
         spec = CommandSpec()
 
-        @command("cat", resource="ram", spec=spec)
+        @command("cat", vfs="ram", spec=spec)
         async def my_cat(backend, paths, *texts, **kw):
             pass
 
@@ -166,13 +165,13 @@ class TestCrossCommandDecorator:
         assert rc.name == "cp"
         assert rc.src == "s3"
         assert rc.dst == "disk"
-        assert rc.resource == "s3->disk"
+        assert rc.vfs == "s3->disk"
 
 
 class TestVersionSupport:
 
     def test_auto_injects_version_option(self):
-        registered = command("foo", resource="disk",
+        registered = command("foo", vfs="disk",
                              spec=CommandSpec())(_noop_handler)
         longs = [
             o.long for o in registered._registered_commands[0].spec.options
@@ -182,7 +181,7 @@ class TestVersionSupport:
 
     def test_version_short_circuits_handler(self):
         _HANDLER_CALLS.clear()
-        registered = command("tsort", resource="disk",
+        registered = command("tsort", vfs="disk",
                              spec=CommandSpec())(_recording_handler)
         stdout, result = asyncio.run(registered._registered_commands[0].fn(
             None, [], [], CommandOpts(flags={"version": True})))
@@ -193,8 +192,7 @@ class TestVersionSupport:
 
     def test_help_keeps_the_spec_epilog(self):
         registered = command(
-            "foo",
-            resource="disk",
+            "foo", vfs="disk",
             spec=CommandSpec(epilog="Services:\n  drive"))(_noop_handler)
         rc = registered._registered_commands[0]
         assert rc.spec.epilog == "Services:\n  drive"
@@ -206,7 +204,7 @@ class TestVersionSupport:
     def test_declared_version_reaches_the_handler(self):
         _HANDLER_CALLS.clear()
         registered = command("custom",
-                             resource=None,
+                             vfs=None,
                              spec=CommandSpec(options=(Option(
                                  long="--version"), )))(_recording_handler)
         asyncio.run(registered._registered_commands[0].fn(
@@ -217,7 +215,7 @@ class TestVersionSupport:
 class TestStandardRequest:
 
     def test_matches_injected_option(self):
-        registered = command("tsort", resource="disk",
+        registered = command("tsort", vfs="disk",
                              spec=CommandSpec())(_noop_handler)
         spec = registered._registered_commands[0].spec
         assert standard_request(
@@ -225,13 +223,13 @@ class TestStandardRequest:
             ["--version"]) == f"tsort (Mirage) {__version__}\n".encode()
 
     def test_none_without_the_flag(self):
-        registered = command("tsort", resource="disk",
+        registered = command("tsort", vfs="disk",
                              spec=CommandSpec())(_noop_handler)
         spec = registered._registered_commands[0].spec
         assert standard_request("tsort", spec, ["/data/a.txt"]) is None
 
     def test_none_after_end_of_options(self):
-        registered = command("grep", resource="disk",
+        registered = command("grep", vfs="disk",
                              spec=CommandSpec())(_noop_handler)
         spec = registered._registered_commands[0].spec
         assert standard_request("grep", spec, ["--", "--version"]) is None
@@ -241,8 +239,7 @@ class TestStandardRequest:
 
     def test_none_when_command_declares_its_own_version(self):
         spec = CommandSpec(options=(Option(long="--version"), ))
-        registered = command("custom", resource="disk",
-                             spec=spec)(_noop_handler)
+        registered = command("custom", vfs="disk", spec=spec)(_noop_handler)
         assert standard_request("custom",
                                 registered._registered_commands[0].spec,
                                 ["--version"]) is None
@@ -254,7 +251,7 @@ class TestStandardRequest:
     # exact-match-only check answered `cat --vers /ram/a` and refused
     # `cat --vers /ram/a /disk/b`.
     def test_matches_an_unambiguous_abbreviation(self):
-        registered = command("tsort", resource="disk",
+        registered = command("tsort", vfs="disk",
                              spec=CommandSpec())(_noop_handler)
         spec = registered._registered_commands[0].spec
         for word in ("--vers", "--versio", "--v"):
@@ -267,7 +264,7 @@ class TestStandardRequest:
     # (`option '--version' doesn't allow an argument`), so this declines
     # rather than answering.
     def test_none_for_an_abbreviation_carrying_a_value(self):
-        registered = command("tsort", resource="disk",
+        registered = command("tsort", vfs="disk",
                              spec=CommandSpec())(_noop_handler)
         spec = registered._registered_commands[0].spec
         assert standard_request("tsort", spec, ["--versio=x"]) is None
@@ -277,8 +274,7 @@ class TestStandardRequest:
     # parser reports the ambiguity with both candidates.
     def test_none_for_an_ambiguous_abbreviation(self):
         spec = CommandSpec(options=(Option(long="--verbose"), ))
-        registered = command("custom", resource="disk",
-                             spec=spec)(_noop_handler)
+        registered = command("custom", vfs="disk", spec=spec)(_noop_handler)
         assert standard_request("custom",
                                 registered._registered_commands[0].spec,
                                 ["--ver"]) is None
@@ -292,8 +288,7 @@ class TestStandardRequest:
         assert standard_request("expr", registered_spec("expr", SPECS["expr"]),
                                 ["--version", "x"]) is None
         borrowed = command(
-            "expr",
-            resource="disk",
+            "expr", vfs="disk",
             spec=CommandSpec(rest=Operand(type="str")))(_noop_handler)
         assert standard_request("expr", borrowed._registered_commands[0].spec,
                                 ["--version", "x"]) is not None
@@ -426,8 +421,7 @@ class TestStandardRequest:
     # --version` printed mirage's version and the handler never ran.
     def test_a_remainder_operand_keeps_the_words_after_it(self):
         spec = CommandSpec(rest=Operand(type="str", remainder=True))
-        registered = command("mytool", resource="disk",
-                             spec=spec)(_noop_handler)
+        registered = command("mytool", vfs="disk", spec=spec)(_noop_handler)
         rest_spec = registered._registered_commands[0].spec
         assert standard_request("mytool", rest_spec,
                                 ["operand", "--version"]) is None
@@ -457,8 +451,7 @@ class TestStandardRequest:
     def test_a_borrowed_name_does_not_borrow_the_family(self):
         for name in ("grep", "zgrep"):
             borrowed = command(
-                name,
-                resource="disk",
+                name, vfs="disk",
                 spec=CommandSpec(rest=Operand(type="str")))(_noop_handler)
             spec = borrowed._registered_commands[0].spec
             assert standard_request(name, spec, ["--version", "--bogus"])

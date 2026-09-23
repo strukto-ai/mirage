@@ -28,7 +28,7 @@ UNSUPPORTED_BUILTINS = frozenset({
     "ulimit",
 })
 
-NAMESPACE_COMMANDS = frozenset({"ln", "readlink"})
+NAMESPACE_COMMANDS = frozenset({"getfattr", "ln", "readlink", "setfattr"})
 
 # bash reserved words that mirage's grammar implements. The parser, not
 # the executor, consumes them, so they never reach route; `type` reports

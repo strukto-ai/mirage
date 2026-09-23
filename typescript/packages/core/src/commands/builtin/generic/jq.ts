@@ -200,7 +200,7 @@ function pathSpecFactory(
 ): (value: string) => PathSpec {
   const first = paths[0]
   const mountPrefix =
-    (first === undefined ? undefined : mountPrefixOf(first.virtual, first.resourcePath)) ??
+    (first === undefined ? undefined : mountPrefixOf(first.virtual, first.vfsPath)) ??
     opts.mountPrefix ??
     ''
   return (value) => PathSpec.fromStrPath(value, mountKey(value, mountPrefix))

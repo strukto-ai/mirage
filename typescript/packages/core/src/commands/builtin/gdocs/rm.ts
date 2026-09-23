@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { unlink } from '../../../core/gdocs/unlink.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
 import { GDOCS_IO } from './io.ts'
 
-export const GDOCS_RM = makeRm(ResourceName.GDOCS, GDOCS_IO, unlink)
+export const GDOCS_RM = makeRm(VFSName.GDOCS, GDOCS_IO, unlink)

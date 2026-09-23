@@ -18,7 +18,7 @@ import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb._schema_json import build_collection_schema_json
-from mirage.resource.mongodb.config import MongoDBConfig
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 
 @pytest.fixture

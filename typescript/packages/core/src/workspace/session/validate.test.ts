@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { CLISpec } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import type { AdmissionRules, CommandRule } from '../../policy/types.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -186,7 +186,7 @@ describe('createSession reads the verbs of an installed CLI', () => {
     // is the part that broke: this read the registry with
     // Object.entries over a Map and silently saw no CLIs at all, so the
     // check passed everything.
-    const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     ws.registerCli(
       'prog',
       new CLISpec({ name: 'prog', subcommands: [new CLISpec({ name: 'run', fn: noopVerb })] }),

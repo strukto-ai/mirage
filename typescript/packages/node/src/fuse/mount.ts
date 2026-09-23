@@ -18,7 +18,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { MountBackend } from '@struktoai/mirage-core/types'
-import type { Session } from '@struktoai/mirage-core/workspace/session/session'
+import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { loadOptionalPeer } from '../optional_peer.ts'
 import { checkMountpoint, FSKIT_MOUNT_ROOT, prepareBackend } from './backend.ts'
@@ -37,7 +37,7 @@ export interface MountOptions {
   /** Scope the mount to a single workspace mount prefix (subtree exposure). */
   rootPrefix?: string
   /** Run every op under this session's mount grants (session-bound mountpoint). */
-  session?: Session
+  session?: SessionState
   /**
    * When true, `@zkochan/fuse-native`'s `autoUnmount` flag is set so the
    * kernel releases the mount if the process exits abnormally. Defaults to
@@ -56,7 +56,7 @@ export interface MountOptions {
    * Which kernel interface serves the mount: 'fuse' (default) or 'fskit'.
    * 'fskit' routes through macFUSE 5.x's FSKit backend (no kernel
    * extension); macOS-only, mounts under /Volumes, and every mounted
-   * resource must report exact sizes. See backend.ts for the guards.
+   * VFS must report exact sizes. See backend.ts for the guards.
    */
   backend?: MountBackend
 }
@@ -186,7 +186,7 @@ export async function mount(ws: Workspace, options: MountOptions = {}): Promise<
     mountpoint = mkdtempSync(join(tmpdir(), 'mirage-fuse-'))
     ownsMountpoint = true
   }
-  const mfs = new MirageFS(ws.fs, {
+  const mfs = new MirageFS(ws.vfs, {
     ...(options.rootPrefix !== undefined ? { rootPrefix: options.rootPrefix } : {}),
     ...(options.session !== undefined ? { session: options.session } : {}),
   })

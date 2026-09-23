@@ -3,12 +3,13 @@ from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-from mirage.commands.builtin.grep_offsets import (decode_line, encode_line,
-                                                  match_offset, prefix_of)
+from mirage.commands.builtin.grep_offsets import (MatchOffsets, decode_line,
+                                                  encode_line, prefix_of)
 from mirage.commands.builtin.grep_select import WalkFilters
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import close_quietly
 from mirage.io.types import IOResult, materialize
+from mirage.io.yield_budget import YieldBudget
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +147,7 @@ async def grep_input(source: AsyncIterator[bytes],
             lines; GNU then opens this input's first context group with
             the separator, as it does between groups within one input.
     """
+    budget = YieldBudget()
     io.exit_code = 1
     pat = utf8_pattern(pat)
     binary = BinaryInput(f.binary_mode)
@@ -209,13 +211,17 @@ async def grep_input(source: AsyncIterator[bytes],
             if hit:
                 if f.only_matching:
                     if not f.invert:
-                        chunks = [
-                            output_line(
-                                encode_line(m.group()), number, True, path,
-                                show_filename, f,
-                                match_offset(line_start, line, m.start()))
-                            for m in pat.finditer(line) if m.group()
-                        ]
+                        offsets = MatchOffsets(
+                            line_start, line) if f.byte_offsets else None
+                        for m in pat.finditer(line):
+                            await budget.run()
+                            if m.group():
+                                chunks.append(
+                                    output_line(
+                                        encode_line(m.group()), number, True,
+                                        path, show_filename, f,
+                                        offsets.at(m.start())
+                                        if offsets else 0))
                 else:
                     if has_context:
                         pending = [(n, data, at) for n, data, at in previous

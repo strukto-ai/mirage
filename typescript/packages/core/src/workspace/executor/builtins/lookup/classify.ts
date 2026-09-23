@@ -15,13 +15,17 @@
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { KEYWORDS } from '../../../lookup/constants.ts'
 import { lookup, lookupAll } from '../../../lookup/lookup.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { DESCRIPTIONS, KIND_BY_CONSUMER } from './constants.ts'
 import { NameKind } from './types.ts'
 import { sessionEntry } from '../../../session/session.ts'
 
 /** Classify the name as the layer that would run it, null if none does. */
-export function classify(name: string, session: Session, registry: MountRegistry): NameKind | null {
+export function classify(
+  name: string,
+  session: SessionState,
+  registry: MountRegistry,
+): NameKind | null {
   if (sessionEntry(session.aliases, name) !== undefined) return NameKind.ALIAS
   if (KEYWORDS.has(name)) return NameKind.KEYWORD
   return KIND_BY_CONSUMER[lookup(name, session, registry)] ?? null
@@ -42,7 +46,11 @@ export function classify(name: string, session: Session, registry: MountRegistry
  * layers: a shell builtin that a mount also registers is one `builtin`
  * line, not two identical ones.
  */
-export function classifyAll(name: string, session: Session, registry: MountRegistry): NameKind[] {
+export function classifyAll(
+  name: string,
+  session: SessionState,
+  registry: MountRegistry,
+): NameKind[] {
   // An alias is reported first and whether or not `expand_aliases` is
   // on, as bash does: `type` describes the definition, not whether the
   // parser is currently applying it.
@@ -67,7 +75,7 @@ export function classifyAll(name: string, session: Session, registry: MountRegis
  */
 export function locations(
   name: string,
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   allMode: boolean,
   drop: NameKind | null = null,
@@ -80,7 +88,7 @@ export function locations(
 /** Render the verbose line `command -V` and `type` print. `session` is
  * needed only to read an alias's value; every other kind renders from
  * the name alone. */
-export function describe(name: string, kind: NameKind, session?: Session): string {
+export function describe(name: string, kind: NameKind, session?: SessionState): string {
   if (kind === NameKind.ALIAS && session !== undefined) {
     return `${name} is aliased to \`${sessionEntry(session.aliases, name) ?? ''}'`
   }

@@ -75,7 +75,7 @@ describe('resolveNotionGlob', () => {
       virtual: `/pages/Page__${TOP1_ID}/`,
       directory: `/pages/Page__${TOP1_ID}/`,
       resolved: true,
-      resourcePath: mountKey(`/pages/Page__${TOP1_ID}/`, ''),
+      vfsPath: mountKey(`/pages/Page__${TOP1_ID}/`, ''),
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [resolved])
     expect(out).toHaveLength(1)
@@ -90,7 +90,7 @@ describe('resolveNotionGlob', () => {
       directory: `/pages/Page__${TOP1_ID}/`,
       pattern: null,
       resolved: false,
-      resourcePath: mountKey(`/pages/Page__${TOP1_ID}/`, ''),
+      vfsPath: mountKey(`/pages/Page__${TOP1_ID}/`, ''),
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
     expect(out).toHaveLength(1)
@@ -110,12 +110,12 @@ describe('resolveNotionGlob', () => {
       directory: '/pages',
       pattern: 'Top*',
       resolved: false,
-      resourcePath: 'pages/Top*',
+      vfsPath: 'pages/Top*',
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
     const originals = out.map((p) => p.virtual).sort()
     expect(originals).toEqual([`/pages/Top1__${TOP1_ID}`, `/pages/Top2__${TOP2_ID}`])
-    for (const p of out) expect(mountPrefixOf(p.virtual, p.resourcePath)).toBe('')
+    for (const p of out) expect(mountPrefixOf(p.virtual, p.vfsPath)).toBe('')
   })
 
   it('matches subtree segments by glob pattern', async () => {
@@ -135,7 +135,7 @@ describe('resolveNotionGlob', () => {
       directory: dir,
       pattern: 'Sub*',
       resolved: false,
-      resourcePath: mountKey(`${dir}Sub*`, ''),
+      vfsPath: mountKey(`${dir}Sub*`, ''),
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
     const originals = out.map((p) => p.virtual).sort()
@@ -157,7 +157,7 @@ describe('resolveNotionGlob', () => {
       directory: '/pages',
       pattern: 'NoSuchPrefix*',
       resolved: false,
-      resourcePath: 'NoSuchPrefix*',
+      vfsPath: 'NoSuchPrefix*',
     })
     const out = await resolveNotionGlob(makeAccessor(transport), [spec])
     // bash nullglob off: an unmatched glob word stays the literal so the

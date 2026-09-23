@@ -44,9 +44,10 @@
  * against a persisted checkpoint written by an earlier version reports every
  * file on an etag-bearing backend as an UPDATE once.
  *
- * Distinct from `cache/file/utils`'s `defaultFingerprintAsync`, which hashes
- * the content bytes themselves. `None` stands in for an absent size so the
- * string matches python's `stat_fingerprint` byte for byte.
+ * Distinct from the file cache's stored fingerprint (`CacheEntry.fingerprint`),
+ * which is whatever token the backend returned for the bytes it cached, or
+ * null. `None` stands in for an absent size so the string matches python's
+ * `stat_fingerprint` byte for byte.
  */
 export function statFingerprint(
   etag: string | null,

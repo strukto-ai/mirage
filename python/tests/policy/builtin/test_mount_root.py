@@ -19,21 +19,21 @@ from mirage.policy import (CommandContext, DenyScope, MountRootPolicy,
 from mirage.policy.builtin.mount_root import (has_no_target_flag,
                                               has_parents_flag,
                                               has_symlink_flag)
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
 
 
 def _registry() -> MountRegistry:
     registry = MountRegistry()
-    registry.mount("/data", RAMResource(), MountMode.WRITE)
+    registry.mount("/data", RAMVFS(), MountMode.WRITE)
     return registry
 
 
 def _path(virtual: str, raw: str | None = None) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path="",
+                    vfs_path="",
                     raw_path=raw or virtual,
                     resolved=True)
 

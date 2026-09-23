@@ -17,11 +17,11 @@ from pydantic import ValidationError
 
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email.config import EmailConfig
-from mirage.types import ResourceName
+from mirage.types import VFSName
 
 
-def test_email_resource_name_exists():
-    assert ResourceName.EMAIL == "email"
+def test_email_vfs_name_exists():
+    assert VFSName.EMAIL == "email"
 
 
 def test_config_creation():

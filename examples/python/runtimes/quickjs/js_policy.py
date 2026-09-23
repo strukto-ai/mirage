@@ -15,8 +15,8 @@
 import asyncio
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
 from mirage.runtime.types import ScriptSource
+from mirage.vfs.ram import RAMVFS
 
 # A JS-only world with a JS policy. The quickjs runtime carries the
 # evaluator capability, so it doubles as the policy engine: the policy
@@ -39,19 +39,19 @@ JS_POLICY = ScriptSource(
 async def main() -> None:
     ws = Workspace(
         {
-            "/data": RAMResource(),
-            "/prod": RAMResource()
+            "/data": RAMVFS(),
+            "/prod": RAMVFS()
         },
         mode=MountMode.EXEC,
-        runtimes=["quickjs", "vfs"],
+        runtimes=["quickjs", "workspace"],
         route_policy=JS_POLICY,
     )
     try:
-        ok = await ws.execute("echo hello > /data/notes.txt")
+        ok = await ws.shell("echo hello > /data/notes.txt")
         print("write /data ->", ok.exit_code)
-        served = await ws.execute('node -e "console.log(6 * 7)"')
+        served = await ws.shell('node -e "console.log(6 * 7)"')
         print("node -e ->", (await served.stdout_str()).strip())
-        denied = await ws.execute("cat /prod/secret.txt")
+        denied = await ws.shell("cat /prod/secret.txt")
         print("touch /prod ->", denied.exit_code,
               (await denied.stderr_str()).strip())
     finally:

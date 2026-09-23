@@ -13,23 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
-  GCSResource,
-  GDocsResource,
-  GDriveResource,
-  GSheetsResource,
-  GSlidesResource,
-  GitHubResource,
-  LangfuseResource,
-  LinearResource,
+  GCSVFS,
+  GDocsVFS,
+  GDriveVFS,
+  GSheetsVFS,
+  GSlidesVFS,
+  GitHubVFS,
+  LangfuseVFS,
+  LinearVFS,
   MountMode,
-  OCIResource,
-  OPFSResource,
-  R2Resource,
-  type Resource,
-  S3Resource,
+  OCIVFS,
+  OPFSVFS,
+  R2VFS,
+  type VFS,
+  S3VFS,
   type S3BrowserOperation,
   type S3BrowserSignOptions,
-  TrelloResource,
+  TrelloVFS,
   Workspace,
 } from '@struktoai/mirage-browser'
 
@@ -46,7 +46,7 @@ function line(s: string, cls?: string): void {
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
-  const res = await ws.execute(cmd)
+  const res = await ws.shell(cmd)
   const out = res.stdoutText.replace(/\s+$/, '')
   if (out !== '') line(out)
   const err = res.stderrText.replace(/\s+$/, '')
@@ -85,26 +85,26 @@ async function fetchConfigured(): Promise<BackendName[]> {
   }
 }
 
-function buildResource(backend: BackendName): Resource {
+function buildVfs(backend: BackendName): VFS {
   const provider = makePresigner(backend)
   switch (backend) {
     case 's3':
-      return new S3Resource({ bucket: backend, presignedUrlProvider: provider })
+      return new S3VFS({ bucket: backend, presignedUrlProvider: provider })
     case 'gcs':
-      return new GCSResource({ bucket: backend, presignedUrlProvider: provider })
+      return new GCSVFS({ bucket: backend, presignedUrlProvider: provider })
     case 'r2':
-      return new R2Resource({ bucket: backend, presignedUrlProvider: provider })
+      return new R2VFS({ bucket: backend, presignedUrlProvider: provider })
     case 'oci':
-      return new OCIResource({ bucket: backend, presignedUrlProvider: provider })
+      return new OCIVFS({ bucket: backend, presignedUrlProvider: provider })
   }
 }
 
 async function demoOpfs(ws: Workspace): Promise<void> {
   line('')
   line('━━━ OPFS (/) — full shell demo ━━━', 'prompt')
-  await ws.fs.writeFile('/hello.txt', 'hello from OPFS\n')
-  await ws.fs.mkdir('/notes')
-  await ws.fs.writeFile('/notes/q1.csv', 'revenue,100\nexpense,80\nprofit,20\n')
+  await ws.vfs.writeFile('/hello.txt', 'hello from OPFS\n')
+  await ws.vfs.mkdir('/notes')
+  await ws.vfs.writeFile('/notes/q1.csv', 'revenue,100\nexpense,80\nprofit,20\n')
   await run(ws, 'ls /')
   await run(ws, 'cat /hello.txt')
   await run(ws, 'head -n 2 /notes/q1.csv')
@@ -115,21 +115,21 @@ async function demoOpfs(ws: Workspace): Promise<void> {
 /**
  * Trello demo. Unlike S3/GCS/OCI which need a server-side presigner, Trello's
  * REST API supports CORS and uses URL-param auth, so the browser can call
- * api.trello.com directly. The TrelloResource holds apiKey/apiToken just like
- * S3Resource holds accessKeyId/secretAccessKey, and ships a full set of shell
- * commands (ls/cat/tree/grep/find/jq/...) registered against `resource: trello`.
+ * api.trello.com directly. The TrelloVFS holds apiKey/apiToken just like
+ * S3VFS holds accessKeyId/secretAccessKey, and ships a full set of shell
+ * commands (ls/cat/tree/grep/find/jq/...) registered against `vfs: trello`.
  */
 async function demoTrello(ws: Workspace): Promise<void> {
   line('')
   line('━━━ Trello (/trello/) — direct browser → api.trello.com ━━━', 'prompt')
   await run(ws, 'ls /trello/')
-  const wsRes = await ws.execute('ls /trello/workspaces/ | head -n 1')
+  const wsRes = await ws.shell('ls /trello/workspaces/ | head -n 1')
   const ws0 = wsRes.stdoutText.trim()
   if (ws0 === '') return
   const wsBase = `/trello/workspaces/${ws0}`
   await run(ws, `cat ${wsBase}/workspace.json`)
   await run(ws, `tree -L 3 ${wsBase}`)
-  const bRes = await ws.execute(`ls ${wsBase}/boards/ | head -n 1`)
+  const bRes = await ws.shell(`ls ${wsBase}/boards/ | head -n 1`)
   const b0 = bRes.stdoutText.trim()
   if (b0 === '') return
   const boardBase = `${wsBase}/boards/${b0}`
@@ -146,13 +146,13 @@ async function demoLinear(ws: Workspace): Promise<void> {
   line('')
   line('━━━ Linear (/linear/) — direct browser → api.linear.app/graphql ━━━', 'prompt')
   await run(ws, 'ls /linear/')
-  const tRes = await ws.execute('ls /linear/teams/ | head -n 1')
+  const tRes = await ws.shell('ls /linear/teams/ | head -n 1')
   const t0 = tRes.stdoutText.trim()
   if (t0 === '') return
   const teamBase = `/linear/teams/${t0}`
   await run(ws, `cat ${teamBase}/team.json`)
   await run(ws, `tree -L 2 ${teamBase}`)
-  const iRes = await ws.execute(`ls ${teamBase}/issues/ | head -n 1`)
+  const iRes = await ws.shell(`ls ${teamBase}/issues/ | head -n 1`)
   const i0 = iRes.stdoutText.trim()
   if (i0 === '') return
   await run(ws, `cat ${teamBase}/issues/${i0}/issue.json`)
@@ -165,7 +165,7 @@ async function demoLangfuse(ws: Workspace): Promise<void> {
   line('━━━ Langfuse (/langfuse/) — direct browser → cloud.langfuse.com ━━━', 'prompt')
   await run(ws, 'ls /langfuse/')
   await run(ws, 'ls /langfuse/datasets/')
-  const dRes = await ws.execute('ls /langfuse/datasets/ | head -n 1')
+  const dRes = await ws.shell('ls /langfuse/datasets/ | head -n 1')
   const d0 = dRes.stdoutText.trim()
   if (d0 === '') return
   const dPath = `/langfuse/datasets/${d0}`
@@ -173,14 +173,14 @@ async function demoLangfuse(ws: Workspace): Promise<void> {
   await run(ws, `wc -l ${dPath}/items.jsonl`)
   await run(ws, `head -n 2 ${dPath}/items.jsonl`)
   await run(ws, 'ls /langfuse/prompts/')
-  const pRes = await ws.execute('ls /langfuse/prompts/ | head -n 1')
+  const pRes = await ws.shell('ls /langfuse/prompts/ | head -n 1')
   const p0 = pRes.stdoutText.trim()
   if (p0 !== '') await run(ws, `tree /langfuse/prompts/${p0}`)
 }
 
 /**
  * GitHub demo. GitHub's REST API supports CORS and uses an Authorization
- * header — same model as Linear. The repo's tree is fetched once at resource
+ * header — same model as Linear. The repo's tree is fetched once at VFS
  * creation and cached, so subsequent `ls`/`cat` calls hit it without round
  * trips except for blob fetches when reading file contents.
  */
@@ -190,7 +190,7 @@ async function demoGitHub(ws: Workspace): Promise<void> {
   await run(ws, 'ls /github/')
   await run(ws, 'tree -L 1 /github/')
   for (const name of ['README.md', 'package.json', 'pyproject.toml']) {
-    const res = await ws.execute(`head -n 8 /github/${name}`)
+    const res = await ws.shell(`head -n 8 /github/${name}`)
     if (res.exitCode === 0 && res.stdoutText.trim() !== '') {
       line(`$ head -n 8 /github/${name}`, 'prompt')
       line(res.stdoutText.replace(/\s+$/, ''))
@@ -210,7 +210,7 @@ async function demoGdocs(ws: Workspace): Promise<void> {
   line('')
   line('━━━ Google Docs (/gdocs/) — direct browser → docs.googleapis.com ━━━', 'prompt')
   await run(ws, 'ls /gdocs/')
-  const ownedRes = await ws.execute('ls /gdocs/owned/ | head -n 1')
+  const ownedRes = await ws.shell('ls /gdocs/owned/ | head -n 1')
   const first = ownedRes.stdoutText.trim().split('\n')[0]
   if (first === undefined || first === '') return
   const path = `/gdocs/owned/${first.split('/').pop() ?? first}`
@@ -223,7 +223,7 @@ async function demoGsheets(ws: Workspace): Promise<void> {
   line('')
   line('━━━ Google Sheets (/gsheets/) — direct browser → sheets.googleapis.com ━━━', 'prompt')
   await run(ws, 'ls /gsheets/')
-  const ownedRes = await ws.execute('ls /gsheets/owned/ | head -n 1')
+  const ownedRes = await ws.shell('ls /gsheets/owned/ | head -n 1')
   const first = ownedRes.stdoutText.trim().split('\n')[0]
   if (first === undefined || first === '') return
   const path = `/gsheets/owned/${first.split('/').pop() ?? first}`
@@ -235,7 +235,7 @@ async function demoGslides(ws: Workspace): Promise<void> {
   line('')
   line('━━━ Google Slides (/gslides/) — direct browser → slides.googleapis.com ━━━', 'prompt')
   await run(ws, 'ls /gslides/')
-  const ownedRes = await ws.execute('ls /gslides/owned/ | head -n 1')
+  const ownedRes = await ws.shell('ls /gslides/owned/ | head -n 1')
   const first = ownedRes.stdoutText.trim().split('\n')[0]
   if (first === undefined || first === '') return
   const path = `/gslides/owned/${first.split('/').pop() ?? first}`
@@ -245,14 +245,14 @@ async function demoGslides(ws: Workspace): Promise<void> {
 
 async function demoGdrive(ws: Workspace): Promise<void> {
   line('')
-  line('━━━ Google Drive (/gdrive/) — folder tree via multi-resource ━━━', 'prompt')
+  line('━━━ Google Drive (/gdrive/) — folder tree via multi-VFS ━━━', 'prompt')
   await run(ws, 'ls /gdrive/')
   await run(ws, 'tree -L 1 /gdrive/')
   await run(ws, "find /gdrive/ -name '*.gdoc.json' | head -n 3")
 }
 
 /**
- * Cloud-backend demo via real shell commands. `ws.execute('ls /s3/…')` now
+ * Cloud-backend demo via real shell commands. `ws.shell('ls /s3/…')` now
  * flows through core's S3_COMMANDS, which internally branches on
  * `config.presignedUrlProvider` and dispatches each AWS SDK command to a
  * presigned URL fetch — mirroring Python's `async_session(config)` seam.
@@ -260,7 +260,7 @@ async function demoGdrive(ws: Workspace): Promise<void> {
 async function demoCloud(ws: Workspace, backend: BackendName): Promise<void> {
   const mount = `/${backend}/`
   line('')
-  line(`━━━ ${backend.toUpperCase()} (${mount}) — ws.execute shell ━━━`, 'prompt')
+  line(`━━━ ${backend.toUpperCase()} (${mount}) — ws.shell shell ━━━`, 'prompt')
   const stamp = String(Date.now())
   const writeKey = `${mount}browser-demo/${stamp}.txt`
   await run(ws, `echo 'hello from browser ${backend}' > ${writeKey}`)
@@ -276,16 +276,16 @@ async function main(): Promise<void> {
   const configured = await fetchConfigured()
   line(`configured backends: ${configured.length > 0 ? configured.join(', ') : '(none)'}`, 'ok')
 
-  const resources: Record<string, Resource> = {
-    '/': new OPFSResource({ root: 'mirage-browser-demo' }),
+  const mounts: Record<string, VFS> = {
+    '/': new OPFSVFS({ root: 'mirage-browser-demo' }),
   }
-  for (const b of configured) resources[`/${b}/`] = buildResource(b)
+  for (const b of configured) mounts[`/${b}/`] = buildVfs(b)
 
   const trelloKey = __TRELLO_API_KEY__
   const trelloToken = __TRELLO_API_TOKEN__
   const trelloEnabled = trelloKey !== '' && trelloToken !== ''
   if (trelloEnabled) {
-    resources['/trello/'] = new TrelloResource({
+    mounts['/trello/'] = new TrelloVFS({
       apiKey: trelloKey,
       apiToken: trelloToken,
     })
@@ -294,7 +294,7 @@ async function main(): Promise<void> {
   const linearKey = __LINEAR_API_KEY__
   const linearEnabled = linearKey !== ''
   if (linearEnabled) {
-    resources['/linear/'] = new LinearResource({ apiKey: linearKey })
+    mounts['/linear/'] = new LinearVFS({ apiKey: linearKey })
   }
 
   const lfPublic = __LANGFUSE_PUBLIC_KEY__
@@ -303,7 +303,7 @@ async function main(): Promise<void> {
   const langfuseEnabled = lfPublic !== '' && lfSecret !== ''
   if (langfuseEnabled) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    resources['/langfuse/'] = new LangfuseResource({
+    mounts['/langfuse/'] = new LangfuseVFS({
       publicKey: lfPublic,
       secretKey: lfSecret,
       ...(lfHost !== '' ? { host: lfHost } : {}),
@@ -318,7 +318,7 @@ async function main(): Promise<void> {
   const githubEnabled = githubToken !== '' && githubOwner !== '' && githubRepo !== ''
   if (githubEnabled) {
     try {
-      resources['/github/'] = await GitHubResource.create({
+      mounts['/github/'] = await GitHubVFS.create({
         token: githubToken,
         owner: githubOwner,
         repo: githubRepo,
@@ -335,29 +335,29 @@ async function main(): Promise<void> {
   const gdocsEnabled =
     googleClientId !== '' && googleClientSecret !== '' && googleRefreshToken !== ''
   if (gdocsEnabled) {
-    resources['/gdocs/'] = new GDocsResource({
+    mounts['/gdocs/'] = new GDocsVFS({
       clientId: googleClientId,
       clientSecret: googleClientSecret,
       refreshToken: googleRefreshToken,
     })
-    resources['/gsheets/'] = new GSheetsResource({
+    mounts['/gsheets/'] = new GSheetsVFS({
       clientId: googleClientId,
       clientSecret: googleClientSecret,
       refreshToken: googleRefreshToken,
     })
-    resources['/gslides/'] = new GSlidesResource({
+    mounts['/gslides/'] = new GSlidesVFS({
       clientId: googleClientId,
       clientSecret: googleClientSecret,
       refreshToken: googleRefreshToken,
     })
-    resources['/gdrive/'] = new GDriveResource({
+    mounts['/gdrive/'] = new GDriveVFS({
       clientId: googleClientId,
       clientSecret: googleClientSecret,
       refreshToken: googleRefreshToken,
     })
   }
 
-  const ws = new Workspace(resources, { mode: MountMode.WRITE })
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
 
   await demoOpfs(ws)
   if (trelloEnabled) {
@@ -384,7 +384,7 @@ async function main(): Promise<void> {
       line(`langfuse: ${msg}`, 'err')
     }
   }
-  if (githubEnabled && resources['/github/'] !== undefined) {
+  if (githubEnabled && mounts['/github/'] !== undefined) {
     try {
       await demoGitHub(ws)
     } catch (err) {

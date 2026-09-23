@@ -18,17 +18,16 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.notion import NotionConfig, NotionResource
+from mirage.vfs.notion import NotionConfig, NotionVFS
 
 load_dotenv(".env.development")
 
 config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
-resource = NotionResource(config=config)
+vfs = NotionVFS(config=config)
 
-with Workspace({
-        "/notion/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/notion/": Mount(vfs, mode=MountMode.READ,
+                       backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -60,6 +59,6 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes")

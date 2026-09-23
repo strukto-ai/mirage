@@ -37,7 +37,7 @@ from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED, OPEN_FOR_READING, TO_STDERR, TO_STDIN, TO_STDOUT)
 from mirage.workspace.executor.builtins.exec.exec import read_open_source
 from mirage.workspace.executor.create import create_file
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -68,12 +68,12 @@ class _Unreadable(Enum):
     TOKEN = auto()
 
 
-def _persistently_closed(session: Session) -> set[int]:
+def _persistently_closed(session: SessionState) -> set[int]:
     """The descriptors an ``exec`` closed for the shell, which a line's
     dup from refuses before the command runs.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     closed: set[int] = set()
     if session.exec_stdin_identity == CLOSED:
@@ -85,7 +85,7 @@ def _persistently_closed(session: Session) -> set[int]:
     return closed
 
 
-def _stdin_dest(session: Session) -> _Fd | str:
+def _stdin_dest(session: SessionState) -> _Fd | str:
     """Where a write through fd 0 lands, read off the shell's bindings.
 
     Its own read end, a closed descriptor and a file's read end take
@@ -95,7 +95,7 @@ def _stdin_dest(session: Session) -> _Fd | str:
     (`exec 0>f`) is the file.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     identity = session.exec_stdin_identity
     if (identity is None or identity == CLOSED
@@ -113,7 +113,7 @@ async def handle_redirect(
     dispatch,
     command: TSNodeLike | None,
     redirects: list[Redirect],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -220,6 +220,9 @@ async def handle_redirect(
         if r.kind == RedirectKind.STDIN:
             scope = _ensure_scope(r.target)
             try:
+                if scope.virtual == "/dev/stdin":
+                    inputs[r.fd] = inputs[FD_STDIN]
+                    continue
                 file_data, _ = await dispatch("read", scope)
             except FS_ERRORS as exc:
                 return _redirect_failure(scope, exc)
@@ -251,7 +254,7 @@ async def handle_redirect(
     # contents and nothing else, so a refused redirect still let `rm`
     # delete its own target -- and then the probe found nothing there
     # and did not even refuse.
-    refusal = await _noclobber_refusal(dispatch, session, redirects)
+    refusal = await _open_refusal(dispatch, session, redirects)
     if refusal is not None:
         return refusal
 
@@ -406,7 +409,7 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
     ``nosuchcmd: command not found`` (bash prints
     ``bash: line 1: nosuchcmd: command not found``) — ``bash:`` is bash's
     ``$0`` and mirage is not bash, and ``line N`` has no meaning for a
-    one-line ``Workspace.execute`` call.
+    one-line ``Workspace.shell`` call.
 
     The label is the target's own spelling, never the exception's message:
     backends raise write failures with prose in ``str(exc)`` (``parent
@@ -445,11 +448,11 @@ def _redirect_word(r: Redirect) -> str:
 
 def _redirect_failure(scope: PathSpec,
                       exc: OSError) -> tuple[None, IOResult, ExecutionNode]:
-    """Shell-attributed IOResult for a ``<`` source that cannot be read.
+    """Shell-attributed IOResult for a redirect target that cannot be opened.
 
     Args:
-        scope (PathSpec): The redirect source that could not be read.
-        exc (OSError): The filesystem error raised by the read.
+        scope (PathSpec): The redirect target that could not be opened.
+        exc (OSError): The filesystem error raised by the open.
     """
     return _shell_failure(_redirect_error_line(scope, exc))
 
@@ -471,12 +474,12 @@ def _shell_failure(line: bytes) -> tuple[None, IOResult, ExecutionNode]:
     return None, io, ExecutionNode(command="redirect", exit_code=1)
 
 
-async def _noclobber_refusal(
+async def _open_refusal(
     dispatch: DispatchFn,
-    session: Session,
+    session: SessionState,
     redirects: list[Redirect],
 ) -> tuple[None, IOResult, ExecutionNode] | None:
-    """Refuse the whole statement when `set -C` bars one of its opens.
+    """Refuse the whole statement when one of its opens cannot happen.
 
     Returned *instead of* running the command, because that is what bash
     does: it opens every redirect before it forks, so a refusal means
@@ -485,6 +488,16 @@ async def _noclobber_refusal(
     contents, and on `rm f > f` it did not even do that -- the command
     deleted its own target first, so the probe found nothing there and
     let the line succeed.
+
+    Two opens refuse. A target typed with a trailing slash is one
+    whatever is there: open(2) with O_CREAT answers `missing/` and
+    `reg/` alike with EISDIR before looking anything up, so bash prints
+    `missing/: Is a directory` and creates nothing, where writing the
+    normalized name would have left a regular file called `missing`.
+    That test is on the spelling alone and costs no round trip, which is
+    a deliberate divergence for a slashed target under a parent that is
+    itself absent: bash reports the parent first (ENOENT), this reads
+    `Is a directory` too. The other is `set -C`, described next.
 
     `set -C` refuses a truncating open onto anything that already exists
     -- an empty file counts, since the test is existence and not size --
@@ -501,12 +514,11 @@ async def _noclobber_refusal(
     pre-command snapshot passed both and wrote the output. `>>` and `>|`
     never refuse but do create, so they count as opens too.
 
-    The whole scan is skipped unless the option is on, so the ordinary
-    redirect path costs no extra round trip. That leaves
-    `> <a directory>` with the option off silently succeeding, which is
-    a separate pre-existing gap: GNU answers `Is a directory` and exit 1
-    whichever operator asked, and closing it means a stat on every
-    output redirect.
+    The stat is skipped unless the option is on, so the ordinary
+    redirect path costs no extra round trip. A directory typed without
+    a slash needs none here: the open itself answers `Is a directory`,
+    from the kernel on a real filesystem and from the store's own
+    directory table on a keyed one, and the write path renders it.
 
     Targets are stat'd through the op dispatcher rather than a backend,
     so a redirect that lands on another mount is answered by the mount
@@ -514,15 +526,14 @@ async def _noclobber_refusal(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): the session holding the shell options.
+        session (SessionState): the session holding the shell options.
         redirects (list[Redirect]): the statement's redirects, in the
             order they were written.
 
     Returns:
         The refusal result, or None when every open is allowed.
     """
-    if not session.shell_options.get("noclobber"):
-        return None
+    noclobber = bool(session.shell_options.get("noclobber"))
     opened: set[str] = set()
     pending: list[PathSpec] = []
     for r in redirects:
@@ -530,11 +541,16 @@ async def _noclobber_refusal(
                        RedirectKind.HERESTRING) or isinstance(r.target, int)):
             continue
         scope = _ensure_scope(r.target)
+        if scope.raw_path.endswith("/"):
+            earlier = await _apply_pending_opens(dispatch, pending)
+            if earlier is not None:
+                return earlier
+            return _shell_failure(
+                f"{scope.raw_path}: Is a directory\n".encode())
         path = scope.virtual
         is_dir = False
-        if path in opened:
-            exists = True
-        else:
+        exists = path in opened
+        if noclobber and not exists:
             try:
                 stat, _ = await dispatch("stat", scope)
             except FS_ERRORS as exc:
@@ -543,8 +559,10 @@ async def _noclobber_refusal(
                 stat = None
             exists = stat is not None
             is_dir = stat is not None and stat.type == FileType.DIRECTORY
-        if exists and not r.append and not r.clobber:
-            await _apply_pending_opens(dispatch, pending)
+        if noclobber and exists and not r.append and not r.clobber:
+            earlier = await _apply_pending_opens(dispatch, pending)
+            if earlier is not None:
+                return earlier
             detail = ("Is a directory"
                       if is_dir else "cannot overwrite existing file")
             err = f"{scope.raw_path}: {detail}\n".encode()
@@ -552,14 +570,19 @@ async def _noclobber_refusal(
             return None, io, ExecutionNode(command="redirect", exit_code=1)
         # This open succeeds, so the target exists for every redirect
         # after it, and a truncating one leaves it empty to be found.
+        # Without the option nothing was stat'd, so an append target of
+        # unknown standing is not listed: pre-opening it with an empty
+        # write would truncate a file that is there.
         opened.add(path)
-        if not exists or not r.append:
+        if not r.append or (noclobber and not exists):
             pending.append(scope)
     return None
 
 
-async def _apply_pending_opens(dispatch: DispatchFn,
-                               pending: list[PathSpec]) -> None:
+async def _apply_pending_opens(
+    dispatch: DispatchFn,
+    pending: list[PathSpec],
+) -> tuple[None, IOResult, ExecutionNode] | None:
     """Apply the opens a refused statement already performed.
 
     bash opens redirects left to right, so the ones before the refused
@@ -568,22 +591,26 @@ async def _apply_pending_opens(dispatch: DispatchFn,
     targets the scan found absent, or opened for truncation, are listed,
     so an append onto an existing file keeps its bytes.
 
-    A write that fails is logged rather than raised: the failure belongs
-    to that earlier redirect, which bash would have reported instead of
-    the noclobber refusal, and inventing that error here would replace
-    the refusal the caller is about to return.
+    An earlier open that fails is the statement's refusal instead: bash
+    stops at the first open it cannot perform, so ``echo x > /nodir/f >
+    reg/`` reports ``/nodir/f: No such file or directory`` and never
+    reaches the slashed target, and the opens after the failed one are
+    not performed either.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
         pending (list[PathSpec]): targets to create or truncate, in the
             order they were opened.
+
+    Returns:
+        The earlier open's failure, or None when every open went through.
     """
     for scope in pending:
         try:
             await dispatch("write", scope, data=b"")
         except FS_ERRORS as exc:
-            logger.debug("noclobber pre-open write failed for %s: %s",
-                         scope.raw_path, exc)
+            return _redirect_failure(scope, exc)
+    return None
 
 
 async def _read_existing(dispatch, scope) -> bytes:

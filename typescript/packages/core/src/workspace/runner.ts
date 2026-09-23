@@ -35,7 +35,7 @@ import type { Workspace } from './workspace/workspace.ts'
  * ```ts
  * const runner = new WorkspaceRunner(new Workspace({ '/': ram }))
  * try {
- *   const result = await runner.call(runner.ws.execute('ls /'))
+ *   const result = await runner.call(runner.ws.shell('ls /'))
  * } finally {
  *   await runner.stop()
  * }
@@ -57,7 +57,7 @@ export class WorkspaceRunner {
    * single event loop interleaves this call with other work as usual.
    *
    * @param p a promise produced from the workspace API (e.g.
-   *   `runner.ws.execute('ls /')`).
+   *   `runner.ws.shell('ls /')`).
    */
   async call<T>(p: Promise<T>): Promise<T> {
     if (this.stopped) throw new Error('WorkspaceRunner is stopped')

@@ -20,7 +20,7 @@ import {
   resolveQdrantConfig,
   type QdrantConfig,
   type QdrantConfigResolved,
-} from '../../resource/qdrant/config.ts'
+} from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import { INVALID, ROOT, makeDetectScope, type DetectFn } from '../hierarchy/scope.ts'
 import { detectFor, filtersOf, scopesFor, tableOf } from './scope.ts'
@@ -44,7 +44,7 @@ function detect(c: QdrantConfigResolved): DetectFn {
 }
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p })
+  return new PathSpec({ vfsPath: stripSlash(p), virtual: p, directory: p })
 }
 
 describe('qdrant scope', () => {

@@ -24,7 +24,7 @@ from mirage.types import ContentType, FileStat, FileType, PathSpec
 def _spec(virtual: str, raw_path: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0] or "/",
-                    resource_path=virtual.lstrip("/"),
+                    vfs_path=virtual.lstrip("/"),
                     raw_path=raw_path)
 
 

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { posix } from 'node:path'
-import { sizesAlwaysKnown } from '@struktoai/mirage-core/resource/base'
+import { sizesAlwaysKnown } from '@struktoai/mirage-core/vfs/base'
 import { KERNEL_BACKENDS, MountBackend, MountMode } from '@struktoai/mirage-core/types'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -34,7 +34,7 @@ export const FSKIT_MOUNT_ROOT = '/Volumes'
  * this function to reinterpret an absent value.
  */
 export function resolveBackend(value?: string | null): MountBackend {
-  if (value === undefined || value === null || value === '') return MountBackend.VFS
+  if (value === undefined || value === null || value === '') return MountBackend.WORKSPACE
   const lowered = value.toLowerCase() as MountBackend
   if (!Object.values(MountBackend).includes(lowered)) {
     throw new Error(
@@ -95,7 +95,7 @@ export function unsizedMounts(ws: Workspace, rootPrefix = ''): [string, string][
   for (const m of ws.mounts()) {
     const bare = rstripSlash(m.prefix)
     if (root !== '' && bare !== root && !m.prefix.startsWith(root + '/')) continue
-    if (!sizesAlwaysKnown(m.resource)) found.push([m.prefix, m.resource.kind])
+    if (!sizesAlwaysKnown(m.vfs)) found.push([m.prefix, m.vfs.kind])
   }
   return found
 }
@@ -104,7 +104,7 @@ export function unsizedMounts(ws: Workspace, rootPrefix = ''): [string, string][
  * Warn when an fskit mount will serve size-unknown files as empty.
  *
  * FSKit drives reads from the size the filesystem reports and has no
- * `direct_io` escape hatch, so a resource that cannot size a file without
+ * `direct_io` escape hatch, so a VFS that cannot size a file without
  * fetching it reports 0, the kernel issues no reads, and every such file
  * comes back empty with exit code 0 (verified on a live fskit mount: the
  * read clamp is pinned at lookup-time size and never refreshed). The mount
@@ -117,9 +117,9 @@ export function checkSizes(backend: MountBackend, ws: Workspace, rootPrefix = ''
   if (offenders.length === 0) return
   const listed = offenders.map(([prefix, kind]) => `${prefix} (${kind})`).join(', ')
   console.warn(
-    'mirage: the fskit mount backend cannot serve resources whose file sizes are only known ' +
+    'mirage: the fskit mount backend cannot serve mounts whose file sizes are only known ' +
       `after a read; size-unknown files under these mounts will read as empty: ${listed}. ` +
-      "Mount them with backend 'fuse', or scope the fskit mount to a byte-store resource " +
+      "Mount them with backend 'fuse', or scope the fskit mount to a byte-store VFS " +
       '(ram, disk, redis, s3, gridfs).',
   )
 }
@@ -134,7 +134,7 @@ export function writableMounts(ws: Workspace, rootPrefix = ''): [string, string]
   for (const m of ws.mounts()) {
     const bare = rstripSlash(m.prefix)
     if (root !== '' && bare !== root && !m.prefix.startsWith(root + '/')) continue
-    if (m.mode !== MountMode.READ) found.push([m.prefix, m.resource.kind])
+    if (m.mode !== MountMode.READ) found.push([m.prefix, m.vfs.kind])
   }
   return found
 }

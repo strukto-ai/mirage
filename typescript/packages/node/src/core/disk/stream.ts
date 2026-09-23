@@ -15,7 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { createReadStream } from 'node:fs'
 import { recordStream } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import { resolveSafe } from './utils.ts'
@@ -23,7 +23,7 @@ import { resolveSafe } from './utils.ts'
 export async function* stream(accessor: DiskAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
   const virtual = path.mountPath
   const full = resolveSafe(accessor.root, virtual)
-  const rec = recordStream('read', virtual, ResourceName.DISK)
+  const rec = recordStream('read', virtual, VFSName.DISK)
   const rs = createReadStream(full, { highWaterMark: 65536 })
   try {
     for await (const chunk of rs) {

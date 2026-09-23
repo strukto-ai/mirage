@@ -14,7 +14,7 @@
 
 import pytest
 
-from .conftest import make_resource_ws, run, run_exit
+from .conftest import make_vfs_ws, run, run_exit
 
 FILES = {
     "logs/app.log": (b"2026-01-01 INFO startup\n"
@@ -47,7 +47,7 @@ FILES = {
 
 @pytest.fixture(params=["ram", "s3", "disk"])
 def ws(request, tmp_path):
-    yield from make_resource_ws(request, tmp_path, FILES)
+    yield from make_vfs_ws(request, tmp_path, FILES)
 
 
 # ---------------------------------------------------------------------------

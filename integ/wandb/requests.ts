@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { Kind, parse, visit } from 'graphql'
 import { Workspace } from '../../typescript/packages/core/src/workspace/workspace/workspace.ts'
 import { getTestParser } from '../../typescript/packages/core/src/workspace/fixtures/workspace_fixture.ts'
-import { WandbResource } from '../../typescript/packages/core/src/resource/wandb/wandb.ts'
+import { WandbVFS } from '../../typescript/packages/core/src/vfs/wandb/wandb.ts'
 import { normalizeWandbConfig } from '../../typescript/packages/core/src/core/wandb/config.ts'
 import { MountMode } from '../../typescript/packages/core/src/types.ts'
 import type { RequestRecord, startWandb } from '../server/wandb/fake.ts'
@@ -91,7 +91,7 @@ export function checkRequests(results: RequestResult[], language: string): void 
 export async function requestChecks(server: Awaited<ReturnType<typeof startWandb>>): Promise<void> {
   const results: RequestResult[] = []
   for (const scenario of scenarios) {
-    const resource = new WandbResource(
+    const vfs = new WandbVFS(
       normalizeWandbConfig({
         entities: ['lab'],
         api_key: API_KEY,
@@ -99,7 +99,7 @@ export async function requestChecks(server: Awaited<ReturnType<typeof startWandb
       }),
     )
     const ws = new Workspace(
-      { '/wandb': resource },
+      { '/wandb': vfs },
       {
         mode: MountMode.READ,
         shellParser: await getTestParser(),
@@ -107,9 +107,9 @@ export async function requestChecks(server: Awaited<ReturnType<typeof startWandb
     )
     try {
       for (const step of scenario.steps) {
-        if (step.invalidate) await resource.index.invalidate()
+        if (step.invalidate) await vfs.index.invalidate()
         const start = server.requests.length
-        const result = await ws.execute(step.command)
+        const result = await ws.shell(step.command)
         results.push({ exit_code: result.exitCode, requests: server.requests.slice(start) })
       }
     } finally {

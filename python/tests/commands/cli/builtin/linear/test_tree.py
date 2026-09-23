@@ -91,6 +91,6 @@ def test_issue_operand_is_positional():
 async def test_missing_required_team_flag_exits_2():
     ws = Workspace({})
     ws.register_cli("linear", LINEAR, CONFIG)
-    io = await ws.execute("linear issue list")
+    io = await ws.shell("linear issue list")
     assert io.exit_code == 2
     await ws.close()

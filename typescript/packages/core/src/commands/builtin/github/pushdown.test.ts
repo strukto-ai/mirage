@@ -70,7 +70,7 @@ function subdir(): PathSpec {
   return new PathSpec({
     virtual: '/src',
     directory: '/src',
-    resourcePath: 'src',
+    vfsPath: 'src',
     resolved: false,
   })
 }

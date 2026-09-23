@@ -68,14 +68,14 @@ def test_virtual_key_for_prefixed():
 
 
 def test_virtual_key_for_root():
-    path = PathSpec(resource_path=mount_key("/knowledge", "/knowledge"),
+    path = PathSpec(vfs_path=mount_key("/knowledge", "/knowledge"),
                     virtual="/knowledge",
                     directory="/knowledge")
     assert virtual_key_for(path) == "/knowledge"
 
 
 def test_virtual_key_for_unprefixed():
-    path = PathSpec(resource_path="guides/quickstart",
+    path = PathSpec(vfs_path="guides/quickstart",
                     virtual="/guides/quickstart",
                     directory="/guides")
     assert virtual_key_for(path) == "/guides/quickstart"

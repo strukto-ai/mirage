@@ -14,7 +14,7 @@
 
 import { detectScope } from '../../../core/postgres/scope.ts'
 import { SEARCHERS } from '../../../core/postgres/search.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { makeSearch } from '../generic_bind/search.ts'
@@ -26,7 +26,7 @@ import { POSTGRES_IO } from './io.ts'
 // multi-operand line and every shaping flag to the generic scan.
 export const POSTGRES_GREP = command({
   name: 'grep',
-  resource: ResourceName.POSTGRES,
+  vfs: VFSName.POSTGRES,
   spec: specOf('grep'),
   fn: makeSearch('grep', detectScope, SEARCHERS, POSTGRES_IO, {
     qualify: literalPushdownOperand,

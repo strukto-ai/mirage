@@ -37,14 +37,11 @@ def _patch_read(monkeypatch):
 
 
 def _root() -> PathSpec:
-    return PathSpec(resource_path="",
-                    virtual="/",
-                    directory="/",
-                    resolved=False)
+    return PathSpec(vfs_path="", virtual="/", directory="/", resolved=False)
 
 
 def _subdir() -> PathSpec:
-    return PathSpec(resource_path="src",
+    return PathSpec(vfs_path="src",
                     virtual="/src",
                     directory="/src",
                     resolved=False)
@@ -55,11 +52,11 @@ async def test_rg_root_large_tree_uses_search(mock_github_api, github_env,
                                               monkeypatch):
     accessor, index = github_env
     narrowed = [
-        PathSpec(resource_path="src/main.py",
+        PathSpec(vfs_path="src/main.py",
                  virtual="/src/main.py",
                  directory="",
                  resolved=True),
-        PathSpec(resource_path="src/utils.py",
+        PathSpec(vfs_path="src/utils.py",
                  virtual="/src/utils.py",
                  directory="",
                  resolved=True),

@@ -113,7 +113,7 @@ class CommandOpts:
         flags (Mapping[str, FlagValue]): The parsed command-line flag
             bag — only real flags, no injected context.
         cwd (PathSpec): The session's working directory, promoted by the
-            dispatcher — the mount-relative key rides ``resource_path``
+            dispatcher — the mount-relative key rides ``vfs_path``
             for operand defaulting. Always a PathSpec (the TS twin keeps
             a string and threads ``mount_prefix`` instead).
         mount_prefix (str): The owning mount's prefix, for commands that
@@ -464,7 +464,7 @@ _UNSET = _Unset()
 class RegisteredCommand:
     name: str
     spec: CommandSpec
-    resource: str | None
+    vfs: str | None
     filetype: str | None
     fn: CommandFn
     provision_fn: ProvisionFn | None = None
@@ -492,7 +492,7 @@ class RegisteredCommand:
 def command(
     name: str,
     *,
-    resource: str | list[str] | None,
+    vfs: str | list[str] | None,
     spec: CommandSpec,
     filetype: str | None = None,
     provision: Callable[..., Any] | None = None,
@@ -503,18 +503,18 @@ def command(
 ) -> Callable[..., Any]:
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        resources = (resource if isinstance(resource, list) else [resource])
+        vfs_names = (vfs if isinstance(vfs, list) else [vfs])
         new_spec, wrapped_fn = _with_help_support(name, spec, fn)
         provision_fn = cast(ProvisionFn | None, provision or dry_run)
         # functools.wraps copies function attributes by reference. Copy the
         # registration list before extending it so wrapping a builtin cannot
         # add registrations to the shared backend command.
         cmds = list(getattr(wrapped_fn, "_registered_commands", []))
-        for p in resources:
+        for p in vfs_names:
             rc = RegisteredCommand(
                 name=name,
                 spec=new_spec,
-                resource=p,
+                vfs=p,
                 filetype=filetype,
                 fn=wrapped_fn,
                 provision_fn=provision_fn,
@@ -541,7 +541,7 @@ def cross_command(
         rc = RegisteredCommand(
             name=name,
             spec=spec,
-            resource=f"{src}->{dst}",
+            vfs=f"{src}->{dst}",
             filetype=None,
             fn=cast(CommandFn, fn),
             src=src,

@@ -14,12 +14,12 @@
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 
 
 async def _ws() -> Workspace:
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("mkdir -p /data; printf a > /data/a.txt")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /data; printf a > /data/a.txt")
     return ws
 
 
@@ -34,17 +34,17 @@ async def _ws() -> Workspace:
 ])
 async def test_descriptor_above_two_is_refused_and_touches_nothing(line):
     ws = await _ws()
-    io = await ws.execute(f"{line}; echo code=$?")
+    io = await ws.shell(f"{line}; echo code=$?")
     assert await io.stderr_str() == "3: Bad file descriptor\n"
     assert await io.stdout_str() == "code=1\n"
-    listing = await ws.execute("ls /data")
+    listing = await ws.shell("ls /data")
     assert await listing.stdout_str() == "a.txt\n"
 
 
 @pytest.mark.asyncio
 async def test_bad_descriptor_short_circuits_like_a_shell_error():
     ws = await _ws()
-    io = await ws.execute("echo x >&3 && echo and || echo or")
+    io = await ws.shell("echo x >&3 && echo and || echo or")
     assert await io.stdout_str() == "or\n"
 
 
@@ -52,15 +52,15 @@ async def test_bad_descriptor_short_circuits_like_a_shell_error():
 async def test_exec_redirect_refusal_leaves_the_shell_streams_alone():
     ws = await _ws()
     ws.create_session("s")
-    await ws.execute("exec 3>&-", session_id="s")
-    io = await ws.execute("echo still", session_id="s")
+    await ws.shell("exec 3>&-", session_id="s")
+    io = await ws.shell("echo still", session_id="s")
     assert await io.stdout_str() == "still\n"
 
 
 @pytest.mark.asyncio
 async def test_closed_stdout_drops_output_and_reports_the_write():
     ws = await _ws()
-    io = await ws.execute("echo x >&-; echo code=$?")
+    io = await ws.shell("echo x >&-; echo code=$?")
     assert await io.stdout_str() == "code=1\n"
     assert await io.stderr_str() == "echo: write error: Bad file descriptor\n"
 
@@ -68,22 +68,22 @@ async def test_closed_stdout_drops_output_and_reports_the_write():
 @pytest.mark.asyncio
 async def test_closed_stderr_and_stdin_are_quiet():
     ws = await _ws()
-    io = await ws.execute("echo x 2>&-; echo code=$?")
+    io = await ws.shell("echo x 2>&-; echo code=$?")
     assert await io.stdout_str() == "x\ncode=0\n"
-    io = await ws.execute("cat /data/a.txt <&-; echo code=$?")
+    io = await ws.shell("cat /data/a.txt <&-; echo code=$?")
     assert await io.stdout_str() == "acode=0\n"
 
 
 @pytest.mark.asyncio
 async def test_a_numeric_target_is_routed_by_the_claimed_descriptor():
     ws = await _ws()
-    io = await ws.execute("cat /data/missing 2<&-; echo code=$?")
+    io = await ws.shell("cat /data/missing 2<&-; echo code=$?")
     assert await io.stdout_str() == "code=1\n"
     assert await io.stderr_str() == ""
-    io = await ws.execute("echo x 1<&-; echo code=$?")
+    io = await ws.shell("echo x 1<&-; echo code=$?")
     assert await io.stdout_str() == "code=1\n"
     assert await io.stderr_str() == "echo: write error: Bad file descriptor\n"
-    io = await ws.execute("cat /data/missing 2<&1; echo code=$?")
+    io = await ws.shell("cat /data/missing 2<&1; echo code=$?")
     assert await io.stdout_str() == (
         "cat: /data/missing: No such file or directory\ncode=1\n")
     assert await io.stderr_str() == ""
@@ -92,11 +92,11 @@ async def test_a_numeric_target_is_routed_by_the_claimed_descriptor():
 @pytest.mark.asyncio
 async def test_a_bare_zero_before_the_operator_is_the_descriptor():
     ws = await _ws()
-    io = await ws.execute("echo x 0>&-; echo code=$?")
+    io = await ws.shell("echo x 0>&-; echo code=$?")
     assert await io.stdout_str() == "x\ncode=0\n"
-    io = await ws.execute("cat 0</data/a.txt; echo code=$?")
+    io = await ws.shell("cat 0</data/a.txt; echo code=$?")
     assert await io.stdout_str() == "acode=0\n"
-    io = await ws.execute("echo 0 >&-; echo code=$?")
+    io = await ws.shell("echo 0 >&-; echo code=$?")
     assert await io.stdout_str() == "code=1\n"
     assert await io.stderr_str() == "echo: write error: Bad file descriptor\n"
 
@@ -104,17 +104,17 @@ async def test_a_bare_zero_before_the_operator_is_the_descriptor():
 @pytest.mark.asyncio
 async def test_exec_closes_by_the_claimed_descriptor():
     ws = await _ws()
-    io = await ws.execute("exec 2<&-; cat /data/missing; echo code=$?")
+    io = await ws.shell("exec 2<&-; cat /data/missing; echo code=$?")
     assert await io.stdout_str() == "code=1\n"
     assert await io.stderr_str() == ""
-    io = await ws.execute("exec 0>&-; echo x; echo code=$?")
+    io = await ws.shell("exec 0>&-; echo x; echo code=$?")
     assert await io.stdout_str() == "x\ncode=0\n"
 
 
 @pytest.mark.asyncio
 async def test_self_dups_change_nothing():
     ws = await _ws()
-    io = await ws.execute("echo x 1>&1; echo y 2>&2; cat <&0 </data/a.txt")
+    io = await ws.shell("echo x 1>&1; echo y 2>&2; cat <&0 </data/a.txt")
     assert await io.stdout_str() == "x\ny\na"
 
 
@@ -183,7 +183,7 @@ async def test_descriptor_zero_duplication_tracks_direction_and_order(
         line, out, err, code):
     ws = await _ws()
     try:
-        io = await ws.execute(line)
+        io = await ws.shell(line)
         assert (await io.stdout_str(), await
                 io.stderr_str(), io.exit_code) == (out, err, code)
     finally:

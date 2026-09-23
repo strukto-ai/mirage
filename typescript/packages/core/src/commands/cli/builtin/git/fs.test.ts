@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../../../io/types.ts'
 import { OpsRegistry } from '../../../../ops/registry.ts'
-import { RAMResource } from '../../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { gitFs } from './fs.ts'
@@ -56,9 +56,9 @@ beforeAll(async () => {
   const repo = join(tmp, 'repo')
   execFileSync('bash', [BUILDER, repo], { stdio: 'ignore' })
 
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(ram)
+  registry.registerVfs(ram)
   ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, ops: registry })
   // Copied into RAM rather than mounted from disk on purpose: a repository that
   // reads correctly out of a keyed store is proof the bridge goes through the

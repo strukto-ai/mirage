@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classCharacters } from '../../../utils/posix.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -32,7 +33,11 @@ function expandRanges(s: string): string {
   let out = ''
   let i = 0
   while (i < s.length) {
-    if (i + 2 < s.length && s[i + 1] === '-') {
+    if (s.startsWith('[:', i) && s.includes(':]', i + 2)) {
+      const end = s.indexOf(':]', i + 2)
+      out += classCharacters(s.slice(i + 2, end))
+      i = end + 2
+    } else if (i + 2 < s.length && s[i + 1] === '-') {
       const start = s.charCodeAt(i)
       const end = s.charCodeAt(i + 2)
       for (let c = start; c <= end; c++) out += String.fromCharCode(c)

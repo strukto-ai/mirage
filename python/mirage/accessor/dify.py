@@ -2,7 +2,7 @@ import aiohttp
 
 from mirage.accessor.base import SessionAccessor
 from mirage.concurrency import ConcurrencyLimiter
-from mirage.resource.dify.config import DifyConfig
+from mirage.vfs.dify.config import DifyConfig
 
 
 class DifyAccessor(SessionAccessor):

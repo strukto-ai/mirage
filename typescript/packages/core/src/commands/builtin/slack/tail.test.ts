@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeSlackTransport, makeFakeResource, seedChannel } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs, seedChannel } from './_test_util.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 const SLACK_TAIL = SLACK_COMMANDS.filter((c) => c.name === 'tail' && c.filetype == null)
@@ -32,8 +32,8 @@ async function runTail(
   const cmd = SLACK_TAIL[0]
   if (cmd === undefined) throw new Error('tail not registered')
   const transport = options.transport ?? new FakeSlackTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -71,10 +71,7 @@ describe('slack tail', () => {
           virtual: '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
           directory: '/mnt/slack/channels/general__C1/',
           resolved: false,
-          resourcePath: mountKey(
-            '/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
-            '/mnt/slack',
-          ),
+          vfsPath: mountKey('/mnt/slack/channels/general__C1/2024-01-01/chat.jsonl', '/mnt/slack'),
         }),
       ],
       { n: '2' },

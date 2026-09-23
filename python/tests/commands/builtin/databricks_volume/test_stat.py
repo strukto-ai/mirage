@@ -17,7 +17,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_stat_default_format(databricks_text_workspace):
-    io = await databricks_text_workspace.execute("stat /dbx/words.txt")
+    io = await databricks_text_workspace.shell("stat /dbx/words.txt")
 
     assert io.exit_code == 0
     out = io.stdout.decode()
@@ -27,8 +27,8 @@ async def test_stat_default_format(databricks_text_workspace):
 
 @pytest.mark.asyncio
 async def test_stat_custom_format(databricks_text_workspace):
-    io = await databricks_text_workspace.execute(
-        "stat -c '%n %s' /dbx/words.txt")
+    io = await databricks_text_workspace.shell("stat -c '%n %s' /dbx/words.txt"
+                                               )
 
     assert io.exit_code == 0
     assert io.stdout.decode().strip() == "/dbx/words.txt 17"
@@ -36,6 +36,6 @@ async def test_stat_custom_format(databricks_text_workspace):
 
 @pytest.mark.asyncio
 async def test_stat_missing_file_fails(databricks_text_workspace):
-    io = await databricks_text_workspace.execute("stat /dbx/missing.txt")
+    io = await databricks_text_workspace.shell("stat /dbx/missing.txt")
 
     assert io.exit_code != 0

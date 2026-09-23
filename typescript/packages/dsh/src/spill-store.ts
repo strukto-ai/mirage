@@ -130,10 +130,10 @@ export class MirageSpillStore extends SpillStore {
     const path = posix.join(dir, name)
     try {
       await ensureDirPath(
-        { exists: (p) => workspace.fs.exists(p), mkdir: (p) => workspace.fs.mkdir(p) },
+        { exists: (p) => workspace.vfs.exists(p), mkdir: (p) => workspace.vfs.mkdir(p) },
         dir,
       )
-      await workspace.fs.writeFile(path, input.content)
+      await workspace.vfs.writeFile(path, input.content)
     } catch (err) {
       // Rejecting is the contract: the spill policy keeps the inline
       // result on a failure, which is a bounded answer, where a locator

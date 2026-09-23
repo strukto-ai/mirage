@@ -4,7 +4,7 @@ from mirage.ops.registry import op
 from mirage.types import PathSpec
 
 
-@op("grep", resource="chroma")
+@op("grep", vfs="chroma")
 async def grep(
     accessor: ChromaAccessor,
     paths: list[PathSpec],

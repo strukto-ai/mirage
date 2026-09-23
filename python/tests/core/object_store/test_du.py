@@ -162,7 +162,7 @@ async def test_root_marker_never_becomes_its_own_child(accessor, warmup,
     store = FakeStore(objects)
     driver = make_driver(store)
     index = RAMIndexCacheStore()
-    root = PathSpec(virtual=virtual, directory=virtual, resource_path='')
+    root = PathSpec(virtual=virtual, directory=virtual, vfs_path='')
     find = make_find(driver)
     size = make_du_size(driver)
     expected = await find(accessor, root)

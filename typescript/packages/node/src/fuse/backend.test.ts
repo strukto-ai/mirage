@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountBackend, MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
@@ -31,10 +31,10 @@ import {
 
 describe('resolveBackend', () => {
   it.each([
-    [undefined, MountBackend.VFS],
-    [null, MountBackend.VFS],
-    ['', MountBackend.VFS],
-    ['vfs', MountBackend.VFS],
+    [undefined, MountBackend.WORKSPACE],
+    [null, MountBackend.WORKSPACE],
+    ['', MountBackend.WORKSPACE],
+    ['workspace', MountBackend.WORKSPACE],
     ['fuse', MountBackend.FUSE],
     ['fskit', MountBackend.FSKIT],
     ['FSKIT', MountBackend.FSKIT],
@@ -49,23 +49,23 @@ describe('resolveBackend', () => {
   it('offers no auto backend', () => {
     // Deliberate: auto-selecting fskit would silently break every API-backed
     // mount, so the only safe value is also the default.
-    expect(Object.values(MountBackend)).toEqual(['vfs', 'fuse', 'fskit'])
+    expect(Object.values(MountBackend)).toEqual(['workspace', 'fuse', 'fskit'])
   })
 
-  it('treats a missing value as vfs, never as a kernel mount', () => {
+  it('treats a missing value as workspace, never as a kernel mount', () => {
     // One meaning for "absent": the MountSpecOptions default, an absent YAML
-    // key, and undefined here all land on vfs.
-    expect(resolveBackend(undefined)).toBe(MountBackend.VFS)
+    // key, and undefined here all land on workspace.
+    expect(resolveBackend(undefined)).toBe(MountBackend.WORKSPACE)
   })
 
-  it('rejects vfs as a mount target via requireKernelBackend', () => {
+  it('rejects workspace as a mount target via requireKernelBackend', () => {
     expect(() => {
-      requireKernelBackend(MountBackend.VFS)
+      requireKernelBackend(MountBackend.WORKSPACE)
     }).toThrow(/does not register a mountpoint/)
   })
 
-  it('prepareBackend rejects vfs', () => {
-    expect(() => prepareBackend('vfs')).toThrow(/does not register a mountpoint/)
+  it('prepareBackend rejects workspace', () => {
+    expect(() => prepareBackend('workspace')).toThrow(/does not register a mountpoint/)
   })
 
   it('prepareBackend runs the fskit guards, so no mount path can skip them', () => {
@@ -73,7 +73,7 @@ describe('resolveBackend', () => {
     // mountpoint guard
     expect(() => prepareBackend('fskit', undefined, '/tmp/x')).toThrow(/only mounts under/)
     // size guard
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     expect(() => prepareBackend('fskit', ws, `${FSKIT_MOUNT_ROOT}/m`)).not.toThrow()
   })
 })
@@ -143,7 +143,7 @@ describe('checkMountpoint', () => {
 
 describe('unsizedMounts / checkSizes', () => {
   it('reports nothing for a byte-store workspace', () => {
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     expect(unsizedMounts(ws)).toEqual([])
     expect(() => {
       checkSizes(MountBackend.FSKIT, ws, '')
@@ -153,13 +153,13 @@ describe('unsizedMounts / checkSizes', () => {
   it('does not treat the always-mounted history view as size-unknown', () => {
     // /.bash_history renders from in-memory events, so it must not block a
     // root-scoped fskit mount.
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     const prefixes = unsizedMounts(ws).map(([prefix]) => prefix)
     expect(prefixes).not.toContain('/.bash_history/')
   })
 
   it('ignores the fuse backend entirely', () => {
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     expect(() => {
       checkSizes(MountBackend.FUSE, ws, '')
     }).not.toThrow()
@@ -167,7 +167,7 @@ describe('unsizedMounts / checkSizes', () => {
 
   it('scopes the check to the mount root prefix', () => {
     const ws = new Workspace(
-      { '/ram/': new RAMResource(), '/other/': new RAMResource() },
+      { '/ram/': new RAMVFS(), '/other/': new RAMVFS() },
       { mode: MountMode.WRITE },
     )
     expect(() => {
@@ -176,10 +176,10 @@ describe('unsizedMounts / checkSizes', () => {
   })
 
   it('warns for a size-unknown mount but lets it proceed', () => {
-    class UnsizedResource extends RAMResource {
+    class UnsizedVFS extends RAMVFS {
       override readonly sizesAlwaysKnown: boolean = false
     }
-    const ws = new Workspace({ '/api/': new UnsizedResource() }, { mode: MountMode.READ })
+    const ws = new Workspace({ '/api/': new UnsizedVFS() }, { mode: MountMode.READ })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
       expect(() => {
@@ -195,13 +195,13 @@ describe('unsizedMounts / checkSizes', () => {
   })
 
   it('writableMounts lists write-capable mounts', () => {
-    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const prefixes = writableMounts(ws, '').map(([prefix]) => prefix)
     expect(prefixes).toContain('/data/')
   })
 
   it('warns when an fskit mount accepts writes', () => {
-    const ws = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
       checkWrites(MountBackend.FSKIT, ws, '')
@@ -215,8 +215,8 @@ describe('unsizedMounts / checkSizes', () => {
   })
 
   it('write warning stays silent for read mounts and the fuse backend', () => {
-    const readOnly = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.READ })
-    const writable = new Workspace({ '/data/': new RAMResource() }, { mode: MountMode.WRITE })
+    const readOnly = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.READ })
+    const writable = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
       checkWrites(MountBackend.FSKIT, readOnly, '')

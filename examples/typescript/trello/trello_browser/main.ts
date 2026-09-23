@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { MountMode, TrelloResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, TrelloVFS, Workspace } from '@struktoai/mirage-browser'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
@@ -34,7 +34,7 @@ function buildConfig(): { apiKey: string; apiToken: string } {
 
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   if (r.exitCode !== 0 && r.stderrText !== '') {
     console.log(`  STDERR: ${r.stderrText.slice(0, 200)}`)
   }
@@ -46,10 +46,10 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const trello = new TrelloResource(buildConfig())
+  const trello = new TrelloVFS(buildConfig())
   const ws = new Workspace({ '/trello': trello }, { mode: MountMode.READ })
   try {
-    console.log('=== BROWSER MODE: TrelloResource → api.trello.com (direct, CORS) ===\n')
+    console.log('=== BROWSER MODE: TrelloVFS → api.trello.com (direct, CORS) ===\n')
 
     await run(ws, 'ls /trello/')
 

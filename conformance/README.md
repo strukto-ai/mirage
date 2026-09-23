@@ -89,7 +89,7 @@ expectations as the existing implementations:
 1. Add runner setup that constructs a fresh workspace and resets backend state
    between cases.
 
-1. For API-backed resources, use mocked clients with payloads shaped like real
+1. For API-backed mounts, use mocked clients with payloads shaped like real
    provider responses. Do not call live APIs from this suite.
 
 1. Add the backend to the applicable case matrices:

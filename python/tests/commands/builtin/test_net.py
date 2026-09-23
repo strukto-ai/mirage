@@ -17,11 +17,11 @@ import sys
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpResponse
 from mirage.commands.config import CommandOpts
-from mirage.resource.base import BaseResource
+from mirage.vfs.base import BaseVFS
 
 curl_mod = sys.modules["mirage.commands.builtin.general.curl"]
 wget_mod = sys.modules["mirage.commands.builtin.general.wget"]
@@ -63,9 +63,9 @@ def mock_http(monkeypatch):
 def multi_mount_ws():
     ws = Workspace(
         {
-            "/ram": (RAMResource(), MountMode.WRITE),
-            "/readonly": (RAMResource(), MountMode.READ),
-            "/nowrite": (BaseResource(), MountMode.WRITE),
+            "/ram": (RAMVFS(), MountMode.WRITE),
+            "/readonly": (RAMVFS(), MountMode.READ),
+            "/nowrite": (BaseVFS(), MountMode.WRITE),
         },
         mode=MountMode.WRITE,
     )
@@ -75,16 +75,16 @@ def multi_mount_ws():
 
 @pytest.mark.asyncio
 async def test_curl_o_persists_to_writable_mount(multi_mount_ws, mock_http):
-    io = await multi_mount_ws.execute(
+    io = await multi_mount_ws.shell(
         "curl -s https://x.test/file -o /ram/foo.bin")
     assert io.exit_code == 0
-    data = await multi_mount_ws.fs.read("/ram/foo.bin")
+    data = await multi_mount_ws.vfs.read("/ram/foo.bin")
     assert data == mock_http
 
 
 @pytest.mark.asyncio
 async def test_curl_o_readonly_mount_fails(multi_mount_ws, mock_http):
-    io = await multi_mount_ws.execute(
+    io = await multi_mount_ws.shell(
         "curl -sS https://x.test/file -o /readonly/foo.bin")
     assert io.exit_code == 23
     err = (io.stderr or b"").decode()
@@ -97,7 +97,7 @@ async def test_curl_o_missing_parent_dir_fails(multi_mount_ws, mock_http):
     # The virtual root catches any absolute path, so an unmounted target no
     # longer fails with "no mount"; it routes to the root and fails because
     # the parent directory does not exist there (no silent success).
-    io = await multi_mount_ws.execute(
+    io = await multi_mount_ws.shell(
         "curl -sS https://x.test/file -o /nope/foo.bin")
     assert io.exit_code == 23
     err = (io.stderr or b"").decode()
@@ -106,9 +106,8 @@ async def test_curl_o_missing_parent_dir_fails(multi_mount_ws, mock_http):
 
 
 @pytest.mark.asyncio
-async def test_curl_o_resource_without_write_op_fails(multi_mount_ws,
-                                                      mock_http):
-    io = await multi_mount_ws.execute(
+async def test_curl_o_vfs_without_write_op_fails(multi_mount_ws, mock_http):
+    io = await multi_mount_ws.shell(
         "curl -sS https://x.test/file -o /nowrite/foo.bin")
     assert io.exit_code == 23
     err = (io.stderr or b"").decode()
@@ -118,16 +117,16 @@ async def test_curl_o_resource_without_write_op_fails(multi_mount_ws,
 
 @pytest.mark.asyncio
 async def test_wget_O_persists_to_writable_mount(multi_mount_ws, mock_http):
-    io = await multi_mount_ws.execute(
+    io = await multi_mount_ws.shell(
         "wget -q -O /ram/wget.bin https://x.test/file")
     assert io.exit_code == 0
-    data = await multi_mount_ws.fs.read("/ram/wget.bin")
+    data = await multi_mount_ws.vfs.read("/ram/wget.bin")
     assert data == mock_http
 
 
 @pytest.mark.asyncio
 async def test_wget_O_readonly_mount_fails(multi_mount_ws, mock_http):
-    io = await multi_mount_ws.execute(
+    io = await multi_mount_ws.shell(
         "wget -O /readonly/wget.bin https://x.test/file")
     assert io.exit_code == 1
     err = (io.stderr or b"").decode()
@@ -171,7 +170,7 @@ def captured_headers(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_curl_sends_default_user_agent(multi_mount_ws, captured_headers):
-    io = await multi_mount_ws.execute("curl -s https://x.test/file")
+    io = await multi_mount_ws.shell("curl -s https://x.test/file")
     assert io.exit_code == 0
     assert captured_headers["headers"]["User-Agent"].startswith("Mozilla/5.0")
 
@@ -179,8 +178,8 @@ async def test_curl_sends_default_user_agent(multi_mount_ws, captured_headers):
 @pytest.mark.asyncio
 async def test_curl_A_flag_overrides_user_agent(multi_mount_ws,
                                                 captured_headers):
-    io = await multi_mount_ws.execute(
-        "curl -s -A my-agent/9 https://x.test/file")
+    io = await multi_mount_ws.shell("curl -s -A my-agent/9 https://x.test/file"
+                                    )
     assert io.exit_code == 0
     assert captured_headers["headers"]["User-Agent"] == "my-agent/9"
 
@@ -188,7 +187,7 @@ async def test_curl_A_flag_overrides_user_agent(multi_mount_ws,
 @pytest.mark.asyncio
 async def test_curl_H_user_agent_overrides_default(multi_mount_ws,
                                                    captured_headers):
-    io = await multi_mount_ws.execute(
+    io = await multi_mount_ws.shell(
         "curl -s -H 'User-Agent: from-H/1' https://x.test/file")
     assert io.exit_code == 0
     assert captured_headers["headers"]["User-Agent"] == "from-H/1"

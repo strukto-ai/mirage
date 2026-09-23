@@ -23,14 +23,13 @@ from mirage.core.gcal.day import (WINDOW_AHEAD_DAYS, WINDOW_BACK_DAYS,
 from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ROOT
 from mirage.core.render.json import compact_json_bytes
-from mirage.resource.gcal.event_entry import (CALENDAR_FILE, PRIMARY_DIR,
-                                              event_title,
-                                              make_calendar_dirname,
-                                              make_event_filename)
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.glob_walk import glob_span
 from mirage.utils.key_prefix import mount_prefix_of
+from mirage.vfs.gcal.event_entry import (CALENDAR_FILE, PRIMARY_DIR,
+                                         event_title, make_calendar_dirname,
+                                         make_event_filename)
 
 CALENDAR_DIR = "gcal/calendar_dir"
 CALENDAR_JSON = "gcal/calendar_json"
@@ -71,7 +70,7 @@ def normalize(path: PathSpec) -> tuple[str, str, str]:
     Returns:
         tuple[str, str, str]: prefix, key, virtual key.
     """
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     raw = path.directory if path.pattern else path.virtual
     if prefix and raw.startswith(prefix):
         rest = raw[len(prefix):]

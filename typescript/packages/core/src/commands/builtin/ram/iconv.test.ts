@@ -15,21 +15,21 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
 const RAM_ICONV = RAM_COMMANDS.filter((c) => c.name === 'iconv' && c.filetype == null)
 
 const ENC = new TextEncoder()
 
 async function runIconv(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
 ): Promise<{ out: Uint8Array; exitCode: number }> {
   const cmd = RAM_ICONV[0]
   if (cmd === undefined) throw new Error('iconv not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -48,9 +48,9 @@ async function runIconv(
 
 describe('iconv', () => {
   it('utf-8 to latin-1', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const input = ENC.encode('caf\u00e9\n')
-    const r = await runIconv(resource, [], { f: 'utf-8', t: 'latin-1' }, input)
+    const r = await runIconv(vfs, [], { f: 'utf-8', t: 'latin-1' }, input)
     expect(r.exitCode).toBe(0)
     const expected = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a])
     expect(Array.from(r.out)).toEqual(Array.from(expected))

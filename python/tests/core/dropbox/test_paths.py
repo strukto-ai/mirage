@@ -15,9 +15,9 @@
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.paths import dropbox_path_of
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 def make_accessor(root_path: str = "/") -> DropboxAccessor:
@@ -41,5 +41,5 @@ def test_subfolder_root_prefixes_api_path():
 def test_mount_prefix_is_stripped():
     spec = PathSpec(virtual="/dropbox/docs/a.txt",
                     directory="/dropbox/docs",
-                    resource_path=mount_key("/dropbox/docs/a.txt", "/dropbox"))
+                    vfs_path=mount_key("/dropbox/docs/a.txt", "/dropbox"))
     assert dropbox_path_of(make_accessor(), spec) == "/docs/a.txt"

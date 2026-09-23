@@ -49,41 +49,41 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     async def entries(self) -> dict[str, IndexEntry]:
         return dict(self._entries)
 
-    async def get(self, resource_path: str) -> LookupResult:
-        entry = self._entries.get(resource_path)
+    async def get(self, vfs_path: str) -> LookupResult:
+        entry = self._entries.get(vfs_path)
         if entry is None:
             return LookupResult(status=LookupStatus.NOT_FOUND)
         return LookupResult(entry=entry)
 
-    async def put(self, resource_path: str, entry: IndexEntry) -> None:
-        async with self._lock_for(resource_path):
+    async def put(self, vfs_path: str, entry: IndexEntry) -> None:
+        async with self._lock_for(vfs_path):
             if not entry.index_time:
                 entry = entry.model_copy(
                     update={
                         "index_time": to_iso_z(datetime.now(timezone.utc))
                     })
-            self._entries[resource_path] = entry
+            self._entries[vfs_path] = entry
 
-    async def list_dir(self, resource_path: str) -> ListResult:
-        exp = self._expiry.get(resource_path)
+    async def list_dir(self, vfs_path: str) -> ListResult:
+        exp = self._expiry.get(vfs_path)
         if exp is None:
             return ListResult(status=LookupStatus.NOT_FOUND)
         if datetime.now(timezone.utc) >= exp:
             return ListResult(status=LookupStatus.EXPIRED)
-        children = self._children.get(resource_path)
+        children = self._children.get(vfs_path)
         return ListResult(entries=children or [])
 
     async def set_dir(
         self,
-        resource_path: str,
+        vfs_path: str,
         entries: list[tuple[str, IndexEntry]],
         expired_at: datetime | None = None,
     ) -> None:
-        async with self._lock_for(resource_path):
+        async with self._lock_for(vfs_path):
             now = datetime.now(timezone.utc)
             exp = expired_at or (now + timedelta(seconds=self._ttl))
             now_iso = to_iso_z(now)
-            prefix = "/" if resource_path == "/" else resource_path + "/"
+            prefix = "/" if vfs_path == "/" else vfs_path + "/"
             child_keys: list[str] = []
             for name, entry in entries:
                 full_path = prefix + name
@@ -91,27 +91,21 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                     entry = entry.model_copy(update={"index_time": now_iso})
                 self._entries[full_path] = entry
                 child_keys.append(full_path)
-            self._children[resource_path] = child_keys
-            self._expiry[resource_path] = exp
+            self._children[vfs_path] = child_keys
+            self._expiry[vfs_path] = exp
 
-    async def invalidate_dir(self, resource_path: str) -> None:
-        for child in self._children.get(resource_path, []):
+    async def invalidate_dir(self, vfs_path: str) -> None:
+        for child in self._children.get(vfs_path, []):
             self._entries.pop(child, None)
-        self._expiry.pop(resource_path, None)
-        self._children.pop(resource_path, None)
+        self._expiry.pop(vfs_path, None)
+        self._children.pop(vfs_path, None)
 
-    async def invalidate_prefix(self, resource_path: str) -> None:
-        for entry_key in [
-                k for k in self._entries if under_path(k, resource_path)
-        ]:
+    async def invalidate_prefix(self, vfs_path: str) -> None:
+        for entry_key in [k for k in self._entries if under_path(k, vfs_path)]:
             self._entries.pop(entry_key, None)
-        for dir_key in [
-                k for k in self._children if under_path(k, resource_path)
-        ]:
+        for dir_key in [k for k in self._children if under_path(k, vfs_path)]:
             self._children.pop(dir_key, None)
-        for exp_key in [
-                k for k in self._expiry if under_path(k, resource_path)
-        ]:
+        for exp_key in [k for k in self._expiry if under_path(k, vfs_path)]:
             self._expiry.pop(exp_key, None)
 
     async def invalidate(self) -> None:

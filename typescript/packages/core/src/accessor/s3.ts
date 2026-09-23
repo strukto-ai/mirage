@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import type { S3Config } from '../resource/s3/config.ts'
+import type { S3Config } from '../vfs/s3/config.ts'
 
 export class S3Accessor extends Accessor {
   readonly config: S3Config

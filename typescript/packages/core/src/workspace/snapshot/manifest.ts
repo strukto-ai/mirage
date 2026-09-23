@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '../../types.ts'
-import { CacheKey, JobKey, MountKey, ResourceStateKey, StateKey } from './keys.ts'
+import { VFSName } from '../../types.ts'
+import { CacheKey, JobKey, MountKey, VFSStateKey, StateKey } from './keys.ts'
 import { BLOB_REF_KEY, isSafeBlobPath } from './utils.ts'
 
 class BlobAllocator {
@@ -92,26 +92,26 @@ function jobToManifest(job: AnyDict, a: BlobAllocator): AnyDict {
 
 function mountToManifest(mount: AnyDict, a: BlobAllocator): AnyDict {
   const idx = mount[MountKey.INDEX] as number
-  const ps = { ...(mount[MountKey.RESOURCE_STATE] as AnyDict) }
-  const ptype = ps[ResourceStateKey.TYPE] as string
-  const files = (ps[ResourceStateKey.FILES] as Record<string, Uint8Array> | undefined) ?? {}
-  if (ptype === ResourceName.RAM) {
-    ps[ResourceStateKey.FILES] = stashBlobs(
+  const ps = { ...(mount[MountKey.VFS_STATE] as AnyDict) }
+  const ptype = ps[VFSStateKey.TYPE] as string
+  const files = (ps[VFSStateKey.FILES] as Record<string, Uint8Array> | undefined) ?? {}
+  if (ptype === VFSName.RAM) {
+    ps[VFSStateKey.FILES] = stashBlobs(
       files,
       a,
       `_ram${String(idx)}`,
       `mounts/${String(idx)}/files`,
     )
-  } else if (ptype === ResourceName.DISK) {
+  } else if (ptype === VFSName.DISK) {
     const newFiles: Record<string, AnyDict> = {}
     for (const [rel, data] of Object.entries(files)) {
       const tarPath = `mounts/${String(idx)}/files/${rel}`
       a.blobs[tarPath] = data
       newFiles[rel] = { [BLOB_REF_KEY]: tarPath }
     }
-    ps[ResourceStateKey.FILES] = newFiles
-  } else if (ptype === ResourceName.REDIS) {
-    ps[ResourceStateKey.FILES] = stashBlobs(
+    ps[VFSStateKey.FILES] = newFiles
+  } else if (ptype === VFSName.REDIS) {
+    ps[VFSStateKey.FILES] = stashBlobs(
       files,
       a,
       `_redis${String(idx)}`,
@@ -120,9 +120,9 @@ function mountToManifest(mount: AnyDict, a: BlobAllocator): AnyDict {
   }
   const out: AnyDict = {}
   for (const [k, v] of Object.entries(mount)) {
-    if (k !== MountKey.RESOURCE_STATE) out[k] = v
+    if (k !== MountKey.VFS_STATE) out[k] = v
   }
-  out[MountKey.RESOURCE_STATE] = ps
+  out[MountKey.VFS_STATE] = ps
   return out
 }
 

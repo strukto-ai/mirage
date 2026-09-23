@@ -69,7 +69,7 @@ def resolve_target(o: str | PathSpec, cwd: PathSpec | str | None) -> PathSpec:
         path = f"{base}/{o}" if base else f"/{o}"
     last_slash = path.rfind("/")
     directory = path[:last_slash + 1] if last_slash >= 0 else "/"
-    return PathSpec(resource_path=(path).strip("/"),
+    return PathSpec(vfs_path=(path).strip("/"),
                     virtual=path,
                     directory=directory,
                     resolved=True)
@@ -148,7 +148,7 @@ def _dump(lines: list[str], prefix: str = "") -> str:
     return "".join(f"{prefix}{line}{CRLF}" for line in [*lines, ""])
 
 
-@command("curl", resource=None, spec=SPECS["curl"])
+@command("curl", vfs=None, spec=SPECS["curl"])
 async def curl(
     accessor: Accessor,
     paths: list[PathSpec],

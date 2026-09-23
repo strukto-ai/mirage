@@ -5,8 +5,8 @@ from mirage.core.dev.constants import ZERO_CHUNK_SIZE
 from mirage.core.dev.read import read
 from mirage.core.dev.stat import stat
 from mirage.core.dev.stream import read_stream
-from mirage.resource.dev.dev import DevStore
 from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileType, PathSpec
+from mirage.vfs.dev.dev import DevStore
 
 
 def _accessor():
@@ -14,7 +14,7 @@ def _accessor():
 
 
 def _spec(name: str):
-    return PathSpec(resource_path=name.strip("/"),
+    return PathSpec(vfs_path=name.strip("/"),
                     virtual="/dev/" + name.strip("/"),
                     directory="/dev/" + name.strip("/"))
 

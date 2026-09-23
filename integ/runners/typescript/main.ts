@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { writeFileSync } from 'node:fs'
-import { ConsistencyPolicy } from '@struktoai/mirage-node'
+import { type ReadSpec } from '@struktoai/mirage-node'
+import { resolveReadSpec } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { ConcurrencyLimiter } from '@struktoai/mirage-core/concurrency/limiter'
 import { ADAPTERS, openConsistency } from './adapters/index.ts'
@@ -194,13 +195,13 @@ export async function runTarget(
   // A console block is only wired into the ram opener; refusing it
   // anywhere else keeps a silently RAM-consoled "redis console" target
   // from reading as covered.
-  if (target.console !== undefined && target.mounts[0].resource !== 'ram') {
+  if (target.console !== undefined && target.mounts[0].vfs !== 'ram') {
     throw new Error(`target ${target.id}: console targets ride ram mounts`)
   }
   // The secrets env block is wired into the ram opener alone, for the
   // console block's reason: a target that declares one on an opener
   // that drops it would run with no managed vars and read as covered.
-  if (target.secrets !== undefined && target.mounts[0].resource !== 'ram') {
+  if (target.secrets !== undefined && target.mounts[0].vfs !== 'ram') {
     throw new Error(`target ${target.id}: secrets targets ride ram mounts`)
   }
   // Profiles reach the workspace only through the openers that pass them
@@ -209,10 +210,10 @@ export async function runTarget(
   // such list because it builds every target's workspace in one place.
   const PROFILE_OPENERS = ['ram', 'disk', 'email']
   const declaresProfiles = target.profiles !== undefined || target.profile !== undefined
-  if (declaresProfiles && !PROFILE_OPENERS.includes(target.mounts[0].resource)) {
+  if (declaresProfiles && !PROFILE_OPENERS.includes(target.mounts[0].vfs)) {
     throw new Error(`target ${target.id}: profiles ride ${PROFILE_OPENERS.join(', ')} mounts`)
   }
-  const { ws, cleanup } = await ADAPTERS[target.mounts[0].resource](target)
+  const { ws, cleanup } = await ADAPTERS[target.mounts[0].vfs](target)
   try {
     // A target's declared environment. A CLI whose spec reads a variable
     // (ntn's --notion-version off NOTION_API_VERSION) behaves differently with
@@ -259,7 +260,7 @@ export async function runTarget(
     const reasons = ruleReasons({ profiles: target.profiles, sessions: target.sessions })
     for (const c of cases) {
       if (!c.targets.includes(target.id)) continue
-      if (c.consistency !== undefined) continue
+      if (c.read !== undefined) continue
       const bound = bindMount(c, target.mounts[0].path)
       const { exitCode, out, err, elapsed, checkOut, notes } = await runCase(ws, bound, reasons)
       if (emit !== null) {
@@ -283,16 +284,19 @@ export async function runTarget(
     await cleanup()
   }
   const scenarios = cases.filter(
-    (c) => c.targets.includes(target.id) && c.consistency !== undefined && c.scenario !== undefined,
+    (c) => c.targets.includes(target.id) && c.read !== undefined && c.scenario !== undefined,
   )
   for (const c of scenarios) {
-    const policy = c.consistency === 'always' ? ConsistencyPolicy.ALWAYS : ConsistencyPolicy.LAZY
-    const opened = await openConsistency(target, policy)
+    // Through the coercer, not a ternary: a typo'd or future policy name
+    // would otherwise run the bounded scenario and report it green, which
+    // is the silent downgrade this suite exists to catch.
+    const spec: ReadSpec = resolveReadSpec(c.read, c.ttl)
+    const opened = await openConsistency(target, spec)
     if (opened === null) {
       // Loud on purpose: an adapter that cannot build a shadow workspace used
       // to drop every scenario case for its target without a word.
       process.stderr.write(
-        `skip [${target.id}] ${c.id}: ${target.mounts[0].resource} adapter has no shadow workspace\n`,
+        `skip [${target.id}] ${c.id}: ${target.mounts[0].vfs} adapter has no shadow workspace\n`,
       )
       continue
     }
@@ -349,7 +353,7 @@ async function main(): Promise<void> {
       process.stderr.write(`skip [${id}]: not a typescript host\n`)
       continue
     }
-    if (!(target.mounts[0].resource in ADAPTERS)) {
+    if (!(target.mounts[0].vfs in ADAPTERS)) {
       process.stderr.write(`skip [${id}]: no typescript adapter\n`)
       continue
     }

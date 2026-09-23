@@ -265,7 +265,7 @@ async def test_an_unpinned_mount_reads_the_repos_default_branch(
     straight sends `ref=None` to the one request the whole mount is built
     on. This pins the resolution, not the config default -- the mount that
     supplies the default lives a layer up, in
-    tests/resource/github/test_lazy_hydration.py.
+    tests/vfs/github/test_lazy_hydration.py.
     """
     mock_repo_get.return_value = {"default_branch": "master"}
     mock_tree_get.return_value = {"truncated": False, "tree": []}

@@ -18,7 +18,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_workspace_execute_databricks_volume_nl(
         databricks_text_workspace):
-    io = await databricks_text_workspace.execute("nl /dbx/words.txt")
+    io = await databricks_text_workspace.shell("nl /dbx/words.txt")
 
     assert io.exit_code == 0
     assert b"     1\tbeta\n" in io.stdout
@@ -27,7 +27,7 @@ async def test_workspace_execute_databricks_volume_nl(
 @pytest.mark.asyncio
 async def test_workspace_execute_databricks_volume_nl_resolves_glob(
         databricks_text_workspace):
-    io = await databricks_text_workspace.execute("nl /dbx/*.txt")
+    io = await databricks_text_workspace.shell("nl /dbx/*.txt")
 
     assert io.exit_code == 0
     assert b"     1\tdelta\n" in io.stdout

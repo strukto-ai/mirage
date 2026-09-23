@@ -17,9 +17,9 @@ different decision, made by the [route policy](/home/route-policy).)
 mode: WRITE
 mounts:
   /repo:
-    resource: ram
+    vfs: ram
   /vault:
-    resource: ram
+    vfs: ram
 
 profiles:
   guarded:
@@ -53,20 +53,29 @@ In code, the same two doors: `Workspace(mounts, profiles=...)` and
 A session that names no profile runs under `profiles.default` when the
 workspace defines one, and unrestricted otherwise; the workspace's own
 default session follows the same rule, so a `default` profile governs
-bare `ws.execute(...)` too, and the op door with it: `ws.fs`,
+bare `ws.shell(...)` too, and the op door with it: `ws.vfs`,
 `ws.dispatch`, `ws.stat` and `ws.readdir` read and write as the default
-session, so an agent whose file tool goes through `ws.fs` is confined
-the way its shell is, and a kernel mount built on `ws.fs` likewise.
-`ws.fs.for_session("agent_a")` (`ws.fs.forSession('agent_a')`) is the
-same door as a named session, and `ws.session("agent_a", profile="guarded")`
+session, so an agent whose file tool goes through `ws.vfs` is confined
+the way its shell is, and a kernel mount built on `ws.vfs` likewise.
+`ws.session("agent_a", profile="guarded")`
 (`ws.session('agent_a', { profile: 'guarded' })`) hands back both doors
-bound to one session: `handle.execute(line)` and `handle.fs.read(path)`
+bound to one session: `handle.shell(line)` and `handle.vfs.read(path)`
 answer under the same profile, so one object per agent is enough. It
 creates the session when the id is new and adopts it as is otherwise;
 a profile for an existing session is refused, since a profile is set
 once. A session that names an explicit empty profile (`profile={}`)
 hides nothing, which is how a host seeds what the default profile
-hides.
+hides. `Session(ws, "agent_a")` is the same pair for a session
+that already exists, since it adopts rather than creates.
+
+Naming a session per call is the other half, and one rule decides
+between them: **a shell line sets the session, an op inherits it.**
+`ws.shell(line, session_id="agent_a")` runs that line as that session.
+`ws.vfs.read(path, session_id="agent_a")` (`ws.vfs.readFile(path, {},
+'agent_a')`) reads as it too, but only when no line is already running:
+inside a command handler, a runtime callback or a kernel mount, the
+line's own session wins, so a handler reaching this door can never
+widen the view it was given.
 
 ## Two axes and a hider
 

@@ -25,9 +25,9 @@ from mirage.agents.openai_agents import (
     MirageShellExecutor,
     build_system_prompt,
 )
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
-ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 agent = Agent(
     name="Mirage RAM Agent",
@@ -58,7 +58,7 @@ agent = SandboxAgent(name="...", model="gpt-5.5", instructions=ws.file_prompt)
 
 | Symbol | Purpose |
 | --- | --- |
-| `MirageShellExecutor` | Drop-in `ShellTool` executor, runs inside `Workspace.execute()`. |
+| `MirageShellExecutor` | Drop-in `ShellTool` executor, runs inside `Workspace.shell()`. |
 | `MirageEditor` | Drop-in `ApplyPatchTool` editor, patches go through Mirage FS ops. |
 | `MirageSandboxClient` | Adapter for `agents.sandbox.SandboxAgent`. |
 | `MirageSandboxSession` | Per-conversation session bound to a workspace. |

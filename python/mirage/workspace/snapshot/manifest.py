@@ -14,9 +14,9 @@
 
 from typing import Any
 
-from mirage.types import ResourceName
+from mirage.types import VFSName
 from mirage.workspace.snapshot.keys import (CacheKey, JobKey, MountKey,
-                                            ResourceStateKey, StateKey)
+                                            StateKey, VFSStateKey)
 from mirage.workspace.snapshot.utils import BLOB_REF_KEY, is_safe_blob_path
 
 
@@ -114,30 +114,32 @@ def _job_to_manifest(job: dict[str, Any], a: _BlobAllocator) -> dict[str, Any]:
 def _mount_to_manifest(mount: dict[str, Any],
                        a: _BlobAllocator) -> dict[str, Any]:
     idx = mount[MountKey.INDEX]
-    ps = dict(mount[MountKey.RESOURCE_STATE])
-    ptype = ps.get(ResourceStateKey.TYPE, "")
-    files = ps.get(ResourceStateKey.FILES, {})
-    if ptype == ResourceName.RAM:
-        ps[ResourceStateKey.FILES] = _stash_blobs(
-            files, a, f"_ram{idx}", tar_dir=f"mounts/{idx}/files")
-    elif ptype == ResourceName.DISK:
+    ps = dict(mount[MountKey.VFS_STATE])
+    ptype = ps.get(VFSStateKey.TYPE, "")
+    files = ps.get(VFSStateKey.FILES, {})
+    if ptype == VFSName.RAM:
+        ps[VFSStateKey.FILES] = _stash_blobs(files,
+                                             a,
+                                             f"_ram{idx}",
+                                             tar_dir=f"mounts/{idx}/files")
+    elif ptype == VFSName.DISK:
         # tree-preserving: real files at their relative paths
         new_files: dict[str, dict[str, Any]] = {}
         for rel, data in files.items():
             tar_path = f"mounts/{idx}/files/{rel}"
             a.blobs[tar_path] = data
             new_files[rel] = {BLOB_REF_KEY: tar_path}
-        ps[ResourceStateKey.FILES] = new_files
-    elif ptype == ResourceName.REDIS:
-        ps[ResourceStateKey.FILES] = _stash_blobs(files,
-                                                  a,
-                                                  f"_redis{idx}",
-                                                  tar_dir=f"mounts/{idx}/data")
+        ps[VFSStateKey.FILES] = new_files
+    elif ptype == VFSName.REDIS:
+        ps[VFSStateKey.FILES] = _stash_blobs(files,
+                                             a,
+                                             f"_redis{idx}",
+                                             tar_dir=f"mounts/{idx}/data")
     return {
         **{
             k: v
-            for k, v in mount.items() if k != MountKey.RESOURCE_STATE
-        }, MountKey.RESOURCE_STATE: ps
+            for k, v in mount.items() if k != MountKey.VFS_STATE
+        }, MountKey.VFS_STATE: ps
     }
 
 

@@ -22,7 +22,7 @@ from mirage.workspace.snapshot.manifest import (resolve_manifest,
                                                 split_manifest_and_blobs)
 from mirage.workspace.snapshot.state import (apply_state_dict,
                                              build_mount_args,
-                                             requires_resource_override,
+                                             requires_vfs_override,
                                              to_state_dict)
 from mirage.workspace.snapshot.tar_io import read_tar, write_tar
 from mirage.workspace.snapshot.utils import (BLOB_REF_KEY, FORMAT_VERSION,
@@ -33,7 +33,7 @@ __all__ = [
     "snapshot",
     "to_state_dict",
     "build_mount_args",
-    "requires_resource_override",
+    "requires_vfs_override",
     "apply_state_dict",
     "MountArgs",
     "split_manifest_and_blobs",

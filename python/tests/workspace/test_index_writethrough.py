@@ -14,13 +14,13 @@
 
 import asyncio
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
-class _FakeRemote(RAMResource):
+class _FakeRemote(RAMVFS):
     caches_reads = True
     index_ttl = 600
 
@@ -39,7 +39,7 @@ def test_dispatch_write_invalidates_parent_dir_index():
     async def run():
         before = await ws.readdir("/r/data")
         scope = PathSpec(
-            resource_path=mount_key("/r/data/b.txt", "/r"),
+            vfs_path=mount_key("/r/data/b.txt", "/r"),
             virtual="/r/data/b.txt",
             directory="/r/data",
             resolved=True,
@@ -63,7 +63,7 @@ def test_dispatch_unlink_invalidates_parent_dir_index():
     async def run():
         before = await ws.readdir("/r/data")
         scope = PathSpec(
-            resource_path=mount_key("/r/data/c.txt", "/r"),
+            vfs_path=mount_key("/r/data/c.txt", "/r"),
             virtual="/r/data/c.txt",
             directory="/r/data",
             resolved=True,

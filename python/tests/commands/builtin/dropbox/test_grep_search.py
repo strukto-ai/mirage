@@ -22,8 +22,8 @@ from mirage.commands.builtin.dropbox.grep import grep
 from mirage.commands.config import CommandOpts
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.io.types import IOResult
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
+from mirage.vfs.dropbox.config import DropboxConfig
 
 _GLOBALS = grep.__wrapped__.__globals__
 
@@ -37,7 +37,7 @@ def make_accessor() -> DropboxAccessor:
 
 
 def scope() -> PathSpec:
-    return PathSpec(resource_path="", virtual="/data", directory="/data")
+    return PathSpec(vfs_path="", virtual="/data", directory="/data")
 
 
 @pytest.fixture
@@ -91,7 +91,7 @@ async def test_count_forces_the_full_walk(harness, index):
 async def test_narrowed_files_reach_the_generic_grep(harness, index):
     narrow, generic = harness
     hits = [
-        PathSpec(resource_path="a.txt",
+        PathSpec(vfs_path="a.txt",
                  virtual="/data/a.txt",
                  directory="",
                  resolved=True)
@@ -107,7 +107,7 @@ async def test_narrowed_files_reach_the_generic_grep(harness, index):
 async def test_explicit_h_survives_narrowing(harness, index):
     narrow, generic = harness
     hits = [
-        PathSpec(resource_path="a.txt",
+        PathSpec(vfs_path="a.txt",
                  virtual="/data/a.txt",
                  directory="",
                  resolved=True)

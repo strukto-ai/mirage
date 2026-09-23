@@ -14,20 +14,19 @@
 
 import pytest
 
-from mirage import DiskResource, MountMode, Workspace
+from mirage import DiskVFS, MountMode, Workspace
 
 
 @pytest.fixture
 def workspace(tmp_path):
-    return Workspace({"/": DiskResource(root=str(tmp_path))},
-                     mode=MountMode.WRITE)
+    return Workspace({"/": DiskVFS(root=str(tmp_path))}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_find_name_glob(workspace):
-    await workspace.fs.write("/hello.txt", b"hi")
-    await workspace.fs.write("/world.py", b"hi")
-    io = await workspace.execute("find / -name '*.txt'")
+    await workspace.vfs.write("/hello.txt", b"hi")
+    await workspace.vfs.write("/world.py", b"hi")
+    io = await workspace.shell("find / -name '*.txt'")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "hello.txt" in out
@@ -36,10 +35,10 @@ async def test_find_name_glob(workspace):
 
 @pytest.mark.asyncio
 async def test_find_type_f(workspace):
-    await workspace.fs.mkdir("/sub")
-    await workspace.fs.write("/a.txt", b"a")
-    await workspace.fs.write("/sub/b.txt", b"b")
-    io = await workspace.execute("find / -type f")
+    await workspace.vfs.mkdir("/sub")
+    await workspace.vfs.write("/a.txt", b"a")
+    await workspace.vfs.write("/sub/b.txt", b"b")
+    io = await workspace.shell("find / -type f")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "/a.txt" in out
@@ -48,9 +47,9 @@ async def test_find_type_f(workspace):
 
 @pytest.mark.asyncio
 async def test_find_type_d(workspace):
-    await workspace.fs.mkdir("/sub")
-    await workspace.fs.write("/a.txt", b"a")
-    io = await workspace.execute("find / -type d")
+    await workspace.vfs.mkdir("/sub")
+    await workspace.vfs.write("/a.txt", b"a")
+    io = await workspace.shell("find / -type d")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "/sub" in out
@@ -59,9 +58,9 @@ async def test_find_type_d(workspace):
 
 @pytest.mark.asyncio
 async def test_find_size_lower_bound(workspace):
-    await workspace.fs.write("/big.txt", b"x" * 1000)
-    await workspace.fs.write("/small.txt", b"x")
-    io = await workspace.execute("find / -size +500c -type f")
+    await workspace.vfs.write("/big.txt", b"x" * 1000)
+    await workspace.vfs.write("/small.txt", b"x")
+    io = await workspace.shell("find / -size +500c -type f")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "big.txt" in out
@@ -70,11 +69,11 @@ async def test_find_size_lower_bound(workspace):
 
 @pytest.mark.asyncio
 async def test_find_maxdepth(workspace):
-    await workspace.fs.mkdir("/sub")
-    await workspace.fs.mkdir("/sub/deep")
-    await workspace.fs.write("/a.txt", b"a")
-    await workspace.fs.write("/sub/deep/c.txt", b"c")
-    io = await workspace.execute("find / -maxdepth 1 -type f")
+    await workspace.vfs.mkdir("/sub")
+    await workspace.vfs.mkdir("/sub/deep")
+    await workspace.vfs.write("/a.txt", b"a")
+    await workspace.vfs.write("/sub/deep/c.txt", b"c")
+    io = await workspace.shell("find / -maxdepth 1 -type f")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "/a.txt" in out

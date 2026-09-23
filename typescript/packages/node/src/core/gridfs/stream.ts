@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { recordStream } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
@@ -26,7 +26,7 @@ export async function* stream(accessor: GridFSAccessor, path: PathSpec): AsyncIt
   const virtual = path.virtual
   const raw = rawPathOf(path)
   const key = gridfsKey(raw, accessor.config)
-  const rec = recordStream('read', virtual, ResourceName.GRIDFS)
+  const rec = recordStream('read', virtual, VFSName.GRIDFS)
   const fileId = await resolveFileId(accessor, path, key)
   if (rec !== null) {
     const revision = fileId.toString()
@@ -60,7 +60,7 @@ export async function* stream(accessor: GridFSAccessor, path: PathSpec): AsyncIt
 }
 
 /**
- * The resource-level `range_read(path, start, end)`, end exclusive.
+ * The VFS-level `range_read(path, start, end)`, end exclusive.
  *
  * Every other backend's `rangeRead` and all of python's spell the window this
  * way; gridfs read its fourth argument as a length, so `range_read(p, 10, 20)`

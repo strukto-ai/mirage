@@ -16,9 +16,9 @@ import { describe, expect, it } from 'vitest'
 import * as nodePkg from './index.ts'
 
 describe('@struktoai/mirage-node barrel exports', () => {
-  it('re-exports core symbols (Workspace, MountMode, RAMResource, …)', () => {
+  it('re-exports core symbols (Workspace, MountMode, RAMVFS, …)', () => {
     expect(nodePkg.MountMode).toBeDefined()
-    expect(nodePkg.RAMResource).toBeDefined()
+    expect(nodePkg.RAMVFS).toBeDefined()
     expect(nodePkg.OpsRegistry).toBeDefined()
     expect(nodePkg.PathSpec).toBeDefined()
   })
@@ -28,9 +28,9 @@ describe('@struktoai/mirage-node barrel exports', () => {
     expect(typeof nodePkg.Workspace).toBe('function')
   })
 
-  it('exports DiskResource', () => {
-    expect(nodePkg.DiskResource).toBeDefined()
-    expect(typeof nodePkg.DiskResource).toBe('function')
+  it('exports DiskVFS', () => {
+    expect(nodePkg.DiskVFS).toBeDefined()
+    expect(typeof nodePkg.DiskVFS).toBe('function')
   })
 
   it('exports DISK_OPS array', () => {
@@ -46,8 +46,8 @@ describe('@struktoai/mirage-node barrel exports', () => {
     expect(typeof nodePkg.patchNodeFs).toBe('function')
   })
 
-  it('exports Redis resource and cache stores', () => {
-    expect(typeof nodePkg.RedisResource).toBe('function')
+  it('exports Redis VFS and cache stores', () => {
+    expect(typeof nodePkg.RedisVFS).toBe('function')
     expect(typeof nodePkg.RedisFileCacheStore).toBe('function')
     expect(typeof nodePkg.RedisIndexCacheStore).toBe('function')
     expect(typeof nodePkg.REDIS_PROMPT).toBe('string')

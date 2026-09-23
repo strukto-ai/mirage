@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { ReturnSignal } from '../../../../shell/errors.ts'
 import { isCountWord } from '../shared.ts'
@@ -49,7 +49,7 @@ export function handleFalse(): Result {
 /** Return from a function or sourced script, with bash's checks. */
 export function handleReturn(
   args: readonly string[],
-  session: Session,
+  session: SessionState,
   callStack: CallStack | null = null,
 ): Result {
   const inFunction = callStack !== null && callStack.depth > 1
@@ -88,7 +88,7 @@ export function handleReturn(
 }
 
 /** Exit the shell, with bash's argument checks. */
-export function handleExit(args: readonly string[], session: Session): Result {
+export function handleExit(args: readonly string[], session: SessionState): Result {
   const first = args[0]
   if (first !== undefined && !isCountWord(first)) {
     // bash exits with 2 after the diagnostic.

@@ -23,8 +23,8 @@ from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.commands.builtin.mongodb.cat import cat
 from mirage.commands.config import CommandOpts
-from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def accessor():
 
 
 def _path(s: str = "/db1/collections/coll1/documents.jsonl") -> PathSpec:
-    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
+    return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
 async def _fake_stat(_accessor, path, index=None):

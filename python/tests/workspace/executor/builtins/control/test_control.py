@@ -3,15 +3,15 @@ import pytest
 from mirage.io.stream import materialize
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal, ReturnSignal
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 from mirage.workspace.executor.builtins.control import (  # isort: skip
     handle_colon, handle_exit, handle_false, handle_return, handle_true,
     loop_levels)
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
 def make_function_stack() -> CallStack:

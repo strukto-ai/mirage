@@ -15,8 +15,10 @@
 import pytest
 
 from mirage import MountMode, Workspace
-from tests.resource.databricks_volume.test_databricks_volume import (
-    FakeFiles, make_resource, seed_directory, seed_file)
+from tests.vfs.databricks_volume.test_databricks_volume import (FakeFiles,
+                                                                make_vfs,
+                                                                seed_directory,
+                                                                seed_file)
 
 ROOT = "/Volumes/main/default/agent_files/root"
 
@@ -31,17 +33,17 @@ def dbx_files() -> FakeFiles:
 
 @pytest.fixture
 def write_ws(dbx_files: FakeFiles) -> Workspace:
-    return Workspace({"/dbx/": make_resource(dbx_files)}, mode=MountMode.WRITE)
+    return Workspace({"/dbx/": make_vfs(dbx_files)}, mode=MountMode.WRITE)
 
 
 @pytest.fixture
 def read_ws(dbx_files: FakeFiles) -> Workspace:
-    return Workspace({"/dbx/": make_resource(dbx_files)}, mode=MountMode.READ)
+    return Workspace({"/dbx/": make_vfs(dbx_files)}, mode=MountMode.READ)
 
 
 @pytest.mark.asyncio
 async def test_cp_file_preserves_bytes(write_ws, dbx_files):
-    io = await write_ws.execute("cp /dbx/src.txt /dbx/dst.txt")
+    io = await write_ws.shell("cp /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code == 0
     assert dbx_files.downloads[f"{ROOT}/dst.txt"] == b"hello"
@@ -51,14 +53,14 @@ async def test_cp_file_preserves_bytes(write_ws, dbx_files):
 async def test_cp_directory_without_recursive_fails(write_ws, dbx_files):
     seed_directory(dbx_files, f"{ROOT}/d")
 
-    io = await write_ws.execute("cp /dbx/d /dbx/d2")
+    io = await write_ws.shell("cp /dbx/d /dbx/d2")
 
     assert io.exit_code != 0
 
 
 @pytest.mark.asyncio
 async def test_cp_writes_are_mount_relative(write_ws):
-    io = await write_ws.execute("cp /dbx/src.txt /dbx/dst.txt")
+    io = await write_ws.shell("cp /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code == 0
     for key in io.writes:
@@ -68,7 +70,7 @@ async def test_cp_writes_are_mount_relative(write_ws):
 
 @pytest.mark.asyncio
 async def test_cp_read_only_mount_rejected(read_ws, dbx_files):
-    io = await read_ws.execute("cp /dbx/src.txt /dbx/dst.txt")
+    io = await read_ws.shell("cp /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code != 0
     assert b"read-only" in io.stderr
@@ -78,7 +80,7 @@ async def test_cp_read_only_mount_rejected(read_ws, dbx_files):
 @pytest.mark.asyncio
 async def test_cp_onto_same_path_errors_and_preserves_file(
         write_ws, dbx_files):
-    io = await write_ws.execute("cp /dbx/src.txt /dbx/src.txt")
+    io = await write_ws.shell("cp /dbx/src.txt /dbx/src.txt")
 
     assert io.exit_code != 0
     assert b"are the same file" in io.stderr
@@ -91,7 +93,7 @@ async def test_cp_multiple_sources_require_directory(write_ws, dbx_files):
     seed_file(dbx_files, f"{ROOT}/b.txt", b"BBB")
     seed_file(dbx_files, f"{ROOT}/target.txt", b"target")
 
-    io = await write_ws.execute("cp /dbx/a.txt /dbx/b.txt /dbx/target.txt")
+    io = await write_ws.shell("cp /dbx/a.txt /dbx/b.txt /dbx/target.txt")
 
     assert io.exit_code != 0
     assert io.stderr == b"cp: target '/dbx/target.txt': Not a directory\n"
@@ -102,7 +104,7 @@ async def test_cp_multiple_sources_require_directory(write_ws, dbx_files):
 
 @pytest.mark.asyncio
 async def test_cp_missing_source_reports_cannot_stat(write_ws, dbx_files):
-    io = await write_ws.execute("cp /dbx/missing /dbx/missing")
+    io = await write_ws.shell("cp /dbx/missing /dbx/missing")
 
     assert io.exit_code != 0
     assert b"cannot stat" in io.stderr
@@ -115,7 +117,7 @@ async def test_cp_recursive_into_itself_errors_and_preserves_tree(
     seed_directory(dbx_files, f"{ROOT}/d")
     seed_file(dbx_files, f"{ROOT}/d/a.txt", b"aaa")
 
-    io = await write_ws.execute("cp -r /dbx/d /dbx/d")
+    io = await write_ws.shell("cp -r /dbx/d /dbx/d")
 
     assert io.exit_code != 0
     assert b"into itself" in io.stderr

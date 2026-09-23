@@ -44,7 +44,7 @@ def links_of(doors: CLIDoors) -> LinkView | None:
 def mounts_of(doors: CLIDoors) -> MountView | None:
     """The name plane's mount boundaries, None when no namespace is wired.
 
-    A mount nested inside the repository is served by another resource
+    A mount nested inside the repository is served by another VFS
     entirely, so the backend holding the parent path cannot see it and
     cannot carry it along in a rename. A verb that moves a directory has
     to ask here or it silently leaves the mount at its old prefix with

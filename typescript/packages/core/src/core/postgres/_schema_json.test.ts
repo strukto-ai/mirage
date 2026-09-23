@@ -29,7 +29,7 @@ vi.mock('./client.ts', () => ({
 }))
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
-import { resolvePostgresConfig } from '../../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import { buildDatabaseJson, buildEntitySchemaJson, databaseNameFromDsn } from './_schema_json.ts'

@@ -73,7 +73,7 @@ describe('core/ssh/readdir', () => {
     const p = new PathSpec({
       virtual: '/mnt/ssh/data',
       directory: '/mnt/ssh/data',
-      resourcePath: mountKey('/mnt/ssh/data', '/mnt/ssh'),
+      vfsPath: mountKey('/mnt/ssh/data', '/mnt/ssh'),
     })
     const out = await readdir(accessor, p)
     expect(out).toEqual(['/mnt/ssh/data/a.txt'])

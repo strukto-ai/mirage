@@ -37,7 +37,7 @@ export async function resolvePath(
   if (index === undefined) {
     throw new Error('dify: missing index')
   }
-  const mountPrefix = mountPrefixOf(spec.virtual, spec.resourcePath)
+  const mountPrefix = mountPrefixOf(spec.virtual, spec.vfsPath)
   await ensureTree(accessor, index, mountPrefix)
   const virtualKey = virtualKeyFor(spec)
   const result = await index.get(virtualKey)
@@ -58,7 +58,7 @@ export async function resolvePath(
 
 function virtualKeyFor(path: PathSpec): string {
   const raw = path.pattern !== null ? path.directory : path.virtual
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   if (prefix !== '') {
     const root = rstripSlash(prefix) !== '' ? rstripSlash(prefix) : '/'
     if (raw === root || raw.startsWith(root + '/')) {

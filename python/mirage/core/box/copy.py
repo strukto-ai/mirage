@@ -25,7 +25,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 def _child_spec(parent: PathSpec, name: str) -> PathSpec:
-    prefix = mount_prefix_of(parent.virtual, parent.resource_path)
+    prefix = mount_prefix_of(parent.virtual, parent.vfs_path)
     virtual = parent.virtual.rstrip("/") + "/" + name
     return PathSpec.from_str_path(virtual, mount_key(virtual, prefix))
 

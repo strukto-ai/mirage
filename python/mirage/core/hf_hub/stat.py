@@ -81,7 +81,7 @@ async def stat(
     Raises:
         FileNotFoundError: nothing exists at the path.
     """
-    prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     rel = path_spec.mount_path.strip("/")
     if not rel:
         return FileStat(name="/", type=FileType.DIRECTORY)

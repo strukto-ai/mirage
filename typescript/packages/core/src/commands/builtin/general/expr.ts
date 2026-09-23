@@ -522,7 +522,7 @@ function exprCommand(
 
 export const GENERAL_EXPR = command({
   name: 'expr',
-  resource: null,
+  vfs: null,
   spec: specOf('expr'),
   fn: exprCommand,
   provision: pureProvision,

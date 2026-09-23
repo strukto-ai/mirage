@@ -6,7 +6,7 @@ import pytest
 from qdrant_client import models
 
 from mirage.core.qdrant.payload import field_value
-from mirage.resource.qdrant.config import QdrantConfig
+from mirage.vfs.qdrant.config import QdrantConfig
 
 COLLECTION = "animals"
 

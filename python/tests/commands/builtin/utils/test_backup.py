@@ -22,9 +22,7 @@ from mirage.types import PathSpec
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory=path,
-                    resource_path=path.strip("/"))
+    return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
 def _listing(children: list[str]):
@@ -72,10 +70,10 @@ def test_sibling_and_parent_paths():
     target = _spec("/data/sub/b.txt")
     backup = sibling_path(target, "~")
     assert backup.virtual == "/data/sub/b.txt~"
-    assert backup.resource_path == "data/sub/b.txt~"
+    assert backup.vfs_path == "data/sub/b.txt~"
     parent = parent_path(target)
     assert parent.virtual == "/data/sub"
-    assert parent.resource_path == "data/sub"
+    assert parent.vfs_path == "data/sub"
     assert parent_path(_spec("/b.txt")).virtual == "/"
 
 

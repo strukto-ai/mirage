@@ -17,14 +17,14 @@ from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
 from mirage.workspace.executor.builtins.shared import is_count_word
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_shift(
     args: list[str],
     call_stack: CallStack | None,
-    session: Session | None = None,
+    session: SessionState | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Shift positional parameters, with bash's argument checks.
 
@@ -36,7 +36,7 @@ async def handle_shift(
         args (list[str]): words after the command name; at most one,
             the shift count.
         call_stack (CallStack | None): function-call positional frames.
-        session (Session | None): shell session state.
+        session (SessionState | None): shell session state.
     """
     if len(args) > 1:
         err = b"shift: too many arguments\n"

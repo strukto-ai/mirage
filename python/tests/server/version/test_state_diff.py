@@ -16,17 +16,16 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.observe.log_entry import EVENT_COMMAND
-from mirage.resource.ram import RAMResource
 from mirage.server.version.api import commit
 from mirage.server.version.backend import LocalBackend
 from mirage.server.version.state_diff import state_diff
 from mirage.server.version.store import VersionStore
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session.state import seed_var
 
 
 def _ws() -> Workspace:
-    return Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                     mode=MountMode.EXEC)
+    return Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.EXEC)
 
 
 @pytest.mark.asyncio
@@ -34,14 +33,14 @@ async def test_state_diff_covers_every_category(tmp_path):
     ws = _ws()
     store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
 
-    await ws.execute("echo one > /m/a.txt")
+    await ws.shell("echo one > /m/a.txt")
     session = ws.create_session("narrow", mounts={"/m": "read"})
     seed_var(session, "API_KEY", "@aws:prod-key")
     await ws.flush_sessions()
     v1 = await commit(store, ws, "main", "v1")
 
-    await ws.execute("echo two > /m/a.txt")
-    await ws.execute("ln -s /m/a.txt /m/l.txt")
+    await ws.shell("echo two > /m/a.txt")
+    await ws.shell("ln -s /m/a.txt /m/l.txt")
     seed_var(session, "API_KEY", "@aws:other-key")
     session.mount_modes = {**session.mount_modes, "/m": MountMode.WRITE}
     await ws.flush_sessions()
@@ -92,9 +91,9 @@ async def test_state_diff_reports_grant_changes_with_direction(tmp_path):
 async def test_state_diff_accepts_branch_refs(tmp_path):
     ws = _ws()
     store = await VersionStore.open(LocalBackend(str(tmp_path)), "ws")
-    await ws.execute("echo one > /m/a.txt")
+    await ws.shell("echo one > /m/a.txt")
     v1 = await commit(store, ws, "main", "v1")
-    await ws.execute("echo new > /m/b.txt")
+    await ws.shell("echo new > /m/b.txt")
     await commit(store, ws, "main", "v2")
 
     diff = await state_diff(store, v1, "main")

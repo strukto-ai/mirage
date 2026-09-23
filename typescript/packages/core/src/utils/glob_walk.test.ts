@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { runWithSession } from '../context/session_context.ts'
 import { FileStat, FileType, PathSpec } from '../types.ts'
-import { Session } from '../workspace/session/session.ts'
+import { SessionState } from '../workspace/session/session.ts'
 import { enoent } from './errors.ts'
 import {
   expandPattern,
@@ -65,7 +65,7 @@ function globSpec(virtual: string, prefix: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual.slice(0, lastSlash + 1),
-    resourcePath: stripSlash(virtual.slice(prefix.length)),
+    vfsPath: stripSlash(virtual.slice(prefix.length)),
     pattern: virtual.slice(lastSlash + 1),
     resolved: false,
   })
@@ -134,7 +134,7 @@ describe('literalWord', () => {
     const spec = new PathSpec({
       virtual: '/data/' + markGlobs('*') + '?.txt',
       directory: '/data/',
-      resourcePath: markGlobs('*') + '?.txt',
+      vfsPath: markGlobs('*') + '?.txt',
       pattern: markGlobs('*') + '?.txt',
       resolved: false,
     })
@@ -150,7 +150,7 @@ describe('literalWord', () => {
     const spec = new PathSpec({
       virtual: '/data/*.txt',
       directory: '/data/',
-      resourcePath: '*.txt',
+      vfsPath: '*.txt',
       pattern: '*.txt',
       resolved: false,
     })
@@ -164,7 +164,7 @@ describe('expandPattern', () => {
     const spec = globSpec('/notion/pages/Demo_page__*/page.md', '/notion')
     const matched = await expandPattern(fakeReaddir, null, spec)
     expect(matched.map((m) => m.virtual)).toEqual(['/notion/pages/Demo_page__uuid1/page.md'])
-    expect(matched[0]?.resourcePath).toBe('pages/Demo_page__uuid1/page.md')
+    expect(matched[0]?.vfsPath).toBe('pages/Demo_page__uuid1/page.md')
     expect(calls.every((c) => !c.includes('*'))).toBe(true)
   })
 
@@ -201,14 +201,14 @@ describe('expandPattern', () => {
     const spec = globSpec('/box/*', '/box')
     const matched = await expandPattern(fakeReaddir, null, spec)
     expect(matched.map((m) => m.virtual)).toEqual(['/box/f.txt', '/box/sub'])
-    expect(matched.map((m) => m.resourcePath)).toEqual(['f.txt', 'sub'])
+    expect(matched.map((m) => m.vfsPath)).toEqual(['f.txt', 'sub'])
   })
 
   it('expands a glob at a root mount', async () => {
     const spec = globSpec('/a*', '')
     const matched = await expandPattern(fakeReaddir, null, spec)
     expect(matched.map((m) => m.virtual)).toEqual(['/alpha'])
-    expect(matched[0]?.resourcePath).toBe('alpha')
+    expect(matched[0]?.vfsPath).toBe('alpha')
   })
 })
 
@@ -242,7 +242,7 @@ describe('resolveGlobWith', () => {
     const typed = new PathSpec({
       virtual: spec.virtual,
       directory: spec.directory,
-      resourcePath: spec.resourcePath,
+      vfsPath: spec.vfsPath,
       pattern: spec.pattern,
       resolved: false,
       rawPath: 'pages/Demo_page__*/page.md',
@@ -269,7 +269,7 @@ describe('resolveGlobWith', () => {
 
 describe('resolveGlobWith under hidden paths', () => {
   it('drops hidden matches', async () => {
-    const sess = new Session({ sessionId: 'narrowed' })
+    const sess = new SessionState({ sessionId: 'narrowed' })
     sess.hiddenPaths = { patterns: ['*.json'] }
     const result = await runWithSession(sess, () =>
       resolveGlobWith(
@@ -283,7 +283,7 @@ describe('resolveGlobWith under hidden paths', () => {
   })
 
   it('an all-hidden match set falls back to the literal', async () => {
-    const sess = new Session({ sessionId: 'narrowed' })
+    const sess = new SessionState({ sessionId: 'narrowed' })
     sess.hiddenPaths = { patterns: ['*.json'] }
     const result = await runWithSession(sess, () =>
       resolveGlobWith(
@@ -392,7 +392,7 @@ function typedSpec(virtual: string, raw: string): PathSpec {
   return new PathSpec({
     virtual: base.virtual,
     directory: base.directory,
-    resourcePath: base.resourcePath,
+    vfsPath: base.vfsPath,
     pattern: base.pattern,
     resolved: base.resolved,
     rawPath: raw,

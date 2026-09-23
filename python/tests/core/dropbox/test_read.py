@@ -20,10 +20,10 @@ from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.read import read
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.ranges import ByteWindow
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 def make_accessor(root_path: str = "/") -> DropboxAccessor:
@@ -60,8 +60,8 @@ async def test_read_strips_mount_prefix(index):
                 make_accessor(),
                 PathSpec(virtual="/dropbox/note.txt",
                          directory="/dropbox",
-                         resource_path=mount_key("/dropbox/note.txt",
-                                                 "/dropbox")), index)
+                         vfs_path=mount_key("/dropbox/note.txt", "/dropbox")),
+                index)
     assert data == b"hi!"
     assert download.await_args.args[1] == "/note.txt"
 
@@ -77,7 +77,7 @@ async def test_a_ranged_read_asks_dropbox_for_the_range(index):
             data = await read(make_accessor(),
                               PathSpec(virtual="/note.txt",
                                        directory="/",
-                                       resource_path="note.txt"),
+                                       vfs_path="note.txt"),
                               index,
                               offset=1,
                               size=2)
@@ -95,7 +95,7 @@ async def test_an_index_less_ranged_read_still_carries_the_range(index):
         await read(make_accessor(),
                    PathSpec(virtual="/note.txt",
                             directory="/",
-                            resource_path="note.txt"),
+                            vfs_path="note.txt"),
                    offset=1,
                    size=2)
     assert download.await_args.args[2] == ByteWindow(1, 2)
@@ -113,8 +113,8 @@ async def test_read_downloads_through_subfolder_root(index):
                 make_accessor("Team/data"),
                 PathSpec(virtual="/dropbox/note.txt",
                          directory="/dropbox",
-                         resource_path=mount_key("/dropbox/note.txt",
-                                                 "/dropbox")), index)
+                         vfs_path=mount_key("/dropbox/note.txt", "/dropbox")),
+                index)
     assert data == b"hi"
     assert download.await_args.args[1] == "/Team/data/note.txt"
 
@@ -133,9 +133,8 @@ async def test_read_folder_raises_isadirectory(index):
         with pytest.raises(IsADirectoryError):
             await read(
                 make_accessor(),
-                PathSpec(resource_path="docs",
-                         virtual="/docs",
-                         directory="/docs"), index)
+                PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
+                index)
 
 
 @pytest.mark.asyncio
@@ -146,6 +145,6 @@ async def test_read_missing_raises_enoent(index):
         with pytest.raises(FileNotFoundError):
             await read(
                 make_accessor(),
-                PathSpec(resource_path="missing.txt",
+                PathSpec(vfs_path="missing.txt",
                          virtual="/missing.txt",
                          directory="/"), index)

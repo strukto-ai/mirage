@@ -25,7 +25,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.s3 import S3VFS, S3Config
 
 load_dotenv(".env.development")
 
@@ -51,7 +51,7 @@ def main():
     print("=== Mirage FUSE-mounting S3 on the host ===")
     with Workspace({
             "/s3/":
-            Mount(S3Resource(s3_config()),
+            Mount(S3VFS(s3_config()),
                   mode=MountMode.READ,
                   backend=MountBackend.FUSE)
     }) as ws:
@@ -84,7 +84,7 @@ def main():
             print(f"\n=== exit code: {result.returncode} ===", file=sys.stderr)
             sys.exit(result.returncode)
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(rec.bytes for rec in records)
         print(
             f"\nMirage served {len(records)} ops, {total} bytes to the sandbox"

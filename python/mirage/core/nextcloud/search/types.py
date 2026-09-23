@@ -74,7 +74,7 @@ class SearchEntry:
 @dataclass(frozen=True, slots=True)
 class SearchTarget:
     endpoint: str
-    resource_scope: str
+    vfs_scope: str
 
 
 @dataclass(frozen=True, slots=True)

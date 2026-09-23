@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.accessor.base import NOOPAccessor
+from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.generic_bind import CommandIO
 from mirage.ops.generic import make_generic_ops
 from mirage.ops.registry import OpsRegistry
@@ -50,7 +51,7 @@ def make_table(**kwargs) -> CommandIO:
 
 
 def rows(ops) -> set:
-    return {(o.name, o.resource, o.filetype, o.write) for o in ops}
+    return {(o.name, o.vfs, o.filetype, o.write) for o in ops}
 
 
 def test_read_only_table_emits_trio():
@@ -89,9 +90,9 @@ def test_full_table_emits_mutations():
     }
 
 
-def test_multi_resource_fan_out():
+def test_multi_vfs_fan_out():
     ops = make_generic_ops(["a", "b"], make_table())
-    assert {o.resource for o in ops} == {"a", "b"}
+    assert {o.vfs for o in ops} == {"a", "b"}
     assert len(ops) == 6
 
 
@@ -114,6 +115,51 @@ async def test_read_wrapper_forwards_index():
     result = await read.fn(acc, PATH, index=None)
     assert result == b"data"
     table.read_bytes.assert_awaited_once_with(acc, PATH, None)
+
+
+@pytest.mark.asyncio
+async def test_emulated_append_reads_current_bytes_and_creates_missing():
+    table = make_table(write=AsyncMock())
+    table.read_bytes.side_effect = [b"old", b"oldnew", FileNotFoundError()]
+    op = next(o for o in make_generic_ops("x", table) if o.name == "append")
+    acc = NOOPAccessor()
+    for data in (b"new", b"!", b"created"):
+        await op.fn(acc, PATH, data)
+    assert [call.args[2] for call in table.write.await_args_list
+            ] == [b"oldnew", b"oldnew!", b"created"]
+
+
+@pytest.mark.asyncio
+async def test_emulated_append_forwards_index():
+    table = make_table(write=AsyncMock())
+    op = next(o for o in make_generic_ops("x", table) if o.name == "append")
+    acc = NOOPAccessor()
+    await op.fn(acc, PATH, b"new", index=NULL_INDEX)
+    table.read_bytes.assert_awaited_once_with(acc, PATH, NULL_INDEX)
+
+
+@pytest.mark.asyncio
+async def test_emulated_append_does_not_overwrite_after_read_failure():
+    table = make_table(write=AsyncMock())
+    table.read_bytes.side_effect = PermissionError(PATH.virtual)
+    op = next(o for o in make_generic_ops("x", table) if o.name == "append")
+    with pytest.raises(PermissionError):
+        await op.fn(NOOPAccessor(), PATH, b"new")
+    table.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_native_append_skips_emulation_and_overrides_still_win():
+    table = make_table(write=AsyncMock(), append=AsyncMock())
+    ops = make_generic_ops("x", table)
+    op = next(o for o in ops if o.name == "append")
+    acc = NOOPAccessor()
+    await op.fn(acc, PATH, b"new")
+    table.append.assert_awaited_once_with(acc, PATH, b"new")
+    table.read_bytes.assert_not_awaited()
+    table.write.assert_not_awaited()
+    assert not any(o.name == "append" for o in make_generic_ops(
+        "x", make_table(write=AsyncMock()), overrides={"append"}))
 
 
 @pytest.mark.asyncio

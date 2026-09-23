@@ -72,10 +72,7 @@ def _run(*texts: str,
          cwd=None,
          **flags) -> tuple[bytes, object]:
     base = cwd or "/"
-    spec = PathSpec(virtual=base,
-                    directory=base,
-                    resource_path="",
-                    resolved=False)
+    spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
     opts = CommandOpts(dispatch=dispatch, cwd=spec, flags=flags)
     body, io = asyncio.run(curl(NOOPAccessor(), [], list(texts), opts))
     if body is None:

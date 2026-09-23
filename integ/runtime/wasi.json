@@ -15,11 +15,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -41,11 +41,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "hello from ram\n"
             }
@@ -70,11 +70,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -96,11 +96,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n"
             }
@@ -177,11 +177,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n",
               "sub/inner.txt": "in\n"
@@ -224,11 +224,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -266,11 +266,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -301,11 +301,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -343,11 +343,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -378,11 +378,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -414,11 +414,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n",
               "d/inner.txt": "x\n"
@@ -448,11 +448,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "real/t.txt": "hello\n",
               "real/sub/deep.txt": "x\n"
@@ -482,11 +482,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -524,11 +524,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -579,11 +579,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -611,11 +611,11 @@
       "world": {
         "runtimes": [
           "wasi",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -663,6 +663,42 @@
       ],
       "hosts": [
         "python"
+      ]
+    },
+    {
+      "id": "no_extended_attribute_calls",
+      "hosts": [
+        "python"
+      ],
+      "world": {
+        "runtimes": [
+          "wasi",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; print([n for n in ('getxattr', 'listxattr', 'removexattr', 'setxattr') if hasattr(os, n)])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[]\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import os; os.listxattr('/data/t.txt')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "module 'os' has no attribute 'listxattr'"
+          }
+        }
       ]
     }
   ]

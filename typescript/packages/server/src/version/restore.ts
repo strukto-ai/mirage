@@ -46,9 +46,9 @@ function mergeMountFiles(
   prefix: string,
   wanted: string[],
 ): void {
-  const liveState = liveMount.resource_state as AnyDict
+  const liveState = liveMount.vfs_state as AnyDict
   const targetFiles =
-    ((targetMount.resource_state as AnyDict).files as Record<string, Uint8Array> | undefined) ?? {}
+    ((targetMount.vfs_state as AnyDict).files as Record<string, Uint8Array> | undefined) ?? {}
   const files = { ...((liveState.files as Record<string, Uint8Array> | undefined) ?? {}) }
   const drop = new Set<string>()
   const base = prefix.replace(/\/+$/, '')

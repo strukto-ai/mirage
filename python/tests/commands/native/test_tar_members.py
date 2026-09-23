@@ -51,7 +51,7 @@ def test_tar_t_dir_selector_takes_the_subtree(env):
 def test_tar_t_selector_matches_stored_spelling_only(env):
     _seed_archive(env)
     result = asyncio.run(
-        env.ws.execute("tar -tzf /data/files.tar.gz memory/memory.json"))
+        env.ws.shell("tar -tzf /data/files.tar.gz memory/memory.json"))
     assert result.exit_code == 2
     stderr = result.stderr.decode()
     assert "tar: memory/memory.json: Not found in archive" in stderr
@@ -69,7 +69,7 @@ def test_tar_xO_streams_member_bytes_to_stdout(env):
 def test_tar_xvO_lists_names_on_stderr(env):
     _seed_archive(env)
     result = asyncio.run(
-        env.ws.execute("tar -xvOzf /data/files.tar.gz ./memory/memory.json"))
+        env.ws.shell("tar -xvOzf /data/files.tar.gz ./memory/memory.json"))
     assert result.exit_code == 0
     assert result.stderr.decode() == "./memory/memory.json\n"
 
@@ -86,7 +86,7 @@ def test_tar_x_mixed_hit_and_miss_extracts_and_exits_2(env):
     _seed_archive(env)
     env.mirage("mkdir -p /data/out2")
     result = asyncio.run(
-        env.ws.execute(
+        env.ws.shell(
             "tar -xzf /data/files.tar.gz -C /data/out2 ./other.txt nope"))
     assert result.exit_code == 2
     assert "tar: nope: Not found in archive" in result.stderr.decode()

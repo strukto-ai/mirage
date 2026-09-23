@@ -11,10 +11,8 @@ def _accessor(root: Path) -> DiskAccessor:
     return DiskAccessor(root)
 
 
-def _root(virtual: str, resource_path: str) -> PathSpec:
-    return PathSpec(virtual=virtual,
-                    directory=virtual,
-                    resource_path=resource_path)
+def _root(virtual: str, vfs_path: str) -> PathSpec:
+    return PathSpec(virtual=virtual, directory=virtual, vfs_path=vfs_path)
 
 
 def _touch(root: Path, relative: str, body: bytes, mtime: float) -> None:
@@ -40,7 +38,7 @@ def test_event_hook_maps_a_create_to_the_virtual_path(tmp_path):
     assert len(events) == 1
     assert events[0].kind is FileChangeKind.CREATE
     assert events[0].path.virtual == "/d/data/a.txt"
-    assert events[0].path.resource_path == "data/a.txt"
+    assert events[0].path.vfs_path == "data/a.txt"
 
 
 def test_event_hook_maps_modified_and_deleted(tmp_path):
@@ -110,4 +108,4 @@ def test_event_hook_ignores_a_move_that_touches_neither_side(tmp_path):
 def test_event_hook_normalizes_the_mount_root(tmp_path):
     events = _map(tmp_path, "modified", {"src_path": str(tmp_path)})
     assert events[0].path.virtual == "/d"
-    assert events[0].path.resource_path == ""
+    assert events[0].path.vfs_path == ""

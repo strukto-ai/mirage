@@ -25,7 +25,7 @@ from mirage.shell.errors import ArithError
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.printf.format import run_printf
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
@@ -87,9 +87,9 @@ _HELP = (
     "    error occurs.\n")
 
 
-async def _assign_printf_target(session: Session, view: SessionView | None,
-                                name: str, subscript: str | None,
-                                value: str) -> str:
+async def _assign_printf_target(session: SessionState,
+                                view: SessionView | None, name: str,
+                                subscript: str | None, value: str) -> str:
     """Assign ``value`` to a ``printf -v`` target (scalar or ``name[idx]``).
 
     A delegation to the one element writer: a bare name assigns element
@@ -102,7 +102,7 @@ async def _assign_printf_target(session: Session, view: SessionView | None,
     ``export``.
 
     Args:
-        session (Session): shell session whose variables are written.
+        session (SessionState): shell session whose variables are written.
         view (SessionView | None): the session plane's door, which the
             write clears; None outside a workspace.
         name (str): the target's base variable name.
@@ -121,7 +121,7 @@ async def _assign_printf_target(session: Session, view: SessionView | None,
 
 async def handle_printf(
     args: list[str],
-    session: Session,
+    session: SessionState,
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
@@ -148,7 +148,7 @@ async def handle_printf(
     Args:
         args (list[str]): the format followed by its arguments, optionally
             preceded by ``-v NAME``.
-        session (Session): shell session, for the ``-v`` assignment.
+        session (SessionState): shell session, for the ``-v`` assignment.
     """
     target: str | None = None
     parsed: re.Match[str] | None = None

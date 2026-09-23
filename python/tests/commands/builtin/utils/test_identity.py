@@ -7,10 +7,10 @@ from mirage.commands.config import CommandOpts
 from mirage.io.types import materialize
 from mirage.ops.types import NamespaceView
 from mirage.policy.profile import SessionProfile
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.state import session_view
 
 
@@ -27,7 +27,7 @@ def test_owner_and_group_prefer_the_entry_then_the_identity_then_dash():
 
 
 def test_identity_reads_the_name_plane_and_the_session_plane():
-    session = Session(session_id="s", profile="admin")
+    session = SessionState(session_id="s", profile="admin")
     view = session_view(session)
     ns = NamespaceView(user="alice")
     assert identity_from(ns, view) == Identity(user="alice", profile="admin")
@@ -38,15 +38,15 @@ def test_identity_reads_the_name_plane_and_the_session_plane():
 
 
 async def _run(ws: Workspace, line: str) -> tuple[int, str]:
-    io = await ws.execute(line)
+    io = await ws.shell(line)
     out = await materialize(io.stdout) if io.stdout else b""
     return io.exit_code, out.decode()
 
 
 def _ws(**kwargs) -> Workspace:
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    return Workspace({"/data/": (resource, MountMode.WRITE)},
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    return Workspace({"/data/": (vfs, MountMode.WRITE)},
                      mode=MountMode.WRITE,
                      **kwargs)
 
@@ -85,5 +85,5 @@ async def test_a_named_session_reports_its_own_profile():
     _, own = await _run(ws, 'stat -c "%G" /data/f.txt')
     assert own == "default\n"
     ws.create_session("r1", profile="reviewer")
-    io = await ws.execute('stat -c "%G" /data/f.txt', session_id="r1")
+    io = await ws.shell('stat -c "%G" /data/f.txt', session_id="r1")
     assert (await materialize(io.stdout)).decode() == "reviewer\n"

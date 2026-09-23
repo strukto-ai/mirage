@@ -23,7 +23,7 @@ from mirage.fuse.backend import (FSKIT_MOUNT_ROOT, MountBackend,
                                  check_mountpoint, prepare_backend)
 from mirage.fuse.mount import mount_background
 from mirage.ops import Ops
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 
 class FuseManager:
@@ -42,7 +42,7 @@ class FuseManager:
               ops: Ops,
               prefix: str = "/",
               mountpoint: str | None = None,
-              session: Session | None = None,
+              session: SessionState | None = None,
               backend: str | MountBackend = MountBackend.FUSE) -> str:
         """Mount the ops tree and return the live mountpoint.
 
@@ -51,7 +51,7 @@ class FuseManager:
             prefix (str): mount root; non-empty scopes the tree.
             mountpoint (str | None): where to mount; None picks a temporary
                 directory appropriate for the backend.
-            session (Session | None): bind ops to this session's grants.
+            session (SessionState | None): bind ops to this session's grants.
             backend (str | MountBackend): kernel interface to use.
 
         Returns:

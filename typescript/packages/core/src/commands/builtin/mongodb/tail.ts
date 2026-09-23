@@ -26,7 +26,7 @@ import {
   watchStream,
 } from '../../../core/mongodb/stream.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type PathSpec, ResourceName } from '../../../types.ts'
+import { type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { followFlags, tailGeneric } from '../generic/tail.ts'
@@ -107,7 +107,7 @@ async function tailCommand(
 
 export const MONGODB_TAIL = command({
   name: 'tail',
-  resource: ResourceName.MONGODB,
+  vfs: VFSName.MONGODB,
   spec: specOf('tail'),
   fn: tailCommand,
 })

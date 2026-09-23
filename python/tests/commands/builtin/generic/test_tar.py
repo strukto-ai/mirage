@@ -15,14 +15,14 @@ from mirage.utils.path import CycleError
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, prefix),
+    return PathSpec(vfs_path=mount_key(path, prefix),
                     virtual=path,
                     directory=path,
                     resolved=True)
 
 
 def _raw(path: str, raw: str, prefix: str = "") -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, prefix),
+    return PathSpec(vfs_path=mount_key(path, prefix),
                     virtual=path,
                     directory=path,
                     resolved=True,

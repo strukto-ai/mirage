@@ -68,7 +68,7 @@ def _keep_visible(
     return kept
 
 
-@command("rg", resource="dropbox", spec=SPECS["rg"])
+@command("rg", vfs="dropbox", spec=SPECS["rg"])
 async def rg(accessor: DropboxAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

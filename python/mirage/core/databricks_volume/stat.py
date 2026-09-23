@@ -75,7 +75,7 @@ async def stat(
     stripped = path.mount_path.strip("/")
     if not stripped:
         return FileStat(name="/", type=FileType.DIRECTORY)
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     virtual_key = (prefix.rstrip("/") + "/" + stripped if prefix else "/" +
                    stripped)
     lookup = await index.get(virtual_key)

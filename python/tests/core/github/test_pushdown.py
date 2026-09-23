@@ -43,14 +43,14 @@ def entries():
 
 
 def test_scope_relative_key_strips_mount_prefix():
-    path = PathSpec(resource_path=mount_key("/gh/src", "/gh"),
+    path = PathSpec(vfs_path=mount_key("/gh/src", "/gh"),
                     virtual="/gh/src",
                     directory="/gh/src")
     assert scope_relative_key(path) == "/src"
 
 
 def test_scope_relative_key_root_becomes_slash():
-    path = PathSpec(resource_path=mount_key("/gh", "/gh"),
+    path = PathSpec(vfs_path=mount_key("/gh", "/gh"),
                     virtual="/gh",
                     directory="/gh")
     assert scope_relative_key(path) == "/"

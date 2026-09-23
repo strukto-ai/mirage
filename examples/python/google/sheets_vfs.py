@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.gsheets import GSheetsConfig, GSheetsResource
+from mirage.vfs.gsheets import GSheetsConfig, GSheetsVFS
 
 load_dotenv(".env.development")
 
@@ -28,11 +28,11 @@ config = GSheetsConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-resource = GSheetsResource(config=config)
+vfs = GSheetsVFS(config=config)
 
 
 async def main():
-    with Workspace({"/gsheets/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/gsheets/": vfs}, mode=MountMode.READ) as ws:
         print(
             "=== VFS MODE: open() reads from Google Sheets transparently ===\n"
         )
@@ -72,7 +72,7 @@ async def main():
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

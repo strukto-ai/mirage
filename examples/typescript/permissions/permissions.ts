@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMResource, Workspace, parseSessionProfile } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace, parseSessionProfile } from '@struktoai/mirage-node'
 
 // An incident-response workspace: the service tree, the runbooks the
 // oncall works from, and the credentials nobody reads by hand.
@@ -175,7 +175,7 @@ function pad(text: string, width: number): string {
 
 async function main(): Promise<void> {
   const ws = new Workspace(
-    { '/repo/': new RAMResource(), '/runbook/': new RAMResource(), '/vault/': new RAMResource() },
+    { '/repo/': new RAMVFS(), '/runbook/': new RAMVFS(), '/vault/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       // The one place this file differs from its Python twin: the
@@ -194,12 +194,12 @@ async function main(): Promise<void> {
 
   // A session that names no role is unrestricted, which is the host's
   // own view and the only place this seeding could run.
-  for (const line of SEED) await ws.execute(line)
+  for (const line of SEED) await ws.shell(line)
 
   for (const role of Object.keys(PROFILES)) ws.createSession(role, { profile: role })
 
   for (const [role, line, note] of LINES) {
-    const res = await ws.execute(line, { sessionId: role })
+    const res = await ws.shell(line, { sessionId: role })
     const out = res.stdout === null ? '' : dec.decode(res.stdout)
     const err = res.stderr === null ? '' : dec.decode(res.stderr)
     console.log(`${pad(role, 10)} ${pad(line, 42)} ${answer(out, err, res.exitCode)}`)

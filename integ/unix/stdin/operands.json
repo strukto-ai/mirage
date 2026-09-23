@@ -1,0 +1,508 @@
+{
+  "cases": [
+    {
+      "id": "shell_stdin_operand_0",
+      "seq": 916700,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | cat -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_1",
+      "seq": 916701,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | wc -l -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 -\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_2",
+      "seq": 916702,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | sort -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_3",
+      "seq": 916703,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | grep a -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_4",
+      "seq": 916704,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | cut -c1 -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_5",
+      "seq": 916705,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | head -n1 -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_6",
+      "seq": 916706,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | tail -n1 -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_7",
+      "seq": 916707,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | sed 's/a/A/' -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "A\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_8",
+      "seq": 916708,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | uniq -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_9",
+      "seq": 916709,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | awk '{print $1}' -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_10",
+      "seq": 916710,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | paste -sd, -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a,b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_11",
+      "seq": 916711,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | cat - -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_12",
+      "seq": 916712,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | tr a A < /dev/stdin)",
+      "expect": {
+        "exit": 0,
+        "stdout": "A\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_13",
+      "seq": 916713,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | cat /data/stdin-file - /data/stdin-file)",
+      "expect": {
+        "exit": 0,
+        "stdout": "file\na\nb\nfile\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_14",
+      "seq": 916714,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | cat - 2>&1)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_15",
+      "seq": 916715,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | cat /dev/stdin)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_stdin_operand_16",
+      "seq": 916716,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | paste - -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\tb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_dash_explicit_redirect",
+      "seq": 916600,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo a - 2>&1)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a -\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_dash_function_redirect",
+      "seq": 916601,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(dash_args() { echo \"argc=$#\"; }; dash_args a - 2>&1)",
+      "expect": {
+        "exit": 0,
+        "stdout": "argc=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_archive_dynamic_cd",
+      "seq": 916800,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(mkdir -p /data/archive-dir; echo hi > /data/archive-dir/a; d=/data/archive-dir; (cd \"$d\" && tar -cf /data/shell.tar . && zip -qr /data/shell.zip .); echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_archive_root_in_place",
+      "seq": 916801,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo before; tar -cf /data/root.tar /data; echo after)",
+      "expect": {
+        "exit": 0,
+        "stdout": "before\nafter\n",
+        "stderr": "tar: /data: Cannot open: Device or resource busy\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "shell_mktemp_other_mount",
+      "seq": 916900,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(mkdir -p /tmp; cd /data; d=$(mktemp -d /tmp/operand.XXXXXX); echo hi > \"$d/a\"; cat \"$d/a\"; rm -r \"$d\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_mktemp_into_data",
+      "seq": 916901,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(cd /; f=$(mktemp /data/operand.XXXXXX); test -f \"$f\" && echo exists; rm \"$f\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "exists\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_empty",
+      "seq": 916730,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(printf '' | cat -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_empty_paste_serial",
+      "seq": 916731,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(printf '' | paste -s -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_repeat_paste_serial",
+      "seq": 916732,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(printf 'a\\nb\\n' | paste -s - -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\tb\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_uniq_stdout",
+      "seq": 916733,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(printf 'a\\na\\nb\\n' | uniq - -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_mixed_paste",
+      "seq": 916734,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | paste /data/stdin-file -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "file\ta\n\tb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_mixed_sort",
+      "seq": 916735,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo c > /data/stdin-file; printf 'b\\na\\n' | sort /data/stdin-file -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_mixed_grep",
+      "seq": 916736,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo a > /data/stdin-file; printf 'a\\nb\\n' | grep a /data/stdin-file -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/stdin-file:a\n(standard input):a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_mixed_head",
+      "seq": 916737,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | head -n1 /data/stdin-file -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/stdin-file <==\nfile\n\n==> (standard input) <==\na\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_mixed_tail",
+      "seq": 916738,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/stdin-file; printf 'a\\nb\\n' | tail -n1 /data/stdin-file -)",
+      "expect": {
+        "exit": 0,
+        "stdout": "==> /data/stdin-file <==\nfile\n\n==> (standard input) <==\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_literal_dash_file",
+      "seq": 916739,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(echo file > /data/-; cd /data; printf pipe | cat - ./-)",
+      "expect": {
+        "exit": 0,
+        "stdout": "pipefile\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_mktemp_relative",
+      "seq": 916740,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(cd /data; d=$(mktemp -d ./relative.XXXXXX); echo hi > \"$d/a\"; cat \"$d/a\"; rm -r \"$d\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_operand_mktemp_file_other",
+      "seq": 916741,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(mkdir -p /tmp; cd /data; f=$(mktemp /tmp/relative.XXXXXX); test -f \"$f\" && echo exists; rm \"$f\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "exists\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_mktemp_default_other_mount",
+      "seq": 916902,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "(cd /data; d=$(mktemp -d); test -d \"$d\" && echo exists; rm -r \"$d\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "exists\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

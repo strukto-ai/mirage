@@ -35,7 +35,7 @@ BLOB = f"/{CHANNEL}/2026-04-10/files/report__F1.pdf"
 def spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.lstrip("/"))
+                    vfs_path=virtual.lstrip("/"))
 
 
 @pytest.fixture

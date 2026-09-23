@@ -15,7 +15,7 @@
 import dotenv from 'dotenv'
 import {
   MountMode,
-  WasabiResource,
+  WasabiVFS,
   Workspace,
   resolvedWasabiEndpoint,
   type WasabiConfig,
@@ -37,17 +37,17 @@ function configFromEnv(): WasabiConfig {
 
 async function main(): Promise<void> {
   const config = configFromEnv()
-  const ws = new Workspace({ '/wasabi/': new WasabiResource(config) }, { mode: MountMode.READ })
+  const ws = new Workspace({ '/wasabi/': new WasabiVFS(config) }, { mode: MountMode.READ })
   try {
     console.log(`=== Wasabi at ${resolvedWasabiEndpoint(config)} ===`)
 
-    let r = await ws.execute('ls /wasabi/')
+    let r = await ws.shell('ls /wasabi/')
     console.log('ls /wasabi/:\n' + r.stdoutText)
 
-    r = await ws.execute("find /wasabi/ -name '*.json' | head -n 5")
+    r = await ws.shell("find /wasabi/ -name '*.json' | head -n 5")
     console.log('find *.json:\n' + r.stdoutText)
 
-    const plan = await ws.execute('grep -m 1 mirage /wasabi/data/example.jsonl', { provision: true })
+    const plan = await ws.shell('grep -m 1 mirage /wasabi/data/example.jsonl', { provision: true })
     console.log(`plan grep -m 1: network_read=${plan.networkRead} precision=${plan.precision}`)
 
     const bytes = ws.records.reduce((acc, rec) => acc + rec.bytes, 0)
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /wasabi/data/example.jsonl ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/wasabi/data/example.jsonl" && chown 500:dev "/wasabi/data/example.jsonl" && touch -t 202601021530 "/wasabi/data/example.jsonl"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

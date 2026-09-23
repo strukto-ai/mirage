@@ -50,7 +50,7 @@ def _run(coro):
 def _spec(mount: str, child: str) -> PathSpec:
     return PathSpec(virtual=f"{mount}/{child}",
                     directory=f"{mount}/{child}",
-                    resource_path=child)
+                    vfs_path=child)
 
 
 @pytest.mark.parametrize("mount,child", CASES)
@@ -77,11 +77,11 @@ def test_a_lookalike_sibling_is_not_under_the_mount(mount, child):
 
 @pytest.mark.parametrize("mount,child", CASES)
 def test_event_helpers_lift_onto_the_mount(mount, child):
-    root = PathSpec(virtual=mount, directory=mount, resource_path="")
+    root = PathSpec(virtual=mount, directory=mount, vfs_path="")
     assert virtual_of(root, child) == f"{mount}/{child}"
     event = event_at(root, child, FileChangeKind.CREATE)
     assert event.path.virtual == f"{mount}/{child}"
-    assert event.path.resource_path == child
+    assert event.path.vfs_path == child
 
 
 async def _evicted(mount: str, child: str, kind: FileChangeKind) -> bool:
@@ -116,7 +116,7 @@ async def _parent_evicted(mount: str, child: str) -> bool:
     await manager.invalidate_after_write(
         PathSpec(virtual=f"{mount}/{child}/leaf.txt",
                  directory=f"{mount}/{child}",
-                 resource_path=f"{child}/leaf.txt"))
+                 vfs_path=f"{child}/leaf.txt"))
     return (await index.list_dir(f"{mount}/{child}")).entries is None
 
 
@@ -151,4 +151,4 @@ async def _framed(mount: str, child: str) -> PathSpec:
 def test_the_watcher_frames_a_lookalike_child_correctly(mount, child):
     framed = _run(_framed(mount, child))
     assert framed.virtual == f"{mount}/{child}"
-    assert framed.resource_path == child
+    assert framed.vfs_path == child

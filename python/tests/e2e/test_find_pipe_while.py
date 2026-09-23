@@ -14,7 +14,7 @@
 
 import pytest
 
-from .conftest import make_resource_ws, run
+from .conftest import make_vfs_ws, run
 
 FILES = {
     "docs/readme.txt": b"hello world\n",
@@ -26,12 +26,12 @@ FILES = {
 
 
 @pytest.fixture(params=["ram", "s3", "disk"])
-def resource_ws(request, tmp_path):
-    yield from make_resource_ws(request, tmp_path, FILES)
+def vfs_ws(request, tmp_path):
+    yield from make_vfs_ws(request, tmp_path, FILES)
 
 
-def test_find_type_f(resource_ws):
-    result = run(resource_ws, "find /data -type f | sort")
+def test_find_type_f(vfs_ws):
+    result = run(vfs_ws, "find /data -type f | sort")
     lines = result.strip().splitlines()
     assert "/data/data.json" in lines
     assert "/data/docs/readme.txt" in lines
@@ -39,22 +39,22 @@ def test_find_type_f(resource_ws):
     assert len(lines) == 5
 
 
-def test_find_maxdepth_0(resource_ws):
-    result = run(resource_ws, "find /data -maxdepth 0 -type f | sort")
+def test_find_maxdepth_0(vfs_ws):
+    result = run(vfs_ws, "find /data -maxdepth 0 -type f | sort")
     lines = [line for line in result.strip().splitlines() if line]
     assert lines == []
 
 
-def test_find_maxdepth_1(resource_ws):
-    result = run(resource_ws, "find /data -maxdepth 1 -type f | sort")
+def test_find_maxdepth_1(vfs_ws):
+    result = run(vfs_ws, "find /data -maxdepth 1 -type f | sort")
     lines = result.strip().splitlines()
     assert "/data/data.json" in lines
     assert "/data/docs/notes.txt" not in lines
     assert "/data/src/main.py" not in lines
 
 
-def test_find_maxdepth_2(resource_ws):
-    result = run(resource_ws, "find /data -maxdepth 2 -type f | sort")
+def test_find_maxdepth_2(vfs_ws):
+    result = run(vfs_ws, "find /data -maxdepth 2 -type f | sort")
     lines = result.strip().splitlines()
     assert "/data/data.json" in lines
     assert "/data/docs/notes.txt" in lines
@@ -63,16 +63,16 @@ def test_find_maxdepth_2(resource_ws):
     assert "/data/src/utils/helpers.py" not in lines
 
 
-def test_find_name_pattern(resource_ws):
-    result = run(resource_ws, "find /data -name '*.txt' | sort")
+def test_find_name_pattern(vfs_ws):
+    result = run(vfs_ws, "find /data -name '*.txt' | sort")
     lines = result.strip().splitlines()
     assert lines == ["/data/docs/notes.txt", "/data/docs/readme.txt"]
 
 
-def test_find_pipe_sort_pipe_while_read_echo(resource_ws):
+def test_find_pipe_sort_pipe_while_read_echo(vfs_ws):
     cmd = ("find /data -maxdepth 2 -type f | sort | "
            "while read f; do echo \"=== $f ===\"; done")
-    result = run(resource_ws, cmd)
+    result = run(vfs_ws, cmd)
     lines = result.strip().splitlines()
     for line in lines:
         assert line.startswith("=== ") and line.endswith(" ===")
@@ -81,27 +81,27 @@ def test_find_pipe_sort_pipe_while_read_echo(resource_ws):
     assert "/data/data.json" in paths
 
 
-def test_find_pipe_sort_pipe_while_read_file(resource_ws):
+def test_find_pipe_sort_pipe_while_read_file(vfs_ws):
     cmd = ("find /data -maxdepth 2 -type f -name '*.json' | sort | "
            "while read f; do echo \"=== $f ===\"; file $f; done")
-    result = run(resource_ws, cmd)
+    result = run(vfs_ws, cmd)
     lines = result.strip().splitlines()
     assert "=== /data/data.json ===" in lines
     assert any("json" in line for line in lines)
 
 
-def test_find_pipe_while_read_echo_content(resource_ws):
+def test_find_pipe_while_read_echo_content(vfs_ws):
     cmd = ("find /data -name '*.txt' -type f | sort | "
            "while read f; do echo \"FILE: $f\"; done")
-    result = run(resource_ws, cmd)
+    result = run(vfs_ws, cmd)
     lines = result.strip().splitlines()
     file_paths = [line.removeprefix("FILE: ") for line in lines]
     assert "/data/docs/notes.txt" in file_paths
     assert "/data/docs/readme.txt" in file_paths
 
 
-def test_find_type_d_memory(resource_ws):
-    result = run(resource_ws, "find /data -type d | sort")
+def test_find_type_d_memory(vfs_ws):
+    result = run(vfs_ws, "find /data -type d | sort")
     lines = result.strip().splitlines()
     if lines:
         assert all("/data" in line for line in lines)

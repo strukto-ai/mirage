@@ -27,7 +27,7 @@ def _out_of_range(value: str) -> IOResult:
     return IOResult(exit_code=1, stderr=err)
 
 
-@command("history", resource="history", spec=SPECS["history"])
+@command("history", vfs="history", spec=SPECS["history"])
 async def history_cmd(
     accessor: HistoryAccessor,
     paths: list[PathSpec],

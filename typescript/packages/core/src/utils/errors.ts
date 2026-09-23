@@ -75,6 +75,12 @@ export function eacces(path: string | { virtual: string }): FsError {
   return fsError(path, 'EACCES')
 }
 
+// An extended attribute the path does not carry. ENODATA is linux's
+// spelling; classify reads it, and macOS's ENOATTR, as NO_XATTR.
+export function noXattr(path: string | { virtual: string }): FsError {
+  return fsError(path, 'ENODATA')
+}
+
 export function enotempty(path: string | { virtual: string }): FsError {
   return fsError(path, 'ENOTEMPTY')
 }
@@ -214,14 +220,14 @@ export interface MissingOpError extends FsError {
 // A mount was asked for an op its backend does not register (e.g. unlink on
 // a mail mount). ENOTSUP is the honest POSIX spelling for a capability gap:
 // the fs chokepoints render GNU 'Operation not supported' against the
-// operand, while the message keeps resource + op for tracebacks. Mirrors
+// operand, while the message keeps VFS + op for tracebacks. Mirrors
 // Python's OperationNotSupportedError/enotsup.
 export function enotsup(
-  resource: string,
+  vfs: string,
   op: string,
   path: string | { virtual: string; rawPath?: string },
 ): MissingOpError {
-  const err = new Error(`no op registered: ${op} for resource ${resource}`) as MissingOpError
+  const err = new Error(`no op registered: ${op} for VFS ${vfs}`) as MissingOpError
   err.code = 'ENOTSUP'
   err.op = op
   err.virtualPath = virtualOf(path)

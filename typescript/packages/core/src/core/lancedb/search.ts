@@ -14,7 +14,7 @@
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import type { LanceRow } from './_driver.ts'
-import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
+import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 import type { PathSpec } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { PATH_SAFE } from '../hierarchy/codec.ts'

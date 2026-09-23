@@ -13,10 +13,8 @@ def _accessor(root: Path) -> DiskAccessor:
     return DiskAccessor(root)
 
 
-def _root(virtual: str, resource_path: str) -> PathSpec:
-    return PathSpec(virtual=virtual,
-                    directory=virtual,
-                    resource_path=resource_path)
+def _root(virtual: str, vfs_path: str) -> PathSpec:
+    return PathSpec(virtual=virtual, directory=virtual, vfs_path=vfs_path)
 
 
 def _touch(root: Path, relative: str, body: bytes, mtime: float) -> None:
@@ -107,7 +105,7 @@ def test_changed_path_carries_the_mount_framing(tmp_path):
     second = asyncio.run(hook.pull(root, first.checkpoint))
     changed = second.changes[0].path
     assert changed.virtual == "/d/data/a.txt"
-    assert changed.resource_path == "data/a.txt"
+    assert changed.vfs_path == "data/a.txt"
 
 
 def test_missing_root_reports_nothing(tmp_path):

@@ -20,7 +20,7 @@ import type {
   DiscordResponse,
   DiscordTransport,
 } from '../../../core/discord/client.ts'
-import type { Resource } from '../../../resource/base.ts'
+import type { VFS } from '../../../vfs/base.ts'
 
 export interface FakeCall {
   method: DiscordMethod
@@ -54,9 +54,9 @@ export class FakeDiscordTransport implements DiscordTransport {
   }
 }
 
-export function makeFakeResource(transport: DiscordTransport): DiscordResourceLike {
+export function makeFakeVfs(transport: DiscordTransport): DiscordResourceLike {
   const accessor = new DiscordAccessor(transport)
-  const resource: Resource & { accessor: DiscordAccessor } = {
+  const vfs: VFS & { accessor: DiscordAccessor } = {
     kind: 'discord',
     accessor,
     open: () => Promise.resolve(),
@@ -66,7 +66,7 @@ export function makeFakeResource(transport: DiscordTransport): DiscordResourceLi
       // Nothing to take back.
     },
   }
-  return resource as DiscordResourceLike
+  return vfs as DiscordResourceLike
 }
 
 export async function seedGuild(

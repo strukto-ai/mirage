@@ -44,7 +44,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-@command("rg", resource="discord", spec=SPECS["rg"])
+@command("rg", vfs="discord", spec=SPECS["rg"])
 async def rg(accessor: DiscordAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
@@ -70,14 +70,13 @@ async def rg(accessor: DiscordAccessor, paths: list[PathSpec],
                     limit=SEARCH_MAX_RESULTS,
                     session=accessor.pool)
                 file_prefix = mount_prefix_of(operand.virtual,
-                                              operand.resource_path) or ""
-                resource_first = match.resource_path.strip("/").split("/",
-                                                                      1)[0]
+                                              operand.vfs_path) or ""
+                vfs_first = match.vfs_path.strip("/").split("/", 1)[0]
                 channels = await list_channels(accessor.config,
                                                guild_id,
                                                session=accessor.pool)
                 channel_map = {c["id"]: channel_dirname(c) for c in channels}
-                lines = format_grep_results(msgs, file_prefix, resource_first,
+                lines = format_grep_results(msgs, file_prefix, vfs_first,
                                             channel_map)
                 if not lines:
                     return b"", IOResult(exit_code=1)

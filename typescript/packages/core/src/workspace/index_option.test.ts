@@ -15,20 +15,20 @@
 import { describe, expect, it } from 'vitest'
 import { IndexType } from '../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 describe('Workspace index option', () => {
-  it('applies the workspace index config to mounted resources', async () => {
-    const ram = new RAMResource()
+  it('applies the workspace index config to mounts', async () => {
+    const ram = new RAMVFS()
     const ws = new Workspace({ '/data': ram }, { index: { type: IndexType.RAM, ttl: 5 } })
     expect(ram.index).toBeInstanceOf(RAMIndexCacheStore)
     expect((ram.index as unknown as { ttl: number }).ttl).toBe(5)
     await ws.close()
   })
 
-  it('keeps the resource default index when no workspace index is given', async () => {
-    const ram = new RAMResource()
+  it('keeps the VFS default index when no workspace index is given', async () => {
+    const ram = new RAMVFS()
     const ws = new Workspace({ '/data': ram }, {})
     expect((ram.index as unknown as { ttl: number }).ttl).toBe(0)
     await ws.close()

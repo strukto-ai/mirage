@@ -40,7 +40,7 @@ def _catalog_type():
 
 
 def _decorated(name: str, filetype: str | None = None):
-    return command(name, resource="s3", spec=CommandSpec(),
+    return command(name, vfs="s3", spec=CommandSpec(),
                    filetype=filetype)(_handler)
 
 
@@ -56,7 +56,7 @@ def test_catalog_iterates_definitions_and_resolves_decorated_commands():
 def test_catalog_accepts_registered_command_values():
     registered = RegisteredCommand(name="cat",
                                    spec=CommandSpec(),
-                                   resource="s3",
+                                   vfs="s3",
                                    filetype=None,
                                    fn=_handler)
     catalog = _catalog_type()([registered])
@@ -86,7 +86,7 @@ def test_catalog_is_an_immutable_snapshot():
 def test_with_overrides_returns_an_independent_definition():
     original = RegisteredCommand(name="cat",
                                  spec=CommandSpec(),
-                                 resource="s3",
+                                 vfs="s3",
                                  filetype=None,
                                  fn=_handler)
 
@@ -103,7 +103,7 @@ def test_with_overrides_returns_an_independent_definition():
 def test_with_overrides_can_clear_a_provision():
     original = RegisteredCommand(name="cat",
                                  spec=CommandSpec(),
-                                 resource="s3",
+                                 vfs="s3",
                                  filetype=None,
                                  fn=_handler,
                                  provision_fn=_provision)
@@ -117,7 +117,7 @@ def test_with_overrides_can_clear_a_provision():
 def test_registered_command_is_immutable():
     registered = RegisteredCommand(name="cat",
                                    spec=CommandSpec(),
-                                   resource="s3",
+                                   vfs="s3",
                                    filetype=None,
                                    fn=_handler)
 
@@ -131,5 +131,5 @@ def test_s3_commands_expose_static_lookup():
     cat = COMMANDS.require("cat")
 
     assert cat.name == "cat"
-    assert cat.resource == "s3"
+    assert cat.vfs == "s3"
     assert cat.filetype is None

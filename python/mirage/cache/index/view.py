@@ -23,7 +23,7 @@ from mirage.cache.index.store import IndexCacheStore
 
 
 class IndexView(IndexCacheStore):
-    """A mount-owned view over a resource's metadata index.
+    """A mount-owned view over a VFS's metadata index.
 
     Backend calls retain this view across awaits. Ownership is checked under
     the same lock that retires mount cache state, so late metadata writes
@@ -38,21 +38,21 @@ class IndexView(IndexCacheStore):
         self._prefix = prefix or "/"
         self._owns = owns
 
-    async def get(self, resource_path: str) -> LookupResult:
+    async def get(self, vfs_path: str) -> LookupResult:
         # A lookup may flush a queued snapshot, so reads share the write fence.
         async with mutation_lock(self._cache):
-            if not self._owns(resource_path):
+            if not self._owns(vfs_path):
                 return LookupResult(status=LookupStatus.NOT_FOUND)
-            result = await self._store.get(resource_path)
-            return result if self._owns(resource_path) else LookupResult(
+            result = await self._store.get(vfs_path)
+            return result if self._owns(vfs_path) else LookupResult(
                 status=LookupStatus.NOT_FOUND)
 
-    async def list_dir(self, resource_path: str) -> ListResult:
+    async def list_dir(self, vfs_path: str) -> ListResult:
         async with mutation_lock(self._cache):
-            if not self._owns(resource_path):
+            if not self._owns(vfs_path):
                 return ListResult(status=LookupStatus.NOT_FOUND)
-            result = await self._store.list_dir(resource_path)
-            if not self._owns(resource_path):
+            result = await self._store.list_dir(vfs_path)
+            if not self._owns(vfs_path):
                 return ListResult(status=LookupStatus.NOT_FOUND)
             if result.entries is None:
                 return result
@@ -61,21 +61,21 @@ class IndexView(IndexCacheStore):
                 [path for path in result.entries if self._owns(path)]
             })
 
-    async def put(self, resource_path: str, entry: IndexEntry) -> None:
+    async def put(self, vfs_path: str, entry: IndexEntry) -> None:
         async with mutation_lock(self._cache):
-            if self._owns(resource_path):
-                await self._store.put(resource_path, entry)
+            if self._owns(vfs_path):
+                await self._store.put(vfs_path, entry)
 
     async def set_dir(self,
-                      resource_path: str,
+                      vfs_path: str,
                       entries: list[tuple[str, IndexEntry]],
                       expired_at: datetime | None = None) -> None:
         async with mutation_lock(self._cache):
-            if self._owns(resource_path):
-                prefix = resource_path.rstrip("/") + "/"
+            if self._owns(vfs_path):
+                prefix = vfs_path.rstrip("/") + "/"
                 owned = [(name, entry) for name, entry in entries
                          if self._owns(prefix + name)]
-                await self._store.set_dir(resource_path, owned, expired_at)
+                await self._store.set_dir(vfs_path, owned, expired_at)
 
     def seed(self, entries: dict[str, IndexEntry],
              children: dict[str, list[str]], expires_at: datetime) -> None:
@@ -100,15 +100,15 @@ class IndexView(IndexCacheStore):
                 for path, entry in entries.items() if self._owns(path)
             }
 
-    async def invalidate_dir(self, resource_path: str) -> None:
+    async def invalidate_dir(self, vfs_path: str) -> None:
         async with mutation_lock(self._cache):
-            if self._owns(resource_path):
-                await self._store.invalidate_dir(resource_path)
+            if self._owns(vfs_path):
+                await self._store.invalidate_dir(vfs_path)
 
-    async def invalidate_prefix(self, resource_path: str) -> None:
+    async def invalidate_prefix(self, vfs_path: str) -> None:
         async with mutation_lock(self._cache):
-            if self._owns(resource_path):
-                await self._store.invalidate_prefix(resource_path)
+            if self._owns(vfs_path):
+                await self._store.invalidate_prefix(vfs_path)
 
     async def invalidate(self) -> None:
         async with mutation_lock(self._cache):

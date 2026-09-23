@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { destKind } from '../../../../commands/builtin/generic/cp.ts'
 import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.ts'
 import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { FileStat } from '../../../../types.ts'
@@ -22,7 +23,7 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { fail, ok, readOnlyError, splitFlags } from '../shared.ts'
-import { statOrNull } from './probe.ts'
+import { dispatchStat, statOrNull } from './probe.ts'
 import type { Result } from '../types.ts'
 
 export function posixRelative(target: string, startDir: string): string {
@@ -62,7 +63,7 @@ function followParent(namespace: Namespace, virtual: string): string {
 // a directory). `slashFollows` turns that override off, which only tar
 // wants: it strips the slash before it stats.
 // A rewritten spec keeps the user-typed form in `rawPath` so error messages
-// still name the operand as typed; the mount re-stamps `resourcePath` at
+// still name the operand as typed; the mount re-stamps `vfsPath` at
 // dispatch. Throws CycleError (carrying the typed operand) on ELOOP.
 export function followPaths(
   namespace: Namespace,
@@ -92,7 +93,7 @@ export function followPaths(
       new PathSpec({
         virtual,
         directory: virtual.slice(0, virtual.lastIndexOf('/') + 1) || '/',
-        resourcePath: '',
+        vfsPath: '',
         pattern: item.pattern,
         resolved: item.resolved,
         rawPath: item.rawPath,
@@ -304,6 +305,23 @@ export async function prepareMv(
   if (namespace.isLink(src.virtual)) {
     if (src.rawPath.endsWith('/')) {
       const early = await slashedLinkRefusal(namespace, dispatch, src, dst, stat)
+      return { items, postUnlink: null, postRename: null, early }
+    }
+    if (!intoDir && dst.rawPath.endsWith('/')) {
+      // rename(2) never follows the source, so a link is not a directory
+      // whatever it points at, and a slashed destination asks for one:
+      // GNU 9.7 refuses `mv dlnk missing/` at the rename and `mv dlnk reg/`
+      // at the destination's stat, the same two wordings a regular source
+      // gets from the generic, whose chain walk also keeps an absent
+      // parent's ENOENT (`mv dlnk nodir/name/`) ahead of the slash.
+      const { strerror } = await destKind(dispatchStat(dispatch), dst)
+      const early =
+        strerror === 'Not a directory'
+          ? fail('mv', `mv: cannot stat '${dst.rawPath}': Not a directory\n`)
+          : fail(
+              'mv',
+              `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${strerror ?? 'Not a directory'}\n`,
+            )
       return { items, postUnlink: null, postRename: null, early }
     }
     // The move is a node-table rename, which the door answers: a link

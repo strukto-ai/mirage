@@ -17,7 +17,7 @@ import { SPECS } from '../../commands/spec/index.ts'
 import { concatBytes } from '../../core/jq/format.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { PathSpec } from '../../types.ts'
@@ -29,12 +29,11 @@ import { makeStorageKey } from '../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, dereferences, lookup } from '../lookup/index.ts'
 import { type Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { abortable, mergeSignals } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
-import { isCreateMode } from '../../commands/builtin/generic/tar/mode.ts'
 import { Strategy } from '../../commands/builtin/generic/crossmount/types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -80,7 +79,7 @@ const JOB_HANDLERS: Record<
   (
     jobTable: JobTable,
     textParts: string[],
-    session: Session | null,
+    session: SessionState | null,
     view: SessionView | null,
     signal?: AbortSignal,
   ) => JobHandlerResult | Promise<JobHandlerResult>
@@ -106,7 +105,7 @@ async function finishFind(
   io: IOResult,
   texts: readonly string[],
   registry: MountRegistry,
-  session: Session,
+  session: SessionState,
   executeFn: ExecuteFn | undefined,
   ns: NamespaceView | undefined,
   statPath: StatPath,
@@ -148,11 +147,11 @@ export async function handleCommand(
   dispatch: DispatchFn,
   registry: MountRegistry,
   parts: readonly (string | PathSpec)[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
-  ensureOpen?: (resource: Resource) => Promise<void>,
+  ensureOpen?: (vfs: VFS) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision,
@@ -327,14 +326,8 @@ export async function handleCommand(
   }
 
   // Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
-  // exactly like a positional destination would. A create-mode tar is
-  // the one relay member kept out: its planner walks a single backend's
-  // tree, so a span there falls through to the refusal below instead of
-  // a relay run that would cross nested mounts.
-  if (
-    isCrossMount(cmdName, routingScopes, registry) &&
-    !(cmdName === 'tar' && isCreateMode(rawArgv))
-  ) {
+  // exactly like a positional destination would.
+  if (isCrossMount(cmdName, routingScopes, registry)) {
     // Parse against the shared spec so flags and text operands do not
     // depend on the source mount: raw argv would hand flag tokens ("-c")
     // to the generic as the search pattern. The bound single-mount runner
@@ -544,7 +537,7 @@ export async function handleCommand(
       : null
 
   if (ensureOpen !== undefined) {
-    await ensureOpen(mount.resource)
+    await ensureOpen(mount.vfs)
   }
 
   const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch)

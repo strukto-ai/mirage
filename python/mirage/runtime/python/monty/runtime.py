@@ -55,7 +55,7 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
     # host access: the interpreter inside it has no host filesystem,
     # environment, or network door, and its file I/O is serviced only
     # through the workspace dispatch, so nothing goes around the gate.
-    reach: RuntimeReach = "vfs"
+    reach: RuntimeReach = "workspace"
     filesystem: ClassVar[tuple[FilesystemOperation,
                                ...]] = ('read', 'write', 'list', 'stat')
     # No import system to resolve a module with, so `-m` has nothing to

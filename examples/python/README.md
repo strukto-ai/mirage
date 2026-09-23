@@ -24,11 +24,11 @@ flowchart LR
     A[cat /Volumes/.../file] --> K[kernel VFS]
     K -->|backend=fuse| X[macFUSE kext] --> L[libfuse]
     K -->|backend=fskit| F[fskitd + macFUSE FSKit module] --> L
-    L --> M[MirageFS] --> R[resource]
+    L --> M[MirageFS] --> R[vfs]
 ```
 
 Same upper half either way; only the kernel-to-userspace hop changes.
 Trade-off: fskit mounts live under `/Volumes` and need exact file sizes
-(no `direct_io`), so API-backed resources are refused. The full write
+(no `direct_io`), so API-backed mounts are refused. The full write
 surface works (via `mirage/fuse/darwin.py`). `fuse/fskit.py` demonstrates
 all of it; details in `docs/python/setup/fuse.mdx`.

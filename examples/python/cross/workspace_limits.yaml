@@ -1,5 +1,4 @@
 mode: WRITE
-consistency: LAZY
 
 # Same /s3 mount as workspace.yaml, plus per-mount command_limits so the
 # guards can be observed firing from the CLI. Python-only: the TS config
@@ -7,7 +6,7 @@ consistency: LAZY
 # to keep the shared workspace.yaml usable from both CLIs.
 mounts:
   /s3:
-    resource: s3
+    vfs: s3
     config:
       bucket: ${AWS_S3_BUCKET}
       region: ${AWS_DEFAULT_REGION}

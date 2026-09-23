@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { S3BrowserPresignedUrlProvider, S3Config } from '../../resource/s3/config.ts'
+import type { S3BrowserPresignedUrlProvider, S3Config } from '../../vfs/s3/config.ts'
 import type { S3Module, S3SendClient } from './client.ts'
 
 function decodeEntities(s: string): string {

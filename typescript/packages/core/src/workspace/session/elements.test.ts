@@ -15,12 +15,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { VarAttr } from '../../shell/variable.ts'
-import { Session } from './session.ts'
+import { SessionState } from './session.ts'
 import { assignElement, elementIsSet } from './elements.ts'
 import { seedVar, setAttr } from './state.ts'
 
-function makeSession(): Session {
-  const session = new Session({ sessionId: 's', cwd: '/' })
+function makeSession(): SessionState {
+  const session = new SessionState({ sessionId: 's', cwd: '/' })
   seedVar(session, 'm', { a: '1', k5: '9', '0': 'z' })
   seedVar(session, 'arr', ['10', '20', '30'])
   seedVar(session, 's5', '5')

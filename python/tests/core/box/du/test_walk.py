@@ -55,7 +55,7 @@ _TREE = {
     ],
 }
 
-_DATA = PathSpec(resource_path="data", virtual="/data", directory="/")
+_DATA = PathSpec(vfs_path="data", virtual="/data", directory="/")
 
 
 async def _fake_list(_tm, folder_id, limit=1000):

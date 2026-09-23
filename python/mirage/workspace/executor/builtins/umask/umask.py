@@ -18,7 +18,7 @@ from mirage.utils.mode import parse_chmod
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 _USAGE = "umask: usage: umask [-p] [-S] [mode]"
@@ -86,7 +86,7 @@ def parse_umask(text: str, current: int) -> int | str:
 
 async def handle_umask(
     args: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print or set the session's file-creation mask.
 
@@ -100,7 +100,7 @@ async def handle_umask(
 
     Args:
         args (list[str]): the words after `umask`.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     scan = scan_options(args, "Sp")
     if scan.bad is not None:

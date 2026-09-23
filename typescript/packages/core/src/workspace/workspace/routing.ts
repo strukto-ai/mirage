@@ -26,7 +26,7 @@ import { catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { Consumer, lookup } from '../lookup/index.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import type { ExecuteOptions } from './types.ts'
 import type { Runtimes } from './runtimes.ts'
@@ -64,7 +64,7 @@ export class Router {
     root: TSNodeLike,
     command: string,
     options: ExecuteOptions,
-    session: Session,
+    session: SessionState,
   ): Promise<RouteDecision | null> {
     if (options.routingDecision !== undefined) return options.routingDecision
     if (options.runtime !== undefined) {

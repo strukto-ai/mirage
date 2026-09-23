@@ -15,8 +15,8 @@
 import { homedir } from 'node:os'
 import {
   MountMode,
-  S3Resource,
-  SSHResource,
+  S3VFS,
+  SSHVFS,
   SSHRuntime,
   Workspace,
   type S3Config,
@@ -70,7 +70,7 @@ const POINTS_CSV = 'name,value\nalpha,1.5\nbeta,2.5\ngamma,4.0\n'
 const ENC = new TextEncoder()
 
 async function show(ws: Workspace, command: string): Promise<void> {
-  const result = await ws.execute(command, { cwd: REMOTE_DIR })
+  const result = await ws.shell(command, { cwd: REMOTE_DIR })
   console.log(`$ ${command}`)
   if (result.stdoutText) {
     process.stdout.write(result.stdoutText.endsWith('\n') ? result.stdoutText : `${result.stdoutText}\n`)
@@ -86,15 +86,15 @@ async function main(): Promise<void> {
     config: { host: 'dev', hostname: HOSTNAME, username: 'ubuntu', identityFile: IDENTITY },
   })
   const ws = new Workspace(
-    { '/data': new S3Resource(dataConfig), [REMOTE_DIR]: new SSHResource(projConfig) },
-    { mode: MountMode.EXEC, runtimes: [runtime, 'vfs'] },
+    { '/data': new S3VFS(dataConfig), [REMOTE_DIR]: new SSHVFS(projConfig) },
+    { mode: MountMode.EXEC, runtimes: [runtime, 'workspace'] },
   )
 
   try {
     // Seed both sides through the workspace: the dataset into S3, the
     // loader onto the box (an SFTP write; the box provisions itself).
-    await ws.execute('cat > /data/points.csv', { stdin: ENC.encode(POINTS_CSV) })
-    await ws.execute(`cat > ${REMOTE_DIR}/load.py`, { stdin: ENC.encode(LOAD_PY) })
+    await ws.shell('cat > /data/points.csv', { stdin: ENC.encode(POINTS_CSV) })
+    await ws.shell(`cat > ${REMOTE_DIR}/load.py`, { stdin: ENC.encode(LOAD_PY) })
     await show(ws, 'ls /data')
     await show(ws, 'ls')
 

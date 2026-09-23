@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { runWithLineAbort } from './abort.ts'
 import { recordStatus } from './executor/statement.ts'
-import { Session, newStatusWriter } from './session/session.ts'
+import { SessionState, newStatusWriter } from './session/session.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
 // the real FallbackStorage (no task isolation, one frame stack per
@@ -46,8 +46,8 @@ describe('the status door on the fallback storage', () => {
   it('an aborted line does not reach a concurrent line on another session', async () => {
     // B binds after A and aborts; while B's frame is the newest, A stamps.
     // The slot would answer A with B's signal and make A throw B's abort.
-    const a = new Session({ sessionId: 'a', cwd: '/' })
-    const b = new Session({ sessionId: 'b', cwd: '/' })
+    const a = new SessionState({ sessionId: 'a', cwd: '/' })
+    const b = new SessionState({ sessionId: 'b', cwd: '/' })
     const abortB = new AbortController()
     const [holdA, releaseA] = gate()
     const [holdB, releaseB] = gate()

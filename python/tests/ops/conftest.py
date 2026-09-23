@@ -16,8 +16,8 @@ import asyncio
 
 from mirage import MountMode, Workspace
 from mirage.ops import Ops
-from mirage.resource.ram import RAMResource
-from mirage.resource.ram.store import RAMStore
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.ram.store import RAMStore
 
 
 def run(coro):
@@ -25,9 +25,9 @@ def run(coro):
 
 
 def make_ops(mode=MountMode.WRITE) -> tuple[Ops, RAMStore]:
-    resource = RAMResource()
-    ws = Workspace({"/data/": resource}, mode=mode)
-    return ws.fs, resource._store
+    vfs = RAMVFS()
+    ws = Workspace({"/data/": vfs}, mode=mode)
+    return ws.vfs, vfs._store
 
 
 def make_ops_with_dir(mode=MountMode.WRITE):

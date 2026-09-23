@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SSH_COMMANDS } from './index.ts'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 
 describe('SSH_COMMANDS', () => {
   it('has all in-scope commands', () => {
@@ -45,7 +45,7 @@ describe('SSH_COMMANDS', () => {
     for (const e of expected) expect(names).toContain(e)
   })
 
-  it('every command targets ResourceName.SSH', () => {
-    for (const c of SSH_COMMANDS) expect(c.resource).toBe(ResourceName.SSH)
+  it('every command targets VFSName.SSH', () => {
+    for (const c of SSH_COMMANDS) expect(c.vfs).toBe(VFSName.SSH)
   })
 })

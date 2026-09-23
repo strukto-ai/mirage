@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RAMStore } from '../resource/ram/store.ts'
+import type { RAMStore } from '../vfs/ram/store.ts'
 import { Accessor } from './base.ts'
 
 export class RAMAccessor extends Accessor {

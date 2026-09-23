@@ -115,7 +115,7 @@ def python_modules() -> dict[str, dict[str, str]]:
 def typescript_modules() -> dict[str, dict[str, str]]:
     """Every typescript module, keyed by directory then folded name.
 
-    The three runtime packages are unioned: python's ``resource/disk`` has
+    The three runtime packages are unioned: python's ``VFS/disk`` has
     no counterpart in ``core`` because CLAUDE.md puts node-only code in
     ``node``, and that split is the design rather than a gap. ``index.ts``
     is skipped for the same reason ``__init__.py`` is.

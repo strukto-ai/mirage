@@ -17,10 +17,10 @@ implementation uses
 
 ```typescript
 import { NTN } from '@struktoai/mirage-core'
-import { NotionResource, Workspace } from '@struktoai/mirage-node'
+import { NotionVFS, Workspace } from '@struktoai/mirage-node'
 
 const config = { apiKey: 'secret_...' }
-const ws = new Workspace({ '/notion': new NotionResource(config) })
+const ws = new Workspace({ '/notion': new NotionVFS(config) })
 ws.registerCli('ntn', NTN, config)
 ```
 

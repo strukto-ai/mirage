@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '../../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { CapacityState, MountMode } from '../../../../types.ts'
 import type { CapacityResult } from '../../../../types.ts'
 import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
@@ -22,7 +22,7 @@ import { Workspace } from '../../../workspace/workspace.ts'
 // RAM backend that reports a fixed quota, standing in for a real filesystem
 // / a provider that exposes storage numbers (real disk free space is
 // machine-specific, so this keeps the output deterministic).
-class QuotaResource extends RAMResource {
+class QuotaVFS extends RAMVFS {
   override statfs(): Promise<CapacityResult> {
     return Promise.resolve({
       state: CapacityState.QUOTA,
@@ -39,13 +39,13 @@ class QuotaResource extends RAMResource {
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
   return new Workspace(
-    { '/mem': new RAMResource(), '/q': new QuotaResource() },
+    { '/mem': new RAMVFS(), '/q': new QuotaVFS() },
     { mode: MountMode.WRITE, shellParser: parser },
   )
 }
 
 async function run(ws: Workspace, cmd: string): Promise<[number, string]> {
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   return [r.exitCode, r.stdoutText]
 }
 
@@ -56,7 +56,7 @@ function cols(out: string, i: number): string[] {
 
 describe('df', () => {
   it('default statfs state is UNKNOWN', async () => {
-    const cap = await new RAMResource().statfs()
+    const cap = await new RAMVFS().statfs()
     expect(cap.state).toBe(CapacityState.UNKNOWN)
     expect(cap.total).toBeUndefined()
   })
@@ -178,7 +178,7 @@ describe('df', () => {
 
   it('rejects a zero block size', async () => {
     const ws = await makeWs()
-    const r = await ws.execute('df -B0 /q')
+    const r = await ws.shell('df -B0 /q')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toBe("df: invalid -B argument '0'\n")
     await ws.close()
@@ -199,11 +199,11 @@ describe('df', () => {
 
   it('errors on a missing FILE operand', async () => {
     const ws = await makeWs()
-    await ws.execute('mkdir -p /mem/sub')
-    await ws.execute("sh -c 'echo hi > /mem/sub/f.txt'")
+    await ws.shell('mkdir -p /mem/sub')
+    await ws.shell("sh -c 'echo hi > /mem/sub/f.txt'")
     expect((await run(ws, 'df /mem/sub/f.txt'))[0]).toBe(0)
     expect((await run(ws, 'df /mem'))[0]).toBe(0)
-    const r = await ws.execute('df /mem/missing')
+    const r = await ws.shell('df /mem/missing')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toBe('df: /mem/missing: No such file or directory\n')
     await ws.close()
@@ -211,7 +211,7 @@ describe('df', () => {
 
   it('follows a symlink to the target mount', async () => {
     const ws = await makeWs()
-    await ws.execute('ln -s /q /mem/link')
+    await ws.shell('ln -s /q /mem/link')
     const [code, out] = await run(ws, 'df /mem/link')
     expect(code).toBe(0)
     const last = out.trimEnd().split('\n').pop() ?? ''

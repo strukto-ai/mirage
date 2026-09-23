@@ -20,9 +20,9 @@ from mirage.agents.io_text import with_refusal
 from mirage.policy import PolicyDenied
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import AdmissionRules, CommandRule
-from mirage.resource.ram import RAMResource
 from mirage.shell import parse
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.node.admission import (Admitted, admit, admit_line,
@@ -52,7 +52,7 @@ DOC = {
 
 
 def _ws() -> Workspace:
-    return Workspace({"/data/": (RAMResource(), MountMode.WRITE)},
+    return Workspace({"/data/": (RAMVFS(), MountMode.WRITE)},
                      mode=MountMode.WRITE,
                      profiles={"default": DOC})
 
@@ -75,8 +75,8 @@ def _voiced(refused) -> str:
 async def test_policy_scopes_follow_links_only_for_a_following_command():
     ws = _ws()
     try:
-        await ws.execute("echo top > /data/secret && "
-                         "ln -s /data/secret /data/link")
+        await ws.shell("echo top > /data/secret && "
+                       "ln -s /data/secret /data/link")
         # cat opens the target: the typed path first, then what it
         # resolves to; rm and `ls -l` act on the link itself.
         assert _virtuals(ws, "cat",
@@ -132,7 +132,7 @@ async def test_a_bare_listing_reads_the_working_directory():
     # directory has to see it here, as the operand typed `.`.
     ws = _ws()
     try:
-        await ws.execute("mkdir -p /data/private && echo x > /data/private/f")
+        await ws.shell("mkdir -p /data/private && echo x > /data/private/f")
         session = ws._session_mgr.get(ws._session_mgr.default_id)
         registry, namespace = ws._registry, ws._namespace
 
@@ -149,7 +149,7 @@ async def test_a_bare_listing_reads_the_working_directory():
                 refusal, Admitted) else (refusal.exit_code, _voiced(refusal))
 
         assert await run("ls") is None
-        await ws.execute("cd /data/private")
+        await ws.shell("cd /data/private")
         assert await run("ls") == (1, "ls: .: private\n")
         # A named operand replaces the implied one.
         assert await run("ls", "/data") is None
@@ -234,7 +234,7 @@ async def test_admit_line_classifies_bare_operands_with_the_spec():
     # runtime resolves it against the cwd exactly as the spec hints do.
     ws = _ws()
     try:
-        await ws.execute("cd /data")
+        await ws.shell("cd /data")
         session = ws._session_mgr.get(ws._session_mgr.default_id)
         registry, namespace = ws._registry, ws._namespace
         refusal = await admit_line(parse("cat secret"), session, registry,
@@ -323,7 +323,7 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
     # not fire, and the line goes on to the door, which answers ENOENT.
     ws = _ws()
     try:
-        await ws.execute("mkdir -p /data/private && echo s > /data/secret")
+        await ws.shell("mkdir -p /data/private && echo s > /data/secret")
         veiled = ws.create_session(
             "veiled",
             profile=SessionProfile(paths=PathsBlock(hide=("/data/secret",
@@ -346,13 +346,13 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
                                               "ls: /data/private: private\n")
         assert await run(veiled, "ls", "/data/private") is None
         # The followed target and the implied operand are dropped too.
-        await ws.execute("ln -s /data/secret /data/l")
+        await ws.shell("ln -s /data/secret /data/l")
         assert await run(plain, "cat",
                          "/data/l") == (1, "cat: /data/l: sealed\n")
         assert await run(veiled, "cat", "/data/l") is None
         # Whatever the session sees is still read as before.
         assert await run(veiled, "cat", "/data/a") is None
-        await ws.execute("echo x > /data/private/f")
+        await ws.shell("echo x > /data/private/f")
         assert await run(plain, "grep", "-r", "x",
                          "/data/private") == (1,
                                               "grep: /data/private: private\n")
@@ -365,7 +365,7 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
 async def test_admit_line_without_rules_admits_the_words_as_typed():
     # No command rule in force: nothing is refused for being unreadable,
     # which is what a coded policy always saw.
-    ws = Workspace({"/data/": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data/": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     try:
         session = ws._session_mgr.get(ws._session_mgr.default_id)

@@ -14,7 +14,7 @@
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/utils/errors'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -59,6 +59,6 @@ export async function read(
       ? file
       : file.slice(offset, size === null ? undefined : offset + size)
   const bytes = new Uint8Array(await window.arrayBuffer())
-  record('read', virtual, ResourceName.OPFS, bytes.byteLength, timer)
+  record('read', virtual, VFSName.OPFS, bytes.byteLength, timer)
   return bytes
 }

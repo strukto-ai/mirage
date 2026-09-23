@@ -19,10 +19,10 @@ independent implementation uses
 
 ```typescript
 import { LINEAR } from '@struktoai/mirage-core'
-import { LinearResource, Workspace } from '@struktoai/mirage-node'
+import { LinearVFS, Workspace } from '@struktoai/mirage-node'
 
 const config = { apiKey: 'lin_api_...' }
-const ws = new Workspace({ '/issues': new LinearResource(config) })
+const ws = new Workspace({ '/issues': new LinearVFS(config) })
 ws.registerCli('linear', LINEAR, config)
 ```
 

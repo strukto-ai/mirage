@@ -13,14 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Session } from '../../../session/session.ts'
+import { SessionState } from '../../../session/session.ts'
 import { changeDir } from '../../../session/shell_dirs.ts'
 import { handlePwd } from './pwd.ts'
 
 const DEC = new TextDecoder()
 
-function session(): Session {
-  const s = new Session({ sessionId: 's1' })
+function session(): SessionState {
+  const s = new SessionState({ sessionId: 's1' })
   changeDir(s, '/data/deep/real', '/data/lk')
   return s
 }

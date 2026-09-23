@@ -18,7 +18,7 @@ import { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { SlackResponse, SlackTransport } from '../../core/slack/client.ts'
-import { PathSpec, ResourceName } from '../../types.ts'
+import { PathSpec, VFSName } from '../../types.ts'
 import { SLACK_OPS } from './index.ts'
 
 const readOp = SLACK_OPS.find((o) => o.name === 'read' && o.filetype === null)
@@ -39,14 +39,14 @@ class FakeTransport implements SlackTransport {
 }
 
 describe('ops/slack/read', () => {
-  it('is registered against ResourceName.SLACK as a non-write read op', () => {
+  it('is registered against VFSName.SLACK as a non-write read op', () => {
     expect(readOp.name).toBe('read')
-    expect(readOp.resource).toBe(ResourceName.SLACK)
+    expect(readOp.vfs).toBe(VFSName.SLACK)
     expect(readOp.write).toBe(false)
     expect(readOp.filetype).toBeNull()
   })
 
-  it('dispatches to coreRead using the resource accessor', async () => {
+  it('dispatches to coreRead using the VFS accessor', async () => {
     const idx = new RAMIndexCacheStore()
     await idx.setDir('/mnt/slack/users', [
       [
@@ -71,7 +71,7 @@ describe('ops/slack/read', () => {
       new PathSpec({
         virtual: '/mnt/slack/users/alice__U1.json',
         directory: '/mnt/slack/users/alice__U1.json',
-        resourcePath: mountKey('/mnt/slack/users/alice__U1.json', '/mnt/slack'),
+        vfsPath: mountKey('/mnt/slack/users/alice__U1.json', '/mnt/slack'),
       }),
       [],
       { index: idx },

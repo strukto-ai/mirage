@@ -283,7 +283,7 @@ def _globbed(mount_path: str, pattern: str) -> PathSpec:
     base = spec(mount_path)
     return PathSpec(virtual=base.virtual + "/" + pattern,
                     directory=base.virtual + "/",
-                    resource_path=base.resource_path + "/" + pattern,
+                    vfs_path=base.vfs_path + "/" + pattern,
                     pattern=pattern)
 
 

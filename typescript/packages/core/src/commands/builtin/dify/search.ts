@@ -19,7 +19,7 @@ import { resolveGlobOf } from '../generic_bind/index.ts'
 import { DIFY_IO } from './io.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -32,8 +32,8 @@ const ENC = new TextEncoder()
 
 function isMountRoot(path: PathSpec): boolean {
   let root =
-    mountPrefixOf(path.virtual, path.resourcePath) !== ''
-      ? rstripSlash(mountPrefixOf(path.virtual, path.resourcePath))
+    mountPrefixOf(path.virtual, path.vfsPath) !== ''
+      ? rstripSlash(mountPrefixOf(path.virtual, path.vfsPath))
       : '/'
   root = root !== '' ? root : '/'
   const value = rstripSlash(path.virtual) !== '' ? rstripSlash(path.virtual) : '/'
@@ -55,7 +55,7 @@ async function searchCommand(
   const mountPrefix =
     (targetPaths[0] === undefined
       ? undefined
-      : mountPrefixOf(targetPaths[0].virtual, targetPaths[0].resourcePath)) ?? ''
+      : mountPrefixOf(targetPaths[0].virtual, targetPaths[0].vfsPath)) ?? ''
   const resolvedPaths = targetPaths.some(isMountRoot)
     ? []
     : await resolveGlob(accessor, targetPaths, index)
@@ -79,7 +79,7 @@ async function searchCommand(
 
 export const DIFY_SEARCH = command({
   name: 'search',
-  resource: ResourceName.DIFY,
+  vfs: VFSName.DIFY,
   spec: specOf('search'),
   fn: searchCommand,
 })

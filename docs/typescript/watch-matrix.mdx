@@ -1,6 +1,6 @@
 ---
 title: Watch Matrix
-description: TypeScript watch delivery support and the pull or push detection paths available for each resource.
+description: TypeScript watch delivery support and the pull or push detection paths available for each VFS.
 icon: table-cells
 ---
 
@@ -10,11 +10,11 @@ Watching has two independent halves:
 
 - **Delivery** (`ws.watch()` and `ws.notify()`) works on **every mount**.
   Mirage invalidates caches, matches scopes, and delivers the event stream.
-- **Detection** is backend-specific. **Pull** marks resources whose
+- **Detection** is backend-specific. **Pull** marks mounts whose
   `deltaHook()` ships with Mirage. **Push signal** names the provider mechanism
   that your application can map to a `FileEvent`.
 
-| Resource              | Pull (`deltaHook`)            | Fingerprint       | Push signal (provider-side)                |
+| VFS              | Pull (`deltaHook`)            | Fingerprint       | Push signal (provider-side)                |
 | --------------------- | ----------------------------- | ----------------- | ------------------------------------------ |
 | Nextcloud             | ✓ recursive PROPFIND          | WebDAV ETag       | `webhook_listeners` app (Nextcloud 30+)    |
 | S3 / S3-compatible    | ✓ recursive `ListObjectsV2`   | object ETag       | S3 Event Notifications (SQS/EventBridge)   |
@@ -109,7 +109,7 @@ import {
 } from "@struktoai/mirage-core";
 
 async function* walk(root: PathSpec): AsyncGenerator<WalkEntry> {
-  for await (const object of listObjects(root.resourcePath)) {
+  for await (const object of listObjects(root.vfsPath)) {
     yield {
       virtual: `/s3/${object.key}`,
       isDir: false,

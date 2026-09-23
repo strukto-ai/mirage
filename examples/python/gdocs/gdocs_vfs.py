@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.gdocs import GDocsConfig, GDocsResource
+from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
 
 load_dotenv(".env.development")
 
@@ -28,11 +28,11 @@ config = GDocsConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-resource = GDocsResource(config=config)
+vfs = GDocsVFS(config=config)
 
 
 async def main() -> None:
-    with Workspace({"/gdocs/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/gdocs/": vfs}, mode=MountMode.READ) as ws:
         print(
             "=== VFS MODE: open() reads from Google Docs transparently ===\n")
 
@@ -67,7 +67,7 @@ async def main() -> None:
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

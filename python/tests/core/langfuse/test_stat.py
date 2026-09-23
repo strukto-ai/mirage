@@ -21,8 +21,8 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.langfuse.stat import stat
 from mirage.core.render.json import jsonl_bytes
-from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.types import ContentType, FileType, PathSpec
+from mirage.vfs.langfuse.config import LangfuseConfig
 
 
 async def seed_dir(index, virtual_key: str, names: list[str]) -> None:
@@ -52,7 +52,7 @@ def index():
 @pytest.mark.asyncio
 async def test_stat_root(accessor, index):
     result = await stat(accessor,
-                        PathSpec(resource_path="", virtual="/", directory="/"),
+                        PathSpec(vfs_path="", virtual="/", directory="/"),
                         index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
@@ -62,9 +62,8 @@ async def test_stat_root(accessor, index):
 async def test_stat_traces_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path="traces",
-                 virtual="/traces",
-                 directory="/traces"), index)
+        PathSpec(vfs_path="traces", virtual="/traces", directory="/traces"),
+        index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "traces"
 
@@ -74,7 +73,7 @@ async def test_stat_trace_file(accessor, index):
     await seed_dir(index, "/traces", ["abc.json"])
     result = await stat(
         accessor,
-        PathSpec(resource_path="traces/abc.json",
+        PathSpec(vfs_path="traces/abc.json",
                  virtual="/traces/abc.json",
                  directory="/traces/abc.json"), index)
     assert result.content == ContentType.JSON
@@ -86,7 +85,7 @@ async def test_stat_session_dir(accessor, index):
     await seed_dir(index, "/sessions", ["sid1"])
     result = await stat(
         accessor,
-        PathSpec(resource_path="sessions/sid1",
+        PathSpec(vfs_path="sessions/sid1",
                  virtual="/sessions/sid1",
                  directory="/sessions/sid1"), index)
     assert result.type == FileType.DIRECTORY
@@ -98,7 +97,7 @@ async def test_stat_prompt_version_file(accessor, index):
     await seed_dir(index, "/prompts/summarize", ["1.json"])
     result = await stat(
         accessor,
-        PathSpec(resource_path="prompts/summarize/1.json",
+        PathSpec(vfs_path="prompts/summarize/1.json",
                  virtual="/prompts/summarize/1.json",
                  directory="/prompts/summarize/1.json"), index)
     assert result.content == ContentType.JSON
@@ -115,7 +114,7 @@ async def test_stat_dataset_items(accessor, index):
     ):
         result = await stat(
             accessor,
-            PathSpec(resource_path="datasets/qa-eval/items.jsonl",
+            PathSpec(vfs_path="datasets/qa-eval/items.jsonl",
                      virtual="/datasets/qa-eval/items.jsonl",
                      directory="/datasets/qa-eval/items.jsonl"), index)
     assert result.content == ContentType.TEXT
@@ -128,7 +127,7 @@ async def test_stat_dotfile_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path=".hidden",
+            PathSpec(vfs_path=".hidden",
                      virtual="/.hidden",
                      directory="/.hidden"), index)
 
@@ -142,7 +141,7 @@ async def test_stat_dataset_runs_dir(accessor, index):
     ):
         result = await stat(
             accessor,
-            PathSpec(resource_path="datasets/qa-eval/runs",
+            PathSpec(vfs_path="datasets/qa-eval/runs",
                      virtual="/datasets/qa-eval/runs",
                      directory="/datasets/qa-eval/runs"), index)
     assert result.type == FileType.DIRECTORY
@@ -157,7 +156,7 @@ async def test_stat_unlisted_trace_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path="traces/absent.json",
+            PathSpec(vfs_path="traces/absent.json",
                      virtual="/traces/absent.json",
                      directory="/traces/absent.json"), index)
 
@@ -168,6 +167,6 @@ async def test_stat_unlisted_prompt_version_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path="prompts/summarize/9.json",
+            PathSpec(vfs_path="prompts/summarize/9.json",
                      virtual="/prompts/summarize/9.json",
                      directory="/prompts/summarize/9.json"), index)

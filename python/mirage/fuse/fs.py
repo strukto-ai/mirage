@@ -15,6 +15,7 @@
 import errno
 import logging
 import os
+import sys
 from typing import Any, Callable
 
 from mirage.fuse.core import MountCore
@@ -22,9 +23,15 @@ from mirage.fuse.darwin import rename_flags_check
 from mirage.fuse.errors import classify_error
 from mirage.ops import Ops
 from mirage.types import JsonValue
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
+
+# setxattr(2)'s flags as the kernel hands them over: linux numbers
+# XATTR_CREATE 1 and XATTR_REPLACE 2, macOS 2 and 4 (its 1 is
+# XATTR_NOFOLLOW, which the kernel has already applied).
+XATTR_CREATE, XATTR_REPLACE = ((0x2, 0x4) if sys.platform == "darwin" else
+                               (0x1, 0x2))
 
 
 class MirageFS:
@@ -38,7 +45,8 @@ class MirageFS:
     Args:
         ops (Ops): the workspace op facade every callback routes to.
         root_prefix (str): mount root; non-empty scopes the tree to one mount.
-        session (Session | None): bind every op to this session's mount grants.
+        session (SessionState | None): bind every op to this
+            session's mount grants.
     """
 
     use_ns = True
@@ -46,7 +54,7 @@ class MirageFS:
     def __init__(self,
                  ops: Ops,
                  root_prefix: str = "",
-                 session: Session | None = None) -> None:
+                 session: SessionState | None = None) -> None:
         self.core = MountCore(ops, root_prefix=root_prefix, session=session)
 
     def _call(self, fn: Callable[..., Any], *args: Any) -> Any:
@@ -170,7 +178,8 @@ class MirageFS:
                  value: bytes,
                  options: int,
                  position: int = 0) -> int:
-        self._call(self.core.setxattr, path, name, value)
+        self._call(self.core.setxattr, path, name, value,
+                   bool(options & XATTR_CREATE), bool(options & XATTR_REPLACE))
         return 0
 
     def getxattr(self, path: str, name: str, position: int = 0) -> bytes:

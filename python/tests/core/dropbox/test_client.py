@@ -22,8 +22,8 @@ from mirage.core.dropbox.client import (DropboxTokenManager, _token_url,
                                         dropbox_download)
 from mirage.core.dropbox.constants import (DROPBOX_API_BASE,
                                            DROPBOX_CONTENT_BASE)
-from mirage.resource.dropbox.config import DropboxConfig
 from mirage.utils.ranges import ByteWindow
+from mirage.vfs.dropbox.config import DropboxConfig
 
 
 def make_config(**overrides) -> DropboxConfig:

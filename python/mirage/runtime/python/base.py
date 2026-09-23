@@ -40,7 +40,7 @@ class PythonRuntime(LanguageRuntime):
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Process runtimes must supply a probe that cannot run startup hooks.
-        if self.reach != "vfs":
+        if self.reach != "workspace":
             return await super().version(env)
         return await self.run(
             RunArgs(code=("import sys\n"

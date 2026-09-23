@@ -99,7 +99,7 @@ function frame(
   // event landed outside the watch scope. The comparison folds case; the
   // slice keeps the server's casing for everything below the root, and is
   // safe because `path_lower` is `path_display` lowercased, same length.
-  const prefix = mountPrefixOf(root.virtual, root.resourcePath)
+  const prefix = mountPrefixOf(root.virtual, root.vfsPath)
   const display = entry.path_display ?? entry.path_lower
   if (display === undefined || display === '') return null
   const base = accessor.rootPath

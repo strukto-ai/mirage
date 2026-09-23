@@ -4,7 +4,7 @@ icon: envelope
 description: Mount an IMAP/SMTP mailbox as a Mirage filesystem (Node only).
 ---
 
-`EmailResource` reads messages over IMAP and sends via SMTP, exposing the mailbox as a tree of folders and messages.
+`EmailVFS` reads messages over IMAP and sends via SMTP, exposing the mailbox as a tree of folders and messages.
 
 <Note>
   Node only. Requires `imapflow`, `mailparser`, and `nodemailer` peers. The browser cannot speak raw TCP for IMAP/SMTP.
@@ -19,9 +19,9 @@ pnpm add @struktoai/mirage-node imapflow mailparser nodemailer
 ## Config
 
 ```ts
-import { EmailResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { EmailVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const email = new EmailResource({
+const email = new EmailVFS({
   imapHost: 'imap.example.com',
   smtpHost: 'smtp.example.com',
   username: process.env.EMAIL_USER!,
@@ -29,7 +29,7 @@ const email = new EmailResource({
 })
 
 const ws = new Workspace({ '/mail': email }, { mode: MountMode.WRITE })
-await ws.execute('ls /mail/INBOX/')
+await ws.shell('ls /mail/INBOX/')
 ```
 
 | Field | Default | Notes |
@@ -47,4 +47,4 @@ await ws.execute('ls /mail/INBOX/')
 
 `read`, `write` (sending mail via the synthesized `/sent/` path).
 
-For mailbox layout, search behavior, and synthesized date directories see the [Python Email docs](/python/resource/email).
+For mailbox layout, search behavior, and synthesized date directories see the [Python Email docs](/python/vfs/email).

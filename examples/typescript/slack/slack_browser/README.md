@@ -1,6 +1,6 @@
 # Browser Slack demo
 
-Two-part demo of the browser `SlackResource` pattern. The browser package never sees the bot token directly — instead, a small Node proxy holds the token and forwards requests to the Slack API. This same shape works for a real frontend (the proxy lives on your server, the browser hits a relative path).
+Two-part demo of the browser `SlackVFS` pattern. The browser package never sees the bot token directly — instead, a small Node proxy holds the token and forwards requests to the Slack API. This same shape works for a real frontend (the proxy lives on your server, the browser hits a relative path).
 
 ## Run
 

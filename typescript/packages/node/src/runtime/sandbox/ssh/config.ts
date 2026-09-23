@@ -17,7 +17,7 @@ import type { SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/confi
 /**
  * How to reach the machine that runs captured lines.
  *
- * The same knobs as the ssh resource's config minus `root` (a runtime
+ * The same knobs as the ssh VFS's config minus `root` (a runtime
  * has no mount root) and password auth (an exec surface holds keys,
  * never a password). `host` doubles as the address unless `hostname`
  * overrides it, mirroring OpenSSH's Host / HostName split.

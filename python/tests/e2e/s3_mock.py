@@ -210,8 +210,17 @@ class MultiBucketS3Client:
         assert name == "list_objects_v2"
         return _MultiBucketPaginator(self.buckets)
 
-    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:
+    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> dict:
+        self.calls["put_object"] += 1
         self._objects(Bucket)[Key] = Body
+        # Real PutObject answers the stored object's ETag, so the token a
+        # write stamps is the one head_object reports next -- suffix
+        # included, which is what makes a multipart-shaped ETag testable.
+        resp: dict = {"ETag": f'"{self._etag(Body)}"'}
+        vid = self._track(Bucket, Key)
+        if vid is not None:
+            resp["VersionId"] = vid
+        return resp
 
     async def delete_object(self, Bucket: str, Key: str) -> None:
         self.calls["delete_object"] += 1

@@ -30,7 +30,7 @@ import {
   type PredNode,
 } from '../../commands/builtin/find_eval.ts'
 import { record, startOp } from '../../observe/context.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../utils/errors.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
@@ -60,12 +60,8 @@ function directoryPath(path: PathSpec): PathSpec {
 
 function virtualKey(path: PathSpec): string {
   const target = directoryPath(path)
-  const prefix = mountPrefixOf(target.virtual, target.resourcePath)
-  return target.resourcePath !== ''
-    ? `${prefix}/${target.resourcePath}`
-    : prefix !== ''
-      ? prefix
-      : '/'
+  const prefix = mountPrefixOf(target.virtual, target.vfsPath)
+  return target.vfsPath !== '' ? `${prefix}/${target.vfsPath}` : prefix !== '' ? prefix : '/'
 }
 
 function parentPath(path: string): string {
@@ -86,7 +82,7 @@ async function resolvedItem(
   accessor: SharePointAccessor,
   path: PathSpec,
 ): Promise<ResolvedSharePointPath> {
-  const resolved = await accessor.resolve(path.resourcePath)
+  const resolved = await accessor.resolve(path.vfsPath)
   requireItem(path, resolved)
   return resolved
 }
@@ -109,9 +105,9 @@ export async function read(
   const resolved = await resolvedItem(accessor, path)
   return readItem(
     accessor.config,
-    accessor.loc(resolved, path.resourcePath),
+    accessor.loc(resolved, path.vfsPath),
     path.virtual,
-    path.resourcePath,
+    path.vfsPath,
     'sharepoint',
     options?.offset ?? 0,
     options?.size ?? null,
@@ -126,9 +122,9 @@ export async function* stream(
   const resolved = await resolvedItem(accessor, path)
   yield* streamItem(
     accessor.config,
-    accessor.loc(resolved, path.resourcePath),
+    accessor.loc(resolved, path.vfsPath),
     path.virtual,
-    path.resourcePath,
+    path.vfsPath,
     'sharepoint',
   )
 }
@@ -168,8 +164,8 @@ export async function readdir(
     const cached = await index.listDir(key)
     if (cached.entries !== undefined && cached.entries !== null) return cached.entries
   }
-  const resolved = await accessor.resolve(target.resourcePath)
-  const prefix = mountPrefixOf(target.virtual, target.resourcePath)
+  const resolved = await accessor.resolve(target.vfsPath)
+  const prefix = mountPrefixOf(target.virtual, target.vfsPath)
   if (resolved.level === 'root') {
     return cacheNamespace(await accessor.listSites(), key, '', prefix, index)
   }
@@ -177,7 +173,7 @@ export async function readdir(
     return cacheNamespace(
       await accessor.listDrives(resolved.siteId),
       key,
-      `/${target.resourcePath}`,
+      `/${target.vfsPath}`,
       prefix,
       index,
     )
@@ -185,10 +181,10 @@ export async function readdir(
   if (resolved.driveId === null) return []
   return readdirItems(
     accessor.config,
-    accessor.loc(resolved, target.resourcePath),
+    accessor.loc(resolved, target.vfsPath),
     index,
     prefix,
-    target.resourcePath,
+    target.vfsPath,
     key,
     target,
   )
@@ -199,20 +195,20 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  if (path.resourcePath === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
-  const resolved = await accessor.resolve(path.resourcePath)
+  if (path.vfsPath === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
+  const resolved = await accessor.resolve(path.vfsPath)
   if (resolved.level === 'site') {
     if (resolved.siteId === null) throw enoent(path)
-    return new FileStat({ name: path.resourcePath, type: FileType.DIRECTORY })
+    return new FileStat({ name: path.vfsPath, type: FileType.DIRECTORY })
   }
   if (resolved.level === 'drive') {
     if (resolved.driveId === null) throw enoent(path)
-    return new FileStat({ name: baseName(path.resourcePath), type: FileType.DIRECTORY })
+    return new FileStat({ name: baseName(path.vfsPath), type: FileType.DIRECTORY })
   }
   requireItem(path, resolved)
   return statItem(
     accessor.config,
-    accessor.loc(resolved, path.resourcePath),
+    accessor.loc(resolved, path.vfsPath),
     path,
     virtualKey(path),
     index,
@@ -226,8 +222,8 @@ export async function write(
 ): Promise<void> {
   const resolved = await resolvedItem(accessor, path)
   const timer = startOp()
-  await writeItem(accessor.config, accessor.loc(resolved, path.resourcePath), data)
-  record('write', path.resourcePath, 'sharepoint', data.length, timer)
+  await writeItem(accessor.config, accessor.loc(resolved, path.vfsPath), data)
+  record('write', path.vfsPath, 'sharepoint', data.length, timer)
   await invalidateAfterWrite(path)
 }
 
@@ -259,7 +255,7 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
-  if (path.resourcePath === '') return
+  if (path.vfsPath === '') return
   const resolved = await resolvedItem(accessor, path)
   const itemPath = resolved.itemPath ?? ''
   if (parents) {
@@ -277,7 +273,7 @@ export async function mkdir(
 export async function unlink(accessor: SharePointAccessor, path: PathSpec): Promise<void> {
   const resolved = await resolvedItem(accessor, path)
   try {
-    await graphDelete(accessor.config, accessor.loc(resolved, path.resourcePath).item())
+    await graphDelete(accessor.config, accessor.loc(resolved, path.vfsPath).item())
   } catch (error) {
     if (error instanceof GraphError && error.status === 404) throw enoent(path)
     throw error
@@ -286,10 +282,10 @@ export async function unlink(accessor: SharePointAccessor, path: PathSpec): Prom
 }
 
 export async function rmR(accessor: SharePointAccessor, path: PathSpec): Promise<void> {
-  if (path.resourcePath === '') return
-  const resolved = await accessor.resolve(path.resourcePath)
+  if (path.vfsPath === '') return
+  const resolved = await accessor.resolve(path.vfsPath)
   if (resolved.driveId === null || resolved.itemPath === null) return
-  await graphDelete(accessor.config, accessor.loc(resolved, path.resourcePath).item())
+  await graphDelete(accessor.config, accessor.loc(resolved, path.vfsPath).item())
   await invalidateSubtree(path)
 }
 
@@ -301,14 +297,14 @@ export async function rmR(accessor: SharePointAccessor, path: PathSpec): Promise
  * emptiness check is the only thing separating them. Aliasing the two --
  * which this was -- destroyed the whole subtree for every caller that does
  * not pre-check emptiness itself, and the command builders are the only
- * callers that do: FUSE, `ws.fs` and the sandbox runtimes all reach the op
+ * callers that do: FUSE, `ws.vfs` and the sandbox runtimes all reach the op
  * directly.
  */
 export async function rmdir(accessor: SharePointAccessor, path: PathSpec): Promise<void> {
-  if (path.resourcePath === '') return
-  const resolved = await accessor.resolve(path.resourcePath)
+  if (path.vfsPath === '') return
+  const resolved = await accessor.resolve(path.vfsPath)
   if (resolved.driveId === null || resolved.itemPath === null) return
-  const loc = accessor.loc(resolved, path.resourcePath)
+  const loc = accessor.loc(resolved, path.vfsPath)
   if (!(await driveRootEmpty(accessor.config, loc))) throw enotempty(path)
   await graphDelete(accessor.config, loc.item())
   await invalidateAfterUnlink(path)
@@ -325,8 +321,8 @@ export async function rename(
   const dstResolved = await resolvedItem(accessor, dst)
   await renameReplace(
     accessor.config,
-    accessor.loc(srcResolved, src.resourcePath),
-    accessor.loc(dstResolved, dst.resourcePath),
+    accessor.loc(srcResolved, src.vfsPath),
+    accessor.loc(dstResolved, dst.vfsPath),
   )
   await invalidateSubtree(dst)
   await invalidateSubtree(src)
@@ -341,8 +337,8 @@ export async function copy(
   const dstResolved = await resolvedItem(accessor, dst)
   await copyTree(
     accessor.config,
-    accessor.loc(srcResolved, src.resourcePath),
-    accessor.loc(dstResolved, dst.resourcePath),
+    accessor.loc(srcResolved, src.vfsPath),
+    accessor.loc(dstResolved, dst.vfsPath),
   )
   await invalidateAfterWrite(dst)
 }
@@ -360,9 +356,9 @@ export async function du(
   } catch (error) {
     if ((error as { code?: unknown }).code !== 'ENOENT') throw error
   }
-  const resolved = await accessor.resolve(path.resourcePath)
+  const resolved = await accessor.resolve(path.vfsPath)
   if (resolved.driveId === null) return 0
-  return duTreeTotal(accessor.config, accessor.loc(resolved, path.resourcePath))
+  return duTreeTotal(accessor.config, accessor.loc(resolved, path.vfsPath))
 }
 
 export async function duEntries(
@@ -376,9 +372,9 @@ export async function duEntries(
   } catch (error) {
     if ((error as { code?: unknown }).code !== 'ENOENT') throw error
   }
-  const resolved = await accessor.resolve(path.resourcePath)
+  const resolved = await accessor.resolve(path.vfsPath)
   if (resolved.driveId === null) return [[], 0]
-  return duTreeEntries(accessor.config, accessor.loc(resolved, path.resourcePath))
+  return duTreeEntries(accessor.config, accessor.loc(resolved, path.vfsPath))
 }
 
 function driveResolved(siteId: string, driveId: string): ResolvedSharePointPath {
@@ -415,7 +411,7 @@ async function findNamespace(
   options: FindOptions,
 ): Promise<string[]> {
   const tree = optionsTree(options)
-  const base = stripSlash(path.resourcePath)
+  const base = stripSlash(path.vfsPath)
   const atRoot = resolved.level === 'root'
   const offset = atRoot ? 1 : 0
   const sites: [string, string][] = atRoot
@@ -472,11 +468,11 @@ export async function find(
   path: PathSpec,
   options: FindOptions = {},
 ): Promise<string[]> {
-  const resolved = await accessor.resolve(path.resourcePath)
+  const resolved = await accessor.resolve(path.vfsPath)
   if (resolved.driveId !== null) {
     return findItems(
       accessor.config,
-      accessor.loc(resolved, path.resourcePath),
+      accessor.loc(resolved, path.vfsPath),
       startBasename(path.virtual),
       async () => (await stat(accessor, path)).type === FileType.DIRECTORY,
       options,

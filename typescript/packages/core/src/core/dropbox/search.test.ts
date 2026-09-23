@@ -39,11 +39,11 @@ function makeAccessor(rootPath?: string): DropboxAccessor {
 }
 
 function mountRoot(): PathSpec {
-  return new PathSpec({ virtual: '/data', directory: '/data', resourcePath: '' })
+  return new PathSpec({ virtual: '/data', directory: '/data', vfsPath: '' })
 }
 
 function subdir(): PathSpec {
-  return new PathSpec({ virtual: '/data/docs', directory: '/data/docs', resourcePath: 'docs' })
+  return new PathSpec({ virtual: '/data/docs', directory: '/data/docs', vfsPath: 'docs' })
 }
 
 beforeEach(() => {
@@ -62,7 +62,7 @@ describe('narrowPaths', () => {
     const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
     expect(search.mock.calls[0]?.[2]).toEqual({ path: '' })
     expect(out?.map((p) => p.virtual)).toEqual(['/data/Sub/Y.txt', '/data/x.txt'])
-    expect(out?.[1]?.resourcePath).toBe('x.txt')
+    expect(out?.[1]?.vfsPath).toBe('x.txt')
     expect(out?.[1]?.resolved).toBe(true)
   })
 
@@ -107,7 +107,7 @@ describe('narrowPaths', () => {
     const scope = new PathSpec({
       virtual: '/data',
       directory: '/data',
-      resourcePath: '',
+      vfsPath: '',
       rawPath: '.',
     })
     search.mockResolvedValueOnce({ paths: [['/x.txt', '/x.txt']], truncated: false })

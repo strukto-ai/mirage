@@ -41,7 +41,7 @@ export async function resolveEntry(
   index: IndexCacheStore | undefined,
 ): Promise<IndexEntry> {
   const virtual = pathSpec.virtual
-  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.resourcePath)
+  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.vfsPath)
   const rel = pathSpec.mountPath.replace(/^\/+|\/+$/g, '')
   if (rel === '') throw eisdir(virtual)
   const found = await lookup(accessor, index, prefix, keyOf(prefix, rel))
@@ -73,6 +73,6 @@ export async function read(
     : undefined
   const timer = startOp()
   const data = await hubBytes(accessor.token, url, window)
-  record('read', raw, accessor.resourceName, data.length, timer)
+  record('read', raw, accessor.vfsName, data.length, timer)
   return data
 }

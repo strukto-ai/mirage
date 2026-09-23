@@ -18,8 +18,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
 from mirage.types import PathSpec
+from mirage.vfs.mongodb import MongoDBConfig, MongoDBVFS
 
 load_dotenv(".env.development")
 
@@ -34,12 +34,12 @@ config = MongoDBConfig(
     databases=[DB],
     elide_fields={f"{DB}.{COLL_EMB}": ["vector"]},
 )
-resource = MongoDBResource(config=config)
+vfs = MongoDBVFS(config=config)
 
 
 async def _run(ws, cmd):
     print(f"\n>>> {cmd}")
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     out = (await r.stdout_str()).strip()
     err = await r.stderr_str()
     if out:
@@ -56,7 +56,7 @@ async def _run(ws, cmd):
 
 
 async def main():
-    ws = Workspace({"/mongodb": resource}, mode=MountMode.READ)
+    ws = Workspace({"/mongodb": vfs}, mode=MountMode.READ)
 
     coll_doc = f"/mongodb/{DB}/collections/{COLL_HET}/documents.jsonl"
     coll_schema = f"/mongodb/{DB}/collections/{COLL_HET}/schema.json"
@@ -97,9 +97,9 @@ async def main():
     # namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print(f"=== metadata overlay on {coll_doc} ===")
-    meta_res = await ws.execute(f'chmod 640 "{coll_doc}"'
-                                f' && chown 500:dev "{coll_doc}"'
-                                f' && touch -t 202601021530 "{coll_doc}"')
+    meta_res = await ws.shell(f'chmod 640 "{coll_doc}"'
+                              f' && chown 500:dev "{coll_doc}"'
+                              f' && touch -t 202601021530 "{coll_doc}"')
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(coll_doc))
     print(f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
@@ -146,7 +146,7 @@ async def main():
     print("\n" + "=" * 60)
     print("CD + pwd + ls + relative path read")
     print("=" * 60)
-    await ws.execute(f'cd "/mongodb/{DB}/collections/{COLL_HET}"')
+    await ws.shell(f'cd "/mongodb/{DB}/collections/{COLL_HET}"')
     await _run(ws, "pwd")
     await _run(ws, "ls")
     await _run(ws, 'head -n 1 documents.jsonl')

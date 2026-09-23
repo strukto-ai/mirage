@@ -53,7 +53,7 @@ class GridFSWalk:
             root (PathSpec): Watch root (mount-virtual path).
         """
         config = self._accessor.config
-        prefix = mount_prefix_of(root.virtual, root.resource_path)
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         pfx = _prefix(root.mount_path, config)
         files: list[str] = []
         markers: list[str] = []

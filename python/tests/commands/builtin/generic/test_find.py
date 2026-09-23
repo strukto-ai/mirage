@@ -5,17 +5,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.find_eval import Name, Not, Or
-from mirage.commands.builtin.generic.find import (FindArgs, apply_mount_prefix,
+from mirage.commands.builtin.find_eval import FindArgs, Name, Not, Or
+from mirage.commands.builtin.generic.find import (apply_mount_prefix,
                                                   apply_mtime_filter, find,
                                                   find_walk_generic,
                                                   parse_find_args, walk_find)
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import FindParseError
 from mirage.ops.types import LinkView
-from mirage.resource.ram import RAMResource
 from mirage.types import (ContentType, FileStat, FileType, FindType, MountMode,
                           PathSpec)
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -162,7 +162,7 @@ async def test_apply_mtime_filter_stats_the_mounted_virtual_path():
     assert out == ["/a.txt"]
     spec = stat.await_args.args[0]
     assert spec.virtual == "/mnt/a.txt"
-    assert spec.resource_path == "a.txt"
+    assert spec.vfs_path == "a.txt"
 
 
 @pytest.mark.asyncio
@@ -282,10 +282,7 @@ async def _unreached_stat(_spec: PathSpec) -> FileStat:
 
 
 def _root_spec() -> PathSpec:
-    return PathSpec(resource_path="",
-                    virtual="/",
-                    directory="/",
-                    resolved=False)
+    return PathSpec(vfs_path="", virtual="/", directory="/", resolved=False)
 
 
 @pytest.mark.asyncio
@@ -385,6 +382,46 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
 
 
 @pytest.mark.asyncio
+async def test_walk_find_time_test_before_prune_gates_it():
+    now = "2026-01-01T00:00:00Z"
+
+    async def readdir(spec: PathSpec, _index):
+        table = {
+            "/": ["/old", "/new"],
+            "/old": ["/old/f.txt"],
+            "/new": ["/new/g.txt"],
+        }
+        return table[spec.virtual]
+
+    async def stat(spec: PathSpec, _index):
+        stamps = {
+            "/": now,
+            "/old": "2000-01-01T00:00:00Z",
+            "/new": now,
+            "/old/f.txt": now,
+            "/new/g.txt": now,
+        }
+        name = spec.virtual.rsplit("/", 1)[-1] or "/"
+        kind = FileType.FILE if "." in name else FileType.DIRECTORY
+        return FileStat(name=name, type=kind, modified=stamps[spec.virtual])
+
+    gated = parse_find_args(
+        ("-mindepth", "1", "-newermt", "2010-01-01", "-prune"))
+    assert await walk_find(_root_spec(),
+                           readdir=readdir,
+                           stat=stat,
+                           index=None,
+                           args=gated) == ["/new", "/old/f.txt"]
+    firm = parse_find_args(
+        ("-mindepth", "1", "-prune", "-newermt", "2010-01-01"))
+    assert await walk_find(_root_spec(),
+                           readdir=readdir,
+                           stat=stat,
+                           index=None,
+                           args=firm) == ["/new"]
+
+
+@pytest.mark.asyncio
 async def test_walk_find_not_negates_predicate():
     readdir = AsyncMock(return_value=["/a.txt", "/b.md"])
 
@@ -474,9 +511,9 @@ def test_parse_find_args_invalid_numeric_raises_find_parse_error(
 def test_find_invalid_numeric_arg_exits_one_with_clean_stderr(expr):
 
     async def _go() -> tuple[int, str]:
-        ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+        ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
         ws.create_session("s")
-        r = await ws.execute(f"find / {expr}", session_id="s")
+        r = await ws.shell(f"find / {expr}", session_id="s")
         return r.exit_code, await r.stderr_str()
 
     code, stderr = asyncio.run(_go())
@@ -486,6 +523,22 @@ def test_find_invalid_numeric_arg_exits_one_with_clean_stderr(expr):
 
 
 # ── Issue #312 parse-level regression tests ────────────────
+
+
+@pytest.mark.asyncio
+async def test_find_time_test_before_prune_gates_it():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /d/old/x /d/new/y && touch /d/old/x/f /d/new/y/g "
+                   "/d/old/o.txt && touch -d 2000-01-01 /d/old")
+    gated = await ws.shell("find /d -mindepth 1 -newermt 2010-01-01 -prune")
+    assert gated.stdout == b"/d/new\n/d/old/o.txt\n/d/old/x\n"
+    firm = await ws.shell("find /d -mindepth 1 -prune -newermt 2010-01-01")
+    assert firm.stdout == b"/d/new\n"
+    old = await ws.shell("find /d -mindepth 1 -mtime +3650 -prune")
+    assert old.stdout == b"/d/old\n"
+    both = await ws.shell(
+        "find /d -mindepth 1 -newermt 1990-01-01 -prune -newermt 2010-01-01")
+    assert both.stdout == b"/d/new\n"
 
 
 def test_parse_find_args_start_path_included():
@@ -518,7 +571,7 @@ def test_parse_find_args_bogus_predicate_raises():
 def _file_spec(virtual: str = "/mnt/a.txt", key: str = "a.txt") -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual[:virtual.rfind("/") + 1],
-                    resource_path=key)
+                    vfs_path=key)
 
 
 def _stat_path(stat: FileStat | None):
@@ -632,7 +685,7 @@ async def test_find_file_start_point_respells_the_operand():
     """
     spec = PathSpec(virtual="/mnt/a.txt",
                     directory="/mnt/",
-                    resource_path="a.txt",
+                    vfs_path="a.txt",
                     raw_path="/other/link.txt")
     stdout, _ = await find(
         [spec],
@@ -715,12 +768,7 @@ async def test_find_directory_start_point_still_walks():
         return ["/", "/a.txt"]
 
     stdout, io = await find(
-        [
-            PathSpec(virtual="/mnt",
-                     directory="/",
-                     resource_path="",
-                     resolved=False)
-        ],
+        [PathSpec(virtual="/mnt", directory="/", vfs_path="", resolved=False)],
         (),
         find_core=core,
         stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
@@ -758,7 +806,7 @@ async def test_find_empty_directory_start_point_is_reported():
         return []
 
     stdout, io = await find(
-        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        [PathSpec(virtual="/mnt", directory="/", vfs_path="")],
         (),
         find_core=core,
         stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
@@ -775,7 +823,7 @@ async def test_find_empty_directory_start_point_matches_empty():
         return []
 
     stdout, io = await find(
-        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        [PathSpec(virtual="/mnt", directory="/", vfs_path="")],
         (),
         find_core=core,
         stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
@@ -794,7 +842,7 @@ async def test_find_populated_directory_start_point_fails_empty():
         return []
 
     stdout, io = await find(
-        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        [PathSpec(virtual="/mnt", directory="/", vfs_path="")],
         (),
         find_core=core,
         stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
@@ -818,7 +866,7 @@ async def test_find_keeps_the_backend_row_when_emptiness_cannot_be_asked():
         return ["/"]
 
     stdout, io = await find(
-        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        [PathSpec(virtual="/mnt", directory="/", vfs_path="")],
         (),
         find_core=core,
         stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
@@ -840,7 +888,7 @@ async def test_find_replaces_the_backend_row_for_the_start_point():
         return ["/"]
 
     stdout, io = await find(
-        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        [PathSpec(virtual="/mnt", directory="/", vfs_path="")],
         ("-not", "-empty"),
         find_core=core,
         stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),
@@ -871,7 +919,7 @@ async def test_find_directory_holding_only_a_link_is_not_empty():
         target_stat=_link_target_stat,
     )
     stdout, io = await find(
-        [PathSpec(virtual="/mnt", directory="/", resource_path="")],
+        [PathSpec(virtual="/mnt", directory="/", vfs_path="")],
         (),
         find_core=core,
         stat_path=_stat_path(FileStat(name="mnt", type=FileType.DIRECTORY)),

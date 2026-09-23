@@ -31,7 +31,7 @@ def make_accessor(root_folder_id: str | None = None) -> BoxAccessor:
 
 
 def mount_root() -> PathSpec:
-    return PathSpec(resource_path="", virtual="/data", directory="/data")
+    return PathSpec(vfs_path="", virtual="/data", directory="/data")
 
 
 def _file(item_id: str, name: str, chain: list[tuple[str, str]]) -> dict:
@@ -67,7 +67,7 @@ async def test_narrow_maps_path_collection_to_mount_paths():
     assert spy.await_args.args[2] == "0"
     assert out is not None
     assert [p.virtual for p in out] == ["/data/Sub/y.txt", "/data/x.txt"]
-    assert out[1].resource_path == "x.txt"
+    assert out[1].vfs_path == "x.txt"
     assert out[1].resolved
 
 
@@ -89,7 +89,7 @@ async def test_narrow_sorts_results_in_walk_order():
 
 @pytest.mark.asyncio
 async def test_narrow_rebases_raw_onto_the_scope_spelling():
-    scope = PathSpec(resource_path="",
+    scope = PathSpec(vfs_path="",
                      virtual="/data",
                      directory="/data",
                      raw_path=".")
@@ -103,7 +103,7 @@ async def test_narrow_rebases_raw_onto_the_scope_spelling():
 
 @pytest.mark.asyncio
 async def test_narrow_subfolder_scope_resolves_id_and_trims_key():
-    scope = PathSpec(resource_path="docs",
+    scope = PathSpec(vfs_path="docs",
                      virtual="/data/docs",
                      directory="/data/docs")
     results = [_file("5", "in.txt", ROOT + [("100", "docs")])]
@@ -121,7 +121,7 @@ async def test_narrow_subfolder_scope_resolves_id_and_trims_key():
 
 @pytest.mark.asyncio
 async def test_narrow_non_folder_scope_returns_none():
-    scope = PathSpec(resource_path="a.txt",
+    scope = PathSpec(vfs_path="a.txt",
                      virtual="/data/a.txt",
                      directory="/data/a.txt")
     with patch("mirage.core.box.search.resolve_item",

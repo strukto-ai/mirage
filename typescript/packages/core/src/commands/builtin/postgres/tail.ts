@@ -19,7 +19,7 @@ import { resolveGlobOf } from '../generic_bind/index.ts'
 import { POSTGRES_IO } from './io.ts'
 import { readStream } from '../../../core/postgres/read.ts'
 import { detectScope } from '../../../core/postgres/scope.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { followFlags, tailGeneric } from '../generic/tail.ts'
@@ -77,7 +77,7 @@ async function tailCommand(
 
 export const POSTGRES_TAIL = command({
   name: 'tail',
-  resource: ResourceName.POSTGRES,
+  vfs: VFSName.POSTGRES,
   spec: specOf('tail'),
   fn: tailCommand,
 })

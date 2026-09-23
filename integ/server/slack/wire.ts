@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { JsonValue } from '../kit/typescript/index.ts'
+import type { Ctx, JsonValue } from '../kit/typescript/index.ts'
+import type { C } from './config.ts'
 
 export interface Reaction {
   name: string
@@ -37,6 +38,9 @@ export interface ChannelRow {
   isArchived: boolean
   isPrivate: boolean
   dmUserId: string | null
+  topic: string
+  purpose: string
+  membersJson: string
 }
 
 export interface FileRow {
@@ -51,6 +55,21 @@ export interface FileRow {
   timestamp: number
   content: string
   contentPath: string | null
+}
+
+// Slack takes a method's arguments in the query string or, on a POST, as a form
+// body. slack-go (and so slack-mcp-server) sends every call the second way and
+// mirage's own client reads with the first, so a read method takes both.
+export function argsOf(ctx: Ctx<C>): URLSearchParams {
+  const out = new URLSearchParams(ctx.query)
+  const raw = ctx.headers['content-type']
+  const type = Array.isArray(raw) ? raw[0] : raw
+  if (type !== undefined && type.startsWith('application/x-www-form-urlencoded')) {
+    for (const [key, value] of new URLSearchParams(ctx.body.toString('utf8'))) {
+      out.append(key, value)
+    }
+  }
+  return out
 }
 
 // Slack answers 200 for a refused call and puts the failure in the body, so
@@ -85,7 +104,18 @@ export function channelJson(c: ChannelRow): JsonValue {
     is_channel: true,
     is_private: c.isPrivate,
     is_archived: c.isArchived,
+    name_normalized: c.name,
+    topic: textField(c.topic),
+    purpose: textField(c.purpose),
+    num_members: (JSON.parse(c.membersJson) as string[]).length,
   }
+}
+
+// A channel's topic and purpose, as Slack nests them. Who set one and when is
+// not modelled, and Slack answers an unset one with the same empty creator and
+// zero time.
+function textField(value: string): JsonValue {
+  return { value, creator: '', last_set: 0 }
 }
 
 export function fileMeta(f: FileRow, origin: string): JsonValue {

@@ -24,7 +24,7 @@ import type { CommandFnResult, CommandOpts } from '@struktoai/mirage-core/comman
 import { FlagView, specOf } from '@struktoai/mirage-core/commands/spec/index'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { EmailAccessor } from '../../../accessor/email.ts'
@@ -79,7 +79,7 @@ async function rgCommand(
   if (operand !== null && query !== null) {
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
-      const filePrefix = mountPrefixOf(operand.virtual, operand.resourcePath)
+      const filePrefix = mountPrefixOf(operand.virtual, operand.vfsPath)
       const pairs = await searchAndFormat(
         accessor,
         match.slots.folder ?? '',
@@ -116,7 +116,7 @@ async function rgCommand(
 
 export const EMAIL_RG = command({
   name: 'rg',
-  resource: ResourceName.EMAIL,
+  vfs: VFSName.EMAIL,
   spec: specOf('rg'),
   fn: rgCommand,
 })

@@ -209,7 +209,7 @@ def test_search_pushdown_ok_rejects_regex_but_allows_fixed_string():
 def _operand(virtual: str, pattern: str | None = None) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0] or "/",
-                    resource_path=virtual.strip("/"),
+                    vfs_path=virtual.strip("/"),
                     pattern=pattern,
                     resolved=pattern is None)
 

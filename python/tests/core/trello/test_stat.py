@@ -18,8 +18,8 @@ from mirage.accessor.trello import TrelloAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.stat import stat
-from mirage.resource.trello.config import TrelloConfig
 from mirage.types import ContentType, FileType, PathSpec
+from mirage.vfs.trello.config import TrelloConfig
 
 
 @pytest.fixture

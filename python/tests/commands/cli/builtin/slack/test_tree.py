@@ -73,7 +73,7 @@ async def test_installed_tree_dispatches_send_message(monkeypatch):
     monkeypatch.setitem(send_message.__globals__, "post_message", fake_post)
     ws = Workspace({})
     ws.register_cli("slack", SLACK, CONFIG)
-    io = await ws.execute('slack send-message --channel C001 --text hello')
+    io = await ws.shell('slack send-message --channel C001 --text hello')
     assert io.exit_code == 0
     out = json.loads(await materialize(io.stdout))
     assert out["channel"] == "C001"
@@ -84,6 +84,6 @@ async def test_installed_tree_dispatches_send_message(monkeypatch):
 async def test_missing_required_flag_exits_2():
     ws = Workspace({})
     ws.register_cli("slack", SLACK, CONFIG)
-    io = await ws.execute("slack send-message --text hi")
+    io = await ws.shell("slack send-message --text hi")
     assert io.exit_code == 2
     await ws.close()

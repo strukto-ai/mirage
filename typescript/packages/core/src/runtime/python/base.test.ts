@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { PythonRuntime } from './base.ts'
 import type { RunArgs, RunResult } from '../types.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../workspace/fixtures/workspace_fixture.ts'
@@ -41,12 +41,12 @@ describe('PythonRuntime version defaults', () => {
       const runtime = new ProcessRuntime()
       expect(runtime.reach).toBe('process')
       const ws = new Workspace(
-        { '/': new RAMResource() },
-        { mode, runtimes: [runtime, 'vfs'], shellParser: await getTestParser() },
+        { '/': new RAMVFS() },
+        { mode, runtimes: [runtime, 'workspace'], shellParser: await getTestParser() },
       )
       try {
         for (const line of ['python --version', 'python3 -V', 'python -VV']) {
-          const io = await ws.execute(line, { env: { PYTHONPATH: '/startup' } })
+          const io = await ws.shell(line, { env: { PYTHONPATH: '/startup' } })
           expect(io.exitCode).toBe(1)
           expect(new TextDecoder().decode(io.stdout)).toBe('')
           expect(new TextDecoder().decode(io.stderr)).toBe(

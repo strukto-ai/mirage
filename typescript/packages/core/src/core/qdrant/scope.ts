@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
-import type { QdrantConfigResolved } from '../../resource/qdrant/config.ts'
+import type { QdrantConfigResolved } from '../../vfs/qdrant/config.ts'
 import { ContentType } from '../../types.ts'
 import { contentTypeForExtension } from '../../utils/filetype.ts'
 import { perAccessor } from '../hierarchy/bind.ts'

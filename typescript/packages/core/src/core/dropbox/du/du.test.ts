@@ -80,7 +80,7 @@ const SIZES: Record<string, { size?: number }> = {
   '/notes.txt': { size: 10 },
 }
 
-const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
 describe('dropbox core du', () => {
   beforeEach(() => {
@@ -98,7 +98,7 @@ describe('dropbox core du', () => {
     mockTree(TREE)
     mockStats(SIZES)
     const file = new PathSpec({
-      resourcePath: 'notes.txt',
+      vfsPath: 'notes.txt',
       virtual: '/notes.txt',
       directory: '/notes.txt',
     })
@@ -119,7 +119,7 @@ describe('dropbox core du', () => {
     const root = new PathSpec({
       virtual: '/mnt/dbx',
       directory: '/mnt/dbx',
-      resourcePath: mountKey('/mnt/dbx', '/mnt/dbx'),
+      vfsPath: mountKey('/mnt/dbx', '/mnt/dbx'),
     })
     const [found, total] = await entries(makeAccessor(), root)
     expect(found).toEqual([

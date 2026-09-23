@@ -16,7 +16,7 @@ import { setServers } from 'node:dns'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { MongoDBResource, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
+import { MongoDBVFS, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 setServers(['8.8.8.8', '1.1.1.1'])
@@ -34,18 +34,18 @@ const COLL_EMB = 'embeddings'
 const COLL_TXT = 'text_indexed'
 const VIEW = 'high_rated_films'
 
-const resource = new MongoDBResource({
+const vfs = new MongoDBVFS({
   uri,
   databases: [DB],
   elideFields: { [`${DB}.${COLL_EMB}`]: ['vector'] },
 })
-const ws = new Workspace({ '/mongodb': resource }, { mode: MountMode.READ })
+const ws = new Workspace({ '/mongodb': vfs }, { mode: MountMode.READ })
 
 const DEC = new TextDecoder()
 
 async function run(cmd: string): Promise<void> {
   console.log(`\n>>> ${cmd}`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   const out = DEC.decode(r.stdout).trimEnd()
   const err = DEC.decode(r.stderr).trimEnd()
   if (out !== '') {
@@ -96,7 +96,7 @@ try {
   // workspace namespace (durable, snapshot-captured) and merge into
   // dispatch-level stat.
   console.log(`=== metadata overlay on ${collDoc} ===`)
-  const metaRes = await ws.execute(
+  const metaRes = await ws.shell(
     `chmod 640 "${collDoc}" && chown 500:dev "${collDoc}" && touch -t 202601021530 "${collDoc}"`,
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
@@ -145,11 +145,11 @@ try {
   console.log('\n' + '='.repeat(60))
   console.log('CD + pwd + ls + relative path read')
   console.log('='.repeat(60))
-  await ws.execute(`cd "/mongodb/${DB}/collections/${COLL_HET}"`)
+  await ws.shell(`cd "/mongodb/${DB}/collections/${COLL_HET}"`)
   await run('pwd')
   await run('ls')
   await run('head -n 1 documents.jsonl')
 } finally {
   await ws.close()
-  await resource.close()
+  await vfs.close()
 }

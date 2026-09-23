@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeSlackTransport, makeFakeResource, seedChannel, seedUser } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs, seedChannel, seedUser } from './_test_util.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 const SLACK_LS = SLACK_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
@@ -37,8 +37,8 @@ async function runLs(
   const cmd = SLACK_LS[0]
   if (cmd === undefined) throw new Error('ls not registered')
   const transport = options.transport ?? new FakeSlackTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -71,7 +71,7 @@ describe('slack ls', () => {
           virtual: '/mnt/slack',
           directory: '/mnt/slack',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack', '/mnt/slack'),
         }),
       ],
       {},
@@ -92,7 +92,7 @@ describe('slack ls', () => {
           virtual: '/mnt/slack/channels',
           directory: '/mnt/slack/channels',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack/channels', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack/channels', '/mnt/slack'),
         }),
       ],
       {},
@@ -114,7 +114,7 @@ describe('slack ls', () => {
           virtual: '/mnt/slack/users',
           directory: '/mnt/slack/users',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack/users', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack/users', '/mnt/slack'),
         }),
       ],
       {},

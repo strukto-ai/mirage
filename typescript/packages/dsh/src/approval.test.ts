@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Outcome, Scope } from '@struktoai/mirage-core/policy/types'
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-node'
@@ -66,13 +66,13 @@ async function world(
   }
   await ctx
     .plugin(MirageService, {
-      mounts: { '/data': [new RAMResource(), MountMode.WRITE] },
+      mounts: { '/data': [new RAMVFS(), MountMode.WRITE] },
       profiles: { agent: role },
     })
     .await()
   const ws = await ctx.mirage.ready
   worlds.push(ws)
-  await ws.fs.writeFile('/data/notes.txt', 'private')
+  await ws.vfs.writeFile('/data/notes.txt', 'private')
   ws.createSession('agent', { profile: 'agent' })
   await ctx.plugin(MirageShellExecutor, { sessionId: 'agent' }).await()
   return { shell: ctx.shell as MirageShellExecutor, ws, asked }
@@ -166,7 +166,7 @@ describe('an asked line with an approval channel', () => {
     const run = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(run.exitCode).toBe(0)
     expect(run.stderr.text).toBe('')
-    expect(await ws.fs.exists('/data/notes.txt')).toBe(false)
+    expect(await ws.vfs.exists('/data/notes.txt')).toBe(false)
     expect(asked).toHaveLength(1)
     expect(asked[0]?.toolName).toBe(APPROVAL_TOOL_NAME)
     expect(asked[0]?.reason).toBe('deletes are reviewed: rm /data/notes.txt')
@@ -190,7 +190,7 @@ describe('an asked line with an approval channel', () => {
 
   it('grants once and never for the session, so the next line asks again', async () => {
     const { shell, ws, asked } = await world(ASK_RM, 'allowed-once')
-    await ws.fs.writeFile('/data/second.txt', 'also private')
+    await ws.vfs.writeFile('/data/second.txt', 'also private')
     expect((await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))).exitCode).toBe(0)
     expect((await shell.run(shell.resolve({ command: 'rm /data/second.txt' }))).exitCode).toBe(0)
     // One nod covered one line; the second line raised its own question.
@@ -206,7 +206,7 @@ describe('an asked line with an approval channel', () => {
     const run = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(run.exitCode).toBe(126)
     expect(run.stderr.text).toBe('rm: Permission denied\n')
-    expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
+    expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
     // A refusal is a refusal however it was reached: no pending question
     // is left behind for a host to answer instead.
     expect(ws.decisions.pending('agent')).toHaveLength(0)
@@ -229,7 +229,7 @@ describe('an asked line with no approval channel', () => {
     // The operator's document said `ask`; the refusal says so too, and
     // names the approval a host can grant.
     expect(run.stderr.text).toBe('rm: Permission denied\n')
-    expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
+    expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
     const pending = ws.decisions.pending('agent')
     expect(pending).toHaveLength(1)
     expect(pending[0]?.command).toBe('rm')
@@ -245,7 +245,7 @@ describe('an asked line with no approval channel', () => {
     await ws.decisions.answer(waiting?.id ?? '', Outcome.ALLOW, Scope.ONCE)
     const retry = await shell.run(shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(retry.exitCode).toBe(0)
-    expect(await ws.fs.exists('/data/notes.txt')).toBe(false)
+    expect(await ws.vfs.exists('/data/notes.txt')).toBe(false)
   })
 
   it('refuses the retry when the host answers no', async () => {
@@ -257,7 +257,7 @@ describe('an asked line with no approval channel', () => {
     expect(retry.exitCode).toBe(126)
     expect(retry.stderr.text).toBe('rm: Permission denied\n')
     expect(retry.sandbox?.denied).toBe(true)
-    expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
+    expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
   })
 })
 
@@ -323,7 +323,7 @@ describe('an ask that outlives the run that raised it', () => {
     expect(run.timedOut).toBe(true)
     expect(run.exitCode).toBeNull()
     expect(run.signal).toBe('SIGTERM')
-    expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
+    expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
   })
 
   it('reports the timeout for a compound line, judged before any of it runs', async () => {
@@ -337,7 +337,7 @@ describe('an ask that outlives the run that raised it', () => {
     )
     expect(run.timedOut).toBe(true)
     expect(run.exitCode).toBeNull()
-    expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
+    expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
   })
 
   it('hands the run signal to the channel, live, so its prompt can be dismissed', async () => {
@@ -364,7 +364,7 @@ describe('an ask that outlives the run that raised it', () => {
     // The human said yes to a line that no longer existed. Banking that
     // as a spent-once grant would hand it to the next identical line
     // with nobody asked, so the question stays open instead.
-    expect(await ws.fs.exists('/data/notes.txt')).toBe(true)
+    expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
     expect(ws.decisions.pending('agent')).toHaveLength(1)
     expect(ws.decisions.list('agent')[0]?.outcome).toBeNull()
   })

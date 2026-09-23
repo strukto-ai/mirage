@@ -17,10 +17,10 @@ name.
 from mirage import Workspace
 from mirage.commands.cli.builtin.himalaya import HIMALAYA
 
-ws = Workspace({"/mail": EmailResource(config)})
+ws = Workspace({"/mail": EmailVFS(config)})
 ws.register_cli("himalaya", HIMALAYA, config.model_dump())
 
-await ws.execute("himalaya envelope list --unseen --max 5")
+await ws.shell("himalaya envelope list --unseen --max 5")
 ```
 
 In YAML the same install rides the `clis:` section:
@@ -28,7 +28,7 @@ In YAML the same install rides the `clis:` section:
 ```yaml
 mounts:
   /mail:
-    resource: email
+    vfs: email
     config: { ... }
 clis:
   himalaya:

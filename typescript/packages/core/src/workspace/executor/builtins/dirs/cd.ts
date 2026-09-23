@@ -18,7 +18,7 @@ import { PathSpec } from '../../../../types.ts'
 import { FileType } from '../../../../types.ts'
 import { CycleError } from '../../../../utils/path.ts'
 import { posixNormpath } from '../../../../utils/path.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { changeDir, logicalCwd } from '../../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
@@ -42,7 +42,7 @@ function cdpathSearchable(target: string): boolean {
 function cdCandidates(
   raw: string,
   cdpathTarget: string | null,
-  session: Session,
+  session: SessionState,
   cwd: string,
 ): [string, boolean][] {
   const fallback = joinPath(raw, cwd)
@@ -63,7 +63,7 @@ export async function handleCd(
   dispatch: DispatchFn,
   isMountRoot: (path: string) => boolean,
   path: string | PathSpec,
-  session: Session,
+  session: SessionState,
   printPath = false,
   cdpathTarget: string | null = null,
   links: Map<string, string> | null = null,
@@ -145,7 +145,7 @@ export async function handleCd(
 // /tmp/deep/real, and a -P $CDPATH hit prints /opt/c/lnk while landing on
 // /opt/c/t.
 function cdSuccess(
-  session: Session,
+  session: SessionState,
   resolved: string,
   logical: string,
   spelled: string,

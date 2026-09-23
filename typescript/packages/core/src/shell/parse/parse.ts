@@ -214,6 +214,32 @@ function repairOrphanedDollars(parser: Parser, root: Node, text: string): Node {
   return root
 }
 
+function repairRedirectDashes(parser: Parser, root: Node, text: string): [Node, string] {
+  // Quote only an uncovered dash before a redirect, never word or heredoc text.
+  const offsets: number[] = []
+  const stack = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (node === undefined) break
+    let end = node.startIndex
+    for (const child of node.children) {
+      const gap = text.slice(end, child.startIndex)
+      if (child.type === 'file_redirect' && gap.trim() === '-') {
+        offsets.push(end + gap.indexOf('-'))
+      }
+      end = child.endIndex
+      stack.push(child)
+    }
+  }
+  if (offsets.length === 0) return [root, text]
+  let repaired = text
+  for (const offset of [...new Set(offsets)].sort((a, b) => b - a)) {
+    repaired = `${repaired.slice(0, offset)}'-'${repaired.slice(offset + 1)}`
+  }
+  const retried = parseProtected(parser, repaired)
+  return retried.hasError ? [root, text] : [retried, repaired]
+}
+
 // `Parser.init` boots one wasm module for the whole process, so two callers
 // that start at the same time used to race it: the second read the language
 // out of a half-built module and threw "Incompatible language version 0".
@@ -285,6 +311,7 @@ export async function createShellParser(config: ShellParserConfig): Promise<Shel
           }
         }
       }
+      ;[root, text] = repairRedirectDashes(parser, root, text)
       if (text.includes('$')) {
         root = repairOrphanedDollars(parser, root, text)
       }

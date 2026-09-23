@@ -19,7 +19,7 @@ import {
   SHOPT_DEFAULTS,
   SHOPT_UNSUPPORTED,
 } from '../../../../shell/constants.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { fail } from '../shared.ts'
@@ -28,7 +28,7 @@ import type { BuiltinCall, Result } from '../types.ts'
 const USAGE = 'shopt: usage: shopt [-pqsu] [-o] [optname ...]'
 
 /** Whether a `shopt` option is on for the session. */
-export function shoptEnabled(session: Session, name: string): boolean {
+export function shoptEnabled(session: SessionState, name: string): boolean {
   return session.shopts[name] ?? SHOPT_DEFAULTS.get(name) ?? false
 }
 
@@ -50,7 +50,7 @@ function row(name: string, on: boolean, reusable: boolean, setO: boolean): strin
  * `-u` is refused; an unknown letter is exit 2. `shopt -s extglob` is
  * refused: the parser has no such mode.
  */
-export function handleShopt(args: string[], session: Session): Result {
+export function handleShopt(args: string[], session: SessionState): Result {
   const scan = scanOptions(args, 'pqosu')
   if (scan.bad !== null)
     return fail('shopt', `bash: shopt: ${scan.bad}: invalid option\n${USAGE}\n`, 2)

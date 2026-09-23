@@ -183,7 +183,7 @@ describe('hf resolveGlob', () => {
   it('expands patterns against readdir entries', async () => {
     const accessor = accessorWith(FILES)
     const spec = new PathSpec({
-      resourcePath: '*.json',
+      vfsPath: '*.json',
       virtual: '/*.json',
       directory: '/',
       pattern: '*.json',

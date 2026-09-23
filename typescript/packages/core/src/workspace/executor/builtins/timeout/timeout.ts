@@ -15,7 +15,7 @@
 import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
 
@@ -119,7 +119,7 @@ async function raceDeadline(
 export async function handleTimeout(
   executeFn: ExecuteStringFn,
   args: readonly string[],
-  session: Session,
+  session: SessionState,
 ): Promise<Result> {
   const parse = parseShellOptions(SHELL_SPECS.timeout, args)
   if (parse.invalid !== null) {

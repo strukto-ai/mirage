@@ -16,7 +16,7 @@ import { DEFAULT_UMASK } from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { isFsError } from '../../utils/errors.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 
 /**
  * Write a file, giving it the umask's mode if the write created it.
@@ -35,7 +35,7 @@ import type { Session } from '../session/session.ts'
  */
 export async function createFile(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   scope: PathSpec,
   data: Uint8Array,
 ): Promise<void> {

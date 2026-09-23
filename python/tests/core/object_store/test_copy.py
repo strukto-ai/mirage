@@ -21,6 +21,7 @@ from mirage.cache.context import push_cache_manager
 from mirage.core.object_store.copy import make_copy
 from mirage.core.object_store.exists import make_exists
 from mirage.core.object_store.stat import make_stat
+from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (FakeManager, FakeStore,
                                               make_driver, spec)
 
@@ -72,3 +73,82 @@ def test_copy_without_native_copy_refuses_to_build():
     driver = replace(make_driver(FakeStore()), copy_file=None)
     with pytest.raises(ValueError, match="no native copy"):
         make_copy(driver, make_exists(make_stat(driver)))
+
+
+# ── the retraction record snapshot capture reads ─────────────────────────
+
+
+def _recorded(coro):
+    scope = RecordingScope()
+    try:
+        _managed(coro)
+    finally:
+        scope.close()
+    return [(r.op, r.path) for r in scope.records]
+
+
+def test_copy_records_a_retraction_for_the_destination(accessor):
+    """A copy replaces dst's bytes and leaves src untouched, so only
+    dst's token stops describing its object."""
+    store = FakeStore({"a.txt": b"x"})
+    assert _recorded(
+        make_copy(make_driver(store),
+                  _exists)(accessor, spec("/a.txt"),
+                           spec("/b.txt"))) == [("copy", "/b.txt")]
+
+
+def test_self_copy_records_nothing(accessor):
+    store = FakeStore({"a.txt": b"x"})
+    assert _recorded(
+        make_copy(make_driver(store), _exists)(accessor, spec("/a.txt"),
+                                               spec("/a.txt"))) == []
+
+
+async def _exists(accessor, path) -> bool:
+    return True
+
+
+async def _boom(conn, src_key: str, dst_key: str) -> bool:
+    raise RuntimeError("boom")
+
+
+def _recorded_failure(coro, exc_type, match: str | None = None):
+    scope = RecordingScope()
+    try:
+        with pytest.raises(exc_type, match=match):
+            _managed(coro)
+    finally:
+        scope.close()
+    return [(r.op, r.path) for r in scope.records]
+
+
+def test_copy_records_the_retraction_when_the_store_throws(accessor):
+    """A raise may have left a partial object on dst, so its token stops
+    describing what is there."""
+    store = FakeStore({"a.txt": b"x"})
+    driver = replace(make_driver(store), copy_file=_boom)
+    assert _recorded_failure(
+        make_copy(driver, _exists)(accessor, spec("/a.txt"), spec("/b.txt")),
+        RuntimeError, "boom") == [("copy", "/b.txt")]
+
+
+def test_copy_evicts_the_destination_when_the_store_throws(accessor):
+    """The eviction rides with the record, on the same condition."""
+
+    async def run():
+        driver = replace(make_driver(FakeStore({"a.txt": b"x"})),
+                         copy_file=_boom)
+        with pytest.raises(RuntimeError):
+            await make_copy(driver, _exists)(accessor, spec("/a.txt"),
+                                             spec("/b.txt"))
+
+    manager = _managed(run())
+    assert manager.writes == ["/b.txt"]
+
+
+def test_copy_of_a_missing_source_records_nothing(accessor):
+    """A clean False is the store saying nothing was copied."""
+    assert _recorded_failure(
+        make_copy(make_driver(FakeStore()), _exists)(accessor, spec("/a.txt"),
+                                                     spec("/b.txt")),
+        FileNotFoundError) == []

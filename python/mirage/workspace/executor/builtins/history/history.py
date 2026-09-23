@@ -15,10 +15,10 @@
 from mirage.commands.config import ExecContext
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.resource.history import HISTORY_PREFIX
+from mirage.vfs.history import HISTORY_PREFIX
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 # bash 5.2.21's own string, letters in ITS order (`history -anrw`, not
@@ -88,19 +88,19 @@ def _parse_args(
 async def handle_history(
     registry: MountRegistry,
     args: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Dispatch the history shell builtin to the view mount.
 
     GNU lookup order: builtins resolve before mount commands, so a
     mount-local command named "history" can never shadow this one.
-    The actual semantics live on the /.bash_history view resource;
+    The actual semantics live on the /.bash_history view VFS;
     this handler only parses options and routes.
 
     Args:
         registry (MountRegistry): The workspace's mount registry.
         args (list[str]): Raw builtin args (flags and counts).
-        session (Session): Calling session.
+        session (SessionState): Calling session.
     """
     flags, texts, error = _parse_args(args)
     if error is not None:

@@ -24,7 +24,7 @@ const DEC = new TextDecoder()
 
 function spec(path: string): PathSpec {
   return new PathSpec({
-    resourcePath: stripSlash(path),
+    vfsPath: stripSlash(path),
     virtual: path,
     directory: path,
     resolved: true,
@@ -33,7 +33,7 @@ function spec(path: string): PathSpec {
 }
 
 function opts(flags: Record<string, string | boolean | number | string[]>, cwd = '/'): CommandOpts {
-  return { stdin: null, flags, filetypeFns: null, cwd, resource: {} } as CommandOpts
+  return { stdin: null, flags, filetypeFns: null, cwd, vfs: {} } as CommandOpts
 }
 
 function makeStream(files: Record<string, string>) {

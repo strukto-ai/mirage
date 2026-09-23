@@ -32,7 +32,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("trello card unlabel", resource="trello", spec=SPEC, write=True)
+@command("trello card unlabel", vfs="trello", spec=SPEC, write=True)
 async def trello_card_label_remove(
         accessor: TrelloAccessor, paths: list[PathSpec], texts: list[str],
         opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

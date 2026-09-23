@@ -16,14 +16,14 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.resource.ram import RAMResource
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import parse
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node import run_command_tree as _run_command_tree
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.workspace import Workspace
 
 
@@ -36,7 +36,7 @@ def run_command_tree(dispatch, registry, *args, **kwargs):
 def registry():
     """Minimal registry with a RAM mount at root."""
     reg = MountRegistry()
-    res = RAMResource()
+    res = RAMVFS()
     reg.mount("/", res, MountMode.WRITE)
     return reg
 
@@ -50,7 +50,7 @@ async def _noop_execute(command, **kwargs):
 
 
 def _session():
-    return Session(session_id="test", cwd="/")
+    return SessionState(session_id="test", cwd="/")
 
 
 @pytest.mark.asyncio
@@ -91,19 +91,13 @@ async def test_run_command_tree_propagates_exit_code(registry):
 
 async def _cross_node(cmd: str):
     # A real two-mount workspace wires dispatch/cache; run_command_tree is the
-    # seam returning the recorded ExecutionNode (Workspace.execute drops it).
-    ws = Workspace({
-        "/a": RAMResource(),
-        "/b": RAMResource()
-    },
-                   mode=MountMode.WRITE)
-    await ws.execute("mkdir -p /a/dir")
-    await ws.execute("printf 'x\\n' > /a/f.txt")
-    io, exec_node = await run_command_tree(ws.dispatch, ws._registry,
-                                           ws.job_table, _noop_execute,
-                                           "agent", parse(cmd),
-                                           Session(session_id="t",
-                                                   cwd="/"), None, None)
+    # seam returning the recorded ExecutionNode (Workspace.shell drops it).
+    ws = Workspace({"/a": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /a/dir")
+    await ws.shell("printf 'x\\n' > /a/f.txt")
+    io, exec_node = await run_command_tree(
+        ws.dispatch, ws._registry, ws.job_table, _noop_execute, "agent",
+        parse(cmd), SessionState(session_id="t", cwd="/"), None, None)
     return io, exec_node
 
 

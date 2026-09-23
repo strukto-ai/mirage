@@ -16,8 +16,8 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.read import read_bytes
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def store():
 async def test_read_bytes(store):
     result = await read_bytes(
         store,
-        PathSpec(resource_path="hello.txt",
+        PathSpec(vfs_path="hello.txt",
                  virtual="/hello.txt",
                  directory="/hello.txt"))
     assert result == b"hello world"
@@ -45,7 +45,7 @@ async def test_read_bytes(store):
 async def test_read_bytes_nested(store):
     result = await read_bytes(
         store,
-        PathSpec(resource_path="sub/nested.txt",
+        PathSpec(vfs_path="sub/nested.txt",
                  virtual="/sub/nested.txt",
                  directory="/sub/nested.txt"))
     assert result == b"nested"
@@ -56,7 +56,7 @@ async def test_read_bytes_not_found(store):
     with pytest.raises(FileNotFoundError):
         await read_bytes(
             store,
-            PathSpec(resource_path="nope.txt",
+            PathSpec(vfs_path="nope.txt",
                      virtual="/nope.txt",
                      directory="/nope.txt"))
 
@@ -68,9 +68,7 @@ async def test_read_bytes_empty_file():
     a = RAMAccessor(s)
     s.files["/empty"] = b""
     result = await read_bytes(
-        a, PathSpec(resource_path="empty",
-                    virtual="/empty",
-                    directory="/empty"))
+        a, PathSpec(vfs_path="empty", virtual="/empty", directory="/empty"))
     assert result == b""
 
 
@@ -82,7 +80,7 @@ async def test_read_bytes_binary_data():
     data = bytes(range(256))
     s.files["/bin"] = data
     result = await read_bytes(
-        a, PathSpec(resource_path="bin", virtual="/bin", directory="/bin"))
+        a, PathSpec(vfs_path="bin", virtual="/bin", directory="/bin"))
     assert result == data
 
 
@@ -94,7 +92,6 @@ async def test_read_bytes_normalizes_path():
     s.files["/file.txt"] = b"data"
     result = await read_bytes(
         a,
-        PathSpec(resource_path="file.txt",
-                 virtual="file.txt",
+        PathSpec(vfs_path="file.txt", virtual="file.txt",
                  directory="file.txt"))
     assert result == b"data"

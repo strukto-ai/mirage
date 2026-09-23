@@ -19,7 +19,7 @@ import { command } from '../../commands/config.ts'
 import { CommandSpec, Operand } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { CapacityState } from '../../types.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type JobRunner, JobStatus } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
@@ -36,7 +36,7 @@ beforeAll(async () => {
 
 function buildWs(): Workspace {
   return new Workspace(
-    { '/m': [new RAMResource(), MountMode.WRITE] },
+    { '/m': [new RAMVFS(), MountMode.WRITE] },
     { mode: MountMode.WRITE, shellParser: parser },
   )
 }
@@ -194,9 +194,9 @@ it.each(
     ),
   ),
 )(
-  'unmount waits for admitted resource use ($surface, streaming=$streaming, alias=$alias)',
+  'unmount waits for admitted VFS use ($surface, streaming=$streaming, alias=$alias)',
   async ({ surface, streaming, alias }) => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     let entered = (): void => undefined
     let resume = (): void => undefined
     const started = new Promise<void>((resolve) => {
@@ -219,38 +219,38 @@ it.each(
       expect(closed).toBe(false)
       return new TextEncoder().encode('value')
     }
-    const resources: Record<string, RAMResource> = { '/data': resource }
-    if (alias === 'initial') resources['/alias'] = resource
-    const ws = new Workspace(resources, { shellParser: parser })
-    if (alias === 'dynamic') ws.addMount('/alias', resource)
-    vi.spyOn(resource, 'statfs').mockImplementation(async () => {
+    const mounts: Record<string, RAMVFS> = { '/data': vfs }
+    if (alias === 'initial') mounts['/alias'] = vfs
+    const ws = new Workspace(mounts, { shellParser: parser })
+    if (alias === 'dynamic') ws.addMount('/alias', vfs)
+    vi.spyOn(vfs, 'statfs').mockImplementation(async () => {
       entered()
       await release
       expect(closed).toBe(false)
       return { state: CapacityState.UNKNOWN }
     })
-    ws.ops.register({ name: 'read', resource: 'ram', filetype: null, write: false, fn: read })
+    ws.opsRegistry.register({ name: 'read', vfs: 'ram', filetype: null, write: false, fn: read })
     const [registered] = command({
       name: 'readvalue',
-      resource: 'ram',
+      vfs: 'ram',
       spec: new CommandSpec({ rest: new Operand({ type: 'path' }) }),
       fn: async () => [await read(), new IOResult()],
     })
     if (registered === undefined) throw new Error('missing command')
     ws.mount('/data').register(registered)
-    const closeResource = resource.close.bind(resource)
-    vi.spyOn(resource, 'close').mockImplementation(async () => {
+    const closeVfs = vfs.close.bind(vfs)
+    vi.spyOn(vfs, 'close').mockImplementation(async () => {
       closed = true
-      await closeResource()
+      await closeVfs()
     })
     const running = (async () => {
       if (surface === 'df') {
-        const result = await ws.execute('df /data')
+        const result = await ws.shell('df /data')
         expect(result.exitCode).toBe(0)
         return 'value'
       }
       if (surface === 'command')
-        return new TextDecoder().decode((await ws.execute('readvalue /data/file')).stdout)
+        return new TextDecoder().decode((await ws.shell('readvalue /data/file')).stdout)
       const value = (await ws.dispatch('read', '/data/file')) as
         | Uint8Array
         | AsyncIterable<Uint8Array>
@@ -288,9 +288,9 @@ it.each(
   },
 )
 
-it('workspace close waits for resource retirements before closing stores', async () => {
-  const resource = new RAMResource()
-  const ws = new Workspace({ '/data': resource }, { shellParser: parser })
+it('workspace close waits for VFS retirements before closing stores', async () => {
+  const vfs = new RAMVFS()
+  const ws = new Workspace({ '/data': vfs }, { shellParser: parser })
   await ws.dispatch('stat', '/data')
   let entered = (): void => undefined
   let resume = (): void => undefined
@@ -301,12 +301,12 @@ it('workspace close waits for resource retirements before closing stores', async
     resume = resolve
   })
   const events: string[] = []
-  const closeResource = resource.close.bind(resource)
-  vi.spyOn(resource, 'close').mockImplementation(async () => {
+  const closeVfs = vfs.close.bind(vfs)
+  vi.spyOn(vfs, 'close').mockImplementation(async () => {
     entered()
     await release
-    await closeResource()
-    events.push('resource')
+    await closeVfs()
+    events.push('vfs')
   })
   const closeStore = ws.stateStore.close.bind(ws.stateStore)
   vi.spyOn(ws.stateStore, 'close').mockImplementation(async () => {
@@ -326,7 +326,7 @@ it('workspace close waits for resource retirements before closing stores', async
     expect(events).toEqual([])
     resume()
     await closing
-    expect(events).toEqual(['resource', 'store'])
+    expect(events).toEqual(['vfs', 'store'])
   } finally {
     resume()
     await Promise.allSettled([removing, ...(closing === undefined ? [] : [closing])])
@@ -334,9 +334,9 @@ it('workspace close waits for resource retirements before closing stores', async
   }
 })
 
-it('unmount drains an admitted resource open before closing it', async () => {
-  const resource = new RAMResource()
-  const ws = new Workspace({ '/data': resource }, { shellParser: parser })
+it('unmount drains an admitted VFS open before closing it', async () => {
+  const vfs = new RAMVFS()
+  const ws = new Workspace({ '/data': vfs }, { shellParser: parser })
   let entered = (): void => undefined
   let resume = (): void => undefined
   const started = new Promise<void>((resolve) => {
@@ -346,11 +346,11 @@ it('unmount drains an admitted resource open before closing it', async () => {
     resume = resolve
   })
   let closed = false
-  vi.spyOn(resource, 'open').mockImplementation(async () => {
+  vi.spyOn(vfs, 'open').mockImplementation(async () => {
     entered()
     await release
   })
-  vi.spyOn(resource, 'close').mockImplementation(() => {
+  vi.spyOn(vfs, 'close').mockImplementation(() => {
     closed = true
     return Promise.resolve()
   })
@@ -375,8 +375,8 @@ it('unmount drains an admitted resource open before closing it', async () => {
 })
 
 it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (kind) => {
-  const resource = new RAMResource()
-  const ws = new Workspace({ '/data': resource })
+  const vfs = new RAMVFS()
+  const ws = new Workspace({ '/data': vfs })
   await ws.resolve('/data')
   let enter = (): void => undefined
   let resume = (): void => undefined
@@ -386,7 +386,7 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
   const release = new Promise<void>((resolve) => {
     resume = resolve
   })
-  const index = resource.index
+  const index = vfs.index
   const method = kind === 'service' ? 'invalidate' : 'clear'
   const invalidate = index[method].bind(index)
   await index.put(
@@ -396,7 +396,7 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
   vi.spyOn(index, method).mockImplementation(async () => {
     enter()
     await release
-    expect(resource.isClosed).toBe(false)
+    expect(vfs.isClosed).toBe(false)
     await invalidate()
   })
   const manager = ws.mount('/data').cacheManager
@@ -411,11 +411,11 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(removed).toBe(false)
-    expect(resource.isClosed).toBe(false)
+    expect(vfs.isClosed).toBe(false)
     resume()
     await updating
     await removing
-    expect(resource.isClosed).toBe(true)
+    expect(vfs.isClosed).toBe(true)
     if (kind === 'clear') expect((await index.get('/outside-scope')).entry).toBeUndefined()
   } finally {
     resume()
@@ -430,16 +430,16 @@ describe('closeWorkspace surfaces closer failures', () => {
     order: string[]
     ready: Promise<void>
   } {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const ws = new Workspace(
-      { '/m': [resource, MountMode.WRITE] },
+      { '/m': [vfs, MountMode.WRITE] },
       { mode: MountMode.WRITE, shellParser: parser },
     )
     const order: string[] = []
-    const closeResource = resource.close.bind(resource)
-    vi.spyOn(resource, 'close').mockImplementation(async () => {
-      order.push('resource')
-      await closeResource()
+    const closeVfs = vfs.close.bind(vfs)
+    vi.spyOn(vfs, 'close').mockImplementation(async () => {
+      order.push('vfs')
+      await closeVfs()
     })
     const ready = ws.dispatch('stat', '/m').then(() => {
       const closers = (ws as unknown as { closers: (() => Promise<void>)[] }).closers
@@ -462,25 +462,25 @@ describe('closeWorkspace surfaces closer failures', () => {
     await ready
     await expect(ws.close()).rejects.toThrow('journal replay failed')
     // The point of the old catch: teardown still completes. The closers
-    // after the failure ran, and the resource still closed.
-    expect(order).toEqual(['journal replay failed', 'later closer', 'resource'])
+    // after the failure ran, and the VFS still closed.
+    expect(order).toEqual(['journal replay failed', 'later closer', 'vfs'])
   }, 30_000)
 
   it('leaves the workspace closed when a closer fails, so nothing resumes onto it', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const ws = new Workspace(
-      { '/m': [resource, MountMode.WRITE] },
+      { '/m': [vfs, MountMode.WRITE] },
       { mode: MountMode.WRITE, shellParser: parser },
     )
     await ws.dispatch('stat', '/m')
     const closers = (ws as unknown as { closers: (() => Promise<void>)[] }).closers
     closers.push(() => Promise.reject(new Error('journal replay failed')))
     await expect(ws.close()).rejects.toThrow('journal replay failed')
-    // The resources are already released here, and `closing` is memoized, so
+    // The mounts are already released here, and `closing` is memoized, so
     // the terminal flag has to be set or the guards that read only `closed`
     // would let a settled runner resolve and reopen one.
     expect((ws as unknown as { closed: boolean }).closed).toBe(true)
-    await expect(ws.execute('echo hi')).rejects.toThrow('Workspace is closed')
+    await expect(ws.shell('echo hi')).rejects.toThrow('Workspace is closed')
     await expect(ws.dispatch('stat', '/m')).rejects.toThrow('Workspace is closed')
     // Teardown ran once and is not retried, so a second caller has to be told
     // why it failed rather than reading the memoized attempt as success.
@@ -488,13 +488,13 @@ describe('closeWorkspace surfaces closer failures', () => {
   }, 30_000)
 
   it('keeps the closer failure when a later teardown stage fails too', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const ws = new Workspace(
-      { '/m': [resource, MountMode.WRITE] },
+      { '/m': [vfs, MountMode.WRITE] },
       { mode: MountMode.WRITE, shellParser: parser },
     )
     await ws.dispatch('stat', '/m')
-    vi.spyOn(resource, 'close').mockRejectedValue(new Error('resource close failed'))
+    vi.spyOn(vfs, 'close').mockRejectedValue(new Error('VFS close failed'))
     const closers = (ws as unknown as { closers: (() => Promise<void>)[] }).closers
     closers.push(() => Promise.reject(new Error('journal replay failed')))
     const err = await ws.close().then(
@@ -505,7 +505,7 @@ describe('closeWorkspace surfaces closer failures', () => {
     expect(err).toBeInstanceOf(AggregateError)
     expect((err as AggregateError).errors.map((e: Error) => e.message)).toEqual([
       'journal replay failed',
-      'resource close failed',
+      'VFS close failed',
     ])
     expect((ws as unknown as { closed: boolean }).closed).toBe(true)
   }, 30_000)
@@ -523,6 +523,6 @@ describe('closeWorkspace surfaces closer failures', () => {
       'second gone',
     ])
     expect(order).toContain('later closer')
-    expect(order).toContain('resource')
+    expect(order).toContain('vfs')
   }, 30_000)
 })

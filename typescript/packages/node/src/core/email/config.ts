@@ -17,8 +17,8 @@ import {
   redactConfigWithSchema,
   secretStr,
   z,
-} from '@struktoai/mirage-core/resource/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/resource/secrets'
+} from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 
 // Doubles as the himalaya CLI's configModel: parse applies the same
 // defaults buildEmailConfig fills in, and secretStr marks the password

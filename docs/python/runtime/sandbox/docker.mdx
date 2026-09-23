@@ -29,15 +29,15 @@ networks, volumes, and bind mounts belong on your own `docker run` command.
 ```python
 from mirage import MountMode, Workspace
 from mirage.accessor.s3 import S3Config
-from mirage.resource.s3.s3 import S3Resource
+from mirage.vfs.s3.s3 import S3VFS
 from mirage.runtime.sandbox.docker import DockerRuntime
 
 runtime = DockerRuntime(captures=["python3"],
                         config={"container": "my-sandbox"})
-ws = Workspace({"/data": S3Resource(S3Config(bucket="my-bucket"))},
+ws = Workspace({"/data": S3VFS(S3Config(bucket="my-bucket"))},
                mode=MountMode.EXEC,
-               runtimes=[runtime, "vfs"])
-await ws.execute("python3 job.py", cwd="/data")
+               runtimes=[runtime, "workspace"])
+await ws.shell("python3 job.py", cwd="/data")
 ```
 
 The `container` config accepts a container name or id. Unknown config fields

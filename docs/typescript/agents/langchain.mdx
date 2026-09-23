@@ -19,7 +19,7 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-node deepagents @langchain/a
 ## Usage
 
 ```ts
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { createDeepAgent } from 'deepagents'
 import {
@@ -28,7 +28,7 @@ import {
   extractText,
 } from '@struktoai/mirage-agents/langchain'
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })

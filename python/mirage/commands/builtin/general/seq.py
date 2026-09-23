@@ -53,7 +53,7 @@ def _seq_generate(texts: list[str], separator: str, width: bool,
     return separator.join(parts) + "\n"
 
 
-@command("seq", resource=None, spec=SPECS["seq"], provision=pure_provision)
+@command("seq", vfs=None, spec=SPECS["seq"], provision=pure_provision)
 async def seq(
     accessor: Accessor,
     paths: list[PathSpec],

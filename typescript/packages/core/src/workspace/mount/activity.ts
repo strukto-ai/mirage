@@ -16,8 +16,8 @@ import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 
-/** Calls and streams sharing one resource, including its removed aliases. */
-export class ResourceActivity {
+/** Calls and streams sharing one VFS, including its removed aliases. */
+export class VFSActivity {
   private count = 0
   private waiters: (() => void)[] = []
 

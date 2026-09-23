@@ -20,7 +20,6 @@ from mirage.commands.builtin.generic.crossmount import (handle_cross_mount,
                                                         is_cross_mount)
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
 from mirage.commands.builtin.generic.crossmount.types import Strategy
-from mirage.commands.builtin.generic.tar.mode import is_create_mode
 from mirage.commands.builtin.utils.identity import identity_from
 from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.config import standard_request
@@ -62,7 +61,7 @@ from mirage.workspace.lookup import (JOB_BUILTINS, Consumer, dereferences,
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.storage import make_storage_key
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
 
@@ -86,7 +85,7 @@ async def _finish_find(
         io: IOResult,
         texts: list[str],
         registry: MountRegistry,
-        session: Session,
+        session: SessionState,
         execute_fn: ExecuteLine | None,
         ns: NamespaceView | None,
         stat_path: StatPath | None,
@@ -108,7 +107,7 @@ async def _finish_find(
         io (IOResult): the selection's result, amended in place.
         texts (list[str]): the expression tokens.
         registry (MountRegistry): used to route per-match dispatch.
-        session (Session): the session the line runs under.
+        session (SessionState): the session the line runs under.
         execute_fn (ExecuteLine | None): runs an ``-exec`` line.
         ns (NamespaceView | None): the name plane's facts.
         stat_path (StatPath | None): dispatcher stat.
@@ -149,7 +148,7 @@ async def handle_command(
     dispatch: DispatchFn,
     registry: MountRegistry,
     parts: list[str | PathSpec],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -291,14 +290,9 @@ async def handle_command(
                                           stderr=ref_err)
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
-    # exactly like a positional destination would. A create-mode tar is
-    # the one relay member kept out: its planner walks a single
-    # backend's tree, so a span there falls through to the refusal
-    # below instead of a relay run that would cross nested mounts.
-    if is_cross_mount(
-            cmd_name, routing_scopes,
-            registry) and not (cmd_name == "tar" and is_create_mode(raw_argv)):
-        # Cross-mount execution bypasses a resource command handler. Parse
+    # exactly like a positional destination would.
+    if is_cross_mount(cmd_name, routing_scopes, registry):
+        # Cross-mount execution bypasses a VFS command handler. Parse
         # against the shared spec so flags and text operands do not depend on
         # the source mount. The bound single-mount runner lets the strategy
         # runners execute each operand natively on its owning mount.

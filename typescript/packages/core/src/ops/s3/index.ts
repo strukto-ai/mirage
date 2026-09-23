@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { S3_IO } from '../../commands/builtin/s3/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const S3_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.S3, S3_IO, {})
+export const S3_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.S3, S3_IO, {})

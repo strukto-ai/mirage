@@ -28,7 +28,7 @@ from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import finish_statement
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
 
@@ -37,7 +37,7 @@ async def run_shell_function(
     execute_node: ExecuteNodeFn,
     cmd_name: str,
     parts: list[str | PathSpec],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     job_table: JobTable | None = None,
@@ -57,7 +57,7 @@ async def run_shell_function(
         cmd_name (str): the function's name (already resolved).
         parts (list[str | PathSpec]): classified command words; the
             tail becomes the function's positional arguments as typed.
-        session (Session): session whose env/arrays host the locals.
+        session (SessionState): session whose env/arrays host the locals.
         stdin (ByteSource | None): stdin forwarded to each statement.
         call_stack (CallStack | None): the caller's stack, or a fresh
             one for a top-level call.

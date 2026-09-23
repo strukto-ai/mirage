@@ -31,7 +31,7 @@ import { moveReveals } from '../../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../../utils/remnants.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
-import type { FindOptions } from '../../../resource/base.ts'
+import type { FindOptions } from '../../../vfs/base.ts'
 import {
   FileType,
   MountMode,
@@ -1110,7 +1110,7 @@ async function isImplicitDir<A extends Accessor>(
   index?: IndexCacheStore,
 ): Promise<boolean> {
   const target = norm(path.virtual)
-  const key = stripSlash(path.resourcePath)
+  const key = stripSlash(path.vfsPath)
   if (!key) {
     try {
       const entries = await ops.readdir(accessor, path, index)
@@ -1124,7 +1124,7 @@ async function isImplicitDir<A extends Accessor>(
   const parentPath = new PathSpec({
     virtual: parentVirtual,
     directory: parentVirtual,
-    resourcePath: parentKey,
+    vfsPath: parentKey,
   })
   try {
     const entries = await ops.readdir(accessor, parentPath, index)
@@ -1244,7 +1244,7 @@ export function requireOp<T>(op: T | undefined, name: string): T {
  * tell a missing key from a prefix that exists only through deeper keys.
  * The namespace's child names cost nothing and are the only authority for
  * a directory that exists because a mount or a link sits under it, which
- * no backend can see because those keys live in another resource.
+ * no backend can see because those keys live in another VFS.
  *
  * A no leaves the original error untouched, so nothing is swallowed: the
  * caller rethrows what the backend said. Both probes are broad for that

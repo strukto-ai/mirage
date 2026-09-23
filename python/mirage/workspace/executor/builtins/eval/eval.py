@@ -18,14 +18,14 @@ from typing import Any
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_eval(
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     script = " ".join(args)
     io = await execute_fn(script, session_id=session.session_id)

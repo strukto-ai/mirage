@@ -25,7 +25,7 @@ import { detectScope, NATIVE_KINDS } from '../../../core/discord/scope.ts'
 import { formatGrepResults, searchGuild } from '../../../core/discord/search.ts'
 import { stat as discordStat } from '../../../core/discord/stat.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
+import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
@@ -97,7 +97,7 @@ async function grepCommand(
         const lines = formatGrepResults(
           raw,
           target,
-          mountPrefixOf(operand.virtual, operand.resourcePath),
+          mountPrefixOf(operand.virtual, operand.vfsPath),
           channelMap,
         )
         if (lines.length === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
@@ -140,7 +140,7 @@ async function grepCommand(
 
 export const DISCORD_GREP = command({
   name: 'grep',
-  resource: ResourceName.DISCORD,
+  vfs: VFSName.DISCORD,
   spec: specOf('grep'),
   fn: grepCommand,
   provision: fileReadProvision,

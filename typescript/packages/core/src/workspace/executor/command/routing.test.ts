@@ -16,16 +16,16 @@ import { describe, expect, it } from 'vitest'
 
 import { cliSpecFor } from '../../../commands/cli/specs.ts'
 import { OpsRegistry } from '../../../ops/registry.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { programTokens } from './routing.ts'
 
 describe('programTokens', () => {
   it('walks a CLI verb path and keeps the rest raw', async () => {
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const ops = new OpsRegistry()
-    ops.registerResource(ram)
+    ops.registerVfs(ram)
     const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, ops })
     try {
       ws.registerCli('git', cliSpecFor('git'))

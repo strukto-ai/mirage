@@ -14,14 +14,14 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { MirageShell } from './shell.ts'
 
 function mkWs(extra: Partial<WorkspaceOptions> = {}): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops, ...extra })
@@ -53,7 +53,7 @@ describe('MirageShell', () => {
 
   it('captures stderr and exitCode for failing commands', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/exists.txt', 'x')
+    await ws.vfs.writeFile('/exists.txt', 'x')
     const shell = new MirageShell(ws)
     const result = await shell.run({ commands: ['cat /missing-file.txt'] })
 

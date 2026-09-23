@@ -14,7 +14,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel } from '../../shell/console/index.ts'
 import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
@@ -232,7 +232,7 @@ beforeAll(async () => {
 
 function buildWs(): Workspace {
   return new Workspace(
-    { '/m': [new RAMResource(), MountMode.WRITE] },
+    { '/m': [new RAMVFS(), MountMode.WRITE] },
     { mode: MountMode.WRITE, shellParser: parser },
   )
 }
@@ -253,7 +253,7 @@ const BODY_SHAPES = [
 describe('& inside a compound body', () => {
   it.each(BODY_SHAPES)('launches a job with launch status 0: %s', async (line) => {
     const ws = buildWs()
-    const io = await ws.execute(`${line}; echo rc=$?`)
+    const io = await ws.shell(`${line}; echo rc=$?`)
     expect(stdoutStr(io)).toBe('rc=0\n')
     const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     expect(job?.command).toBe('false')
@@ -263,27 +263,27 @@ describe('& inside a compound body', () => {
 
   it('leaves loop-body jobs running when the loop ends', async () => {
     const ws = buildWs()
-    const io = await ws.execute('for i in 1 2; do sleep 0.3 & done; jobs')
+    const io = await ws.shell('for i in 1 2; do sleep 0.3 & done; jobs')
     expect(stdoutStr(io)).toBe('[1] running sleep 0.3\n[2] running sleep 0.3\n')
-    await ws.execute('wait')
-    expect(stdoutStr(await ws.execute('jobs'))).toBe('')
+    await ws.shell('wait')
+    expect(stdoutStr(await ws.shell('jobs'))).toBe('')
   })
 
   it('wait adopts loop-body jobs in id order, after the foreground line', async () => {
     const ws = buildWs()
-    const io = await ws.execute('for i in 1 2; do echo $i & done; echo launched; wait')
+    const io = await ws.shell('for i in 1 2; do echo $i & done; echo launched; wait')
     expect(stdoutStr(io)).toBe('launched\n1\n2\n')
   })
 
   it('$! names each loop-body job', async () => {
     const ws = buildWs()
-    const io = await ws.execute('for i in 1 2; do sleep 0.1 & echo $!; done; wait')
+    const io = await ws.shell('for i in 1 2; do sleep 0.1 & echo $!; done; wait')
     expect(stdoutStr(io)).toBe('1\n2\n')
   })
 
   it('errexit does not trip on a body launch', async () => {
     const ws = buildWs()
-    const io = await ws.execute('set -e; for i in 1; do false & done; echo ok; wait')
+    const io = await ws.shell('set -e; for i in 1; do false & done; echo ok; wait')
     expect(stdoutStr(io)).toBe('ok\n')
   })
 })
@@ -315,7 +315,7 @@ describe('background conditions and function scope', () => {
   ])('%s', async (line, expected, code) => {
     const ws = buildWs()
     try {
-      const result = await ws.execute(line)
+      const result = await ws.shell(line)
       expect(stdoutStr(result)).toBe(expected)
       expect(stderrStr(result)).toBe('')
       expect(result.exitCode).toBe(code)
@@ -331,14 +331,14 @@ describe('jobs are scoped to the session that launched them', () => {
     ws.createSession('a')
     ws.createSession('b')
     try {
-      await ws.execute('sleep 30 &', { sessionId: 'a' })
-      expect(stdoutStr(await ws.execute('jobs', { sessionId: 'b' }))).toBe('')
-      expect(stdoutStr(await ws.execute('jobs', { sessionId: 'a' }))).toContain('[1]')
-      const io = await ws.execute('wait %1', { sessionId: 'b' })
+      await ws.shell('sleep 30 &', { sessionId: 'a' })
+      expect(stdoutStr(await ws.shell('jobs', { sessionId: 'b' }))).toBe('')
+      expect(stdoutStr(await ws.shell('jobs', { sessionId: 'a' }))).toContain('[1]')
+      const io = await ws.shell('wait %1', { sessionId: 'b' })
       expect(io.exitCode).toBe(127)
       expect(stderrStr(io)).toContain('no such job')
-      expect(stdoutStr(await ws.execute('ps', { sessionId: 'b' }))).toBe('')
-      expect((await ws.execute('kill %1', { sessionId: 'a' })).exitCode).toBe(0)
+      expect(stdoutStr(await ws.shell('ps', { sessionId: 'b' }))).toBe('')
+      expect((await ws.shell('kill %1', { sessionId: 'a' })).exitCode).toBe(0)
     } finally {
       await ws.close()
     }
@@ -348,8 +348,8 @@ describe('jobs are scoped to the session that launched them', () => {
     const ws = buildWs()
     ws.createSession('a')
     try {
-      await ws.execute('sleep 30 &', { sessionId: 'a' })
-      await ws.execute('sleep 30 &', { sessionId: 'a' })
+      await ws.shell('sleep 30 &', { sessionId: 'a' })
+      await ws.shell('sleep 30 &', { sessionId: 'a' })
       const old = ws.jobTable.get(2, 'a')
       expect(old).not.toBeNull()
       await ws.closeSession('a')
@@ -357,9 +357,9 @@ describe('jobs are scoped to the session that launched them', () => {
       expect(ws.jobTable.listJobs('a')).toEqual([])
       // A session reusing the id starts from one and inherits nothing.
       ws.createSession('a')
-      expect(stdoutStr(await ws.execute('jobs', { sessionId: 'a' }))).toBe('')
-      expect(stdoutStr(await ws.execute('sleep 30 & echo $!', { sessionId: 'a' }))).toBe('1\n')
-      const io = await ws.execute('wait %2', { sessionId: 'a' })
+      expect(stdoutStr(await ws.shell('jobs', { sessionId: 'a' }))).toBe('')
+      expect(stdoutStr(await ws.shell('sleep 30 & echo $!', { sessionId: 'a' }))).toBe('1\n')
+      const io = await ws.shell('wait %2', { sessionId: 'a' })
       expect(io.exitCode).toBe(127)
       expect(stderrStr(io)).toContain('no such job')
     } finally {
@@ -372,9 +372,9 @@ describe('jobs are scoped to the session that launched them', () => {
     ws.createSession('a')
     ws.createSession('b')
     try {
-      await ws.execute('sleep 30 &')
-      await ws.execute('sleep 30 &', { sessionId: 'a' })
-      await ws.execute('sleep 30 &', { sessionId: 'b' })
+      await ws.shell('sleep 30 &')
+      await ws.shell('sleep 30 &', { sessionId: 'a' })
+      await ws.shell('sleep 30 &', { sessionId: 'b' })
       await ws.closeAllSessions()
       expect(ws.jobTable.listJobs('a')).toEqual([])
       expect(ws.jobTable.listJobs('b')).toEqual([])
@@ -390,9 +390,9 @@ describe('jobs are scoped to the session that launched them', () => {
     ws.createSession('a')
     ws.createSession('b')
     try {
-      const firstA = await ws.execute('sleep 30 & echo $!', { sessionId: 'a' })
-      const firstB = await ws.execute('sleep 30 & echo $!', { sessionId: 'b' })
-      const secondA = await ws.execute('sleep 30 & echo $!', { sessionId: 'a' })
+      const firstA = await ws.shell('sleep 30 & echo $!', { sessionId: 'a' })
+      const firstB = await ws.shell('sleep 30 & echo $!', { sessionId: 'b' })
+      const secondA = await ws.shell('sleep 30 & echo $!', { sessionId: 'a' })
       expect([stdoutStr(firstA), stdoutStr(firstB), stdoutStr(secondA)]).toEqual([
         '1\n',
         '1\n',

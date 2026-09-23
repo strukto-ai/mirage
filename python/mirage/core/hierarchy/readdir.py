@@ -164,7 +164,7 @@ def make_readdir(
             # null and undefined alike).
             index = RAMIndexCacheStore()
         virtual = path_spec.virtual
-        prefix = mount_prefix_of(path_spec.virtual, path_spec.resource_path)
+        prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
         path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
         key = path.strip("/")
         virtual_key = prefix + "/" + key if key else prefix or "/"
@@ -201,7 +201,7 @@ def make_readdir(
                 readdir, accessor,
                 PathSpec(virtual=proof_key,
                          directory=proof_key,
-                         resource_path=mount_key(proof_key, prefix)), index)
+                         vfs_path=mount_key(proof_key, prefix)), index)
             if own is None:
                 raise enoent(virtual)
             # The resolve may have warmed this very listing: a parent's

@@ -37,7 +37,7 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-@command("rg", resource="gmail", spec=SPECS["rg"])
+@command("rg", vfs="gmail", spec=SPECS["rg"])
 async def rg(accessor: GmailAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])
@@ -51,7 +51,7 @@ async def rg(accessor: GmailAccessor, paths: list[PathSpec], texts: list[str],
         match = detect_scope(operand)
         if match.kind in NATIVE_KINDS:
             file_prefix = mount_prefix_of(operand.virtual,
-                                          operand.resource_path) or ""
+                                          operand.vfs_path) or ""
             rows = await search_messages(
                 accessor.token_manager,
                 pattern_str,

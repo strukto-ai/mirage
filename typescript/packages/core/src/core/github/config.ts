@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import type { ConfigOf, RedactedConfig } from '../../resource/secrets.ts'
-import { parseConfigWithSchema, redactConfigWithSchema, secretStr } from '../../resource/secrets.ts'
+import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, redactConfigWithSchema, secretStr } from '../../vfs/secrets.ts'
 
 const GitHubConfigSchema = z.object({
   token: secretStr(),

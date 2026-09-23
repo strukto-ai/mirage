@@ -15,7 +15,7 @@
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { describe, expect, it } from 'vitest'
 
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import { commandName, forkForCall } from './utils.ts'
 
 describe('commandName', () => {
@@ -30,8 +30,8 @@ describe('commandName', () => {
   })
 })
 
-function makeSession(): Session {
-  return new Session({ sessionId: 's1', cwd: '/home', vars: varsFromEnv({ A: '1', B: '2' }) })
+function makeSession(): SessionState {
+  return new SessionState({ sessionId: 's1', cwd: '/home', vars: varsFromEnv({ A: '1', B: '2' }) })
 }
 
 describe('forkForCall', () => {

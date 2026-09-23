@@ -34,9 +34,9 @@ async def test_stat_root_fetches_folder_info(accessor, index):
                 "modified_at": "2026-04-01T00:00:00+00:00"
             },
     ) as mock_info:
-        info = await stat(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+        info = await stat(accessor,
+                          PathSpec(vfs_path="", virtual="/", directory="/"),
+                          index)
     assert info.type == FileType.DIRECTORY
     assert info.name == "/"
     assert info.modified == "2026-04-01T00:00:00+00:00"
@@ -56,8 +56,7 @@ async def test_stat_file_carries_box_metadata(accessor, index):
                      size=5))],
     )
     info = await stat(
-        accessor,
-        PathSpec(resource_path="a.txt", virtual="/a.txt", directory="/"),
+        accessor, PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
         index)
     assert info.content == ContentType.TEXT
     assert info.size == 5
@@ -79,9 +78,8 @@ async def test_stat_folder_is_directory(accessor, index):
                      vfs_name="docs"))],
     )
     info = await stat(
-        accessor, PathSpec(resource_path="docs",
-                           virtual="/docs",
-                           directory="/"), index)
+        accessor, PathSpec(vfs_path="docs", virtual="/docs", directory="/"),
+        index)
     assert info.type == FileType.DIRECTORY
     assert info.extra["box_id"] == "100"
 
@@ -102,8 +100,7 @@ async def test_stat_populates_via_parent_readdir(accessor, index):
     ):
         info = await stat(
             accessor,
-            PathSpec(resource_path="a.txt", virtual="/a.txt", directory="/"),
-            index)
+            PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"), index)
     assert info.size == 5
 
 
@@ -121,9 +118,8 @@ async def test_stat_missing_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(resource_path="ghost",
-                         virtual="/ghost",
-                         directory="/"), index)
+                PathSpec(vfs_path="ghost", virtual="/ghost", directory="/"),
+                index)
 
 
 @pytest.mark.asyncio
@@ -227,7 +223,7 @@ async def test_stat_direct_resolve_hides_weblinks(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(resource_path="homepage",
+                PathSpec(vfs_path="homepage",
                          virtual="/homepage",
                          directory="/"), index)
 
@@ -242,7 +238,7 @@ async def test_stat_root_reads_a_404_as_absence(accessor, index):
     ):
         with pytest.raises(FileNotFoundError):
             await stat(accessor,
-                       PathSpec(resource_path="", virtual="/", directory="/"),
+                       PathSpec(vfs_path="", virtual="/", directory="/"),
                        index)
 
 
@@ -255,6 +251,6 @@ async def test_stat_root_keeps_a_server_error_a_failure(accessor, index):
     ):
         with pytest.raises(BoxApiError) as caught:
             await stat(accessor,
-                       PathSpec(resource_path="", virtual="/", directory="/"),
+                       PathSpec(vfs_path="", virtual="/", directory="/"),
                        index)
     assert caught.value.status == 500

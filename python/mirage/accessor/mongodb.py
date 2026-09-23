@@ -20,8 +20,8 @@ from typing import Any
 from pymongo import AsyncMongoClient
 
 from mirage.accessor.base import Accessor
-from mirage.resource.mongodb.config import MongoDBConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.mongodb.config import MongoDBConfig
+from mirage.vfs.secrets import reveal_secret
 
 
 class MongoDBAccessor(Accessor):

@@ -32,7 +32,7 @@ import { getText } from '../../shell/helpers.ts'
 import { type Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { createFile } from './create.ts'
@@ -108,7 +108,7 @@ export async function handleRedirect(
   dispatch: DispatchFn,
   command: TSNodeLike | null,
   redirects: readonly Redirect[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
@@ -169,6 +169,10 @@ export async function handleRedirect(
     for (const fd of r.fd === FD_BOTH ? [FD_STDOUT, FD_STDERR] : [r.fd]) closed.delete(fd)
     if (r.kind === RedirectKind.STDIN) {
       const scope = ensureScope(r.target)
+      if (scope.virtual === '/dev/stdin') {
+        inputs[r.fd] = inputs[FD_STDIN] ?? null
+        continue
+      }
       let data: unknown
       try {
         ;[data] = await dispatch('read', scope)
@@ -206,7 +210,7 @@ export async function handleRedirect(
   // and nothing else, so a refused redirect still let `rm` delete its own
   // target — and then the probe found nothing there and did not even
   // refuse.
-  const barred = await noclobberRefusal(dispatch, session, redirects)
+  const barred = await openRefusal(dispatch, session, redirects)
   if (barred !== null) return barred
 
   let stdoutData: Uint8Array
@@ -378,7 +382,7 @@ export async function handleRedirect(
  * set by the other shell-attributed error, `nosuchcmd: command not found`
  * (bash prints `bash: line 1: nosuchcmd: command not found`) — `bash:` is
  * bash's `$0` and mirage is not bash, and `line N` has no meaning for a
- * one-line `Workspace.execute` call.
+ * one-line `Workspace.shell` call.
  *
  * The label is the target's own spelling, never the error's message: backends
  * raise write failures with prose in the message (`parent directory does not
@@ -399,7 +403,7 @@ function closedWriteLine(command: TSNodeLike): Uint8Array {
   return new TextEncoder().encode(`${name}: write error: Bad file descriptor\n`)
 }
 
-/** Shell-attributed IOResult for a `<` source that cannot be read. */
+/** Shell-attributed IOResult for a redirect target that cannot be opened. */
 function redirectFailure(scope: PathSpec, err: unknown): Result {
   return shellFailure(redirectErrorLine(scope, err))
 }
@@ -417,7 +421,7 @@ function shellFailure(line: Uint8Array): Result {
 }
 
 /**
- * Refuse the whole statement when `set -C` bars one of its opens.
+ * Refuse the whole statement when one of its opens cannot happen.
  *
  * Returned *instead of* running the command, because that is what bash
  * does: it opens every redirect before it forks, so a refusal means the
@@ -426,6 +430,16 @@ function shellFailure(line: Uint8Array): Result {
  * and on `rm f > f` it did not even do that — the command deleted its
  * own target first, so the probe found nothing there and let the line
  * succeed.
+ *
+ * Two opens refuse. A target typed with a trailing slash is one whatever
+ * is there: open(2) with O_CREAT answers `missing/` and `reg/` alike with
+ * EISDIR before looking anything up, so bash prints `missing/: Is a
+ * directory` and creates nothing, where writing the normalized name would
+ * have left a regular file called `missing`. That test is on the spelling
+ * alone and costs no round trip, which is a deliberate divergence for a
+ * slashed target under a parent that is itself absent: bash reports the
+ * parent first (ENOENT), this reads `Is a directory` too. The other is
+ * `set -C`, described next.
  *
  * `set -C` refuses a truncating open onto anything that already exists —
  * an empty file counts, since the test is existence and not size — while
@@ -442,23 +456,22 @@ function shellFailure(line: Uint8Array): Result {
  * pre-command snapshot passed both and wrote the output. `>>` and `>|`
  * never refuse but do create, so they count as opens too.
  *
- * The whole scan is skipped unless the option is on, so the ordinary
- * redirect path costs no extra round trip. That leaves
- * `> <a directory>` with the option off silently succeeding, which is a
- * separate pre-existing gap: GNU answers `Is a directory` and exit 1
- * whichever operator asked, and closing it means a stat on every output
- * redirect.
+ * The stat is skipped unless the option is on, so the ordinary redirect
+ * path costs no extra round trip. A directory typed without a slash needs
+ * none here: the open itself answers `Is a directory`, from the kernel on
+ * a real filesystem and from the store's own directory table on a keyed
+ * one, and the write path renders it.
  *
  * Targets are stat'd through the op dispatcher rather than a backend, so
  * a redirect that lands on another mount is answered by the mount that
  * owns it.
  */
-async function noclobberRefusal(
+async function openRefusal(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   redirects: readonly Redirect[],
 ): Promise<Result | null> {
-  if (session.shellOptions.noclobber !== true) return null
+  const noclobber = session.shellOptions.noclobber === true
   const opened = new Set<string>()
   const pending: PathSpec[] = []
   for (const r of redirects) {
@@ -471,10 +484,15 @@ async function noclobberRefusal(
       continue
     }
     const scope = ensureScope(r.target)
+    if (scope.rawPath.endsWith('/')) {
+      const earlier = await applyPendingOpens(dispatch, pending)
+      if (earlier !== null) return earlier
+      return shellFailure(new TextEncoder().encode(`${scope.rawPath}: Is a directory\n`))
+    }
     const path = scope.virtual
     let exists = opened.has(path)
     let isDir = false
-    if (!exists) {
+    if (noclobber && !exists) {
       let stat: unknown
       try {
         ;[stat] = await dispatch('stat', scope)
@@ -487,17 +505,21 @@ async function noclobberRefusal(
       exists = stat instanceof FileStat
       isDir = stat instanceof FileStat && stat.type === FileType.DIRECTORY
     }
-    if (exists && !r.append && !r.clobber) {
-      await applyPendingOpens(dispatch, pending)
+    if (noclobber && exists && !r.append && !r.clobber) {
+      const earlier = await applyPendingOpens(dispatch, pending)
+      if (earlier !== null) return earlier
       const detail = isDir ? 'Is a directory' : 'cannot overwrite existing file'
       const err = new TextEncoder().encode(`${scope.rawPath}: ${detail}\n`)
       const io = new IOResult({ exitCode: 1, stderr: err })
       return [null, io, new ExecutionNode({ command: 'redirect', exitCode: 1 })]
     }
     // This open succeeds, so the target exists for every redirect after
-    // it, and a truncating one leaves it empty to be found.
+    // it, and a truncating one leaves it empty to be found. Without the
+    // option nothing was stat'd, so an append target of unknown standing
+    // is not listed: pre-opening it with an empty write would truncate a
+    // file that is there.
     opened.add(path)
-    if (!exists || !r.append) pending.push(scope)
+    if (!r.append || (noclobber && !exists)) pending.push(scope)
   }
   return null
 }
@@ -511,24 +533,30 @@ async function noclobberRefusal(
  * scan found absent, or opened for truncation, are listed, so an append
  * onto an existing file keeps its bytes.
  *
- * A write that fails is swallowed rather than raised: the failure belongs
- * to that earlier redirect, which bash would have reported instead of the
- * noclobber refusal, and inventing that error here would replace the
- * refusal the caller is about to return.
+ * An earlier open that fails is the statement's refusal instead: bash stops
+ * at the first open it cannot perform, so `echo x > /nodir/f > reg/` reports
+ * `/nodir/f: No such file or directory` and never reaches the slashed target,
+ * and the opens after the failed one are not performed either. Returns that
+ * failure, or null when every open went through.
  */
-async function applyPendingOpens(dispatch: DispatchFn, pending: PathSpec[]): Promise<void> {
+async function applyPendingOpens(
+  dispatch: DispatchFn,
+  pending: PathSpec[],
+): Promise<Result | null> {
   for (const scope of pending) {
     try {
       await dispatch('write', scope, [new Uint8Array()])
     } catch (err) {
       if (!isFsError(err)) throw err
+      return redirectFailure(scope, err)
     }
   }
+  return null
 }
 
 /** The descriptors an `exec` closed for the shell, which a line's dup
  * from refuses before the command runs. */
-function persistentlyClosed(session: Session): Set<number> {
+function persistentlyClosed(session: SessionState): Set<number> {
   const closed = new Set<number>()
   if (session.execStdinIdentity === EXEC_CLOSED) closed.add(FD_STDIN)
   if (session.execStdout === EXEC_CLOSED) closed.add(FD_STDOUT)
@@ -543,7 +571,7 @@ function persistentlyClosed(session: Session): Set<number> {
  * pipe); a terminal stream dup'd onto it (`exec 0<&1`) writes where that
  * stream goes; a file opened for writing (`exec 0>f`) is the file.
  */
-function stdinDest(session: Session): FdDest {
+function stdinDest(session: SessionState): FdDest {
   const id = session.execStdinIdentity
   if (id === null || id === EXEC_CLOSED || id.startsWith(OPEN_FOR_READING)) return CLOSED
   if (id === EXEC_TO_STDOUT) return TO_STDOUT
@@ -573,7 +601,7 @@ function ensureScope(target: unknown): PathSpec {
 function toScope(path: string): PathSpec {
   const lastSlash = path.lastIndexOf('/')
   const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
+  return new PathSpec({ vfsPath: stripSlash(path), virtual: path, directory, resolved: true })
 }
 
 function concat(chunks: Uint8Array[]): Uint8Array {

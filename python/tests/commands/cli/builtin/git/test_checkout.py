@@ -22,8 +22,8 @@ from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.checkout import (_blocked_ancestors,
                                                       _blocked_descendants,
                                                       _conflicts)
-from mirage.resource.disk import DiskResource
 from mirage.types import MountMode
+from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (branch_with_gitlink,
                                                      commit_gitlink,
@@ -39,7 +39,7 @@ async def run(ws, line: str) -> tuple[int, bytes, bytes]:
         ws (Workspace): workspace with the repository and CLI.
         line (str): the command line, without the leading directory.
     """
-    result = await ws.execute(f"git -C /repo {line}")
+    result = await ws.shell(f"git -C /repo {line}")
     return result.exit_code, result.stdout or b"", result.stderr or b""
 
 
@@ -67,8 +67,8 @@ async def write(ws, name: str, text: str) -> None:
     """
     parent = posixpath.dirname(name)
     if parent:
-        await ws.execute(f"mkdir -p /repo/{parent}")
-    await ws.execute(f"echo {text} > /repo/{name}")
+        await ws.shell(f"mkdir -p /repo/{parent}")
+    await ws.shell(f"echo {text} > /repo/{name}")
 
 
 async def branch_holding(ws, name: str, path: str, text: str) -> None:
@@ -333,12 +333,12 @@ async def test_checking_out_a_symlink_restores_a_link_not_a_file(git_rw):
     # content write; writing the blob would leave a 5-byte regular file
     # spelling "a.txt".
     assert (await run(git_rw, "checkout -b side"))[0] == 0
-    await git_rw.execute("ln -s a.txt /repo/link")
+    await git_rw.shell("ln -s a.txt /repo/link")
     assert (await run(git_rw, "add link"))[0] == 0
     assert (await run(git_rw, "commit -m linked"))[0] == 0
     assert (await run(git_rw, "checkout main"))[0] == 0
     assert (await run(git_rw, "checkout side"))[0] == 0
-    listing = await git_rw.execute("ls -l /repo/link")
+    listing = await git_rw.shell("ls -l /repo/link")
     assert (listing.stdout or b"").startswith(b"lrwxrwxrwx")
     assert b"link -> a.txt" in (listing.stdout or b"")
 
@@ -352,21 +352,21 @@ async def test_checking_out_a_regular_file_over_a_link_replaces_it(git_rw):
     # ever changed, and the link stays in the working tree while HEAD
     # and the index say a file is there.
     assert (await run(git_rw, "checkout -b linked"))[0] == 0
-    await git_rw.execute("ln -s a.txt /repo/thing")
+    await git_rw.shell("ln -s a.txt /repo/thing")
     assert (await run(git_rw, "add thing"))[0] == 0
     assert (await run(git_rw, "commit -m link"))[0] == 0
     assert (await run(git_rw, "checkout -b plain"))[0] == 0
-    await git_rw.execute("rm /repo/thing")
-    await git_rw.execute("printf 'PLAIN\\n' > /repo/thing")
+    await git_rw.shell("rm /repo/thing")
+    await git_rw.shell("printf 'PLAIN\\n' > /repo/thing")
     assert (await run(git_rw, "add thing"))[0] == 0
     assert (await run(git_rw, "commit -m plain"))[0] == 0
     assert (await run(git_rw, "checkout linked"))[0] == 0
     assert (await run(git_rw, "checkout plain"))[0] == 0
-    listing = await git_rw.execute("ls -l /repo/thing")
+    listing = await git_rw.shell("ls -l /repo/thing")
     assert not (listing.stdout or b"").startswith(b"lrwxrwxrwx")
-    content = await git_rw.execute("cat /repo/thing")
+    content = await git_rw.shell("cat /repo/thing")
     assert (content.stdout or b"") == b"PLAIN\n"
-    kept = await git_rw.execute("cat /repo/a.txt")
+    kept = await git_rw.shell("cat /repo/a.txt")
     assert (kept.stdout or b"") == b"one changed\n"
 
 
@@ -376,18 +376,18 @@ async def test_checking_out_a_link_over_a_regular_file_replaces_it(git_rw):
     # replaced by, or removing the link later uncovers content no
     # branch records.
     assert (await run(git_rw, "checkout -b plainfirst"))[0] == 0
-    await git_rw.execute("printf 'PLAIN\\n' > /repo/thing")
+    await git_rw.shell("printf 'PLAIN\\n' > /repo/thing")
     assert (await run(git_rw, "add thing"))[0] == 0
     assert (await run(git_rw, "commit -m plain"))[0] == 0
     assert (await run(git_rw, "checkout -b linkedafter"))[0] == 0
-    await git_rw.execute("rm /repo/thing")
-    await git_rw.execute("ln -s a.txt /repo/thing")
+    await git_rw.shell("rm /repo/thing")
+    await git_rw.shell("ln -s a.txt /repo/thing")
     assert (await run(git_rw, "add thing"))[0] == 0
     assert (await run(git_rw, "commit -m link"))[0] == 0
     assert (await run(git_rw, "checkout plainfirst"))[0] == 0
     assert (await run(git_rw, "checkout linkedafter"))[0] == 0
-    await git_rw.execute("rm /repo/thing")
-    listing = await git_rw.execute("ls /repo/thing")
+    await git_rw.shell("rm /repo/thing")
+    listing = await git_rw.shell("ls /repo/thing")
     assert b"No such file or directory" in (listing.stderr or b"")
 
 
@@ -399,18 +399,18 @@ async def test_checking_out_a_link_that_moved_retargets_it(git_rw):
     # place left the checkout refused with EEXIST and the link pointing
     # at the other branch's target.
     assert (await run(git_rw, "checkout -b first"))[0] == 0
-    await git_rw.execute("ln -s a.txt /repo/lk")
+    await git_rw.shell("ln -s a.txt /repo/lk")
     assert (await run(git_rw, "add lk"))[0] == 0
     assert (await run(git_rw, "commit -m first"))[0] == 0
     assert (await run(git_rw, "checkout -b second"))[0] == 0
-    await git_rw.execute("printf 'other\\n' > /repo/b.txt")
-    await git_rw.execute("ln -sf b.txt /repo/lk")
+    await git_rw.shell("printf 'other\\n' > /repo/b.txt")
+    await git_rw.shell("ln -sf b.txt /repo/lk")
     assert (await run(git_rw, "add -A"))[0] == 0
     assert (await run(git_rw, "commit -m second"))[0] == 0
     assert (await run(git_rw, "checkout first"))[0] == 0
-    assert (await git_rw.execute("readlink /repo/lk")).stdout == b"a.txt\n"
+    assert (await git_rw.shell("readlink /repo/lk")).stdout == b"a.txt\n"
     assert (await run(git_rw, "checkout second"))[0] == 0
-    assert (await git_rw.execute("readlink /repo/lk")).stdout == b"b.txt\n"
+    assert (await git_rw.shell("readlink /repo/lk")).stdout == b"b.txt\n"
 
 
 @pytest.mark.asyncio
@@ -448,7 +448,7 @@ async def branch_holding_a_child(ws) -> None:
         ws (Workspace): workspace with the repository and CLI.
     """
     assert (await run(ws, "switch -c other"))[0] == 0
-    await ws.execute("mkdir -p /repo/slot && echo kid > /repo/slot/child")
+    await ws.shell("mkdir -p /repo/slot && echo kid > /repo/slot/child")
     assert (await run(ws, "add -f slot/child"))[0] == 0
     assert (await run(ws, "commit -m child"))[0] == 0
     assert (await run(ws, "switch main"))[0] == 0
@@ -461,7 +461,7 @@ async def test_a_staged_file_where_the_target_records_a_directory(git_rw):
     # change. What must not happen either way is the old answer: a raw
     # ENOTDIR after the earlier entries were already written.
     await branch_holding_a_child(git_rw)
-    await git_rw.execute("echo staged > /repo/slot")
+    await git_rw.shell("echo staged > /repo/slot")
     assert (await run(git_rw, "add slot"))[0] == 0
     code, _out, err = await run(git_rw, "switch other")
     assert code == 1
@@ -479,30 +479,29 @@ async def test_an_ignored_link_where_the_target_records_a_directory(git_rw):
     # reaches the write. Writing through the link landed the blob in the
     # link's target, corrupting a path no branch named while the link
     # itself survived; git replaces the link instead.
-    await git_rw.execute("printf 'slot\\n' > /repo/.gitignore")
+    await git_rw.shell("printf 'slot\\n' > /repo/.gitignore")
     assert (await run(git_rw, "add .gitignore"))[0] == 0
     assert (await run(git_rw, "commit -m ignore"))[0] == 0
     await branch_holding_a_child(git_rw)
-    await git_rw.execute(
-        "mkdir -p /repo/away && echo outside > /repo/away/child")
-    await git_rw.execute("ln -s /repo/away /repo/slot")
+    await git_rw.shell("mkdir -p /repo/away && echo outside > /repo/away/child"
+                       )
+    await git_rw.shell("ln -s /repo/away /repo/slot")
     assert (await run(git_rw, "switch other"))[0] == 0
-    assert (await git_rw.execute("cat /repo/slot/child")).stdout == b"kid\n"
+    assert (await git_rw.shell("cat /repo/slot/child")).stdout == b"kid\n"
     # The link's target tree is untouched, and the link itself is gone.
-    assert (await
-            git_rw.execute("cat /repo/away/child")).stdout == b"outside\n"
-    assert (await git_rw.execute("readlink /repo/slot")).exit_code != 0
+    assert (await git_rw.shell("cat /repo/away/child")).stdout == b"outside\n"
+    assert (await git_rw.shell("readlink /repo/slot")).exit_code != 0
 
 
 @pytest.mark.asyncio
 async def test_an_ignored_file_where_the_target_records_a_directory(git_rw):
-    await git_rw.execute("printf 'slot\\n' > /repo/.gitignore")
+    await git_rw.shell("printf 'slot\\n' > /repo/.gitignore")
     assert (await run(git_rw, "add .gitignore"))[0] == 0
     assert (await run(git_rw, "commit -m ignore"))[0] == 0
     await branch_holding_a_child(git_rw)
-    await git_rw.execute("echo ignored > /repo/slot")
+    await git_rw.shell("echo ignored > /repo/slot")
     assert (await run(git_rw, "switch other"))[0] == 0
-    assert (await git_rw.execute("cat /repo/slot/child")).stdout == b"kid\n"
+    assert (await git_rw.shell("cat /repo/slot/child")).stdout == b"kid\n"
     assert (await run(git_rw, "status --short"))[1] == b""
 
 
@@ -511,14 +510,14 @@ async def test_an_untracked_file_there_is_still_refused(git_rw):
     # Untracked and not ignored is the case git does refuse, and the
     # wording is its own: the replacement above must not reach it.
     await branch_holding_a_child(git_rw)
-    await git_rw.execute("echo untracked > /repo/slot")
+    await git_rw.shell("echo untracked > /repo/slot")
     code, _out, err = await run(git_rw, "switch other")
     assert code == 1
     assert err == (b"error: The following untracked working tree files would "
                    b"be overwritten by checkout:\n\tslot\n"
                    b"Please move or remove them before you switch "
                    b"branches.\nAborting\n")
-    assert (await git_rw.execute("cat /repo/slot")).stdout == b"untracked\n"
+    assert (await git_rw.shell("cat /repo/slot")).stdout == b"untracked\n"
 
 
 @pytest.mark.asyncio
@@ -528,17 +527,17 @@ async def test_an_ignored_directory_where_the_target_records_a_file(git_rw):
     # directory is silent (it is about the untracked files one would
     # lose), and git updates ignored files by default and takes the
     # whole directory with it.
-    await git_rw.execute("printf 'slot/\n' > /repo/.gitignore")
+    await git_rw.shell("printf 'slot/\n' > /repo/.gitignore")
     assert (await run(git_rw, "add .gitignore"))[0] == 0
     assert (await run(git_rw, "commit -m ignore"))[0] == 0
     assert (await run(git_rw, "switch -c other"))[0] == 0
-    await git_rw.execute("echo asfile > /repo/slot")
+    await git_rw.shell("echo asfile > /repo/slot")
     assert (await run(git_rw, "add -f slot"))[0] == 0
     assert (await run(git_rw, "commit -m file"))[0] == 0
     assert (await run(git_rw, "switch main"))[0] == 0
-    await git_rw.execute("mkdir -p /repo/slot && echo keep > /repo/slot/keep")
+    await git_rw.shell("mkdir -p /repo/slot && echo keep > /repo/slot/keep")
     assert (await run(git_rw, "switch other"))[0] == 0
-    assert (await git_rw.execute("cat /repo/slot")).stdout == b"asfile\n"
+    assert (await git_rw.shell("cat /repo/slot")).stdout == b"asfile\n"
 
 
 @pytest.mark.asyncio
@@ -547,28 +546,28 @@ async def test_a_directory_holding_untracked_files_is_still_refused(git_rw):
     # above cannot be unconditional: an untracked file inside is one
     # git will not lose, and it names the directory rather than the file.
     assert (await run(git_rw, "switch -c other"))[0] == 0
-    await git_rw.execute("echo asfile > /repo/slot")
+    await git_rw.shell("echo asfile > /repo/slot")
     assert (await run(git_rw, "add slot"))[0] == 0
     assert (await run(git_rw, "commit -m file"))[0] == 0
     assert (await run(git_rw, "switch main"))[0] == 0
-    await git_rw.execute("mkdir -p /repo/slot && echo keep > /repo/slot/keep")
+    await git_rw.shell("mkdir -p /repo/slot && echo keep > /repo/slot/keep")
     code, _out, err = await run(git_rw, "switch other")
     assert code == 1
     assert err == (b"error: Updating the following directories would lose "
                    b"untracked files in them:\n\tslot\n\nAborting\n")
-    assert (await git_rw.execute("cat /repo/slot/keep")).stdout == b"keep\n"
+    assert (await git_rw.shell("cat /repo/slot/keep")).stdout == b"keep\n"
 
 
 @pytest.mark.asyncio
 async def test_a_switch_puts_the_executable_bit_back(git_rw):
     assert (await run(git_rw, "switch -c other"))[0] == 0
-    await git_rw.execute("printf '#!/bin/sh\n' > /repo/s.sh")
-    await git_rw.execute("chmod 755 /repo/s.sh")
+    await git_rw.shell("printf '#!/bin/sh\n' > /repo/s.sh")
+    await git_rw.shell("chmod 755 /repo/s.sh")
     assert (await run(git_rw, "add s.sh"))[0] == 0
     assert (await run(git_rw, "commit -m script"))[0] == 0
     assert (await run(git_rw, "switch main"))[0] == 0
     assert (await run(git_rw, "switch other"))[0] == 0
-    listed = await git_rw.execute("ls -l /repo/s.sh")
+    listed = await git_rw.shell("ls -l /repo/s.sh")
     assert (listed.stdout or b"").startswith(b"-rwxr-xr-x")
     assert (await run(git_rw, "status --short"))[1] == b""
 
@@ -589,12 +588,12 @@ def test_a_staged_file_under_a_written_file_blocks():
 async def test_a_staged_file_inside_a_directory_the_branch_replaces(
         git_rw, repo_path: Path):
     assert (await run(git_rw, "checkout -b filebranch"))[0] == 0
-    await git_rw.execute("printf 'FILE\\n' > /repo/slot")
+    await git_rw.shell("printf 'FILE\\n' > /repo/slot")
     assert (await run(git_rw, "add slot"))[0] == 0
     assert (await run(git_rw, "commit -m file"))[0] == 0
     assert (await run(git_rw, "checkout main"))[0] == 0
-    await git_rw.execute("mkdir -p /repo/slot && printf 'c\\n' > "
-                         "/repo/slot/child")
+    await git_rw.shell("mkdir -p /repo/slot && printf 'c\\n' > "
+                       "/repo/slot/child")
     assert (await run(git_rw, "add slot/child"))[0] == 0
     code, _out, err = await run(git_rw, "checkout filebranch")
     assert code == 1
@@ -616,17 +615,17 @@ async def test_replacing_a_directory_does_not_follow_a_link_out_of_it(
     (repo_path / "outside").mkdir()
     (repo_path / "outside" / "keep.txt").write_text("keep\n", encoding="utf-8")
     assert (await run(git_rw, "checkout -b slotfile"))[0] == 0
-    await git_rw.execute("printf 'FILE\\n' > /repo/slot")
+    await git_rw.shell("printf 'FILE\\n' > /repo/slot")
     assert (await run(git_rw, "add slot"))[0] == 0
     assert (await run(git_rw, "commit -m file"))[0] == 0
     assert (await run(git_rw, "checkout main"))[0] == 0
-    await git_rw.execute("rm /repo/slot")
-    await git_rw.execute("printf 'link\\n' > /repo/.gitignore")
-    await git_rw.execute("mkdir -p /repo/slot")
-    await git_rw.execute("ln -s /repo/outside /repo/slot/link")
+    await git_rw.shell("rm /repo/slot")
+    await git_rw.shell("printf 'link\\n' > /repo/.gitignore")
+    await git_rw.shell("mkdir -p /repo/slot")
+    await git_rw.shell("ln -s /repo/outside /repo/slot/link")
     assert (await run(git_rw, "checkout slotfile"))[0] == 0
     assert (repo_path / "outside" / "keep.txt").exists()
-    gone = await git_rw.execute("readlink /repo/slot/link")
+    gone = await git_rw.shell("readlink /repo/slot/link")
     assert gone.exit_code != 0
 
 
@@ -642,24 +641,24 @@ async def test_a_mount_further_down_the_switch_stops_it_before_it_starts(
     inner.mkdir()
     with Workspace(
         {
-            "/repo/": DiskResource(root=str(repo_path)),
-            "/repo/slot/data/": DiskResource(root=str(inner)),
+            "/repo/": DiskVFS(root=str(repo_path)),
+            "/repo/slot/data/": DiskVFS(root=str(inner)),
         },
             mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
-        await ws.execute("printf 'ignored.txt\n' > /repo/.gitignore")
+        await ws.shell("printf 'ignored.txt\n' > /repo/.gitignore")
         assert (await run(ws, "add .gitignore"))[0] == 0
         assert (await run(ws, "commit -m ignores"))[0] == 0
         assert (await run(ws, "checkout -b slotted"))[0] == 0
-        await ws.execute("printf 'edited\n' > /repo/a.txt")
-        await ws.execute("printf 'v2\n' > /repo/slot")
+        await ws.shell("printf 'edited\n' > /repo/a.txt")
+        await ws.shell("printf 'v2\n' > /repo/slot")
         assert (await run(ws, "add a.txt slot"))[0] == 0
         assert (await run(ws, "commit -m two"))[0] == 0
         assert (await run(ws, "checkout main"))[0] == 0
         # Only ignored content, so no collision list names the
         # directory and the write loop is what would meet the mount.
-        await ws.execute("mkdir -p /repo/slot")
-        await ws.execute("printf 'x\n' > /repo/slot/ignored.txt")
+        await ws.shell("mkdir -p /repo/slot")
+        await ws.shell("printf 'x\n' > /repo/slot/ignored.txt")
         before = (repo_path / "a.txt").read_text(encoding="utf-8")
         code, _out, err = await run(ws, "checkout slotted")
         assert code == 128
@@ -703,7 +702,7 @@ async def test_a_gitlink_lands_over_a_directory_of_untracked_files(
     # read it as a file replacing the directory and aborted a switch
     # git takes.
     branch_with_gitlink(repo_path, "linked", "sub")
-    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    await git_rw.shell("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
     assert (await run(git_rw, "checkout linked"))[0] == 0
     assert (repo_path / "sub" /
             "keep.txt").read_text(encoding="utf-8") == "keep\n"
@@ -715,7 +714,7 @@ async def test_an_untracked_file_where_a_gitlink_lands_is_still_refused(
     # The other half of git's rule: the directory cannot be made
     # without deleting the file, so this one is named and refused.
     branch_with_gitlink(repo_path, "linked", "sub")
-    await git_rw.execute("printf 'mine\n' > /repo/sub")
+    await git_rw.shell("printf 'mine\n' > /repo/sub")
     code, _out, err = await run(git_rw, "checkout linked")
     assert code == 1
     assert b"would be overwritten by checkout:\n\tsub\n" in err
@@ -726,7 +725,7 @@ async def test_an_untracked_file_where_a_gitlink_lands_is_still_refused(
 async def test_a_branch_that_drops_a_gitlink_rmdirs_it(git_rw,
                                                        repo_path: Path):
     assert (await run(git_rw, "branch plain"))[0] == 0
-    await git_rw.execute("mkdir /repo/sub")
+    await git_rw.shell("mkdir /repo/sub")
     commit_gitlink(repo_path, "sub")
     code, _out, err = await run(git_rw, "checkout plain")
     assert code == 0
@@ -738,7 +737,7 @@ async def test_a_branch_that_drops_a_gitlink_rmdirs_it(git_rw,
 async def test_a_gitlink_directory_that_is_not_empty_is_kept_with_a_warning(
         git_rw, repo_path: Path):
     assert (await run(git_rw, "branch plain"))[0] == 0
-    await git_rw.execute("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
+    await git_rw.shell("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
     commit_gitlink(repo_path, "sub")
     code, _out, err = await run(git_rw, "checkout plain")
     assert code == 0

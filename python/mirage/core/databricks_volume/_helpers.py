@@ -17,7 +17,7 @@ from mirage.utils.key_prefix import mount_key, mount_prefix_of
 
 
 def parent_path(path: PathSpec) -> PathSpec:
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     stripped = path.mount_path.rstrip("/")
     parent_relative = stripped.rsplit("/", 1)[0] if "/" in stripped else "/"
     if not parent_relative.startswith("/"):

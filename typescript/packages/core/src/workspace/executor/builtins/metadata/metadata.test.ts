@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry, type RegisteredOp } from '../../../../ops/registry.ts'
-import { RAMResource } from '../../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import type { FileStat } from '../../../../types.ts'
 import { MountMode } from '../../../../types.ts'
 import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
@@ -61,15 +61,15 @@ describe('parseGroup', () => {
   })
 })
 
-async function makeWs(mode: MountMode = MountMode.WRITE): Promise<[Workspace, RAMResource]> {
+async function makeWs(mode: MountMode = MountMode.WRITE): Promise<[Workspace, RAMVFS]> {
   const parser = await getTestParser()
-  const resource = new RAMResource()
-  resource.store.files.set('/f.txt', new TextEncoder().encode('hello'))
-  const ws = new Workspace({ '/data': resource }, { mode, shellParser: parser })
-  return [ws, resource]
+  const vfs = new RAMVFS()
+  vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
+  const ws = new Workspace({ '/data': vfs }, { mode, shellParser: parser })
+  return [ws, vfs]
 }
 
-// Ops resolve by resource kind in the workspace registry, so overlay- and
+// Ops resolve by VFS kind in the workspace registry, so overlay- and
 // stat-only-backend simulations block registration itself.
 class NoSetattrRegistry extends OpsRegistry {
   override register(ro: RegisteredOp): void {
@@ -88,17 +88,17 @@ class StatOnlyRegistry extends OpsRegistry {
 async function makeOverlayWs(
   files: Record<string, string>,
   registry: OpsRegistry = new NoSetattrRegistry(),
-): Promise<[Workspace, RAMResource]> {
+): Promise<[Workspace, RAMVFS]> {
   const parser = await getTestParser()
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   for (const [p, data] of Object.entries(files)) {
-    resource.store.files.set(p, new TextEncoder().encode(data))
+    vfs.store.files.set(p, new TextEncoder().encode(data))
   }
   const ws = new Workspace(
-    { '/data': resource },
+    { '/data': vfs },
     { mode: MountMode.WRITE, shellParser: parser, ops: registry },
   )
-  return [ws, resource]
+  return [ws, vfs]
 }
 
 async function statOf(ws: Workspace, path: string): Promise<FileStat> {
@@ -106,7 +106,7 @@ async function statOf(ws: Workspace, path: string): Promise<FileStat> {
 }
 
 async function run(ws: Workspace, cmd: string): Promise<[number, string, string]> {
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   return [r.exitCode, r.stdoutText, r.stderrText]
 }
 
@@ -197,13 +197,13 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('falls back to the namespace overlay when the mount has no setattr', async () => {
-    const [ws, resource] = await makeOverlayWs({ '/f.txt': 'hello' })
+    const [ws, vfs] = await makeOverlayWs({ '/f.txt': 'hello' })
     const [code] = await run(
       ws,
       'chmod 601 /data/f.txt && chown 500:dev /data/f.txt && touch -t 202603041200 /data/f.txt',
     )
     expect(code).toBe(0)
-    expect(resource.store.attrs.size).toBe(0)
+    expect(vfs.store.attrs.size).toBe(0)
     const stat = await statOf(ws, '/data/f.txt')
     expect(stat.mode).toBe(0o601)
     expect(stat.uid).toBe(500)
@@ -346,10 +346,10 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
   })
 
   it('chgrp falls back to the namespace overlay when the mount has no setattr', async () => {
-    const [ws, resource] = await makeOverlayWs({ '/f.txt': 'hello' })
+    const [ws, vfs] = await makeOverlayWs({ '/f.txt': 'hello' })
     const [code] = await run(ws, 'chgrp dev /data/f.txt')
     expect(code).toBe(0)
-    expect(resource.store.attrs.size).toBe(0)
+    expect(vfs.store.attrs.size).toBe(0)
     expect((await statOf(ws, '/data/f.txt')).gid).toBe('dev')
     await ws.close()
   })

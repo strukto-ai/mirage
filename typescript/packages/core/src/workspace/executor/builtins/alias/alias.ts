@@ -14,7 +14,7 @@
 
 import { IOResult } from '../../../../io/types.ts'
 import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ownRecord, sessionEntry, setSessionEntry } from '../../../session/session.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import { scanOptions } from '../getopt.ts'
@@ -34,7 +34,7 @@ function hasBadChar(name: string): boolean {
 }
 
 /** Define or print aliases. */
-export function handleAlias(args: string[], session: Session, mark: AliasMark): Result {
+export function handleAlias(args: string[], session: SessionState, mark: AliasMark): Result {
   const scan = scanOptions(args, 'p')
   if (scan.bad !== null)
     return fail('alias', `bash: alias: ${scan.bad}: invalid option\n${ALIAS_USAGE}\n`, 2)
@@ -85,7 +85,7 @@ export function handleAlias(args: string[], session: Session, mark: AliasMark): 
 }
 
 /** Remove aliases: the named ones, or all under `-a`. */
-export function handleUnalias(args: string[], session: Session): Result {
+export function handleUnalias(args: string[], session: SessionState): Result {
   const scan = scanOptions(args, 'a')
   if (scan.bad !== null)
     return fail('unalias', `bash: unalias: ${scan.bad}: invalid option\n${UNALIAS_USAGE}\n`, 2)
@@ -117,12 +117,12 @@ export function handleUnalias(args: string[], session: Session): Result {
   ]
 }
 
-function aliasesOn(session: Session): boolean {
+function aliasesOn(session: SessionState): boolean {
   return session.shopts.expand_aliases ?? SHOPT_DEFAULTS.get('expand_aliases') ?? false
 }
 
 /** The alias text a command word expands to, or null. */
-export function aliasValue(session: Session, name: string, mark: AliasMark): string | null {
+export function aliasValue(session: SessionState, name: string, mark: AliasMark): string | null {
   if (!aliasesOn(session)) return null
   const value = sessionEntry(session.aliases, name)
   if (value === undefined || session.aliasStack.includes(name)) return null
@@ -138,7 +138,7 @@ export function aliasValue(session: Session, name: string, mark: AliasMark): str
  * fresh line the parser reads again.
  */
 export function aliasCommandText(
-  session: Session,
+  session: SessionState,
   name: string,
   rest: string,
   mark: AliasMark,

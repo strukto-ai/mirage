@@ -93,6 +93,55 @@ export const SPECS: Record<string, CommandSpec> = {
     options: [new Option({ short: '-z', long: '--zero' })],
     rest: new Operand({ type: 'str' }),
   }),
+  // getfattr and setfattr run in the executor over the op door's attribute
+  // ops, like readlink and ln, so these specs are their grammar and no
+  // builder binds them. Pinned against Debian's attr 2.5.2;
+  // --one-file-system, --restore and --raw are not offered.
+  getfattr: new CommandSpec({
+    options: [
+      new Option({
+        short: '-n',
+        long: '--name',
+        type: 'str',
+        description: 'get the named extended attribute value',
+      }),
+      new Option({ short: '-d', long: '--dump', description: 'get all extended attribute values' }),
+      new Option({
+        short: '-e',
+        long: '--encoding',
+        type: 'str',
+        description: "encode values (as 'text', 'hex' or 'base64')",
+      }),
+      new Option({
+        short: '-m',
+        long: '--match',
+        type: 'str',
+        description: 'only get attributes with names matching pattern',
+      }),
+      new Option({ long: '--only-values', description: 'print the bare values only' }),
+      new Option({
+        short: '-h',
+        long: '--no-dereference',
+        description: 'do not dereference symbolic links',
+      }),
+      new Option({
+        long: '--absolute-names',
+        description: "don't strip leading '/' in pathnames",
+      }),
+      new Option({ short: '-R', long: '--recursive', description: 'recurse into subdirectories' }),
+      new Option({
+        short: '-L',
+        long: '--logical',
+        description: 'logical walk, follow symbolic links',
+      }),
+      new Option({
+        short: '-P',
+        long: '--physical',
+        description: 'physical walk, do not follow symbolic links',
+      }),
+    ],
+    rest: new Operand({ type: 'path' }),
+  }),
   // ln runs in the executor for both link kinds (a symlink is namespace
   // state, a "hard link" is a byte copy through the op door), so this spec
   // is its grammar authority and no builder binds it.
@@ -210,6 +259,34 @@ export const SPECS: Record<string, CommandSpec> = {
   }),
   rmdir: new CommandSpec({
     options: [new Option({ short: '-v' })],
+    rest: new Operand({ type: 'path' }),
+  }),
+  setfattr: new CommandSpec({
+    options: [
+      new Option({
+        short: '-n',
+        long: '--name',
+        type: 'str',
+        description: 'set the value of the named extended attribute',
+      }),
+      new Option({
+        short: '-x',
+        long: '--remove',
+        type: 'str',
+        description: 'remove the named extended attribute',
+      }),
+      new Option({
+        short: '-v',
+        long: '--value',
+        type: 'str',
+        description: 'use value as the attribute value',
+      }),
+      new Option({
+        short: '-h',
+        long: '--no-dereference',
+        description: 'do not dereference symbolic links',
+      }),
+    ],
     rest: new Operand({ type: 'path' }),
   }),
   touch: new CommandSpec({

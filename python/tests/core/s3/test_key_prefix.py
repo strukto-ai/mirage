@@ -11,10 +11,10 @@ from mirage.core.s3.rename import rename
 from mirage.core.s3.stat import stat
 from mirage.core.s3.unlink import unlink
 from mirage.core.s3.write import write_bytes
-from mirage.resource.s3 import S3Config
-from mirage.resource.s3.s3 import S3Resource
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
+from mirage.vfs.s3 import S3Config
+from mirage.vfs.s3.s3 import S3VFS
 from tests.e2e.s3_mock import patch_s3_multi
 
 resolve_glob = make_resolve_glob(readdir, SCOPE_ERROR)
@@ -38,7 +38,7 @@ def _accessor(key_prefix: str | None = None) -> S3Accessor:
 
 
 def _path(p: str) -> PathSpec:
-    return PathSpec(virtual=p, directory=p, resource_path=p.strip("/"))
+    return PathSpec(virtual=p, directory=p, vfs_path=p.strip("/"))
 
 
 def test_normalize_empty_returns_none():
@@ -88,7 +88,7 @@ def test_resolve_glob_with_prefix():
         accessor = _accessor(PREFIX)
         index = RAMIndexCacheStore()
         glob_path = PathSpec(
-            resource_path="*.txt",
+            vfs_path="*.txt",
             virtual="/*.txt",
             directory="/",
             pattern="*.txt",
@@ -152,7 +152,7 @@ def test_unlink_with_prefix():
 
 def test_get_state_includes_key_prefix():
     config = _config(PREFIX)
-    resource = S3Resource(config)
-    state = resource.get_state()
+    vfs = S3VFS(config)
+    state = vfs.get_state()
     assert state["config"]["key_prefix"] == PREFIX
     assert state["config"]["key_prefix"] != "<REDACTED>"

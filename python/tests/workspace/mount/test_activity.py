@@ -17,13 +17,13 @@ import asyncio
 import pytest
 
 from mirage.io.cachable_iterator import CachableAsyncIterator
-from mirage.workspace.mount.activity import ResourceActivity
+from mirage.workspace.mount.activity import VFSActivity
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("finish", ["eof", "error", "close", "bounded"])
-async def test_resource_usage_ends_with_its_stream(finish):
-    activity = ResourceActivity()
+async def test_vfs_usage_ends_with_its_stream(finish):
+    activity = VFSActivity()
 
     async def chunks():
         yield b"value"
@@ -58,7 +58,7 @@ async def test_resource_usage_ends_with_its_stream(finish):
 
 
 @pytest.mark.asyncio
-async def test_exhausted_cache_stream_does_not_keep_a_resource_active():
+async def test_exhausted_cache_stream_does_not_keep_a_vfs_active():
     content = b"value"
 
     async def chunks():
@@ -66,14 +66,14 @@ async def test_exhausted_cache_stream_does_not_keep_a_resource_active():
 
     cached = CachableAsyncIterator(chunks())
     assert await cached.drain() == content
-    activity = ResourceActivity()
+    activity = VFSActivity()
     activity.hold(cached)
     await asyncio.wait_for(activity.wait(), 1)
 
 
 @pytest.mark.asyncio
 async def test_close_waits_for_a_pending_pull_before_releasing_usage():
-    activity = ResourceActivity()
+    activity = VFSActivity()
     entered = asyncio.Event()
     release = asyncio.Event()
 

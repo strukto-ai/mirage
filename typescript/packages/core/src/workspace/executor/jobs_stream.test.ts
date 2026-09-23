@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeAll, describe, expect, it } from 'vitest'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel } from '../../shell/console/index.ts'
 import { JobStatus } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
@@ -31,7 +31,7 @@ beforeAll(async () => {
 
 function buildWs(): Workspace {
   return new Workspace(
-    { '/m': [new RAMResource(), MountMode.WRITE] },
+    { '/m': [new RAMVFS(), MountMode.WRITE] },
     { mode: MountMode.WRITE, shellParser: parser },
   )
 }
@@ -39,7 +39,7 @@ function buildWs(): Workspace {
 /** Run a backgrounded command and return its finished console. */
 async function runBg(cmd: string): Promise<{ out: string; err: string }> {
   const ws = buildWs()
-  await ws.execute(cmd)
+  await ws.shell(cmd)
   await ws.jobTable.wait(1, ws.sessionManager.defaultId)
   const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
   if (job === null) throw new Error('job 1 missing')
@@ -52,7 +52,7 @@ async function runBg(cmd: string): Promise<{ out: string; err: string }> {
 describe('streaming: output lands while the job is still running', () => {
   it('streams each loop iteration instead of batching at the end', async () => {
     const ws = buildWs()
-    await ws.execute('for i in 1 2 3; do echo $i; sleep 0.25; done &')
+    await ws.shell('for i in 1 2 3; do echo $i; sleep 0.25; done &')
     const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
 
@@ -95,12 +95,12 @@ describe('capture sites: a sink must never leak into a captured value', () => {
 
   it('sends redirected output to the file, not the console', async () => {
     const ws = buildWs()
-    await ws.execute('echo hi > /m/f.txt &')
+    await ws.shell('echo hi > /m/f.txt &')
     await ws.jobTable.wait(1, ws.sessionManager.defaultId)
     const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
     expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).toBe('')
-    const res = await ws.execute('cat /m/f.txt')
+    const res = await ws.shell('cat /m/f.txt')
     expect(res.stdoutText).toBe('hi\n')
   })
 
@@ -117,15 +117,15 @@ describe('bare wait adopts job output', () => {
   // surface it or the output is stranded.
   it('surfaces every job in id order', async () => {
     const ws = buildWs()
-    await ws.execute('echo a &')
-    await ws.execute('echo b &')
-    const res = await ws.execute('wait')
+    await ws.shell('echo a &')
+    await ws.shell('echo b &')
+    const res = await ws.shell('wait')
     expect(res.stdoutText).toBe('a\nb\n')
   })
 
   it('returns nothing and exit 0 when there are no jobs', async () => {
     const ws = buildWs()
-    const res = await ws.execute('wait')
+    const res = await ws.shell('wait')
     expect(res.stdoutText).toBe('')
     expect(res.exitCode).toBe(0)
   })
@@ -138,7 +138,7 @@ describe('bare wait adopts job output', () => {
   // which turns the documented job-id order into completion order.
   it('gives a job nested in a backgrounded subshell its own console', async () => {
     const ws = buildWs()
-    await ws.execute('( (sleep 0.15; echo a) & echo b & wait ) &')
+    await ws.shell('( (sleep 0.15; echo a) & echo b & wait ) &')
     await ws.jobTable.wait(1, ws.sessionManager.defaultId)
     const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
@@ -151,7 +151,7 @@ describe('kill reaches a real running command', () => {
     const ws = buildWs()
     // Grouped, so `&` backgrounds the whole sequence rather than only
     // the last command.
-    await ws.execute('(echo started; sleep 10; echo never) &')
+    await ws.shell('(echo started; sleep 10; echo never) &')
     const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
     if (job === null) throw new Error('job 1 missing')
 
@@ -165,7 +165,7 @@ describe('kill reaches a real running command', () => {
     }
 
     const started = Date.now()
-    await ws.execute('kill %1')
+    await ws.shell('kill %1')
     const elapsed = Date.now() - started
 
     expect(job.status).toBe(JobStatus.KILLED)
@@ -183,14 +183,14 @@ describe('kill reaches a real running command', () => {
 it('a followed tail streams to its job console until killed', async () => {
   const ws = buildWs()
   ws.createSession('writer')
-  await ws.execute("printf 'l1\\n' > /m/log")
-  await ws.execute('tail -f -s 0.05 /m/log &')
+  await ws.shell("printf 'l1\\n' > /m/log")
+  await ws.shell('tail -f -s 0.05 /m/log &')
   await new Promise((resolve) => setTimeout(resolve, 150))
-  await ws.execute("printf 'l2\\n' >> /m/log", { sessionId: 'writer' })
+  await ws.shell("printf 'l2\\n' >> /m/log", { sessionId: 'writer' })
   await new Promise((resolve) => setTimeout(resolve, 250))
   const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
   expect(job?.status).toBe(JobStatus.RUNNING)
   expect(new TextDecoder().decode(await job?.console.snapshot(Channel.STDOUT))).toBe('l1\nl2\n')
-  expect((await ws.execute('kill %1')).exitCode).toBe(0)
+  expect((await ws.shell('kill %1')).exitCode).toBe(0)
   await ws.close()
 })

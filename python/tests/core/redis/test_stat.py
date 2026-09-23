@@ -19,8 +19,8 @@ import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.stat import stat
-from mirage.resource.redis.store import RedisStore
 from mirage.types import ContentType, FileType, PathSpec
+from mirage.vfs.redis.store import RedisStore
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -44,7 +44,7 @@ async def accessor():
 @pytest.mark.asyncio
 async def test_stat_root(accessor):
     result = await stat(accessor,
-                        PathSpec(resource_path="", virtual="/", directory="/"))
+                        PathSpec(vfs_path="", virtual="/", directory="/"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
@@ -53,7 +53,7 @@ async def test_stat_root(accessor):
 async def test_stat_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path="hello.txt",
+        PathSpec(vfs_path="hello.txt",
                  virtual="/hello.txt",
                  directory="/hello.txt"))
     assert result.name == "hello.txt"
@@ -64,8 +64,7 @@ async def test_stat_file(accessor):
 @pytest.mark.asyncio
 async def test_stat_directory(accessor):
     result = await stat(
-        accessor,
-        PathSpec(resource_path="sub", virtual="/sub", directory="/sub"))
+        accessor, PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "sub"
     assert result.size is None
@@ -76,14 +75,14 @@ async def test_stat_not_found(accessor):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path="nope", virtual="/nope", directory="/nope"))
+            PathSpec(vfs_path="nope", virtual="/nope", directory="/nope"))
 
 
 @pytest.mark.asyncio
 async def test_stat_json_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path="data.json",
+        PathSpec(vfs_path="data.json",
                  virtual="/data.json",
                  directory="/data.json"))
     assert result.content == ContentType.JSON
@@ -94,7 +93,5 @@ async def test_stat_json_file(accessor):
 async def test_stat_image_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path="img.png",
-                 virtual="/img.png",
-                 directory="/img.png"))
+        PathSpec(vfs_path="img.png", virtual="/img.png", directory="/img.png"))
     assert result.content == ContentType.IMAGE_PNG

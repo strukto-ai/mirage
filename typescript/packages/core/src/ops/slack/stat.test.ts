@@ -18,7 +18,7 @@ import { SlackAccessor } from '../../accessor/slack.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import type { SlackResponse, SlackTransport } from '../../core/slack/client.ts'
-import { type FileStat, FileType, PathSpec, ResourceName } from '../../types.ts'
+import { type FileStat, FileType, PathSpec, VFSName } from '../../types.ts'
 import { SLACK_OPS } from './index.ts'
 
 const statOp = SLACK_OPS.find((o) => o.name === 'stat' && o.filetype === null)
@@ -34,14 +34,14 @@ class FakeTransport implements SlackTransport {
 }
 
 describe('ops/slack/stat', () => {
-  it('is registered against ResourceName.SLACK as a non-write stat op', () => {
+  it('is registered against VFSName.SLACK as a non-write stat op', () => {
     expect(statOp.name).toBe('stat')
-    expect(statOp.resource).toBe(ResourceName.SLACK)
+    expect(statOp.vfs).toBe(VFSName.SLACK)
     expect(statOp.write).toBe(false)
     expect(statOp.filetype).toBeNull()
   })
 
-  it('dispatches to coreStat using the resource accessor', async () => {
+  it('dispatches to coreStat using the VFS accessor', async () => {
     const idx = new RAMIndexCacheStore()
     await idx.setDir('/mnt/slack/channels', [
       [
@@ -62,7 +62,7 @@ describe('ops/slack/stat', () => {
       new PathSpec({
         virtual: '/mnt/slack/channels/general__C1',
         directory: '/mnt/slack/channels/general__C1',
-        resourcePath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
+        vfsPath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
       }),
       [],
       { index: idx },

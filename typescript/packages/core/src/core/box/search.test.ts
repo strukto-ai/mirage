@@ -49,7 +49,7 @@ function makeAccessor(rootFolderId?: string): BoxAccessor {
 }
 
 function mountRoot(): PathSpec {
-  return new PathSpec({ virtual: '/data', directory: '/data', resourcePath: '' })
+  return new PathSpec({ virtual: '/data', directory: '/data', vfsPath: '' })
 }
 
 function file(id: string, name: string, chain: [string, string][]): BoxSearchItem {
@@ -80,7 +80,7 @@ describe('narrowPaths', () => {
     const out = await narrowPaths(makeAccessor(), 'needle', [mountRoot()])
     expect(search.mock.calls[0]?.[2]).toBe('0')
     expect(out?.map((p) => p.virtual)).toEqual(['/data/Sub/y.txt', '/data/x.txt'])
-    expect(out?.[1]?.resourcePath).toBe('x.txt')
+    expect(out?.[1]?.vfsPath).toBe('x.txt')
     expect(out?.[1]?.resolved).toBe(true)
   })
 
@@ -99,7 +99,7 @@ describe('narrowPaths', () => {
     const scope = new PathSpec({
       virtual: '/data',
       directory: '/data',
-      resourcePath: '',
+      vfsPath: '',
       rawPath: '.',
     })
     search.mockResolvedValueOnce({ items: [file('2', 'x.txt', ROOT)], truncated: false })
@@ -111,7 +111,7 @@ describe('narrowPaths', () => {
     const scope = new PathSpec({
       virtual: '/data/docs',
       directory: '/data/docs',
-      resourcePath: 'docs',
+      vfsPath: 'docs',
     })
     resolveItem.mockResolvedValueOnce({ id: '100', type: 'folder', name: 'docs' })
     search.mockResolvedValueOnce({
@@ -127,7 +127,7 @@ describe('narrowPaths', () => {
     const scope = new PathSpec({
       virtual: '/data/a.txt',
       directory: '/data/a.txt',
-      resourcePath: 'a.txt',
+      vfsPath: 'a.txt',
     })
     resolveItem.mockResolvedValueOnce({ id: '9', type: 'file', name: 'a.txt' })
     const out = await narrowPaths(makeAccessor(), 'needle', [scope])

@@ -66,7 +66,7 @@ async def test_find_all():
 
 @pytest.mark.asyncio
 async def test_find_name_matches_mount_root_start_path():
-    spec = PathSpec(resource_path=mount_key("/db", "/db"),
+    spec = PathSpec(vfs_path=mount_key("/db", "/db"),
                     virtual="/db",
                     directory="/db")
     out = await find_mod.find(None, spec, name="db")

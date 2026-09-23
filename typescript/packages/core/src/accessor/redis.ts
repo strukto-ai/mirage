@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import type { RedisStoreLike } from '../resource/redis/store.ts'
+import type { RedisStoreLike } from '../vfs/redis/store.ts'
 
 export class RedisAccessor extends Accessor {
   readonly store: RedisStoreLike

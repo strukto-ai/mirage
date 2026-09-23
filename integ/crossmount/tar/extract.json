@@ -69,7 +69,7 @@
       }
     },
     {
-      "id": "xm_tar_create_span_keeps_the_refusal",
+      "id": "xm_tar_create_writes_into_the_other_mount",
       "seq": 962312,
       "targets": [
         "ram",
@@ -95,11 +95,45 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data2/xsrc && echo s | tee /data2/xsrc/s.txt > /dev/null && tar -czf /data/xspan.tgz /data2/xsrc; echo exit=$?",
+      "command": "mkdir -p /data2/xsrc && echo s | tee /data2/xsrc/s.txt > /dev/null && tar -czf /data/xspan.tgz -C /data2 xsrc; echo exit=$?; tar -tzf /data/xspan.tgz",
       "expect": {
         "exit": 0,
-        "stdout": "exit=1\n",
-        "stderr": "tar: paths span multiple mounts (/data/, /data2/), cross-mount not supported\n"
+        "stdout": "exit=0\nxsrc/\nxsrc/s.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_tar_create_gathers_operands_from_both_mounts",
+      "seq": 962337,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xmc /data2/xmd && echo a | tee /data/xmc/a.txt > /dev/null && echo b | tee /data2/xmd/b.txt > /dev/null && tar -cf /data2/xmcd.tar -C /data/xmc a.txt -C /data2/xmd b.txt && tar -tf /data2/xmcd.tar",
+      "expect": {
+        "exit": 0,
+        "stdout": "a.txt\nb.txt\n",
+        "stderr": ""
       }
     },
     {

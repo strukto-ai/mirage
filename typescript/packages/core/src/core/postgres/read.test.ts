@@ -27,7 +27,7 @@ vi.mock('./_schema_json.ts', () => ({
 
 import { PostgresAccessor } from '../../accessor/postgres.ts'
 import { PathSpec } from '../../types.ts'
-import { resolvePostgresConfig } from '../../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../../vfs/postgres/config.ts'
 import type { PgDriver } from './_driver.ts'
 import * as client from './client.ts'
 import * as _schema from './_schema_json.ts'
@@ -70,7 +70,7 @@ describe('read', () => {
       new PathSpec({
         virtual: '/pg/database.json',
         directory: '/pg/',
-        resourcePath: mountKey('/pg/database.json', '/pg'),
+        vfsPath: mountKey('/pg/database.json', '/pg'),
       }),
     )
     const parsed = JSON.parse(decode(out)) as { database: string }
@@ -95,7 +95,7 @@ describe('read', () => {
       new PathSpec({
         virtual: '/pg/public/tables/users/schema.json',
         directory: '/pg/public/tables/users/',
-        resourcePath: mountKey('/pg/public/tables/users/schema.json', '/pg'),
+        vfsPath: mountKey('/pg/public/tables/users/schema.json', '/pg'),
       }),
     )
     expect(_schema.buildEntitySchemaJson).toHaveBeenCalledWith(
@@ -114,7 +114,7 @@ describe('read', () => {
         new PathSpec({
           virtual: '/pg/public/tables/users/rows.jsonl',
           directory: '/pg/public/tables/users/',
-          resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
+          vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
         }),
       ),
     ).rejects.toThrow(/too large to read entirely/)
@@ -131,7 +131,7 @@ describe('read', () => {
       new PathSpec({
         virtual: '/pg/public/tables/users/rows.jsonl',
         directory: '/pg/public/tables/users/',
-        resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
+        vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
     )
     expect(decode(out)).toBe('{"id":1,"name":"a"}\n{"id":2,"name":"b"}\n')
@@ -144,7 +144,7 @@ describe('read', () => {
       new PathSpec({
         virtual: '/pg/public/tables/users/rows.jsonl',
         directory: '/pg/public/tables/users/',
-        resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
+        vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
       undefined,
       { limit: 10, offset: 5 },
@@ -164,7 +164,7 @@ describe('read', () => {
       new PathSpec({
         virtual: '/pg/public/tables/users/rows.jsonl',
         directory: '/pg/public/tables/users/',
-        resourcePath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
+        vfsPath: mountKey('/pg/public/tables/users/rows.jsonl', '/pg'),
       }),
     )
     expect(decode(out)).toBe('{"ts":"2026-04-30T00:00:00.000Z"}\n')

@@ -14,7 +14,7 @@
 
 import { VarAttr } from '../../shell/variable.ts'
 import { seedVar, setAttr } from './state.ts'
-import type { Session } from './session.ts'
+import type { SessionState } from './session.ts'
 import { envGet } from './state.ts'
 
 // Returns $HOME from the session env, or null when unset/empty, matching
@@ -22,7 +22,7 @@ import { envGet } from './state.ts'
 // Read through the session door, not the raw env: this is HOME's own
 // resolution channel ($HOME, tilde expansion, bare `cd`), so a hidden
 // HOME must read as unset here too.
-export function homeDir(session: Session): string | null {
+export function homeDir(session: SessionState): string | null {
   const home = envGet(session, 'HOME')
   return home !== null && home !== '' ? home : null
 }
@@ -37,7 +37,7 @@ export function homeDir(session: Session): string | null {
 // ordinary variable the user can assign, and bash does not read it back
 // when deciding where `cd ..` goes. Clobbering $PWD and running `cd ..`
 // from /data/lk still lands on /data.
-export function logicalCwd(session: Session): string {
+export function logicalCwd(session: SessionState): string {
   return session.logicalCwd ?? session.cwd
 }
 
@@ -48,7 +48,7 @@ export function logicalCwd(session: Session): string {
 // rather than left describing wherever the session used to be, and
 // $OLDPWD is untouched because no `cd` ran. $PWD does follow, since it
 // names where the session is.
-export function setCwd(session: Session, cwd: string): void {
+export function setCwd(session: SessionState, cwd: string): void {
   session.cwd = cwd
   session.logicalCwd = undefined
   seedVar(session, 'PWD', cwd)
@@ -65,7 +65,7 @@ export function setCwd(session: Session, cwd: string): void {
 //
 // bash never re-validates the logical name: deleting the symlink it was
 // spelled through leaves `pwd` still printing it. Nothing here checks it.
-export function changeDir(session: Session, newCwd: string, logical?: string): void {
+export function changeDir(session: SessionState, newCwd: string, logical?: string): void {
   seedVar(session, 'OLDPWD', session.env.PWD ?? '')
   // bash exports $OLDPWD as it does $PWD (`declare -x OLDPWD`), and
   // this is where the name is first created, so the mark has to be

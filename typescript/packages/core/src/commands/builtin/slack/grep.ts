@@ -28,7 +28,7 @@ import { detectScope, NATIVE_KINDS, searchTarget } from '../../../core/slack/sco
 import { searchFiles, searchMessages } from '../../../core/slack/search.ts'
 import { stat as slackStat } from '../../../core/slack/stat.ts'
 import { IOResult } from '../../../io/types.ts'
-import { type FileStat, type PathSpec, ResourceName } from '../../../types.ts'
+import { type FileStat, type PathSpec, VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { grepGeneric } from '../generic/grep.ts'
@@ -82,7 +82,7 @@ async function grepCommand(
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind) && (accessor.transport.searchAvailable?.() ?? true)) {
       const target = searchTarget(match)
-      const filePrefix = mountPrefixOf(operand.virtual, operand.resourcePath)
+      const filePrefix = mountPrefixOf(operand.virtual, operand.vfsPath)
       const query = buildQuery(pattern, target)
       const count = SEARCH_MAX_RESULTS
       // Every kind that reaches here searches messages, and each of them
@@ -127,7 +127,7 @@ async function grepCommand(
 
 export const SLACK_GREP = command({
   name: 'grep',
-  resource: ResourceName.SLACK,
+  vfs: VFSName.SLACK,
   spec: specOf('grep'),
   fn: grepCommand,
   provision: fileReadProvision,

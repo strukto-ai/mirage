@@ -28,7 +28,7 @@ async def mkdir(accessor: GDriveAccessor,
                 path: PathSpec,
                 parents: bool = False) -> None:
     virtual = path.virtual
-    key = path.resource_path
+    key = path.vfs_path
     token_manager = accessor.token_manager
     if not key:
         if parents:

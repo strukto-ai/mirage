@@ -195,14 +195,14 @@ async function pythonCommand(
 
 export const GENERAL_PYTHON3 = command({
   name: 'python3',
-  resource: null,
+  vfs: null,
   spec: specOf('python3'),
   fn: pythonCommand,
 })
 
 export const GENERAL_PYTHON = command({
   name: 'python',
-  resource: null,
+  vfs: null,
   spec: specOf('python'),
   fn: pythonCommand,
 })

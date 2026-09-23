@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from functools import partial
-
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.mktemp import mktemp_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
@@ -21,15 +19,33 @@ from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
 from mirage.commands.config import CommandOpts
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.path import resolve_path
 
 
 async def mktemp(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                  texts: list[str],
                  opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
-    return await mktemp_generic(
-        paths, list(texts), opts,
-        partial(ops.require(Operation.MKDIR), accessor),
-        partial(ops.require(Operation.WRITE), accessor))
+    dispatch = opts.dispatch
+
+    async def mkdir(path: PathSpec, parents: bool = False) -> None:
+        if dispatch is not None:
+            await dispatch("mkdir",
+                           PathSpec.from_str_path(
+                               resolve_path(path.virtual, opts.cwd.virtual)),
+                           parents=parents)
+        else:
+            await ops.require(Operation.MKDIR)(accessor, path, parents=parents)
+
+    async def write(path: PathSpec, data: bytes) -> None:
+        if dispatch is not None:
+            await dispatch("write",
+                           PathSpec.from_str_path(
+                               resolve_path(path.virtual, opts.cwd.virtual)),
+                           data=data)
+        else:
+            await ops.require(Operation.WRITE)(accessor, path, data)
+
+    return await mktemp_generic(paths, list(texts), opts, mkdir, write)
 
 
 BUILDER = Builder('mktemp',

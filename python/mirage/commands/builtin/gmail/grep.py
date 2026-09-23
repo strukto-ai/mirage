@@ -54,10 +54,7 @@ async def grep_provision(accessor: GmailAccessor, paths: list[PathSpec],
                                      replace(opts, command=line))
 
 
-@command("grep",
-         resource="gmail",
-         spec=SPECS["grep"],
-         provision=grep_provision)
+@command("grep", vfs="gmail", spec=SPECS["grep"], provision=grep_provision)
 async def grep(accessor: GmailAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
@@ -70,7 +67,7 @@ async def grep(accessor: GmailAccessor, paths: list[PathSpec],
         match = detect_scope(operand)
         if match.kind in NATIVE_KINDS:
             file_prefix = mount_prefix_of(operand.virtual,
-                                          operand.resource_path) or ""
+                                          operand.vfs_path) or ""
             rows = await search_messages(
                 accessor.token_manager,
                 pattern,

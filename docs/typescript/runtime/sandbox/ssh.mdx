@@ -14,7 +14,7 @@ captures.
 
 The other providers need Mirage and FUSE inside the sandbox to serve the
 workspace's mounts. SSH is the one provider whose machine usually **is**
-the fileserver: the [ssh resource](/typescript/setup/ssh) already mounts
+the fileserver: the [ssh VFS](/typescript/setup/ssh) already mounts
 that machine's directory over SFTP. Mount it at a prefix **equal to its
 remote absolute path**, and the two sides agree about every path with no
 FUSE, no remote Mirage install, and no path rewriting anywhere:
@@ -22,7 +22,7 @@ FUSE, no remote Mirage install, and no path rewriting anywhere:
 ```yaml
 mounts:
   /home/user/proj:            # prefix == the remote absolute path
-    resource: ssh
+    vfs: ssh
     config:
       host: mybox
       root: /home/user/proj
@@ -32,7 +32,7 @@ runtimes:
     captures: ["python3"]
     config:
       host: mybox             # the same machine
-  - vfs
+  - workspace
 ```
 
 The agent lists and greps `/home/user/proj` through the workspace (SFTP),
@@ -56,13 +56,13 @@ prefixes.
 ## Connect from TypeScript
 
 ```ts
-import { MountMode, SSHResource, SSHRuntime, Workspace } from '@struktoai/mirage-node'
+import { MountMode, SSHVFS, SSHRuntime, Workspace } from '@struktoai/mirage-node'
 
 const runtime = new SSHRuntime({
   captures: ['python3'],
   config: { host: 'mybox', username: 'deploy', identityFile: '~/.ssh/id_ed25519' },
 })
-const proj = new SSHResource({
+const proj = new SSHVFS({
   host: 'mybox',
   username: 'deploy',
   identityFile: '~/.ssh/id_ed25519',
@@ -70,12 +70,12 @@ const proj = new SSHResource({
 })
 const ws = new Workspace(
   { '/home/deploy/proj': proj },
-  { mode: MountMode.EXEC, runtimes: [runtime, 'vfs'] },
+  { mode: MountMode.EXEC, runtimes: [runtime, 'workspace'] },
 )
-await ws.execute('python3 train.py', { cwd: '/home/deploy/proj' })
+await ws.shell('python3 train.py', { cwd: '/home/deploy/proj' })
 ```
 
-The config carries the ssh resource's fields minus `root`: `host` (required,
+The config carries the ssh VFS's fields minus `root`: `host` (required,
 also the address unless `hostname` overrides it), `port`, `username`,
 `identityFile`, `timeout`, and the shared `env`. Auth is keys or an agent,
 never a password: with no `identityFile`, `SSH_AUTH_SOCK` authenticates, and

@@ -18,12 +18,12 @@ from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from dotenv import load_dotenv
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.agno import MirageToolkit
 
 load_dotenv(".env.development")
 
-ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
 agent = Agent(
     model=OpenAIChat(id="gpt-4o"),
@@ -37,10 +37,10 @@ TASK = "List all files under /data and show the contents of each one."
 
 
 async def main() -> None:
-    await ws.execute('echo "hello from mirage" | tee /data/hello.txt')
+    await ws.shell('echo "hello from mirage" | tee /data/hello.txt')
     await agent.aprint_response(TASK)
 
-    records = ws.fs.records
+    records = ws.vfs.records
     if records:
         total = sum(r.bytes for r in records)
         print(f"\n--- {len(records)} ops, {total:,} bytes ---")

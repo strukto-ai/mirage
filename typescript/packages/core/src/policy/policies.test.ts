@@ -17,7 +17,7 @@ import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed, PathSpec, type Refusal } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
@@ -140,14 +140,14 @@ class NoInterpreters implements Policy {
 }
 
 function registry(): MountRegistry {
-  return new MountRegistry({ '/data': new RAMResource() }, MountMode.WRITE, {})
+  return new MountRegistry({ '/data': new RAMVFS() }, MountMode.WRITE, {})
 }
 
 function path(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: '',
+    vfsPath: '',
     rawPath: virtual,
     resolved: true,
   })
@@ -161,9 +161,9 @@ function executableWorkspace(
   deny?: readonly CommandRule[],
   policies?: readonly Policy[],
 ): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
-  ops.registerResource(ram)
+  ops.registerVfs(ram)
   return new Workspace(
     { '/data/': ram },
     {
@@ -308,13 +308,13 @@ describe('workspace policies', () => {
       },
     ])
     try {
-      await ws.execute('mkdir -p /data/prod && echo keep > /data/prod/x.txt')
-      const refused = await ws.execute('rm /data/prod/x.txt')
+      await ws.shell('mkdir -p /data/prod && echo keep > /data/prod/x.txt')
+      const refused = await ws.shell('rm /data/prod/x.txt')
       expect(refused.exitCode).toBe(1)
       expect(new TextDecoder().decode(refused.stderr)).toBe(
         'rm: /data/prod/x.txt: production data is protected\n',
       )
-      const intact = await ws.execute('cat /data/prod/x.txt')
+      const intact = await ws.shell('cat /data/prod/x.txt')
       expect(new TextDecoder().decode(intact.stdout)).toBe('keep\n')
     } finally {
       await ws.close()
@@ -327,7 +327,7 @@ describe('workspace policies', () => {
     const ws = executableWorkspace()
     try {
       ws.policies.add(new NoInterpreters())
-      const refused = await ws.execute("python3 -c 'print(1)'")
+      const refused = await ws.shell("python3 -c 'print(1)'")
       // A whole-command refusal is bash's "found but may not run".
       expect(refused.exitCode).toBe(126)
       expect(new TextDecoder().decode(refused.stderr)).toBe('python3: Permission denied\n')
@@ -346,7 +346,7 @@ describe('workspace policies', () => {
   it('the policies option accepts instances', async () => {
     const ws = executableWorkspace(undefined, [new NoInterpreters()])
     try {
-      const refused = await ws.execute("python3 -c 'print(1)'")
+      const refused = await ws.shell("python3 -c 'print(1)'")
       expect(refused.exitCode).toBe(126)
       expect(new TextDecoder().decode(refused.stderr)).toBe('python3: Permission denied\n')
       expect(refused.refusal).toEqual({
@@ -370,7 +370,7 @@ describe('workspace policies', () => {
       { reason: 'frozen', commands: ['touch'], paths: ['/data/prod/*'] },
     ])
     try {
-      const refused = await ws.execute('source /data/setup.sh')
+      const refused = await ws.shell('source /data/setup.sh')
       expect(refused.exitCode).toBe(126)
       expect(new TextDecoder().decode(refused.stderr)).toBe('source: Permission denied\n')
       expect(refused.refusal).toEqual({
@@ -380,10 +380,10 @@ describe('workspace policies', () => {
         scope: 'command',
         askId: null,
       })
-      const frozen = await ws.execute('touch /data/prod/x')
+      const frozen = await ws.shell('touch /data/prod/x')
       expect(frozen.exitCode).toBe(1)
       expect(new TextDecoder().decode(frozen.stderr)).toContain('frozen')
-      const ok = await ws.execute('touch /data/dev-x && echo done')
+      const ok = await ws.shell('touch /data/dev-x && echo done')
       expect(new TextDecoder().decode(ok.stdout)).toContain('done')
     } finally {
       await ws.close()
@@ -397,11 +397,11 @@ describe('workspace policies', () => {
       { reason: 'prod is protected', commands: ['shuf'], paths: ['/data/prod/*'] },
     ])
     try {
-      await ws.execute('mkdir -p /data/prod')
-      const refused = await ws.execute('shuf -e a -o /data/prod/out')
+      await ws.shell('mkdir -p /data/prod')
+      const refused = await ws.shell('shuf -e a -o /data/prod/out')
       expect(refused.exitCode).toBe(1)
       expect(new TextDecoder().decode(refused.stderr)).toContain('prod is protected')
-      const listing = await ws.execute('ls /data/prod')
+      const listing = await ws.shell('ls /data/prod')
       expect(new TextDecoder().decode(listing.stdout)).not.toContain('out')
     } finally {
       await ws.close()
@@ -413,7 +413,7 @@ describe('workspace policies', () => {
     // path-only guard must refuse it, not just shell commands (#675).
     const ws = executableWorkspace([{ reason: 'prod is protected', paths: ['/data/prod/*'] }])
     try {
-      await ws.execute('mkdir -p /data/other')
+      await ws.shell('mkdir -p /data/other')
       await ws.dispatch('write', '/data/other/ok.txt', [new TextEncoder().encode('fine')])
       await expect(
         ws.dispatch('write', '/data/prod/x.txt', [new TextEncoder().encode('nope')]),
@@ -430,11 +430,11 @@ describe('workspace policies', () => {
     const ws = executableWorkspace()
     try {
       ws.policies.add(new ReadOnlyProd())
-      await ws.execute('mkdir -p /data/prod')
-      const refused = await ws.execute('touch /data/prod/x')
+      await ws.shell('mkdir -p /data/prod')
+      const refused = await ws.shell('touch /data/prod/x')
       expect(refused.exitCode).not.toBe(0)
       expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
-      const ok = await ws.execute('touch /data/free && echo done')
+      const ok = await ws.shell('touch /data/free && echo done')
       expect(new TextDecoder().decode(ok.stdout)).toContain('done')
     } finally {
       await ws.close()
@@ -446,10 +446,10 @@ describe('workspace policies', () => {
     // write classification must cover that op too.
     const ws = executableWorkspace()
     try {
-      await ws.execute('mkdir -p /data/prod')
+      await ws.shell('mkdir -p /data/prod')
       await ws.dispatch('write', '/data/prod/x.txt', [new TextEncoder().encode('keep')])
       ws.policies.add(new ReadOnlyProd())
-      const refused = await ws.execute('touch /data/prod/x.txt')
+      const refused = await ws.shell('touch /data/prod/x.txt')
       expect(refused.exitCode).not.toBe(0)
       expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
     } finally {
@@ -529,7 +529,7 @@ describe('Limit', () => {
     try {
       ws.policies.add(new CapLines())
       await ws.dispatch('write', '/data/big.txt', [new TextEncoder().encode('1\n2\n3\n4\n5\n')])
-      const r = await ws.execute('cat /data/big.txt')
+      const r = await ws.shell('cat /data/big.txt')
       const out = new TextDecoder().decode(r.stdout)
       expect(out.split('\n').filter((l) => l !== '').length).toBe(2)
       expect(new TextDecoder().decode(r.stderr)).toContain('output truncated')
@@ -590,7 +590,7 @@ describe('Limit end to end', () => {
       ws.policies.add(new CapLines())
       ws.policies.add(new CapThree())
       await ws.dispatch('write', '/data/big.txt', [new TextEncoder().encode('1\n2\n3\n4\n5\n')])
-      const r = await ws.execute('cat /data/big.txt')
+      const r = await ws.shell('cat /data/big.txt')
       const out = new TextDecoder().decode(r.stdout)
       expect(out.split('\n').filter((l) => l !== '').length).toBe(2)
     } finally {
@@ -603,10 +603,10 @@ describe('Limit end to end', () => {
     try {
       ws.policies.add(new CapBytesHard())
       await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('hello world\n')])
-      const r = await ws.execute('cat /data/f.txt')
+      const r = await ws.shell('cat /data/f.txt')
       expect(r.exitCode).toBe(1)
       expect(new TextDecoder().decode(r.stderr)).toContain('output truncated')
-      const ok = await ws.execute('echo ok')
+      const ok = await ws.shell('echo ok')
       expect(ok.exitCode).toBe(0)
       expect(new TextDecoder().decode(ok.stdout)).toBe('ok\n')
     } finally {
@@ -630,7 +630,7 @@ describe('Limit end to end', () => {
     const ws = executableWorkspace()
     try {
       ws.policies.add(new Boom())
-      const r = await ws.execute('echo hi')
+      const r = await ws.shell('echo hi')
       expect(r.exitCode).toBe(126)
       const err = new TextDecoder().decode(r.stderr)
       expect(err).toBe('echo: Permission denied\n')
@@ -652,12 +652,12 @@ describe('Limit end to end', () => {
       const spy = new SeeProducer()
       ws.policies.add(spy)
       await ws.dispatch('write', '/data/f.txt', [new TextEncoder().encode('a\nb\n')])
-      await ws.execute('cat /data/f.txt | wc -l')
-      await ws.execute('cat /data/f.txt ; head -n 1 /data/f.txt')
-      await ws.execute('false || cat /data/f.txt')
+      await ws.shell('cat /data/f.txt | wc -l')
+      await ws.shell('cat /data/f.txt ; head -n 1 /data/f.txt')
+      await ws.shell('false || cat /data/f.txt')
       // Builtins carry provenance too: a policy keyed on echo sees it.
-      await ws.execute('echo hi')
-      await ws.execute('cat /data/f.txt ; echo done')
+      await ws.shell('echo hi')
+      await ws.shell('cat /data/f.txt ; echo done')
       expect(spy.seen).toEqual(['wc', 'head', 'cat', 'echo', 'echo'])
     } finally {
       await ws.close()

@@ -25,7 +25,7 @@ from mirage.workspace.executor.builtins.shared import (arith_refusal,
                                                        readonly_refusal,
                                                        refusal, require_view)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (env_get, session_view,
                                             shadow_local, visible_arrays,
                                             visible_assocs)
@@ -34,7 +34,7 @@ from mirage.workspace.types import ExecutionNode
 
 async def handle_local(
     assignments: list[str],
-    session: Session,
+    session: SessionState,
     state: SessionView | None = None,
     arrays: list[tuple[str, bool, list[str]]] | None = None,
     cmd: str = "local",
@@ -48,7 +48,7 @@ async def handle_local(
 
     Args:
         assignments (list[str]): ``NAME`` / ``NAME=value`` operands.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         state (SessionView | None): the session plane's gated door.
         arrays (list[tuple[str, bool, list[str]]] | None): staged array
             literals from the declaration.

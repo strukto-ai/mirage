@@ -41,24 +41,24 @@ Mirage 是 **面向 AI Agent 的虚拟终端**。虚拟文件系统提供广泛�
 ```python
 ws = Workspace(
     {
-        "/tmp":   (RAMResource(), MountMode.EXEC),
-        "/redis": (RedisResource(url=redis_url), MountMode.WRITE),
-        "/slack": (SlackResource(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
+        "/tmp":   (RAMVFS(), MountMode.EXEC),
+        "/redis": (RedisVFS(url=redis_url), MountMode.WRITE),
+        "/slack": (SlackVFS(SlackConfig(token=slack_bot_token)), MountMode.EXEC),
     },
     # monty 捕获 python，脚本在工作区内以沙箱方式运行
-    runtimes=[MontyRuntime(captures=["python", "python3"]), "vfs"],
+    runtimes=[MontyRuntime(captures=["python", "python3"]), "workspace"],
 )
 
 # 一次 grep 扫遍所有数据源
-await ws.execute("grep -rln session /redis /tmp")
+await ws.shell("grep -rln session /redis /tmp")
 
 # 运行存放在 Slack 里的脚本，把报告写入 Redis
-await ws.execute("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
+await ws.shell("python3 /slack/channels/general_.../files/example__F....py > /redis/report.txt")
 
 # 以头部命令名安装一个类型化 CLI：按名称分发，而不是按路径，
 # 并且像其他程序一样可以通过 `man`、`type`、`which` 发现
 ws.register_cli("slack", SLACK, {"token": slack_bot_token})
-await ws.execute('slack send-message --channel general --text "report is up"')
+await ws.shell('slack send-message --channel general --text "report is up"')
 ```
 
 ## 关于
@@ -121,16 +121,16 @@ npx @struktoai/mirage-cli
 
 ```python
 from mirage import Workspace
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3Config, S3VFS
 
 ws = Workspace({
-    "/data": RAMResource(),
-    "/s3":   S3Resource(S3Config(bucket="my-bucket")),
+    "/data": RAMVFS(),
+    "/s3":   S3VFS(S3Config(bucket="my-bucket")),
 })
 
-await ws.execute("cp /s3/report.csv /data/report.csv")
-await ws.execute("grep alert /s3/data/log.jsonl | wc -l")
+await ws.shell("cp /s3/report.csv /data/report.csv")
+await ws.shell("grep alert /s3/data/log.jsonl | wc -l")
 
 await ws.snapshot("demo.tar")
 ```
@@ -138,15 +138,15 @@ await ws.snapshot("demo.tar")
 ### TypeScript
 
 ```ts
-import { Workspace, RAMResource, S3Resource } from '@struktoai/mirage-node'
+import { Workspace, RAMVFS, S3VFS } from '@struktoai/mirage-node'
 
 const ws = new Workspace({
-  '/data': new RAMResource(),
-  '/s3':   new S3Resource({ bucket: 'my-bucket' }),
+  '/data': new RAMVFS(),
+  '/s3':   new S3VFS({ bucket: 'my-bucket' }),
 })
 
-await ws.execute('cp /s3/report.csv /data/report.csv')
-await ws.execute('grep alert /s3/data/log.jsonl | wc -l')
+await ws.shell('cp /s3/report.csv /data/report.csv')
+await ws.shell('grep alert /s3/data/log.jsonl | wc -l')
 
 await ws.snapshot('demo.tar')
 ```
@@ -163,7 +163,7 @@ mirage workspace load demo.tar --id demo-restored
 
 ## Agent 框架
 
-Mirage 可以作为沙箱或工具层接入 Agent 框架。`read` 等 POSIX 操作也可以按资源和文件类型自定义：Mirage 不内置任何文件类型渲染器，因此某种格式如何渲染完全取决于你注册的实现，而针对特定资源和扩展名注册的命令优先于通用命令。
+Mirage 可以作为沙箱或工具层接入 Agent 框架。`read` 等 POSIX 操作也可以按 VFS 和文件类型自定义：Mirage 不内置任何文件类型渲染器，因此某种格式如何渲染完全取决于你注册的实现，而针对特定 VFS 和扩展名注册的命令优先于通用命令。
 
 |            | 集成                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -181,10 +181,10 @@ Mirage 可以作为沙箱或工具层接入 Agent 框架。`read` 等 POSIX 操�
 两层默认都使用进程内 RAM，零配置。Redis 存储可以在 worker、进程和机器之间共享缓存状态：
 
 ```ts
-import { RedisFileCacheStore, S3Resource, Workspace } from '@struktoai/mirage-node'
+import { RedisFileCacheStore, S3VFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
-  { '/s3': new S3Resource({ bucket: 'my-bucket' }) },
+  { '/s3': new S3VFS({ bucket: 'my-bucket' }) },
   {
     cache: new RedisFileCacheStore({ url: 'redis://localhost:6379/0', cacheLimit: '8GB' }),
     index: { type: 'redis', url: 'redis://localhost:6379/0', ttl: 600 },

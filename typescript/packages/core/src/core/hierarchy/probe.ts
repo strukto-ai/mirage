@@ -46,7 +46,7 @@ export async function assertListed<A extends Accessor>(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<void> {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const virtual = rstripSlash(path.virtual)
   const parentVirtual = virtual.slice(0, virtual.lastIndexOf('/')) || '/'
   const entries = await readdir(
@@ -55,12 +55,12 @@ export async function assertListed<A extends Accessor>(
       virtual: parentVirtual,
       directory: parentVirtual,
       resolved: false,
-      resourcePath: mountKey(parentVirtual, prefix),
+      vfsPath: mountKey(parentVirtual, prefix),
     }),
     index,
   )
   const names = new Set(entries.map(basenameOf))
-  if (!names.has(basenameOf(path.resourcePath))) throw enoent(path)
+  if (!names.has(basenameOf(path.vfsPath))) throw enoent(path)
 }
 
 /** Return the size the parent listing recorded for this path. */
@@ -71,8 +71,8 @@ export async function listedSize(
   if (index === undefined) return null
   // assertListed has just populated the parent directory, so any size the
   // listing computed is already in the index.
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
-  const lookup = await index.get(`${prefix}/${path.resourcePath}`)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  const lookup = await index.get(`${prefix}/${path.vfsPath}`)
   return lookup.entry?.size ?? null
 }
 
@@ -91,8 +91,8 @@ export async function resolveEntry<A extends Accessor>(
   index?: IndexCacheStore,
 ): Promise<IndexEntry | null> {
   if (index === undefined) return null
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
-  const key = stripSlash(path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  const key = stripSlash(path.vfsPath)
   const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
   const parentVirtual = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
   const warm =
@@ -104,7 +104,7 @@ export async function resolveEntry<A extends Accessor>(
               virtual: parentVirtual,
               directory: parentVirtual,
               resolved: false,
-              resourcePath: mountKey(parentVirtual, prefix),
+              vfsPath: mountKey(parentVirtual, prefix),
             }),
             index,
           )

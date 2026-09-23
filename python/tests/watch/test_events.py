@@ -2,10 +2,8 @@ from mirage.types import FileChangeKind, PathSpec
 from mirage.watch.events import event_at, field, text_field, virtual_of
 
 
-def _root(virtual: str, resource_path: str) -> PathSpec:
-    return PathSpec(virtual=virtual,
-                    directory=virtual,
-                    resource_path=resource_path)
+def _root(virtual: str, vfs_path: str) -> PathSpec:
+    return PathSpec(virtual=virtual, directory=virtual, vfs_path=vfs_path)
 
 
 def test_virtual_of_lifts_onto_the_mount_prefix():
@@ -33,7 +31,7 @@ def test_event_at_frames_both_halves_of_the_path():
     event = event_at(_root("/d", ""), "day/a.txt", FileChangeKind.CREATE)
     assert event.kind is FileChangeKind.CREATE
     assert event.path.virtual == "/d/day/a.txt"
-    assert event.path.resource_path == "day/a.txt"
+    assert event.path.vfs_path == "day/a.txt"
     assert event.previous_path is None
 
 
@@ -42,7 +40,7 @@ def test_event_at_frames_a_previous_path_for_a_move():
                      "day/old.txt")
     assert event.previous_path is not None
     assert event.previous_path.virtual == "/d/day/old.txt"
-    assert event.previous_path.resource_path == "day/old.txt"
+    assert event.previous_path.vfs_path == "day/old.txt"
 
 
 def test_event_at_stamps_an_aware_timestamp():

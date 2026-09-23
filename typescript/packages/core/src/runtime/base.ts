@@ -54,13 +54,13 @@ export abstract class Runtime {
   readonly captures: readonly string[]
   /**
    * Which doors this runtime's code has to the outside world (see
-   * RuntimeReach): 'vfs' when the workspace dispatch is its only one,
+   * RuntimeReach): 'workspace' when the workspace dispatch is its only one,
    * as the bridged engines (monty, pyodide, quickjs) and the vfs
    * routing marker declare, 'process' or 'remote' when the code can
    * act around that gate. The default is 'process', the no-promise
    * claim, so a custom runtime must declare a narrower reach
    * explicitly rather than inherit it. Embedders read the aggregate:
-   * only a world in which every runtime reaches 'vfs' makes "agent
+   * only a world in which every runtime reaches 'workspace' makes "agent
    * code cannot bypass mount modes and policy" a true statement,
    * which is what the dsh adapter's sandbox claim is built from; one
    * wider runtime voids it.
@@ -105,7 +105,7 @@ export abstract class Runtime {
     this.binding = binding
   }
 
-  /** Engine entry point; Workspace.execute still owns shell admission and routing. */
+  /** Engine entry point; Workspace.shell still owns shell admission and routing. */
   async execute(request: ExecutionRequest, context?: RuntimeContext): Promise<RunResult> {
     const current = context ?? this.captureContext()
     if (current !== undefined) {

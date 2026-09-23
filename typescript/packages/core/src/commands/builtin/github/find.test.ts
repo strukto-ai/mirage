@@ -78,7 +78,7 @@ describe('github find', () => {
     const pattern = new PathSpec({
       virtual: '/src/*.py',
       directory: '/src/',
-      resourcePath: 'src/*.py',
+      vfsPath: 'src/*.py',
       pattern: '*.py',
       resolved: false,
       rawPath: '/src/*.py',

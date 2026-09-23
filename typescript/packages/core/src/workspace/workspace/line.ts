@@ -27,7 +27,7 @@ import {
   resolveLimit,
 } from '../../policy/index.ts'
 import type { MountEntry } from '../mount/mount.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
@@ -56,7 +56,7 @@ export async function runWholeLine(
   runtime: Runtime & LineExecutor,
   command: string,
   stdin: ByteSource | null,
-  session: Session,
+  session: SessionState,
   mounts: readonly MountEntry[],
   policies: Policies,
   invalidate: () => Promise<void>,

@@ -22,8 +22,8 @@ from dotenv import load_dotenv
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb.stream import read_stream
-from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("MIRAGE_RUN_INTEGRATION_MONGO") != "1",
@@ -56,7 +56,7 @@ async def _collect_lines(gen) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_extended_json_for_bson_types(accessor):
-    path = PathSpec(resource_path="mirage_test/bson_types.jsonl",
+    path = PathSpec(vfs_path="mirage_test/bson_types.jsonl",
                     virtual="/mirage_test/bson_types.jsonl",
                     directory="/mirage_test/bson_types.jsonl")
     lines = await _collect_lines(read_stream(accessor, path))
@@ -79,7 +79,7 @@ async def test_extended_json_for_bson_types(accessor):
 
 @pytest.mark.asyncio
 async def test_streams_full_5000_docs_without_cap(accessor):
-    path = PathSpec(resource_path="mirage_test/streaming_large.jsonl",
+    path = PathSpec(vfs_path="mirage_test/streaming_large.jsonl",
                     virtual="/mirage_test/streaming_large.jsonl",
                     directory="/mirage_test/streaming_large.jsonl")
     count = 0
@@ -90,7 +90,7 @@ async def test_streams_full_5000_docs_without_cap(accessor):
 
 @pytest.mark.asyncio
 async def test_short_circuit_when_only_first_doc_consumed(accessor):
-    path = PathSpec(resource_path="mirage_test/streaming_large.jsonl",
+    path = PathSpec(vfs_path="mirage_test/streaming_large.jsonl",
                     virtual="/mirage_test/streaming_large.jsonl",
                     directory="/mirage_test/streaming_large.jsonl")
     start = time.monotonic()

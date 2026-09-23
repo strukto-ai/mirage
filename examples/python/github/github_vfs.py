@@ -18,7 +18,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.github import GitHubConfig, GitHubResource
+from mirage.vfs.github import GitHubConfig, GitHubVFS
 
 load_dotenv(".env.development")
 
@@ -26,13 +26,13 @@ config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
 
 
 async def main():
-    resource = GitHubResource(
+    vfs = GitHubVFS(
         config=config,
         owner="strukto-ai",
         repo="mirage",
         ref="main",
     )
-    with Workspace({"/github/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/github/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE: open() reads from GitHub transparently ===\n")
 
         print("--- os.listdir() root ---")
@@ -80,7 +80,7 @@ async def main():
         core_isfile = os.path.isfile("/github/python/mirage/core")
         print(f"  /github/python/mirage/core: {core_isfile}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

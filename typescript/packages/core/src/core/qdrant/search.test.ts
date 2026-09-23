@@ -15,7 +15,7 @@
 import { expect, it } from 'vitest'
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { resolveQdrantConfig } from '../../resource/qdrant/config.ts'
+import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import { searchRowsOutput } from './search.ts'
 
@@ -39,7 +39,7 @@ it('returns the canonical nested document lineage path', async () => {
         },
       ]),
   } as unknown as QdrantAccessor
-  const path = new PathSpec({ virtual: '/db', directory: '/db', resourcePath: '' })
+  const path = new PathSpec({ virtual: '/db', directory: '/db', vfsPath: '' })
   const output = new TextDecoder().decode(
     await searchRowsOutput(accessor, 'refund', [path], 1, 0, '/db'),
   )

@@ -26,7 +26,7 @@ import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { unreadableStdin } from '../../shell/descriptors.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { ExecutionNode } from '../types.ts'
 import { type ExecuteNodeFn, handleBackground } from './jobs.ts'
@@ -39,7 +39,7 @@ export async function handlePipe(
   executeNode: ExecuteNodeFn,
   commands: readonly TSNodeLike[],
   stderrFlags: readonly boolean[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
@@ -177,7 +177,7 @@ export async function handleConnection(
   left: TSNodeLike,
   op: string | null,
   right: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
 ): Promise<Result> {
@@ -275,7 +275,7 @@ export async function handleConnection(
 export async function handleSubshell(
   executeNode: ExecuteNodeFn,
   body: readonly TSNodeLike[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,

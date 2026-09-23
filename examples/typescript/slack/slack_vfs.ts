@@ -19,7 +19,7 @@ import dotenv from 'dotenv'
 import {
   MountMode,
   patchNodeFs,
-  SlackResource,
+  SlackVFS,
   Workspace,
   type SlackConfig,
 } from '@struktoai/mirage-node'
@@ -39,8 +39,8 @@ function buildConfig(): SlackConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new SlackResource(buildConfig())
-  const ws = new Workspace({ '/slack': resource }, { mode: MountMode.READ })
+  const vfs = new SlackVFS(buildConfig())
+  const ws = new Workspace({ '/slack': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Slack transparently ===\n')

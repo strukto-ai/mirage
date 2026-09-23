@@ -38,9 +38,7 @@ class _FakeManager:
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(resource_path=path.lstrip("/"),
-                    virtual=path,
-                    directory="/")
+    return PathSpec(vfs_path=path.lstrip("/"), virtual=path, directory="/")
 
 
 @pytest.mark.asyncio

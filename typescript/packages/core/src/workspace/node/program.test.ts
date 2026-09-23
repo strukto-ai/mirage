@@ -13,20 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser, stderrStr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const ws = new Workspace(
-    { '/': new RAMResource() },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
-  await ws.execute('mkdir -p /data/sub')
-  await ws.execute('echo hi > /data/sub/x.txt')
-  await ws.execute('cd /data')
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+  await ws.shell('mkdir -p /data/sub')
+  await ws.shell('echo hi > /data/sub/x.txt')
+  await ws.shell('cd /data')
   return ws
 }
 
@@ -35,21 +32,21 @@ describe('drain error spelling', () => {
     // cat of a directory errors on the first lazy pull, past the eager
     // chokepoint; the drain must still report the operand as typed.
     const ws = await makeWs()
-    const io = await ws.execute('cat sub')
+    const io = await ws.shell('cat sub')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toMatch(/^cat: sub: /)
   })
 
   it('keeps an absolute operand absolute', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('cat /data/sub')
+    const io = await ws.shell('cat /data/sub')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toMatch(/^cat: \/data\/sub: /)
   })
 
   it('eager errors respell the relative operand', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('cat sub/missing.txt')
+    const io = await ws.shell('cat sub/missing.txt')
     expect(io.exitCode).toBe(1)
     expect(stderrStr(io)).toBe('cat: sub/missing.txt: No such file or directory\n')
   })

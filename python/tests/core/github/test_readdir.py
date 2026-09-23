@@ -82,8 +82,9 @@ def tree():
 @pytest.mark.asyncio
 async def test_readdir_root(tree):
     index = _index_from_tree(tree)
-    result = await readdir(
-        None, PathSpec(resource_path="", virtual="/", directory="/"), index)
+    result = await readdir(None,
+                           PathSpec(vfs_path="", virtual="/", directory="/"),
+                           index)
     assert result == ["/README.md", "/src"]
 
 
@@ -91,7 +92,7 @@ async def test_readdir_root(tree):
 async def test_readdir_subdirectory(tree):
     index = _index_from_tree(tree)
     result = await readdir(
-        None, PathSpec(resource_path="src", virtual="/src", directory="/src"),
+        None, PathSpec(vfs_path="src", virtual="/src", directory="/src"),
         index)
     assert result == ["/src/main.py", "/src/utils"]
 
@@ -101,7 +102,7 @@ async def test_readdir_nested(tree):
     index = _index_from_tree(tree)
     result = await readdir(
         None,
-        PathSpec(resource_path="src/utils",
+        PathSpec(vfs_path="src/utils",
                  virtual="/src/utils",
                  directory="/src/utils"), index)
     assert result == ["/src/utils/helpers.py"]
@@ -115,7 +116,7 @@ async def test_readdir_missing_directory(tree):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path="nonexistent",
+            PathSpec(vfs_path="nonexistent",
                      virtual="/nonexistent",
                      directory="/nonexistent"), index)
 
@@ -138,9 +139,9 @@ async def test_readdir_refills_an_expired_index(tree, monkeypatch):
     monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", fake_fetch_tree)
     accessor = MagicMock()
     accessor.truncated = False
-    result = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    result = await readdir(accessor,
+                           PathSpec(vfs_path="", virtual="/", directory="/"),
+                           index)
     assert result == ["/README.md", "/src"]
     assert len(calls) == 1
 
@@ -163,7 +164,7 @@ async def test_readdir_does_not_refill_on_a_real_miss(tree, monkeypatch):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path="nonexistent",
+            PathSpec(vfs_path="nonexistent",
                      virtual="/nonexistent",
                      directory="/nonexistent"), index)
     assert calls == []
@@ -200,7 +201,7 @@ async def test_truncated_tree_refills_expired_directory(
     accessor = MagicMock()
     accessor.ref = "main"
     accessor.truncated = True
-    path = PathSpec(resource_path="src/nested",
+    path = PathSpec(vfs_path="src/nested",
                     virtual="/repo/src/nested",
                     directory="/repo/src/nested")
     try:
@@ -244,9 +245,7 @@ async def test_complete_refill_removes_obsolete_directories(
     }
     fetch = AsyncMock(return_value=(tree, False))
     monkeypatch.setattr(mirage.core.github.tree, "fetch_tree", fetch)
-    path = PathSpec(resource_path="src",
-                    virtual="/repo/src",
-                    directory="/repo/src")
+    path = PathSpec(vfs_path="src", virtual="/repo/src", directory="/repo/src")
     try:
         await index.set_dir("/other", [
             ("keep", IndexEntry(id="keep", name="keep", resource_type="file"))
@@ -301,9 +300,9 @@ async def test_truncated_refill_does_not_cache_partial_listings(
     accessor = MagicMock()
     accessor.ref = "main"
     accessor.truncated = False
-    root_path = PathSpec(resource_path="", virtual=root, directory=root)
+    root_path = PathSpec(vfs_path="", virtual=root, directory=root)
     docs = prefix + "/docs"
-    docs_path = PathSpec(resource_path="docs", virtual=docs, directory=docs)
+    docs_path = PathSpec(vfs_path="docs", virtual=docs, directory=docs)
     try:
         if refresh:
             await index.set_dir(root, [])

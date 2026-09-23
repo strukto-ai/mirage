@@ -22,11 +22,11 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-node @earendil-works/pi-codi
 Pass the Mirage extension to Pi's regular entry point. Pi continues to own its CLI/TUI, model selection, sessions, themes, commands, and authentication.
 
 ```ts
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { main } from '@earendil-works/pi-coding-agent'
 import { mirageExtension } from '@struktoai/mirage-agents/pi'
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -61,7 +61,7 @@ Pi serializes its own mutations and its `edit` tool checks that the requested ol
 
 The Mirage extension records a content fingerprint whenever Pi reads or greps a file. A later `edit` or full-file `write` fails with `StaleMirageFileError` if that content changed in the meantime. Reading the file again refreshes the fingerprint, so the agent can reconsider the new content and retry. The `edit` adapter also checks again immediately before writing.
 
-This protection is enabled by default. It observes the content returned by the mounted resource, so a remote backend's cache and invalidation policy still determines when an external change becomes visible to Mirage.
+This protection is enabled by default. It observes the content returned by the mounted VFS, so a remote backend's cache and invalidation policy still determines when an external change becomes visible to Mirage.
 
 ## Exports
 

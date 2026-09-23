@@ -207,7 +207,7 @@ def vars_from_fields(data: Mapping[str, Any]) -> dict[str, ShellVar]:
 
 
 @dataclass
-class Session:
+class SessionState:
     session_id: str
     cwd: str = "/"
     # The spelling `cd` arrived at: `..` simplified textually, symlinks
@@ -470,7 +470,7 @@ class Session:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Session":
+    def from_dict(cls, data: dict[str, Any]) -> "SessionState":
         if "env" in data or "var_attrs" in data or "managed" in data:
             data = dict(data)
             env = data.pop("env", {})
@@ -603,7 +603,7 @@ class Session:
         self.vars.setdefault("PWD",
                              ShellVar(self.cwd, frozenset({VarAttr.EXPORT})))
 
-    def fork(self, **overrides: Any) -> "Session":
+    def fork(self, **overrides: Any) -> "SessionState":
         """Return a copy of this session with overrides applied.
 
         Every inherited field is copied deeply enough that mutations on
@@ -635,7 +635,7 @@ class Session:
                 **defaults["vars"], "PWD":
                 ShellVar(overrides["cwd"], frozenset({VarAttr.EXPORT}))
             }
-        return Session(**defaults)
+        return SessionState(**defaults)
 
     def snapshot(self) -> dict[str, Any]:
         """Copy the state a child shell runs on top of.

@@ -131,17 +131,22 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
   const mountsMeta: AnyDict[] = []
   for (const mount of state.mounts as unknown as AnyDict[]) {
     const prefix = mount.prefix as string
-    const resourceState = { ...(mount.resource_state as AnyDict) }
-    const files = (resourceState.files as Record<string, Uint8Array> | undefined) ?? {}
-    delete resourceState.files
+    const vfsState = { ...(mount.vfs_state as AnyDict) }
+    const files = (vfsState.files as Record<string, Uint8Array> | undefined) ?? {}
+    delete vfsState.files
     for (const [rel, data] of Object.entries(files)) entries[treePath(prefix, rel)] = data
     mountsMeta.push({
       index: mount.index,
       prefix,
       mode: mount.mode,
-      resourceClass: mount.resource_class,
-      resourceRef: (mount.resource_ref as string | null | undefined) ?? null,
-      resourceState,
+      // Carried from v4 on. Omitting it made a commit round trip reset
+      // every mount's read policy, which was invisible only because
+      // nothing read the key.
+      read: mount.read,
+      ttl: mount.ttl,
+      vfsClass: mount.vfs_class,
+      vfsRef: (mount.vfs_ref as string | null | undefined) ?? null,
+      vfsState,
     })
   }
 
@@ -168,22 +173,24 @@ export function toState(
   for (const mount of meta.mounts) {
     const prefix = mount.prefix as string
     const treePrefix = stripSlashes(prefix)
-    const resourceState = { ...(mount.resourceState as AnyDict) }
+    const vfsState = { ...(mount.vfsState as AnyDict) }
     const files: Record<string, Uint8Array> = {}
     for (const [tp, data] of Object.entries(entries)) {
       if (isReserved(tp)) continue
       if (belongs(treePrefix, tp)) files[relPath(prefix, tp)] = data
     }
-    resourceState.files = files
+    vfsState.files = files
     mounts.push({
       index: mount.index,
       prefix,
       mode: mount.mode,
-      resource_class: mount.resourceClass,
+      read: mount.read,
+      ttl: mount.ttl,
+      vfs_class: mount.vfsClass,
       // A meta committed before the ref was recorded reads as null, the
-      // answer for a resource constructed in code.
-      resource_ref: (mount.resourceRef as string | null | undefined) ?? null,
-      resource_state: resourceState,
+      // answer for a VFS constructed in code.
+      vfs_ref: (mount.vfsRef as string | null | undefined) ?? null,
+      vfs_state: vfsState,
     })
   }
 

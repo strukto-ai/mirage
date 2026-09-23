@@ -19,7 +19,7 @@ import dotenv from 'dotenv'
 import {
   MountMode,
   patchNodeFs,
-  TrelloResource,
+  TrelloVFS,
   Workspace,
   type TrelloConfig,
 } from '@struktoai/mirage-node'
@@ -54,8 +54,8 @@ const exists = (p: string): Promise<boolean> =>
   )
 
 async function main(): Promise<void> {
-  const resource = new TrelloResource(buildConfig())
-  const ws = new Workspace({ '/trello': resource }, { mode: MountMode.READ })
+  const vfs = new TrelloVFS(buildConfig())
+  const ws = new Workspace({ '/trello': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Trello transparently ===\n')

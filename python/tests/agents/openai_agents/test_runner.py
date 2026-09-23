@@ -28,16 +28,16 @@ def _stat(file_type: ContentType) -> FileStat:
 @pytest.fixture
 def ws():
     workspace = MagicMock()
-    workspace.fs = MagicMock()
-    workspace.fs.stat = AsyncMock()
-    workspace.fs.read = AsyncMock()
+    workspace.vfs = MagicMock()
+    workspace.vfs.stat = AsyncMock()
+    workspace.vfs.read = AsyncMock()
     return workspace
 
 
 @pytest.mark.asyncio
 async def test_build_blocks_image_inlines_base64(ws):
-    ws.fs.stat.return_value = _stat(ContentType.IMAGE_PNG)
-    ws.fs.read.return_value = b"\x89PNG\r\n\x1a\n"
+    ws.vfs.stat.return_value = _stat(ContentType.IMAGE_PNG)
+    ws.vfs.read.return_value = b"\x89PNG\r\n\x1a\n"
     runner = MirageRunner(ws)
     blocks = await runner.build_blocks("hi", ["/img.png"])
     assert blocks[0] == {"type": "input_text", "text": "hi"}
@@ -48,8 +48,8 @@ async def test_build_blocks_image_inlines_base64(ws):
 
 @pytest.mark.asyncio
 async def test_build_blocks_pdf_uploads_to_files_api(ws):
-    ws.fs.stat.return_value = _stat(ContentType.PDF)
-    ws.fs.read.return_value = b"%PDF-1.4 ..."
+    ws.vfs.stat.return_value = _stat(ContentType.PDF)
+    ws.vfs.read.return_value = b"%PDF-1.4 ..."
     fake_client = MagicMock()
     fake_client.files = MagicMock()
     fake_client.files.create = AsyncMock(return_value=MagicMock(id="file-abc"))
@@ -66,8 +66,8 @@ async def test_build_blocks_pdf_uploads_to_files_api(ws):
 
 @pytest.mark.asyncio
 async def test_build_blocks_text_decoded_inline(ws):
-    ws.fs.stat.return_value = _stat(ContentType.TEXT)
-    ws.fs.read.return_value = b"hello world"
+    ws.vfs.stat.return_value = _stat(ContentType.TEXT)
+    ws.vfs.read.return_value = b"hello world"
     runner = MirageRunner(ws)
     blocks = await runner.build_blocks("look", ["/notes.txt"])
     assert blocks[1] == {"type": "input_text", "text": "hello world"}
@@ -75,8 +75,8 @@ async def test_build_blocks_text_decoded_inline(ws):
 
 @pytest.mark.asyncio
 async def test_build_blocks_jpeg(ws):
-    ws.fs.stat.return_value = _stat(ContentType.IMAGE_JPEG)
-    ws.fs.read.return_value = b"\xff\xd8\xff..."
+    ws.vfs.stat.return_value = _stat(ContentType.IMAGE_JPEG)
+    ws.vfs.read.return_value = b"\xff\xd8\xff..."
     runner = MirageRunner(ws)
     blocks = await runner.build_blocks("see", ["/photo.jpg"])
     assert blocks[1]["type"] == "input_image"
@@ -94,8 +94,8 @@ async def test_build_blocks_multiple_paths_in_order(ws):
     async def fake_read(p):
         return bytes_seq.pop(0)
 
-    ws.fs.stat.side_effect = fake_stat
-    ws.fs.read.side_effect = fake_read
+    ws.vfs.stat.side_effect = fake_stat
+    ws.vfs.read.side_effect = fake_read
     runner = MirageRunner(ws)
     blocks = await runner.build_blocks("two", ["/a.txt", "/b.png"])
     assert len(blocks) == 3

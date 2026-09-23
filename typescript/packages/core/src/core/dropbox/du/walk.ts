@@ -40,7 +40,7 @@ export async function walkSize(
   if (s.type !== FileType.DIRECTORY) {
     const size = s.size ?? 0
     if (entries !== null) {
-      const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+      const prefix = mountPrefixOf(path.virtual, path.vfsPath)
       const raw = rstripSlash(path.virtual)
       const key = prefix !== '' && raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
       entries.push([key, size])
@@ -61,7 +61,7 @@ export async function walkSize(
       virtual: trimmed,
       directory: trimmed,
       resolved: false,
-      resourcePath: mountKey(trimmed, mountPrefixOf(path.virtual, path.resourcePath)),
+      vfsPath: mountKey(trimmed, mountPrefixOf(path.virtual, path.vfsPath)),
     })
     total += await walkSize(accessor, childSpec, index, entries)
   }

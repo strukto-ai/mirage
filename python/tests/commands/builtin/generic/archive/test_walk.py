@@ -12,7 +12,7 @@ from mirage.utils.path import CycleError
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, prefix),
+    return PathSpec(vfs_path=mount_key(path, prefix),
                     virtual=path,
                     directory=path,
                     resolved=True)
@@ -118,7 +118,7 @@ def test_child_spec_strips_the_mount_prefix_from_the_backend_key():
     root = _spec("/data/d", "/data")
     child = aw._child_spec("/data/d/a.txt", root)
     assert child.virtual == "/data/d/a.txt"
-    assert child.resource_path == "d/a.txt"
+    assert child.vfs_path == "d/a.txt"
 
 
 def test_same_mount_is_true_without_a_mount_view():
@@ -244,7 +244,7 @@ async def test_a_hidden_nested_mount_prunes_but_is_never_named():
     # neither a member nor a "different filesystem" warning hands back
     # the name the session's hides withhold.
     # The mountpoint is not the parent's own directory entry (it belongs
-    # to another resource), but the parent backend does hold a key that
+    # to another VFS), but the parent backend does hold a key that
     # the mount shadows, which is what pruning has to catch.
     tree = _Tree({
         "/d/a.txt": b"a",

@@ -15,7 +15,7 @@
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
+import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 import type { LanceRow, ValueTest } from './_driver.ts'
 import { PathSpec } from '../../types.ts'
 import { perAccessor } from '../hierarchy/bind.ts'

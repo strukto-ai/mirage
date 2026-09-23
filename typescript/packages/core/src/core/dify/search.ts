@@ -55,7 +55,7 @@ export async function searchSegments(
   const searchMethod = validateArgs(query, method, topK, threshold)
   let mountPrefix = options.mountPrefix ?? ''
   if (mountPrefix === '' && paths.length > 0 && paths[0] !== undefined) {
-    mountPrefix = mountPrefixOf(paths[0].virtual, paths[0].resourcePath)
+    mountPrefix = mountPrefixOf(paths[0].virtual, paths[0].vfsPath)
   }
   const retrievalModel: Record<string, unknown> = {
     search_method: searchMethod,
@@ -143,7 +143,7 @@ async function targetEntries(
         stripPrefix: false,
       })
       for (const child of children) {
-        const childSpec = PathSpec.fromStrPath(child, rekey(path.virtual, path.resourcePath, child))
+        const childSpec = PathSpec.fromStrPath(child, rekey(path.virtual, path.vfsPath, child))
         const childResolved = await resolvePath(accessor, childSpec, index)
         if (childResolved.entry !== null && !childResolved.isDir) {
           targets.set(childResolved.entry.id, childResolved.entry)

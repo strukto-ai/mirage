@@ -46,7 +46,7 @@ async def run(git_rw, line: str) -> tuple[int, bytes, bytes]:
         git_rw (Workspace): workspace with the repository and CLI.
         line (str): the command line, without the leading directory.
     """
-    result = await git_rw.execute(f"git -C /repo {line}")
+    result = await git_rw.shell(f"git -C /repo {line}")
     return result.exit_code, result.stdout or b"", result.stderr or b""
 
 
@@ -284,7 +284,7 @@ async def test_a_symlink_stages_its_target_not_the_target_content(
     # Pinned against git 2.50: the blob is the target string and the
     # mode is 120000. Reading through the link would store `one\n` under
     # mode 100644, which is a second copy of a.txt, not a link.
-    await git_rw.execute("ln -s a.txt /repo/link")
+    await git_rw.shell("ln -s a.txt /repo/link")
     assert (await run(git_rw, "add link"))[0] == 0
     with Repo(str(repo_path)) as repo:
         entry = repo.open_index()[b"link"]
@@ -296,7 +296,7 @@ async def test_a_symlink_stages_its_target_not_the_target_content(
 async def test_a_broken_symlink_stages_its_target(git_rw, repo_path: Path):
     # git stores the target string whether or not anything is there, so
     # a link to nothing stages exactly like a live one.
-    await git_rw.execute("ln -s nowhere /repo/broken")
+    await git_rw.shell("ln -s nowhere /repo/broken")
     assert (await run(git_rw, "add broken"))[0] == 0
     with Repo(str(repo_path)) as repo:
         entry = repo.open_index()[b"broken"]
@@ -308,7 +308,7 @@ async def test_a_broken_symlink_stages_its_target(git_rw, repo_path: Path):
 async def test_a_staged_symlink_is_not_reported_modified(git_rw):
     # The staged blob is the target string; comparing it against the
     # bytes behind the link would call every symlink modified.
-    await git_rw.execute("ln -s a.txt /repo/link")
+    await git_rw.shell("ln -s a.txt /repo/link")
     assert (await run(git_rw, "add link"))[0] == 0
     _code, out, _err = await run(git_rw, "status --porcelain")
     assert out == b"A  link\n"

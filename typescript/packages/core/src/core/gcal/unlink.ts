@@ -33,11 +33,11 @@ const WRITABLE_ROLES = new Set(['owner', 'writer'])
 async function del(accessor: GCalAccessor, match: ScopeMatch, entry: IndexEntry): Promise<void> {
   const calendars = await calendarIndex(accessor)
   const calendar = calendars.get(match.slots.calendar ?? '')
-  if (calendar === undefined) throw enoent(match.resourcePath)
+  if (calendar === undefined) throw enoent(match.vfsPath)
   const role = calendar.accessRole
-  if (typeof role !== 'string' || !WRITABLE_ROLES.has(role)) throw eacces(match.resourcePath)
+  if (typeof role !== 'string' || !WRITABLE_ROLES.has(role)) throw eacces(match.vfsPath)
   const calId = calendar.id
-  if (typeof calId !== 'string') throw enoent(match.resourcePath)
+  if (typeof calId !== 'string') throw enoent(match.vfsPath)
   await deleteEvent(accessor.tokenManager, calId, entry.id)
 }
 

@@ -4,7 +4,7 @@ from mirage.workspace.executor.builtins.lookup.classify import (classify,
                                                                 classify_all,
                                                                 describe)
 from mirage.workspace.executor.builtins.lookup.types import NameKind
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 TREE = CLISpec(name="linear",
                subcommands=(CLISpec(name="issue", fn=lambda: None), ))
@@ -24,8 +24,8 @@ class FakeRegistry:
         return object() if name in self._commands else None
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
 def make_registry(with_cli: bool = False) -> FakeRegistry:

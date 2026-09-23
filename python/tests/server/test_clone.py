@@ -16,12 +16,12 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
-from mirage.resource.slack import SlackConfig, SlackResource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.server.clone import clone_workspace_with_override
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 
 class AccountConfig(BaseModel):
@@ -41,7 +41,7 @@ async def test_a_clone_keeps_the_declared_instances():
     answers the first read with an unknown source."""
     register_secrets("acct-clone", AccountConfig, fetch_account)
     src = Workspace(
-        {"/": RAMResource()},
+        {"/": RAMVFS()},
         mode=MountMode.WRITE,
         secrets={
             "prod": {
@@ -59,7 +59,7 @@ async def test_a_clone_keeps_the_declared_instances():
     try:
         clone = await clone_workspace_with_override(src, None)
         try:
-            result = await clone.execute('echo "$TOKEN"')
+            result = await clone.shell('echo "$TOKEN"')
             assert result.exit_code == 0
             assert (await result.stdout_str()) == "a1:r\n"
         finally:
@@ -74,7 +74,7 @@ async def test_an_override_replaces_the_declared_instances():
     workspace's would leave it reading production."""
     register_secrets("acct-override", AccountConfig, fetch_account)
     src = Workspace(
-        {"/": RAMResource()},
+        {"/": RAMVFS()},
         mode=MountMode.WRITE,
         secrets={
             "prod": {
@@ -102,7 +102,7 @@ async def test_an_override_replaces_the_declared_instances():
                 }
             })
         try:
-            result = await clone.execute('echo "$TOKEN"')
+            result = await clone.shell('echo "$TOKEN"')
             assert (await result.stdout_str()) == "staging:r\n"
         finally:
             await clone.close()
@@ -116,7 +116,7 @@ async def test_an_empty_override_drops_the_declared_instances():
     truthiness fallback read as "none supplied"."""
     register_secrets("aws-sm", AccountConfig, fetch_account)
     src = Workspace(
-        {"/": RAMResource()},
+        {"/": RAMVFS()},
         mode=MountMode.WRITE,
         secrets={
             "aws-sm": {
@@ -134,7 +134,7 @@ async def test_an_empty_override_drops_the_declared_instances():
     try:
         clone = await clone_workspace_with_override(src, {"secrets": {}})
         try:
-            result = await clone.execute('echo "$TOKEN"')
+            result = await clone.shell('echo "$TOKEN"')
             assert (await result.stdout_str()) == "default:r\n"
         finally:
             await clone.close()
@@ -151,8 +151,8 @@ async def test_an_override_mount_reads_a_pointer():
     register_secrets("acct-mount", AccountConfig, fetch_account)
     src = Workspace(
         {
-            "/": RAMResource(),
-            "/slack": SlackResource(config=SlackConfig(token="xoxb-src")),
+            "/": RAMVFS(),
+            "/slack": SlackVFS(config=SlackConfig(token="xoxb-src")),
         },
         mode=MountMode.WRITE)
     try:
@@ -168,7 +168,7 @@ async def test_an_override_mount_reads_a_pointer():
                 },
                 "mounts": {
                     "/slack": {
-                        "resource": "slack",
+                        "vfs": "slack",
                         "config": {
                             "token": {
                                 "from": "prod",
@@ -181,7 +181,7 @@ async def test_an_override_mount_reads_a_pointer():
             })
         try:
             mount = clone._registry.mount_for_prefix("/slack")
-            token = mount.resource.config.token
+            token = mount.vfs.config.token
             assert token.get_secret_value() == "live:bot"
         finally:
             await clone.close()
@@ -213,7 +213,7 @@ async def test_a_clone_with_no_override_pointer_builds_no_source():
     that fills a managed variable. Building them here would read a
     bootstrap file on behalf of an override that named no pointer."""
     register_secrets("acct-lazy", AccountConfig, fetch_account)
-    src = Workspace({"/": RAMResource()},
+    src = Workspace({"/": RAMVFS()},
                     mode=MountMode.WRITE,
                     secrets=broken_bootstrap("acct-lazy"))
     try:
@@ -227,7 +227,7 @@ async def test_a_clone_with_no_override_pointer_builds_no_source():
         clone = await clone_workspace_with_override(
             src, {"mounts": {
                 "/": {
-                    "resource": "ram"
+                    "vfs": "ram"
                 }
             }})
         await clone.close()
@@ -238,7 +238,7 @@ async def test_a_clone_with_no_override_pointer_builds_no_source():
 @pytest.mark.asyncio
 async def test_an_override_pointer_still_builds_the_declared_sources():
     register_secrets("acct-wanted", AccountConfig, fetch_account)
-    src = Workspace({"/": RAMResource()},
+    src = Workspace({"/": RAMVFS()},
                     mode=MountMode.WRITE,
                     secrets=broken_bootstrap("acct-wanted"))
     try:
@@ -247,7 +247,7 @@ async def test_an_override_pointer_still_builds_the_declared_sources():
                 src, {
                     "mounts": {
                         "/slack": {
-                            "resource": "slack",
+                            "vfs": "slack",
                             "config": {
                                 "token": {
                                     "from": "prod",

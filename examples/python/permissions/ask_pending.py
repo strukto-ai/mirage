@@ -15,7 +15,7 @@
 import asyncio
 
 from mirage import MountMode, Outcome, Scope, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 # Two rules that ask: one about a path, one about a whole command.
 ROLE = {
@@ -35,9 +35,9 @@ ROLE = {
 
 
 async def run(ws: Workspace, line: str) -> None:
-    await ws.fs.write("/data/a.txt", b"a\n")
-    await ws.fs.write("/data/secret.txt", b"s\n")
-    res = await ws.execute(line, session_id="agent")
+    await ws.vfs.write("/data/a.txt", b"a\n")
+    await ws.vfs.write("/data/secret.txt", b"s\n")
+    res = await ws.shell(line, session_id="agent")
     how = "ran" if res.refusal is None else f"refused ({res.refusal.kind})"
     print(f"{line}: {how}, exit {res.exit_code}")
 
@@ -46,7 +46,7 @@ async def main() -> None:
     # No `on_ask`: nobody answers inline, so an asked line is refused for
     # now and its question waits in the ledger under an id the agent is
     # told to quote.
-    ws = Workspace({"/data/": RAMResource()},
+    ws = Workspace({"/data/": RAMVFS()},
                    mode=MountMode.WRITE,
                    profiles={"agent": ROLE})
     ws.create_session("agent", profile="agent")

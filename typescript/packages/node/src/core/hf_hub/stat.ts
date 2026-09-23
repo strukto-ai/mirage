@@ -60,7 +60,7 @@ export async function stat(
   pathSpec: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.resourcePath)
+  const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.vfsPath)
   const rel = pathSpec.mountPath.replace(/^\/+|\/+$/g, '')
   if (rel === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
   const key = keyOf(prefix, rel)

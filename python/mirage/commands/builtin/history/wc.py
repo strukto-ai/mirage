@@ -25,7 +25,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("wc", resource="history", spec=SPECS["wc"], aggregate=wc_aggregate)
+@command("wc", vfs="history", spec=SPECS["wc"], aggregate=wc_aggregate)
 async def wc(accessor: HistoryAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

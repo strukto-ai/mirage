@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ContentType, FileStat, FileType } from '../../../types.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { CommandIO } from './adapter.ts'
-import { makeGenericCommands } from './factory.ts'
+import { makeGenericCommands, withSlashGuard } from './factory.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { makeFind } from '../../../core/object_store/find.ts'
 import { makeStat } from '../../../core/object_store/stat.ts'
@@ -138,5 +138,52 @@ describe('makeGenericCommands', () => {
     const shuf = makeGenericCommands('chroma', makeOps()).find((c) => c.name === 'shuf')
     expect(shuf).toBeDefined()
     expect(shuf?.write).toBe(false)
+  })
+})
+
+describe('withSlashGuard on the write tier', () => {
+  const slashed = new PathSpec({
+    virtual: '/mnt/missing',
+    directory: '/mnt',
+    vfsPath: 'missing',
+    rawPath: '/mnt/missing/',
+  })
+
+  it('refuses a slashed write before the backend', async () => {
+    // open(2) with O_CREAT answers `x/` with EISDIR before looking anything
+    // up, so `tee missing/` and `truncate -s0 missing/` must not leave a
+    // regular file called `missing` behind; a bare operand passes through.
+    const written: string[] = []
+    const write = (_accessor: unknown, path: PathSpec): Promise<void> => {
+      written.push(path.virtual)
+      return Promise.resolve()
+    }
+    const truncate = (_accessor: unknown, path: PathSpec): Promise<void> => {
+      written.push(path.virtual)
+      return Promise.resolve()
+    }
+    const guarded = withSlashGuard(makeOps({ write, append: write, truncate }))
+    await expect(
+      guarded.write?.(new FakeAccessor(), slashed, new Uint8Array()),
+    ).rejects.toMatchObject({
+      code: 'EISDIR',
+    })
+    await expect(
+      guarded.append?.(new FakeAccessor(), slashed, new Uint8Array()),
+    ).rejects.toMatchObject({
+      code: 'EISDIR',
+    })
+    await expect(guarded.truncate?.(new FakeAccessor(), slashed, 0)).rejects.toMatchObject({
+      code: 'EISDIR',
+    })
+    await guarded.write?.(new FakeAccessor(), spec('/a.txt'), new Uint8Array())
+    await guarded.truncate?.(new FakeAccessor(), spec('/a.txt'), 0)
+    expect(written).toEqual(['/mnt/a.txt', '/mnt/a.txt'])
+  })
+
+  it('leaves write absent when the backend has none', () => {
+    const guarded = withSlashGuard(makeOps())
+    expect(guarded.write).toBeUndefined()
+    expect(guarded.append).toBeUndefined()
   })
 })

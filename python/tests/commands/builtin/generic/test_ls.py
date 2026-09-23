@@ -17,9 +17,7 @@ from mirage.types import (LINK_TARGET_KEY, ContentType, FileStat, FileType,
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(virtual=path,
-                    directory=path,
-                    resource_path=path.strip("/"))
+    return PathSpec(virtual=path, directory=path, vfs_path=path.strip("/"))
 
 
 def _make_fs_backend(tree: dict[str, FileStat]):

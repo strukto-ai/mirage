@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeDiscordTransport, makeFakeResource, seedChannel, seedGuild } from './_test_util.ts'
+import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
 import { DISCORD_COMMANDS } from './index.ts'
 
 const DISCORD_TAIL = DISCORD_COMMANDS.filter((c) => c.name === 'tail' && c.filetype == null)
@@ -32,8 +32,8 @@ async function runTail(
   const cmd = DISCORD_TAIL[0]
   if (cmd === undefined) throw new Error('tail not registered')
   const transport = options.transport ?? new FakeDiscordTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -71,7 +71,7 @@ describe('discord tail', () => {
           virtual: '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
           directory: '/mnt/discord/My Server__G1/channels/general__C1/',
           resolved: false,
-          resourcePath: mountKey(
+          vfsPath: mountKey(
             '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
             '/mnt/discord',
           ),

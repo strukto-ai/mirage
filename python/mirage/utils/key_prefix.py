@@ -170,7 +170,7 @@ def rekey(parent_original: str, parent_key: str, child: str) -> str:
     return child[prefix_len:].strip("/")
 
 
-def mount_prefix_of(virtual: str, resource_path: str) -> str:
+def mount_prefix_of(virtual: str, vfs_path: str) -> str:
     """Recover a mount prefix from a virtual path and its backend key.
 
     The inverse of stamping: given a path's virtual form and the key the
@@ -180,7 +180,7 @@ def mount_prefix_of(virtual: str, resource_path: str) -> str:
 
     Args:
         virtual (str): An absolute virtual path.
-        resource_path (str): Its backend key (mount-relative, slashless).
+        vfs_path (str): Its backend key (mount-relative, slashless).
 
     Returns:
         The mount prefix without a trailing slash.
@@ -191,7 +191,7 @@ def mount_prefix_of(virtual: str, resource_path: str) -> str:
         mount_prefix_of("/data", "")           -> "/data"
         mount_prefix_of("/x.txt", "x.txt")     -> ""
     """
-    prefix_len = len(virtual.rstrip("/")) - len(resource_path)
+    prefix_len = len(virtual.rstrip("/")) - len(vfs_path)
     return virtual[:prefix_len].rstrip("/")
 
 
@@ -207,6 +207,6 @@ def mounted_path(root: PathSpec, mount_path: str) -> PathSpec:
             prefix.
         mount_path (str): The mount-local key to address.
     """
-    prefix = mount_prefix_of(root.virtual, root.resource_path)
+    prefix = mount_prefix_of(root.virtual, root.vfs_path)
     virtual = prefix + mount_path if prefix else mount_path
     return PathSpec.from_str_path(virtual, mount_path.strip("/"))

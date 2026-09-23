@@ -27,9 +27,7 @@ def test_extract_dest_prefers_the_explicit_operand():
 
 
 def test_extract_dest_falls_back_to_cwd_per_space():
-    cwd = PathSpec(virtual="/work/sub",
-                   directory="/work/sub",
-                   resource_path="sub")
+    cwd = PathSpec(virtual="/work/sub", directory="/work/sub", vfs_path="sub")
     assert extract_dest(None, cwd, True) == "/work/sub"
     assert extract_dest(None, cwd, False) == "/sub"
 

@@ -43,7 +43,7 @@ import * as walkMod from './walk.ts'
 
 const ACCESSOR = {} as ChromaAccessor
 const INDEX = {} as IndexCacheStore
-const ROOT = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
 function mockStats(stats: Record<string, { size?: number | null; modified?: string }>): void {
   vi.mocked(statMod.stat).mockImplementation((_accessor, spec) => {

@@ -25,7 +25,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("tree", resource="history", spec=SPECS["tree"])
+@command("tree", vfs="history", spec=SPECS["tree"])
 async def tree(accessor: HistoryAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

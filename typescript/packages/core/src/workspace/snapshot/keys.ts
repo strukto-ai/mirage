@@ -34,10 +34,11 @@ export const MountKey = Object.freeze({
   INDEX: 'index',
   PREFIX: 'prefix',
   MODE: 'mode',
-  CONSISTENCY: 'consistency',
-  RESOURCE_CLASS: 'resource_class',
-  RESOURCE_REF: 'resource_ref',
-  RESOURCE_STATE: 'resource_state',
+  READ: 'read',
+  TTL: 'ttl',
+  VFS_CLASS: 'vfs_class',
+  VFS_REF: 'vfs_ref',
+  VFS_STATE: 'vfs_state',
 } as const)
 
 export const CacheKey = Object.freeze({
@@ -65,7 +66,7 @@ export const JobKey = Object.freeze({
   SESSION_ID: 'session_id',
 } as const)
 
-export const ResourceStateKey = Object.freeze({
+export const VFSStateKey = Object.freeze({
   TYPE: 'type',
   CONFIG: 'config',
   NEEDS_OVERRIDE: 'needs_override',

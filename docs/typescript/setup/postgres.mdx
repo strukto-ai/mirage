@@ -4,7 +4,7 @@ icon: /images/postgres-logo.svg
 description: Mount a Postgres database as a read-only filesystem of schemas, tables, and rows.
 ---
 
-`PostgresResource` connects to Postgres via a DSN and exposes its schemas and tables as a tree.
+`PostgresVFS` connects to Postgres via a DSN and exposes its schemas and tables as a tree.
 
 Setup steps for the DSN and required permissions live at [Postgres Credentials](/home/setup/postgres).
 
@@ -15,15 +15,15 @@ pnpm add @struktoai/mirage-node pg
 ```
 
 ```ts
-import { MountMode, PostgresResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, PostgresVFS, Workspace } from '@struktoai/mirage-node'
 
-const pg = new PostgresResource({
+const pg = new PostgresVFS({
   dsn: process.env.PG_DSN!,
   schemas: ['public', 'analytics'],
 })
 
 const ws = new Workspace({ '/pg': pg }, { mode: MountMode.READ })
-await ws.execute('ls /pg/public/')
+await ws.shell('ls /pg/public/')
 ```
 
 ## Browser
@@ -32,12 +32,12 @@ await ws.execute('ls /pg/public/')
 pnpm add @struktoai/mirage-browser
 ```
 
-For browser apps, point the resource at a same-origin proxy or use a serverless Postgres driver such as `@neondatabase/serverless`. The browser examples include a Vite plugin that wires the resource to a server-side `pg` client:
+For browser apps, point the VFS at a same-origin proxy or use a serverless Postgres driver such as `@neondatabase/serverless`. The browser examples include a Vite plugin that wires the VFS to a server-side `pg` client:
 
 ```ts
-import { MountMode, PostgresResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, PostgresVFS, Workspace } from '@struktoai/mirage-browser'
 
-const pg = new PostgresResource({
+const pg = new PostgresVFS({
   dsn: 'postgres-proxy://app',
 })
 ```
@@ -55,7 +55,7 @@ const pg = new PostgresResource({
 
 ## Mount mode
 
-`read` only. Postgres mounts are read-only at the resource level.
+`read` only. Postgres mounts are read-only at the VFS level.
 
 ## Snapshot behavior
 

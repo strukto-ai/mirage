@@ -19,7 +19,7 @@ import { postExecuteGate, refusalOf, renderDeny } from '../../policy/index.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecutionNode } from '../types.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
@@ -29,7 +29,7 @@ type Result = [ByteSource | null, IOResult, ExecutionNode]
 export async function runCommandTree(
   deps: ExecuteNodeDeps,
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null = null,
 ): Promise<Result> {
   const [stdout, io, execNode] = await executeNode(deps, node, session, stdin, null)

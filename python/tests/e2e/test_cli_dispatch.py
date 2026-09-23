@@ -25,10 +25,10 @@ from mirage.config import load_config
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy.match import Outcome
-from mirage.resource.ram import RAMResource
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 
 
 class TokenConfig(BaseModel):
@@ -60,13 +60,13 @@ def make_tree() -> CLISpec:
 
 @pytest.fixture
 def ws():
-    workspace = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    workspace = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                           mode=MountMode.WRITE)
     yield workspace
 
 
 async def run(ws, line):
-    io = await ws.execute(line)
+    io = await ws.shell(line)
     out = await materialize(io.stdout) if io.stdout else b""
     err = await materialize(io.stderr) if io.stderr else b""
     return io.exit_code, out, err
@@ -100,7 +100,7 @@ async def test_command_tiers_key_on_the_installed_name():
     # word and not the other, deny and ask rules name one install and
     # leave its twin alone, and a grant runs the line under the granted
     # install's own config.
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    profiles={
                        "crew": {
@@ -128,13 +128,13 @@ async def test_command_tiers_key_on_the_installed_name():
     ws.create_session("c", profile="crew")
     ws.create_session("s", profile="solo")
     try:
-        io = await ws.execute("h2 message send -t x hi", session_id="c")
+        io = await ws.shell("h2 message send -t x hi", session_id="c")
         err = await materialize(io.stderr) if io.stderr else b""
         assert io.exit_code == 126
         assert err == b"h2: Permission denied\n"
         assert io.refusal is not None
         assert io.refusal.reason == "beta is read-only"
-        io = await ws.execute("h1 message send -t x hi", session_id="c")
+        io = await ws.shell("h1 message send -t x hi", session_id="c")
         err = await materialize(io.stderr) if io.stderr else b""
         assert io.exit_code == 126
         assert err == b"h1: Permission denied\n"
@@ -143,17 +143,17 @@ async def test_command_tiers_key_on_the_installed_name():
         (request, ) = ws.decisions.pending()
         assert request.command == "h1"
         await ws.decisions.answer(request.id, Outcome.ALLOW)
-        io = await ws.execute("h1 message send -t x hi", session_id="c")
+        io = await ws.shell("h1 message send -t x hi", session_id="c")
         out = await materialize(io.stdout) if io.stdout else b""
         assert (io.exit_code, out) == (0, b"sent[one] to=x: hi\n")
-        io = await ws.execute("h2 message send -t x hi", session_id="s")
+        io = await ws.shell("h2 message send -t x hi", session_id="s")
         err = await materialize(io.stderr) if io.stderr else b""
         assert io.exit_code == 127
         assert b"h2: command not found" in err
-        io = await ws.execute("type -t h1; type -t h2", session_id="s")
+        io = await ws.shell("type -t h1; type -t h2", session_id="s")
         out = await materialize(io.stdout) if io.stdout else b""
         assert (io.exit_code, out) == (1, b"cli\n")
-        io = await ws.execute("h1 message send -t x hi", session_id="s")
+        io = await ws.shell("h1 message send -t x hi", session_id="s")
         out = await materialize(io.stdout) if io.stdout else b""
         assert (io.exit_code, out) == (0, b"sent[one] to=x: hi\n")
     finally:
@@ -194,7 +194,7 @@ async def test_yaml_clis_section_installs_through_load_config():
         cfg = load_config({
             "mounts": {
                 "/data": {
-                    "resource": "ram"
+                    "vfs": "ram"
                 }
             },
             "clis": {
@@ -216,7 +216,7 @@ async def test_yaml_clis_section_installs_through_load_config():
 
 @pytest.mark.asyncio
 async def test_yaml_cli_reference_form_installs(tmp_path):
-    # `cli:` points at code like `resource:` does: a ./file.py:ATTR
+    # `cli:` points at code like `vfs:` does: a ./file.py:ATTR
     # reference loads the CLISpec straight from the script.
     script = tmp_path / "slackish.py"
     script.write_text(
@@ -232,7 +232,7 @@ async def test_yaml_cli_reference_form_installs(tmp_path):
     cfg = load_config({
         "mounts": {
             "/data": {
-                "resource": "ram"
+                "vfs": "ram"
             }
         },
         "clis": {
@@ -255,7 +255,7 @@ async def test_yaml_unknown_cli_key_fails_loud():
     cfg = load_config({
         "mounts": {
             "/data": {
-                "resource": "ram"
+                "vfs": "ram"
             }
         },
         "clis": {
@@ -278,17 +278,17 @@ async def test_policy_sees_the_cli_fact():
             return {"deny": "cli lines are frozen"}
         return None
 
-    workspace = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    workspace = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                           mode=MountMode.WRITE,
                           route_policy=policy)
     workspace.register_cli("slack-eng", make_tree(), config={"token": "tok"})
-    io = await workspace.execute("slack-eng message send -t x hi")
+    io = await workspace.shell("slack-eng message send -t x hi")
     assert io.exit_code == 126
     err = await materialize(io.stderr) if io.stderr else b""
     assert err == b"slack-eng: Permission denied\n"
     assert io.refusal is not None and io.refusal.kind == "deny"
     assert denied[-1] == "slack-eng"
-    io = await workspace.execute("echo unaffected")
+    io = await workspace.shell("echo unaffected")
     assert io.exit_code == 0
     assert denied[-1] is None
 
@@ -430,7 +430,7 @@ async def test_yaml_script_entry_executes_end_to_end(tmp_path):
     cfg = load_config({
         "mounts": {
             "/data": {
-                "resource": "ram"
+                "vfs": "ram"
             }
         },
         "clis": {

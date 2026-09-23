@@ -21,7 +21,7 @@ from mirage.types import DriftPolicy
 from mirage.utils.path import norm
 from mirage.workspace.snapshot import (apply_state_dict, install_fingerprints,
                                        to_state_dict)
-from mirage.workspace.snapshot.keys import MountKey, ResourceStateKey, StateKey
+from mirage.workspace.snapshot.keys import MountKey, StateKey, VFSStateKey
 
 if TYPE_CHECKING:
     from mirage.workspace.workspace import Workspace
@@ -39,10 +39,9 @@ def _selected_file(path: str, wanted: list[str]) -> bool:
 def _merge_mount_files(live_mount: dict[str, Any], target_mount: dict[str,
                                                                       Any],
                        prefix: str, wanted: list[str]) -> None:
-    live_state = live_mount[MountKey.RESOURCE_STATE]
-    target_files = target_mount[MountKey.RESOURCE_STATE].get(
-        ResourceStateKey.FILES, {})
-    files = dict(live_state.get(ResourceStateKey.FILES, {}))
+    live_state = live_mount[MountKey.VFS_STATE]
+    target_files = target_mount[MountKey.VFS_STATE].get(VFSStateKey.FILES, {})
+    files = dict(live_state.get(VFSStateKey.FILES, {}))
     base = prefix.rstrip("/")
     for rel in set(files) | set(target_files):
         full = f"{base}{rel}"
@@ -52,7 +51,7 @@ def _merge_mount_files(live_mount: dict[str, Any], target_mount: dict[str,
             files[rel] = target_files[rel]
         else:
             files.pop(rel, None)
-    live_state[ResourceStateKey.FILES] = files
+    live_state[VFSStateKey.FILES] = files
 
 
 async def restore(

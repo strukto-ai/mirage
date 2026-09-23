@@ -37,7 +37,7 @@ def index():
 async def test_readdir_root(accessor, index):
     result = await readdir(
         accessor,
-        PathSpec(resource_path=mount_key("/gsheets", "/gsheets"),
+        PathSpec(vfs_path=mount_key("/gsheets", "/gsheets"),
                  virtual="/gsheets",
                  directory="/gsheets"), index)
     assert result == ["/gsheets/owned", "/gsheets/shared"]
@@ -62,7 +62,7 @@ async def test_readdir_owned(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned", "/gsheets"),
                      virtual="/gsheets/owned",
                      directory="/gsheets/owned"), index)
         assert len(result) == 1
@@ -74,8 +74,8 @@ async def test_readdir_file_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned/file.gsheet.json",
-                                             "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned/file.gsheet.json",
+                                        "/gsheets"),
                      virtual="/gsheets/owned/file.gsheet.json",
                      directory="/gsheets/owned/file.gsheet.json"), index)
 
@@ -85,7 +85,7 @@ async def test_readdir_invalid_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/bogus", "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/bogus", "/gsheets"),
                      virtual="/gsheets/bogus",
                      directory="/gsheets/bogus"), index)
 
@@ -102,8 +102,8 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned/2026-05-*",
-                                             "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned/2026-05-*",
+                                        "/gsheets"),
                      virtual="/gsheets/owned/2026-05-*",
                      directory="/gsheets/owned",
                      pattern="2026-05-*"), index)
@@ -146,14 +146,14 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned/2026-05-*",
-                                             "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned/2026-05-*",
+                                        "/gsheets"),
                      virtual="/gsheets/owned/2026-05-*",
                      directory="/gsheets/owned",
                      pattern="2026-05-*"), index)
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned", "/gsheets"),
                      virtual="/gsheets/owned",
                      directory="/gsheets/owned"), index)
 
@@ -198,13 +198,13 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned", "/gsheets"),
                      virtual="/gsheets/owned",
                      directory="/gsheets/owned"), index)
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned/2026-05-*",
-                                             "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned/2026-05-*",
+                                        "/gsheets"),
                      virtual="/gsheets/owned/2026-05-*",
                      directory="/gsheets/owned",
                      pattern="2026-05-*"), index)
@@ -223,7 +223,7 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned", "/gsheets"),
                      virtual="/gsheets/owned",
                      directory="/gsheets/owned"), index)
 
@@ -242,8 +242,7 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned/*foo*",
-                                             "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned/*foo*", "/gsheets"),
                      virtual="/gsheets/owned/*foo*",
                      directory="/gsheets/owned",
                      pattern="*foo*"), index)
@@ -272,7 +271,7 @@ async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+            PathSpec(vfs_path=mount_key("/gsheets/owned", "/gsheets"),
                      virtual="/gsheets/owned",
                      directory="/gsheets/owned"), index)
 
@@ -305,7 +304,7 @@ async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
     async def fake_list(token_manager, mime_type=None, **kwargs):
         return files, complete["v"]
 
-    owned = PathSpec(resource_path=mount_key("/gsheets/owned", "/gsheets"),
+    owned = PathSpec(vfs_path=mount_key("/gsheets/owned", "/gsheets"),
                      virtual="/gsheets/owned",
                      directory="/gsheets/owned")
     with patch("mirage.core.gsheets.readdir.list_all_files", new=fake_list):

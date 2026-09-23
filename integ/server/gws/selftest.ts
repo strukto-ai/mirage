@@ -25,12 +25,17 @@ import type { JsonValue } from '../kit/typescript/types.ts'
 import { gwsFake } from './fake.ts'
 import { cachedState, dropState, withState } from './store/cache.ts'
 import { loadState } from './store/load.ts'
+import { saveState } from './store/save.ts'
 
 import { parseDriveQuery, matchQuery } from './drive/query.ts'
 import { createDriveItem } from './drive/item.ts'
 import { GwsState } from './store/state.ts'
-import { newTab, gridData } from './sheets/grid.ts'
+import { newTab } from './sheets/grid.ts'
+import { gridData } from './sheets/spreadsheet.ts'
 import { sheetsBatchUpdate } from './sheets/batch.ts'
+import { CELL_DATA, CELL_FORMAT, canonical } from './sheets/fields.ts'
+import { badField, parseMask } from './sheets/mask.ts'
+import { formatNumber } from './sheets/number.ts'
 import { formatEventTime, slotMs } from './calendar/zone.ts'
 
 // The corpus exercises the SURFACES of this fake heavily -- seven vendor APIs
@@ -213,7 +218,7 @@ function compatibilityDirect(): void {
     200,
   )
   tab = st.sheets.get(file.id)!.tabs[0]!
-  check('direct Sheets sizes content', Number(tab.columnPixels?.[0]) > 100)
+  check('direct Sheets sizes content', Number(tab.columnMeta['0']?.pixelSize) > 100)
   eq(
     'direct Sheets leaves cells unchanged',
     tab.cells.get('0,0') ?? '',
@@ -231,9 +236,11 @@ function compatibilityDirect(): void {
   ]) {
     eq('direct Sheets rejects invalid dimension range', resize(dimensions).status, 400)
   }
-  check('direct Sheets exposes pixel metadata', arr(gridData(tab)[0]?.columnMetadata).length === 26)
+  const whole = gridData({ tab, startRow: 0, startCol: 0, endRow: null, endCol: null })
+  check('direct Sheets exposes pixel metadata', arr(whole.columnMetadata).length === 26)
   for (const failure of [
     { unsupported: {} },
+    { constructor: {} },
     { autoResizeDimensions: { dimensions: { sheetId: 99, dimension: 'ROWS' } } },
   ]) {
     const before = structuredClone(st.sheets.get(file.id))
@@ -263,6 +270,7 @@ function compatibilityDirect(): void {
       updateCells: {
         start: { sheetId: 1 },
         rows: [{ values: [{ userEnteredValue: { stringValue: 'new value' } }] }],
+        fields: 'userEnteredValue',
       },
     },
     { autoResizeDimensions: { dimensions: { sheetId: 1, dimension: 'COLUMNS', endIndex: 1 } } },
@@ -342,6 +350,52 @@ function compatibilityDirect(): void {
   )
 }
 
+// The Sheets pieces every format request leans on, each pinned to what the
+// live API answered on 2026-09-21.
+function sheetsFormatsDirect(): void {
+  eq(
+    'direct Sheets mask distributes a parenthesized list',
+    parseMask('userEnteredFormat(backgroundColor,textFormat.italic),note').map((p) => [...p]),
+    [
+      ['userEnteredFormat', 'backgroundColor'],
+      ['userEnteredFormat', 'textFormat', 'italic'],
+      ['note'],
+    ],
+  )
+  eq(
+    'direct Sheets mask names the first bad segment in snake_case',
+    badField(parseMask('userEnteredFormat.textFormatX.bold'), CELL_DATA),
+    'userEnteredFormat.text_format_x',
+  )
+  eq('direct Sheets mask accepts a whole message', badField(parseMask('*'), CELL_DATA), null)
+  for (const [value, format, want] of [
+    [0.685, { type: 'PERCENT', pattern: '0.0%' }, '68.5%'],
+    [0.62, { type: 'PERCENT', pattern: '0.0%' }, '62.0%'],
+    [0.62, { type: 'PERCENT' }, '62%'],
+    [1234.5, { type: 'NUMBER', pattern: '#,##0.00' }, '1,234.50'],
+    [-5, { type: 'CURRENCY' }, '-$5.00'],
+    [12345, { type: 'SCIENTIFIC', pattern: '0.00E+00' }, '1.23E+04'],
+    [1.005, { type: 'NUMBER', pattern: '0.00' }, '1.01'],
+    [-3, { type: 'NUMBER', pattern: '0;(0)' }, '(3)'],
+  ] as const) {
+    eq(`direct Sheets formats ${String(value)} as ${want}`, formatNumber(value, format), want)
+  }
+  eq(
+    'direct Sheets shows a NUMBER with no pattern plain',
+    formatNumber(1234.5, { type: 'NUMBER' }),
+    null,
+  )
+  eq('direct Sheets leaves dates unmodeled', formatNumber(1, { type: 'DATE' }), null)
+  eq(
+    'direct Sheets quantizes a color and mirrors its style',
+    canonical({ backgroundColor: { red: 1, green: 0.9, blue: 0 } }, CELL_FORMAT),
+    {
+      backgroundColor: { red: 1, green: 0.8980392 },
+      backgroundColorStyle: { rgbColor: { red: 1, green: 0.8980392 } },
+    },
+  )
+}
+
 async function compatibilityHttp(at: string): Promise<void> {
   const base = `${at}/_run/compat1077`
   check('compatibility world seeds', (await reset(base, { tenants: ['t1'], epoch: EPOCH })) === 200)
@@ -402,6 +456,7 @@ async function compatibilityHttp(at: string): Promise<void> {
         updateCells: {
           start: { sheetId: 0 },
           rows: [{ values: [{ userEnteredValue: { stringValue: 'short' } }] }],
+          fields: 'userEnteredValue',
         },
       },
       { autoResizeDimensions: { dimensions: { sheetId: 0, dimension: 'COLUMNS', endIndex: 1 } } },
@@ -596,13 +651,184 @@ async function compatibilityHttp(at: string): Promise<void> {
   eq('HTTP Calendar list refuses a zone it cannot resolve', badZone.status, 400)
 }
 
+// spreadsheets.get narrows to `ranges` the way the live API does: a small
+// read of a big sheet stays small, an offset range says where it starts,
+// each range gets its own GridData, and only the tabs asked for come back.
+async function gridRangesHttp(at: string): Promise<void> {
+  const base = `${at}/_run/ranges1151`
+  check('ranges world seeds', (await reset(base, { tenants: ['t1'], epoch: EPOCH })) === 200)
+  const made = await post(`${base}/v4/spreadsheets`, 't1', { properties: { title: 'Games' } })
+  const id = String(obj(made.body).spreadsheetId)
+  const games = Array.from({ length: 1313 }, (_, r) =>
+    Array.from({ length: 8 }, (_, c) => `r${String(r + 1)}c${String(c + 1)}`),
+  )
+  const filled = await api(`${base}/v4/spreadsheets/${id}/values/Sheet1!A1`, 't1', {
+    method: 'PUT',
+    body: JSON.stringify({ values: games }),
+  })
+  eq('ranges: fills 1313 rows', filled.status, 200)
+  const second = await post(`${base}/v4/spreadsheets/${id}:batchUpdate`, 't1', {
+    requests: [{ addSheet: { properties: { title: 'Notes' } } }],
+  })
+  eq('ranges: adds a second tab', second.status, 200)
+  await api(`${base}/v4/spreadsheets/${id}/values/Notes!A1`, 't1', {
+    method: 'PUT',
+    body: JSON.stringify({ values: [['note']] }),
+  })
+  const get = (query: string): ReturnType<typeof api> =>
+    api(`${base}/v4/spreadsheets/${id}?${query}`, 't1')
+  const sheetsOf = (body: JsonValue): Obj[] => arr(obj(body).sheets).map(obj)
+  const formatted = (grid: Obj): JsonValue[] =>
+    arr(grid.rowData).map((row) => field(obj(row).values, 'formattedValue'))
+
+  const all = await get('includeGridData=true')
+  eq('ranges: none asked returns every tab', sheetsOf(all.body).length, 2)
+  eq(
+    'ranges: and the whole grid',
+    arr(obj(arr(sheetsOf(all.body)[0]?.data)[0]).rowData).length,
+    1313,
+  )
+
+  const head = await get(`includeGridData=true&ranges=${encodeURIComponent('Sheet1!A1:H2')}`)
+  eq('ranges: A1:H2 names one tab', sheetsOf(head.body).length, 1)
+  const headGrid = obj(arr(sheetsOf(head.body)[0]?.data)[0])
+  eq('ranges: A1:H2 returns two rows', arr(headGrid.rowData).length, 2)
+  eq('ranges: of eight cells', arr(obj(arr(headGrid.rowData)[1]).values).length, 8)
+  eq('ranges: with metadata for the range only', arr(headGrid.rowMetadata).length, 2)
+  eq('ranges: in both dimensions', arr(headGrid.columnMetadata).length, 8)
+  check(
+    'ranges: a zero start is omitted',
+    !('startRow' in headGrid) && !('startColumn' in headGrid),
+  )
+  check(
+    'ranges: the reply stays small',
+    JSON.stringify(head.body).length * 100 < JSON.stringify(all.body).length,
+  )
+
+  const offset = await get(`includeGridData=true&ranges=${encodeURIComponent('Sheet1!C5:D6')}`)
+  const offsetGrid = obj(arr(sheetsOf(offset.body)[0]?.data)[0])
+  eq('ranges: an offset range reports startRow', offsetGrid.startRow ?? null, 4)
+  eq('ranges: and startColumn', offsetGrid.startColumn ?? null, 2)
+  eq('ranges: and holds exactly its cells', formatted(offsetGrid), [
+    ['r5c3', 'r5c4'],
+    ['r6c3', 'r6c4'],
+  ])
+
+  const many = await get(
+    `includeGridData=true&ranges=${encodeURIComponent('Sheet1!A1:B1')}&ranges=${encodeURIComponent('Sheet1!H1313:H1313')}&ranges=${encodeURIComponent('Notes!A1')}`,
+  )
+  eq(
+    'ranges: two tabs named, in tab order',
+    sheetsOf(many.body).map((t) => String(obj(t.properties).title)),
+    ['Sheet1', 'Notes'],
+  )
+  const firstTab = arr(sheetsOf(many.body)[0]?.data).map(obj)
+  eq('ranges: one GridData per range of a tab', firstTab.length, 2)
+  eq('ranges: in request order', firstTab.map(formatted), [[['r1c1', 'r1c2']], [['r1313c8']]])
+  eq('ranges: the last row keeps its offset', firstTab[1]?.startRow ?? null, 1312)
+
+  const notes = await get(`includeGridData=true&ranges=Notes`)
+  eq(
+    'ranges: a bare tab name selects that tab',
+    sheetsOf(notes.body).map((t) => String(obj(t.properties).title)),
+    ['Notes'],
+  )
+  eq('ranges: keeping its real index', obj(sheetsOf(notes.body)[0]?.properties).index ?? null, 1)
+  eq('ranges: whole', formatted(obj(arr(sheetsOf(notes.body)[0]?.data)[0])), [['note']])
+
+  const beyond = await get(
+    `includeGridData=true&ranges=${encodeURIComponent('Sheet1!A2000:B2001')}`,
+  )
+  eq(
+    'ranges: past the data is an empty grid',
+    arr(obj(arr(sheetsOf(beyond.body)[0]?.data)[0]).rowData),
+    [],
+  )
+
+  const bare = await get(`ranges=${encodeURIComponent('Notes!A1')}`)
+  eq('ranges: without includeGridData still selects tabs', sheetsOf(bare.body).length, 1)
+  check('ranges: and still carries no data', !('data' in (sheetsOf(bare.body)[0] ?? {})))
+
+  const bad = await get(`includeGridData=true&ranges=${encodeURIComponent('Missing!A1')}`)
+  eq('ranges: an unknown tab is a 400', bad.status, 400)
+}
+
+async function driveMoveHttp(at: string): Promise<void> {
+  const base = `${at}/_run/drivemove`
+  check('drive move world seeds', (await reset(base, { tenants: ['t1'], epoch: EPOCH })) === 200)
+  const FOLDER = 'application/vnd.google-apps.folder'
+  const idOf = async (path: string, body: JsonValue): Promise<string> =>
+    String(obj((await post(`${base}${path}`, 't1', body)).body).id)
+  const patch = (id: string, query: string, body: JsonValue = {}): ReturnType<typeof api> =>
+    api(`${base}/drive/v3/files/${id}?${query}`, 't1', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    })
+  const listed = async (driveId?: string): Promise<string[]> => {
+    const query = driveId === undefined ? '' : `?driveId=${driveId}&corpora=drive`
+    const got = await api(`${base}/drive/v3/files${query}`, 't1')
+    return field(obj(got.body).files, 'name')
+      .filter((name) => name !== 'Team' && name !== 'Other')
+      .sort()
+  }
+  const refusal = (reply: { status: number; body: JsonValue }): JsonValue => [
+    reply.status,
+    String(obj(arr(obj(obj(reply.body).error).errors)[0]).reason),
+  ]
+  const team = await idOf('/drive/v3/drives', { name: 'Team' })
+  const other = await idOf('/drive/v3/drives', { name: 'Other' })
+  const stay = await idOf('/drive/v3/files', { name: 'Stay', mimeType: FOLDER })
+  const loose = await idOf('/drive/v3/files', { name: 'Loose', mimeType: 'text/plain' })
+  const carry = await idOf('/drive/v3/files', { name: 'Carry', mimeType: FOLDER, parents: [team] })
+  await idOf('/drive/v3/files', { name: 'Child', mimeType: 'text/plain', parents: [carry] })
+
+  eq(
+    'drive move: a My Drive folder cannot move into a shared drive',
+    refusal(await patch(stay, `addParents=${team}`)),
+    [403, 'teamDrivesFolderMoveInNotSupported'],
+  )
+  eq('drive move: a My Drive file can', (await patch(loose, `addParents=${team}`)).status, 200)
+  eq('drive move: the shared drive lists it', await listed(team), ['Carry', 'Child', 'Loose'])
+  eq('drive move: My Drive keeps the refused folder', await listed(), ['Stay'])
+  eq(
+    'drive move: a folder moves between shared drives',
+    (await patch(carry, `addParents=${other}`)).status,
+    200,
+  )
+  eq('drive move: its child goes with it', await listed(other), ['Carry', 'Child'])
+  eq('drive move: and leaves the drive it came from', await listed(team), ['Loose'])
+  eq('drive move: it moves out to My Drive', (await patch(carry, 'addParents=root')).status, 200)
+  eq('drive move: with its child', await listed(), ['Carry', 'Child', 'Stay'])
+  eq(
+    'drive move: files.update renames a drive root',
+    (await patch(team, '', { name: 'Team' })).status,
+    200,
+  )
+  eq('drive move: a drive root cannot move', refusal(await patch(team, 'addParents=root')), [
+    403,
+    'insufficientFilePermissions',
+  ])
+  eq('drive move: the drive still holds its files', await listed(team), ['Loose'])
+  for (const id of [team, other]) {
+    await api(`${base}/drive/v3/drives/${id}`, 't1', { method: 'DELETE' })
+  }
+  eq('drive move: deleting the drives keeps what left them', await listed(), [
+    'Carry',
+    'Child',
+    'Stay',
+  ])
+}
+
 async function main(): Promise<void> {
   compatibilityDirect()
+  sheetsFormatsDirect()
   const fake = await launch()
   const at = fake.endpoint
   const seed = { tenants: ['t1'], epoch: EPOCH, extras: { forms: FORMS } }
   try {
     await compatibilityHttp(at)
+    await gridRangesHttp(at)
+    await driveMoveHttp(at)
     // ---- the base world is fixture rows, not constructor state
     check('a bare /reset seeds', (await reset(at, { tenants: ['t1'], epoch: EPOCH })) === 200)
     const labels = await api(`${at}/gmail/v1/users/me/labels`, 't1')
@@ -986,6 +1212,56 @@ async function main(): Promise<void> {
       )
     } finally {
       await home.close()
+    }
+
+    const bulk = await start(gwsFake, 0)
+    try {
+      await reset(bulk.endpoint, seed)
+      const db = bulk.runtime.pool.client(DEFAULT_RUN)
+      const st = await loadState(db, 't1')
+      const file = createDriveItem(
+        st,
+        'large workbook',
+        'application/vnd.google-apps.spreadsheet',
+        [],
+      )
+      const tab = newTab(0, 'Data', 20_001, 1)
+      const samples = ['', 'quote" and apostrophe\'', 'line\nfeed', '音楽', '\\', '\u0000']
+      for (let row = 0; row < 20_001; row += 1)
+        tab.cells.set(`${String(row)},0`, samples[row % samples.length] ?? '')
+      tab.props.set('10000,0', { userEnteredFormat: { textFormat: { bold: true } } })
+      tab.cells.delete('10001,0')
+      tab.props.set('10001,0', { note: 'formatted, no value' })
+      st.sheets.set(file.id, { title: file.name, tabs: [tab], nextSheetId: 1 })
+      await saveState(db, gwsFake.dmmf, 't1', st)
+      const restored = await loadState(db, 't1')
+      check(
+        'bulk cell persistence preserves text across chunk boundaries',
+        isDeepStrictEqual(restored.sheets.get(file.id)?.tabs[0]?.cells, tab.cells),
+      )
+      check(
+        'bulk cell persistence preserves formats, a formatted blank cell included',
+        isDeepStrictEqual(restored.sheets.get(file.id)?.tabs[0]?.props, tab.props),
+      )
+      tab.cells.set('00,0', 'duplicate primary key')
+      let refusal = ''
+      try {
+        await saveState(db, gwsFake.dmmf, 't1', st)
+      } catch (err) {
+        refusal = err instanceof Error ? err.message : String(err)
+      }
+      check(
+        'an invalid bulk cell write fails on the composite key',
+        refusal.includes('UNIQUE constraint failed'),
+        refusal.replaceAll('\n', ' ').trim().slice(0, 160),
+      )
+      const rolledBack = await loadState(db, 't1')
+      check(
+        'a failed bulk write restores the entire previous workbook',
+        isDeepStrictEqual(rolledBack.sheets, restored.sheets),
+      )
+    } finally {
+      await bulk.close()
     }
 
     // Door four: keyed by the run's CLIENT, not its name, so two servers in

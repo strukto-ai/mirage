@@ -38,5 +38,5 @@ async def write_bytes(accessor: BoxAccessor, path: PathSpec,
         if parent_id is None:
             raise enoent(path.virtual)
         await upload_new_file(tm, parent_id, parts[-1], data)
-    record("write", path.resource_path, "box", len(data), timer)
+    record("write", path.vfs_path, "box", len(data), timer)
     await invalidate_after_write(path)

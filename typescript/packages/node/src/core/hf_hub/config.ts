@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { secretStr, z } from '@struktoai/mirage-core/resource/secrets'
-import type { ConfigOf } from '@struktoai/mirage-core/resource/secrets'
+import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { API_BASE } from './constants.ts'
 
 /**

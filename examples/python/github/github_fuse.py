@@ -17,7 +17,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.github import GitHubConfig, GitHubResource
+from mirage.vfs.github import GitHubConfig, GitHubVFS
 
 load_dotenv(".env.development")
 
@@ -25,17 +25,16 @@ config = GitHubConfig(token=os.environ["GITHUB_TOKEN"])
 
 # Nothing here is async: the mount names the repo and fetches its tree on
 # the first read, which is the point of a FUSE mount.
-resource = GitHubResource(
+vfs = GitHubVFS(
     config=config,
     owner="strukto-ai",
     repo="mirage",
     ref="main",
 )
 
-with Workspace({
-        "/github/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/github/": Mount(vfs, mode=MountMode.READ,
+                       backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -80,6 +79,6 @@ with Workspace({
     print(">>> Press Enter to unmount and exit...")
     input()
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes")

@@ -19,14 +19,12 @@ from mirage.core.ram.rename import rename
 from mirage.core.ram.set_attrs import set_attrs
 from mirage.core.ram.stat import stat
 from mirage.core.ram.unlink import unlink
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(resource_path=path.strip("/"),
-                    virtual=path,
-                    directory=path)
+    return PathSpec(vfs_path=path.strip("/"), virtual=path, directory=path)
 
 
 @pytest.fixture

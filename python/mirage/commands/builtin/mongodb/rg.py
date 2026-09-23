@@ -33,7 +33,7 @@ _search = make_search("rg",
                       stream=True)
 
 
-@command("rg", resource="mongodb", spec=SPECS["rg"])
+@command("rg", vfs="mongodb", spec=SPECS["rg"])
 async def rg(accessor: MongoDBAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

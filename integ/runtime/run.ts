@@ -21,16 +21,16 @@ import {
   buildRuntime,
   CLISpec,
   Limit,
-  MongoDBResource,
+  MongoDBVFS,
   MountMode,
   PathSpec,
-  RAMResource,
-  RedisResource,
+  RAMVFS,
+  RedisVFS,
   registerRuntime,
   LINE_EXECUTOR,
   type LineExecutor,
   Runtime,
-  S3Resource,
+  S3VFS,
   ScriptSource,
   snakeToCamel,
   Workspace,
@@ -41,7 +41,7 @@ import {
   type OpsContext,
   type OpsResultContext,
   type Policy,
-  type Resource,
+  type VFS,
   type RunResult,
   type RuntimeEntry,
   type FilesystemOperation,
@@ -98,7 +98,7 @@ interface Step {
 }
 
 interface MountSpecJson {
-  resource: string
+  vfs: string
   files?: Record<string, string>
   generated_files?: number
   limits?: Record<string, Record<string, unknown>>
@@ -414,11 +414,11 @@ async function ensureMongo(): Promise<void> {
   mongoSeeded = true
 }
 
-async function buildResource(spec: MountSpecJson, runId: string): Promise<Resource> {
-  if (spec.resource === 'ram') {
-    const resource = new RAMResource()
+async function buildVfs(spec: MountSpecJson, runId: string): Promise<VFS> {
+  if (spec.vfs === 'ram') {
+    const vfs = new RAMVFS()
     if (spec.generated_files !== undefined) {
-      resource.loadState({
+      vfs.loadState({
         type: 'ram',
         files: Object.fromEntries(
           Array.from({ length: spec.generated_files }, (_, i) => [
@@ -428,17 +428,17 @@ async function buildResource(spec: MountSpecJson, runId: string): Promise<Resour
         ),
       })
     }
-    return resource
+    return vfs
   }
-  if (spec.resource === 'redis') {
-    return new RedisResource({
+  if (spec.vfs === 'redis') {
+    return new RedisVFS({
       url: process.env.REDIS_URL ?? '',
       keyPrefix: `mirage-integ-runtime-ts-${runId}/`,
     })
   }
-  if (spec.resource === 's3') {
+  if (spec.vfs === 's3') {
     await ensureS3()
-    return new S3Resource({
+    return new S3VFS({
       bucket: BUCKET,
       region: 'us-east-1',
       endpoint: process.env.S3_ENDPOINT,
@@ -447,11 +447,11 @@ async function buildResource(spec: MountSpecJson, runId: string): Promise<Resour
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'minio123',
     })
   }
-  if (spec.resource === 'mongodb') {
+  if (spec.vfs === 'mongodb') {
     await ensureMongo()
-    return new MongoDBResource({ uri: process.env.MONGODB_URI ?? '', databases: [DB] })
+    return new MongoDBVFS({ uri: process.env.MONGODB_URI ?? '', databases: [DB] })
   }
-  throw new Error(`unknown resource kind: ${spec.resource}`)
+  throw new Error(`unknown VFS kind: ${spec.vfs}`)
 }
 
 function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
@@ -476,16 +476,16 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   registerRuntimes(world.register_runtimes ?? {})
   const mounts: Record<string, MountSpec> = {}
   const seeds: [string, string, string][] = []
-  const mountSpecs = world.mounts ?? { '/ram': { resource: 'ram' } }
+  const mountSpecs = world.mounts ?? { '/ram': { vfs: 'ram' } }
   for (const [prefix, spec] of Object.entries(mountSpecs)) {
-    const resource = await buildResource(spec, runId)
+    const vfs = await buildVfs(spec, runId)
     const guards = Object.fromEntries(
       Object.entries(spec.limits ?? {}).map(([cmd, kwargs]) => [
         cmd,
         new Limit(camelizeKeys(kwargs)),
       ]),
     )
-    mounts[prefix] = Object.keys(guards).length > 0 ? [resource, MountMode.EXEC, guards] : resource
+    mounts[prefix] = Object.keys(guards).length > 0 ? [vfs, MountMode.EXEC, guards] : vfs
     for (const [name, content] of Object.entries(spec.files ?? {})) {
       seeds.push([prefix, name, content])
     }
@@ -585,11 +585,11 @@ function checkOps(expect: Expect, seen: string[]): string[] {
   return problems
 }
 
-// One facade step: call a typed Ops convenience (`ws.fs`) and check its
+// One facade step: call a typed Ops convenience (`ws.vfs`) and check its
 // value. The JSON carries the python facade spelling (`is_dir`,
 // `list_files`); snakeToCamel maps it onto the TS method.
 async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promise<string[]> {
-  const facade = ws.fs as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+  const facade = ws.vfs as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
   const method = facade[snakeToCamel(spec.method)]
   if (method === undefined) return [`facade has no method ${spec.method}`]
   const args: unknown[] = [spec.path]
@@ -602,7 +602,7 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
     // condition instead.
     let name = 'NONE'
     try {
-      await method.apply(ws.fs, args)
+      await method.apply(ws.vfs, args)
     } catch (err) {
       name = (err as { code?: string }).code ?? (err as Error).constructor.name
     }
@@ -611,7 +611,7 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
   }
   if (expect.throws_contains !== undefined) {
     try {
-      await method.apply(ws.fs, args)
+      await method.apply(ws.vfs, args)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.includes(expect.throws_contains)) return []
@@ -622,7 +622,7 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
     }
     return ['facade: expected an error, none raised']
   }
-  const value = await method.apply(ws.fs, args)
+  const value = await method.apply(ws.vfs, args)
   if (
     expect.value !== undefined &&
     JSON.stringify(value ?? null) !== JSON.stringify(expect.value)
@@ -703,7 +703,7 @@ async function runStep(
   if (step.stdin !== undefined) options.stdin = ENC.encode(step.stdin)
   if (expect.throws_contains !== undefined) {
     try {
-      await ws.execute(command, options)
+      await ws.shell(command, options)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message.includes(expect.throws_contains)) return []
@@ -714,7 +714,7 @@ async function runStep(
     }
     return [`${caseId} ${label}: expected an error, none raised`]
   }
-  const result = await ws.execute(command, options)
+  const result = await ws.shell(command, options)
   const stdout = DEC.decode(result.stdout)
   const stderr = DEC.decode(result.stderr)
   const problems = check(caseId, label, expect, result.exitCode, stdout, stderr)

@@ -52,39 +52,39 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     return Promise.resolve(new Map(this.entryMap))
   }
 
-  get(resourcePath: string): Promise<LookupResult> {
-    const entry = this.entryMap.get(resourcePath)
+  get(vfsPath: string): Promise<LookupResult> {
+    const entry = this.entryMap.get(vfsPath)
     if (entry === undefined) return Promise.resolve({ status: LookupStatus.NOT_FOUND })
     return Promise.resolve({ entry })
   }
 
-  put(resourcePath: string, entry: IndexEntry): Promise<void> {
-    return this.lock.withLock(resourcePath, () => {
+  put(vfsPath: string, entry: IndexEntry): Promise<void> {
+    return this.lock.withLock(vfsPath, () => {
       const stored =
         entry.indexTime === '' ? entry.copyWith({ indexTime: toIsoZ(new Date()) }) : entry
-      this.entryMap.set(resourcePath, stored)
+      this.entryMap.set(vfsPath, stored)
       return Promise.resolve()
     })
   }
 
-  listDir(resourcePath: string): Promise<ListResult> {
-    const exp = this.expiry.get(resourcePath)
+  listDir(vfsPath: string): Promise<ListResult> {
+    const exp = this.expiry.get(vfsPath)
     if (exp === undefined) return Promise.resolve({ status: LookupStatus.NOT_FOUND })
     if (Date.now() >= exp) return Promise.resolve({ status: LookupStatus.EXPIRED })
-    const children = this.children.get(resourcePath) ?? []
+    const children = this.children.get(vfsPath) ?? []
     return Promise.resolve({ entries: children })
   }
 
   setDir(
-    resourcePath: string,
+    vfsPath: string,
     entries: readonly [string, IndexEntry][],
     expiredAt?: Date | null,
   ): Promise<void> {
-    return this.lock.withLock(resourcePath, () => {
+    return this.lock.withLock(vfsPath, () => {
       const now = Date.now()
       const exp = expiredAt ? expiredAt.getTime() : now + this.ttl * 1000
       const nowIso = toIsoZ(new Date(now))
-      const prefix = resourcePath === '/' ? '/' : `${resourcePath}/`
+      const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
       const childKeys: string[] = []
       for (const [name, entry] of entries) {
         const fullPath = prefix + name
@@ -92,30 +92,30 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         this.entryMap.set(fullPath, stored)
         childKeys.push(fullPath)
       }
-      this.children.set(resourcePath, childKeys)
-      this.expiry.set(resourcePath, exp)
+      this.children.set(vfsPath, childKeys)
+      this.expiry.set(vfsPath, exp)
       return Promise.resolve()
     })
   }
 
-  invalidateDir(resourcePath: string): Promise<void> {
-    for (const child of this.children.get(resourcePath) ?? []) {
+  invalidateDir(vfsPath: string): Promise<void> {
+    for (const child of this.children.get(vfsPath) ?? []) {
       this.entryMap.delete(child)
     }
-    this.expiry.delete(resourcePath)
-    this.children.delete(resourcePath)
+    this.expiry.delete(vfsPath)
+    this.children.delete(vfsPath)
     return Promise.resolve()
   }
 
-  invalidatePrefix(resourcePath: string): Promise<void> {
+  invalidatePrefix(vfsPath: string): Promise<void> {
     for (const key of [...this.entryMap.keys()]) {
-      if (underPath(key, resourcePath)) this.entryMap.delete(key)
+      if (underPath(key, vfsPath)) this.entryMap.delete(key)
     }
     for (const key of [...this.children.keys()]) {
-      if (underPath(key, resourcePath)) this.children.delete(key)
+      if (underPath(key, vfsPath)) this.children.delete(key)
     }
     for (const key of [...this.expiry.keys()]) {
-      if (underPath(key, resourcePath)) this.expiry.delete(key)
+      if (underPath(key, vfsPath)) this.expiry.delete(key)
     }
     return Promise.resolve()
   }

@@ -21,7 +21,7 @@ from mirage.types import PathSpec
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.provision.command import handle_command_provision
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 async def handle_redirect_provision(
@@ -29,7 +29,7 @@ async def handle_redirect_provision(
     registry: MountRegistry,
     command: Any,
     targets: list[tuple[RedirectKind, PathSpec]],
-    session: Session,
+    session: SessionState,
     namespace: Namespace | None = None,
 ) -> ProvisionResult:
     """Plan a redirect: the inner command plus the redirect I/O.
@@ -48,7 +48,7 @@ async def handle_redirect_provision(
         command (Any): the redirected command node.
         targets (list[tuple[RedirectKind, PathSpec]]): resolved
             stdin/stdout redirect targets on mounts.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     # command is None for the bare `> file` form: nothing to run,
     # only the redirect targets cost anything.

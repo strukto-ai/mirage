@@ -64,7 +64,7 @@ async def find(
         empty (bool): -empty.
         tree (PredNode | None): parsed predicate tree.
     """
-    base = path.resource_path
+    base = path.vfs_path
     results: list[str] = []
     saw_descendant = False
     tree = tree if tree is not None else build_tree(name=name,
@@ -123,7 +123,7 @@ async def find(
 
 
 async def _dir_exists(accessor: GDriveAccessor, path: PathSpec) -> bool:
-    if not path.resource_path:
+    if not path.vfs_path:
         return True
-    node = await resolve_key(accessor, path.resource_path)
+    node = await resolve_key(accessor, path.vfs_path)
     return node is not None and node.is_folder

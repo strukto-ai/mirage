@@ -27,7 +27,7 @@ import { abortable, mergeSignals } from '../abort.ts'
 import type { SessionView } from '../../ops/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
 import { scanOptions } from './builtins/getopt.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -43,7 +43,7 @@ export interface ExecuteNodeOpts {
 
 export type ExecuteNodeFn = (
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
@@ -78,7 +78,7 @@ export async function handleBackground(
   executeNode: ExecuteNodeFn,
   left: TSNodeLike,
   right: TSNodeLike | null,
-  session: Session,
+  session: SessionState,
   jobTable: JobTable,
   agentId: string | null,
   stdin: ByteSource | null = null,
@@ -242,7 +242,7 @@ export async function handleBackground(
 export function runStatement(
   executeNode: ExecuteNodeFn,
   node: TSNodeLike,
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
@@ -292,7 +292,7 @@ function jobResult(cmdStr: string, msg: string, code: number): JobHandlerResult 
  * The job list a builtin reads: the calling session's, or the shared
  * empty id when it runs with no session (a bare table in a test).
  */
-function sessionOf(session: Session | null): string {
+function sessionOf(session: SessionState | null): string {
   return session?.sessionId ?? ''
 }
 
@@ -350,7 +350,7 @@ async function adopt(jobTable: JobTable, job: Job, cmdStr: string): Promise<JobH
 export async function handleWait(
   jobTable: JobTable,
   parts: string[],
-  session: Session | null = null,
+  session: SessionState | null = null,
   view: SessionView | null = null,
   signal?: AbortSignal,
 ): Promise<JobHandlerResult> {
@@ -510,7 +510,7 @@ export async function handleWait(
 export function handleDisown(
   jobTable: JobTable,
   parts: string[],
-  session: Session | null = null,
+  session: SessionState | null = null,
   _view: SessionView | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')
@@ -567,7 +567,7 @@ export function handleDisown(
 export async function handleFg(
   jobTable: JobTable,
   parts: string[],
-  session: Session | null = null,
+  session: SessionState | null = null,
   _view: SessionView | null = null,
   signal?: AbortSignal,
 ): Promise<JobHandlerResult> {
@@ -616,7 +616,7 @@ export async function handleFg(
 export async function handleKill(
   jobTable: JobTable,
   parts: string[],
-  session: Session | null = null,
+  session: SessionState | null = null,
   _view: SessionView | null = null,
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
@@ -682,7 +682,7 @@ function jobRow(job: Job, long: boolean): string {
 export function handleJobs(
   jobTable: JobTable,
   parts: string[],
-  session: Session | null = null,
+  session: SessionState | null = null,
   _view: SessionView | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')
@@ -739,7 +739,7 @@ export function handleJobs(
 export function handlePs(
   jobTable: JobTable,
   parts: string[],
-  session: Session | null = null,
+  session: SessionState | null = null,
   _view: SessionView | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')

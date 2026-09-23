@@ -57,7 +57,7 @@ class MirageFileToolkit(FileToolkit):
 
     def _read_mirage_bytes(self, mirage_path: str) -> bytes:
         quoted = shlex.quote(mirage_path)
-        io = self._runner.run(self._ws.execute(f"cat {quoted}"))
+        io = self._runner.run(self._ws.shell(f"cat {quoted}"))
         if io.exit_code != 0:
             stderr = io.stderr if isinstance(io.stderr, bytes) else b""
             raise FileNotFoundError(stderr.decode("utf-8", errors="replace"))
@@ -67,13 +67,13 @@ class MirageFileToolkit(FileToolkit):
         parent = str(Path(mirage_path).parent)
         if parent and parent != "/":
             mkdir_io = self._runner.run(
-                self._ws.execute(f"mkdir -p {shlex.quote(parent)}"))
+                self._ws.shell(f"mkdir -p {shlex.quote(parent)}"))
             if mkdir_io.exit_code != 0:
                 stderr = mkdir_io.stderr if isinstance(mkdir_io.stderr,
                                                        bytes) else b""
                 raise OSError(stderr.decode("utf-8", errors="replace"))
         quoted = shlex.quote(mirage_path)
-        io = self._runner.run(self._ws.execute(f"cat > {quoted}", stdin=data))
+        io = self._runner.run(self._ws.shell(f"cat > {quoted}", stdin=data))
         if io.exit_code != 0:
             stderr = io.stderr if isinstance(io.stderr, bytes) else b""
             raise OSError(stderr.decode("utf-8", errors="replace"))
@@ -205,7 +205,7 @@ class MirageFileToolkit(FileToolkit):
         """
         root = self._to_mirage_path(path or self._mirage_root)
         cmd = f"find {shlex.quote(root)} -name {shlex.quote(file_name)}"
-        io = self._runner.run(self._ws.execute(cmd))
+        io = self._runner.run(self._ws.shell(cmd))
         return io_to_str(io)
 
     def glob_files(self, pattern: str, path: str | None = None) -> str:
@@ -241,5 +241,5 @@ class MirageFileToolkit(FileToolkit):
         if file_pattern:
             parts.insert(2, f"--include={shlex.quote(file_pattern)}")
         parts.append(shlex.quote(root))
-        io = self._runner.run(self._ws.execute(" ".join(parts)))
+        io = self._runner.run(self._ws.shell(" ".join(parts)))
         return io_to_str(io)

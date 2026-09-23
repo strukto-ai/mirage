@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MinIOResource, MountMode, Workspace, type FileStat, type MinIOConfig } from '@struktoai/mirage-node'
+import { MinIOVFS, MountMode, Workspace, type FileStat, type MinIOConfig } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -28,23 +28,23 @@ function configFromEnv(): MinIOConfig {
 
 async function main(): Promise<void> {
   const config = configFromEnv()
-  const ws = new Workspace({ '/minio/': new MinIOResource(config) }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/minio/': new MinIOVFS(config) }, { mode: MountMode.WRITE })
   try {
     console.log(`=== MinIO at ${config.endpoint} (bucket ${config.bucket}) ===`)
 
     // Seed a few objects so the demo is self-contained (WRITE mode).
-    await ws.execute(`echo '{"event":"queue-operation","tool":"mirage"}' > /minio/data/example.jsonl`)
-    await ws.execute(`echo '{"event":"read","tool":"mirage"}' >> /minio/data/example.jsonl`)
-    await ws.execute(`echo '{"event":"queue-operation","tool":"other"}' >> /minio/data/example.jsonl`)
-    await ws.execute(`echo '{"name":"mirage","version":1,"tags":["s3","minio"]}' > /minio/data/config.json`)
-    await ws.execute('echo "hello from minio" > /minio/notes.txt')
+    await ws.shell(`echo '{"event":"queue-operation","tool":"mirage"}' > /minio/data/example.jsonl`)
+    await ws.shell(`echo '{"event":"read","tool":"mirage"}' >> /minio/data/example.jsonl`)
+    await ws.shell(`echo '{"event":"queue-operation","tool":"other"}' >> /minio/data/example.jsonl`)
+    await ws.shell(`echo '{"name":"mirage","version":1,"tags":["s3","minio"]}' > /minio/data/config.json`)
+    await ws.shell('echo "hello from minio" > /minio/notes.txt')
 
 
     // chmod/chown/touch never hit the MinIO API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /minio/notes.txt ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/minio/notes.txt" && chown 500:dev "/minio/notes.txt" && touch -t 202601021530 "/minio/notes.txt"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
@@ -55,46 +55,46 @@ async function main(): Promise<void> {
     )
 
     console.log('\n--- ls /minio/ ---')
-    let r = await ws.execute('ls /minio/')
+    let r = await ws.shell('ls /minio/')
     console.log(r.stdoutText)
 
     console.log('--- tree /minio/ ---')
-    r = await ws.execute('tree /minio/')
+    r = await ws.shell('tree /minio/')
     console.log(r.stdoutText)
 
     console.log('--- stat /minio/notes.txt ---')
-    r = await ws.execute('stat /minio/notes.txt')
+    r = await ws.shell('stat /minio/notes.txt')
     console.log(`  ${r.stdoutText.trim()}`)
 
     console.log('\n--- cat /minio/notes.txt ---')
-    r = await ws.execute('cat /minio/notes.txt')
+    r = await ws.shell('cat /minio/notes.txt')
     console.log(`  ${JSON.stringify(r.stdoutText.trim())}`)
 
     console.log('\n--- head -c 40 /minio/data/example.jsonl (byte range) ---')
-    r = await ws.execute('head -c 40 /minio/data/example.jsonl')
+    r = await ws.shell('head -c 40 /minio/data/example.jsonl')
     console.log(`  ${JSON.stringify(r.stdoutText.trim())}`)
 
     console.log('\n--- grep -c queue-operation /minio/data/example.jsonl ---')
-    r = await ws.execute('grep -c queue-operation /minio/data/example.jsonl')
+    r = await ws.shell('grep -c queue-operation /minio/data/example.jsonl')
     console.log(`  count: ${r.stdoutText.trim()}`)
 
     console.log("--- find /minio/ -name '*.json' ---")
-    r = await ws.execute("find /minio/ -name '*.json'")
+    r = await ws.shell("find /minio/ -name '*.json'")
     console.log(r.stdoutText)
 
     console.log('--- jq .tags /minio/data/config.json ---')
-    r = await ws.execute('jq .tags /minio/data/config.json')
+    r = await ws.shell('jq .tags /minio/data/config.json')
     console.log(`  ${r.stdoutText.trim()}`)
 
     console.log('\n--- PROVISION: cat (plan only) vs head -c (byte budget) ---')
-    let plan = await ws.execute('cat /minio/data/example.jsonl', { provision: true })
+    let plan = await ws.shell('cat /minio/data/example.jsonl', { provision: true })
     console.log(`  cat: network_read=${plan.networkRead} precision=${plan.precision}`)
-    plan = await ws.execute('head -c 20 /minio/data/example.jsonl', { provision: true })
+    plan = await ws.shell('head -c 20 /minio/data/example.jsonl', { provision: true })
     console.log(`  head -c 20: network_read=${plan.networkRead} precision=${plan.precision}`)
 
     console.log('\n--- rm seeded objects ---')
     for (const key of ['/minio/data/example.jsonl', '/minio/data/config.json', '/minio/notes.txt']) {
-      await ws.execute(`rm ${key}`)
+      await ws.shell(`rm ${key}`)
     }
     console.log('  cleaned')
 

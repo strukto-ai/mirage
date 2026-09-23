@@ -93,7 +93,7 @@ async function main(): Promise<void> {
   env.MIRAGE_HOME = join(work, 'mirage-home')
   env.MIRAGE_IDLE_GRACE_SECONDS = '60'
   const cfg = join(work, 'config.yaml')
-  writeFileSync(cfg, 'mounts:\n  /:\n    resource: ram\n    mode: write\n')
+  writeFileSync(cfg, 'mounts:\n  /:\n    vfs: ram\n    mode: write\n')
   try {
     const id = (run(bin, env, ['workspace', 'create', cfg]) as { id: string }).id
     console.log('=== create workspace (ram mount) ===')

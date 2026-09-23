@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -33,15 +33,15 @@ beforeAll(async () => {
 })
 
 async function buildWs(): Promise<Workspace> {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(ram)
+  registry.registerVfs(ram)
   const ws = new Workspace(
     { '/': ram },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
   )
-  await ws.execute('mkdir -p /data/sub')
-  await ws.execute('touch /data/a.txt /data/sub/nested.txt')
+  await ws.shell('mkdir -p /data/sub')
+  await ws.shell('touch /data/a.txt /data/sub/nested.txt')
   return ws
 }
 
@@ -49,7 +49,7 @@ async function run(
   ws: Workspace,
   cmd: string,
 ): Promise<{ code: number; out: string; err: string }> {
-  const res = await ws.execute(cmd)
+  const res = await ws.shell(cmd)
   return { code: res.exitCode, out: DEC.decode(res.stdout), err: DEC.decode(res.stderr) }
 }
 

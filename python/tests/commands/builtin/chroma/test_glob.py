@@ -29,8 +29,8 @@ async def test_plain_path_passes_through(chroma_accessor, chroma_index,
 
 @pytest.mark.asyncio
 async def test_pattern_expands_against_readdir(chroma_accessor, chroma_index):
-    pattern = PathSpec(resource_path=mount_key("/knowledge/guides/quick*",
-                                               "/knowledge"),
+    pattern = PathSpec(vfs_path=mount_key("/knowledge/guides/quick*",
+                                          "/knowledge"),
                        virtual="/knowledge/guides/quick*",
                        directory="/knowledge/guides",
                        pattern="quick*",
@@ -44,8 +44,8 @@ async def test_pattern_without_match_stays_literal(chroma_accessor,
                                                    chroma_index):
     # bash with nullglob off: the unmatched glob word stays the literal so
     # the command errors on it like GNU.
-    pattern = PathSpec(resource_path=mount_key("/knowledge/guides/*.zip",
-                                               "/knowledge"),
+    pattern = PathSpec(vfs_path=mount_key("/knowledge/guides/*.zip",
+                                          "/knowledge"),
                        virtual="/knowledge/guides/*.zip",
                        directory="/knowledge/guides",
                        pattern="*.zip",

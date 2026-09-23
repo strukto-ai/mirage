@@ -21,10 +21,10 @@ independent implementation uses
 from mirage import Workspace
 from mirage.commands.cli.builtin.linear import LINEAR
 from mirage.core.linear.config import LinearConfig
-from mirage.resource.linear import LinearResource
+from mirage.vfs.linear import LinearVFS
 
 config = LinearConfig(api_key="lin_api_...")
-ws = Workspace({"/issues": LinearResource(config)})
+ws = Workspace({"/issues": LinearVFS(config)})
 ws.register_cli("linear", LINEAR, config.model_dump())
 ```
 

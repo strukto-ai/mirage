@@ -1,7 +1,7 @@
 import aiohttp
 
 from mirage.accessor.base import SessionAccessor
-from mirage.resource.jaeger.config import JaegerConfig
+from mirage.vfs.jaeger.config import JaegerConfig
 
 
 class JaegerAccessor(SessionAccessor):

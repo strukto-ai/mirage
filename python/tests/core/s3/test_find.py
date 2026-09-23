@@ -57,20 +57,20 @@ def _session_for(pages, config):
     return _FakeSession(pages)
 
 
-def _spec(resource_path):
-    if resource_path:
-        return PathSpec(virtual="/mnt/" + resource_path,
+def _spec(vfs_path):
+    if vfs_path:
+        return PathSpec(virtual="/mnt/" + vfs_path,
                         directory="/mnt/",
-                        resource_path=resource_path)
-    return PathSpec(virtual="/mnt", directory="/", resource_path="")
+                        vfs_path=vfs_path)
+    return PathSpec(virtual="/mnt", directory="/", vfs_path="")
 
 
-def _run_find(monkeypatch, keys, resource_path="data", **kwargs):
+def _run_find(monkeypatch, keys, vfs_path="data", **kwargs):
     pages = [{"Contents": [{"Key": key, "Size": size} for key, size in keys]}]
     monkeypatch.setattr(s3_driver, "async_session",
                         partial(_session_for, pages))
     accessor = S3Accessor(S3Config(bucket="b"))
-    return asyncio.run(find(accessor, _spec(resource_path), **kwargs))
+    return asyncio.run(find(accessor, _spec(vfs_path), **kwargs))
 
 
 def test_find_synthesizes_implicit_dirs(monkeypatch):
@@ -129,5 +129,5 @@ def test_find_name_matches_implicit_dir(monkeypatch):
 
 
 def test_find_root_start_synthesizes_to_root(monkeypatch):
-    out = _run_find(monkeypatch, [("a/b.txt", 2)], resource_path="", type="d")
+    out = _run_find(monkeypatch, [("a/b.txt", 2)], vfs_path="", type="d")
     assert out == ["/", "/a"]

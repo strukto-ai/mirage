@@ -26,7 +26,7 @@ def spec(virtual: str, pattern: str | None = None) -> PathSpec:
     directory = (virtual.rsplit("/", 1)[0] or "/") if pattern else virtual
     return PathSpec(virtual=virtual,
                     directory=directory,
-                    resource_path=virtual.lstrip("/"),
+                    vfs_path=virtual.lstrip("/"),
                     pattern=pattern)
 
 

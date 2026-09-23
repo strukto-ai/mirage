@@ -19,18 +19,18 @@
 // until killed. Since this process does not spawn subprocesses of its
 // own, the single-event-loop deadlock (see /typescript/limitations)
 // never triggers here.
-import { FuseManager, MountMode, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { FuseManager, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
   const ws = new Workspace(
-    { '/data/': new RAMResource() },
+    { '/data/': new RAMVFS() },
     { mode: MountMode.WRITE },
   )
 
   // Seed a file so the parent has something to read.
-  await ws.execute('echo "hello from helper" | tee /data/hello.txt')
+  await ws.shell('echo "hello from helper" | tee /data/hello.txt')
   // Use printf (not echo) so the \n escapes expand to real newlines.
-  await ws.execute(`printf 'line1\\nline2\\nline3\\n' | tee /data/multi.txt`)
+  await ws.shell(`printf 'line1\\nline2\\nline3\\n' | tee /data/multi.txt`)
 
   const fm = new FuseManager()
   const mp = await fm.setup(ws)

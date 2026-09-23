@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 
 from mirage import MountMode, Workspace
-from mirage.resource.disk import DiskResource
+from mirage.vfs.disk import DiskVFS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = REPO_ROOT / "data"
@@ -29,11 +29,11 @@ DATA_DIR = REPO_ROOT / "data"
 tmp = tempfile.mkdtemp()
 shutil.copytree(DATA_DIR, Path(tmp) / "files", dirs_exist_ok=True)
 
-resource = DiskResource(root=tmp + "/files")
+vfs = DiskVFS(root=tmp + "/files")
 
 
 async def main():
-    ws = Workspace({"/data/": resource}, mode=MountMode.READ)
+    ws = Workspace({"/data/": vfs}, mode=MountMode.READ)
 
     with ws:
         print("=== VFS MODE ===\n")
@@ -75,13 +75,13 @@ async def main():
         print(f"  access W_OK: {os.access('/data/example.json', os.W_OK)}")
 
         print("\n--- the backend's own host paths ---")
-        # The patch is process-wide, so the disk resource's own os calls
-        # pass through it too; they name host paths under the resource
+        # The patch is process-wide, so the disk VFS's own os calls
+        # pass through it too; they name host paths under the VFS
         # root, which no mount owns, and reach the real filesystem.
         print(f"  host copy readable: "
               f"{Path(tmp, 'files', 'example.json').is_file()}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

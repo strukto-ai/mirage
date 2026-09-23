@@ -26,7 +26,7 @@ from mirage.workspace.executor.builtins.man.types import ManEntry
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup import command_visible, verb_visible
 from mirage.workspace.mount.registry import DEV_PREFIX, MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 # Shell builtins the manual documents through a spec of another name.
@@ -79,13 +79,13 @@ def _builtin_entry(name: str) -> ManEntry | None:
 
 
 def _command_entries(registry: MountRegistry,
-                     session: Session) -> list[ManEntry]:
+                     session: SessionState) -> list[ManEntry]:
     """One entry per name registered on any mount that the session can
     see, first registration wins.
 
     Args:
         registry (MountRegistry): registry holding the mounts.
-        session (Session): the session reading the manual.
+        session (SessionState): the session reading the manual.
     """
     seen: dict[str, ManEntry] = {}
     for mount in registry.mounts():
@@ -97,12 +97,13 @@ def _command_entries(registry: MountRegistry,
     return list(seen.values())
 
 
-def _cli_entries(registry: MountRegistry, session: Session) -> list[ManEntry]:
+def _cli_entries(registry: MountRegistry,
+                 session: SessionState) -> list[ManEntry]:
     """One entry per installed CLI head word the session can see.
 
     Args:
         registry (MountRegistry): registry holding the installs.
-        session (Session): the session reading the manual.
+        session (SessionState): the session reading the manual.
     """
     return [
         ManEntry(name=name, spec=install.spec)
@@ -157,21 +158,21 @@ def _render_section(title: str, entries: Sequence[ManEntry]) -> str:
     return "\n".join(lines)
 
 
-def _child_visible(head: str, path: tuple[str, ...], session: Session,
+def _child_visible(head: str, path: tuple[str, ...], session: SessionState,
                    verb: str) -> bool:
     """Whether the session can see one child of the node being rendered.
 
     Args:
         head (str): installed head word, as typed.
         path (tuple[str, ...]): canonical verbs down to the node.
-        session (Session): the session reading the manual.
+        session (SessionState): the session reading the manual.
         verb (str): the child's canonical name.
     """
     return verb_visible(head, (*path, verb), session)
 
 
 def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
-                      session: Session) -> str | None:
+                      session: SessionState) -> str | None:
     """The page for one node of an installed CLI, None when verbs miss
     or the session cannot see the node they name.
 
@@ -191,7 +192,7 @@ def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
         verbs (Sequence[str]): verb words after the head, aliases
             allowed.
         spec (CLISpec): the installed program tree.
-        session (Session): the session reading the manual.
+        session (SessionState): the session reading the manual.
     """
     found = find_node(spec, verbs)
     if found is None:
@@ -207,7 +208,7 @@ def _render_cli_entry(head: str, verbs: Sequence[str], spec: CLISpec,
                      visible=partial(_child_visible, head, path, session))
 
 
-def _render_man_index(registry: MountRegistry, session: Session) -> str:
+def _render_man_index(registry: MountRegistry, session: SessionState) -> str:
     """The bare ``man`` listing, by kind of word: commands, then CLIs.
 
     Every name registered on any mount is one row however many mounts
@@ -217,7 +218,7 @@ def _render_man_index(registry: MountRegistry, session: Session) -> str:
 
     Args:
         registry (MountRegistry): registry holding mounts and installs.
-        session (Session): the session reading the manual.
+        session (SessionState): the session reading the manual.
     """
     sections = [
         _render_section("commands", _command_entries(registry, session)),
@@ -228,9 +229,9 @@ def _render_man_index(registry: MountRegistry, session: Session) -> str:
 
 
 def _cli_man(
-        install: CLIInstall, verbs: Sequence[str], cmd_str: str,
-        registry: MountRegistry,
-        session: Session) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    install: CLIInstall, verbs: Sequence[str], cmd_str: str,
+    registry: MountRegistry, session: SessionState
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """The page (or pages) for an installed head word.
 
     A CLI may not take a general command's name, but a mount can
@@ -243,7 +244,7 @@ def _cli_man(
             allowed.
         cmd_str (str): the line, for the execution node.
         registry (MountRegistry): registry holding the mounts.
-        session (Session): the session reading the manual.
+        session (SessionState): the session reading the manual.
     """
     head = install.name
     entry = _render_cli_entry(head, verbs, install.spec, session)
@@ -265,7 +266,7 @@ def _cli_man(
 async def handle_man(
     args: list[str],
     registry: MountRegistry,
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     if not args:
         out = _render_man_index(registry, session).encode()

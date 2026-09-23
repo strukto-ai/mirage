@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
 import { Precision } from '../../provision/types.ts'
-import { RAMResource } from '../../resource/ram/ram.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { NodeKind } from '../../shell/node_kind.ts'
 import { createShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
@@ -26,7 +26,7 @@ import {} from '../expand/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { provisionNode } from '../node/provision_node.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import type { ExecuteResult } from '../workspace/workspace.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
@@ -75,7 +75,7 @@ const PLANS: Record<NodeKind, [string, string, string, string]> = {
 
 function buildWorkspace(policies: Policy[] = []): Workspace {
   return new Workspace(
-    { '/data': new RAMResource() },
+    { '/data': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
@@ -94,8 +94,8 @@ describe('planner covers every statement kind', () => {
       const [snippet, net, write, precision] = PLANS[kind]
       const ws = buildWorkspace()
       try {
-        await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-        const result = await ws.execute(snippet, { provision: true })
+        await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+        const result = await ws.shell(snippet, { provision: true })
         if (kind === NodeKind.UNSUPPORTED) {
           const gated = result as unknown as ExecuteResult
           expect(gated.exitCode).toBe(2)
@@ -121,7 +121,7 @@ describe('planner covers every statement kind', () => {
         executeFn: () => Promise.resolve(new IOResult()),
       },
       fake as unknown as TSNodeLike,
-      new Session({ sessionId: 't' }),
+      new SessionState({ sessionId: 't' }),
     )
     expect(result.precision).toBe(Precision.UNKNOWN)
     expect(result.networkRead).toBe('0')
@@ -131,20 +131,20 @@ describe('planner covers every statement kind', () => {
   it('plans function calls, env prefixes, eval, and redirect reads', async () => {
     const ws = buildWorkspace()
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-      let result = await ws.execute('f() { cat /data/a.txt; }; f', { provision: true })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      let result = await ws.shell('f() { cat /data/a.txt; }; f', { provision: true })
       expect(result.networkRead).toBe('24')
       expect(result.precision).toBe('exact')
-      result = await ws.execute('f() { f; }; f', { provision: true })
+      result = await ws.shell('f() { f; }; f', { provision: true })
       expect(result.precision).toBe('unknown')
-      result = await ws.execute('FOO=1 cat /data/a.txt', { provision: true })
+      result = await ws.shell('FOO=1 cat /data/a.txt', { provision: true })
       expect(result.networkRead).toBe('24')
       expect(result.precision).toBe('exact')
-      result = await ws.execute("eval 'cat /data/a.txt'", { provision: true })
+      result = await ws.shell("eval 'cat /data/a.txt'", { provision: true })
       expect(result.precision).toBe('unknown')
-      result = await ws.execute('wc -l < /data/a.txt', { provision: true })
+      result = await ws.shell('wc -l < /data/a.txt', { provision: true })
       expect(result.networkRead).toBe('24')
-      result = await ws.execute('cat /data/a.txt > /dev/null', { provision: true })
+      result = await ws.shell('cat /data/a.txt > /dev/null', { provision: true })
       expect(result.networkWrite).toBe('0')
       expect(result.precision).toBe('exact')
     } finally {
@@ -154,24 +154,24 @@ describe('planner covers every statement kind', () => {
 
   it('follows symlinks and spans mounts', async () => {
     const ws = new Workspace(
-      { '/data': new RAMResource(), '/data2': new RAMResource() },
+      { '/data': new RAMVFS(), '/data2': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-      await ws.execute('tee /data2/b.txt > /dev/null', { stdin: ENC.encode('y'.repeat(6)) })
-      await ws.execute('ln -s /data/a.txt /data2/lnk.txt')
-      let result = await ws.execute('cat /data2/lnk.txt', { provision: true })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      await ws.shell('tee /data2/b.txt > /dev/null', { stdin: ENC.encode('y'.repeat(6)) })
+      await ws.shell('ln -s /data/a.txt /data2/lnk.txt')
+      let result = await ws.shell('cat /data2/lnk.txt', { provision: true })
       expect(result.networkRead).toBe('24')
       expect(result.precision).toBe('exact')
-      result = await ws.execute('cat /data/a.txt /data2/b.txt', { provision: true })
+      result = await ws.shell('cat /data/a.txt /data2/b.txt', { provision: true })
       expect(result.networkRead).toBe('30')
       expect(result.readOps).toBe(2)
       expect(result.precision).toBe('exact')
-      result = await ws.execute('cat /data2/b.txt /data/a.txt', { provision: true })
+      result = await ws.shell('cat /data2/b.txt /data/a.txt', { provision: true })
       expect(result.networkRead).toBe('30')
     } finally {
       await ws.close()
@@ -180,19 +180,19 @@ describe('planner covers every statement kind', () => {
 
   it('cross-mount grep keeps parsed flags and pattern', async () => {
     const ws = new Workspace(
-      { '/data': new RAMResource(), '/data2': new RAMResource() },
+      { '/data': new RAMVFS(), '/data2': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('sun\nmoon\n') })
-      await ws.execute('tee /data2/b.txt > /dev/null', { stdin: ENC.encode('cross\n') })
-      const count = await ws.execute('grep -c s /data/a.txt /data2/b.txt')
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('sun\nmoon\n') })
+      await ws.shell('tee /data2/b.txt > /dev/null', { stdin: ENC.encode('cross\n') })
+      const count = await ws.shell('grep -c s /data/a.txt /data2/b.txt')
       expect(new TextDecoder().decode(count.stdout)).toBe('/data/a.txt:1\n/data2/b.txt:1\n')
       expect(count.exitCode).toBe(0)
-      const numbered = await ws.execute('grep -n cross /data/a.txt /data2/b.txt')
+      const numbered = await ws.shell('grep -n cross /data/a.txt /data2/b.txt')
       expect(new TextDecoder().decode(numbered.stdout)).toBe('/data2/b.txt:1:cross\n')
     } finally {
       await ws.close()
@@ -202,28 +202,28 @@ describe('planner covers every statement kind', () => {
   it('is dry, runs case arms fully, and prices sed reads', async () => {
     const ws = buildWorkspace()
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
       // a dry run must not execute command substitutions
-      let result = await ws.execute('cat $(tee /data/leak.txt > /dev/null; echo /data/a.txt)', {
+      let result = await ws.shell('cat $(tee /data/leak.txt > /dev/null; echo /data/a.txt)', {
         provision: true,
       })
       expect(result.precision).toBe('unknown')
-      const listing = new TextDecoder().decode((await ws.execute('ls /data')).stdout)
+      const listing = new TextDecoder().decode((await ws.shell('ls /data')).stdout)
       expect(listing).not.toContain('leak.txt')
       // a case arm runs every statement up to its ;; terminator
       const out = new TextDecoder().decode(
-        (await ws.execute('case x in x) echo one; echo two;; esac')).stdout,
+        (await ws.shell('case x in x) echo one; echo two;; esac')).stdout,
       )
       expect(out).toBe('one\ntwo\n')
-      result = await ws.execute('case x in x) cat /data/a.txt; cat /data/a.txt;; esac', {
+      result = await ws.shell('case x in x) cat /data/a.txt; cat /data/a.txt;; esac', {
         provision: true,
       })
       expect(result.networkRead).toBe('48')
       // sed reads its operands; -i degrades to a floor
-      result = await ws.execute('sed s/x/y/ /data/a.txt', { provision: true })
+      result = await ws.shell('sed s/x/y/ /data/a.txt', { provision: true })
       expect(result.networkRead).toBe('24')
       expect(result.precision).toBe('exact')
-      result = await ws.execute('sed -i s/x/y/ /data/a.txt', { provision: true })
+      result = await ws.shell('sed -i s/x/y/ /data/a.txt', { provision: true })
       expect(result.precision).toBe('unknown')
     } finally {
       await ws.close()
@@ -283,9 +283,9 @@ describe('provision clears the command gate first', () => {
     const counting = new Counting()
     const ws = buildWorkspace([counting])
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
       counting.commands.length = 0
-      const result = await ws.execute('cat < /data/a.txt', { provision: true })
+      const result = await ws.shell('cat < /data/a.txt', { provision: true })
       expect(result.networkRead).toBe('24')
       expect(counting.commands).toEqual(['cat'])
     } finally {
@@ -300,11 +300,11 @@ describe('provision clears the command gate first', () => {
     // never be allowed to produce.
     const ws = buildWorkspace([new NoCat()])
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-      const result = await ws.execute('cat /data/a.txt', { provision: true })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      const result = await ws.shell('cat /data/a.txt', { provision: true })
       expect(result.precision).toBe(Precision.UNKNOWN)
       expect(result.networkRead).toBe('0')
-      const priced = await ws.execute('head /data/a.txt', { provision: true })
+      const priced = await ws.shell('head /data/a.txt', { provision: true })
       expect(priced.networkRead).toBe('0-24')
     } finally {
       await ws.close()
@@ -317,8 +317,8 @@ describe('provision clears the command gate first', () => {
     // approval it would need.
     const ws = buildWorkspace([new AskCat()])
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-      const result = await ws.execute('cat /data/a.txt', { provision: true })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      const result = await ws.shell('cat /data/a.txt', { provision: true })
       expect(result.precision).toBe(Precision.UNKNOWN)
       expect(result.networkRead).toBe('0')
     } finally {
@@ -333,8 +333,8 @@ describe('provision clears the command gate first', () => {
     // builtin plan, and the redirect source never stat'd or priced.
     const ws = buildWorkspace([new NoRead()])
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-      const result = await ws.execute('read x < /data/a.txt', { provision: true })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      const result = await ws.shell('read x < /data/a.txt', { provision: true })
       expect(result.precision).toBe(Precision.UNKNOWN)
       expect(result.networkRead).toBe('0')
     } finally {
@@ -342,8 +342,8 @@ describe('provision clears the command gate first', () => {
     }
     const control = buildWorkspace()
     try {
-      await control.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-      const priced = await control.execute('read x < /data/a.txt', { provision: true })
+      await control.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      const priced = await control.shell('read x < /data/a.txt', { provision: true })
       expect(priced.networkRead).toBe('24')
     } finally {
       await control.close()
@@ -354,8 +354,8 @@ describe('provision clears the command gate first', () => {
     // The body's own reads are byte counts the refusal is protecting.
     const ws = buildWorkspace([new NoF()])
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-      const result = await ws.execute('f() { cat /data/a.txt; }; f', { provision: true })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      const result = await ws.shell('f() { cat /data/a.txt; }; f', { provision: true })
       expect(result.precision).toBe(Precision.UNKNOWN)
       expect(result.networkRead).toBe('0')
     } finally {
@@ -371,10 +371,10 @@ describe('provision clears the command gate first', () => {
     // commands.allow profile that lists only the real tools it uses.
     const ws = buildWorkspace()
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
       const session = ws.sessionManager.get(ws.sessionManager.defaultId)
       session.commands = { allow: ['cat', 'tee'], ask: [], deny: [] }
-      const result = await ws.execute('f() { cat /data/a.txt; }; f', { provision: true })
+      const result = await ws.shell('f() { cat /data/a.txt; }; f', { provision: true })
       expect(result.networkRead).toBe('24')
       expect(result.precision).toBe(Precision.EXACT)
     } finally {
@@ -389,11 +389,11 @@ describe('provision clears the command gate first', () => {
     // exposed under another identity.
     const ws = buildWorkspace([new NoInternCat()])
     try {
-      await ws.execute('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
-      const denied = await ws.execute('cat /data/a.txt', { provision: true, agentId: 'intern' })
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      const denied = await ws.shell('cat /data/a.txt', { provision: true, agentId: 'intern' })
       expect(denied.precision).toBe(Precision.UNKNOWN)
       expect(denied.networkRead).toBe('0')
-      const priced = await ws.execute('cat /data/a.txt', { provision: true })
+      const priced = await ws.shell('cat /data/a.txt', { provision: true })
       expect(priced.networkRead).toBe('24')
     } finally {
       await ws.close()

@@ -23,9 +23,9 @@ from mirage.fuse.core import MountCore
 from mirage.io.types import IOResult
 from mirage.policy import Action, Deny, OpsContext, Policy
 from mirage.policy.types import SessionContext
-from mirage.resource.ram import RAMResource
 from mirage.shell.variable import VarAttr
 from mirage.types import HiddenPaths, HiddenVars, MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import (env_snapshot, reset_current_session,
                                       set_current_session)
@@ -44,8 +44,8 @@ class DenyOp(Policy):
         return None
 
 
-class _OverlayRAMResource(RAMResource):
-    """RAM resource with the native setattr op stripped, standing in for
+class _OverlayRAMVFS(RAMVFS):
+    """RAM VFS with the native setattr op stripped, standing in for
     an API backend that has no attribute slot."""
 
     def __init__(self) -> None:
@@ -54,9 +54,9 @@ class _OverlayRAMResource(RAMResource):
 
 
 def _two_mounts(policies=None) -> Workspace:
-    a = RAMResource()
+    a = RAMVFS()
     a._store.files["/x.txt"] = b"public\n"
-    b = RAMResource()
+    b = RAMVFS()
     b._store.files["/y.txt"] = b"other\n"
     return Workspace({
         "/a": (a, MountMode.WRITE),
@@ -72,7 +72,7 @@ def test_fuse_symlink_on_hidden_turf_is_refused():
     # namespace table directly, at a layer no session view covers.
     ws = _two_mounts()
     sess = ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
-    core = MountCore(ws.fs, session=sess)
+    core = MountCore(ws.vfs, session=sess)
     with pytest.raises(FileNotFoundError):
         core.symlink("/b/lk", "/a/x.txt")
     assert not ws.namespace.is_link("/b/lk")
@@ -81,7 +81,7 @@ def test_fuse_symlink_on_hidden_turf_is_refused():
 def test_fuse_symlink_on_visible_turf_still_works():
     ws = _two_mounts()
     sess = ws.create_session("agent")
-    core = MountCore(ws.fs, session=sess)
+    core = MountCore(ws.vfs, session=sess)
     core.symlink("/a/lk", "x.txt")
     assert ws.namespace.readlink("/a/lk") == "x.txt"
 
@@ -90,7 +90,7 @@ def test_ln_fires_the_op_gates():
     ws = _two_mounts(policies=[DenyOp("symlink")])
 
     async def run():
-        return await ws.execute("ln -s x.txt /a/lk")
+        return await ws.shell("ln -s x.txt /a/lk")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -104,11 +104,11 @@ def test_ln_leaves_an_op_record():
     ws = _two_mounts()
 
     async def run():
-        return await ws.execute("ln -s x.txt /a/lk")
+        return await ws.shell("ln -s x.txt /a/lk")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
-    assert any(r.op == "symlink" and r.path == "/a/lk" for r in ws.fs.records)
+    assert any(r.op == "symlink" and r.path == "/a/lk" for r in ws.vfs.records)
 
 
 def test_scoped_shell_ln_onto_hidden_turf_is_refused():
@@ -116,7 +116,7 @@ def test_scoped_shell_ln_onto_hidden_turf_is_refused():
     ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
 
     async def run():
-        return await ws.execute("ln -s /a/x.txt /b/lk", session_id="agent")
+        return await ws.shell("ln -s /a/x.txt /b/lk", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -132,9 +132,9 @@ def test_scoped_shell_ln_does_not_follow_a_hidden_link_into_its_directory():
 
     async def run():
         for line in ("mkdir -p /a/d", "ln -s /a/d /a/hl"):
-            assert (await ws.execute(line)).exit_code == 0
+            assert (await ws.shell(line)).exit_code == 0
         ws.create_session("agent", profile={"paths": {"hide": ["/a/hl"]}})
-        return await ws.execute("ln -s /a/x.txt /a/hl", session_id="agent")
+        return await ws.shell("ln -s /a/x.txt /a/hl", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 1
@@ -149,10 +149,10 @@ def test_scoped_shell_hard_ln_of_a_hidden_link_has_nothing_to_copy():
     ws = _two_mounts()
 
     async def run():
-        assert (await ws.execute("ln -s /a/x.txt /a/hl")).exit_code == 0
+        assert (await ws.shell("ln -s /a/x.txt /a/hl")).exit_code == 0
         ws.create_session("agent", profile={"paths": {"hide": ["/a/hl"]}})
         return [
-            await ws.execute(line, session_id="agent")
+            await ws.shell(line, session_id="agent")
             for line in ("ln /a/hl /a/copy", "ln -L /a/hl /a/copy2")
         ]
 
@@ -168,7 +168,7 @@ def test_scoped_shell_ln_onto_a_hidden_mount_root_does_not_say_it_exists():
     ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
 
     async def run():
-        return await ws.execute("ln -sT /a/x.txt /b", session_id="agent")
+        return await ws.shell("ln -sT /a/x.txt /b", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 1
@@ -182,8 +182,8 @@ def test_symlink_and_readlink_answer_on_the_ops_facade():
     ws = _two_mounts()
 
     async def run():
-        await ws.fs.symlink("/a/lk", "x.txt")
-        return await ws.fs.readlink("/a/lk")
+        await ws.vfs.symlink("/a/lk", "x.txt")
+        return await ws.vfs.readlink("/a/lk")
 
     assert asyncio.run(run()) == "x.txt"
     assert ws.namespace.readlink("/a/lk") == "x.txt"
@@ -197,9 +197,9 @@ def test_scoped_shell_readlink_on_hidden_turf_is_refused():
     ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
 
     async def run():
-        made = await ws.execute("ln -s /b/y.txt /b/lk")
+        made = await ws.shell("ln -s /b/y.txt /b/lk")
         assert made.exit_code == 0
-        return await ws.execute("readlink /b/lk", session_id="agent")
+        return await ws.shell("readlink /b/lk", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -213,9 +213,9 @@ def test_scoped_shell_readlink_f_on_hidden_turf_is_refused():
     ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
 
     async def run():
-        made = await ws.execute("ln -s /b/y.txt /b/lk")
+        made = await ws.shell("ln -s /b/y.txt /b/lk")
         assert made.exit_code == 0
-        return await ws.execute("readlink -m /b/lk", session_id="agent")
+        return await ws.shell("readlink -m /b/lk", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -226,9 +226,9 @@ def test_shell_readlink_fires_the_op_gates():
     ws = _two_mounts(policies=[DenyOp("readlink")])
 
     async def run():
-        made = await ws.execute("ln -s x.txt /a/lk")
+        made = await ws.shell("ln -s x.txt /a/lk")
         assert made.exit_code == 0
-        return await ws.execute("readlink /a/lk")
+        return await ws.shell("readlink /a/lk")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -239,7 +239,7 @@ def test_readlink_on_a_non_link_raises_einval():
     ws = _two_mounts()
 
     async def run():
-        return await ws.fs.readlink("/a/x.txt")
+        return await ws.vfs.readlink("/a/x.txt")
 
     with pytest.raises(OSError):
         asyncio.run(run())
@@ -251,9 +251,9 @@ def test_chown_h_on_a_link_fires_the_op_gates():
     ws = _two_mounts(policies=[DenyOp("setattr")])
 
     async def run():
-        made = await ws.execute("ln -s x.txt /a/lk")
+        made = await ws.shell("ln -s x.txt /a/lk")
         assert made.exit_code == 0
-        return await ws.execute("chown -h alice /a/lk")
+        return await ws.shell("chown -h alice /a/lk")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -265,14 +265,14 @@ def test_chown_h_on_a_link_fires_the_op_gates():
 def test_overlay_setattr_fires_the_op_gates():
     # A backend with no native setattr op stores attrs in the namespace
     # overlay; that write must clear the same gates as a native one.
-    o = _OverlayRAMResource()
+    o = _OverlayRAMVFS()
     o._store.files["/f.txt"] = b"body\n"
     ws = Workspace({"/o": (o, MountMode.WRITE)},
                    mode=MountMode.WRITE,
                    policies=[DenyOp("setattr")])
 
     async def run():
-        return await ws.execute("chmod 600 /o/f.txt")
+        return await ws.shell("chmod 600 /o/f.txt")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -282,12 +282,12 @@ def test_overlay_setattr_fires_the_op_gates():
 
 
 def test_overlay_setattr_still_lands_without_policies():
-    o = _OverlayRAMResource()
+    o = _OverlayRAMVFS()
     o._store.files["/f.txt"] = b"body\n"
     ws = Workspace({"/o": (o, MountMode.WRITE)}, mode=MountMode.WRITE)
 
     async def run():
-        return await ws.execute("chmod 600 /o/f.txt")
+        return await ws.shell("chmod 600 /o/f.txt")
 
     io = asyncio.run(run())
     assert io.exit_code == 0, f"unexpected refusal: {io}"
@@ -310,8 +310,8 @@ def test_export_fires_the_state_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        denied = await ws.execute("export SECRET_X=1")
-        allowed = await ws.execute("export PUBLIC_X=1")
+        denied = await ws.shell("export SECRET_X=1")
+        allowed = await ws.shell("export PUBLIC_X=1")
         return denied, allowed
 
     denied, allowed = asyncio.run(run())
@@ -332,7 +332,7 @@ def test_every_declaring_spelling_fires_the_state_gate():
 
     async def run():
         return [
-            await ws.execute(line) for line in (
+            await ws.shell(line) for line in (
                 "SECRET_A=1",
                 "export SECRET_B",
                 "readonly SECRET_C",
@@ -359,7 +359,7 @@ def test_a_hidden_name_cannot_be_marked_readonly():
     session.hidden_vars = HiddenVars(names=("SECRET", ), patterns=())
 
     async def run():
-        return await ws.execute("readonly SECRET")
+        return await ws.shell("readonly SECRET")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -371,7 +371,7 @@ def test_command_env_is_a_snapshot_not_the_live_dict():
     # A command's env is the process view: a child cannot write the
     # parent's environment, so a mutation must not land in the session.
 
-    @command("envpoke", resource="ram", spec=CommandSpec())
+    @command("envpoke", vfs="ram", spec=CommandSpec())
     async def envpoke(store, paths: list[PathSpec], texts: list[str],
                       opts: CommandOpts):
         assert opts.env is not None
@@ -384,7 +384,7 @@ def test_command_env_is_a_snapshot_not_the_live_dict():
         mount.register(rc)
 
     async def run():
-        return await ws.execute("envpoke /a/x.txt")
+        return await ws.shell("envpoke /a/x.txt")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -395,7 +395,7 @@ def test_a_command_can_opt_into_the_session_view():
     # The LinkView pattern for the session plane: the live handle rides
     # CommandOpts, and reads answer through the view.
 
-    @command("envread", resource="ram", spec=CommandSpec())
+    @command("envread", vfs="ram", spec=CommandSpec())
     async def envread(store, paths: list[PathSpec], texts: list[str],
                       opts: CommandOpts):
         assert opts.session_view is not None
@@ -408,8 +408,8 @@ def test_a_command_can_opt_into_the_session_view():
         mount.register(rc)
 
     async def run():
-        await ws.execute("export MARKER=yes")
-        result = await ws.execute("envread /a/x.txt")
+        await ws.shell("export MARKER=yes")
+        result = await ws.shell("envread /a/x.txt")
         return await result.stdout_str()
 
     assert asyncio.run(run()).strip() == "yes"
@@ -422,13 +422,13 @@ def test_facade_symlink_respects_the_sessions_view():
     async def run():
         token = set_current_session(sess)
         try:
-            await ws.fs.symlink("/a/lk", "x.txt")
+            await ws.vfs.symlink("/a/lk", "x.txt")
             # The hidden mount does not exist for the session, so a
             # create under it answers ENOENT as every read does; only a
             # create at a hidden name inside a visible directory is
             # EACCES.
             with pytest.raises(FileNotFoundError):
-                await ws.fs.symlink("/b/lk", "y.txt")
+                await ws.vfs.symlink("/b/lk", "y.txt")
         finally:
             reset_current_session(token)
 
@@ -443,9 +443,9 @@ def test_bare_export_of_a_new_name_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        denied = await ws.execute("export SECRET_BARE")
-        allowed = await ws.execute("export PUBLIC_BARE")
-        listed = await ws.execute("export -p")
+        denied = await ws.shell("export SECRET_BARE")
+        allowed = await ws.shell("export PUBLIC_BARE")
+        listed = await ws.shell("export -p")
         return denied, allowed, await listed.stdout_str()
 
     denied, allowed, listed = asyncio.run(run())
@@ -464,7 +464,7 @@ def test_local_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        return await ws.execute("f() { local SECRET_L=1; }; f")
+        return await ws.shell("f() { local SECRET_L=1; }; f")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -480,8 +480,8 @@ def test_plain_assignment_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        denied = await ws.execute("SECRET_P=1; echo after")
-        allowed = await ws.execute("PUBLIC_P=1")
+        denied = await ws.shell("SECRET_P=1; echo after")
+        allowed = await ws.shell("PUBLIC_P=1")
         return denied, allowed
 
     denied, allowed = asyncio.run(run())
@@ -496,7 +496,7 @@ def test_append_assignment_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        return await ws.execute("SECRET_A+=x")
+        return await ws.shell("SECRET_A+=x")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -509,7 +509,7 @@ def test_array_assignment_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        return await ws.execute("SECRET_V=(a b); echo after")
+        return await ws.shell("SECRET_V=(a b); echo after")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -522,7 +522,7 @@ def test_array_append_assignment_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        return await ws.execute("SECRET_VA+=(a)")
+        return await ws.shell("SECRET_VA+=(a)")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -534,7 +534,7 @@ def test_subscript_assignment_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        return await ws.execute("SECRET_S[0]=x")
+        return await ws.shell("SECRET_S[0]=x")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -552,7 +552,7 @@ def test_scalar_append_onto_an_existing_array_fires_the_gate():
     seed_var(sess, "SECRET_E", ["a"])
 
     async def run():
-        return await ws.execute("SECRET_E+=x")
+        return await ws.shell("SECRET_E+=x")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -565,7 +565,7 @@ def test_declaration_array_assignment_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        return await ws.execute("export SECRET_D=(a)")
+        return await ws.shell("export SECRET_D=(a)")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -583,9 +583,9 @@ def test_a_prefix_assignment_clears_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        denied = await ws.execute("SECRET_K=leak printenv SECRET_K")
+        denied = await ws.shell("SECRET_K=leak printenv SECRET_K")
         out = await denied.stdout_str() if denied.stdout else ""
-        allowed = await ws.execute("OPEN_K=fine printenv OPEN_K")
+        allowed = await ws.shell("OPEN_K=fine printenv OPEN_K")
         return denied, out, await allowed.stdout_str()
 
     denied, out, allowed_out = asyncio.run(run())
@@ -605,7 +605,7 @@ def test_declare_x_on_an_existing_name_clears_the_gate():
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
     seed_var(sess, "SECRET_TOKEN", "hunter2")
 
-    io = asyncio.run(ws.execute("declare -x SECRET_TOKEN"))
+    io = asyncio.run(ws.shell("declare -x SECRET_TOKEN"))
     assert io.exit_code != 0
     assert b"refused by policy" in (io.stderr or b"")
     assert VarAttr.EXPORT not in sess.vars["SECRET_TOKEN"].attrs
@@ -621,8 +621,8 @@ def test_a_declaration_stamps_what_stored_despite_a_bad_sibling():
     ws = _two_mounts()
 
     async def run():
-        bad = await ws.execute("declare -x QGOOD=1 1BAD=x")
-        shown = await ws.execute("declare -p QGOOD")
+        bad = await ws.shell("declare -x QGOOD=1 1BAD=x")
+        shown = await ws.shell("declare -p QGOOD")
         return bad, await shown.stdout_str() if shown.stdout else ""
 
     bad, shown = asyncio.run(run())
@@ -637,8 +637,8 @@ def test_readonly_name_refuses_a_declaration_array_store():
     ws = _two_mounts()
 
     async def run():
-        await ws.execute("readonly LOCKED")
-        return await ws.execute("export LOCKED=(a)")
+        await ws.shell("readonly LOCKED")
+        return await ws.shell("export LOCKED=(a)")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -655,10 +655,10 @@ def test_readonly_declaration_array_abandons_the_line():
     ws = _two_mounts()
 
     async def run():
-        await ws.execute("readonly LOCKED")
-        denied = await ws.execute("export LOCKED=(a); echo unreached")
+        await ws.shell("readonly LOCKED")
+        denied = await ws.shell("export LOCKED=(a); echo unreached")
         out = await denied.stdout_str() if denied.stdout else ""
-        after = await ws.execute("echo after")
+        after = await ws.shell("echo after")
         return denied, out, after
 
     denied, out, after = asyncio.run(run())
@@ -672,8 +672,8 @@ def test_readonly_declare_array_is_fatal_at_top_level():
     ws = _two_mounts()
 
     async def run():
-        await ws.execute("readonly LOCKED")
-        denied = await ws.execute("declare LOCKED=(a); echo unreached")
+        await ws.shell("readonly LOCKED")
+        denied = await ws.shell("declare LOCKED=(a); echo unreached")
         out = await denied.stdout_str() if denied.stdout else ""
         return denied, out
 
@@ -688,8 +688,8 @@ def test_readonly_scalar_export_refusal_continues_the_line():
     ws = _two_mounts()
 
     async def run():
-        await ws.execute("readonly LOCKED")
-        io = await ws.execute("export LOCKED=v; echo rc=$?")
+        await ws.shell("readonly LOCKED")
+        io = await ws.shell("export LOCKED=v; echo rc=$?")
         out = await io.stdout_str() if io.stdout else ""
         return io, out
 
@@ -704,8 +704,8 @@ def test_readonly_local_array_refusal_stays_in_the_function():
     ws = _two_mounts()
 
     async def run():
-        await ws.execute("readonly LOCKED")
-        io = await ws.execute("f() { local LOCKED=(a); echo in-f; }; f")
+        await ws.shell("readonly LOCKED")
+        io = await ws.shell("f() { local LOCKED=(a); echo in-f; }; f")
         out = await io.stdout_str() if io.stdout else ""
         return io, out
 
@@ -720,7 +720,7 @@ def test_export_of_an_array_literal_prints_nothing():
     ws = _two_mounts()
 
     async def run():
-        io = await ws.execute("export ARR=(x y)")
+        io = await ws.shell("export ARR=(x y)")
         out = await io.stdout_str() if io.stdout else ""
         return io, out
 
@@ -737,8 +737,8 @@ def test_readonly_loop_variable_refuses_before_the_body():
     ws = _two_mounts()
 
     async def run():
-        await ws.execute("readonly LV")
-        denied = await ws.execute("for LV in a b; do echo ran; done")
+        await ws.shell("readonly LV")
+        denied = await ws.shell("for LV in a b; do echo ran; done")
         out = await denied.stdout_str() if denied.stdout else ""
         return denied, out
 
@@ -762,7 +762,7 @@ def test_the_gate_learns_which_session_asked():
     ws.create_session("agent", mounts={"/a": "write"})
 
     async def run():
-        await ws.execute("X=1", session_id="agent")
+        await ws.shell("X=1", session_id="agent")
 
     asyncio.run(run())
     assert seen == ["agent"]
@@ -775,7 +775,7 @@ def test_subscripted_unset_of_a_scalar_fires_the_gate():
     seed_var(ws.get_session(ws.default_session_id), "SECRET_U", "v")
 
     async def run():
-        return await ws.execute("unset 'SECRET_U[0]'")
+        return await ws.shell("unset 'SECRET_U[0]'")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -789,7 +789,7 @@ def test_subscripted_unset_of_an_array_element_fires_the_gate():
     seed_var(sess, "SECRET_W", ["a", "b"])
 
     async def run():
-        return await ws.execute("unset 'SECRET_W[1]'")
+        return await ws.shell("unset 'SECRET_W[1]'")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -803,9 +803,9 @@ def test_for_loop_variable_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
 
     async def run():
-        denied = await ws.execute("for SECRET_I in a b; do echo ran; done")
+        denied = await ws.shell("for SECRET_I in a b; do echo ran; done")
         out = await denied.stdout_str() if denied.stdout else ""
-        allowed = await ws.execute("for PUB_I in a b; do echo ok; done")
+        allowed = await ws.shell("for PUB_I in a b; do echo ok; done")
         allowed_out = await allowed.stdout_str()
         return denied, out, allowed, allowed_out
 
@@ -836,8 +836,8 @@ def test_expansion_reads_a_hidden_var_as_unset():
     ws = _hidden_vars_ws()
 
     async def run():
-        io = await ws.execute('echo "[$SLACK_TOKEN][$PUBLIC]"',
-                              session_id="agent")
+        io = await ws.shell('echo "[$SLACK_TOKEN][$PUBLIC]"',
+                            session_id="agent")
         return io, await io.stdout_str()
 
     io, out = asyncio.run(run())
@@ -849,8 +849,8 @@ def test_assign_default_writes_raw_env_under_hidden_vars():
     ws = _hidden_vars_ws()
 
     async def run():
-        io = await ws.execute('echo "${NEWVAR:=seeded}" && echo "$NEWVAR"',
-                              session_id="agent")
+        io = await ws.shell('echo "${NEWVAR:=seeded}" && echo "$NEWVAR"',
+                            session_id="agent")
         return io, await io.stdout_str()
 
     io, out = asyncio.run(run())
@@ -867,8 +867,8 @@ def test_assign_default_of_a_hidden_var_is_refused():
     ws = _hidden_vars_ws()
 
     async def run():
-        return await ws.execute('echo "${SLACK_TOKEN:=fake}"',
-                                session_id="agent")
+        return await ws.shell('echo "${SLACK_TOKEN:=fake}"',
+                              session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -881,9 +881,9 @@ def test_arith_assign_of_a_hidden_var_is_refused():
     ws = _hidden_vars_ws()
 
     async def run():
-        expansion = await ws.execute('echo "$((SLACK_TOKEN=5))"',
-                                     session_id="agent")
-        command = await ws.execute("((SLACK_TOKEN=7))", session_id="agent")
+        expansion = await ws.shell('echo "$((SLACK_TOKEN=5))"',
+                                   session_id="agent")
+        command = await ws.shell("((SLACK_TOKEN=7))", session_id="agent")
         return expansion, command
 
     expansion, command = asyncio.run(run())
@@ -896,8 +896,7 @@ def test_printf_v_of_a_hidden_var_is_refused():
     ws = _hidden_vars_ws()
 
     async def run():
-        return await ws.execute("printf -v SLACK_TOKEN fake",
-                                session_id="agent")
+        return await ws.shell("printf -v SLACK_TOKEN fake", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -908,7 +907,7 @@ def test_env_builtin_omits_hidden_vars():
     ws = _hidden_vars_ws()
 
     async def run():
-        io = await ws.execute("env", session_id="agent")
+        io = await ws.shell("env", session_id="agent")
         return await io.stdout_str()
 
     out = asyncio.run(run())
@@ -920,7 +919,7 @@ def test_set_listing_omits_hidden_vars():
     ws = _hidden_vars_ws()
 
     async def run():
-        io = await ws.execute("set", session_id="agent")
+        io = await ws.shell("set", session_id="agent")
         return await io.stdout_str()
 
     out = asyncio.run(run())
@@ -932,7 +931,7 @@ def test_export_p_omits_hidden_vars():
     ws = _hidden_vars_ws()
 
     async def run():
-        io = await ws.execute("export -p", session_id="agent")
+        io = await ws.shell("export -p", session_id="agent")
         return await io.stdout_str()
 
     out = asyncio.run(run())
@@ -946,7 +945,7 @@ def test_exporting_a_hidden_var_is_refused_and_preserves_it():
     ws = _hidden_vars_ws()
 
     async def run():
-        return await ws.execute("export SLACK_TOKEN=fake", session_id="agent")
+        return await ws.shell("export SLACK_TOKEN=fake", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -957,7 +956,7 @@ def test_plain_assignment_of_a_hidden_var_is_refused():
     ws = _hidden_vars_ws()
 
     async def run():
-        return await ws.execute("SLACK_TOKEN=fake", session_id="agent")
+        return await ws.shell("SLACK_TOKEN=fake", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -968,7 +967,7 @@ def test_unset_of_a_hidden_var_is_quiet_and_preserves_it():
     ws = _hidden_vars_ws()
 
     async def run():
-        return await ws.execute("unset SLACK_TOKEN", session_id="agent")
+        return await ws.shell("unset SLACK_TOKEN", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -991,11 +990,11 @@ def test_expansion_reads_a_hidden_array_as_unset():
     ws = _hidden_array_ws()
 
     async def run():
-        io = await ws.execute(
+        io = await ws.shell(
             'echo "[$SLACK_TOKEN][${SLACK_TOKEN[0]}]'
             '[${SLACK_TOKEN[@]}][${#SLACK_TOKEN[@]}]"',
             session_id="agent")
-        splat = await ws.execute(
+        splat = await ws.shell(
             'for el in "${SLACK_TOKEN[@]}"; do echo "el=$el"; done; echo end',
             session_id="agent")
         return io, await io.stdout_str(), splat, await splat.stdout_str()
@@ -1014,10 +1013,10 @@ def test_prefix_assignment_of_a_hidden_var_is_refused():
     ws = _hidden_vars_ws()
 
     async def run():
-        await ws.execute("f() { echo ran; }", session_id="agent")
-        fn = await ws.execute("SLACK_TOKEN=fake f", session_id="agent")
-        cmd = await ws.execute("SLACK_TOKEN=fake echo hi", session_id="agent")
-        bare = await ws.execute("SLACK_TOKEN=fake OTHER=x", session_id="agent")
+        await ws.shell("f() { echo ran; }", session_id="agent")
+        fn = await ws.shell("SLACK_TOKEN=fake f", session_id="agent")
+        cmd = await ws.shell("SLACK_TOKEN=fake echo hi", session_id="agent")
+        bare = await ws.shell("SLACK_TOKEN=fake OTHER=x", session_id="agent")
         return fn, cmd, bare
 
     fn, cmd, bare = asyncio.run(run())
@@ -1036,7 +1035,7 @@ def test_bare_declare_a_of_a_hidden_var_is_refused():
     ws = _hidden_vars_ws()
 
     async def run():
-        return await ws.execute("declare -a SLACK_TOKEN", session_id="agent")
+        return await ws.shell("declare -a SLACK_TOKEN", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -1052,9 +1051,8 @@ def test_unset_of_a_hidden_array_is_a_quiet_noop():
     ws = _hidden_array_ws()
 
     async def run():
-        element = await ws.execute('unset "SLACK_TOKEN[1]"',
-                                   session_id="agent")
-        whole = await ws.execute("unset SLACK_TOKEN", session_id="agent")
+        element = await ws.shell('unset "SLACK_TOKEN[1]"', session_id="agent")
+        whole = await ws.shell("unset SLACK_TOKEN", session_id="agent")
         return element, whole
 
     element, whole = asyncio.run(run())
@@ -1072,7 +1070,7 @@ def test_bare_export_of_a_hidden_var_is_refused():
     ws = _hidden_vars_ws()
 
     async def run():
-        return await ws.execute("export SLACK_TOKEN", session_id="agent")
+        return await ws.shell("export SLACK_TOKEN", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -1089,8 +1087,8 @@ def test_subscript_arithmetic_resolves_against_the_visible_env():
     sess.hidden_vars = HiddenVars(names=("SECRET_IDX", ))
 
     async def run():
-        await ws.execute("b=(x y)", session_id="agent")
-        return await ws.execute("b[SECRET_IDX]=z", session_id="agent")
+        await ws.shell("b=(x y)", session_id="agent")
+        return await ws.shell("b[SECRET_IDX]=z", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -1107,9 +1105,9 @@ def test_hidden_home_reads_as_unset_everywhere():
     sess.hidden_vars = HiddenVars(names=("HOME", ))
 
     async def run():
-        home = await ws.execute('echo "[$HOME]"', session_id="agent")
-        tilde = await ws.execute("echo ~", session_id="agent")
-        cd = await ws.execute("cd", session_id="agent")
+        home = await ws.shell('echo "[$HOME]"', session_id="agent")
+        tilde = await ws.shell("echo ~", session_id="agent")
+        cd = await ws.shell("cd", session_id="agent")
         return await home.stdout_str(), await tilde.stdout_str(), cd
 
     home_out, tilde_out, cd = asyncio.run(run())
@@ -1129,7 +1127,7 @@ def test_guest_env_omits_hidden_vars():
 
 
 def _hidden_paths_ws() -> Workspace:
-    a = RAMResource()
+    a = RAMVFS()
     a._store.files["/x.txt"] = b"public\n"
     a._store.files["/secrets/token.txt"] = b"s3cr3t\n"
     a._store.files["/note.key"] = b"kkk\n"
@@ -1149,11 +1147,11 @@ def test_ops_read_of_a_hidden_path_is_enoent():
         token = set_current_session(sess)
         try:
             with pytest.raises(FileNotFoundError):
-                await ws.fs.read("/a/secrets/token.txt")
+                await ws.vfs.read("/a/secrets/token.txt")
             with pytest.raises(FileNotFoundError):
-                await ws.fs.stat("/a/secrets")
+                await ws.vfs.stat("/a/secrets")
             with pytest.raises(FileNotFoundError):
-                await ws.fs.read("/a/note.key")
+                await ws.vfs.read("/a/note.key")
         finally:
             reset_current_session(token)
 
@@ -1167,7 +1165,7 @@ def test_ops_readdir_drops_hidden_names():
     async def run():
         token = set_current_session(sess)
         try:
-            return await ws.fs.readdir("/a")
+            return await ws.vfs.readdir("/a")
         finally:
             reset_current_session(token)
 
@@ -1184,7 +1182,7 @@ def test_ops_exists_says_a_hidden_path_does_not():
     async def run():
         token = set_current_session(sess)
         try:
-            return await ws.fs.exists("/a/secrets/token.txt")
+            return await ws.vfs.exists("/a/secrets/token.txt")
         finally:
             reset_current_session(token)
 
@@ -1203,17 +1201,17 @@ def test_ops_create_into_hidden_space_never_lands():
         token = set_current_session(sess)
         try:
             with pytest.raises(FileNotFoundError):
-                await ws.fs.write("/a/secrets/new.txt", b"x")
+                await ws.vfs.write("/a/secrets/new.txt", b"x")
             with pytest.raises(FileNotFoundError):
-                await ws.fs.mkdir("/a/secrets/sub")
+                await ws.vfs.mkdir("/a/secrets/sub")
             with pytest.raises(PermissionError):
-                await ws.fs.write("/a/new.key", b"x")
+                await ws.vfs.write("/a/new.key", b"x")
         finally:
             reset_current_session(token)
 
     asyncio.run(run())
     files = next(m for m in ws.namespace.registry.mounts()
-                 if m.prefix.rstrip("/") == "/a").resource._store.files
+                 if m.prefix.rstrip("/") == "/a").vfs._store.files
     assert "/secrets/new.txt" not in files
 
 
@@ -1221,8 +1219,8 @@ def test_unscoped_session_sees_everything():
     ws = _hidden_paths_ws()
 
     async def run():
-        listing = await ws.fs.readdir("/a")
-        body = await ws.fs.read("/a/secrets/token.txt")
+        listing = await ws.vfs.readdir("/a")
+        body = await ws.vfs.read("/a/secrets/token.txt")
         return listing, body
 
     listing, body = asyncio.run(run())
@@ -1236,7 +1234,7 @@ def test_fuse_hides_hidden_paths():
     # scoped shell about what exists.
     ws = _hidden_paths_ws()
     sess = ws.get_session("agent")
-    core = MountCore(ws.fs, session=sess)
+    core = MountCore(ws.vfs, session=sess)
     with pytest.raises(FileNotFoundError):
         core.getattr("/a/secrets/token.txt")
     names = core.readdir("/a")
@@ -1248,7 +1246,7 @@ def test_shell_cat_of_a_hidden_path_is_no_such_file():
     ws = _hidden_paths_ws()
 
     async def run():
-        io = await ws.execute("cat /a/secrets/token.txt", session_id="agent")
+        io = await ws.shell("cat /a/secrets/token.txt", session_id="agent")
         out = await io.stdout_str() if io.stdout else ""
         return io, out
 
@@ -1262,7 +1260,7 @@ def test_shell_cat_of_a_pattern_hidden_file_is_no_such_file():
     ws = _hidden_paths_ws()
 
     async def run():
-        io = await ws.execute("cat /a/note.key", session_id="agent")
+        io = await ws.shell("cat /a/note.key", session_id="agent")
         out = await io.stdout_str() if io.stdout else ""
         return io, out
 
@@ -1275,7 +1273,7 @@ def test_shell_ls_drops_hidden_names():
     ws = _hidden_paths_ws()
 
     async def run():
-        io = await ws.execute("ls /a", session_id="agent")
+        io = await ws.shell("ls /a", session_id="agent")
         return await io.stdout_str()
 
     out = asyncio.run(run())
@@ -1288,7 +1286,7 @@ def test_shell_ls_of_a_hidden_dir_is_no_such_file():
     ws = _hidden_paths_ws()
 
     async def run():
-        io = await ws.execute("ls /a/secrets", session_id="agent")
+        io = await ws.shell("ls /a/secrets", session_id="agent")
         out = await io.stdout_str() if io.stdout else ""
         return io, out
 
@@ -1301,7 +1299,7 @@ def test_shell_find_never_reports_hidden_rows():
     ws = _hidden_paths_ws()
 
     async def run():
-        io = await ws.execute("find /a", session_id="agent")
+        io = await ws.shell("find /a", session_id="agent")
         return await io.stdout_str()
 
     out = asyncio.run(run())
@@ -1316,7 +1314,7 @@ def test_shell_glob_never_matches_a_hidden_name():
     ws = _hidden_paths_ws()
 
     async def run():
-        io = await ws.execute("cat /a/*.key", session_id="agent")
+        io = await ws.shell("cat /a/*.key", session_id="agent")
         out = await io.stdout_str() if io.stdout else ""
         return io, out
 
@@ -1332,13 +1330,13 @@ def test_find_predicates_evaluate_on_the_visible_tree():
     # unseen child exists. Under hidden paths the generic must walk
     # through the guarded readdir instead.
     ws = _hidden_paths_ws()
-    resource = next(m for m in ws.namespace.registry.mounts()
-                    if m.prefix.rstrip("/") == "/a").resource
-    resource._store.files["/vault/only.key"] = b"kkk\n"
-    resource._store.dirs.add("/vault")
+    vfs = next(m for m in ws.namespace.registry.mounts()
+               if m.prefix.rstrip("/") == "/a").vfs
+    vfs._store.files["/vault/only.key"] = b"kkk\n"
+    vfs._store.dirs.add("/vault")
 
     async def run():
-        io = await ws.execute("find /a -empty", session_id="agent")
+        io = await ws.shell("find /a -empty", session_id="agent")
         return await io.stdout_str()
 
     out = asyncio.run(run())
@@ -1350,13 +1348,13 @@ def test_shell_redirect_into_hidden_space_fails_and_writes_nothing():
     ws = _hidden_paths_ws()
 
     async def run():
-        return await ws.execute("echo hi > /a/secrets/new.txt",
-                                session_id="agent")
+        return await ws.shell("echo hi > /a/secrets/new.txt",
+                              session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
     files = next(m for m in ws.namespace.registry.mounts()
-                 if m.prefix.rstrip("/") == "/a").resource._store.files
+                 if m.prefix.rstrip("/") == "/a").vfs._store.files
     assert "/secrets/new.txt" not in files
 
 
@@ -1364,7 +1362,7 @@ def test_shell_du_never_counts_hidden_leaves():
     ws = _hidden_paths_ws()
 
     async def run():
-        io = await ws.execute("du -a /a", session_id="agent")
+        io = await ws.shell("du -a /a", session_id="agent")
         return await io.stdout_str()
 
     out = asyncio.run(run())
@@ -1377,7 +1375,7 @@ def test_shell_tree_never_prints_hidden_names():
     ws = _hidden_paths_ws()
 
     async def run():
-        io = await ws.execute("tree /a", session_id="agent")
+        io = await ws.shell("tree /a", session_id="agent")
         return await io.stdout_str()
 
     out = asyncio.run(run())
@@ -1395,9 +1393,9 @@ def test_a_whole_mount_hidden_by_prefix_disappears():
     sess.hidden_paths = HiddenPaths(paths=("/b", ))
 
     async def run():
-        root = await ws.execute("ls /", session_id="agent")
-        fan = await ws.execute("find / -name '*.txt'", session_id="agent")
-        denied = await ws.execute("cat /b/y.txt", session_id="agent")
+        root = await ws.shell("ls /", session_id="agent")
+        fan = await ws.shell("find / -name '*.txt'", session_id="agent")
+        denied = await ws.shell("cat /b/y.txt", session_id="agent")
         return (await root.stdout_str(), await fan.stdout_str(), denied)
 
     root_out, fan_out, denied = asyncio.run(run())

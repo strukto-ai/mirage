@@ -39,7 +39,7 @@ async def walk(
         info = await stat(accessor, path, index)
     except FileNotFoundError:
         return 0
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     if info.type != FileType.DIRECTORY:
         size = info.size or 0
         if results is not None:
@@ -55,6 +55,6 @@ async def walk(
         child_spec = PathSpec(virtual=trimmed,
                               directory=trimmed,
                               resolved=False,
-                              resource_path=mount_key(trimmed, prefix))
+                              vfs_path=mount_key(trimmed, prefix))
         total += await walk(accessor, child_spec, index, results)
     return total

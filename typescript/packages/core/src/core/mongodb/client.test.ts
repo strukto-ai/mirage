@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig, type MongoDBConfig } from '../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig, type MongoDBConfig } from '../../vfs/mongodb/config.ts'
 import {
   countDocuments,
   findDocuments,

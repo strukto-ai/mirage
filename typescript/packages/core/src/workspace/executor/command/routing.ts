@@ -69,7 +69,7 @@ export function defaultCwdOperand(
   return new PathSpec({
     virtual: operand.virtual,
     directory: operand.directory,
-    resourcePath: operand.resourcePath,
+    vfsPath: operand.vfsPath,
     pattern: operand.pattern,
     resolved: operand.resolved,
     rawPath: CWD_DEFAULT_RAW[cmdName] ?? '',
@@ -84,7 +84,7 @@ export function pathFlagScopes(cmdName: string, argv: string[], cwd: string): Pa
       new PathSpec({
         virtual: value,
         directory: value,
-        resourcePath: '',
+        vfsPath: '',
         rawPath: value,
       }),
   )
@@ -120,7 +120,7 @@ export function positionalScopes(
     .map(
       ([value]) =>
         byVirtual.get(value) ??
-        new PathSpec({ virtual: value, directory: value, resourcePath: '', rawPath: value }),
+        new PathSpec({ virtual: value, directory: value, vfsPath: '', rawPath: value }),
     )
 }
 

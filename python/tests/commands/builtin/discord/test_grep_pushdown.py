@@ -32,7 +32,7 @@ def _concrete_paths(n: int = 7):
                     f"2026-01-{d:02d}/chat.jsonl")
         paths.append(
             PathSpec(
-                resource_path=mount_key(original, "/discord"),
+                vfs_path=mount_key(original, "/discord"),
                 virtual=original,
                 directory=original,
             ))
@@ -41,7 +41,7 @@ def _concrete_paths(n: int = 7):
 
 def _channel_path(name: str = "general__ch_456") -> PathSpec:
     original = f"/discord/myguild__g_123/channels/{name}"
-    return PathSpec(resource_path=mount_key(original, "/discord"),
+    return PathSpec(vfs_path=mount_key(original, "/discord"),
                     virtual=original,
                     directory=original)
 
@@ -163,7 +163,7 @@ async def test_discord_grep_resolves_ids_without_index():
     accessor.config = AsyncMock()
     path = "/discord/myguild__g_123/channels/general__ch_456"
     paths = [
-        PathSpec(resource_path=mount_key(path, "/discord"),
+        PathSpec(vfs_path=mount_key(path, "/discord"),
                  virtual=path,
                  directory=path)
     ]
@@ -190,7 +190,7 @@ async def test_discord_grep_bare_names_skip_native_search():
     accessor.config = AsyncMock()
     path = "/discord/myguild/channels/general"
     paths = [
-        PathSpec(resource_path=mount_key(path, "/discord"),
+        PathSpec(vfs_path=mount_key(path, "/discord"),
                  virtual=path,
                  directory=path)
     ]
@@ -212,7 +212,7 @@ async def test_discord_grep_falls_back_when_native_raises():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     paths = [
-        PathSpec(resource_path=mount_key(
+        PathSpec(vfs_path=mount_key(
             "/discord/myguild__g_123/channels/general__ch_456/*.jsonl",
             "/discord"),
                  virtual="/discord/myguild__g_123/channels/general__ch_456"
@@ -278,7 +278,7 @@ async def test_discord_grep_multi_pattern_skips_native_search():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     paths = [
-        PathSpec(resource_path=mount_key(
+        PathSpec(vfs_path=mount_key(
             "/discord/myguild__g_123/channels/general__ch_456/*.jsonl",
             "/discord"),
                  virtual="/discord/myguild__g_123/channels/general__ch_456"
@@ -352,7 +352,7 @@ async def test_discord_rg_multi_pattern_skips_native_search():
     accessor = AsyncMock()
     accessor.config = AsyncMock()
     paths = [
-        PathSpec(resource_path=mount_key(
+        PathSpec(vfs_path=mount_key(
             "/discord/myguild__g_123/channels/general__ch_456/*.jsonl",
             "/discord"),
                  virtual="/discord/myguild__g_123/channels/general__ch_456"
@@ -412,7 +412,7 @@ async def test_discord_grep_file_blob_skips_native_search():
     path = ("/discord/myguild__g_123/channels/general__ch_456/2026-01-01/"
             "files/img__A1.png")
     paths = [
-        PathSpec(resource_path=mount_key(path, "/discord"),
+        PathSpec(vfs_path=mount_key(path, "/discord"),
                  virtual=path,
                  directory=path)
     ]

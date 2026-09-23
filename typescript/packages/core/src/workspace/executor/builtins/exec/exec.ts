@@ -22,7 +22,7 @@ import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
 import { PathSpec } from '../../../../types.ts'
 import { getRedirects } from '../../../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { createFile } from '../../create.ts'
 import { toScope } from '../scope.ts'
@@ -32,7 +32,7 @@ import type { BuiltinCall, Result } from '../types.ts'
 
 /** The `exec` builtin without redirects: bare `exec` is a no-op that
  * succeeds; `exec CMD` has no OS-process referent and is refused. */
-export function handleExecCommand(args: string[], _session: Session): Result {
+export function handleExecCommand(args: string[], _session: SessionState): Result {
   if (args.length === 0)
     return [null, new IOResult(), new ExecutionNode({ command: 'exec', exitCode: 0 })]
   const err = new TextEncoder().encode(
@@ -92,7 +92,7 @@ export async function readOpenSource(dispatch: DispatchFn, identity: string): Pr
   }
 }
 
-function identity(session: Session, fd: number): [string, boolean] {
+function identity(session: SessionState, fd: number): [string, boolean] {
   // fd 0 is its own read end unless an `exec` rebound it: closed, or a
   // writing stream's identity (`exec 0<&1`), which a later dup from fd 0
   // copies as bash's does.
@@ -104,7 +104,7 @@ function identity(session: Session, fd: number): [string, boolean] {
 /** Point a writing stream at an identity. A stream on its own terminal
  * end is stored as null, the undiverted state every reader of
  * `execStdout`/`execStderr` already knows. */
-function bind(session: Session, fd: number, id: string, append: boolean): void {
+function bind(session: SessionState, fd: number, id: string, append: boolean): void {
   if (fd === FD_STDERR) {
     session.execStderr = id === TO_STDERR ? null : id
     session.execStderrAppend = append
@@ -123,7 +123,7 @@ function bind(session: Session, fd: number, id: string, append: boolean): void {
  */
 async function route(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   binding: string | null,
   data: Uint8Array,
   own: string,
@@ -136,9 +136,9 @@ async function route(
   return [null, null, false]
 }
 
-type StreamBindings = Pick<Session, (typeof EXEC_STREAM_FIELDS)[number]>
+type StreamBindings = Pick<SessionState, (typeof EXEC_STREAM_FIELDS)[number]>
 
-function bindingsOf(session: Session): StreamBindings {
+function bindingsOf(session: SessionState): StreamBindings {
   return {
     execStdout: session.execStdout,
     execStdoutAppend: session.execStdoutAppend,
@@ -161,7 +161,7 @@ function bindingsOf(session: Session): StreamBindings {
  */
 async function rollBack(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   saved: StreamBindings,
   err: Uint8Array,
 ): Promise<Result> {
@@ -186,7 +186,7 @@ function scopeOf(target: unknown): PathSpec {
  */
 export async function installExecRedirects(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   redirects: Redirect[],
 ): Promise<Result> {
   const badFd = unsupportedDescriptor(redirects)
@@ -203,7 +203,7 @@ export async function installExecRedirects(
  * still bound, which is the state bash reports from. */
 async function install(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   redirects: Redirect[],
 ): Promise<Uint8Array | null> {
   for (const r of redirects) {
@@ -331,7 +331,7 @@ async function install(
  */
 async function openTarget(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   scope: PathSpec,
   append: boolean,
 ): Promise<boolean> {
@@ -373,7 +373,7 @@ export function stdoutToStderr(node: TSNodeLike): boolean {
 
 export async function divertStatement(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   stdout: Uint8Array | null,
   io: IOResult,
   command: string,
@@ -438,7 +438,7 @@ function joinBytes(parts: Uint8Array[]): Uint8Array {
 
 async function appendTo(
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   target: string,
   data: Uint8Array,
 ): Promise<void> {

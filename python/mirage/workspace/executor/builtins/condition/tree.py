@@ -17,6 +17,7 @@ import re
 from mirage.shell.arith import ArithError, evaluate_arith
 from mirage.shell.array import make_array
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.posix import translate_classes
 from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS)
 from mirage.workspace.executor.builtins.condition.operators import (
@@ -72,7 +73,7 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
     if node.op == "=~":
         pattern = re.escape(node.right) if node.right_literal else node.right
         try:
-            match = re.search(pattern, node.left)
+            match = re.search(translate_classes(pattern), node.left)
         except re.error:
             raise CondError("mirage: syntax error in conditional expression")
         if match is None:

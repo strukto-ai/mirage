@@ -14,12 +14,12 @@
 
 import type { DispatchFn } from '../runtime/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
-import type { Session, StatusWriter } from './session/session.ts'
+import type { SessionState, StatusWriter } from './session/session.ts'
 
 /**
  * One running line: its signal and the sessions its statements stamp
  * on (the target session and the per-call fork, one object when the
- * call named no cwd or env). Bound by `execute` for the line's duration
+ * call named no cwd or env). Bound by `shell` for the line's duration
  * and read at the status door. It rides the async context rather than
  * the session, so two lines on one session each see their own, and a
  * statement that settles after its caller was released still reads the
@@ -27,7 +27,7 @@ import type { Session, StatusWriter } from './session/session.ts'
  */
 interface LineAbortFrame {
   signal: AbortSignal | undefined
-  sessions: readonly Session[]
+  sessions: readonly SessionState[]
   writer: StatusWriter
 }
 
@@ -37,11 +37,11 @@ const lineAbortContext = createAsyncContext<LineAbortFrame>()
  * Run `fn` as the body of the line `signal` belongs to. Everything the
  * body awaits, down to the status door, can then ask `abortedLine`
  * whether its caller is still waiting, without the signal being threaded
- * through every handler. `execute` is the only caller.
+ * through every handler. `shell` is the only caller.
  */
 export function runWithLineAbort<T>(
   signal: AbortSignal | undefined,
-  sessions: readonly Session[],
+  sessions: readonly SessionState[],
   writer: StatusWriter,
   fn: () => Promise<T>,
 ): Promise<T> {
@@ -58,7 +58,7 @@ export function runWithLineAbort<T>(
  * writers in play nothing can attribute the last stamp, so an aborted
  * line declines to restore rather than guess.
  */
-export function lineStatusWriter(session: Session): StatusWriter | null {
+export function lineStatusWriter(session: SessionState): StatusWriter | null {
   const frames = lineAbortContext.liveStores().filter((f) => f.sessions.includes(session))
   return frames.length === 1 ? (frames[0]?.writer ?? null) : null
 }
@@ -78,7 +78,7 @@ export function lineStatusWriter(session: Session): StatusWriter | null {
  * case left open is two aborted-or-not lines overlapping on one session
  * without task isolation, where the fallback cannot tell them apart.
  */
-export function abortedLine(session: Session): AbortSignal | undefined {
+export function abortedLine(session: SessionState): AbortSignal | undefined {
   const frames = lineAbortContext.liveStores().filter((f) => f.sessions.includes(session))
   if (frames.length === 0) return undefined
   const aborted = frames.filter((f) => f.signal?.aborted === true)

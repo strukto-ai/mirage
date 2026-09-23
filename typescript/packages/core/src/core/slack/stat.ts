@@ -101,11 +101,11 @@ async function statDay(
     return new FileStat({ name: entry.vfsName, type: FileType.DIRECTORY })
   }
   const virtual = path.virtual.replace(/\/+$/, '').split('/').slice(0, -1).join('/')
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const channelSpec = new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: mountKey(virtual, prefix),
+    vfsPath: mountKey(virtual, prefix),
   })
   if ((await resolveEntry(readdir, accessor, channelSpec, index)) === null) {
     throw enoent(path)

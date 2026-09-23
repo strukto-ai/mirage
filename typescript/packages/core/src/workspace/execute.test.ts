@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -31,10 +31,10 @@ beforeAll(async () => {
   parser = await createShellParser({ engineWasm, grammarWasm })
 })
 
-function buildWorkspace(): { ws: Workspace; ram: RAMResource } {
-  const ram = new RAMResource()
+function buildWorkspace(): { ws: Workspace; ram: RAMVFS } {
+  const ram = new RAMVFS()
   const registry = new OpsRegistry()
-  registry.registerResource(ram)
+  registry.registerVfs(ram)
   const ws = new Workspace(
     { '/ram': ram },
     { mode: MountMode.WRITE, ops: registry, shellParser: parser },
@@ -42,10 +42,10 @@ function buildWorkspace(): { ws: Workspace; ram: RAMResource } {
   return { ws, ram }
 }
 
-describe('Workspace.execute', () => {
+describe('Workspace.shell', () => {
   it('runs the `true` shell builtin with exit 0', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('true')
+    const res = await ws.shell('true')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('')
     await ws.close()
@@ -53,17 +53,17 @@ describe('Workspace.execute', () => {
 
   it('runs the `false` shell builtin with exit 1', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('false')
+    const res = await ws.shell('false')
     expect(res.exitCode).toBe(1)
     await ws.close()
   })
 
   it('readonly registers a bare name and an array assignment', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('RO=1; readonly RO; RO=2')
+    const res = await ws.shell('RO=1; readonly RO; RO=2')
     expect(res.exitCode).toBe(1)
     expect(new TextDecoder().decode(res.stderr)).toBe('bash: RO: readonly variable\n')
-    const res2 = await ws.execute("readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
+    const res2 = await ws.shell("readonly -a RA=(x y); unset 'RA[1]'; echo rc=$?")
     expect(new TextDecoder().decode(res2.stdout)).toBe('rc=1\n')
     expect(new TextDecoder().decode(res2.stderr)).toBe(
       'bash: unset: RA: cannot unset: readonly variable\n',
@@ -73,16 +73,16 @@ describe('Workspace.execute', () => {
 
   it("source positional args keep the operand's spelling", async () => {
     const { ws } = buildWorkspace()
-    await ws.execute("printf 'echo a1=$1\\n' > /ram/s.sh")
+    await ws.shell("printf 'echo a1=$1\\n' > /ram/s.sh")
     // A path-looking argument stays as typed, not resolved.
-    const res = await ws.execute('cd /ram && source /ram/s.sh ./sub/x.txt')
+    const res = await ws.shell('cd /ram && source /ram/s.sh ./sub/x.txt')
     expect(new TextDecoder().decode(res.stdout)).toBe('a1=./sub/x.txt\n')
     await ws.close()
   })
 
   it('runs `pwd` and prints /', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('pwd')
+    const res = await ws.shell('pwd')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('/\n')
     await ws.close()
@@ -90,7 +90,7 @@ describe('Workspace.execute', () => {
 
   it('runs `echo hello` and prints hello', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('echo hello')
+    const res = await ws.shell('echo hello')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('hello\n')
     await ws.close()
@@ -98,7 +98,7 @@ describe('Workspace.execute', () => {
 
   it('chains commands with &&', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('true && echo ok')
+    const res = await ws.shell('true && echo ok')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('ok\n')
     await ws.close()
@@ -106,7 +106,7 @@ describe('Workspace.execute', () => {
 
   it('short-circuits on && after a non-zero exit', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('false && echo skipped')
+    const res = await ws.shell('false && echo skipped')
     expect(res.exitCode).toBe(1)
     expect(new TextDecoder().decode(res.stdout)).toBe('')
     await ws.close()
@@ -114,7 +114,7 @@ describe('Workspace.execute', () => {
 
   it('chains commands with || on failure', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('false || echo recovered')
+    const res = await ws.shell('false || echo recovered')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('recovered\n')
     await ws.close()
@@ -123,7 +123,7 @@ describe('Workspace.execute', () => {
   it('runs `cat` against a file on RAM mount', async () => {
     const { ws, ram } = buildWorkspace()
     ram.store.files.set('/x.txt', new TextEncoder().encode('hello world'))
-    const res = await ws.execute('cat /ram/x.txt')
+    const res = await ws.shell('cat /ram/x.txt')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('hello world')
     await ws.close()
@@ -133,7 +133,7 @@ describe('Workspace.execute', () => {
     const { ws, ram } = buildWorkspace()
     ram.store.files.set('/a.txt', new TextEncoder().encode('aa\n'))
     ram.store.files.set('/b.txt', new TextEncoder().encode('bb\n'))
-    const res = await ws.execute('cat /ram/a.txt /ram/b.txt')
+    const res = await ws.shell('cat /ram/a.txt /ram/b.txt')
     expect(new TextDecoder().decode(res.stdout)).toBe('aa\nbb\n')
     await ws.close()
   })
@@ -141,7 +141,7 @@ describe('Workspace.execute', () => {
   it('runs `head -n 1`', async () => {
     const { ws, ram } = buildWorkspace()
     ram.store.files.set('/x.txt', new TextEncoder().encode('line1\nline2\nline3\n'))
-    const res = await ws.execute('head -n 1 /ram/x.txt')
+    const res = await ws.shell('head -n 1 /ram/x.txt')
     expect(new TextDecoder().decode(res.stdout)).toBe('line1\n')
     await ws.close()
   })
@@ -149,7 +149,7 @@ describe('Workspace.execute', () => {
   it('runs `tail -n 1`', async () => {
     const { ws, ram } = buildWorkspace()
     ram.store.files.set('/x.txt', new TextEncoder().encode('line1\nline2\nline3\n'))
-    const res = await ws.execute('tail -n 1 /ram/x.txt')
+    const res = await ws.shell('tail -n 1 /ram/x.txt')
     expect(new TextDecoder().decode(res.stdout)).toBe('line3\n')
     await ws.close()
   })
@@ -157,7 +157,7 @@ describe('Workspace.execute', () => {
   it('runs `wc -l` on a file', async () => {
     const { ws, ram } = buildWorkspace()
     ram.store.files.set('/x.txt', new TextEncoder().encode('a\nb\nc\n'))
-    const res = await ws.execute('wc -l /ram/x.txt')
+    const res = await ws.shell('wc -l /ram/x.txt')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toMatch(/^3 /)
     await ws.close()
@@ -166,7 +166,7 @@ describe('Workspace.execute', () => {
   it('runs `stat` on a file', async () => {
     const { ws, ram } = buildWorkspace()
     ram.store.files.set('/x.txt', new TextEncoder().encode('abc'))
-    const res = await ws.execute('stat /ram/x.txt')
+    const res = await ws.shell('stat /ram/x.txt')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toMatch(/name=x\.txt size=3/)
     await ws.close()
@@ -176,7 +176,7 @@ describe('Workspace.execute', () => {
     const { ws, ram } = buildWorkspace()
     ram.store.files.set('/a.txt', new Uint8Array([1]))
     ram.store.files.set('/b.txt', new Uint8Array([2]))
-    const res = await ws.execute('ls /ram/')
+    const res = await ws.shell('ls /ram/')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('a.txt\nb.txt\n')
     await ws.close()
@@ -185,18 +185,18 @@ describe('Workspace.execute', () => {
   it('pipes cat into wc', async () => {
     const { ws, ram } = buildWorkspace()
     ram.store.files.set('/x.txt', new TextEncoder().encode('a\nb\n'))
-    const res = await ws.execute('cat /ram/x.txt | wc -l')
+    const res = await ws.shell('cat /ram/x.txt | wc -l')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toMatch(/^2/)
     await ws.close()
   })
 
   it('throws when shellParser is missing', async () => {
-    const ram = new RAMResource()
+    const ram = new RAMVFS()
     const registry = new OpsRegistry()
-    registry.registerResource(ram)
+    registry.registerVfs(ram)
     const ws = new Workspace({ '/ram': ram }, { mode: MountMode.READ, ops: registry })
-    await expect(ws.execute('true')).rejects.toThrow(/shellParser/)
+    await expect(ws.shell('true')).rejects.toThrow(/shellParser/)
     await ws.close()
   })
 })
@@ -204,35 +204,35 @@ describe('Workspace.execute', () => {
 describe('argv dispatch regressions', () => {
   it('timeout keeps a quoted word as one argument', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute("timeout 5 echo 'a  b'")
+    const res = await ws.shell("timeout 5 echo 'a  b'")
     expect(new TextDecoder().decode(res.stdout)).toBe('a  b\n')
     await ws.close()
   })
 
   it('xargs keeps initial args before stdin words (GNU)', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('echo c | xargs echo a b')
+    const res = await ws.shell('echo c | xargs echo a b')
     expect(new TextDecoder().decode(res.stdout)).toBe('a b c\n')
     await ws.close()
   })
 
   it('xargs input words stay literal argv tokens', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute("echo '$(echo pwned)' | xargs echo")
+    const res = await ws.shell("echo '$(echo pwned)' | xargs echo")
     expect(new TextDecoder().decode(res.stdout)).toBe('$(echo pwned)\n')
     await ws.close()
   })
 
   it('xargs survives a quote character in input', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('echo "don\'t" | xargs echo')
+    const res = await ws.shell('echo "don\'t" | xargs echo')
     expect(new TextDecoder().decode(res.stdout)).toBe("don't\n")
     await ws.close()
   })
 
   it('runs a command named by a variable', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('E=echo; $E hi')
+    const res = await ws.shell('E=echo; $E hi')
     expect(new TextDecoder().decode(res.stdout)).toBe('hi\n')
     expect(res.exitCode).toBe(0)
     await ws.close()
@@ -240,14 +240,14 @@ describe('argv dispatch regressions', () => {
 
   it('runs a quoted command name', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('"echo" hi')
+    const res = await ws.shell('"echo" hi')
     expect(new TextDecoder().decode(res.stdout)).toBe('hi\n')
     await ws.close()
   })
 })
 
 describe('glob rule: resolved by whoever consumes the word, exactly once', () => {
-  function seed(ram: RAMResource): void {
+  function seed(ram: RAMVFS): void {
     ram.store.files.set('/notes.txt', new TextEncoder().encode('line1\n'))
     ram.store.files.set('/nums.txt', new TextEncoder().encode('5\n'))
     ram.store.files.set('/words.txt', new TextEncoder().encode('banana\n'))
@@ -256,7 +256,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
   it('zero-match glob stays the literal word (bash nullglob off)', async () => {
     const { ws, ram } = buildWorkspace()
     seed(ram)
-    const res = await ws.execute('echo /ram/*.nope')
+    const res = await ws.shell('echo /ram/*.nope')
     expect(new TextDecoder().decode(res.stdout)).toBe('/ram/*.nope\n')
     await ws.close()
   })
@@ -264,7 +264,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
   it('test -f sees the shell-resolved match, not the pattern', async () => {
     const { ws, ram } = buildWorkspace()
     seed(ram)
-    const res = await ws.execute('test -f /ram/note* && echo yes')
+    const res = await ws.shell('test -f /ram/note* && echo yes')
     expect(new TextDecoder().decode(res.stdout)).toBe('yes\n')
     await ws.close()
   })
@@ -272,7 +272,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
   it('function positional args receive matches, not the pattern', async () => {
     const { ws, ram } = buildWorkspace()
     seed(ram)
-    const res = await ws.execute('f() { echo $1 $#; }; f /ram/*.txt')
+    const res = await ws.shell('f() { echo $1 $#; }; f /ram/*.txt')
     expect(new TextDecoder().decode(res.stdout)).toBe('/ram/notes.txt 3\n')
     await ws.close()
   })
@@ -280,7 +280,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
   it('ln with multiple expanded sources is a GNU error', async () => {
     const { ws, ram } = buildWorkspace()
     seed(ram)
-    const res = await ws.execute('ln -s /ram/*.txt /ram/lnk')
+    const res = await ws.shell('ln -s /ram/*.txt /ram/lnk')
     expect(res.exitCode).toBe(1)
     expect(new TextDecoder().decode(res.stderr)).toContain(': No such file or directory')
     await ws.close()
@@ -289,8 +289,8 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
   it('ln links to the single glob match, not the literal pattern', async () => {
     const { ws, ram } = buildWorkspace()
     seed(ram)
-    await ws.execute('ln -s /ram/note* /ram/l2')
-    const res = await ws.execute('readlink /ram/l2')
+    await ws.shell('ln -s /ram/note* /ram/l2')
+    const res = await ws.shell('readlink /ram/l2')
     expect(new TextDecoder().decode(res.stdout)).toBe('/ram/notes.txt\n')
     await ws.close()
   })
@@ -298,7 +298,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
   it('unknown command fails 127 without a backend error', async () => {
     const { ws, ram } = buildWorkspace()
     seed(ram)
-    const res = await ws.execute('nosuchcmd /ram/*.txt')
+    const res = await ws.shell('nosuchcmd /ram/*.txt')
     expect(res.exitCode).toBe(127)
     expect(new TextDecoder().decode(res.stderr)).toBe('nosuchcmd: command not found\n')
     await ws.close()
@@ -306,7 +306,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
 
   it('runs a getopts option-parsing loop', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute(
+    const res = await ws.shell(
       'set -- -a val -b\n' +
         'while getopts "a:b" opt; do\n' +
         '  case $opt in\n' +
@@ -321,7 +321,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
 
   it('reparses when OPTIND is reassigned to its current value', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute(
+    const res = await ws.shell(
       'set -- -ab; getopts ab o; echo "1:$o"; OPTIND=1; getopts ab o; echo "2:$o"',
     )
     expect(new TextDecoder().decode(res.stdout)).toBe('1:a\n2:a\n')
@@ -330,7 +330,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
 
   it('does not let a subshell corrupt the parent getopts cursor', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute(
+    const res = await ws.shell(
       'set -- -ab; OPTIND=1; getopts ab o; (getopts ab o); getopts ab o; echo "$o"',
     )
     expect(new TextDecoder().decode(res.stdout)).toBe('b\n')
@@ -346,7 +346,7 @@ describe('glob rule: resolved by whoever consumes the word, exactly once', () =>
 describe('Object.prototype-colliding names', () => {
   it('an unknown command named toString is command-not-found, exit 127', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('toString')
+    const res = await ws.shell('toString')
     expect(res.exitCode).toBe(127)
     expect(new TextDecoder().decode(res.stderr)).toContain('toString: command not found')
     await ws.close()
@@ -354,36 +354,36 @@ describe('Object.prototype-colliding names', () => {
 
   it('command -v and type do not report prototype members as functions', async () => {
     const { ws } = buildWorkspace()
-    const v = await ws.execute('command -v toString')
+    const v = await ws.shell('command -v toString')
     expect(v.exitCode).toBe(1)
     expect(new TextDecoder().decode(v.stdout)).toBe('')
-    const t = await ws.execute('type constructor')
+    const t = await ws.shell('type constructor')
     expect(t.exitCode).toBe(1)
     await ws.close()
   })
 
   it('a prefix assignment on an unknown command does not leak into the session', async () => {
     const { ws } = buildWorkspace()
-    await ws.execute('X=7 toString')
-    const res = await ws.execute('echo "[$X]"')
+    await ws.shell('X=7 toString')
+    const res = await ws.shell('echo "[$X]"')
     expect(new TextDecoder().decode(res.stdout)).toBe('[]\n')
     await ws.close()
   })
 
   it('__proto__ is an ordinary shell variable', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('__proto__=5; echo "[$__proto__]"')
+    const res = await ws.shell('__proto__=5; echo "[$__proto__]"')
     expect(new TextDecoder().decode(res.stdout)).toBe('[5]\n')
-    const unset = await ws.execute('__proto__=5; unset __proto__; echo "[$__proto__]"')
+    const unset = await ws.shell('__proto__=5; unset __proto__; echo "[$__proto__]"')
     expect(new TextDecoder().decode(unset.stdout)).toBe('[]\n')
     await ws.close()
   })
 
   it('a shell function named toString defines, runs, and unsets', async () => {
     const { ws } = buildWorkspace()
-    const res = await ws.execute('toString() { echo ran; }; toString')
+    const res = await ws.shell('toString() { echo ran; }; toString')
     expect(new TextDecoder().decode(res.stdout)).toBe('ran\n')
-    const gone = await ws.execute('toString() { echo ran; }; unset -f toString; toString')
+    const gone = await ws.shell('toString() { echo ran; }; unset -f toString; toString')
     expect(gone.exitCode).toBe(127)
     await ws.close()
   })

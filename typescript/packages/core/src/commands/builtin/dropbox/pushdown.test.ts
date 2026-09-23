@@ -46,14 +46,14 @@ function makeAccessor(contentSearch = true): DropboxAccessor {
 }
 
 function scope(): PathSpec {
-  return new PathSpec({ virtual: '/data', directory: '/data', resourcePath: '' })
+  return new PathSpec({ virtual: '/data', directory: '/data', vfsPath: '' })
 }
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: '',
-    resourcePath: virtual.replace(/^\/data\//, ''),
+    vfsPath: virtual.replace(/^\/data\//, ''),
     resolved: true,
   })
 }

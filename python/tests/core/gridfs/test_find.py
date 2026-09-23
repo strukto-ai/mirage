@@ -122,9 +122,7 @@ def _run_find(monkeypatch, docs, **kwargs):
     monkeypatch.setattr(gridfs_driver, "iter_latest", fake)
     accessor = GridFSAccessor(
         GridFSConfig(uri="mongodb://localhost:27017", database="db"))
-    spec = PathSpec(virtual="/mnt/data",
-                    directory="/mnt/",
-                    resource_path="data")
+    spec = PathSpec(virtual="/mnt/data", directory="/mnt/", vfs_path="data")
     out = asyncio.run(find(accessor, spec, **kwargs))
     return out, fake.queries
 

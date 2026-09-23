@@ -2,7 +2,7 @@ import type { Mem0Accessor } from '../../../accessor/mem0.ts'
 import { detectScope } from '../../../core/mem0/scope.ts'
 import { searchMemoriesRendered } from '../../../core/mem0/search.ts'
 import { IOResult } from '../../../io/types.ts'
-import { ResourceName, type PathSpec } from '../../../types.ts'
+import { VFSName, type PathSpec } from '../../../types.ts'
 import { enoent } from '../../../utils/errors.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -18,7 +18,7 @@ const ENCODER = new TextEncoder()
 const resolveGlob = resolveGlobOf(MEM0_IO)
 
 function isMountRoot(path: PathSpec): boolean {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const root = rstripSlash(prefix) || '/'
   return (rstripSlash(path.virtual) || '/') === root
 }
@@ -61,7 +61,7 @@ async function searchCommand(
   const threshold = fl.asFloat('threshold') ?? 0
   const targets = defaultPaths(paths, opts.cwd, opts.mountPrefix ?? '')
   const first = targets[0]
-  const mountPrefix = first === undefined ? '' : mountPrefixOf(first.virtual, first.resourcePath)
+  const mountPrefix = first === undefined ? '' : mountPrefixOf(first.virtual, first.vfsPath)
   try {
     const ids = targets.some(isMountRoot)
       ? undefined
@@ -78,7 +78,7 @@ async function searchCommand(
 
 export const MEM0_SEARCH = command({
   name: 'search',
-  resource: ResourceName.MEM0,
+  vfs: VFSName.MEM0,
   spec: specOf('search'),
   fn: searchCommand,
   provision: metadataProvision,

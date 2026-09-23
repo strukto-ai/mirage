@@ -18,7 +18,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '../../workspace.ts'
 import { LocalRuntime } from './local.ts'
@@ -97,10 +97,10 @@ describe('LocalRuntime', () => {
       const baseline = await rt.version({})
       const expected: unknown = JSON.parse(DEC.decode(baseline.stdout))
       expect(expected).toMatchObject({ MIRAGE_TEST_VERSION_ENV: 'host' })
-      const ws = new Workspace({ '/': new RAMResource() }, { mode, runtimes: [rt, 'vfs'] })
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode, runtimes: [rt, 'workspace'] })
       try {
         for (const line of ['python --version', 'python3 -V', 'python -VV']) {
-          const io = await ws.execute(line, { env: session })
+          const io = await ws.shell(line, { env: session })
           expect(io.exitCode).toBe(0)
           expect(JSON.parse(DEC.decode(io.stdout))).toEqual(expected)
           expect(DEC.decode(io.stderr)).toBe('')
@@ -127,18 +127,18 @@ describe('LocalRuntime', () => {
     const env = { PYTHONPATH: dir }
     const rt = new LocalRuntime({ config: { home: python } })
     const ws = new Workspace(
-      { '/': new RAMResource() },
-      { mode: MountMode.READ, runtimes: [rt, 'vfs'] },
+      { '/': new RAMVFS() },
+      { mode: MountMode.READ, runtimes: [rt, 'workspace'] },
     )
     try {
       for (const line of ['python --version', 'python3 -V', 'python -VV']) {
-        const io = await ws.execute(line, { env })
+        const io = await ws.shell(line, { env })
         expect(io.exitCode).toBe(0)
         expect(DEC.decode(io.stdout)).toBe(expected)
         expect(DEC.decode(io.stderr)).toBe('')
         await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
       }
-      const refused = await ws.execute("python -c 'pass'", { env })
+      const refused = await ws.shell("python -c 'pass'", { env })
       expect(refused.exitCode).toBe(126)
       await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
       const control = await rt.run({ code: 'pass', args: [], stdin: null, env })

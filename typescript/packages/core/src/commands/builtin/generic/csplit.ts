@@ -81,7 +81,7 @@ function makePathSpec(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: stripSlash(virtual),
+    vfsPath: stripSlash(virtual),
     resolved: true,
   })
 }
@@ -109,7 +109,7 @@ export async function csplitGeneric(
   const prefix = new PathSpec({
     virtual: rawPrefix,
     directory: rawPrefix,
-    resourcePath: mountKey(rawPrefix, opts.mountPrefix ?? ''),
+    vfsPath: mountKey(rawPrefix, opts.mountPrefix ?? ''),
   }).mountPath
   const digitsValue = fl.asStr('digits')
   const suffixValue = fl.asStr('suffix_format')

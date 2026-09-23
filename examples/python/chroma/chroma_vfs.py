@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.chroma import ChromaConfig, ChromaResource
+from mirage.vfs.chroma import ChromaConfig, ChromaVFS
 
 load_dotenv(".env.development")
 
@@ -30,7 +30,7 @@ def require_env(name: str) -> str:
     return value
 
 
-def build_resource() -> ChromaResource:
+def build_vfs() -> ChromaVFS:
     config = ChromaConfig(
         host=os.environ.get("CHROMA_HOST", "localhost"),
         port=int_env("CHROMA_PORT", 8000),
@@ -40,7 +40,7 @@ def build_resource() -> ChromaResource:
         chunk_index_field=os.environ.get("CHROMA_CHUNK_INDEX_FIELD",
                                          "chunk_index"),
     )
-    return ChromaResource(config=config)
+    return ChromaVFS(config=config)
 
 
 def first_file(directory: str) -> str | None:
@@ -57,8 +57,8 @@ def first_file(directory: str) -> str | None:
 
 
 async def main() -> None:
-    resource = build_resource()
-    with Workspace({"/knowledge/": resource}, mode=MountMode.READ) as ws:
+    vfs = build_vfs()
+    with Workspace({"/knowledge/": vfs}, mode=MountMode.READ) as ws:
         print("=== Chroma VFS ===\n")
 
         print("--- os.listdir('/knowledge') ---")
@@ -83,7 +83,7 @@ async def main() -> None:
         print(f"  isfile: {os.path.isfile(path)}")
         print(f"  size: {os.path.getsize(path)}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(record.bytes for record in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

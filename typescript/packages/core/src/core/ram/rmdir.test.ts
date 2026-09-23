@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import { RAMStore } from '../../resource/ram/store.ts'
+import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
 import { mkdir } from './mkdir.ts'
 import { rmdir } from './rmdir.ts'

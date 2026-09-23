@@ -19,7 +19,7 @@ from mirage.accessor.hf_hub import HfHubAccessor, HfRepoConfig
 
 class ModelAccessor(HfHubAccessor):
     REPO_TYPE = "model"
-    RESOURCE_NAME = "hf_models"
+    VFS_NAME = "hf_models"
 
 
 def test_revision_defaults_to_main_without_a_request():

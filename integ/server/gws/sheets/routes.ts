@@ -23,8 +23,10 @@ import { SHEET_MIME } from '../wire/mime.ts'
 import { NOT_FOUND, idVerbOf, ok, unknownRoute, verbOf } from '../wire/reply.ts'
 import type { Ctx } from '../../kit/typescript/index.ts'
 import { colIndexToLetter, parseA1, rangeLabel, rangeLabelFor } from './a1.ts'
+import type { A1Range } from './a1.ts'
 import { copySheetTo, sheetsBatchUpdate } from './batch.ts'
-import { clearRange, fmtSpreadsheet, rangeValues, tabExtent, writeValues } from './grid.ts'
+import { clearRange, rangeValues, tabExtent, writeValues } from './grid.ts'
+import { fmtSpreadsheet } from './spreadsheet.ts'
 import { batchClearValues, batchGetValues, batchUpdateValues, unparseable } from './values.ts'
 
 type GwsCtx = Ctx<GwsState>
@@ -181,7 +183,13 @@ export function sheetsRoutes(): KitRoute<C>[] {
         const id = ctx.params.id ?? ''
         const sheet = ctx.db.sheets.get(id)
         if (sheet === undefined) return NOT_FOUND
-        return ok(fmtSpreadsheet(sheet, id, ctx.query.get('includeGridData') === 'true'))
+        const ranges: A1Range[] = []
+        for (const rangeStr of ctx.query.getAll('ranges')) {
+          const range = parseA1(sheet, rangeStr)
+          if (range === null) return unparseable(rangeStr)
+          ranges.push(range)
+        }
+        return ok(fmtSpreadsheet(sheet, id, ctx.query.get('includeGridData') === 'true', ranges))
       },
       ID,
     ),

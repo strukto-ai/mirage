@@ -16,11 +16,11 @@ import type { GSheetsAccessor } from '../../accessor/gsheets.ts'
 import { read as coreRead } from '../../core/gsheets/read.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
-import { type PathSpec, ResourceName } from '../../types.ts'
+import { type PathSpec, VFSName } from '../../types.ts'
 
 export const readOp: RegisteredOp = {
   name: 'read',
-  resource: ResourceName.GSHEETS,
+  vfs: VFSName.GSHEETS,
   filetype: '.gsheet.json',
   write: false,
   // A backend that registers its own read op does not go through

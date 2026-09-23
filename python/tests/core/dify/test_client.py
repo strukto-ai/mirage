@@ -6,7 +6,7 @@ from yarl import URL
 from mirage.accessor.dify import DifyAccessor
 from mirage.core.api import client as api_client
 from mirage.core.dify import client
-from mirage.resource.dify.config import DifyConfig
+from mirage.vfs.dify.config import DifyConfig
 
 BASE = "https://dify.example/v1"
 DOCUMENTS = f"{BASE}/datasets/dataset-1/documents"

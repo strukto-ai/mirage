@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
+import { runWithRecording } from '../../observe/context.ts'
 import { makeExists } from './exists.ts'
 import { codeOf, FakeAccessor, FakeManager, FakeStore, makeDriver, spec } from './fakes.ts'
 import { makeRename } from './rename.ts'
@@ -77,3 +78,96 @@ describe('object_store rename', () => {
     expect(() => makeRename(driver, makeExists(makeStat(driver)))).toThrow('no native move')
   })
 })
+
+async function recorded(fn: () => Promise<void>): Promise<[string, string][]> {
+  const [, records] = await runWithRecording(async () => {
+    await managed(fn)
+  })
+  return records.map((r) => [r.op, r.path])
+}
+
+function alwaysExists(): Promise<boolean> {
+  return Promise.resolve(true)
+}
+
+describe('object_store rename retraction records', () => {
+  it('records a retraction for both paths', async () => {
+    // A move invalidates the token of both: src's object left, dst's was
+    // replaced by it.
+    const store = new FakeStore()
+    store.objects.set('a.txt', new Uint8Array(1))
+    const records = await recorded(() =>
+      makeRename(makeDriver(store), alwaysExists)(accessor, spec('/a.txt'), spec('/b.txt')),
+    )
+    expect(records).toEqual([
+      ['rename', '/mnt/a.txt'],
+      ['rename', '/mnt/b.txt'],
+    ])
+  })
+
+  it('a self-rename records nothing', async () => {
+    const store = new FakeStore()
+    store.objects.set('a.txt', new Uint8Array(1))
+    const records = await recorded(() =>
+      makeRename(makeDriver(store), alwaysExists)(accessor, spec('/a.txt'), spec('/a.txt')),
+    )
+    expect(records).toEqual([])
+  })
+
+  it('records both retractions when the prefix walk fails', async () => {
+    // moveFile's clean false is the ordinary way into the prefix walk,
+    // not an answer about it. The walk is paginated and can reject
+    // having already moved keys, which is the case the record is in
+    // `finally` for.
+    const store = new FakeStore()
+    store.objects.set('d/f.txt', new Uint8Array(1))
+    const driver = makeDriver(store)
+    driver.movePrefix = () => Promise.reject(Object.assign(new Error('boom'), { code: 'EIO' }))
+    const { code, records } = await recordedFailure(() =>
+      makeRename(driver, alwaysExists)(accessor, spec('/d'), spec('/e')),
+    )
+    expect(code).toBe('EIO')
+    expect(records).toEqual([
+      ['rename_prefix', '/mnt/d'],
+      ['rename_prefix', '/mnt/e'],
+    ])
+  })
+
+  it('evicts both subtrees when the prefix walk rejects', async () => {
+    // The eviction rides with the records, on the same condition.
+    const store = new FakeStore()
+    store.objects.set('d/f.txt', new Uint8Array(1))
+    const driver = makeDriver(store)
+    driver.movePrefix = () => Promise.reject(Object.assign(new Error('boom'), { code: 'EIO' }))
+    const manager = await managed(async () => {
+      expect(await codeOf(makeRename(driver, alwaysExists)(accessor, spec('/d'), spec('/e')))).toBe(
+        'EIO',
+      )
+    })
+    expect(manager.subtrees).toEqual(['/e', '/d'])
+  })
+
+  it('records nothing when the source is missing', async () => {
+    // Both calls answering a clean false is the store saying nothing
+    // moved at all, which is the one outcome safe to skip.
+    const { code, records } = await recordedFailure(() =>
+      makeRename(makeDriver(new FakeStore()), alwaysExists)(
+        accessor,
+        spec('/a.txt'),
+        spec('/b.txt'),
+      ),
+    )
+    expect(code).toBe('ENOENT')
+    expect(records).toEqual([])
+  })
+})
+
+async function recordedFailure(
+  fn: () => Promise<void>,
+): Promise<{ code: string; records: [string, string][] }> {
+  let code = 'no-throw'
+  const [, records] = await runWithRecording(async () => {
+    code = await codeOf(managed(fn))
+  })
+  return { code, records: records.map((r) => [r.op, r.path]) }
+}

@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeSlackTransport, makeFakeResource, seedChannel } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs, seedChannel } from './_test_util.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 const SLACK_TREE = SLACK_COMMANDS.filter((c) => c.name === 'tree' && c.filetype == null)
@@ -32,8 +32,8 @@ async function runTree(
   const cmd = SLACK_TREE[0]
   if (cmd === undefined) throw new Error('tree not registered')
   const transport = options.transport ?? new FakeSlackTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -56,7 +56,7 @@ describe('slack tree', () => {
           virtual: '/mnt/slack',
           directory: '/mnt/slack',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack', '/mnt/slack'),
         }),
       ],
       { L: '1' },
@@ -81,7 +81,7 @@ describe('slack tree', () => {
           virtual: '/mnt/slack/channels',
           directory: '/mnt/slack/channels',
           resolved: false,
-          resourcePath: mountKey('/mnt/slack/channels', '/mnt/slack'),
+          vfsPath: mountKey('/mnt/slack/channels', '/mnt/slack'),
         }),
       ],
       {},

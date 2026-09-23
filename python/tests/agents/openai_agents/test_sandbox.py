@@ -17,13 +17,13 @@ import io
 from pathlib import Path
 
 from mirage.agents.openai_agents.sandbox import MirageSandboxClient
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
 def _make_client() -> MirageSandboxClient:
-    ram = RAMResource()
+    ram = RAMVFS()
     ws = Workspace(
         {"/": (ram, MountMode.WRITE)},
         mode=MountMode.WRITE,
@@ -31,7 +31,7 @@ def _make_client() -> MirageSandboxClient:
     return MirageSandboxClient(ws)
 
 
-def test_create_session_with_default_resources():
+def test_create_session_with_default_mounts():
 
     async def _run():
         client = _make_client()
@@ -92,7 +92,7 @@ def test_exec_names_the_reason_beside_a_refused_command():
     # refusal record, and a byte surface appends it as one more line.
 
     async def _run():
-        ws = Workspace({"/": (RAMResource(), MountMode.WRITE)},
+        ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)},
                        mode=MountMode.WRITE,
                        route_policy=lambda ctx: {"deny": "no deletes"}
                        if ctx.command == "rm" else None)

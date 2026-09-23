@@ -23,7 +23,7 @@ pytestmark = pytest.mark.asyncio
 def spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.lstrip("/"))
+                    vfs_path=virtual.lstrip("/"))
 
 
 async def test_root_is_a_directory(api, accessor, index):

@@ -16,7 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 import { SET_OPTION_DEFAULTS, SET_OPTION_NAMES } from '../../../../shell/constants.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -24,7 +24,7 @@ import type { BuiltinCall, Result } from '../types.ts'
 
 export function handleSet(
   args: string[],
-  session: Session,
+  session: SessionState,
   _callStack: CallStack | null = null,
 ): Result {
   if (args.length === 0) {
@@ -90,7 +90,7 @@ export function handleSet(
  * is longer than the padding and simply overflows it, which is GNU's
  * own `%-15s\t%s` and not a special case.
  */
-function optionListing(session: Session, plus: boolean): Uint8Array {
+function optionListing(session: SessionState, plus: boolean): Uint8Array {
   const lines: string[] = []
   for (const [name, byDefault] of SET_OPTION_DEFAULTS) {
     const on = session.shellOptions[name] ?? byDefault

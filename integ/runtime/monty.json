@@ -20,7 +20,7 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -38,7 +38,7 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -63,7 +63,7 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -81,11 +81,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "hello from ram\n"
             }
@@ -107,11 +107,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -130,11 +130,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "hello from ram\n",
               "analyze.py": "from pathlib import Path\nprint('ram:', Path('/ram/data.txt').read_text().strip())\nprint('argv sum:', int(argv[1]) + int(argv[2]))\n"
@@ -157,11 +157,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "pipe.py": "print('came-through-pipe')\n"
             }
@@ -183,7 +183,7 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -201,7 +201,7 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -219,11 +219,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "hello from ram\n",
               "pipe.py": "print('x')\n"
@@ -246,11 +246,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -269,11 +269,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -291,11 +291,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "hello from ram\n"
             }
@@ -317,11 +317,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -340,11 +340,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "slow.py": "n = 0\nfor i in range(300000000):\n    n = n + 1\n"
             },
@@ -371,11 +371,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -400,17 +400,17 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "top.txt": "top\n"
             }
           },
           "/data/inner": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "leaf.txt": "deep\n"
             }
@@ -439,17 +439,17 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "top.txt": "top\n"
             }
           },
           "/data/inner": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -481,11 +481,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -513,24 +513,24 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "one.txt": "one",
               "unused.txt": "unused"
             }
           },
           "/data/nested": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "inside.txt": "nested"
             }
           },
           "/large": {
-            "resource": "ram",
+            "vfs": "ram",
             "generated_files": 47000
           }
         },
@@ -675,11 +675,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n",
               "sub/inner.txt": "inner\n"
@@ -708,11 +708,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n",
               "sub/inner.txt": "inner\n"
@@ -741,11 +741,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "sub/inner.txt": "inner\n"
             }
@@ -773,11 +773,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/parent/child": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "a.txt": "a\n"
             }
@@ -804,11 +804,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "a.txt": "a\n"
             }
@@ -833,11 +833,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n"
             }
@@ -862,11 +862,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n"
             }
@@ -893,11 +893,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n",
               "sub/inner.txt": "inner\n"
@@ -921,7 +921,7 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -948,11 +948,11 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "in.json": "{\"a\":1}"
             }
@@ -1023,7 +1023,7 @@
       "world": {
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -1033,6 +1033,39 @@
             "exit": 0,
             "stdout": "total=0006\n[1, 3, 6]\n[(1, 2), (3,)]\n[(1, 3), (2, 0)]\n",
             "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "no_extended_attribute_calls",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; print([n for n in ('getxattr', 'listxattr', 'removexattr', 'setxattr') if hasattr(os, n)])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[]\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import os; os.listxattr('/data/t.txt')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "module 'os' has no attribute 'listxattr'"
           }
         }
       ]

@@ -12,7 +12,7 @@ microVM guest  --virtio-fs /s3-->  host FUSE mountpoint  -->  Mirage  -->  S3
  (msb / libkrun)                       (fuse3)
 ```
 
-1. `microsandbox_fuse.py` (host) FUSE-mounts an `S3Resource` at a temp mountpoint.
+1. `microsandbox_fuse.py` (host) FUSE-mounts an `S3VFS` at a temp mountpoint.
 1. It boots a microVM with `Volume.bind(<mountpoint>, readonly=True)` mapped to
    `/s3`, so the guest's `/s3` is backed by the host FUSE mount over virtio-fs.
 1. `remote/guest.py` runs inside the microVM: it `os.listdir('/s3')` and reads

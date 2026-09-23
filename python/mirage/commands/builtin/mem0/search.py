@@ -49,7 +49,7 @@ def parse_flags(fl: FlagView, default_limit: int) -> SearchFlags:
 
 
 def is_mount_root(path: PathSpec) -> bool:
-    root = mount_prefix_of(path.virtual, path.resource_path).rstrip("/") or "/"
+    root = mount_prefix_of(path.virtual, path.vfs_path).rstrip("/") or "/"
     value = path.virtual.rstrip("/") or "/"
     return value == "/" or value == root
 
@@ -65,7 +65,7 @@ def memory_ids(paths: list[PathSpec]) -> set[str]:
 
 
 @command("search",
-         resource="mem0",
+         vfs="mem0",
          spec=SPECS["search"],
          provision=metadata_provision)
 async def search(accessor: Mem0Accessor, paths: list[PathSpec],
@@ -80,7 +80,7 @@ async def search(accessor: Mem0Accessor, paths: list[PathSpec],
         raise UsageError("search: only the 'semantic' method is supported")
     target_paths = default_paths(paths, opts.cwd)
     mount_prefix = mount_prefix_of(target_paths[0].virtual,
-                                   target_paths[0].resource_path)
+                                   target_paths[0].vfs_path)
     target_ids: set[str] | None = None
     if not any(is_mount_root(path) for path in target_paths):
         target_ids = memory_ids(await resolve_glob(accessor, target_paths,

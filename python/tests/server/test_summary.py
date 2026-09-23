@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.resource.ram import RAMResource
 from mirage.server.summary import _mount_description
+from mirage.vfs.ram import RAMVFS
 
 ASTRAL = "\U00010400"
 
 
-class _PromptResource(RAMResource):
+class _PromptVFS(RAMVFS):
 
     def __init__(self, prompt: str) -> None:
         super().__init__()
@@ -26,8 +26,8 @@ class _PromptResource(RAMResource):
 
 
 def test_short_prompt_is_returned_whole():
-    assert _mount_description(_PromptResource("hello")) == "hello"
-    assert _mount_description(_PromptResource("")) == ""
+    assert _mount_description(_PromptVFS("hello")) == "hello"
+    assert _mount_description(_PromptVFS("")) == ""
 
 
 def test_budget_counts_code_points():
@@ -35,11 +35,11 @@ def test_budget_counts_code_points():
     # units, so the typescript twin ellipsized a prompt this side leaves
     # whole -- and its cut landed inside the 40th surrogate pair.
     prompt = "a" * 40 + ASTRAL * 45
-    assert _mount_description(_PromptResource(prompt)) == prompt
+    assert _mount_description(_PromptVFS(prompt)) == prompt
 
 
 def test_ellipsizes_on_a_code_point_boundary():
-    result = _mount_description(_PromptResource(ASTRAL * 130))
+    result = _mount_description(_PromptVFS(ASTRAL * 130))
     assert result == ASTRAL * 119 + "…"
     assert len(result) == 120
     assert "�" not in result
@@ -47,4 +47,4 @@ def test_ellipsizes_on_a_code_point_boundary():
 
 def test_trailing_whitespace_is_dropped_before_the_ellipsis():
     prompt = "x" * 118 + "  " + "y" * 10
-    assert _mount_description(_PromptResource(prompt)) == "x" * 118 + "…"
+    assert _mount_description(_PromptVFS(prompt)) == "x" * 118 + "…"

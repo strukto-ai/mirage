@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createRequire } from 'node:module'
-import { MountMode, RedisResource, Workspace, patchNodeFs } from '@struktoai/mirage-node'
+import { MountMode, RedisVFS, Workspace, patchNodeFs } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
@@ -39,16 +39,16 @@ async function isDir(p: string): Promise<boolean> {
 
 async function main(): Promise<void> {
   const seedWs = new Workspace(
-    { '/data': new RedisResource({ url: REDIS_URL }) },
+    { '/data': new RedisVFS({ url: REDIS_URL }) },
     { mode: MountMode.WRITE },
   )
-  await seedWs.execute('echo "hello world" | tee /data/hello.txt')
-  await seedWs.execute('mkdir /data/sub')
-  await seedWs.execute('echo "nested" | tee /data/sub/nested.txt')
+  await seedWs.shell('echo "hello world" | tee /data/hello.txt')
+  await seedWs.shell('mkdir /data/sub')
+  await seedWs.shell('echo "nested" | tee /data/sub/nested.txt')
   await seedWs.close()
 
   const ws = new Workspace(
-    { '/data': new RedisResource({ url: REDIS_URL }) },
+    { '/data': new RedisVFS({ url: REDIS_URL }) },
     { mode: MountMode.WRITE },
   )
   patchNodeFs(ws)

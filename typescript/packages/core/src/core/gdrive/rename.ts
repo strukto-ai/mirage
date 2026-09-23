@@ -21,9 +21,9 @@ import { driveTargetName, eaccesOnDenied, isFolder, resolveKey, resolveParent } 
 
 async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const tm = accessor.tokenManager
-  const srcNode = await resolveKey(accessor, src.resourcePath)
+  const srcNode = await resolveKey(accessor, src.vfsPath)
   if (srcNode === null) throw enoent(src)
-  const dstNode = await resolveKey(accessor, dst.resourcePath)
+  const dstNode = await resolveKey(accessor, dst.vfsPath)
   if (dstNode !== null) {
     // GNU mv overwrites the destination: drop a conflicting file (or empty
     // folder) before the move. A non-empty folder conflict is mv's
@@ -40,7 +40,7 @@ async function renameImpl(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec
   }
   const [srcParentId] = await resolveParent(accessor, src)
   const [dstParentId] = await resolveParent(accessor, dst)
-  const dstKey = dst.resourcePath
+  const dstKey = dst.vfsPath
   const basename = dstKey.includes('/') ? dstKey.slice(dstKey.lastIndexOf('/') + 1) : dstKey
   const name = driveTargetName(basename, srcNode)
   const move = dstParentId !== srcParentId

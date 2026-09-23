@@ -16,13 +16,13 @@ import base64
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.langchain.backend import LangchainWorkspace
 
 
 @pytest.fixture
 def workspace():
-    return Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    return Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
 
 @pytest.fixture
@@ -237,7 +237,7 @@ async def test_upload_and_download(backend):
 async def test_als_names_the_reason_beside_a_refusal():
     # stderr is bash's bare `Permission denied`; the reason rides the
     # refusal record, and the error text appends it as one more line.
-    ws = Workspace({"/": RAMResource()},
+    ws = Workspace({"/": RAMVFS()},
                    mode=MountMode.WRITE,
                    route_policy=lambda ctx: {"deny": "no lists"}
                    if ctx.command == "ls" else None)

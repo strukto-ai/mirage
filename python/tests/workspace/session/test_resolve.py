@@ -8,7 +8,7 @@ from mirage.shell.variable import VarAttr
 from mirage.types import (HiddenPaths, HiddenVars, MountMode, PathSpec,
                           ShowEntry, ShownPaths)
 from mirage.utils.hidden import path_hidden, path_visible
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 from mirage.policy.profile import (  # isort: skip
     CommandsBlock, MountCommandsBlock, PathsBlock, ProfileMount,
@@ -190,7 +190,7 @@ def _read_op(virtual: str) -> OpsContext:
     return OpsContext(op="read",
                       path=PathSpec(virtual=virtual,
                                     directory=virtual.rsplit("/", 1)[0],
-                                    resource_path=virtual,
+                                    vfs_path=virtual,
                                     raw_path=virtual),
                       write=False,
                       prefix="/other")
@@ -265,14 +265,14 @@ def test_narrow_stamps_the_uneditable_fields_and_apply_seeds_the_rest():
                        mounts={"/a": "rw"},
                        paths=PathsBlock(hide=("/a/secrets", )),
                        vars=VarsBlock(hide=("SLACK_TOKEN", ))))
-    narrowed = Session(session_id="s1")
+    narrowed = SessionState(session_id="s1")
     narrow(narrowed, compiled)
     assert narrowed.mount_modes == {"/a": MountMode.WRITE}
     assert narrowed.mount_modes is not compiled.mount_modes
     assert narrowed.hidden_paths == HiddenPaths(paths=("/a/secrets", ))
     assert narrowed.hidden_vars == HiddenVars(names=("SLACK_TOKEN", ))
     assert narrowed.cwd == "/" and "ROLE" not in narrowed.env
-    applied = Session(session_id="s2")
+    applied = SessionState(session_id="s2")
     apply_profile(applied, compiled)
     assert applied.mount_modes == {"/a": MountMode.WRITE}
     assert applied.cwd == "/a"
@@ -286,7 +286,7 @@ def test_narrow_carries_the_role_s_admission_rules_onto_the_session():
     assert compiled.commands == AdmissionRules(
         allow=("ls", ),
         ask=(CommandRule(reason="no standing approval", commands=("git", )), ))
-    session = Session(session_id="s")
+    session = SessionState(session_id="s")
     narrow(session, compiled)
     assert session.commands == compiled.commands
     assert compile_profile(SessionProfile(cwd="/x")).commands is None
@@ -389,7 +389,7 @@ def test_narrow_stamps_the_path_axis():
             hide=("/repo", ),
             show=(ShowEntry(path="/repo/public", mode=None), ),
             reasons=(HideReason(patterns=("/repo", ), reason="sealed"), ))))
-    session = Session(session_id="s")
+    session = SessionState(session_id="s")
     narrow(session, compiled)
     assert session.shown_paths == compiled.shown_paths
     assert session.hide_reasons == compiled.hide_reasons
@@ -400,7 +400,7 @@ def test_narrow_stamps_the_path_axis():
 def test_compile_profile_carries_the_name_and_narrow_stamps_it():
     compiled = compile_profile(PROFILES["reviewer"], "reviewer")
     assert compiled.profile == "reviewer"
-    session = Session(session_id="s1")
+    session = SessionState(session_id="s1")
     narrow(session, compiled)
     assert session.profile == "reviewer"
     # A document passed without a name, and no document at all, leave

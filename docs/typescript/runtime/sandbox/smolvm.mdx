@@ -31,10 +31,10 @@ const runtime = new SmolvmRuntime({
   config: { machine: 'mirage-box' },
 })
 const ws = new Workspace(
-  { '/data': resource },
-  { mode: MountMode.EXEC, runtimes: [runtime, 'vfs'] },
+  { '/data': vfs },
+  { mode: MountMode.EXEC, runtimes: [runtime, 'workspace'] },
 )
-await ws.execute('python3 job.py', { cwd: '/data' })
+await ws.shell('python3 job.py', { cwd: '/data' })
 ```
 
 The smolvm CLI is the transport, so there is no SDK dependency. The first

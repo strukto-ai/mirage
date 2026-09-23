@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.expand.classify.parts import classify_parts
 from mirage.workspace.mount import MountRegistry
 
 
 def _registry() -> MountRegistry:
     registry = MountRegistry()
-    registry.mount("/ram/", RAMResource(), MountMode.WRITE)
+    registry.mount("/ram/", RAMVFS(), MountMode.WRITE)
     return registry
 
 

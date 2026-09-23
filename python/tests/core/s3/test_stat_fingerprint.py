@@ -18,8 +18,8 @@ from contextlib import ExitStack
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index import NULL_INDEX
 from mirage.core.s3.stat import stat
-from mirage.resource.s3 import S3Config
 from mirage.types import PathSpec
+from mirage.vfs.s3 import S3Config
 from tests.e2e.s3_mock import patch_s3_multi
 
 
@@ -35,9 +35,7 @@ def test_s3_stat_returns_fingerprint_from_etag():
             aws_secret_access_key="fake",
         )
         accessor = S3Accessor(config)
-        scope = PathSpec(resource_path="foo.txt",
-                         virtual="/foo.txt",
-                         directory="/")
+        scope = PathSpec(vfs_path="foo.txt", virtual="/foo.txt", directory="/")
         result = asyncio.run(stat(accessor, scope, index=NULL_INDEX))
         assert result.fingerprint is not None
         assert result.fingerprint == result.extra.get("etag")

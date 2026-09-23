@@ -23,7 +23,7 @@ import { specFor } from './delta.ts'
  * Mirrors Python `virtual_of` (`watch/events.py`).
  */
 export function virtualOf(root: PathSpec, relative: string): string {
-  const prefix = rstripSlash(mountPrefixOf(root.virtual, root.resourcePath))
+  const prefix = rstripSlash(mountPrefixOf(root.virtual, root.vfsPath))
   const stem = stripSlash(relative)
   if (stem === '') return prefix === '' ? '/' : prefix
   return prefix === '' ? `/${stem}` : `${prefix}/${stem}`

@@ -21,7 +21,7 @@ from mirage.types import PathSpec
 
 
 def path_parts(path: PathSpec) -> list[str]:
-    return [p for p in path.resource_path.strip("/").split("/") if p]
+    return [p for p in path.vfs_path.strip("/").split("/") if p]
 
 
 def root_id(accessor: BoxAccessor) -> str:

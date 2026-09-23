@@ -26,7 +26,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from mirage import (CLIInvocation, CLISpec, Operand, Option, RAMResource,
+from mirage import (CLIInvocation, CLISpec, Operand, Option, RAMVFS,
                     Workspace)
 from mirage.io import IOResult
 
@@ -57,7 +57,7 @@ PAGER = CLISpec(
     ),
 )
 
-ws = Workspace({"/workspace": RAMResource()})
+ws = Workspace({"/workspace": RAMVFS()})
 ws.register_cli("pager-eng", PAGER, {"account": "engineering"})
 ws.register_cli("pager-support", PAGER, {"account": "support"})
 ```
@@ -198,11 +198,11 @@ as an attachment. That is different from treating a mount as the CLI's service
 client. Such a leaf opts into workspace access through `inv.doors`; do not
 assume those doors exist outside a workspace.
 
-If a CLI and a Mirage resource back the same service, neither names the other.
+If a CLI and a Mirage VFS back the same service, neither names the other.
 A write verb on a CLI with a config model expires every mount's cached reads
 after it runs, and a write that throws may already have reached the service, so
 Mirage also expires on that path. Do not widen `CLISpec`, `Option`, or
-`Operand` to point a CLI at a resource.
+`Operand` to point a CLI at a VFS.
 
 ## Snapshots and credentials
 

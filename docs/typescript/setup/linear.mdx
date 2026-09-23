@@ -4,7 +4,7 @@ icon: triangle
 description: Mount Linear teams, projects, and issues as a Mirage filesystem.
 ---
 
-`LinearResource` exposes a Linear workspace as a tree of teams, projects, and issues. Reads route through the Linear GraphQL API.
+`LinearVFS` exposes a Linear workspace as a tree of teams, projects, and issues. Reads route through the Linear GraphQL API.
 
 Setup steps for the API key live at [Linear Credentials](/home/setup/linear).
 
@@ -15,15 +15,15 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { LinearResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { LinearVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const linear = new LinearResource({
+const linear = new LinearVFS({
   apiKey: process.env.LINEAR_API_KEY!,
   workspace: 'strukto',
 })
 
 const ws = new Workspace({ '/linear': linear }, { mode: MountMode.READ })
-await ws.execute('ls /linear/teams/')
+await ws.shell('ls /linear/teams/')
 ```
 
 ## Browser
@@ -33,9 +33,9 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { LinearResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { LinearVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const linear = new LinearResource({
+const linear = new LinearVFS({
   apiKey: LINEAR_API_KEY,
 })
 ```
@@ -53,4 +53,4 @@ const linear = new LinearResource({
 
 `read`.
 
-For the mounted layout (`teams/`, `projects/`, `issues/`) see the [Python Linear docs](/python/resource/linear).
+For the mounted layout (`teams/`, `projects/`, `issues/`) see the [Python Linear docs](/python/vfs/linear).

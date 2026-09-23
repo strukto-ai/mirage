@@ -17,7 +17,7 @@ import type { LanceDBAccessor } from '../../../accessor/lancedb.ts'
 import { searchRowsOutput } from '../../../core/lancedb/search.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts, type ProvisionFn } from '../../config.ts'
 import { exactZeroProvision } from '../generic_bind/provision.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -49,9 +49,7 @@ async function searchCommand(
   }
   const target = defaultPaths(paths, opts.cwd)
   const mountPrefix =
-    (target[0] === undefined
-      ? undefined
-      : mountPrefixOf(target[0].virtual, target[0].resourcePath)) ??
+    (target[0] === undefined ? undefined : mountPrefixOf(target[0].virtual, target[0].vfsPath)) ??
     opts.mountPrefix ??
     ''
   const topK = fl.asInt('top_k') ?? accessor.config.searchLimit
@@ -67,7 +65,7 @@ async function searchCommand(
 
 export const LANCEDB_SEARCH = command({
   name: 'search',
-  resource: ResourceName.LANCEDB,
+  vfs: VFSName.LANCEDB,
   spec: specOf('search'),
   fn: searchCommand,
   provision: exactZeroProvision as ProvisionFn,

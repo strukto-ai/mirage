@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { Session } from '../session/session.ts'
+import { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import {
   BreakSignal,
@@ -67,7 +67,12 @@ describe('handleIf', () => {
       [node('c1'), [node('b1')]],
       [node('c2'), [node('b2')]],
     ]
-    const [stdout, io] = await handleIf(execute, branches, null, new Session({ sessionId: 'test' }))
+    const [stdout, io] = await handleIf(
+      execute,
+      branches,
+      null,
+      new SessionState({ sessionId: 'test' }),
+    )
     expect(io.exitCode).toBe(0)
     expect(decode(await materialize(stdout))).toBe('b2-out')
     expect(calls).toEqual(['c1', 'c2', 'b2'])
@@ -84,7 +89,7 @@ describe('handleIf', () => {
       execute,
       [[node('c'), [node('b')]]],
       [node('e')],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(io.exitCode).toBe(0)
     expect(decode(await materialize(stdout))).toBe('else-out')
@@ -102,7 +107,7 @@ describe('handleFor', () => {
         new ExecutionNode(),
       ])
     }
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     const [stdout] = await handleFor(execute, 'X', ['a', 'b', 'c'], [node('body')], s)
     expect(seen).toEqual(['a', 'b', 'c'])
     expect(decode(await materialize(stdout))).toBe('iter-a\niter-b\niter-c\n')
@@ -122,7 +127,7 @@ describe('handleFor', () => {
       'X',
       ['a', 'b', 'c'],
       [node('body')],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(seen).toEqual(['a', 'b'])
   })
@@ -139,7 +144,7 @@ describe('handleFor', () => {
       'X',
       ['a', 'b', 'c'],
       [node('body')],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(seen).toEqual(['a', 'b', 'c'])
   })
@@ -148,7 +153,7 @@ describe('handleFor', () => {
   // loop variable is an ordinary variable and keeps its last value; the
   // shadowed value is not put back.
   it('keeps the loop variable at its last value', async () => {
-    const s = new Session({ sessionId: 'test', vars: varsFromEnv({ X: 'saved' }) })
+    const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ X: 'saved' }) })
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
     await handleFor(execute, 'X', ['a', 'b'], [node('body')], s)
@@ -158,7 +163,7 @@ describe('handleFor', () => {
   // bash 5.2: `unset Y; for Y in ; do :; done` leaves Y unset, since no
   // iteration ever assigned it.
   it('leaves the variable untouched when there are no words', async () => {
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
     await handleFor(execute, 'Y', [], [node('body')], s)
@@ -182,7 +187,7 @@ describe('handleWhile / handleUntil', () => {
       execute,
       node('cond'),
       [node('body')],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(await materialize(stdout))).toBe('1;2;')
   })
@@ -201,7 +206,7 @@ describe('handleWhile / handleUntil', () => {
       execute,
       node('cond'),
       [node('body')],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(await materialize(stdout))).toBe('1;2;')
   })
@@ -216,7 +221,7 @@ describe('handleWhile / handleUntil', () => {
       execute,
       node('cond'),
       [node('body')],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
     )
     expect(decode(await materialize(io.stderr))).toMatch(/while loop terminated after 10000/)
   })
@@ -234,7 +239,7 @@ describe('handleCase', () => {
       [['b*'], [node('B')], ';;'],
       [['*'], [node('catchall')], ';;'],
     ]
-    await handleCase(execute, 'banana', items, new Session({ sessionId: 'test' }))
+    await handleCase(execute, 'banana', items, new SessionState({ sessionId: 'test' }))
     expect(which).toBe('B')
   })
 
@@ -248,7 +253,7 @@ describe('handleCase', () => {
       [['a*'], [node('A')], ';;'],
       [['*'], [node('catchall')], ';;'],
     ]
-    await handleCase(execute, 'xyz', items, new Session({ sessionId: 'test' }))
+    await handleCase(execute, 'xyz', items, new SessionState({ sessionId: 'test' }))
     expect(which).toBe('catchall')
   })
 
@@ -256,7 +261,7 @@ describe('handleCase', () => {
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
     const items: [string[], TSNodeLike[], string][] = [[['z*'], [node('body')], ';;']]
-    const [, io] = await handleCase(execute, 'abc', items, new Session({ sessionId: 'test' }))
+    const [, io] = await handleCase(execute, 'abc', items, new SessionState({ sessionId: 'test' }))
     expect(io.exitCode).toBe(0)
   })
 
@@ -271,7 +276,7 @@ describe('handleCase', () => {
       [['b'], [node('B')], ';;'],
       [['c'], [node('C')], ';;'],
     ]
-    await handleCase(execute, 'a', items, new Session({ sessionId: 'test' }))
+    await handleCase(execute, 'a', items, new SessionState({ sessionId: 'test' }))
     expect(ran).toEqual(['A', 'B'])
   })
 
@@ -286,7 +291,7 @@ describe('handleCase', () => {
       [['a'], [node('A2')], ';;&'],
       [['b'], [node('B')], ';;'],
     ]
-    await handleCase(execute, 'a', items, new Session({ sessionId: 'test' }))
+    await handleCase(execute, 'a', items, new SessionState({ sessionId: 'test' }))
     expect(ran).toEqual(['A', 'A2'])
   })
 })
@@ -313,7 +318,7 @@ describe('& inside a body', () => {
     const table = new JobTable()
     const ran: string[] = []
     const { execute, release } = parked(ran)
-    const s = new Session({ sessionId: 'test' })
+    const s = new SessionState({ sessionId: 'test' })
     const branches: [TSNodeLike, TSNodeLike[]][] = [[node('c'), [bg('slow')]]]
     const [, io] = await handleIf(execute, branches, null, s, null, null, table, 'a1')
     // The body came back while the job is still parked, and its status
@@ -339,7 +344,7 @@ describe('& inside a body', () => {
       execute,
       'x',
       items,
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
       null,
       null,
       table,
@@ -362,7 +367,7 @@ describe('& inside a body', () => {
       'i',
       ['1', '2'],
       [bg('slow')],
-      new Session({ sessionId: 'test' }),
+      new SessionState({ sessionId: 'test' }),
       null,
       null,
       null,
@@ -382,7 +387,7 @@ describe('& inside a body', () => {
       Promise.resolve([null, new IOResult(), new ExecutionNode()])
     const branches: [TSNodeLike, TSNodeLike[]][] = [[node('c'), [bg('x')]]]
     await expect(
-      handleIf(execute, branches, null, new Session({ sessionId: 'test' })),
+      handleIf(execute, branches, null, new SessionState({ sessionId: 'test' })),
     ).rejects.toThrow(/job table/)
   })
 })

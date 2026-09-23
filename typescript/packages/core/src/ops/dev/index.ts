@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DEV_IO } from '../../commands/builtin/dev/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const DEV_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.RAM, DEV_IO)
+export const DEV_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.RAM, DEV_IO)

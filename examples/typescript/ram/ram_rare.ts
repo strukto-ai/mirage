@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createRequire } from 'node:module'
-import { MountMode, RAMResource, Workspace, patchNodeFs } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace, patchNodeFs } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
@@ -21,7 +21,7 @@ const fs = require('fs') as typeof import('fs')
 async function run(ws: Workspace, cmd: string): Promise<void> {
   console.log(`\n$ ${cmd}`)
   try {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     const out = r.stdoutText.replace(/\s+$/, '')
     if (out !== '') console.log(out)
     const err = r.stderrText.replace(/\s+$/, '')
@@ -33,7 +33,7 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/data': new RAMResource() }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   patchNodeFs(ws)
 
   await fs.promises.writeFile('/data/dup.txt', 'banana\napple\ncherry\napple\n')

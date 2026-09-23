@@ -33,7 +33,7 @@ from mirage.workspace.expand import expand_and_classify, expand_node
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (conversion_scalar, deref,
                                             session_view, subscript_index)
 from mirage.workspace.types import ExecutionNode
@@ -51,12 +51,12 @@ def _arith_fatal(exc: ArithError) -> ExitSignal:
     return ExitSignal(1, stderr=f"bash: {exc}\n".encode(), contained_code=1)
 
 
-async def _fatal_index(session: Session, subscript: str,
+async def _fatal_index(session: SessionState, subscript: str,
                        view: SessionView | None) -> int:
     """``subscript_index`` whose failure ends the line, in bash's words.
 
     Args:
-        session (Session): the session the subscript reads.
+        session (SessionState): the session the subscript reads.
         subscript (str): the raw subscript text.
         view (SessionView | None): the gated door.
     """
@@ -113,7 +113,7 @@ async def _assign_var(view: SessionView, key: str, value: ShellValue) -> None:
 
 async def expand_array_items(
     array_node: Any,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace,
@@ -127,7 +127,7 @@ async def expand_array_items(
 
     Args:
         array_node (Any): the tree-sitter ``array`` node.
-        session (Session): shell session.
+        session (SessionState): shell session.
         execute_fn (Callable): workspace execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.
@@ -160,7 +160,7 @@ _SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER, NT.ERROR})
 async def _subscript_key_text(
     subscript_node: Any,
     name: str,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     cs: CallStack | None,
     view: SessionView | None,
@@ -177,7 +177,7 @@ async def _subscript_key_text(
     Args:
         subscript_node (Any): the tree-sitter ``subscript`` node.
         name (str): the array variable's name, for the raw slice.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): evaluator for command substitutions.
         cs (CallStack | None): shell call stack.
         view (SessionView | None): the session plane's gated door.
@@ -197,7 +197,7 @@ async def _subscript_key_text(
 
 async def execute_assignment(
     node: Any,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     namespace: Namespace,
@@ -212,7 +212,7 @@ async def execute_assignment(
 
     Args:
         node (Any): the tree-sitter ``variable_assignment`` node.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
         namespace (Namespace): addressing authority holding the links.

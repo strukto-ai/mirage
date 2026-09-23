@@ -44,7 +44,7 @@ from mirage.types import PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
-from mirage.workspace.session import Session, env_snapshot
+from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 # A textual rest operand is a CLI node's pass-through form: parsed under
@@ -239,7 +239,7 @@ def drops_mount_caches(spec: CLISpec) -> bool:
 async def handle_cli(
     install: CLIInstall,
     parts: list[str | PathSpec],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     context: CLIContext = CLIContext(),
     drop_caches: Callable[[], Awaitable[None]] | None = None,
@@ -263,7 +263,7 @@ async def handle_cli(
             tree, validated config).
         parts (list[str | PathSpec]): expanded command words including
             the head; CLI words are shell-expanded strings.
-        session (Session): shell session (cwd for path resolution, env
+        session (SessionState): shell session (cwd for path resolution, env
             for the invocation record).
         stdin (ByteSource | None): stdin data, carried on the
             invocation record.

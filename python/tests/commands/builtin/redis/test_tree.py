@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage import MountMode, Workspace
-from mirage.resource.redis import RedisResource
+from mirage.vfs.redis import RedisVFS
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -26,21 +26,21 @@ pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
 
 @pytest_asyncio.fixture()
 async def workspace():
-    resource = RedisResource(url=REDIS_URL, key_prefix="test:tree:")
-    await resource._store.clear()
-    await resource._store.add_dir("/")
-    ws = Workspace({"/": resource}, mode=MountMode.WRITE)
+    vfs = RedisVFS(url=REDIS_URL, key_prefix="test:tree:")
+    await vfs._store.clear()
+    await vfs._store.add_dir("/")
+    ws = Workspace({"/": vfs}, mode=MountMode.WRITE)
     yield ws
-    await resource._store.clear()
-    await resource._store.close()
+    await vfs._store.clear()
+    await vfs._store.close()
 
 
 @pytest.mark.asyncio
 async def test_tree_basic(workspace):
-    await workspace.fs.mkdir("/d1")
-    await workspace.fs.write("/d1/a.txt", b"a")
-    await workspace.fs.write("/d1/b.txt", b"b")
-    io = await workspace.execute("tree /d1")
+    await workspace.vfs.mkdir("/d1")
+    await workspace.vfs.write("/d1/a.txt", b"a")
+    await workspace.vfs.write("/d1/b.txt", b"b")
+    io = await workspace.shell("tree /d1")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "a.txt" in out
@@ -49,11 +49,11 @@ async def test_tree_basic(workspace):
 
 @pytest.mark.asyncio
 async def test_tree_L_max_depth(workspace):
-    await workspace.fs.mkdir("/d1")
-    await workspace.fs.mkdir("/d1/sub")
-    await workspace.fs.mkdir("/d1/sub/deep")
-    await workspace.fs.write("/d1/sub/deep/file.txt", b"d")
-    io = await workspace.execute("tree -L 1 /d1")
+    await workspace.vfs.mkdir("/d1")
+    await workspace.vfs.mkdir("/d1/sub")
+    await workspace.vfs.mkdir("/d1/sub/deep")
+    await workspace.vfs.write("/d1/sub/deep/file.txt", b"d")
+    io = await workspace.shell("tree -L 1 /d1")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "sub" in out
@@ -63,10 +63,10 @@ async def test_tree_L_max_depth(workspace):
 
 @pytest.mark.asyncio
 async def test_tree_d_dirs_only(workspace):
-    await workspace.fs.mkdir("/d1")
-    await workspace.fs.mkdir("/d1/sub")
-    await workspace.fs.write("/d1/file.txt", b"x")
-    io = await workspace.execute("tree -d /d1")
+    await workspace.vfs.mkdir("/d1")
+    await workspace.vfs.mkdir("/d1/sub")
+    await workspace.vfs.write("/d1/file.txt", b"x")
+    io = await workspace.shell("tree -d /d1")
     assert io.exit_code == 0
     out = io.stdout.decode()
     assert "sub" in out

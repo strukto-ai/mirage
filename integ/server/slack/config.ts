@@ -42,3 +42,10 @@ export const config = parseConfig({
 // postSeq did.
 export const POST_TS_BASE = 1775000000
 export const BOT_USER_ID = 'UBOT'
+// Who auth.test says holds the token. The fake does not model token holders
+// (xoxb and xoxp reach one workspace, and every write is made as BOT_USER_ID),
+// so it answers with that one identity for either.
+export const BOT_ID = 'BBOT'
+export const BOT_USER_NAME = 'mirage-integ'
+export const TEAM_ID = 'T1'
+export const TEAM_NAME = 'Kestrel'

@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.commands.cli.builtin.himalaya import HIMALAYA
-from mirage.resource.email import EmailConfig, EmailResource
 from mirage.types import PathSpec
+from mirage.vfs.email import EmailConfig, EmailVFS
 
 load_dotenv(".env.development")
 
@@ -31,11 +31,11 @@ config = EmailConfig(
     password=os.environ["EMAIL_PASSWORD"],
     max_messages=20,
 )
-resource = EmailResource(config=config)
+vfs = EmailVFS(config=config)
 
 
 async def main() -> None:
-    ws = Workspace({"/email": resource}, mode=MountMode.READ)
+    ws = Workspace({"/email": vfs}, mode=MountMode.READ)
     # The mail verbs are a CLI install, separate from the mount: the
     # mount serves files, himalaya acts on the account.
     ws.register_cli("himalaya", HIMALAYA, config.model_dump())
@@ -44,13 +44,13 @@ async def main() -> None:
     for cmd in ("cat /email/__nf_missing__.txt",
                 "head /email/__nf_missing__.txt",
                 "stat /email/__nf_missing__.txt"):
-        result = await ws.execute(cmd)
+        result = await ws.shell(cmd)
         print(f"$ {cmd}")
         print(f"  exit={result.exit_code}  "
               f"{(await result.stderr_str()).strip()}")
 
     print("=== ls /email/ ===")
-    result = await ws.execute("ls /email/")
+    result = await ws.shell("ls /email/")
     print(await result.stdout_str())
 
     folders = (await result.stdout_str()).strip().splitlines()
@@ -62,7 +62,7 @@ async def main() -> None:
         return
 
     print(f"=== ls /email/{folder}/ ===")
-    result = await ws.execute(f"ls /email/{folder}/")
+    result = await ws.shell(f"ls /email/{folder}/")
     print(await result.stdout_str())
 
     dates = (await result.stdout_str()).strip().splitlines()
@@ -72,7 +72,7 @@ async def main() -> None:
     first_date = dates[0]
 
     print(f"=== ls /email/{folder}/{first_date}/ ===")
-    result = await ws.execute(f"ls /email/{folder}/{first_date}/")
+    result = await ws.shell(f"ls /email/{folder}/{first_date}/")
     print(await result.stdout_str())
 
     messages = (await result.stdout_str()).strip().splitlines()
@@ -86,34 +86,34 @@ async def main() -> None:
                                 maxsplit=1)[-1].removesuffix(".email.json")
 
     print(f"=== cat {first_msg} ===")
-    result = await ws.execute(f"cat {first_msg}")
+    result = await ws.shell(f"cat {first_msg}")
     print((await result.stdout_str())[:500])
 
     print(f"\n=== jq .subject {first_msg} ===")
-    result = await ws.execute(f'jq ".subject" {first_msg}')
+    result = await ws.shell(f'jq ".subject" {first_msg}')
     print(await result.stdout_str())
 
     print(f"=== jq .from {first_msg} ===")
-    result = await ws.execute(f'jq ".from" {first_msg}')
+    result = await ws.shell(f'jq ".from" {first_msg}')
     print(await result.stdout_str())
 
     # find: -name at folder level pushes down to IMAP search; -path and
     # -size run the local walk (dirs and sizeless entries count as 0, so
     # +0c drops them and -1k keeps them).
     print(f"=== find /email/{folder}/ -name '*.email.json' | head -n 5 ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f'find /email/{folder}/ -name "*.email.json" | head -n 5')
     print(await result.stdout_str())
 
     print(f"=== find /email/{folder}/ -path '*{first_date}*'"
           " | head -n 5 ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f'find /email/{folder}/ -path "*{first_date}*" | head -n 5')
     print(await result.stdout_str())
 
     print(f"=== find /email/{folder}/ -maxdepth 1 -size +0c"
           " (dirs drop out) ===")
-    result = await ws.execute(f"find /email/{folder}/ -maxdepth 1 -size +0c")
+    result = await ws.shell(f"find /email/{folder}/ -maxdepth 1 -size +0c")
     print(f"  exit={result.exit_code}")
     print(await result.stdout_str())
 
@@ -121,9 +121,9 @@ async def main() -> None:
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print(f"=== metadata overlay on {first_msg} ===")
-    meta_res = await ws.execute(f'chmod 640 "{first_msg}"'
-                                f' && chown 500:dev "{first_msg}"'
-                                f' && touch -t 202601021530 "{first_msg}"')
+    meta_res = await ws.shell(f'chmod 640 "{first_msg}"'
+                              f' && chown 500:dev "{first_msg}"'
+                              f' && touch -t 202601021530 "{first_msg}"')
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch("stat",
                                    PathSpec.from_str_path(f"{first_msg}"))
@@ -131,22 +131,22 @@ async def main() -> None:
           f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print("=== himalaya envelope list -m <folder> --page-size 5 ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f'himalaya envelope list -m "{folder}" --page-size 5')
     print((await result.stdout_str())[:500])
 
     print("=== himalaya envelope search not flag seen order by date desc ===")
-    result = await ws.execute(
+    result = await ws.shell(
         f'himalaya envelope search -m "{folder}" --page-size 5 '
         f"not flag seen order by date desc")
     print((await result.stdout_str())[:500])
 
     print(f"=== himalaya message read {uid} ===")
-    result = await ws.execute(f'himalaya message read -m "{folder}" {uid}')
+    result = await ws.shell(f'himalaya message read -m "{folder}" {uid}')
     print((await result.stdout_str())[:500])
 
     print(f"\n=== tree -L 2 /email/{folder}/ ===")
-    result = await ws.execute(f"tree -L 2 /email/{folder}/")
+    result = await ws.shell(f"tree -L 2 /email/{folder}/")
     print((await result.stdout_str())[:500])
 
     # ── native search dispatch (IMAP TEXT search via -r at folder level) ──
@@ -156,7 +156,7 @@ async def main() -> None:
         (f"rg Hi /email/{folder}/ (folder scope)", f"rg Hi /email/{folder}/"),
     ]:
         print(f"\n=== {label} ===")
-        r = await ws.execute(cmd)
+        r = await ws.shell(cmd)
         out = (await r.stdout_str()).strip()
         err = (await r.stderr_str()).strip()
         lines = out.splitlines() if out else []
@@ -170,7 +170,7 @@ async def main() -> None:
     # tail keeps walking (lists folders once, then each match's days).
     glob_folder = folder[:2] + "*"
     print(f"\n=== echo /email/{glob_folder}/2* (mid-path glob) ===")
-    r = await ws.execute(f"echo /email/{glob_folder}/2*")
+    r = await ws.shell(f"echo /email/{glob_folder}/2*")
     out = (await r.stdout_str()).strip()
     print(f"  {out[:200]}")
     assert f"/email/{folder}/2" in out, "mid-path glob did not expand"
@@ -178,7 +178,7 @@ async def main() -> None:
     # A glob that matches nothing stays the literal word, so the
     # command reports it like GNU coreutils.
     print("\n=== cat /email/zz-none-*/x.eml (no match) ===")
-    r = await ws.execute("cat /email/zz-none-*/x.eml")
+    r = await ws.shell("cat /email/zz-none-*/x.eml")
     err = (await r.stderr_str()).strip()
     print(f"  exit={r.exit_code}  {err[:120]}")
     assert r.exit_code == 1 and "zz-none-*" in err

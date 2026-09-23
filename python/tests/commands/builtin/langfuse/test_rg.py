@@ -21,8 +21,8 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.langfuse.rg import rg
 from mirage.commands.config import CommandOpts
 from mirage.io.types import IOResult
-from mirage.resource.langfuse.config import LangfuseConfig
 from mirage.types import PathSpec
+from mirage.vfs.langfuse.config import LangfuseConfig
 
 GENERICS = "mirage.commands.builtin.generic_bind.search._GENERICS"
 RESOLVE = "mirage.commands.builtin.generic_bind.adapter.make_resolve_glob"
@@ -41,7 +41,7 @@ def accessor():
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual.strip("/"))
+                    vfs_path=virtual.strip("/"))
 
 
 def _glob(virtual: str) -> PathSpec:
@@ -50,7 +50,7 @@ def _glob(virtual: str) -> PathSpec:
     # while "/sessions/*" routes to `session` and reaches the push-down.
     return PathSpec(virtual=virtual,
                     directory=virtual.rsplit("/", 1)[0],
-                    resource_path=virtual.strip("/"),
+                    vfs_path=virtual.strip("/"),
                     pattern=virtual.rsplit("/", 1)[-1],
                     resolved=False)
 

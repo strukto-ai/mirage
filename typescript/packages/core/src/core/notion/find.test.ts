@@ -68,7 +68,7 @@ function root(): PathSpec {
     virtual: '/db',
     directory: '/db',
     resolved: false,
-    resourcePath: 'db',
+    vfsPath: 'db',
   })
 }
 
@@ -83,7 +83,7 @@ describe('notion core find', () => {
       virtual: '/db',
       directory: '/db',
       resolved: false,
-      resourcePath: mountKey('/db', '/db'),
+      vfsPath: mountKey('/db', '/db'),
     })
     const out = await find(accessor, spec, { name: 'db' })
     expect(out).toEqual(['/'])

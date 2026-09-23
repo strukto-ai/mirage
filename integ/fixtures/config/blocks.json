@@ -1,12 +1,12 @@
 {
-  "note": "Workspace configs both loaders must accept, for every block that is not a permission verb: mounts, cache, index, store, clis, console and the top level. The counterpart to rejected.json, and the reason it exists: TypeScript checks keys against hand-written tables that mirror Python's pydantic models, so a field added on the Python side would be silently refused by TypeScript until a config using it turned up. Every key of every block appears in the accepted set at least once, which turns that drift into a failing test. The three verbs of a role's commands block have a file each (allow.json, ask.json, deny.json), because a rule grammar accepted for one verb and refused for another is exactly the kind of drift a single mixed file hides. Values are only as real as validation demands \u2014 no resource is built and no script is read, both loaders stop at the shape.",
+  "note": "Workspace configs both loaders must accept, for every block that is not a permission verb: mounts, cache, index, store, clis, console and the top level. The counterpart to rejected.json, and the reason it exists: TypeScript checks keys against hand-written tables that mirror Python's pydantic models, so a field added on the Python side would be silently refused by TypeScript until a config using it turned up. Every key of every block appears in the accepted set at least once, which turns that drift into a failing test. The three verbs of a role's commands block have a file each (allow.json, ask.json, deny.json), because a rule grammar accepted for one verb and refused for another is exactly the kind of drift a single mixed file hides. Values are only as real as validation demands \u2014 no VFS is built and no script is read, both loaders stop at the shape.",
   "cases": [
     {
       "name": "top level: every key",
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "clis": {
@@ -114,7 +114,7 @@
           }
         },
         "mode": "write",
-        "consistency": "lazy",
+        "read": "fresh",
         "default_session_id": "s1",
         "default_agent_id": "a1",
         "workspace_id": "w1",
@@ -135,7 +135,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram",
+            "vfs": "ram",
             "mode": "read",
             "config": {
               "root": "/tmp/x"
@@ -146,8 +146,22 @@
                 "on_exceed": "error"
               }
             },
-            "backend": "vfs",
-            "mountpoint": "/mnt/d"
+            "backend": "workspace",
+            "mountpoint": "/mnt/d",
+            "read": "bounded",
+            "ttl": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: an integral float bound",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 60.0
           }
         }
       }
@@ -157,7 +171,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "cache": {
@@ -176,7 +190,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "cache": {
@@ -199,7 +213,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "store": {
@@ -231,7 +245,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "clis": {
@@ -250,7 +264,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "clis": {
@@ -268,7 +282,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "clis": {
@@ -283,7 +297,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "console": {
@@ -296,7 +310,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "console": {
@@ -312,7 +326,7 @@
       "config": {
         "mounts": {
           "/d": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "console": {

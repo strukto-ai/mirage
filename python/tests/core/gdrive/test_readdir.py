@@ -145,8 +145,7 @@ async def test_readdir_root(accessor, index):
             return_value=files,
     ):
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
         assert "/readme.txt" in result
 
 
@@ -160,9 +159,9 @@ async def test_readdir_cached(accessor, index):
         vfs_name="cached.txt",
     )
     await index.set_dir("/", [("cached.txt", entry)])
-    result = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    result = await readdir(accessor,
+                           PathSpec(vfs_path="", virtual="/", directory="/"),
+                           index)
     assert any("cached.txt" in r for r in result)
 
 
@@ -196,7 +195,7 @@ async def test_readdir_subfolder(accessor, index):
     ) as mock_list:
         result = await readdir(
             accessor,
-            PathSpec(resource_path="docs", virtual="/docs", directory="/docs"),
+            PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
             index)
         assert "/docs/notes.txt" in result
         mock_list.assert_called_once_with(accessor.token_manager,
@@ -236,7 +235,7 @@ async def test_readdir_repopulates_evicted_subfolder(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="docs", virtual="/docs", directory="/docs"),
+            PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
             index)
         assert "/docs/notes.txt" in result
 
@@ -265,9 +264,8 @@ async def test_readdir_missing_subfolder_raises_after_recursion(
         with pytest.raises(FileNotFoundError):
             await readdir(
                 accessor,
-                PathSpec(resource_path="docs",
-                         virtual="/docs",
-                         directory="/docs"), index)
+                PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
+                index)
 
 
 @pytest.mark.asyncio
@@ -296,7 +294,7 @@ async def test_readdir_under_a_file_is_not_a_directory(accessor, index):
         with pytest.raises(NotADirectoryError):
             await readdir(
                 accessor,
-                PathSpec(resource_path="a.txt/x",
+                PathSpec(vfs_path="a.txt/x",
                          virtual="/a.txt/x",
                          directory="/a.txt/x"), index)
 
@@ -317,8 +315,7 @@ async def test_readdir_root_includes_shared_drives(accessor, index):
          patch("mirage.core.gdrive.readdir.list_shared_drives",
                new_callable=AsyncMock, return_value=drives):
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
         assert "/readme.txt" in result
         # Shared Drives appear as top-level directories.
         assert "/Team Drive/" in result
@@ -350,8 +347,7 @@ async def test_readdir_root_uniquifies_duplicate_shared_drive_names(
          patch("mirage.core.gdrive.readdir.list_shared_drives",
                new_callable=AsyncMock, return_value=drives):
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
 
     assert result == [
         "/Team/",
@@ -379,8 +375,7 @@ async def test_readdir_root_shared_drives_best_effort(accessor, index):
          patch("mirage.core.gdrive.readdir.list_shared_drives",
                new_callable=AsyncMock, side_effect=RuntimeError("no scope")):
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
         assert "/readme.txt" in result
 
 
@@ -402,7 +397,7 @@ async def test_readdir_failed_shared_drives_leaves_root_uncached(
         "owners": [],
         "capabilities": {},
     }]
-    root = PathSpec(resource_path="", virtual="/", directory="/")
+    root = PathSpec(vfs_path="", virtual="/", directory="/")
     with patch("mirage.core.gdrive.readdir.list_files",
                new_callable=AsyncMock, return_value=files), \
          patch("mirage.core.gdrive.readdir.list_shared_drives",
@@ -462,8 +457,7 @@ async def test_readdir_workspace_files_get_extensions(accessor, index):
             return_value=files,
     ):
         result = await readdir(
-            accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="", virtual="/", directory="/"), index)
         assert "/My Document.gdoc.json" in result
         assert "/My Sheet.gsheet.json" in result
         assert "/My Slides.gslide.json" in result
@@ -497,8 +491,7 @@ async def test_readdir_size_binary_kept_google_apps_in_extra(accessor, index):
             return_value=files,
     ):
         await readdir(accessor,
-                      PathSpec(resource_path="", virtual="/", directory="/"),
-                      index)
+                      PathSpec(vfs_path="", virtual="/", directory="/"), index)
 
     # Binary files download raw: Drive's size is the rendered byte length.
     binary = (await index.get("/report.pdf")).entry
@@ -519,7 +512,7 @@ async def test_readdir_scoped_mount_lists_folder_children(
     accessor = scoped_accessor(scope)
     entries = await readdir(
         accessor,
-        PathSpec(virtual="/", directory="/", resource_path=""),
+        PathSpec(virtual="/", directory="/", vfs_path=""),
         index=NULL_INDEX,
     )
     assert entries == ["/in.txt"]

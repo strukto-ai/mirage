@@ -26,10 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("grep",
-         resource="history",
-         spec=SPECS["grep"],
-         aggregate=prefix_aggregate)
+@command("grep", vfs="history", spec=SPECS["grep"], aggregate=prefix_aggregate)
 async def grep(accessor: HistoryAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

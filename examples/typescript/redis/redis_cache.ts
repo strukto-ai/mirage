@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { defaultFingerprint } from '@struktoai/mirage-core'
 import { RedisFileCacheStore } from '@struktoai/mirage-node'
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
@@ -35,7 +34,9 @@ async function main(): Promise<void> {
 
   console.log('--- set + get round-trip ---')
   const payload = ENC.encode('hello from redis cache')
-  const fp = defaultFingerprint(payload)
+  // A backend token, not a hash of the bytes: the cache compares what
+  // the backend said about the object, so that is what a caller supplies.
+  const fp = 'etag-demo-1'
   await cache.set('/data/hello.txt', payload, { fingerprint: fp })
   const got = await cache.get('/data/hello.txt')
   console.log(`  get: ${DEC.decode(got ?? new Uint8Array())}`)

@@ -63,9 +63,8 @@ async def _fake_list(_tm, folder_id, limit=1000):
 async def test_size_walks_directory_tree(accessor, index):
     with patch("mirage.core.box.readdir.list_folder_items", new=_fake_list):
         total = await size(
-            accessor,
-            PathSpec(resource_path="data", virtual="/data", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="data", virtual="/data",
+                               directory="/"), index)
     assert total == 39
 
 
@@ -75,6 +74,5 @@ async def test_size_missing_path_is_zero(accessor, index):
          patch("mirage.core.box.resolve.list_folder_items", new=_fake_list):
         total = await size(
             accessor,
-            PathSpec(resource_path="ghost", virtual="/ghost", directory="/"),
-            index)
+            PathSpec(vfs_path="ghost", virtual="/ghost", directory="/"), index)
     assert total == 0

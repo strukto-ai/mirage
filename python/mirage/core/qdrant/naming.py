@@ -19,9 +19,9 @@ from typing import Any
 from mirage.core.hierarchy.codec import PATH_SAFE
 from mirage.core.qdrant.payload import field_value
 from mirage.core.render.json import value_text
-from mirage.resource.qdrant.config import QdrantConfig
 from mirage.utils.naming import fit_id_name, parse_id_name
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len, path_safe_name
+from mirage.vfs.qdrant.config import QdrantConfig
 
 
 def group_name(value: Any, *, basename: bool = False) -> str:

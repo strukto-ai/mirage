@@ -20,7 +20,7 @@ from mirage.workspace.expand.variable import (_ArithOperand, _case_mod,
                                               _glob_replace, _glob_strip,
                                               _lookup_var, _pattern_text,
                                               _slice_array)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import seed_var
 
@@ -63,11 +63,11 @@ def test_glob_strip_class_negation():
 
 
 def test_pattern_text_splices_refs_live():
-    session = Session(session_id="t",
-                      vars=vars_from_env({
-                          "ext": ".txt",
-                          "pat": "l"
-                      }))
+    session = SessionState(session_id="t",
+                           vars=vars_from_env({
+                               "ext": ".txt",
+                               "pat": "l"
+                           }))
     assert _pattern_text("$ext", session, None) == ".txt"
     assert _pattern_text("*${ext}", session, None) == "*.txt"
     assert _pattern_text("a$pat*b", session, None) == "al*b"
@@ -79,14 +79,15 @@ def test_pattern_text_binds_backslash_escapes():
     # bash 5.2: ${v#a\*} strips a literal a*, so the escaped
     # character is spelled as a one-character class for the
     # escape-less fnmatch; a trailing lone backslash stays itself.
-    session = Session(session_id="t", vars=vars_from_env({}))
+    session = SessionState(session_id="t", vars=vars_from_env({}))
     assert _pattern_text("a\\*b", session, None) == "a[*]b"
     assert _pattern_text("\\\\", session, None) == "\\"
     assert _pattern_text("a\\", session, None) == "a\\"
 
 
 def test_lookup_var_array_first_element():
-    session = Session(session_id="t", vars={"a": ShellVar(["one", "two"])})
+    session = SessionState(session_id="t",
+                           vars={"a": ShellVar(["one", "two"])})
     assert _lookup_var("a", session, None) == "one"
 
 
@@ -97,12 +98,12 @@ def test_lookup_var_array_first_element():
     (["1", "-1"], ["2", "3"]),
 ])
 def test_slice_array(groups, expected):
-    operand = _ArithOperand(Session(session_id="s", cwd="/"))
+    operand = _ArithOperand(SessionState(session_id="s", cwd="/"))
     assert _slice_array(["1", "2", "3", "4"], groups, operand) == expected
 
 
 def test_arith_operand_resolves_expressions_and_records_writes():
-    session = Session(session_id="s", cwd="/")
+    session = SessionState(session_id="s", cwd="/")
     seed_var(session, "i", "1")
     seed_var(session, "o", "2")
     operand = _ArithOperand(session)

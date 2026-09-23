@@ -83,5 +83,5 @@ async def _python3(
                           cwd=opts.cwd)
 
 
-python3 = command("python3", resource=None, spec=SPECS["python3"])(_python3)
-python_cmd = command("python", resource=None, spec=SPECS["python"])(_python3)
+python3 = command("python3", vfs=None, spec=SPECS["python3"])(_python3)
+python_cmd = command("python", vfs=None, spec=SPECS["python"])(_python3)

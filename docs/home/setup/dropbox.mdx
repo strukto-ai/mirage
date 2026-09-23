@@ -6,7 +6,7 @@ description: Set up Dropbox OAuth2 credentials and obtain a long-lived refresh t
 
 ## Overview
 
-The Dropbox resource uses OAuth2 with a long-lived refresh token to authenticate against the
+The Dropbox VFS uses OAuth2 with a long-lived refresh token to authenticate against the
 [Dropbox v2 HTTP API](https://www.dropbox.com/developers/documentation/http/documentation):
 
 - **`/2/files/list_folder`**, list folder entries
@@ -19,7 +19,7 @@ Two flows are supported:
 - **Code flow with client secret**, for Node/server. Needs `client_id`, `client_secret`, `refresh_token`.
 - **PKCE flow**, for browsers. Needs only `client_id` and `refresh_token` (no secret in the bundle).
 
-Both produce the same long-lived refresh token; the resource auto-refreshes short-lived access
+Both produce the same long-lived refresh token; the VFS auto-refreshes short-lived access
 tokens (≈4h) behind the scenes.
 
 ## Setup
@@ -41,7 +41,7 @@ On the app's settings page, click the **Permissions** tab and check:
 - `files.metadata.read`, list folders, read file metadata
 - `files.content.read`, download file bytes
 
-If you also want write/delete (not used by the read-only resource yet), check
+If you also want write/delete (not used by the read-only VFS yet), check
 `files.content.write` and `files.metadata.write`.
 
 Click **Submit** at the bottom of the Permissions tab. **Required**: Dropbox does not include
@@ -127,7 +127,7 @@ PKCE flow. The bundled example does the dance end-to-end.
 1. From `examples/typescript/browser/`, run `pnpm dev`.
 1. Open `http://localhost:5173/dropbox_pkce.html` and click **Connect Dropbox**.
 
-The example persists the refresh token to `localStorage`, then mounts a `DropboxResource` with
+The example persists the refresh token to `localStorage`, then mounts a `DropboxVFS` with
 just `{ clientId, refreshToken }` and runs `ls /dropbox/`. Inspect DevTools -> Network -> filter
 `token` to confirm refresh calls don't include `client_secret`.
 
@@ -147,7 +147,7 @@ Refresh tokens get revoked if:
 - The Dropbox account password is changed
 - The app is deleted in the developer console
 
-The `DropboxTokenManager` in the resource transparently exchanges the refresh token for a fresh
+The `DropboxTokenManager` in the VFS transparently exchanges the refresh token for a fresh
 access token whenever the cached one is within 5 minutes of expiry.
 
 ## Scopes Reference
@@ -161,7 +161,7 @@ access token whenever the cached one is within 5 minutes of expiry.
 | `sharing.read`           | List shared links and shared folders |
 | `account_info.read`      | Account email, country, user info    |
 
-The Mirage resource only needs `files.metadata.read` + `files.content.read` for the read-only
+The Mirage VFS only needs `files.metadata.read` + `files.content.read` for the read-only
 mount. Add the `*.write` scopes if/when write commands land.
 
 ## Troubleshooting
@@ -178,9 +178,9 @@ mount. Add the `*.write` scopes if/when write commands land.
 For TypeScript usage, mount with:
 
 ```ts
-import { DropboxResource } from '@struktoai/mirage-node'
+import { DropboxVFS } from '@struktoai/mirage-node'
 
-const dropbox = new DropboxResource({
+const dropbox = new DropboxVFS({
   clientId: process.env.DROPBOX_APP_KEY!,
   clientSecret: process.env.DROPBOX_APP_SECRET!,
   refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
@@ -190,9 +190,9 @@ const dropbox = new DropboxResource({
 Or browser (PKCE):
 
 ```ts
-import { DropboxResource } from '@struktoai/mirage-browser'
+import { DropboxVFS } from '@struktoai/mirage-browser'
 
-const dropbox = new DropboxResource({
+const dropbox = new DropboxVFS({
   clientId: 'YOUR_APP_KEY',
   refreshToken: refreshTokenFromLocalStorage,
 })

@@ -21,8 +21,8 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.trello.normalize import (normalize_card, normalize_workspace,
                                           to_json_bytes)
 from mirage.core.trello.readdir import readdir
-from mirage.resource.trello.config import TrelloConfig
 from mirage.types import PathSpec
+from mirage.vfs.trello.config import TrelloConfig
 
 
 @pytest.fixture
@@ -37,9 +37,9 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    result = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    result = await readdir(accessor,
+                           PathSpec(vfs_path="", virtual="/", directory="/"),
+                           index)
     assert result == ["/workspaces"]
 
 
@@ -52,7 +52,7 @@ async def test_readdir_workspace_dir_carries_sized_workspace_json(
                return_value=[ws]):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="workspaces/Engineering__ws1",
+            PathSpec(vfs_path="workspaces/Engineering__ws1",
                      virtual="/workspaces/Engineering__ws1",
                      directory="/workspaces/Engineering__ws1"), index)
     assert result == [
@@ -102,7 +102,7 @@ async def test_readdir_card_dir_carries_sized_card_json(accessor, index):
                return_value=[card]):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=f"{base.strip('/')}/cards/Fix_login__c1",
+            PathSpec(vfs_path=f"{base.strip('/')}/cards/Fix_login__c1",
                      virtual=f"{base}/cards/Fix_login__c1",
                      directory=f"{base}/cards/Fix_login__c1"), index)
     assert result == [
@@ -148,13 +148,13 @@ async def test_readdir_traversal_never_refetches_a_listing(accessor, index):
                return_value=cards) as cards_mock:
         listed = await readdir(
             accessor,
-            PathSpec(resource_path=f"{base.strip('/')}/cards",
+            PathSpec(vfs_path=f"{base.strip('/')}/cards",
                      virtual=f"{base}/cards",
                      directory=f"{base}/cards"), index)
         for card_dir in listed:
             await readdir(
                 accessor,
-                PathSpec(resource_path=card_dir.strip("/"),
+                PathSpec(vfs_path=card_dir.strip("/"),
                          virtual=card_dir,
                          directory=card_dir), index)
     assert ws_mock.await_count == 1
@@ -176,7 +176,7 @@ async def test_readdir_unknown_workspace_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await readdir(
                 accessor,
-                PathSpec(resource_path="workspaces/Ghost__nope/boards",
+                PathSpec(vfs_path="workspaces/Ghost__nope/boards",
                          virtual="/workspaces/Ghost__nope/boards",
                          directory="/workspaces/Ghost__nope/boards"), index)
 
@@ -188,7 +188,7 @@ async def test_readdir_unrecognized_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path="__nf_missing__",
+            PathSpec(vfs_path="__nf_missing__",
                      virtual="/__nf_missing__",
                      directory="/__nf_missing__"), index)
 
@@ -198,6 +198,6 @@ async def test_readdir_unrecognized_nested_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path="workspaces/w/nope/deeper",
+            PathSpec(vfs_path="workspaces/w/nope/deeper",
                      virtual="/workspaces/w/nope/deeper",
                      directory="/workspaces/w/nope/deeper"), index)

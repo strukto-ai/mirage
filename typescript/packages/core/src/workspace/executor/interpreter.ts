@@ -83,7 +83,7 @@ function toPathSpec(p: PathSpec): PathSpec {
     directory: p.directory,
     pattern: p.pattern,
     resolved: p.resolved,
-    resourcePath: mountKey(p.virtual, mountPrefixOf(p.virtual, p.resourcePath)),
+    vfsPath: mountKey(p.virtual, mountPrefixOf(p.virtual, p.vfsPath)),
   })
 }
 

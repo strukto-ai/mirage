@@ -38,7 +38,7 @@ def run_async_from_sync(
     running one (FUSE, which serves it from its own thread) takes
     run_coroutine_threadsafe, an idle one (a ``with ws:`` block, whose
     caller is the only thread there is) is driven per call. Both keep
-    every call on ONE loop, which is what a resource holding a
+    every call on ONE loop, which is what a VFS holding a
     connection pool needs to still be closable at the end.
 
     Args:

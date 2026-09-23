@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { compareDepthFirst } from './executor/find_action_dispatch.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
@@ -23,20 +23,20 @@ import { Workspace } from './workspace/workspace.ts'
 async function singleMountWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const root = new RAMResource()
-  ops.registerResource(root)
+  const root = new RAMVFS()
+  ops.registerVfs(root)
   return new Workspace({ '/': root }, { mode: MountMode.WRITE, ops, shellParser: parser })
 }
 
 async function twoMountWs(): Promise<Workspace> {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const root = new RAMResource()
-  const a = new RAMResource()
-  const b = new RAMResource()
-  ops.registerResource(root)
-  ops.registerResource(a)
-  ops.registerResource(b)
+  const root = new RAMVFS()
+  const a = new RAMVFS()
+  const b = new RAMVFS()
+  ops.registerVfs(root)
+  ops.registerVfs(a)
+  ops.registerVfs(b)
   return new Workspace(
     { '/': root, '/a': a, '/b': b },
     { mode: MountMode.WRITE, ops, shellParser: parser },
@@ -45,8 +45,8 @@ async function twoMountWs(): Promise<Workspace> {
 
 async function setupHtmlFiles(ws: Workspace): Promise<void> {
   ws.createSession('s')
-  await ws.execute('mkdir -p /a/b', { sessionId: 's' })
-  await ws.execute('touch /foo.html /bar.htm /a/b/baz.html', { sessionId: 's' })
+  await ws.shell('mkdir -p /a/b', { sessionId: 's' })
+  await ws.shell('touch /foo.html /bar.htm /a/b/baz.html', { sessionId: 's' })
 }
 
 const MUTATE = 'sh -c \'echo "$KEEP:$PWD"; KEEP=child; cd /\''
@@ -58,26 +58,26 @@ describe('find action layer', () => {
     it('removes matched files', async () => {
       const ws = await singleMountWs()
       await setupHtmlFiles(ws)
-      const r = await ws.execute("find / -name '*.html' -delete", { sessionId: 's' })
+      const r = await ws.shell("find / -name '*.html' -delete", { sessionId: 's' })
       expect(r.exitCode).toBe(0)
       expect(r.stdoutText).toBe('')
-      const after = await ws.execute("find / -name '*.html'", { sessionId: 's' })
+      const after = await ws.shell("find / -name '*.html'", { sessionId: 's' })
       expect(after.stdoutText).toBe('')
-      const htm = await ws.execute("find / -name '*.htm'", { sessionId: 's' })
+      const htm = await ws.shell("find / -name '*.htm'", { sessionId: 's' })
       expect(htm.stdoutText).toContain('/bar.htm')
     })
 
     it('is silent unless -print is also given', async () => {
       const ws = await singleMountWs()
       await setupHtmlFiles(ws)
-      const r = await ws.execute("find / -name '*.html' -delete", { sessionId: 's' })
+      const r = await ws.shell("find / -name '*.html' -delete", { sessionId: 's' })
       expect(r.stdoutText).toBe('')
     })
 
     it('emits matches when -print -delete is combined', async () => {
       const ws = await singleMountWs()
       await setupHtmlFiles(ws)
-      const r = await ws.execute("find / -name '*.html' -print -delete", {
+      const r = await ws.shell("find / -name '*.html' -print -delete", {
         sessionId: 's',
       })
       const out = r.stdoutText
@@ -88,11 +88,11 @@ describe('find action layer', () => {
     it('skips mount roots', async () => {
       const ws = await twoMountWs()
       ws.createSession('s')
-      await ws.execute('touch /a/x.html /b/y.html', { sessionId: 's' })
+      await ws.shell('touch /a/x.html /b/y.html', { sessionId: 's' })
       // Without -name, /a and /b appear as synthetic dir entries.
       // -delete must skip them.
-      await ws.execute('find / -type d -delete', { sessionId: 's' })
-      const ls = await ws.execute('ls /', { sessionId: 's' })
+      await ws.shell('find / -type d -delete', { sessionId: 's' })
+      const ls = await ws.shell('ls /', { sessionId: 's' })
       const out = ls.stdoutText
       expect(out).toContain('a')
       expect(out).toContain('b')
@@ -101,9 +101,9 @@ describe('find action layer', () => {
     it('orders deepest-first so children clear before parents', async () => {
       const ws = await singleMountWs()
       ws.createSession('s')
-      await ws.execute('mkdir -p /tmp/a/b', { sessionId: 's' })
-      await ws.execute('touch /tmp/a/b/file.txt', { sessionId: 's' })
-      const r = await ws.execute("find /tmp -name '*.txt' -delete", {
+      await ws.shell('mkdir -p /tmp/a/b', { sessionId: 's' })
+      await ws.shell('touch /tmp/a/b/file.txt', { sessionId: 's' })
+      const r = await ws.shell("find /tmp -name '*.txt' -delete", {
         sessionId: 's',
       })
       expect(r.exitCode).toBe(0)
@@ -112,12 +112,12 @@ describe('find action layer', () => {
     it('removes directories emptied by the deepest-first pass', async () => {
       const ws = await singleMountWs()
       ws.createSession('s')
-      await ws.execute('mkdir -p /tree/deep', { sessionId: 's' })
-      await ws.execute('touch /tree/deep/f.txt', { sessionId: 's' })
-      const r = await ws.execute('find /tree -delete', { sessionId: 's' })
+      await ws.shell('mkdir -p /tree/deep', { sessionId: 's' })
+      await ws.shell('touch /tree/deep/f.txt', { sessionId: 's' })
+      const r = await ws.shell('find /tree -delete', { sessionId: 's' })
       expect(r.exitCode).toBe(0)
       expect(r.stderrText).toBe('')
-      const after = await ws.execute('find / -name tree', { sessionId: 's' })
+      const after = await ws.shell('find / -name tree', { sessionId: 's' })
       expect(after.stdoutText).toBe('')
     })
   })
@@ -126,7 +126,7 @@ describe('find action layer', () => {
     it('separates matches with NUL bytes', async () => {
       const ws = await singleMountWs()
       await setupHtmlFiles(ws)
-      const r = await ws.execute("find / -name '*.html' -print0", { sessionId: 's' })
+      const r = await ws.shell("find / -name '*.html' -print0", { sessionId: 's' })
       const out = r.stdoutText
       expect(out).toContain('\x00')
       // No newlines outside the NUL separators.
@@ -144,7 +144,7 @@ describe('find action layer', () => {
       // carry `?`, the answer `stat %i` and `%b` already give.
       const ws = await singleMountWs()
       await setupHtmlFiles(ws)
-      const r = await ws.execute("find / -name '*.html' -ls", { sessionId: 's' })
+      const r = await ws.shell("find / -name '*.html' -ls", { sessionId: 's' })
       const lines = r.stdoutText.split('\n').filter((l) => l !== '')
       expect(lines.length).toBeGreaterThanOrEqual(2)
       for (const line of lines) {
@@ -163,9 +163,9 @@ describe('find action layer', () => {
       // order.
       const ws = await singleMountWs()
       try {
-        await ws.execute('mkdir -p /w/b /w/a; printf x > /w/b/x; printf y > /w/a/y; cd /w')
+        await ws.shell('mkdir -p /w/b /w/a; printf x > /w/b/x; printf y > /w/a/y; cd /w')
         const out = async (line: string) => {
-          const io = await ws.execute(line)
+          const io = await ws.shell(line)
           return [io.stdoutText, io.stderrText, io.exitCode]
         }
         expect(await out('find b a -depth')).toEqual(['b/x\nb\na/y\na\n', '', 0])
@@ -182,11 +182,9 @@ describe('find action layer', () => {
       // first, so `find d/ -delete` refused the non-empty directory.
       const ws = await singleMountWs()
       try {
-        await ws.execute(
-          'mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w',
-        )
+        await ws.shell('mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w')
         const out = async (line: string) => {
-          const io = await ws.execute(line)
+          const io = await ws.shell(line)
           return [io.stdoutText, io.stderrText, io.exitCode]
         }
         expect(await out('find d/ -depth')).toEqual(['d/a.txt\nd/sub/c.txt\nd/sub\nd/\n', '', 0])
@@ -209,11 +207,9 @@ describe('find action layer', () => {
       // run per start point, so no sort can fold the two together.
       const ws = await singleMountWs()
       try {
-        await ws.execute(
-          'mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w',
-        )
+        await ws.shell('mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w')
         const out = async (line: string) => {
-          const io = await ws.execute(line)
+          const io = await ws.shell(line)
           return [io.stdoutText, io.stderrText, io.exitCode]
         }
         const post = 'd/a.txt\nd/sub/c.txt\nd/sub\nd\n'
@@ -244,14 +240,14 @@ describe('find action layer', () => {
       // directory` per match, exit 0.
       const ws = await singleMountWs()
       try {
-        await ws.execute('mkdir -p /w/d; cd /w')
-        const io = await ws.execute('find d -maxdepth 0 -exec cd {} \\;; echo rc=$?')
+        await ws.shell('mkdir -p /w/d; cd /w')
+        const io = await ws.shell('find d -maxdepth 0 -exec cd {} \\;; echo rc=$?')
         expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([
           'rc=0\n',
           "find: 'cd': No such file or directory\n",
           0,
         ])
-        const mixed = await ws.execute(
+        const mixed = await ws.shell(
           'find d -maxdepth 0 -exec export X=1 \\;; find d -maxdepth 0 -exec echo hi {} \\;',
         )
         expect([mixed.stdoutText, mixed.stderrText]).toEqual([
@@ -269,8 +265,8 @@ describe('find action layer', () => {
       // exit 0, and the function never runs.
       const ws = await singleMountWs()
       try {
-        await ws.execute('mkdir -p /w/d; cd /w')
-        const io = await ws.execute(
+        await ws.shell('mkdir -p /w/d; cd /w')
+        const io = await ws.shell(
           'f() { echo BAD; }; find d -maxdepth 0 -exec f {} \\;; echo rc=$?',
         )
         expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([
@@ -289,10 +285,10 @@ describe('find action layer', () => {
       // `\n`, and a byte outside ASCII is octal; `-print` stays raw.
       const ws = await singleMountWs()
       try {
-        await ws.execute(
+        await ws.shell(
           "mkdir -p /w/d; touch 'd/a b' 'd/c\\d' 'd/e\"f' \"d/n\nl\" 'd/ü' 2>/dev/null; cd /w; touch 'd/a b' 'd/c\\d' 'd/e\"f' \"d/n\nl\" 'd/ü'; ln -s 'a b' 'd/li nk'",
         )
-        const io = await ws.execute('find d -mindepth 1 -ls | sort')
+        const io = await ws.shell('find d -mindepth 1 -ls | sort')
         expect([io.stderrText, io.exitCode]).toEqual(['', 0])
         const names = io.stdoutText
           .split('\n')
@@ -309,7 +305,7 @@ describe('find action layer', () => {
             'd/\\303\\274',
           ].sort(),
         )
-        expect((await ws.execute("find d -name 'a b'")).stdoutText).toBe('d/a b\n')
+        expect((await ws.shell("find d -name 'a b'")).stdoutText).toBe('d/a b\n')
       } finally {
         await ws.close()
       }
@@ -320,7 +316,7 @@ describe('find action layer', () => {
     it('find without action flags is unchanged', async () => {
       const ws = await singleMountWs()
       await setupHtmlFiles(ws)
-      const r = await ws.execute("find / -name '*.html'", { sessionId: 's' })
+      const r = await ws.shell("find / -name '*.html'", { sessionId: 's' })
       const out = r.stdoutText
       expect(out).toContain('/foo.html')
       expect(out).toContain('/a/b/baz.html')
@@ -332,7 +328,7 @@ describe('find action layer', () => {
     it('honors -name on mount roots', async () => {
       const ws = await twoMountWs()
       ws.createSession('s')
-      const r = await ws.execute("find / -name 'a' -type d", { sessionId: 's' })
+      const r = await ws.shell("find / -name 'a' -type d", { sessionId: 's' })
       const lines = r.stdoutText
         .trim()
         .split('\n')
@@ -340,6 +336,32 @@ describe('find action layer', () => {
       expect(lines).toContain('/a')
       expect(lines).not.toContain('/b')
     })
+  })
+})
+
+describe('a time test gates the -prune after it', () => {
+  it('prunes only the directories the test holds for', async () => {
+    const ws = await singleMountWs()
+    ws.createSession('s')
+    await ws.shell(
+      'mkdir -p /d/old/x /d/new/y && touch /d/old/x/f /d/new/y/g /d/old/o.txt && touch -d 2000-01-01 /d/old',
+      { sessionId: 's' },
+    )
+    const gated = await ws.shell('find /d -mindepth 1 -newermt 2010-01-01 -prune', {
+      sessionId: 's',
+    })
+    expect(gated.stdoutText).toBe('/d/new\n/d/old/o.txt\n/d/old/x\n')
+    const firm = await ws.shell('find /d -mindepth 1 -prune -newermt 2010-01-01', {
+      sessionId: 's',
+    })
+    expect(firm.stdoutText).toBe('/d/new\n')
+    const old = await ws.shell('find /d -mindepth 1 -mtime +3650 -prune', { sessionId: 's' })
+    expect(old.stdoutText).toBe('/d/old\n')
+    const both = await ws.shell(
+      'find /d -mindepth 1 -newermt 1990-01-01 -prune -newermt 2010-01-01',
+      { sessionId: 's' },
+    )
+    expect(both.stdoutText).toBe('/d/new\n')
   })
 })
 
@@ -362,10 +384,10 @@ describe('find -exec isolation', () => {
       try {
         // The mutating programs are `sh -c` lines: GNU's -exec sees no
         // shell function, so a function head would not run at all.
-        await ws.execute(
+        await ws.shell(
           'mkdir -p /w/d; touch /w/d/a.txt /w/d/b.txt; cd /w; KEEP=parent; set -- original',
         )
-        const io = await ws.execute(
+        const io = await ws.shell(
           `find d -name '*.txt' -exec ${action} ${terminator}; ` +
             'echo "$KEEP:$PWD:$1"; echo "${UNSET_FOR_TEST}"',
         )
@@ -384,12 +406,12 @@ describe('find -exec isolation', () => {
   it('keeps the stderr of a program that exits 127, and names only a missing one', async () => {
     const ws = await singleMountWs()
     try {
-      await ws.execute('mkdir -p /w/d; cd /w')
-      const own = await ws.execute(
+      await ws.shell('mkdir -p /w/d; cd /w')
+      const own = await ws.shell(
         "find d -maxdepth 0 -exec sh -c 'echo ownerr >&2; exit 127' \\; ; echo rc=$?",
       )
       expect([own.stdoutText, own.stderrText, own.exitCode]).toEqual(['rc=0\n', 'ownerr\n', 0])
-      const missing = await ws.execute('find d -maxdepth 0 -exec nosuchcmd {} \\; ; echo rc=$?')
+      const missing = await ws.shell('find d -maxdepth 0 -exec nosuchcmd {} \\; ; echo rc=$?')
       expect([missing.stdoutText, missing.stderrText, missing.exitCode]).toEqual([
         'rc=0\n',
         "find: 'nosuchcmd': No such file or directory\n",
@@ -406,13 +428,13 @@ describe('find -exec isolation', () => {
       "mkdir -p /w/d/sub; printf 'a\\n' > /w/d/a.txt; printf 'bb\\n' > /w/d/b.txt; " +
       'printf x > /w/d/sub/c.txt; cd /w'
     const out = async (line: string): Promise<[string, string, number]> => {
-      const r = await ws.execute(line)
+      const r = await ws.shell(line)
       return [r.stdoutText, r.stderrText, r.exitCode]
     }
     try {
       // GNU: the row is gone before the next action sees it, so cat
       // fails, its failure ends the chain, and -print never fires.
-      await ws.execute(seed)
+      await ws.shell(seed)
       expect(await out('find d -type f -delete -exec cat {} \\; -print')).toEqual([
         '',
         'cat: d/a.txt: No such file or directory\n' +
@@ -422,7 +444,7 @@ describe('find -exec isolation', () => {
       ])
       expect(await out('find d -type f')).toEqual(['', '', 0])
       // -delete implies -depth, so every action runs in that order.
-      await ws.execute(seed)
+      await ws.shell(seed)
       expect(await out('find d -exec echo saw {} \\; -delete -print')).toEqual([
         'saw d/a.txt\nd/a.txt\nsaw d/b.txt\nd/b.txt\nsaw d/sub/c.txt\nd/sub/c.txt\n' +
           'saw d/sub\nd/sub\nsaw d\nd\n',
@@ -430,7 +452,7 @@ describe('find -exec isolation', () => {
         0,
       ])
       expect(await out('test -e d')).toEqual(['', '', 1])
-      await ws.execute(seed)
+      await ws.shell(seed)
       const post = 'd/a.txt\nd/b.txt\nd/sub/c.txt\nd/sub\nd\n'
       expect(await out('find d -depth')).toEqual([post, '', 0])
       expect(await out('find d -depth -print')).toEqual([post, '', 0])
@@ -457,12 +479,12 @@ describe('find -exec isolation', () => {
     // operand's native run.
     const ws = await twoMountWs()
     const out = async (line: string): Promise<[string, string, number]> => {
-      const r = await ws.execute(line, { sessionId: 's' })
+      const r = await ws.shell(line, { sessionId: 's' })
       return [r.stdoutText, r.stderrText, r.exitCode]
     }
     try {
       ws.createSession('s')
-      await ws.execute('touch /a/x.txt /b/y.txt', { sessionId: 's' })
+      await ws.shell('touch /a/x.txt /b/y.txt', { sessionId: 's' })
       expect(await out('find /a /b -maxdepth 0 -exec echo batch {} +')).toEqual([
         'batch /a /b\n',
         '',
@@ -488,14 +510,14 @@ describe('find -exec isolation', () => {
     // file or directory` at -ls, exit 1, and -print never runs for it.
     const ws = await singleMountWs()
     try {
-      await ws.execute('mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w')
-      const io = await ws.execute('find d -type f -delete -ls -print')
+      await ws.shell('mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w')
+      const io = await ws.shell('find d -type f -delete -ls -print')
       expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([
         '',
         "find: 'd/a.txt': No such file or directory\nfind: 'd/sub/c.txt': No such file or directory\n",
         1,
       ])
-      expect((await ws.execute('find d -type f')).stdoutText).toBe('')
+      expect((await ws.shell('find d -type f')).stdoutText).toBe('')
     } finally {
       await ws.close()
     }
@@ -505,14 +527,14 @@ describe('find -exec isolation', () => {
     // GNU runs both actions; one explicit -print is the implicit one.
     const ws = await singleMountWs()
     try {
-      await ws.execute('mkdir -p /w/d; touch /w/d/a.txt; cd /w')
-      const twice = await ws.execute('find d -name a.txt -print -print')
+      await ws.shell('mkdir -p /w/d; touch /w/d/a.txt; cd /w')
+      const twice = await ws.shell('find d -name a.txt -print -print')
       expect([twice.stdoutText, twice.stderrText, twice.exitCode]).toEqual([
         'd/a.txt\nd/a.txt\n',
         '',
         0,
       ])
-      const once = await ws.execute('find d -name a.txt -print')
+      const once = await ws.shell('find d -name a.txt -print')
       expect([once.stdoutText, once.stderrText, once.exitCode]).toEqual(['d/a.txt\n', '', 0])
     } finally {
       await ws.close()
@@ -525,11 +547,11 @@ describe('find -exec isolation', () => {
     // with find's exit status untouched.
     const ws = await singleMountWs()
     const out = async (line: string): Promise<[string, string, number]> => {
-      const r = await ws.execute(line)
+      const r = await ws.shell(line)
       return [r.stdoutText, r.stderrText, r.exitCode]
     }
     try {
-      await ws.execute(
+      await ws.shell(
         "mkdir -p /w/d; touch /w/d/a.txt; printf '#!/bin/sh\\necho ran $1\\n' > /w/check.sh; cd /w",
       )
       expect(await out('find d -name a.txt -exec ./check.sh {} \\; -print')).toEqual([
@@ -559,21 +581,21 @@ describe('find -exec isolation', () => {
     // the link in place.
     const ws = await singleMountWs()
     try {
-      await ws.execute(
+      await ws.shell(
         'mkdir -p /w/d/sub; printf a > /w/d/a.txt; ln -s a.txt /w/d/link; ln -s nowhere /w/d/dangling; cd /w',
       )
-      let io = await ws.execute('find d -type l -delete')
+      let io = await ws.shell('find d -type l -delete')
       expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', '', 0])
-      io = await ws.execute('find d -type l')
+      io = await ws.shell('find d -type l')
       expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', '', 0])
-      io = await ws.execute('cat d/a.txt')
+      io = await ws.shell('cat d/a.txt')
       expect([io.stdoutText, io.exitCode]).toEqual(['a', 0])
       // An unfiltered -delete meets the link among the backend rows and
       // removes the whole tree, the directory holding it included.
-      await ws.execute('ln -s a.txt /w/d/sub/link')
-      io = await ws.execute('find d -delete')
+      await ws.shell('ln -s a.txt /w/d/sub/link')
+      io = await ws.shell('find d -delete')
       expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual(['', '', 0])
-      io = await ws.execute('find d')
+      io = await ws.shell('find d')
       expect([io.stderrText, io.exitCode]).toEqual(["find: 'd': No such file or directory\n", 1])
     } finally {
       await ws.close()
@@ -585,10 +607,10 @@ describe('find -exec isolation', () => {
     // delegated ls needs the link view to render the row at all.
     const ws = await singleMountWs()
     try {
-      await ws.execute(
+      await ws.shell(
         'mkdir -p /w/d; touch /w/d/a.txt; ln -s a.txt /w/d/link; ln -s nowhere /w/d/dangling; cd /w',
       )
-      const io = await ws.execute('find d -type l -ls')
+      const io = await ws.shell('find d -type l -ls')
       expect([io.stderrText, io.exitCode]).toEqual(['', 0])
       const rows = io.stdoutText.split('\n').filter((l) => l !== '')
       expect(rows.map((r) => r.split(/\s+/).slice(-3))).toEqual([
@@ -606,14 +628,14 @@ describe('find -exec isolation', () => {
     async (action) => {
       const ws = await singleMountWs()
       try {
-        await ws.execute('mkdir -p /w/d; touch /w/d/a.txt; cd /w')
-        const io = await ws.execute(`find d ${action} -name '*.txt' -print`)
+        await ws.shell('mkdir -p /w/d; touch /w/d/a.txt; cd /w')
+        const io = await ws.shell(`find d ${action} -name '*.txt' -print`)
         expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([
           '',
           'find: -name: tests after actions are not supported\n',
           1,
         ])
-        expect((await ws.execute('test ! -e marker && test -e d/a.txt')).exitCode).toBe(0)
+        expect((await ws.shell('test ! -e marker && test -e d/a.txt')).exitCode).toBe(0)
       } finally {
         await ws.close()
       }
@@ -628,11 +650,11 @@ for (const nested of [false, true]) {
       const ws = nested ? await twoMountWs() : await singleMountWs()
       try {
         const root = nested ? '/a/d' : '/d'
-        await ws.execute(`mkdir -p ${root}; touch "${root}/a\nb" /bystander`)
-        const io = await ws.execute(`find ${nested ? '/' : '/d'} -name 'a*' -type f ${action}`)
+        await ws.shell(`mkdir -p ${root}; touch "${root}/a\nb" /bystander`)
+        const io = await ws.shell(`find ${nested ? '/' : '/d'} -name 'a*' -type f ${action}`)
         expect(io.exitCode).toBe(0)
         expect(io.stderrText).toBe('')
-        const check = await ws.execute(`test -f /bystander && test ! -e "${root}/a\nb"`)
+        const check = await ws.shell(`test -f /bystander && test ! -e "${root}/a\nb"`)
         expect(check.exitCode).toBe(0)
       } finally {
         await ws.close()
@@ -641,14 +663,16 @@ for (const nested of [false, true]) {
   )
 }
 
-it('refuses deletion under OR before removing any file', async () => {
+// GNU findutils 4.10.0: `keep` short-circuits the -o, everything else
+// reaches -delete, and the directory holding `keep` cannot go.
+it('deletes only the other arm under OR', async () => {
   const ws = await singleMountWs()
   try {
-    await ws.execute('mkdir d; touch d/keep d/remove')
-    const io = await ws.execute('find d -name keep -o -delete')
+    await ws.shell('mkdir d; touch d/keep d/remove')
+    const io = await ws.shell('find d -name keep -o -delete')
     expect(io.exitCode).toBe(1)
-    expect(io.stderrText).toContain('supported only in a top-level')
-    expect((await ws.execute('test -f d/keep && test -f d/remove')).exitCode).toBe(0)
+    expect(io.stderrText).toBe("find: cannot delete 'd': Directory not empty\n")
+    expect((await ws.shell('test -f d/keep && test ! -e d/remove')).exitCode).toBe(0)
   } finally {
     await ws.close()
   }
@@ -657,10 +681,10 @@ it('refuses deletion under OR before removing any file', async () => {
 it('preserves newline mount names and filenames through print0 and ls', async () => {
   const parser = await getTestParser()
   const ops = new OpsRegistry()
-  const root = new RAMResource()
-  const nested = new RAMResource()
-  ops.registerResource(root)
-  ops.registerResource(nested)
+  const root = new RAMVFS()
+  const nested = new RAMVFS()
+  ops.registerVfs(root)
+  ops.registerVfs(nested)
   const ws = new Workspace(
     { '/': root, '/d/nested\nmount': nested },
     {
@@ -670,11 +694,11 @@ it('preserves newline mount names and filenames through print0 and ls', async ()
     },
   )
   try {
-    await ws.execute('touch "/d/nested\nmount/a\nb"')
-    const printed = await ws.execute('find /d -print0')
+    await ws.shell('touch "/d/nested\nmount/a\nb"')
+    const printed = await ws.shell('find /d -print0')
     expect(printed.stdoutText).toBe('/d\0/d/nested\nmount\0/d/nested\nmount/a\nb\0')
     expect(printed.stderrText).toBe('')
-    const listed = await ws.execute('find /d -type f -ls')
+    const listed = await ws.shell('find /d -type f -ls')
     expect(listed.exitCode).toBe(0)
     expect(listed.stderrText).toBe('')
     // -ls escapes the newline, as findutils does; the row stays one line.
@@ -688,14 +712,14 @@ describe('find actions under an aborted invocation', () => {
   it('stops running -exec at the next match', async () => {
     const ws = await singleMountWs()
     try {
-      await ws.execute('mkdir -p /d; touch /d/a.html /d/b.html /d/c.html')
+      await ws.shell('mkdir -p /d; touch /d/a.html /d/b.html /d/c.html')
       const controller = new AbortController()
       setTimeout(() => {
         controller.abort()
       }, 100)
       const t0 = Date.now()
       await expect(
-        ws.execute("find /d -name '*.html' -exec sleep 0.5 \\;", { signal: controller.signal }),
+        ws.shell("find /d -name '*.html' -exec sleep 0.5 \\;", { signal: controller.signal }),
       ).rejects.toMatchObject({ name: 'AbortError' })
       expect(Date.now() - t0).toBeLessThan(1200)
     } finally {

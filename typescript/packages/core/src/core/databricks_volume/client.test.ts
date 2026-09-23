@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import { normalizeDatabricksVolumeConfig } from '../../resource/databricks_volume/config.ts'
+import { normalizeDatabricksVolumeConfig } from '../../vfs/databricks_volume/config.ts'
 import { dbxFetch, dbxUrl, encodeRemotePath } from './client.ts'
 import { DatabricksVolumeApiError } from './errors.ts'
 

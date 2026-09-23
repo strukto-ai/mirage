@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeDiscordTransport, makeFakeResource, seedChannel, seedGuild } from './_test_util.ts'
+import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
 import { DISCORD_GREP } from './grep.ts'
 
 const DEC = new TextDecoder()
@@ -31,8 +31,8 @@ async function runGrep(
   const cmd = DISCORD_GREP[0]
   if (cmd === undefined) throw new Error('grep not registered')
   const transport = options.transport ?? new FakeDiscordTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, texts, {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -77,7 +77,7 @@ describe('discord grep', () => {
           virtual: '/mnt/discord/My Server__G1/channels/general__C1',
           directory: '/mnt/discord/My Server__G1/channels/general__C1',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
         }),
       ],
       ['hello'],
@@ -115,7 +115,7 @@ describe('discord grep', () => {
           virtual: '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
           directory: '/mnt/discord/My Server__G1/channels/general__C1/',
           resolved: false,
-          resourcePath: mountKey(
+          vfsPath: mountKey(
             '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl',
             '/mnt/discord',
           ),
@@ -149,7 +149,7 @@ describe('discord grep', () => {
         virtual: `/mnt/discord/My Server__G1/channels/general__C1/${date}/chat.jsonl`,
         directory: `/mnt/discord/My Server__G1/channels/general__C1/${date}/chat.jsonl`,
         resolved: true,
-        resourcePath: mountKey(
+        vfsPath: mountKey(
           `/mnt/discord/My Server__G1/channels/general__C1/${date}/chat.jsonl`,
           '/mnt/discord',
         ),
@@ -187,7 +187,7 @@ describe('discord grep', () => {
         virtual: `/mnt/discord/My Server__G1/channels/${name}`,
         directory: `/mnt/discord/My Server__G1/channels/${name}`,
         resolved: false,
-        resourcePath: mountKey(`/mnt/discord/My Server__G1/channels/${name}`, '/mnt/discord'),
+        vfsPath: mountKey(`/mnt/discord/My Server__G1/channels/${name}`, '/mnt/discord'),
       })
     await runGrep(
       [dir('general__C1'), dir('random__C2')],
@@ -220,7 +220,7 @@ describe('discord grep', () => {
           virtual: blob,
           directory: blob,
           resolved: false,
-          resourcePath: mountKey(blob, '/mnt/discord'),
+          vfsPath: mountKey(blob, '/mnt/discord'),
         }),
       ],
       ['quarter'],

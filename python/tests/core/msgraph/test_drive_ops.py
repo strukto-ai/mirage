@@ -87,7 +87,7 @@ async def test_iter_tree_emits_virtual_not_backend_path(monkeypatch):
 
 # The six request-sequence cases below are the twins of
 # `core/src/core/msgraph/drive.test.ts`. The shared drive layer implements
-# copy-with-monitor-polling and replace-on-409 for two resources in two
+# copy-with-monitor-polling and replace-on-409 for two VFS in two
 # languages, and OneDrive/SharePoint are not in the conformance matrix, so
 # nothing cross-language covered it (issue #1089 item 16b). They mock at the
 # HTTP layer so each case pins a request sequence, not an internal call.

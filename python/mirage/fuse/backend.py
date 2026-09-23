@@ -46,7 +46,7 @@ def resolve_backend(value: "str | MountBackend | None") -> MountBackend:
         ValueError: the name is not a known backend.
     """
     if value is None or value == "":
-        return MountBackend.VFS
+        return MountBackend.WORKSPACE
     try:
         return MountBackend(str(value).lower())
     except ValueError:
@@ -118,7 +118,7 @@ def check_sizes(backend: MountBackend,
     """Warn when an fskit mount will serve size-unknown files as empty.
 
     FSKit drives reads from the size the filesystem reports and has no
-    ``direct_io`` escape hatch, so a resource that cannot size a file
+    ``direct_io`` escape hatch, so a VFS that cannot size a file
     without fetching it reports 0, the kernel issues no reads, and every
     such file comes back empty with exit code 0 (verified on a live fskit
     mount: the read clamp is pinned at lookup-time size and never
@@ -136,15 +136,15 @@ def check_sizes(backend: MountBackend,
     offenders = ops.unsized_mounts(root_prefix)
     if not offenders:
         return
-    # resource_type may be a ResourceName enum member; print its value, not
-    # the "ResourceName.SLACK" repr Python 3.12 gives a str-mixin Enum.
+    # resource_type may be a VFSName enum member; print its value, not
+    # the "VFSName.SLACK" repr Python 3.12 gives a str-mixin Enum.
     listed = ", ".join(f"{prefix} ({getattr(name, 'value', name)})"
                        for prefix, name in offenders)
     logger.warning(
-        "the fskit mount backend cannot serve resources whose file sizes "
+        "the fskit mount backend cannot serve mounts whose file sizes "
         "are only known after a read; size-unknown files under these "
         "mounts will read as empty: %s. Mount them with backend='fuse', "
-        "or scope the fskit mount to a byte-store resource (ram, disk, "
+        "or scope the fskit mount to a byte-store VFS (ram, disk, "
         "redis, s3, gridfs).", listed)
 
 

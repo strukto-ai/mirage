@@ -17,9 +17,9 @@ from mirage.core.hierarchy.bind import per_accessor
 from mirage.core.hierarchy.codec import PATH_SAFE, Codec
 from mirage.core.hierarchy.scope import (DetectFn, Scope, ScopeMatch, Segment,
                                          Slot, make_detect_scope)
-from mirage.resource.lancedb.config import LanceDBConfig
 from mirage.types import ContentType
 from mirage.utils.filetype import content_type_for_extension
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 CARD = Codec(suffix=".md")
 

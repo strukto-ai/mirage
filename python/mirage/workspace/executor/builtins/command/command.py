@@ -24,14 +24,14 @@ from mirage.workspace.executor.builtins.lookup.types import NameKind
 from mirage.workspace.executor.builtins.shared import ok, result
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 _USAGE = "command: usage: command [-pVv] command [arg ...]\n"
 _OPTIONS = "pvV"
 
 
-def _probe(mode: str, rest: Sequence[str], session: Session,
+def _probe(mode: str, rest: Sequence[str], session: SessionState,
            registry: MountRegistry) -> Result:
     """Run the ``-v``/``-V`` introspection modes.
 
@@ -44,7 +44,7 @@ def _probe(mode: str, rest: Sequence[str], session: Session,
     Args:
         mode (str): ``"v"`` or ``"V"``.
         rest (Sequence[str]): operand words to classify.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         registry (MountRegistry): mount registry.
     """
     out_lines: list[str] = []
@@ -80,7 +80,7 @@ def _probe(mode: str, rest: Sequence[str], session: Session,
 async def handle_command_builtin(
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     stdin: ByteSource | None = None,
 ) -> Result:
@@ -97,7 +97,7 @@ async def handle_command_builtin(
     Args:
         execute_fn (Callable): shell evaluator for the inner line.
         args (list[str]): words after the ``command`` name.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         registry (MountRegistry): mount registry for name resolution.
         stdin (ByteSource | None): piped input for the inner run.
     """

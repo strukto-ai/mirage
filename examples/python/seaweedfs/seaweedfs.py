@@ -18,8 +18,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
 from mirage.types import PathSpec
+from mirage.vfs.seaweedfs import SeaweedFSConfig, SeaweedFSVFS
 
 load_dotenv(".env.development")
 
@@ -29,12 +29,12 @@ config = SeaweedFSConfig(
     access_key_id=os.environ.get("SEAWEEDFS_ACCESS_KEY", "any"),
     secret_access_key=os.environ.get("SEAWEEDFS_SECRET_KEY", "any"),
 )
-resource = SeaweedFSResource(config)
-ws = Workspace({"/seaweedfs/": resource}, mode=MountMode.WRITE)
+vfs = SeaweedFSVFS(config)
+ws = Workspace({"/seaweedfs/": vfs}, mode=MountMode.WRITE)
 
 
 def ops_summary() -> str:
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
@@ -44,21 +44,21 @@ async def main():
         f"=== SeaweedFS at {config.endpoint_url} (bucket {config.bucket}) ===")
 
     # Seed a few objects so the demo is self-contained (WRITE mode).
-    await ws.fs.write(
+    await ws.vfs.write(
         "/seaweedfs/data/example.jsonl",
         b'{"event":"queue-operation","tool":"mirage"}\n'
         b'{"event":"read","tool":"mirage"}\n'
         b'{"event":"queue-operation","tool":"other"}\n')
-    await ws.fs.write(
+    await ws.vfs.write(
         "/seaweedfs/data/config.json",
         b'{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}')
-    await ws.fs.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
+    await ws.vfs.write("/seaweedfs/notes.txt", b"hello from seaweedfs\n")
 
     # chmod/chown/touch never hit the SeaweedFS API: attrs land in the
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print("=== metadata overlay on /seaweedfs/notes.txt ===")
-    meta_res = await ws.execute(
+    meta_res = await ws.shell(
         'chmod 640 "/seaweedfs/notes.txt"'
         ' && chown 500:dev "/seaweedfs/notes.txt"'
         ' && touch -t 202601021530 "/seaweedfs/notes.txt"')
@@ -69,50 +69,49 @@ async def main():
           f"gid={meta_st.gid} mtime={meta_st.modified}")
 
     print("\n--- ls /seaweedfs/ ---")
-    r = await ws.execute("ls /seaweedfs/")
+    r = await ws.shell("ls /seaweedfs/")
     print(await r.stdout_str())
 
     print("--- tree /seaweedfs/ ---")
-    r = await ws.execute("tree /seaweedfs/")
+    r = await ws.shell("tree /seaweedfs/")
     print(await r.stdout_str())
 
     print("--- stat /seaweedfs/notes.txt ---")
-    r = await ws.execute("stat /seaweedfs/notes.txt")
+    r = await ws.shell("stat /seaweedfs/notes.txt")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print("\n--- cat /seaweedfs/notes.txt ---")
-    r = await ws.execute("cat /seaweedfs/notes.txt")
+    r = await ws.shell("cat /seaweedfs/notes.txt")
     print(f"  {(await r.stdout_str()).strip()!r}")
 
     print("\n--- head -c 40 /seaweedfs/data/example.jsonl (byte range) ---")
-    r = await ws.execute("head -c 40 /seaweedfs/data/example.jsonl")
+    r = await ws.shell("head -c 40 /seaweedfs/data/example.jsonl")
     print(f"  {(await r.stdout_str()).strip()!r}")
 
     print("\n--- grep -c queue-operation /seaweedfs/data/example.jsonl ---")
-    r = await ws.execute(
-        "grep -c queue-operation /seaweedfs/data/example.jsonl")
+    r = await ws.shell("grep -c queue-operation /seaweedfs/data/example.jsonl")
     print(f"  count: {(await r.stdout_str()).strip()}")
 
     print("--- find /seaweedfs/ -name '*.json' ---")
-    r = await ws.execute("find /seaweedfs/ -name '*.json'")
+    r = await ws.shell("find /seaweedfs/ -name '*.json'")
     print(await r.stdout_str())
 
     print("--- jq .tags /seaweedfs/data/config.json ---")
-    r = await ws.execute("jq .tags /seaweedfs/data/config.json")
+    r = await ws.shell("jq .tags /seaweedfs/data/config.json")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print("\n--- PROVISION: cat (plan only) vs head -c (byte budget) ---")
-    dr = await ws.execute("cat /seaweedfs/data/example.jsonl", provision=True)
+    dr = await ws.shell("cat /seaweedfs/data/example.jsonl", provision=True)
     print(f"  cat: network_read={dr.network_read} precision={dr.precision}")
-    dr = await ws.execute("head -c 20 /seaweedfs/data/example.jsonl",
-                          provision=True)
+    dr = await ws.shell("head -c 20 /seaweedfs/data/example.jsonl",
+                        provision=True)
     print(f"  head -c 20: network_read={dr.network_read} "
           f"precision={dr.precision}")
 
     print("\n--- rm seeded objects ---")
     for key in ("/seaweedfs/data/example.jsonl", "/seaweedfs/data/config.json",
                 "/seaweedfs/notes.txt"):
-        await ws.execute(f"rm {key}")
+        await ws.shell(f"rm {key}")
     print("  cleaned")
 
     print(f"\nStats: {ops_summary()}")

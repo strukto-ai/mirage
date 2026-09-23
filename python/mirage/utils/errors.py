@@ -233,21 +233,21 @@ async def listing_error(path: str | PathSpec, key: str,
     return await readdir_error(path, key, is_file, is_dir)
 
 
-def enotsup(resource: str, op_name: str,
+def enotsup(vfs: str, op_name: str,
             path: str | PathSpec) -> OperationNotSupportedError:
     """Missing-capability error for an op a backend does not register.
 
     ``filename`` carries the virtual path so ``format_fs_error`` reports
-    the operand, while the strerror text keeps the resource and op name
+    the operand, while the strerror text keeps the VFS and op name
     for raw tracebacks.
 
     Args:
-        resource (str): Resource name of the mount that lacks the op.
+        vfs (str): VFS name of the mount that lacks the op.
         op_name (str): The unresolvable op (e.g. ``unlink``).
         path (object): The operand; ``virtual`` is the reported spelling.
     """
     return OperationNotSupportedError(errno.ENOTSUP,
-                                      f"{resource}: no op {op_name!r}",
+                                      f"{vfs}: no op {op_name!r}",
                                       _virtual_of(path))
 
 

@@ -63,9 +63,8 @@ async def _fake_list(_tm, folder_id, limit=1000):
 async def test_entries_lists_files_with_total(accessor, index):
     with patch("mirage.core.box.readdir.list_folder_items", new=_fake_list):
         found, total = await entries(
-            accessor,
-            PathSpec(resource_path="data", virtual="/data", directory="/"),
-            index)
+            accessor, PathSpec(vfs_path="data", virtual="/data",
+                               directory="/"), index)
     assert found == [
         ("/data/a.txt", 27),
         ("/data/sub/b.txt", 12),
@@ -78,7 +77,7 @@ async def test_entries_on_file_returns_empty(accessor, index):
     with patch("mirage.core.box.readdir.list_folder_items", new=_fake_list):
         found, total = await entries(
             accessor,
-            PathSpec(resource_path="data/a.txt",
+            PathSpec(vfs_path="data/a.txt",
                      virtual="/data/a.txt",
                      directory="/data"), index)
     assert found == []

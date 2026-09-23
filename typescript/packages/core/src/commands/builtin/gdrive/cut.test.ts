@@ -80,7 +80,7 @@ describe('gdrive cut', () => {
       makeAccessor() as never,
       [
         new PathSpec({
-          resourcePath: 'test/file.csv',
+          vfsPath: 'test/file.csv',
           virtual: '/test/file.csv',
           directory: '/test',
         }),
@@ -113,7 +113,7 @@ describe('gdrive cut', () => {
       makeAccessor() as never,
       [
         new PathSpec({
-          resourcePath: 'test/file.txt',
+          vfsPath: 'test/file.txt',
           virtual: '/test/file.txt',
           directory: '/test',
         }),

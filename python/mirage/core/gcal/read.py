@@ -22,9 +22,9 @@ from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import compact_json_bytes
-from mirage.resource.gcal.event_entry import parse_event_filename
 from mirage.types import PathSpec
 from mirage.utils.errors import enoent
+from mirage.vfs.gcal.event_entry import parse_event_filename
 
 
 async def _read_calendar_json(accessor: GCalAccessor, match: ScopeMatch,

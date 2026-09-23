@@ -1,13 +1,13 @@
 ---
 title: SharePoint
 icon: microsoft
-description: Get a Microsoft Graph access token for the SharePoint resource.
+description: Get a Microsoft Graph access token for the SharePoint VFS.
 ---
 
-The SharePoint resource talks to Microsoft SharePoint Online through the
+The SharePoint VFS talks to Microsoft SharePoint Online through the
 [Microsoft Graph API](https://learn.microsoft.com/en-us/graph/). It
 authenticates with an OAuth2 **bearer access token**. Unlike OneDrive, you do
-**not** need a drive id: the resource discovers sites and document libraries for
+**not** need a drive id: the VFS discovers sites and document libraries for
 you, so a token with the right SharePoint permissions is all it needs.
 
 ## Credentials
@@ -17,7 +17,7 @@ You only need an **access token**. Pick whichever path fits.
 ### Option A: App-only (client credentials)
 
 Best for scripted, automated, and CI runs. There is no signed-in user, and it
-works for SharePoint because the resource uses `/sites` and `/sites/{id}/drives`
+works for SharePoint because the VFS uses `/sites` and `/sites/{id}/drives`
 (no `/me` context required).
 
 1. In the [Microsoft Entra admin center](https://entra.microsoft.com), go to
@@ -55,7 +55,7 @@ This is a **delegated** token scoped to your own SharePoint access.
 <Note>
 A static token is short-lived (about 60 minutes). For long-running mounts, pass
 a `Callable[[], str]` provider as `access_token` instead of a string. The
-resource refreshes on `401`, so the mount survives token expiry.
+VFS refreshes on `401`, so the mount survives token expiry.
 </Note>
 
 ### Verify access
@@ -85,4 +85,4 @@ on by default. Older versions are only readable while the library retains them
 (the version cap is configurable, and an admin can disable versioning).
 </Note>
 
-For Python configuration, see the [Python SharePoint resource](/python/resource/sharepoint) guide.
+For Python configuration, see the [Python SharePoint VFS](/python/vfs/sharepoint) guide.

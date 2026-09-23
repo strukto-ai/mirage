@@ -133,7 +133,7 @@ function spec(virtual: string, pattern?: string): PathSpec {
   return new PathSpec({
     virtual,
     directory,
-    resourcePath: virtual.replace(/^\//, ''),
+    vfsPath: virtual.replace(/^\//, ''),
     ...(pattern !== undefined ? { pattern } : {}),
   })
 }

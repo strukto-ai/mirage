@@ -16,7 +16,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
 
 export function rawPathOf(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   return prefix !== '' && path.virtual.startsWith(prefix)
     ? path.virtual.slice(prefix.length) || '/'
     : path.virtual

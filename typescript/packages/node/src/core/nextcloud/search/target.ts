@@ -26,13 +26,13 @@ export function searchTarget(url: string): SearchTarget | null {
   endpoint.hash = ''
   return {
     endpoint: endpoint.toString(),
-    resourceScope: decodePath(`/${parts.join('/')}`),
+    vfsScope: decodePath(`/${parts.join('/')}`),
   }
 }
 
 export function scopePath(target: SearchTarget, path: PathSpec): string {
   const relative = stripSlash(rawPathOf(path))
-  return relative === '' ? target.resourceScope : `${rstripSlash(target.resourceScope)}/${relative}`
+  return relative === '' ? target.vfsScope : `${rstripSlash(target.vfsScope)}/${relative}`
 }
 
 function stripScope(path: string, scope: string): string | null {
@@ -43,11 +43,11 @@ function stripScope(path: string, scope: string): string | null {
 
 export function relativePath(href: string, target: SearchTarget): string {
   const hrefPath = rstripSlash(decodePath(new URL(href, target.endpoint).pathname))
-  const resourceScope = rstripSlash(target.resourceScope)
-  let relative = stripScope(hrefPath, resourceScope)
+  const vfsScope = rstripSlash(target.vfsScope)
+  let relative = stripScope(hrefPath, vfsScope)
   if (relative === null) {
     const davRoot = rstripSlash(decodePath(new URL(target.endpoint).pathname))
-    relative = stripScope(hrefPath, `${davRoot}${resourceScope}`)
+    relative = stripScope(hrefPath, `${davRoot}${vfsScope}`)
   }
   if (relative === null) {
     throw new Error(`Nextcloud Files Search returned an out-of-scope href: ${href}`)

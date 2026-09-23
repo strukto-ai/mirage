@@ -12,7 +12,7 @@ from mirage.utils.key_prefix import mount_key
 
 
 def test_split_path_strips_real_prefix():
-    p = PathSpec(resource_path=mount_key("/od/a.txt", "/od"),
+    p = PathSpec(vfs_path=mount_key("/od/a.txt", "/od"),
                  virtual="/od/a.txt",
                  directory="/od/a.txt")
     assert split_path(p) == ("/od", "a.txt")
@@ -21,7 +21,7 @@ def test_split_path_strips_real_prefix():
 def test_split_path_does_not_strip_sibling_prefix_match():
     # `/data` must not be stripped from the sibling `/database.txt`; the
     # boundary guard lives in mount_key, whose output split_path returns.
-    p = PathSpec(resource_path=mount_key("/database.txt", "/data"),
+    p = PathSpec(vfs_path=mount_key("/database.txt", "/data"),
                  virtual="/database.txt",
                  directory="/database.txt")
     assert split_path(p) == ("", "database.txt")

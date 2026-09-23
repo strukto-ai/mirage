@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Resource } from '@struktoai/mirage-core/resource/base'
+import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { createShellParser } from '@struktoai/mirage-core/shell/parse'
 import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { savedResourceBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
+import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
-import { buildResource, knownResources } from './resource/registry.ts'
+import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { ENGINE_WASM_BASE64, GRAMMAR_WASM_BASE64 } from './generated/wasm.ts'
 
 let cachedParser: Promise<ShellParser> | null = null
@@ -53,16 +53,14 @@ function randomSessionId(): string {
 }
 
 export class Workspace extends CoreWorkspace {
-  /** A saved mount rebuilds through this package's resource registry. */
-  protected static override async buildSavedResource(
-    entry: MountSnapshot,
-  ): Promise<Resource | null> {
-    const build = savedResourceBuild(entry, (name) => knownResources().includes(name))
-    return build === null ? null : buildResource(build.name, build.config)
+  /** A saved mount rebuilds through this package's VFS registry. */
+  protected static override async buildSavedVfs(entry: MountSnapshot): Promise<VFS | null> {
+    const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
+    return build === null ? null : buildVfs(build.name, build.config)
   }
 
-  constructor(resources: Record<string, Resource>, options: WorkspaceOptions = {}) {
-    super(resources, {
+  constructor(mounts: Record<string, VFS>, options: WorkspaceOptions = {}) {
+    super(mounts, {
       ...options,
       sessionId: options.sessionId ?? randomSessionId(),
       shellParserFactory: options.shellParserFactory ?? loadShellParser,

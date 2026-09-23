@@ -14,7 +14,7 @@
 
 import { Accessor } from './base.ts'
 import type { PgDriver } from '../core/postgres/_driver.ts'
-import type { PostgresConfigResolved } from '../resource/postgres/config.ts'
+import type { PostgresConfigResolved } from '../vfs/postgres/config.ts'
 
 export class PostgresAccessor extends Accessor {
   readonly driver: PgDriver

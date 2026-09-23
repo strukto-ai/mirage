@@ -19,7 +19,7 @@ import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { hubStream, resolveUrl } from './client.ts'
 import { read, resolveEntry } from './read.ts'
 
-/** Read a byte range, in the resource API's end-exclusive spelling. */
+/** Read a byte range, in the VFS API's end-exclusive spelling. */
 export async function rangeRead(
   accessor: HfHubAccessor,
   path: PathSpec,
@@ -43,7 +43,7 @@ export async function* stream(
     accessor.revision,
     accessor.repoPath(raw),
   )
-  const rec = recordStream('read', raw, accessor.resourceName)
+  const rec = recordStream('read', raw, accessor.vfsName)
   for await (const chunk of hubStream(accessor.token, url)) {
     if (rec !== null) rec.bytes += chunk.length
     yield chunk

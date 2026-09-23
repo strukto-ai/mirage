@@ -141,7 +141,7 @@ function seqCommand(
 
 export const GENERAL_SEQ = command({
   name: 'seq',
-  resource: null,
+  vfs: null,
   spec: specOf('seq'),
   fn: seqCommand,
   provision: pureProvision,

@@ -14,7 +14,7 @@
 
 import {
   MountMode,
-  RAMResource,
+  RAMVFS,
   ScriptSource,
   Workspace,
   parseSessionProfile,
@@ -107,7 +107,7 @@ function pad(text: string, width: number): string {
 
 async function main(): Promise<void> {
   const ws = new Workspace(
-    { '/repo/': new RAMResource(), '/scratch/': new RAMResource() },
+    { '/repo/': new RAMVFS(), '/scratch/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
       policies: [operatorOwnsCredentials],
@@ -122,11 +122,11 @@ async function main(): Promise<void> {
     },
   )
   try {
-    for (const line of SEED) await ws.execute(line)
+    for (const line of SEED) await ws.shell(line)
     ws.createSession('reviewer', { profile: 'reviewer' })
 
     for (const [who, line, note] of LINES) {
-      const res = await (who === 'host' ? ws.execute(line) : ws.execute(line, { sessionId: who }))
+      const res = await (who === 'host' ? ws.shell(line) : ws.shell(line, { sessionId: who }))
       const out = res.stdout === null ? '' : dec.decode(res.stdout)
       const err = res.stderr === null ? '' : dec.decode(res.stderr)
       console.log(`${pad(who, 9)} ${pad(line, 30)} ${answer(out, err, res.exitCode)}`)

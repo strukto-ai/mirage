@@ -29,7 +29,7 @@ async def test_stream_file(tmp_path):
     chunks = []
     async for chunk in read_stream(
             accessor,
-            PathSpec(resource_path="data.txt",
+            PathSpec(vfs_path="data.txt",
                      virtual="/data.txt",
                      directory="/data.txt"), index):
         chunks.append(chunk)
@@ -41,7 +41,7 @@ async def test_stream_with_glob_scope(tmp_path):
     (tmp_path / "data.txt").write_bytes(b"abc")
     accessor = DiskAccessor(tmp_path)
     index = RAMIndexCacheStore(ttl=0)
-    scope = PathSpec(resource_path=mount_key("/disk/data.txt", "/disk"),
+    scope = PathSpec(vfs_path=mount_key("/disk/data.txt", "/disk"),
                      virtual="/disk/data.txt",
                      directory="/disk/")
     chunks = []

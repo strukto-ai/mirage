@@ -31,9 +31,9 @@ Add `.mirage/workspace.yaml` to the project where you start Codex:
 ```yaml
 mounts:
   /scratch:
-    resource: ram
+    vfs: ram
   /data:
-    resource: disk
+    vfs: disk
     config:
       root: ${PWD}/data
 ```

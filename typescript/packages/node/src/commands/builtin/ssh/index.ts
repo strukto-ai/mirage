@@ -14,10 +14,10 @@
 
 import { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../../accessor/ssh.ts'
 import { SSH_IO } from './io.ts'
 
 export const SSH_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<SSHAccessor>(ResourceName.SSH, SSH_IO),
+  ...makeGenericCommands<SSHAccessor>(VFSName.SSH, SSH_IO),
 ]

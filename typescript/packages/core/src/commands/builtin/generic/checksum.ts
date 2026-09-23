@@ -62,7 +62,7 @@ function makePathSpec(virtual: string, mountPrefix: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: mountKey(virtual, mountPrefix),
+    vfsPath: mountKey(virtual, mountPrefix),
     resolved: true,
   })
 }
@@ -87,7 +87,7 @@ async function checkFile(
 ): Promise<[string, string, number]> {
   const fl = new FlagView(opts.flags, specOf(name))
   const data = DEC.decode(await materialize(stream(p)))
-  const mountPrefix = mountPrefixOf(p.virtual, p.resourcePath)
+  const mountPrefix = mountPrefixOf(p.virtual, p.vfsPath)
   const checkLabel = p.rawPath !== '' ? p.rawPath : p.virtual
   const output: string[] = []
   const errors: string[] = []

@@ -23,7 +23,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("stat", resource="history", spec=SPECS["stat"])
+@command("stat", vfs="history", spec=SPECS["stat"])
 async def stat(accessor: HistoryAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

@@ -22,11 +22,11 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.agents.camel import MirageFileToolkit, MirageTerminalToolkit
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 load_dotenv(".env.development")
 
-ram = RAMResource()
+ram = RAMVFS()
 ws = Workspace({"/": ram}, mode=MountMode.WRITE)
 
 terminal = MirageTerminalToolkit(ws)
@@ -55,7 +55,7 @@ task = ("Write a CSV at /data/numbers.csv with columns name,value and 3 rows. "
 async def main():
     response = await asyncio.to_thread(agent.step, task)
     print(response.msgs[-1].content)
-    listing = await ws.execute("find / -type f")
+    listing = await ws.shell("find / -type f")
     print((listing.stdout or b"").decode())
 
 

@@ -17,7 +17,7 @@ import { isLineExecutor, isProcessExecutor } from '../../runtime/mixin.ts'
 import type { RouteDecision } from '../../runtime/routing/types.ts'
 import { headVisible, nodeVisible } from '../../policy/match/allow.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { INTERPRETER_NAMES, NAMESPACE_COMMANDS, SHELL_NAMES } from './constants.ts'
 import { Consumer } from './types.ts'
 
@@ -27,7 +27,7 @@ import { Consumer } from './types.ts'
  * patterns start with (`headVisible`). This is the raw answer;
  * `commandVisible` and `layers` add the words that are never subjects.
  */
-export function listed(name: string, session: Session): boolean {
+export function listed(name: string, session: SessionState): boolean {
   return headVisible(name, session.commands)
 }
 
@@ -42,7 +42,7 @@ export function listed(name: string, session: Session): boolean {
  * cannot resurrect a hidden builtin, and its body's lines each pass
  * this gate themselves.
  */
-export function isTool(name: string, session: Session): boolean {
+export function isTool(name: string, session: SessionState): boolean {
   if (name.includes('/')) return false
   return !(name in session.functions && !SHELL_NAMES.has(name))
 }
@@ -54,7 +54,7 @@ export function isTool(name: string, session: Session): boolean {
  * absent from every enumerator; a word that is not a tool (`isTool`) is
  * always visible.
  */
-export function commandVisible(name: string, session: Session): boolean {
+export function commandVisible(name: string, session: SessionState): boolean {
   return !isTool(name, session) || listed(name, session)
 }
 
@@ -70,14 +70,14 @@ export function commandVisible(name: string, session: Session): boolean {
  * single words, so a verb path only ever belongs to a CLI whose head word
  * already passed.
  */
-export function verbVisible(head: string, path: readonly string[], session: Session): boolean {
+export function verbVisible(head: string, path: readonly string[], session: SessionState): boolean {
   return nodeVisible([head, ...path], session.commands)
 }
 
 /** Whether routing explicitly refused the external runtime for `name`. */
 export function runtimeRefused(
   name: string,
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   routing?: RouteDecision,
 ): boolean {
@@ -104,7 +104,7 @@ export function runtimeRefused(
  */
 function* layers(
   name: string,
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   routing?: RouteDecision,
 ): Generator<Consumer> {
@@ -194,7 +194,7 @@ function* layers(
  */
 export function lookup(
   name: string,
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   routing?: RouteDecision,
 ): Consumer {
@@ -209,6 +209,10 @@ export function lookup(
  * introspection (`type -a`, `which -a`) needs this: dispatch runs the
  * winner and never asks what it shadowed.
  */
-export function lookupAll(name: string, session: Session, registry: MountRegistry): Consumer[] {
+export function lookupAll(
+  name: string,
+  session: SessionState,
+  registry: MountRegistry,
+): Consumer[] {
   return [...layers(name, session, registry)]
 }

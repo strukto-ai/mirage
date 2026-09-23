@@ -15,11 +15,11 @@
 
 Every other integ case is a shell line run against a mount the runner
 built by hand in its own idiom, so the door a YAML block actually comes
-through -- ``build_resource`` here, ``buildResource`` in
+through -- ``build_vfs`` here, ``buildVfs`` in
 ``integ/config/run.ts`` -- was exercised by nothing. This suite hands the
 same mapping to that door on both hosts and compares what came out: the
 redacted snapshot state for a config both must accept, or the refusal's
-``<resource>: <field>`` prefix for one both must refuse. Keys are compared
+``<VFS>: <field>`` prefix for one both must refuse. Keys are compared
 in python's wire spelling; the TypeScript runner folds its camelCase state
 back through the rename map the spec dump records.
 """
@@ -30,7 +30,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from mirage.resource.registry import build_resource
+from mirage.vfs.registry import build_vfs
 
 HOST = "python"
 SUITE = Path(__file__).parent / "cases.json"
@@ -42,7 +42,7 @@ def _problems(case: dict[str, Any], state: dict[str, Any] | None,
 
     Args:
         case (dict[str, Any]): the case as written in ``cases.json``.
-        state (dict[str, Any] | None): the built resource's redacted
+        state (dict[str, Any] | None): the built VFS's redacted
             config, or None when the build refused.
         error (str | None): the refusal message, or None when it built.
 
@@ -85,13 +85,13 @@ def _problems(case: dict[str, Any], state: dict[str, Any] | None,
 
 async def _run(case: dict[str, Any]) -> list[str]:
     try:
-        resource = build_resource(case["resource"], dict(case["config"]))
+        vfs = build_vfs(case["vfs"], dict(case["config"]))
     except Exception as exc:
         return _problems(case, None, str(exc))
-    state = resource.get_state()
+    state = vfs.get_state()
     if inspect.isawaitable(state):
         state = await state
-    close = getattr(resource, "close", None)
+    close = getattr(vfs, "close", None)
     if close is not None:
         closed = close()
         if inspect.isawaitable(closed):

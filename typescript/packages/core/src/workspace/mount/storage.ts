@@ -12,29 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { stripMount } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from './registry.ts'
 
-// Serial numbers for resources that declare no storageId, keyed on the
+// Serial numbers for mounts that declare no storageId, keyed on the
 // object so one instance mounted at two prefixes gets one identity.
-// Browser resources implement Resource directly instead of extending
-// BaseResource, so they have no storageId; keying on the mount prefix
+// Browser VFS classes implement VFS directly instead of extending
+// BaseVFS, so they have no storageId; keying on the mount prefix
 // would hand one object two identities and let a self-move through.
-const OBJECT_IDS = new WeakMap<Resource, number>()
+const OBJECT_IDS = new WeakMap<VFS, number>()
 let objectIdCounter = 0
 
-export function resourceStorageId(resource: Resource): string {
-  const declared = resource.storageId?.()
+export function vfsStorageId(vfs: VFS): string {
+  const declared = vfs.storageId?.()
   if (declared !== undefined) return declared
-  let serial = OBJECT_IDS.get(resource)
+  let serial = OBJECT_IDS.get(vfs)
   if (serial === undefined) {
     serial = ++objectIdCounter
-    OBJECT_IDS.set(resource, serial)
+    OBJECT_IDS.set(vfs, serial)
   }
-  return `resource:${String(serial)}`
+  return `vfs:${String(serial)}`
 }
 
 /**
@@ -45,7 +45,7 @@ export function resourceStorageId(resource: Resource): string {
  * mounts it does not: two prefixes can address one store, and there a move
  * would copy an object over itself and then unlink the source.
  *
- * The resource's storage id and the mount-relative path are joined into
+ * The VFS's storage id and the mount-relative path are joined into
  * one path-like string rather than kept as separate components, so nested
  * backings collapse onto the same key. Two disk mounts rooted at
  * `/srv/data` and `/srv/data/sub` make `/a/sub/x` and `/b/x` the same
@@ -66,6 +66,6 @@ export function makeStorageKey(registry: MountRegistry): (path: PathSpec) => str
       return rstripSlash(path.virtual)
     }
     const rel = rstripSlash(stripMount(path.virtual, rstripSlash(entry.prefix)))
-    return resourceStorageId(entry.resource) + rel
+    return vfsStorageId(entry.vfs) + rel
   }
 }

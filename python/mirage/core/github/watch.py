@@ -58,7 +58,7 @@ class GitHubWalk:
                 report every unlisted path as deleted.
         """
         accessor = self._accessor
-        prefix = mount_prefix_of(root.virtual, root.resource_path)
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
         ref = await ensure_ref(accessor)
         tree, truncated = await fetch_tree(accessor.config, accessor.owner,
                                            accessor.repo, ref, accessor.pool)

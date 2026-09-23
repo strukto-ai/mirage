@@ -22,8 +22,8 @@ from bson import Decimal128, ObjectId
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.mongodb.stream import read_stream, read_tail, watch_stream
-from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 DOCS_PATH = "/db1/collections/coll1/documents.jsonl"
 VIEW_DOCS_PATH = "/db1/views/myview/documents.jsonl"
@@ -56,7 +56,7 @@ def _patched_watch(docs):
 
 
 def _path(s: str) -> PathSpec:
-    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
+    return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
 async def _collect(gen):

@@ -18,10 +18,10 @@ Install Grok Build separately.
 
 ```python
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 with Workspace(
-    {"/": Mount(RAMResource(), mode=MountMode.WRITE, backend=MountBackend.FUSE)}) as ws:
+    {"/": Mount(RAMVFS(), mode=MountMode.WRITE, backend=MountBackend.FUSE)}) as ws:
     print(f"cd {ws.fuse_mountpoint} && grok")
     input("Press Enter when done...")
 ```

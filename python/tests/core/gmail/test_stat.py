@@ -85,8 +85,7 @@ async def _populate_index(idx):
 async def test_stat_root(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/", "/gmail"),
-                 virtual="/",
+        PathSpec(vfs_path=mount_key("/", "/gmail"), virtual="/",
                  directory="/"), index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
@@ -97,7 +96,7 @@ async def test_stat_label(accessor, index):
     await _populate_index(index)
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gmail/INBOX", "/gmail"),
+        PathSpec(vfs_path=mount_key("/gmail/INBOX", "/gmail"),
                  virtual="/gmail/INBOX",
                  directory="/gmail/INBOX"), index)
     assert result.type == FileType.DIRECTORY
@@ -110,7 +109,7 @@ async def test_stat_date(accessor, index):
     await _populate_index(index)
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gmail/INBOX/2026-04-12", "/gmail"),
+        PathSpec(vfs_path=mount_key("/gmail/INBOX/2026-04-12", "/gmail"),
                  virtual="/gmail/INBOX/2026-04-12",
                  directory="/gmail/INBOX/2026-04-12"), index)
     assert result.type == FileType.DIRECTORY
@@ -126,7 +125,7 @@ async def test_stat_date_outside_the_listed_window(accessor, index):
     await _populate_index(index)
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gmail/INBOX/2020-01-01", "/gmail"),
+        PathSpec(vfs_path=mount_key("/gmail/INBOX/2020-01-01", "/gmail"),
                  virtual="/gmail/INBOX/2020-01-01",
                  directory="/gmail/INBOX/2020-01-01"), index)
     assert result.type == FileType.DIRECTORY
@@ -139,7 +138,7 @@ async def test_stat_message(accessor, index):
     result = await stat(
         accessor,
         PathSpec(
-            resource_path=mount_key(
+            vfs_path=mount_key(
                 "/gmail/INBOX/2026-04-12/Test_Email__msg1.gmail.json",
                 "/gmail"),
             virtual="/gmail/INBOX/2026-04-12/Test_Email__msg1.gmail.json",
@@ -161,7 +160,7 @@ async def test_stat_attachment(accessor, index):
     result = await stat(
         accessor,
         PathSpec(
-            resource_path=mount_key(
+            vfs_path=mount_key(
                 "/gmail/INBOX/2026-04-12/Test_Email__msg1/image.png",
                 "/gmail"),
             virtual="/gmail/INBOX/2026-04-12/Test_Email__msg1/image.png",
@@ -189,7 +188,7 @@ async def test_stat_not_found(accessor, index):
             with pytest.raises(FileNotFoundError):
                 await stat(
                     accessor,
-                    PathSpec(resource_path=mount_key(
+                    PathSpec(vfs_path=mount_key(
                         "/gmail/INBOX/nonexistent.gmail.json", "/gmail"),
                              virtual="/gmail/INBOX/nonexistent.gmail.json",
                              directory="/gmail/INBOX/nonexistent.gmail.json"),
@@ -210,8 +209,7 @@ async def test_stat_unknown_top_level_raises(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(resource_path=mount_key("/gmail/NoSuchLabel",
-                                                 "/gmail"),
+                PathSpec(vfs_path=mount_key("/gmail/NoSuchLabel", "/gmail"),
                          virtual="/gmail/NoSuchLabel",
                          directory="/gmail/NoSuchLabel"), index)
 
@@ -228,7 +226,7 @@ async def test_stat_real_label_via_api(accessor, index):
     ):
         result = await stat(
             accessor,
-            PathSpec(resource_path=mount_key("/gmail/STARRED", "/gmail"),
+            PathSpec(vfs_path=mount_key("/gmail/STARRED", "/gmail"),
                      virtual="/gmail/STARRED",
                      directory="/gmail/STARRED"), index)
     assert result.type == FileType.DIRECTORY

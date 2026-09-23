@@ -4,7 +4,7 @@ icon: google
 description: Mount Google Docs as JSON-backed files from Node or the browser.
 ---
 
-`GDocsResource` exposes Google Docs as `.gdoc.json` files. Reads return the document's structured content; writes update the doc in place via the Google Docs API.
+`GDocsVFS` exposes Google Docs as `.gdoc.json` files. Reads return the document's structured content; writes update the doc in place via the Google Docs API.
 
 Setup steps for OAuth credentials live at [Google Workspace Credentials](/home/setup/google).
 
@@ -15,16 +15,16 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { GDocsResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { GDocsVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const docs = new GDocsResource({
+const docs = new GDocsVFS({
   clientId: process.env.GOOGLE_CLIENT_ID!,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
   refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
 })
 
 const ws = new Workspace({ '/docs': docs }, { mode: MountMode.WRITE })
-await ws.execute('cat /docs/owned/MyDoc.gdoc.json')
+await ws.shell('cat /docs/owned/MyDoc.gdoc.json')
 ```
 
 ## Browser
@@ -34,9 +34,9 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { GDocsResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GDocsVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const docs = new GDocsResource({
+const docs = new GDocsVFS({
   clientId: GOOGLE_CLIENT_ID,
   clientSecret: GOOGLE_CLIENT_SECRET,
   refreshToken: localStorage.getItem('gdocs.refresh_token')!,
@@ -60,4 +60,4 @@ A PKCE example lives at `examples/typescript/browser/src/gdocs_pkce.ts`.
 
 `read`, partial write (text replacements via the Docs API).
 
-For the JSON shape and supported edits see the [Python Google Docs docs](/python/resource/gdocs).
+For the JSON shape and supported edits see the [Python Google Docs docs](/python/vfs/gdocs).

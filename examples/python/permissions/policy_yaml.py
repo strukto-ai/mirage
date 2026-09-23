@@ -68,12 +68,12 @@ async def main() -> None:
     ws = Workspace(**config.to_workspace_kwargs())
     try:
         for line in SEED:
-            await ws.execute(line)
+            await ws.shell(line)
         ws.create_session("reviewer", profile="reviewer")
 
         for who, line, note in LINES:
-            res = await ws.execute(line,
-                                   session_id=None if who == "host" else who)
+            res = await ws.shell(line,
+                                 session_id=None if who == "host" else who)
             outcome = answer(res.stdout or b"", res.stderr or b"",
                              res.exit_code)
             print(f"{who:9} {line:30} {outcome}")

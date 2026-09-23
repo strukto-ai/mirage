@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './runtime.ts'
 
-// The runtime declares reach='vfs', meaning the workspace bridge is the
+// The runtime declares reach='workspace', meaning the workspace bridge is the
 // guest's only door to the outside. Pyodide's default exposes the host
 // globalThis as the `js` module, which under Node hands the guest
 // js.process (host env) and js.fetch (network) — doors around the

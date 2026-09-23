@@ -104,10 +104,10 @@ def child_spec(spec: PathSpec, name: str) -> PathSpec:
         name (str): the child's bare name.
     """
     base = spec.virtual.rstrip("/")
-    key = spec.resource_path.rstrip("/")
+    key = spec.vfs_path.rstrip("/")
     return PathSpec(virtual=f"{base}/{name}",
                     directory=spec.virtual,
-                    resource_path=f"{key}/{name}" if key else name)
+                    vfs_path=f"{key}/{name}" if key else name)
 
 
 async def remove_remnants(channel: RemnantChannel, allowed: Allowed,

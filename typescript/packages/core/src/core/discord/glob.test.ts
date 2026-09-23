@@ -64,7 +64,7 @@ describe('resolveDiscordGlob', () => {
     const resolved = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
       directory: '/mnt/discord/My Server__G1/channels/general__C1/',
-      resourcePath: mountKey(
+      vfsPath: mountKey(
         '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
         '/mnt/discord',
       ),
@@ -82,7 +82,7 @@ describe('resolveDiscordGlob', () => {
     const noPattern = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/channels/general__C1',
       directory: '/mnt/discord/My Server__G1/channels/general__C1',
-      resourcePath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
+      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
       resolved: false,
     })
     const out = await resolveDiscordGlob(new DiscordAccessor(t), [noPattern], idx)
@@ -103,10 +103,7 @@ describe('resolveDiscordGlob', () => {
       virtual: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
       directory: '/mnt/discord/My Server__G1/channels/general__C1',
       pattern: '*.jsonl',
-      resourcePath: mountKey(
-        '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
-        '/mnt/discord',
-      ),
+      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1/*.jsonl', '/mnt/discord'),
       resolved: false,
     })
     const out = await resolveDiscordGlob(new DiscordAccessor(t), [spec], idx)
@@ -117,7 +114,7 @@ describe('resolveDiscordGlob', () => {
       '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
     ])
     for (const p of out) {
-      expect(mountPrefixOf(p.virtual, p.resourcePath)).toBe('/mnt/discord')
+      expect(mountPrefixOf(p.virtual, p.vfsPath)).toBe('/mnt/discord')
     }
   })
 
@@ -132,10 +129,7 @@ describe('resolveDiscordGlob', () => {
       virtual: '/mnt/discord/My Server__G1/channels/general__C1/*.csv',
       directory: '/mnt/discord/My Server__G1/channels/general__C1',
       pattern: '*.csv',
-      resourcePath: mountKey(
-        '/mnt/discord/My Server__G1/channels/general__C1/*.csv',
-        '/mnt/discord',
-      ),
+      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1/*.csv', '/mnt/discord'),
       resolved: false,
     })
     const out = await resolveDiscordGlob(new DiscordAccessor(t), [spec], idx)
@@ -157,10 +151,7 @@ describe('resolveDiscordGlob', () => {
       virtual: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
       directory: '/mnt/discord/My Server__G1/channels/general__C1',
       pattern: '*.jsonl',
-      resourcePath: mountKey(
-        '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
-        '/mnt/discord',
-      ),
+      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1/*.jsonl', '/mnt/discord'),
       resolved: false,
     })
     const out = await resolveDiscordGlob(new DiscordAccessor(t), [spec], idx)
@@ -177,23 +168,20 @@ describe('resolveDiscordGlob', () => {
     const resolved = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/members/alice__U1.json',
       directory: '/mnt/discord/My Server__G1/members/',
-      resourcePath: mountKey('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
+      vfsPath: mountKey('/mnt/discord/My Server__G1/members/alice__U1.json', '/mnt/discord'),
       resolved: true,
     })
     const patterned = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
       directory: '/mnt/discord/My Server__G1/channels/general__C1',
       pattern: '*.jsonl',
-      resourcePath: mountKey(
-        '/mnt/discord/My Server__G1/channels/general__C1/*.jsonl',
-        '/mnt/discord',
-      ),
+      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1/*.jsonl', '/mnt/discord'),
       resolved: false,
     })
     const noPattern = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/channels/eng__C2',
       directory: '/mnt/discord/My Server__G1/channels/eng__C2',
-      resourcePath: mountKey('/mnt/discord/My Server__G1/channels/eng__C2', '/mnt/discord'),
+      vfsPath: mountKey('/mnt/discord/My Server__G1/channels/eng__C2', '/mnt/discord'),
       resolved: false,
     })
     const out = await resolveDiscordGlob(

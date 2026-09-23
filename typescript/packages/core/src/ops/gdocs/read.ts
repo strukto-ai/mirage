@@ -16,11 +16,11 @@ import type { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { read as coreRead } from '../../core/gdocs/read.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
-import { type PathSpec, ResourceName } from '../../types.ts'
+import { type PathSpec, VFSName } from '../../types.ts'
 
 export const readOp: RegisteredOp = {
   name: 'read',
-  resource: ResourceName.GDOCS,
+  vfs: VFSName.GDOCS,
   filetype: '.gdoc.json',
   write: false,
   // A backend that registers its own read op does not go through

@@ -17,7 +17,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  DropboxResource,
+  DropboxVFS,
   MountMode,
   patchNodeFs,
   Workspace,
@@ -41,8 +41,8 @@ function buildConfig(): DropboxConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new DropboxResource(buildConfig())
-  const ws = new Workspace({ '/dropbox': resource }, { mode: MountMode.READ })
+  const vfs = new DropboxVFS(buildConfig())
+  const ws = new Workspace({ '/dropbox': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Dropbox transparently ===\n')

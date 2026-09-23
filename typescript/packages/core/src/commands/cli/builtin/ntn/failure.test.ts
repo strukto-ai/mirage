@@ -34,9 +34,9 @@ const PROBED: [number, string, string, string][] = [
   ],
   [
     403,
-    'restricted_resource',
+    'restricted_vfs',
     'sample message.',
-    'error: Public API request failed (403 Forbidden restricted_resource): sample message.\n',
+    'error: Public API request failed (403 Forbidden restricted_vfs): sample message.\n',
   ],
   [
     404,

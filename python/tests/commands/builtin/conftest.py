@@ -14,11 +14,11 @@
 
 import pytest
 
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 
 @pytest.fixture
 def backend():
-    b = RAMResource()
+    b = RAMVFS()
     b.accessor.store.dirs.add("/tmp")
     return b

@@ -54,7 +54,7 @@ async def test_stat_light_uses_index_entry_without_detail_call(monkeypatch):
 
     index = RAMIndexCacheStore()
     path = PathSpec(
-        resource_path=mount_key("/knowledge/guides/quickstart", "/knowledge"),
+        vfs_path=mount_key("/knowledge/guides/quickstart", "/knowledge"),
         virtual="/knowledge/guides/quickstart",
         directory="/knowledge/guides/quickstart",
     )
@@ -84,7 +84,7 @@ async def test_stat_light_returns_directory_without_detail_call(monkeypatch):
 
     index = RAMIndexCacheStore()
     path = PathSpec(
-        resource_path=mount_key("/knowledge/guides", "/knowledge"),
+        vfs_path=mount_key("/knowledge/guides", "/knowledge"),
         virtual="/knowledge/guides",
         directory="/knowledge/guides",
     )

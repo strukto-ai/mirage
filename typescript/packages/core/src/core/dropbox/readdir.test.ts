@@ -57,7 +57,7 @@ describe('dropbox readdir', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       index,
     )
     expect(out).toEqual(['/docs/', '/notes.txt'])
@@ -86,10 +86,10 @@ describe('dropbox readdir', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    await readdir(accessor, new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }), index)
+    await readdir(accessor, new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }), index)
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/docs' }),
+      new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
       index,
     )
     expect(out).toContain('/docs/note.md')
@@ -120,13 +120,13 @@ describe('dropbox readdir', () => {
     const index = new RAMIndexCacheStore()
     const root = await readdir(
       accessor,
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       index,
     )
     expect(root).toEqual(['/docs/'])
     const nested = await readdir(
       accessor,
-      new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/docs' }),
+      new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
       index,
     )
     expect(nested).toEqual(['/docs/note.md'])
@@ -144,7 +144,7 @@ describe('dropbox readdir', () => {
       new PathSpec({
         virtual: '/dropbox',
         directory: '/dropbox',
-        resourcePath: mountKey('/dropbox', '/dropbox'),
+        vfsPath: mountKey('/dropbox', '/dropbox'),
       }),
       index,
     )
@@ -163,7 +163,7 @@ describe('dropbox readdir', () => {
     await expect(
       readdir(
         makeAccessor(),
-        new PathSpec({ resourcePath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt/x' }),
+        new PathSpec({ vfsPath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt/x' }),
         new RAMIndexCacheStore(),
       ),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
@@ -176,7 +176,7 @@ describe('dropbox readdir', () => {
       readdir(
         makeAccessor(),
         new PathSpec({
-          resourcePath: 'nope/deeper',
+          vfsPath: 'nope/deeper',
           virtual: '/nope/deeper',
           directory: '/nope/deeper',
         }),
@@ -201,7 +201,7 @@ describe('dropbox readdir', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       index,
     )
     expect(out).toEqual(['/empty.txt'])

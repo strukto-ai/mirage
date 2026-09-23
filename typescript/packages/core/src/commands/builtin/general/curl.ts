@@ -66,7 +66,7 @@ export function resolveTarget(o: string, cwd: string): PathSpec {
   }
   const lastSlash = path.lastIndexOf('/')
   const directory = lastSlash >= 0 ? path.slice(0, lastSlash + 1) : '/'
-  return new PathSpec({ resourcePath: stripSlash(path), virtual: path, directory, resolved: true })
+  return new PathSpec({ vfsPath: stripSlash(path), virtual: path, directory, resolved: true })
 }
 
 /** Whether the line's headers already carry a Content-Type. */
@@ -348,7 +348,7 @@ async function curlCommand(
 
 export const GENERAL_CURL = command({
   name: 'curl',
-  resource: null,
+  vfs: null,
   spec: specOf('curl'),
   fn: curlCommand,
 })

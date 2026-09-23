@@ -21,7 +21,7 @@ from mirage.types import (HiddenPaths, MountMode, ShowEntry, ShownPaths,
                           weaker_mode)
 from mirage.utils.hidden import classify_paths, classify_shows, classify_vars
 from mirage.workspace.session.constants import DEFAULT_PROFILE
-from mirage.workspace.session.session import Session, vars_from_env
+from mirage.workspace.session.session import SessionState, vars_from_env
 from mirage.workspace.session.shell_dirs import set_cwd
 from mirage.workspace.session.validate import check_rules
 
@@ -484,7 +484,7 @@ def compile_profile(effective: SessionProfile | None,
     )
 
 
-def narrow(session: Session, compiled: CompiledProfile) -> None:
+def narrow(session: SessionState, compiled: CompiledProfile) -> None:
     """Stamp a compiled profile's narrowing onto a session.
 
     The fields no shell line can edit: the per-mount modes, hidden
@@ -495,7 +495,7 @@ def narrow(session: Session, compiled: CompiledProfile) -> None:
     is what an agent runs under.
 
     Args:
-        session (Session): the session to narrow.
+        session (SessionState): the session to narrow.
         compiled (CompiledProfile): the effective profile.
     """
     session.mount_modes = (dict(compiled.mount_modes)
@@ -509,7 +509,7 @@ def narrow(session: Session, compiled: CompiledProfile) -> None:
     session.profile = compiled.profile
 
 
-def apply_profile(session: Session, compiled: CompiledProfile) -> None:
+def apply_profile(session: SessionState, compiled: CompiledProfile) -> None:
     """Narrow a fresh session and seed its scratch state from the profile.
 
     A profile's env is a *process* environment, the same shape
@@ -522,7 +522,7 @@ def apply_profile(session: Session, compiled: CompiledProfile) -> None:
     :func:`narrow`.
 
     Args:
-        session (Session): the session just created.
+        session (SessionState): the session just created.
         compiled (CompiledProfile): the effective profile.
     """
     narrow(session, compiled)

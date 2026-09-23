@@ -21,7 +21,7 @@
  *   - "REST front" (top of file) runs in Node: an HTTP server answering the
  *     Upstash REST shape over the redis at REDIS_URL. That is the role
  *     serverless-redis-http plays in front of a self-hosted redis. Against
- *     Upstash itself none of it is needed: a page points RedisResource at the
+ *     Upstash itself none of it is needed: a page points RedisVFS at the
  *     database's redis url, exactly as the Node mount is configured
  *     (examples/typescript/browser/redis.html).
  *   - "Browser code" (bottom) uses @struktoai/mirage-browser with nothing but
@@ -31,9 +31,9 @@ import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { MountMode, RedisResource, Workspace } from '@struktoai/mirage-browser'
+import { MountMode, RedisVFS, Workspace } from '@struktoai/mirage-browser'
 import {
-  RedisResource as NodeRedisResource,
+  RedisVFS as NodeRedisVFS,
   Workspace as NodeWorkspace,
 } from '@struktoai/mirage-node'
 import { createClient, RESP_TYPES } from 'redis'
@@ -155,12 +155,12 @@ async function startRestFront(token: string): Promise<{ url: string; close: () =
 // ── BROWSER CODE ────────────────────────────────────────────────
 
 interface Shell {
-  execute: (cmd: string) => Promise<{ stdoutText: string; stderrText: string; exitCode: number }>
+  shell: (cmd: string) => Promise<{ stdoutText: string; stderrText: string; exitCode: number }>
 }
 
 async function run(ws: Shell, cmd: string): Promise<void> {
   console.log(`$ ${cmd}`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   const out = r.stdoutText.replace(/\s+$/, '')
   if (out !== '') console.log(out)
   const err = r.stderrText.replace(/\s+$/, '')
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
   // maxRequestBytes is lowered from its 8 MiB default only so a small file
   // takes the chunked path: Upstash caps a request at 10 MB, and a file above
   // the cap goes out as one SET followed by APPENDs.
-  const browserRedis = new RedisResource({
+  const browserRedis = new RedisVFS({
     url: front.url,
     token,
     keyPrefix: KEY_PREFIX,
@@ -187,7 +187,7 @@ async function main(): Promise<void> {
   await browserRedis.open()
   const ws = new Workspace({ '/data': browserRedis }, { mode: MountMode.WRITE })
 
-  const nodeRedis = new NodeRedisResource({ url: REDIS_URL, keyPrefix: KEY_PREFIX })
+  const nodeRedis = new NodeRedisVFS({ url: REDIS_URL, keyPrefix: KEY_PREFIX })
   const nodeWs = new NodeWorkspace({ '/data': nodeRedis }, { mode: MountMode.WRITE })
 
   try {

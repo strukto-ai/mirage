@@ -25,7 +25,7 @@ from mirage.workspace.executor.builtins.script.constants import SOURCE_USAGE
 from mirage.workspace.executor.builtins.script.script import (read_script_text,
                                                               script_error)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -33,7 +33,7 @@ async def handle_source(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     path: str | PathSpec,
-    session: Session,
+    session: SessionState,
     args: list[str] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Read a script file and execute it in the calling shell.
@@ -47,7 +47,7 @@ async def handle_source(
         dispatch (DispatchFn): op dispatcher, used to read the file.
         execute_fn (Callable): runs the script text in this session.
         path (str | PathSpec): the script to source.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         args (list[str] | None): positional parameters to expose to the
             script. When given they replace ``$1..$#`` for the duration
             of the source and are restored afterwards, matching bash;

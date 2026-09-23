@@ -20,7 +20,7 @@ import { command } from '../../config.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 
 const ENC = new TextEncoder()
 
@@ -120,7 +120,7 @@ async function historyFn(
 
 export const HISTORY_HISTORY = command({
   name: 'history',
-  resource: ResourceName.HISTORY,
+  vfs: VFSName.HISTORY,
   spec: specOf('history'),
   fn: historyFn,
 })

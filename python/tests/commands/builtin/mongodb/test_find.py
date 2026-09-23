@@ -22,8 +22,8 @@ from mirage.commands.builtin.mongodb import COMMANDS
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import FindParseError
 from mirage.core.mongodb.types import EntityKind
-from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 MOUNT = "/mongo"
 
@@ -39,7 +39,7 @@ def _find_command():
 def _spec(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path=virtual[len(MOUNT):].strip("/"))
+                    vfs_path=virtual[len(MOUNT):].strip("/"))
 
 
 async def _list_collections(_client, _database, kind=EntityKind.COLLECTION):
@@ -179,7 +179,7 @@ async def test_sizeless_rendered_files_count_as_size_zero():
 async def test_glob_operand_expands_mid_path():
     pattern = PathSpec(virtual=f"{MOUNT}/*/collections",
                        directory=f"{MOUNT}/",
-                       resource_path="*/collections",
+                       vfs_path="*/collections",
                        pattern="collections",
                        resolved=False)
     lines = await _run([pattern])

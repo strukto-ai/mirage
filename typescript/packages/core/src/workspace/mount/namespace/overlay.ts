@@ -21,7 +21,7 @@ import type { NodeMeta } from './namespace.ts'
  *
  * Backends without a native attribute slot store chmod/chown/touch
  * results in the namespace node table; every stat surface (dispatch,
- * the fs facade, FUSE) merges through here (overlay wins per-field)
+ * the op facade, FUSE) merges through here (overlay wins per-field)
  * so they cannot disagree.
  */
 export function mergeOverlayStat(meta: NodeMeta | null, stat: FileStat): FileStat {

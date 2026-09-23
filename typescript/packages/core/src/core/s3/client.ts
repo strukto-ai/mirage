@@ -17,7 +17,7 @@ import type { S3Client } from '@aws-sdk/client-s3'
 import type { PathSpec } from '../../types.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import type { S3Config } from '../../resource/s3/config.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
 
 export function s3Key(path: string, config: S3Config): string {
   return kp.apply(config.keyPrefix ?? '', path)
@@ -32,7 +32,7 @@ export function stripKeyPrefix(key: string, config: S3Config): string {
 }
 
 export function rawPathOf(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   return prefix !== '' && path.virtual.startsWith(prefix)
     ? path.virtual.slice(prefix.length) || '/'
     : path.virtual
@@ -85,7 +85,7 @@ export async function loadS3Module(config?: S3Config): Promise<S3Module> {
   cachedModule ??= loadOptionalPeer(
     () => import('@aws-sdk/client-s3') as unknown as Promise<S3Module>,
     {
-      feature: 'S3Resource',
+      feature: 'S3VFS',
       packageName: '@aws-sdk/client-s3',
       docsUrl: 'https://mirage.dev/typescript/install',
     },

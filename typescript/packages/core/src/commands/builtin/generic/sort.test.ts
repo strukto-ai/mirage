@@ -24,7 +24,7 @@ async function stderrOf(flags: CommandOpts['flags']): Promise<[string, number]> 
     flags,
     filetypeFns: null,
     cwd: '/',
-    resource: { kind: 'ram' } as never,
+    vfs: { kind: 'ram' } as never,
   } as CommandOpts
   const result = await sortGeneric([], opts, () => {
     throw new Error('paths are empty; the source is stdin')

@@ -15,14 +15,14 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { describe, expect, it } from 'vitest'
 import { createMirageMcpServer } from './server.ts'
 
 function mkWs(): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -62,14 +62,14 @@ describe('createMirageMcpServer', () => {
 
   it('requires a reread after an external change', async () => {
     const workspace = mkWs()
-    await workspace.fs.writeFile('/doc.txt', 'first')
+    await workspace.vfs.writeFile('/doc.txt', 'first')
     const server = createMirageMcpServer(workspace)
     const client = new Client({ name: 'mirage-test', version: '1.0.0' })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     await server.connect(serverTransport)
     await client.connect(clientTransport)
     await client.callTool({ name: 'read', arguments: { path: '/doc.txt' } })
-    await workspace.fs.writeFile('/doc.txt', 'external')
+    await workspace.vfs.writeFile('/doc.txt', 'external')
     const stale = await client.callTool({
       name: 'edit',
       arguments: { path: '/doc.txt', old_string: 'external', new_string: 'changed' },
@@ -82,7 +82,7 @@ describe('createMirageMcpServer', () => {
       arguments: { path: '/doc.txt', old_string: 'external', new_string: 'changed' },
     })
     expect(edit.isError).not.toBe(true)
-    expect(await workspace.fs.readFileText('/doc.txt')).toBe('changed')
+    expect(await workspace.vfs.readFileText('/doc.txt')).toBe('changed')
     await client.close()
     await server.close()
     await workspace.close()

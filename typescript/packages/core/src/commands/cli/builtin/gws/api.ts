@@ -49,7 +49,7 @@ const API_OPTIONS: readonly Option[] = [
 ]
 
 // Flush a mounted listing after a gws mutation, when one is cached: gws
-// commands mutate Drive items by id, so the precise vfs path is unknown;
+// commands mutate Drive items by id, so the precise resource path is unknown;
 // invalidating a synthetic root child flushes the cached root listing so
 // newly created items surface in the next ls. No-op when no cache manager
 // is active (the usual case for a CLI line).

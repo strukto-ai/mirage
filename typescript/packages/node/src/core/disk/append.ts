@@ -16,7 +16,7 @@ import type { DiskAccessor } from '../../accessor/disk.ts'
 import { appendFile } from 'node:fs/promises'
 import { invalidateAfterWrite } from '@struktoai/mirage-core/cache/context'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { diskError } from './errors.ts'
 import { resolveSafe } from './utils.ts'
@@ -34,6 +34,6 @@ export async function appendBytes(
   } catch (err) {
     throw diskError(err, p)
   }
-  record('append', virtual, ResourceName.DISK, data.byteLength, timer)
+  record('append', virtual, VFSName.DISK, data.byteLength, timer)
   await invalidateAfterWrite(p)
 }

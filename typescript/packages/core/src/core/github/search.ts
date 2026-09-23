@@ -27,7 +27,7 @@ async function search(
 }
 
 function stripPrefix(p: PathSpec): string {
-  const prefix = mountPrefixOf(p.virtual, p.resourcePath)
+  const prefix = mountPrefixOf(p.virtual, p.vfsPath)
   let raw = p.virtual
   if (prefix !== '' && raw.startsWith(prefix)) {
     raw = raw.slice(prefix.length) || '/'
@@ -41,8 +41,7 @@ export async function narrowPaths(
   paths: readonly PathSpec[],
 ): Promise<PathSpec[]> {
   const mountPrefix =
-    (paths[0] === undefined ? undefined : mountPrefixOf(paths[0].virtual, paths[0].resourcePath)) ??
-    ''
+    (paths[0] === undefined ? undefined : mountPrefixOf(paths[0].virtual, paths[0].vfsPath)) ?? ''
   const narrowed: string[] = []
   for (const p of paths) {
     const pathFilter = stripSlash(stripPrefix(p))
@@ -61,7 +60,7 @@ export async function narrowPaths(
       new PathSpec({
         virtual: `${mountPrefix}/${lstripSlash(n)}`,
         directory: '',
-        resourcePath: mountKey(`${mountPrefix}/${lstripSlash(n)}`, mountPrefix),
+        vfsPath: mountKey(`${mountPrefix}/${lstripSlash(n)}`, mountPrefix),
         resolved: true,
       }),
   )

@@ -7,11 +7,11 @@
       "world": {
         "runtimes": [
           "echobox",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -41,7 +41,7 @@
         },
         "runtimes": [
           "ghost",
-          "vfs"
+          "workspace"
         ]
       },
       "build_error": {
@@ -50,14 +50,14 @@
     },
     {
       "id": "a_builtin_name_cannot_be_shadowed",
-      "note": "A host cannot take a shipped name: registering under `monty` is refused the way register_resource and register_cli_spec refuse a builtin resource or CLI name, in both languages with one wording.",
+      "note": "A host cannot take a shipped name: registering under `monty` is refused the way register_vfs and register_cli_spec refuse a builtin VFS or CLI name, in both languages with one wording.",
       "world": {
         "register_runtimes": {
           "monty": "echobox"
         },
         "runtimes": [
           "monty",
-          "vfs"
+          "workspace"
         ]
       },
       "build_error": {

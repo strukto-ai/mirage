@@ -48,7 +48,7 @@ function makeAccessor(transport: NotionTransport): NotionAccessor {
 }
 
 function spec(virtual: string, prefix = ''): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
 const PAGE_ID = 'aaaa1111-2222-3333-4444-555566667777'
@@ -285,7 +285,7 @@ describe('notion stat', () => {
     const virtual = `/notion/pages/${segment}/`
     const result = await stat(
       makeAccessor(transport),
-      new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, '/notion') }),
+      new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/notion') }),
       idx,
     )
     expect(result.name).toBe(segment)

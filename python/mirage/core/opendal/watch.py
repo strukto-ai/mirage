@@ -55,8 +55,8 @@ class OpendalWalk:
         Args:
             root (PathSpec): Watch root (mount-virtual path).
         """
-        prefix = mount_prefix_of(root.virtual, root.resource_path)
-        base = root.resource_path.strip("/")
+        prefix = mount_prefix_of(root.virtual, root.vfs_path)
+        base = root.vfs_path.strip("/")
         list_path = base + "/" if base else "/"
         op = self._accessor.operator()
         try:
@@ -68,9 +68,9 @@ class OpendalWalk:
             if not relative or relative == list_path:
                 continue
             is_dir = relative.endswith("/")
-            resource_rel = relative.rstrip("/")
-            virtual = (prefix.rstrip("/") + "/" +
-                       resource_rel if prefix else "/" + resource_rel)
+            vfs_rel = relative.rstrip("/")
+            virtual = (prefix.rstrip("/") + "/" + vfs_rel if prefix else "/" +
+                       vfs_rel)
             if is_dir:
                 yield WalkEntry(virtual=virtual, is_dir=True, fingerprint=None)
                 continue
@@ -78,7 +78,7 @@ class OpendalWalk:
             if meta is None or (meta.etag is None
                                 and meta.last_modified is None
                                 and meta.content_length is None):
-                meta = await self._stat(op, resource_rel)
+                meta = await self._stat(op, vfs_rel)
             modified = meta.last_modified.isoformat() \
                 if meta and meta.last_modified else None
             size = meta.content_length if meta else None

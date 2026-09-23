@@ -1,6 +1,6 @@
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import { isShortRangeRefusal, sliceWindow } from '@struktoai/mirage-core/utils/ranges'
@@ -46,7 +46,7 @@ export async function read(
       data = Buffer.from(sliceWindow(new Uint8Array(whole), 0, options.size ?? null))
     }
     const bytes = new Uint8Array(data)
-    record('read', path.virtual, ResourceName.NEXTCLOUD, bytes.byteLength, timer)
+    record('read', path.virtual, VFSName.NEXTCLOUD, bytes.byteLength, timer)
     return bytes
   } catch (error) {
     if (isNotFound(error)) throw enoent(path)

@@ -1,4 +1,4 @@
-# SSH Resource Examples
+# SSH VFS Examples
 
 Mount a remote host over SFTP and read it as a filesystem — either via the in-process VFS patch or a real macFUSE/libfuse mount.
 
@@ -42,4 +42,4 @@ cat <mp>/ssh/etc/hostname
 
 ## Production note
 
-The SSH connection holds credentials (key material or password) in-process. For shared servers, restrict the SSH user with a per-user `chroot`/`AllowUsers` directive in `sshd_config` so the mount only sees what that user is meant to see. A browser build is impossible — SSH/SFTP is a TCP protocol with no CORS-equivalent and no transport that survives in a browser sandbox; see [`docs/plans/2026-04-29-ssh-resource.md`](../../../docs/plans/2026-04-29-ssh-resource.md) for the full design.
+The SSH connection holds credentials (key material or password) in-process. For shared servers, restrict the SSH user with a per-user `chroot`/`AllowUsers` directive in `sshd_config` so the mount only sees what that user is meant to see. A browser build is impossible — SSH/SFTP is a TCP protocol with no CORS-equivalent and no transport that survives in a browser sandbox; see [`docs/plans/2026-04-29-ssh-vfs.md`](../../../docs/plans/2026-04-29-ssh-VFS.md) for the full design.

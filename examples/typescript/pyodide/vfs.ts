@@ -16,11 +16,11 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  GDocsResource,
-  LinearResource,
+  GDocsVFS,
+  LinearVFS,
   MountMode,
-  RAMResource,
-  S3Resource,
+  RAMVFS,
+  S3VFS,
   Workspace,
   type GDocsConfig,
   type LinearConfig,
@@ -54,8 +54,8 @@ function buildS3(): S3Config | undefined {
 
 async function py(ws: Workspace, label: string, code: string): Promise<void> {
   console.log(`\n--- ${label} ---`)
-  await ws.fs.writeFile('/ram/__demo.py', code)
-  const r = await ws.execute('python3 /ram/__demo.py')
+  await ws.vfs.writeFile('/ram/__demo.py', code)
+  const r = await ws.shell('python3 /ram/__demo.py')
   if (r.stdoutText !== '') process.stdout.write(r.stdoutText)
   if (r.exitCode !== 0) console.error(`  exit=${String(r.exitCode)} ${r.stderrText.trim().slice(0, 200)}`)
 }
@@ -63,20 +63,20 @@ async function py(ws: Workspace, label: string, code: string): Promise<void> {
 async function main(): Promise<void> {
   const ws = new Workspace({}, { mode: MountMode.EXEC })
   // The demo scripts live under /ram, so the mount carries x.
-  ws.addMount('/ram', new RAMResource(), MountMode.EXEC)
+  ws.addMount('/ram', new RAMVFS(), MountMode.EXEC)
 
   const linear = buildLinear()
-  if (linear !== undefined) ws.addMount('/linear', new LinearResource(linear), MountMode.READ)
+  if (linear !== undefined) ws.addMount('/linear', new LinearVFS(linear), MountMode.READ)
   const gdocs = buildGDocs()
-  if (gdocs !== undefined) ws.addMount('/gdocs', new GDocsResource(gdocs), MountMode.READ)
+  if (gdocs !== undefined) ws.addMount('/gdocs', new GDocsVFS(gdocs), MountMode.READ)
   const s3 = buildS3()
-  if (s3 !== undefined) ws.addMount('/s3', new S3Resource(s3), MountMode.READ)
+  if (s3 !== undefined) ws.addMount('/s3', new S3VFS(s3), MountMode.READ)
 
   console.log('Mounts:', ws.mounts().map((m) => m.prefix).join(', '))
 
   try {
     // 1. Plain RAM read+write — the simplest case.
-    await ws.fs.writeFile('/ram/hello.txt', 'world')
+    await ws.vfs.writeFile('/ram/hello.txt', 'world')
     await py(
       ws,
       '1. RAM read+write via Python open()',
@@ -88,11 +88,11 @@ with open('/ram/out.txt', 'w') as f:
 print('wrote /ram/out.txt')
 `,
     )
-    console.log('host sees:', await ws.fs.readFileText('/ram/out.txt'))
+    console.log('host sees:', await ws.vfs.readFileText('/ram/out.txt'))
 
     // 2. Lazy-on-miss — host writes a new path AFTER preload; Python still sees it.
-    await ws.execute('mkdir -p /ram/synth/today')
-    await ws.fs.writeFile('/ram/synth/today/note.md', 'lazy demo')
+    await ws.shell('mkdir -p /ram/synth/today')
+    await ws.vfs.writeFile('/ram/synth/today/note.md', 'lazy demo')
     await py(
       ws,
       '2. Lazy-on-miss: a path the preload never walked',
@@ -160,7 +160,7 @@ img.save('/ram/icon.png')
 print('saved /ram/icon.png')
 `,
     )
-    const png = await ws.fs.readFile('/ram/icon.png')
+    const png = await ws.vfs.readFile('/ram/icon.png')
     console.log(`host sees ${String(png.length)} bytes (PNG magic: ${[...png.slice(0, 4)].map((b) => b.toString(16)).join(' ')})`)
 
     // 7. Cross-mount via Python: read from /linear, write to /ram.
@@ -181,7 +181,7 @@ json.dump(out, open('/ram/summary.json', 'w'), indent=2)
 print(f'wrote {len(out)} teams to /ram/summary.json')
 `,
       )
-      console.log('host sees:', (await ws.fs.readFileText('/ram/summary.json')).slice(0, 200))
+      console.log('host sees:', (await ws.vfs.readFileText('/ram/summary.json')).slice(0, 200))
     }
   } finally {
     await ws.close()

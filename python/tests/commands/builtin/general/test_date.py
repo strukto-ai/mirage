@@ -17,11 +17,11 @@ import time
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 
 
 async def _run(ws: Workspace, line: str) -> tuple[str, str, int]:
-    io = await ws.execute(line)
+    io = await ws.shell(line)
     return await io.stdout_str(), await io.stderr_str(), io.exit_code
 
 
@@ -85,7 +85,7 @@ async def _run(ws: Workspace, line: str) -> tuple[str, str, int]:
          "08\n00\n"),
     ])
 async def test_date_honors_the_command_environment_tz(line, expected):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         assert await _run(ws, line) == (expected, "", 0)
     finally:
@@ -95,7 +95,7 @@ async def test_date_honors_the_command_environment_tz(line, expected):
 @pytest.mark.asyncio
 async def test_date_refuses_a_wall_clock_the_zone_skips():
     # glibc's mktime finds no instant for 02:30 on the night CEST starts.
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         assert await _run(
             ws, "TZ=Europe/Berlin date -d '2025-03-30 02:30:00' +%s") == (
@@ -109,17 +109,17 @@ async def test_tz_never_leaks_between_workspaces():
     # Two workspaces render one instant at once, each under its own TZ:
     # the zone is read from the command environment, never set on the
     # process, so neither can move the other's clock.
-    hong_kong = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    utc = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    hong_kong = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    utc = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        await hong_kong.execute("export TZ=Asia/Hong_Kong")
-        await utc.execute("export TZ=UTC")
+        await hong_kong.shell("export TZ=Asia/Hong_Kong")
+        await utc.shell("export TZ=UTC")
         line = "date -d @0 '+%H %z'"
         results = await asyncio.gather(
             *[_run(ws, line) for ws in (hong_kong, utc, hong_kong, utc)])
         assert [r[0] for r in results
                 ] == ["08 +0800\n", "00 +0000\n", "08 +0800\n", "00 +0000\n"]
-        plain = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+        plain = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
         try:
             out, _, _ = await _run(plain, "date -u -d @0 '+%H %z'")
             assert out == "00 +0000\n"
@@ -151,7 +151,7 @@ async def test_tz_never_leaks_between_workspaces():
      "TZ=Europe/Istanbul date -d @1498906800 +%Z", "EEST\n+03\n"),
 ])
 async def test_date_zone_abbreviation(line, expected):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         assert await _run(ws, line) == (expected, "", 0)
     finally:
@@ -169,7 +169,7 @@ async def test_implicit_host_timezone(monkeypatch, host_zone, summer, winter):
         with monkeypatch.context() as patch:
             patch.setenv("TZ", host_zone)
             time.tzset()
-            ws = Workspace({"/": RAMResource()})
+            ws = Workspace({"/": RAMVFS()})
             try:
                 for epoch, expected in [(1789430400, summer),
                                         (1767225600, winter)]:
@@ -201,7 +201,7 @@ async def test_implicit_host_timezone(monkeypatch, host_zone, summer, winter):
     ("date -d 'x\\'", r"x\\"),
 ])
 async def test_date_invalid_date_quotes_the_expression(line, escaped):
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         assert await _run(ws,
                           line) == ("", f"date: invalid date '{escaped}'\n", 1)
@@ -220,7 +220,7 @@ async def test_an_empty_expression_is_today_at_midnight(line):
     so does `date -d '   '`. mirage used to answer
     `date: invalid date ''` and exit 1.
     """
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         out, err, code = await _run(ws, f"{line} +%H:%M:%S")
         assert (out, err, code) == ("00:00:00\n", "", 0)

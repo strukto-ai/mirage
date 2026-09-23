@@ -20,7 +20,7 @@ import { deleteFile } from '../google/drive.ts'
 import { eaccesOnDenied, isFolder, resolveKey } from './resolve.ts'
 
 async function unlinkImpl(accessor: GDriveAccessor, path: PathSpec): Promise<void> {
-  const key = path.resourcePath
+  const key = path.vfsPath
   if (key === '') throw eisdir(path)
   const node = await resolveKey(accessor, key)
   if (node === null) throw enoent(path)

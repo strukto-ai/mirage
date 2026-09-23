@@ -26,7 +26,7 @@ from mirage.utils.path import norm
 async def stream(accessor: RedisAccessor,
                  path: PathSpec) -> AsyncIterator[bytes]:
     virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     raw = path.virtual
     if prefix and raw.startswith(prefix):
         rest = raw[len(prefix):]

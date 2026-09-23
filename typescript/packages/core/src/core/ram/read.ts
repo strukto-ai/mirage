@@ -14,7 +14,7 @@
 
 import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import { ResourceName, type PathSpec } from '../../types.ts'
+import { VFSName, type PathSpec } from '../../types.ts'
 import { norm } from './utils.ts'
 import { enoent } from '../../utils/errors.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
@@ -48,6 +48,6 @@ export function read(
     throw enoent(path)
   }
   const data = offset === 0 && size === null ? whole : sliceWindow(whole, offset, size)
-  record('read', p, ResourceName.RAM, data.byteLength, timer)
+  record('read', p, VFSName.RAM, data.byteLength, timer)
   return Promise.resolve(data)
 }

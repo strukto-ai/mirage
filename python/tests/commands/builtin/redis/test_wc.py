@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage import MountMode, Workspace
-from mirage.resource.redis import RedisResource
+from mirage.vfs.redis import RedisVFS
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -26,18 +26,18 @@ pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
 
 @pytest_asyncio.fixture()
 async def workspace():
-    resource = RedisResource(url=REDIS_URL, key_prefix="test:wc:")
-    await resource._store.clear()
-    ws = Workspace({"/": resource}, mode=MountMode.WRITE)
+    vfs = RedisVFS(url=REDIS_URL, key_prefix="test:wc:")
+    await vfs._store.clear()
+    ws = Workspace({"/": vfs}, mode=MountMode.WRITE)
     yield ws
-    await resource._store.clear()
-    await resource._store.close()
+    await vfs._store.clear()
+    await vfs._store.close()
 
 
 @pytest.mark.asyncio
 async def test_wc_default(workspace):
-    await workspace.fs.write("/f.txt", b"hello world\nfoo bar\n")
-    io = await workspace.execute("wc /f.txt")
+    await workspace.vfs.write("/f.txt", b"hello world\nfoo bar\n")
+    io = await workspace.shell("wc /f.txt")
     assert io.exit_code == 0
     parts = io.stdout.decode().split()
     assert parts[0] == "2"
@@ -47,25 +47,25 @@ async def test_wc_default(workspace):
 
 @pytest.mark.asyncio
 async def test_wc_l(workspace):
-    await workspace.fs.write("/f.txt", b"a\nb\nc\n")
-    io = await workspace.execute("wc -l /f.txt")
+    await workspace.vfs.write("/f.txt", b"a\nb\nc\n")
+    io = await workspace.shell("wc -l /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "3"
 
 
 @pytest.mark.asyncio
 async def test_wc_c(workspace):
-    await workspace.fs.write("/f.txt", b"hello\n")
-    io = await workspace.execute("wc -c /f.txt")
+    await workspace.vfs.write("/f.txt", b"hello\n")
+    io = await workspace.shell("wc -c /f.txt")
     assert io.exit_code == 0
     assert io.stdout.decode().split()[0] == "6"
 
 
 @pytest.mark.asyncio
 async def test_wc_multi_file_emits_total(workspace):
-    await workspace.fs.write("/a.txt", b"hello\n")
-    await workspace.fs.write("/b.txt", b"world\nfoo\n")
-    io = await workspace.execute("wc /a.txt /b.txt")
+    await workspace.vfs.write("/a.txt", b"hello\n")
+    await workspace.vfs.write("/b.txt", b"world\nfoo\n")
+    io = await workspace.shell("wc /a.txt /b.txt")
     assert io.exit_code == 0
     assert io.stdout.endswith(b"\n")
     lines = io.stdout.decode().splitlines()

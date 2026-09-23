@@ -69,8 +69,8 @@ async def stat(
     index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
     virtual = path.virtual
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
-    key = path.resource_path
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
+    key = path.vfs_path
     if not key:
         # The mount root has no parent listing to inherit an mtime from;
         # fetch the folder's own metadata so find -mtime and ls -ld see a
@@ -93,7 +93,7 @@ async def stat(
                 accessor,
                 PathSpec(virtual=parent_virtual,
                          directory=parent_virtual,
-                         resource_path=mount_key(parent_virtual, prefix)),
+                         vfs_path=mount_key(parent_virtual, prefix)),
                 index=index,
             )
         except FileNotFoundError as exc:

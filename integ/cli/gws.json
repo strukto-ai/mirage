@@ -397,7 +397,7 @@
       "targets": [
         "cli-gws"
       ],
-      "command": "gws sheets spreadsheets batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"bogusRequest\": {}}]}' 2>&1 | grep -c 'Unsupported request: bogusRequest'",
+      "command": "gws sheets spreadsheets batchUpdate --params '{\"spreadsheetId\": \"sheet0001\"}' --json '{\"requests\": [{\"bogusRequest\": {}}]}' 2>&1 | grep 'Cannot find field' | grep -c bogusRequest",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
@@ -1118,6 +1118,396 @@
       "targets": [
         "cli-gws"
       ]
+    },
+    {
+      "id": "gw_drive_update_refuses_a_missing_parent",
+      "seq": 563082,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "F=$(gws drive files create --json '{\"name\":\"Parent Probe\",\"mimeType\":\"text/plain\"}' | jq -r .id); gws drive files update --params \"{\\\"fileId\\\":\\\"$F\\\",\\\"addParents\\\":\\\"NHL-B2B-Analysis\\\",\\\"removeParents\\\":\\\"root\\\"}\" --json '{\"name\":\"Parent Probe\"}' 2>&1 | grep -c 'File not found: NHL-B2B-Analysis.'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_refused_parent_leaves_the_file_as_it_was",
+      "seq": 563083,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "F=$(gws drive files create --json '{\"name\":\"Stay Probe\",\"mimeType\":\"text/plain\"}' | jq -r .id); gws drive files update --params \"{\\\"fileId\\\":\\\"$F\\\",\\\"addParents\\\":\\\"NHL-B2B-Analysis\\\",\\\"removeParents\\\":\\\"root\\\"}\" --json '{\"name\":\"Renamed Probe\"}' > /dev/null 2>&1; gws drive files get --params \"{\\\"fileId\\\":\\\"$F\\\"}\" | jq -c '[.name, .parents]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"Stay Probe\",[\"root\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_update_refuses_a_file_as_parent",
+      "seq": 563084,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "F=$(gws drive files create --json '{\"name\":\"Child Probe\",\"mimeType\":\"text/plain\"}' | jq -r .id); G=$(gws drive files create --json '{\"name\":\"Not A Folder\",\"mimeType\":\"text/plain\"}' | jq -r .id); gws drive files update --params \"{\\\"fileId\\\":\\\"$F\\\",\\\"addParents\\\":\\\"$G\\\",\\\"removeParents\\\":\\\"root\\\"}\" --json '{\"name\":\"Child Probe\"}' 2>&1 | grep -c 'The specified parent is not a folder.'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_update_moves_into_a_folder",
+      "seq": 563085,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "D=$(gws drive files create --json '{\"name\":\"Move Dest\",\"mimeType\":\"application/vnd.google-apps.folder\"}' | jq -r .id); F=$(gws drive files create --json '{\"name\":\"Move Probe\",\"mimeType\":\"text/plain\"}' | jq -r .id); gws drive files update --params \"{\\\"fileId\\\":\\\"$F\\\",\\\"addParents\\\":\\\"$D\\\",\\\"removeParents\\\":\\\"root\\\"}\" --json '{\"name\":\"Move Probe\"}' > /dev/null; gws drive files get --params \"{\\\"fileId\\\":\\\"$F\\\"}\" | jq -c '.parents' | grep -c \"$D\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_added_parent_replaces_the_old_one",
+      "seq": 563086,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "D=$(gws drive files create --json '{\"name\":\"Replace Dest\",\"mimeType\":\"application/vnd.google-apps.folder\"}' | jq -r .id); F=$(gws drive files create --json '{\"name\":\"Replace Probe\",\"mimeType\":\"text/plain\"}' | jq -r .id); gws drive files update --params \"{\\\"fileId\\\":\\\"$F\\\",\\\"addParents\\\":\\\"$D\\\"}\" --json '{\"name\":\"Replace Probe\"}' | jq -c --arg d \"$D\" '.parents == [$d]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_create_refuses_a_missing_parent",
+      "seq": 563087,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files create --json '{\"name\":\"Orphan Probe\",\"mimeType\":\"text/plain\",\"parents\":[\"NHL-B2B-Analysis\"]}' 2>&1 | grep -c 'File not found: NHL-B2B-Analysis.'; gws drive files list --params \"{\\\"q\\\": \\\"name = 'Orphan Probe'\\\"}\" | jq '.files | length'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_create_refuses_two_parents",
+      "seq": 563088,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "A=$(gws drive files create --json '{\"name\":\"Twin A\",\"mimeType\":\"application/vnd.google-apps.folder\"}' | jq -r .id); B=$(gws drive files create --json '{\"name\":\"Twin B\",\"mimeType\":\"application/vnd.google-apps.folder\"}' | jq -r .id); gws drive files create --json \"{\\\"name\\\":\\\"Twin\\\",\\\"mimeType\\\":\\\"text/plain\\\",\\\"parents\\\":[\\\"$A\\\",\\\"$B\\\"]}\" 2>&1 | grep -c 'Increasing the number of parents is not allowed'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_copy_refuses_a_missing_parent",
+      "seq": 563089,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "F=$(gws drive files create --json '{\"name\":\"Copy Source\",\"mimeType\":\"text/plain\"}' | jq -r .id); gws drive files copy --params \"{\\\"fileId\\\":\\\"$F\\\"}\" --json '{\"parents\":[\"NHL-B2B-Analysis\"]}' 2>&1 | grep -c 'File not found: NHL-B2B-Analysis.'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_folder_cannot_move_under_itself",
+      "seq": 563090,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "A=$(gws drive files create --json '{\"name\":\"Loop Outer\",\"mimeType\":\"application/vnd.google-apps.folder\"}' | jq -r .id); B=$(gws drive files create --json \"{\\\"name\\\":\\\"Loop Inner\\\",\\\"mimeType\\\":\\\"application/vnd.google-apps.folder\\\",\\\"parents\\\":[\\\"$A\\\"]}\" | jq -r .id); gws drive files update --params \"{\\\"fileId\\\":\\\"$A\\\",\\\"addParents\\\":\\\"$B\\\",\\\"removeParents\\\":\\\"root\\\"}\" --json '{\"name\":\"Loop Outer\"}' 2>&1 | grep -c 'Bad Request'; gws drive files get --params \"{\\\"fileId\\\":\\\"$A\\\"}\" | jq -c '.parents'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n[\"root\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_update_body_parents_is_not_writable",
+      "seq": 563091,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "F=$(gws drive files create --json '{\"name\":\"Body Probe\",\"mimeType\":\"text/plain\"}' | jq -r .id); gws drive files update --params \"{\\\"fileId\\\":\\\"$F\\\"}\" --json '{\"parents\":[\"root\"]}' 2>&1 | grep -c 'The parents field is not directly writable'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_trashed_folder_is_still_a_parent",
+      "seq": 563092,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "T=$(gws drive files create --json '{\"name\":\"Trash Dest\",\"mimeType\":\"application/vnd.google-apps.folder\"}' | jq -r .id); gws drive files update --params \"{\\\"fileId\\\":\\\"$T\\\"}\" --json '{\"trashed\":true}' > /dev/null; gws drive files create --json \"{\\\"name\\\":\\\"In Trash\\\",\\\"mimeType\\\":\\\"text/plain\\\",\\\"parents\\\":[\\\"$T\\\"]}\" | jq -c --arg t \"$T\" '.parents == [$t]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "true\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_drive_get_missing_id_names_the_id",
+      "seq": 563093,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws drive files get --params '{\"fileId\": \"NHL-B2B-Analysis\"}' 2>&1 | grep -c 'File not found: NHL-B2B-Analysis.'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_repeat_cell_bolds_the_header",
+      "seq": 563094,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Bold Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"repeatCell\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":1,\"startColumnIndex\":0,\"endColumnIndex\":6},\"cell\":{\"userEnteredFormat\":{\"textFormat\":{\"bold\":true}}},\"fields\":\"userEnteredFormat.textFormat.bold\"}}]}' | jq -c .replies; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!A1:B2\\\"}\" | jq -c '[.sheets[0].data[0].rowData[].values[] | [.userEnteredFormat, .effectiveFormat.textFormat.bold]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{}]\n[[{\"textFormat\":{\"bold\":true}},true],[{\"textFormat\":{\"bold\":true}},true],[null,false],[null,false]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_repeat_cell_mask_writes_only_the_named_fields",
+      "seq": 563095,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Mask Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"repeatCell\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":2,\"startColumnIndex\":0,\"endColumnIndex\":1},\"cell\":{\"userEnteredFormat\":{\"backgroundColor\":{\"red\":1,\"green\":0.9,\"blue\":0.8},\"textFormat\":{\"italic\":true,\"bold\":true},\"horizontalAlignment\":\"CENTER\"}},\"fields\":\"userEnteredFormat(backgroundColor,textFormat.italic)\"}}]}' > /dev/null; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!A2\\\"}\" | jq -c '.sheets[0].data[0].rowData[0].values[0].userEnteredFormat'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"backgroundColor\":{\"red\":1,\"green\":0.8980392,\"blue\":0.8},\"textFormat\":{\"italic\":true},\"backgroundColorStyle\":{\"rgbColor\":{\"red\":1,\"green\":0.8980392,\"blue\":0.8}}}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_repeat_cell_star_replaces_the_whole_cell",
+      "seq": 563096,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Star Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"repeatCell\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":2,\"startColumnIndex\":1,\"endColumnIndex\":2},\"cell\":{\"userEnteredFormat\":{\"textFormat\":{\"italic\":true}}},\"fields\":\"*\"}}]}' > /dev/null; gws sheets read --spreadsheet $SID --range 'Sheet1!A2:B2' | jq -c .values; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!B2\\\"}\" | jq -c '.sheets[0].data[0].rowData[0].values[0] | [.userEnteredValue, .userEnteredFormat]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"Oilers\"]]\n[null,{\"textFormat\":{\"italic\":true}}]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_number_format_shows_in_the_values",
+      "seq": 563097,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Percent Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Pct\"],[\"0.685\"],[\"0.62\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"repeatCell\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":3,\"startColumnIndex\":0,\"endColumnIndex\":1},\"cell\":{\"userEnteredFormat\":{\"numberFormat\":{\"type\":\"PERCENT\",\"pattern\":\"0.0%\"}}},\"fields\":\"userEnteredFormat.numberFormat\"}}]}' > /dev/null; gws sheets read --spreadsheet $SID --range 'Sheet1!A1:A3' | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"Pct\"],[\"68.5%\"],[\"62.0%\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_update_dimension_properties_reads_back",
+      "seq": 563098,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Dimension Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateDimensionProperties\":{\"range\":{\"sheetId\":0,\"dimension\":\"COLUMNS\",\"startIndex\":0,\"endIndex\":2},\"properties\":{\"pixelSize\":180},\"fields\":\"pixelSize\"}},{\"updateDimensionProperties\":{\"range\":{\"sheetId\":0,\"dimension\":\"ROWS\",\"startIndex\":2,\"endIndex\":3},\"properties\":{\"hiddenByUser\":true},\"fields\":\"hiddenByUser\"}}]}' > /dev/null; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!A2:C3\\\"}\" | jq -c '.sheets[0].data[0] | [.rowMetadata, .columnMetadata]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[{\"pixelSize\":21},{\"hiddenByUser\":true,\"pixelSize\":21}],[{\"pixelSize\":180},{\"pixelSize\":180},{\"pixelSize\":100}]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_add_banding_paints_alternate_rows",
+      "seq": 563099,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Band Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"addBanding\":{\"bandedRange\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":4,\"startColumnIndex\":0,\"endColumnIndex\":2},\"rowProperties\":{\"headerColor\":{\"red\":0.2,\"green\":0.4,\"blue\":0.6},\"firstBandColor\":{\"red\":1,\"green\":1,\"blue\":1},\"secondBandColor\":{\"red\":0.9,\"green\":0.9,\"blue\":0.9}}}}}]}' | jq -c '.replies[0].addBanding.bandedRange | [.range, .rowProperties.secondBandColor]'; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!A1:A4\\\"}\" | jq -c '[.sheets[0].data[0].rowData[].values[0].effectiveFormat.backgroundColor]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"startRowIndex\":0,\"endRowIndex\":4,\"startColumnIndex\":0,\"endColumnIndex\":2},{\"red\":0.8980392,\"green\":0.8980392,\"blue\":0.8980392}]\n[{\"red\":0.2,\"green\":0.4,\"blue\":0.6},{\"red\":1,\"green\":1,\"blue\":1},{\"red\":0.8980392,\"green\":0.8980392,\"blue\":0.8980392},{\"red\":1,\"green\":1,\"blue\":1}]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_add_banding_refuses_an_overlap",
+      "seq": 563100,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Overlap Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"addBanding\":{\"bandedRange\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":4,\"startColumnIndex\":0,\"endColumnIndex\":2},\"rowProperties\":{\"firstBandColor\":{\"red\":1},\"secondBandColor\":{\"blue\":1}}}}}]}' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"addBanding\":{\"bandedRange\":{\"range\":{\"sheetId\":0,\"startRowIndex\":2,\"endRowIndex\":6,\"startColumnIndex\":1,\"endColumnIndex\":3},\"rowProperties\":{\"firstBandColor\":{\"red\":1},\"secondBandColor\":{\"blue\":1}}}}}]}' 2>&1 | grep -c 'already has alternating background colors'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_update_borders_sets_both_sides_of_an_inner_line",
+      "seq": 563101,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Border Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateBorders\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":2,\"startColumnIndex\":0,\"endColumnIndex\":1},\"top\":{\"style\":\"SOLID\"},\"innerHorizontal\":{\"style\":\"DOUBLE\"}}}]}' > /dev/null; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!A1:A2\\\"}\" | jq -c '[.sheets[0].data[0].rowData[].values[0].userEnteredFormat.borders]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"top\":{\"style\":\"SOLID\",\"width\":1,\"color\":{},\"colorStyle\":{\"rgbColor\":{}}},\"bottom\":{\"style\":\"DOUBLE\",\"width\":3,\"color\":{},\"colorStyle\":{\"rgbColor\":{}}}},{\"top\":{\"style\":\"DOUBLE\",\"width\":3,\"color\":{},\"colorStyle\":{\"rgbColor\":{}}}}]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_set_basic_filter_sorts_and_hides_rows",
+      "seq": 563102,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Filter Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"setBasicFilter\":{\"filter\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":4,\"startColumnIndex\":0,\"endColumnIndex\":2},\"sortSpecs\":[{\"dimensionIndex\":1,\"sortOrder\":\"DESCENDING\"}],\"filterSpecs\":[{\"columnIndex\":0,\"filterCriteria\":{\"hiddenValues\":[\"kings\"]}}]}}}]}' > /dev/null; gws sheets read --spreadsheet $SID --range 'Sheet1!A1:B4' | jq -c .values; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!A1:A4\\\"}\" | jq -c '.sheets[0] | [.basicFilter.criteria, [.data[0].rowMetadata[].hiddenByFilter]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Avs\",\"47\"],[\"Kings\",\"44\"]]\n[{\"0\":{\"hiddenValues\":[\"kings\"]}},[null,null,null,true]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_conditional_rule_formats_matching_cells",
+      "seq": 563103,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Rule Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"addConditionalFormatRule\":{\"index\":0,\"rule\":{\"ranges\":[{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":4,\"startColumnIndex\":1,\"endColumnIndex\":2}],\"booleanRule\":{\"condition\":{\"type\":\"NUMBER_GREATER\",\"values\":[{\"userEnteredValue\":\"45\"}]},\"format\":{\"backgroundColor\":{\"red\":0.8,\"green\":1,\"blue\":0.8}}}}}}]}' > /dev/null; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!B2:B4\\\"}\" | jq -c '.sheets[0] | [(.conditionalFormats | length), [.data[0].rowData[].values[0].effectiveFormat.backgroundColor]]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1,[{\"red\":0.8,\"green\":1,\"blue\":0.8},{\"red\":1,\"green\":1,\"blue\":1},{\"red\":0.8,\"green\":1,\"blue\":0.8}]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_conditional_rule_refuses_underline",
+      "seq": 563104,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Rule Limit Probe\"}}' | jq -r .spreadsheetId); gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"addConditionalFormatRule\":{\"index\":0,\"rule\":{\"ranges\":[{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":4,\"startColumnIndex\":1,\"endColumnIndex\":2}],\"booleanRule\":{\"condition\":{\"type\":\"NOT_BLANK\"},\"format\":{\"textFormat\":{\"underline\":true}}}}}}]}' 2>&1 | grep -c 'ConditionalFormatRule.format only supports bold, italic, strikethrough'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_sort_range_keeps_hidden_rows_in_place",
+      "seq": 563105,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Sort Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Blank\",\"\"],[\"Text\",\"n/a\"],[\"Hidden\",\"1\"],[\"Neg\",\"-5\"],[\"Bool\",\"TRUE\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateDimensionProperties\":{\"range\":{\"sheetId\":0,\"dimension\":\"ROWS\",\"startIndex\":4,\"endIndex\":5},\"properties\":{\"hiddenByUser\":true},\"fields\":\"hiddenByUser\"}},{\"sortRange\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":7,\"startColumnIndex\":0,\"endColumnIndex\":2},\"sortSpecs\":[{\"dimensionIndex\":1,\"sortOrder\":\"ASCENDING\"}]}}]}' > /dev/null; gws sheets read --spreadsheet $SID --range 'Sheet1!A1:A7' | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "[[\"Team\"],[\"Neg\"],[\"Oilers\"],[\"Text\"],[\"Hidden\"],[\"Bool\"],[\"Blank\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_sort_range_needs_a_sort_order",
+      "seq": 563106,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Sort Order Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"sortRange\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":4,\"startColumnIndex\":0,\"endColumnIndex\":2},\"sortSpecs\":[{\"dimensionIndex\":1}]}}]}' 2>&1 | grep -c 'Invalid requests\\[0\\].sortRange: No sort order specified.'; gws sheets read --spreadsheet $SID --range 'Sheet1!A1:A4' | jq -c .values",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n[[\"Team\"],[\"Oilers\"],[\"Kings\"],[\"Avs\"]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_mask_names_the_unknown_field",
+      "seq": 563107,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Field Probe\"}}' | jq -r .spreadsheetId); gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"repeatCell\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":1,\"startColumnIndex\":0,\"endColumnIndex\":1},\"cell\":{\"userEnteredFormat\":{\"textFormat\":{\"bold\":true}}},\"fields\":\"userEnteredFormat.textFormatX.bold\"}}]}' 2>&1 | grep -c 'Invalid field: userEnteredFormat.text_format_x'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_request_on_a_missing_grid_is_refused",
+      "seq": 563108,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Grid Probe\"}}' | jq -r .spreadsheetId); gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"repeatCell\":{\"range\":{\"sheetId\":99,\"startRowIndex\":0,\"endRowIndex\":1,\"startColumnIndex\":0,\"endColumnIndex\":1},\"cell\":{\"userEnteredFormat\":{\"textFormat\":{\"bold\":true}}},\"fields\":\"userEnteredFormat.textFormat.bold\"}}]}' 2>&1 | grep -c 'Invalid requests\\[0\\].repeatCell: No grid with id: 99'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_failed_batch_applies_no_format",
+      "seq": 563109,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Atomic Probe\"}}' | jq -r .spreadsheetId); gws sheets write --spreadsheet $SID --range 'Sheet1!A1' --json-values '[[\"Team\",\"Wins\"],[\"Oilers\",\"50\"],[\"Kings\",\"44\"],[\"Avs\",\"47\"]]' > /dev/null; gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"repeatCell\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":1,\"startColumnIndex\":0,\"endColumnIndex\":2},\"cell\":{\"userEnteredFormat\":{\"textFormat\":{\"bold\":true}}},\"fields\":\"userEnteredFormat.textFormat.bold\"}},{\"sortRange\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":4,\"startColumnIndex\":0,\"endColumnIndex\":2},\"sortSpecs\":[{\"dimensionIndex\":1}]}}]}' > /dev/null 2>&1; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!A1:B1\\\"}\" | jq -c '[.sheets[0].data[0].rowData[0].values[] | .userEnteredFormat]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[null,null]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_dimension_properties_clip_to_the_grid",
+      "seq": 563110,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Clip Probe\"}}' | jq -r .spreadsheetId); gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateDimensionProperties\":{\"range\":{\"sheetId\":0,\"dimension\":\"ROWS\",\"startIndex\":998,\"endIndex\":2000000000},\"properties\":{\"pixelSize\":40},\"fields\":\"pixelSize\"}}]}' | jq -c .replies; gws sheets spreadsheets get --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\",\\\"includeGridData\\\":true,\\\"ranges\\\":\\\"Sheet1!A998:A1000\\\"}\" | jq -c '.sheets[0] | [.properties.gridProperties.rowCount, .data[0].rowMetadata]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{}]\n[1000,[{\"pixelSize\":21},{\"pixelSize\":40},{\"pixelSize\":40}]]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_sheets_dimension_properties_refuse_a_start_past_the_grid",
+      "seq": 563111,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "SID=$(gws sheets spreadsheets create --json '{\"properties\":{\"title\":\"Past Probe\"}}' | jq -r .spreadsheetId); gws sheets spreadsheets batchUpdate --params \"{\\\"spreadsheetId\\\":\\\"$SID\\\"}\" --json '{\"requests\":[{\"updateDimensionProperties\":{\"range\":{\"sheetId\":0,\"dimension\":\"COLUMNS\",\"startIndex\":26,\"endIndex\":30},\"properties\":{\"pixelSize\":40},\"fields\":\"pixelSize\"}}]}' 2>&1 | grep -cF \"Invalid requests[0].updateDimensionProperties: Cannot update a column that doesn't exist. Tried to update column index 26 but there are only 26 columns.\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
     }
   ]
 }

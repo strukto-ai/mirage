@@ -87,9 +87,9 @@ def index():
 async def test_stat_mount_root_is_directory(dropbox_accessor, index):
     rpc = FakeDropboxRpc()
     with patch(RPC, new=rpc):
-        out = await stat(
-            dropbox_accessor,
-            PathSpec(resource_path="", virtual="/", directory="/"), index)
+        out = await stat(dropbox_accessor,
+                         PathSpec(vfs_path="", virtual="/", directory="/"),
+                         index)
     assert out.type == FileType.DIRECTORY
     assert out.name == "/"
     assert rpc.list_requests == 0
@@ -204,8 +204,7 @@ async def test_stat_populates_from_parent_listing(dropbox_accessor, index):
     with patch(RPC, new=rpc):
         out = await stat(
             dropbox_accessor,
-            PathSpec(resource_path="a.txt", virtual="/a.txt", directory="/"),
-            index)
+            PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"), index)
     assert out.type == FileType.FILE
     assert out.name == "a.txt"
     assert out.size == 5
@@ -228,12 +227,10 @@ async def test_stat_serves_index_hit_without_second_call(
     with patch(RPC, new=rpc):
         file_out = await stat(
             dropbox_accessor,
-            PathSpec(resource_path="a.txt", virtual="/a.txt", directory="/"),
-            index)
+            PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"), index)
         dir_out = await stat(
             dropbox_accessor,
-            PathSpec(resource_path="docs", virtual="/docs", directory="/"),
-            index)
+            PathSpec(vfs_path="docs", virtual="/docs", directory="/"), index)
     assert file_out.type == FileType.FILE
     assert dir_out.type == FileType.DIRECTORY
     assert dir_out.extra["dropbox_id"] == "id:docs"
@@ -256,7 +253,7 @@ async def test_stat_miss_after_populate_is_enoent(dropbox_accessor, index):
         with pytest.raises(FileNotFoundError) as excinfo:
             await stat(
                 dropbox_accessor,
-                PathSpec(resource_path="note.txt",
+                PathSpec(vfs_path="note.txt",
                          virtual="/note.txt",
                          directory="/"), index)
     assert str(excinfo.value) == "/note.txt"
@@ -266,15 +263,14 @@ async def test_stat_miss_after_populate_is_enoent(dropbox_accessor, index):
 @pytest.mark.asyncio
 async def test_stat_under_mount_prefix(dropbox_accessor, index):
     # Every other test runs on an unprefixed mount; this pins the prefix
-    # arithmetic (virtual_key and the parent's resource_path).
+    # arithmetic (virtual_key and the parent's vfs_path).
     rpc = FakeDropboxRpc(entries=[FILE_ENTRY])
     with patch(RPC, new=rpc):
         out = await stat(
             dropbox_accessor,
             PathSpec(virtual="/dropbox/a.txt",
                      directory="/dropbox",
-                     resource_path=mount_key("/dropbox/a.txt", "/dropbox")),
-            index)
+                     vfs_path=mount_key("/dropbox/a.txt", "/dropbox")), index)
     assert out.type == FileType.FILE
     assert out.name == "a.txt"
     assert out.size == 5
@@ -289,7 +285,7 @@ async def test_stat_failed_populate_is_enoent(dropbox_accessor, index):
         with pytest.raises(FileNotFoundError) as excinfo:
             await stat(
                 dropbox_accessor,
-                PathSpec(resource_path="ghost/missing.txt",
+                PathSpec(vfs_path="ghost/missing.txt",
                          virtual="/ghost/missing.txt",
                          directory="/ghost"), index)
     assert str(excinfo.value) == "/ghost/missing.txt"
@@ -304,7 +300,7 @@ async def test_stat_populate_server_error_propagates(dropbox_accessor, index):
         with pytest.raises(DropboxApiError) as excinfo:
             await stat(
                 dropbox_accessor,
-                PathSpec(resource_path="ghost/missing.txt",
+                PathSpec(vfs_path="ghost/missing.txt",
                          virtual="/ghost/missing.txt",
                          directory="/ghost"), index)
     assert excinfo.value.status == 500
@@ -318,7 +314,7 @@ async def test_stat_enotdir_from_populate_propagates(dropbox_accessor, index):
         with pytest.raises(NotADirectoryError):
             await stat(
                 dropbox_accessor,
-                PathSpec(resource_path="a.txt/x",
+                PathSpec(vfs_path="a.txt/x",
                          virtual="/a.txt/x",
                          directory="/a.txt"), index)
 

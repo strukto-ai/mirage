@@ -4,15 +4,15 @@ icon: /images/qdrant-logo.svg
 description: Mount a Qdrant collection as a Mirage filesystem in TypeScript, with payload folders and a semantic search command.
 ---
 
-`QdrantResource` exposes a [Qdrant](https://qdrant.tech/) collection as a read-only filesystem: group-by
+`QdrantVFS` exposes a [Qdrant](https://qdrant.tech/) collection as a read-only filesystem: group-by
 payload fields become nested folders, each point is a `.json` payload file (plus
 a `.txt` text file and an optional blob), and semantic search is the `search`
-command. The TypeScript backend mirrors the [Python one](/python/resource/qdrant)
+command. The TypeScript backend mirrors the [Python one](/python/vfs/qdrant)
 and returns identical results.
 
 ## Install
 
-The client is browser-safe, so the resource ships in `core` and is available
+The client is browser-safe, so the VFS ships in `core` and is available
 from both the Node and browser packages:
 
 ```bash
@@ -20,9 +20,9 @@ pnpm add @struktoai/mirage-node @qdrant/js-client-rest
 ```
 
 ```ts
-import { QdrantResource, MountMode, Workspace } from "@struktoai/mirage-node";
+import { QdrantVFS, MountMode, Workspace } from "@struktoai/mirage-node";
 
-const fashion = new QdrantResource({
+const fashion = new QdrantVFS({
   config: {
     url: "https://xyz.cloud.qdrant.io",
     apiKey: process.env.QDRANT_API_KEY,
@@ -38,8 +38,8 @@ const fashion = new QdrantResource({
 
 const ws = new Workspace({ "/fashion/": fashion }, { mode: MountMode.READ });
 
-await ws.execute("ls /fashion/Men/Shoes/White");
-await ws.execute('search "red running shoes" /fashion'); // ranked paths + score + content
+await ws.shell("ls /fashion/Men/Shoes/White");
+await ws.shell('search "red running shoes" /fashion'); // ranked paths + score + content
 ```
 
 ### Document and chunk lineage
@@ -48,7 +48,7 @@ Config fields accept Qdrant's dotted nested-key syntax. A LangChain-style
 payload with `page_content` and `metadata: { source, page }` can therefore use:
 
 ```ts
-const docs = new QdrantResource({
+const docs = new QdrantVFS({
   config: {
     collection: "company_docs",
     groupBy: ["metadata.source"],
@@ -100,7 +100,7 @@ vector plugs in the same way. Without it the query text goes to the server, so
 the cluster must have inference enabled (Qdrant Cloud) and store vectors from
 the same `embeddingModel` (default `sentence-transformers/all-MiniLM-L6-v2`).
 The hook never lands in a snapshot: a restored mount asks for a fresh
-resource. Browsing (`ls`/`cat`/`find`/`grep`) needs no embedding.
+VFS. Browsing (`ls`/`cat`/`find`/`grep`) needs no embedding.
 
 ## Supported commands
 

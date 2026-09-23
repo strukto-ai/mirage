@@ -370,7 +370,7 @@ export function newStatusWriter(): StatusWriter {
   return Symbol('line')
 }
 
-export class Session {
+export class SessionState {
   sessionId: string
   cwd: string
   // The spelling `cd` arrived at: `..` simplified textually, symlinks
@@ -558,13 +558,13 @@ export class Session {
    * persistent session's old directory from `pwd`. `??` cannot express
    * this, since the value being chosen is `undefined`.
    */
-  fork(overrides: Partial<SessionInit> = {}): Session {
+  fork(overrides: Partial<SessionInit> = {}): SessionState {
     const movedTo = 'logicalCwd' in overrides ? undefined : overrides.cwd
     const vars = overrides.vars ?? copyVars(this.vars)
     // $PWD names where the session is, so it follows the move even when
     // the caller also supplied variables to layer on.
     if (movedTo !== undefined) vars.PWD = makeVar(movedTo, new Set([VarAttr.Export]))
-    const forked = new Session({
+    const forked = new SessionState({
       sessionId: overrides.sessionId ?? this.sessionId,
       cwd: overrides.cwd ?? this.cwd,
       logicalCwd: movedTo !== undefined ? undefined : (overrides.logicalCwd ?? this.logicalCwd),
@@ -751,7 +751,7 @@ export class Session {
 
   /**
    * The durable-field payload persisted by SessionStore and snapshots.
-   * Keys are snake_case, byte-identical to Python's `Session.to_dict`,
+   * Keys are snake_case, byte-identical to Python's `SessionState.to_dict`,
    * so both languages can share one store (a py daemon creates the
    * session, a node kernel tier binds it).
    */
@@ -856,8 +856,8 @@ export class Session {
     profile?: string | null
     decisions?: DecisionJSON[] | null
     generation?: number
-  }): Session {
-    return new Session({
+  }): SessionState {
+    return new SessionState({
       sessionId: data.session_id,
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
       // No `var_attrs` at all means the payload is a bare process

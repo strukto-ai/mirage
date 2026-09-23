@@ -20,8 +20,8 @@ import { makeWorkspace, stdoutStr } from './fixtures/workspace_fixture.ts'
 describe('node/js: workspace mount access', () => {
   it('std.open reads a file the shell wrote', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('echo hello-from-shell > /ram/in.txt')
-    const io = await ws.execute(
+    await ws.shell('echo hello-from-shell > /ram/in.txt')
+    const io = await ws.shell(
       "js -e \"const f = std.open('/ram/in.txt', 'r'); console.log(f.readAsString().trim().toUpperCase()); f.close()\"",
     )
     expect(io.exitCode).toBe(0)
@@ -31,21 +31,21 @@ describe('node/js: workspace mount access', () => {
 
   it('std.open writes a file cat can read back', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       "js -e \"const f = std.open('/ram/out.txt', 'w'); f.puts('js-wrote-this'); f.close()\"",
     )
     expect(io.exitCode).toBe(0)
-    const back = await ws.execute('cat /ram/out.txt')
+    const back = await ws.shell('cat /ram/out.txt')
     expect(stdoutStr(back)).toBe('js-wrote-this')
     await ws.close()
   }, 60_000)
 
   it('os.readdir lists files written into a fresh subdir', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('mkdir /ram/dir')
-    await ws.execute('echo a > /ram/dir/a.txt')
-    await ws.execute('echo b > /ram/dir/b.txt')
-    const io = await ws.execute(
+    await ws.shell('mkdir /ram/dir')
+    await ws.shell('echo a > /ram/dir/a.txt')
+    await ws.shell('echo b > /ram/dir/b.txt')
+    const io = await ws.shell(
       "js -e \"const [names] = os.readdir('/ram/dir'); console.log(names.filter((n) => !n.startsWith('.')).sort().join(','))\"",
     )
     expect(io.exitCode).toBe(0)
@@ -55,7 +55,7 @@ describe('node/js: workspace mount access', () => {
 
   it('a host path outside any mount is invisible (std.open returns null)', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("js -e \"console.log(std.open('/etc/passwd', 'r') === null)\"")
+    const io = await ws.shell("js -e \"console.log(std.open('/etc/passwd', 'r') === null)\"")
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('true\n')
     await ws.close()
@@ -63,18 +63,18 @@ describe('node/js: workspace mount access', () => {
 
   it('a session narrowed to read denies writes (std.open returns null)', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('echo seeded > /ram/seed.txt')
+    await ws.shell('echo seeded > /ram/seed.txt')
     ws.createSession('narrow', { mounts: { '/ram': 'read' } })
-    const io = await ws.execute(
+    const io = await ws.shell(
       "js -e \"const f = std.open('/ram/blocked.txt', 'w'); console.log(f === null ? 'denied' : 'WROTE')\"",
       { sessionId: 'narrow' },
     )
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('denied\n')
-    const check = await ws.execute('cat /ram/blocked.txt', { sessionId: 'narrow' })
+    const check = await ws.shell('cat /ram/blocked.txt', { sessionId: 'narrow' })
     expect(check.exitCode).not.toBe(0)
     // The narrowed session still reads.
-    const read = await ws.execute(
+    const read = await ws.shell(
       "js -e \"const f = std.open('/ram/seed.txt', 'r'); console.log(f.readAsString().trim()); f.close()\"",
       { sessionId: 'narrow' },
     )
@@ -84,7 +84,7 @@ describe('node/js: workspace mount access', () => {
 
   it('reads its own writes after close within a run (whole-file buffering)', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       "js -e \"const w = std.open('/ram/live.txt', 'w'); w.puts('v1'); w.close(); const r = std.open('/ram/live.txt', 'r'); console.log(r.readAsString()); r.close()\"",
     )
     expect(io.exitCode).toBe(0)
@@ -100,7 +100,7 @@ describe('node/js: workspace mount access', () => {
 describe('node/js: std.open dispatches the real establishing op', () => {
   it('creating a file records create, not write', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("js -e \"const f = std.open('/ram/new.txt', 'w'); f.close()\"")
+    const io = await ws.shell("js -e \"const f = std.open('/ram/new.txt', 'w'); f.close()\"")
     expect(io.exitCode).toBe(0)
     const ops = ws.records.filter((r) => r.path.endsWith('/new.txt')).map((r) => r.op)
     expect(ops).toContain('create')
@@ -110,43 +110,43 @@ describe('node/js: std.open dispatches the real establishing op', () => {
 
   it('truncating an existing file records truncate and empties it', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('echo previous > /ram/t.txt')
-    const io = await ws.execute("js -e \"const f = std.open('/ram/t.txt', 'w'); f.close()\"")
+    await ws.shell('echo previous > /ram/t.txt')
+    const io = await ws.shell("js -e \"const f = std.open('/ram/t.txt', 'w'); f.close()\"")
     expect(io.exitCode).toBe(0)
     const ops = ws.records.filter((r) => r.path.endsWith('/t.txt')).map((r) => r.op)
     expect(ops).toContain('truncate')
     expect(ops).not.toContain('create')
-    const wc = await ws.execute('wc -c < /ram/t.txt')
+    const wc = await ws.shell('wc -c < /ram/t.txt')
     expect(stdoutStr(wc).trim()).toBe('0')
     await ws.close()
   }, 60_000)
 
   it("'wx' refuses an existing file and leaves it untouched", async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('echo keep > /ram/x.txt')
-    const io = await ws.execute("js -e \"console.log(std.open('/ram/x.txt', 'wx') === null)\"")
+    await ws.shell('echo keep > /ram/x.txt')
+    const io = await ws.shell("js -e \"console.log(std.open('/ram/x.txt', 'wx') === null)\"")
     expect(stdoutStr(io)).toBe('true\n')
-    const still = await ws.execute('cat /ram/x.txt')
+    const still = await ws.shell('cat /ram/x.txt')
     expect(stdoutStr(still)).toBe('keep\n')
     await ws.close()
   }, 60_000)
 
   it("'wx' creates a missing file", async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute(
+    const io = await ws.shell(
       "js -e \"const f = std.open('/ram/nx.txt', 'wx'); f.puts('made'); f.close()\"",
     )
     expect(io.exitCode).toBe(0)
-    const back = await ws.execute('cat /ram/nx.txt')
+    const back = await ws.shell('cat /ram/nx.txt')
     expect(stdoutStr(back)).toBe('made')
     await ws.close()
   }, 60_000)
 
   it("'r+' does not create a missing file", async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("js -e \"console.log(std.open('/ram/absent.txt', 'r+') === null)\"")
+    const io = await ws.shell("js -e \"console.log(std.open('/ram/absent.txt', 'r+') === null)\"")
     expect(stdoutStr(io)).toBe('true\n')
-    const check = await ws.execute('cat /ram/absent.txt')
+    const check = await ws.shell('cat /ram/absent.txt')
     expect(check.exitCode).not.toBe(0)
     await ws.close()
   }, 60_000)
@@ -156,8 +156,8 @@ describe('node/js: std.open dispatches the real establishing op', () => {
     // throws TypeError("invalid file mode"); the lenient parser used
     // to read 'zz' as 'r' and hand back a live fd.
     const { ws } = await makeWorkspace()
-    await ws.execute('echo x > /ram/g.txt')
-    const io = await ws.execute(
+    await ws.shell('echo x > /ram/g.txt')
+    const io = await ws.shell(
       "js -e \"try { std.open('/ram/g.txt', 'zz') } catch (e) { console.log(e instanceof TypeError, e.message) }\"",
     )
     expect(io.exitCode).toBe(0)
@@ -172,27 +172,27 @@ describe('node/js: std.open dispatches the real establishing op', () => {
 describe('node/js: os mutation surface', () => {
   it('mkdir reports 0 then -20 (EEXIST)', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute("js -e \"console.log(os.mkdir('/ram/d'), os.mkdir('/ram/d'))\"")
+    const io = await ws.shell("js -e \"console.log(os.mkdir('/ram/d'), os.mkdir('/ram/d'))\"")
     expect(stdoutStr(io)).toBe('0 -20\n')
     await ws.close()
   }, 60_000)
 
   it('rename moves a file and reports -44 for a missing source', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('echo xy > /ram/a.txt')
-    const io = await ws.execute(
+    await ws.shell('echo xy > /ram/a.txt')
+    const io = await ws.shell(
       "js -e \"console.log(os.rename('/ram/a.txt', '/ram/b.txt'), os.rename('/ram/zz', '/ram/yy'))\"",
     )
     expect(stdoutStr(io)).toBe('0 -44\n')
-    const back = await ws.execute('cat /ram/b.txt')
+    const back = await ws.shell('cat /ram/b.txt')
     expect(stdoutStr(back)).toBe('xy\n')
     await ws.close()
   }, 60_000)
 
   it('stat answers [obj, 0] with size and mode, [null, 44] when missing', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('printf xy > /ram/s.txt')
-    const io = await ws.execute(
+    await ws.shell('printf xy > /ram/s.txt')
+    const io = await ws.shell(
       "js -e \"const [st, e] = os.stat('/ram/s.txt'); console.log(e, st.size, (st.mode & os.S_IFMT) === os.S_IFREG, JSON.stringify(os.stat('/ram/nope')))\"",
     )
     expect(stdoutStr(io)).toBe('0 2 true [null,44]\n')
@@ -201,8 +201,8 @@ describe('node/js: os mutation surface', () => {
 
   it('remove takes a file then -44, and an empty directory', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('mkdir /ram/d && echo x > /ram/d/f.txt')
-    const io = await ws.execute(
+    await ws.shell('mkdir /ram/d && echo x > /ram/d/f.txt')
+    const io = await ws.shell(
       "js -e \"console.log(os.remove('/ram/d/f.txt'), os.remove('/ram/d/f.txt'), os.remove('/ram/d'))\"",
     )
     expect(stdoutStr(io)).toBe('0 -44 0\n')
@@ -211,19 +211,19 @@ describe('node/js: os mutation surface', () => {
 
   it('a cross-mount rename answers -44 and moves nothing (real engine)', async () => {
     const { ws } = await makeWorkspace()
-    await ws.execute('echo keep > /ram/src.txt')
-    const io = await ws.execute("js -e \"console.log(os.rename('/ram/src.txt', '/disk/dst.txt'))\"")
+    await ws.shell('echo keep > /ram/src.txt')
+    const io = await ws.shell("js -e \"console.log(os.rename('/ram/src.txt', '/disk/dst.txt'))\"")
     expect(stdoutStr(io)).toBe('-44\n')
-    const still = await ws.execute('cat /ram/src.txt')
+    const still = await ws.shell('cat /ram/src.txt')
     expect(stdoutStr(still)).toBe('keep\n')
-    const gone = await ws.execute('cat /disk/dst.txt')
+    const gone = await ws.shell('cat /disk/dst.txt')
     expect(gone.exitCode).not.toBe(0)
     await ws.close()
   }, 60_000)
 
   it('readdir reports [[], 44] for a missing directory', async () => {
     const { ws } = await makeWorkspace()
-    const io = await ws.execute('js -e "console.log(JSON.stringify(os.readdir(\'/ram/nope\')))"')
+    const io = await ws.shell('js -e "console.log(JSON.stringify(os.readdir(\'/ram/nope\')))"')
     expect(stdoutStr(io)).toBe('[[],44]\n')
     await ws.close()
   }, 60_000)

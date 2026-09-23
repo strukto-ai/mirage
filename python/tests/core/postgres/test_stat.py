@@ -20,9 +20,9 @@ import pytest
 from mirage.accessor.postgres import PostgresAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.postgres.stat import stat
-from mirage.resource.postgres.config import PostgresConfig
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.postgres.config import PostgresConfig
 
 
 @asynccontextmanager
@@ -65,7 +65,7 @@ def _exists(monkeypatch):
 @pytest.mark.asyncio
 async def test_stat_root(accessor, index):
     result = await stat(accessor,
-                        PathSpec(resource_path="", virtual="/", directory="/"),
+                        PathSpec(vfs_path="", virtual="/", directory="/"),
                         index)
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
@@ -75,7 +75,7 @@ async def test_stat_root(accessor, index):
 async def test_stat_database_json(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path="database.json",
+        PathSpec(vfs_path="database.json",
                  virtual="/database.json",
                  directory="/database.json"), index)
     assert result.content == ContentType.JSON
@@ -86,9 +86,8 @@ async def test_stat_database_json(accessor, index):
 async def test_stat_schema(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path="public",
-                 virtual="/public",
-                 directory="/public"), index)
+        PathSpec(vfs_path="public", virtual="/public", directory="/public"),
+        index)
     assert result.type == FileType.DIRECTORY
     assert result.extra["schema"] == "public"
 
@@ -97,7 +96,7 @@ async def test_stat_schema(accessor, index):
 async def test_stat_kind_tables(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path="public/tables",
+        PathSpec(vfs_path="public/tables",
                  virtual="/public/tables",
                  directory="/public/tables"), index)
     assert result.type == FileType.DIRECTORY
@@ -108,7 +107,7 @@ async def test_stat_kind_tables(accessor, index):
 async def test_stat_kind_views(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path="analytics/views",
+        PathSpec(vfs_path="analytics/views",
                  virtual="/analytics/views",
                  directory="/analytics/views"), index)
     assert result.type == FileType.DIRECTORY
@@ -119,7 +118,7 @@ async def test_stat_kind_views(accessor, index):
 async def test_stat_entity_table(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path="public/tables/users",
+        PathSpec(vfs_path="public/tables/users",
                  virtual="/public/tables/users",
                  directory="/public/tables/users"), index)
     assert result.type == FileType.DIRECTORY
@@ -135,7 +134,7 @@ async def test_stat_entity_table(accessor, index):
 async def test_stat_entity_schema_json(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path="public/tables/users/schema.json",
+        PathSpec(vfs_path="public/tables/users/schema.json",
                  virtual="/public/tables/users/schema.json",
                  directory="/public/tables/users/schema.json"), index)
     assert result.content == ContentType.JSON
@@ -169,7 +168,7 @@ async def test_stat_entity_rows_jsonl(accessor, index, monkeypatch):
                         AsyncMock(return_value=4096))
     result = await stat(
         accessor,
-        PathSpec(resource_path="public/tables/users/rows.jsonl",
+        PathSpec(vfs_path="public/tables/users/rows.jsonl",
                  virtual="/public/tables/users/rows.jsonl",
                  directory="/public/tables/users/rows.jsonl"), index)
     assert result.content == ContentType.TEXT
@@ -201,7 +200,7 @@ async def test_stat_view_entity_rows(accessor, index, monkeypatch):
                         AsyncMock(return_value=128))
     result = await stat(
         accessor,
-        PathSpec(resource_path="analytics/views/daily_revenue/rows.jsonl",
+        PathSpec(vfs_path="analytics/views/daily_revenue/rows.jsonl",
                  virtual="/analytics/views/daily_revenue/rows.jsonl",
                  directory="/analytics/views/daily_revenue/rows.jsonl"), index)
     assert result.content == ContentType.TEXT
@@ -226,14 +225,14 @@ async def test_stat_fingerprint_changes_with_row_count(accessor, index,
                         AsyncMock(return_value=10))
     first = await stat(
         accessor,
-        PathSpec(resource_path="public/tables/users/rows.jsonl",
+        PathSpec(vfs_path="public/tables/users/rows.jsonl",
                  virtual="/public/tables/users/rows.jsonl",
                  directory="/public/tables/users/rows.jsonl"), index)
     monkeypatch.setattr("mirage.core.postgres.client.estimated_row_count",
                         AsyncMock(return_value=20))
     second = await stat(
         accessor,
-        PathSpec(resource_path="public/tables/users/rows.jsonl",
+        PathSpec(vfs_path="public/tables/users/rows.jsonl",
                  virtual="/public/tables/users/rows.jsonl",
                  directory="/public/tables/users/rows.jsonl"), index)
     assert first.fingerprint != second.fingerprint
@@ -244,7 +243,7 @@ async def test_stat_invalid_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path="public/tables/users/extra/foo",
+            PathSpec(vfs_path="public/tables/users/extra/foo",
                      virtual="/public/tables/users/extra/foo",
                      directory="/public/tables/users/extra/foo"), index)
 
@@ -256,7 +255,7 @@ async def test_stat_missing_schema_raises(accessor, index, monkeypatch):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path=mount_key("/pg/__nf_missing__.txt", "/pg"),
+            PathSpec(vfs_path=mount_key("/pg/__nf_missing__.txt", "/pg"),
                      virtual="/pg/__nf_missing__.txt",
                      directory="/pg/__nf_missing__.txt"), index)
 
@@ -268,6 +267,6 @@ async def test_stat_missing_entity_raises(accessor, index, monkeypatch):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path="public/tables/nope",
+            PathSpec(vfs_path="public/tables/nope",
                      virtual="/public/tables/nope",
                      directory="/public/tables/nope"), index)

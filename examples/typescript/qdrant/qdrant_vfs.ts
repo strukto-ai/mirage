@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { QdrantClient } from '@qdrant/js-client-rest'
-import { MountMode, QdrantResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, QdrantVFS, Workspace } from '@struktoai/mirage-node'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -142,7 +142,7 @@ const DEC = new TextDecoder()
 
 async function show(ws: Workspace, cmd: string): Promise<void> {
   console.log(`\n=== ${cmd} ===`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   console.log(DEC.decode(r.stdout).trimEnd())
 }
 
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
     // depends on no model runtime.
     embed: (text: string): Promise<number[]> => Promise.resolve(embed(text)),
   }
-  const fashion = new QdrantResource({
+  const fashion = new QdrantVFS({
     config: {
       ...connection,
       collection: 'fashion',
@@ -176,7 +176,7 @@ async function main(): Promise<void> {
   // Chunks grouped by the document they came from: `metadata.source` is
   // a nested payload path, `basenameFields` lists it by file name, and
   // `nameField` puts the page label in front of the point id.
-  const docs = new QdrantResource({
+  const docs = new QdrantVFS({
     config: {
       ...connection,
       collection: 'company_docs',
@@ -198,7 +198,7 @@ async function main(): Promise<void> {
   await show(ws, 'cat /fashion/Men/Shoes/White/3.json')
 
   console.log('\n=== stat /fashion/Men/Shoes/White/3.jpg (raw image bytes) ===')
-  const s = await ws.execute("stat -c '%s' /fashion/Men/Shoes/White/3.jpg")
+  const s = await ws.shell("stat -c '%s' /fashion/Men/Shoes/White/3.jpg")
   console.log(`  image size: ${DEC.decode(s.stdout).trim()} bytes`)
 
   await show(ws, 'search "white running sneakers" /fashion')
@@ -207,7 +207,7 @@ async function main(): Promise<void> {
   await show(ws, 'rg -li running /fashion/Men')
 
   console.log("\n=== find /fashion -name '*.txt' | wc -l ===")
-  const f = await ws.execute("find /fashion -name '*.txt' | wc -l")
+  const f = await ws.shell("find /fashion -name '*.txt' | wc -l")
   console.log(`  products: ${DEC.decode(f.stdout).trim()}`)
 
   console.log("\n=== mounted Qdrant collection 'company_docs' at /docs/ ===")

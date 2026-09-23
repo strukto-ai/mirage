@@ -19,8 +19,10 @@ from mirage.cache.index import RAMIndexCacheStore
 from mirage.types import PathSpec
 from tests.core.databricks_volume.conftest import (accessor, databricks_config,
                                                    files, index, remote_root)
-from tests.resource.databricks_volume.test_databricks_volume import (
-    FakeFiles, make_resource, seed_directory, seed_file)
+from tests.vfs.databricks_volume.test_databricks_volume import (FakeFiles,
+                                                                make_vfs,
+                                                                seed_directory,
+                                                                seed_file)
 
 __all__ = [
     "accessor",
@@ -90,7 +92,7 @@ def databricks_text_files() -> FakeFiles:
 def databricks_text_workspace(databricks_text_files: FakeFiles) -> Workspace:
     # WRITE, because sed -i writes back through the command-tier write
     # slot, which now answers the mount mode like every other write.
-    return Workspace({"/dbx/": make_resource(databricks_text_files)},
+    return Workspace({"/dbx/": make_vfs(databricks_text_files)},
                      mode=MountMode.WRITE)
 
 

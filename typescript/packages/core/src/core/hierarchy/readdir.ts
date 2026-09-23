@@ -156,7 +156,7 @@ export function makeReaddir<A extends Accessor>(
     // duration of the call.
     const store = index ?? new RAMIndexCacheStore()
     const virtual = pathSpec.virtual
-    const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.resourcePath)
+    const prefix = mountPrefixOf(pathSpec.virtual, pathSpec.vfsPath)
     const path = (pathSpec.pattern !== null ? pathSpec.dir : pathSpec).mountPath
     const key = stripSlash(path)
     const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
@@ -196,7 +196,7 @@ export function makeReaddir<A extends Accessor>(
           virtual: proofKey,
           directory: proofKey,
           resolved: false,
-          resourcePath: mountKey(proofKey, prefix),
+          vfsPath: mountKey(proofKey, prefix),
         }),
         store,
       )

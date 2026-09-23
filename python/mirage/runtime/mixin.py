@@ -71,9 +71,9 @@ class LineExecutorMixin(ABC):
     workspace line. Named captures receive one safely quoted command.
     Interpreter runtimes never inherit
     it: they are the engine inside one command (python3, node), never
-    the line. The vfs runtime does not either: a line resolved to vfs
-    runs on the workspace executor inline, so there is no delegate to
-    call. Capability is detected by type (isinstance), never by
+    the line. The workspace runtime does not either: a line resolved to
+    workspace runs on the workspace executor inline, so there is no delegate
+    to call. Capability is detected by type (isinstance), never by
     probing for a method or a flag.
     """
 

@@ -22,7 +22,7 @@ import {
   buildRuntime,
   DEFAULT_ENTRIES,
   DEFAULT_PYTHON,
-  VFSRuntime,
+  WorkspaceRuntime,
   wholeLineRuntime,
 } from '../../runtime/table.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -66,11 +66,12 @@ export class Runtimes {
         this.entries.push(typeof entry === 'string' ? buildRuntime(entry) : entry)
       }
     }
-    if (!this.entries.some((entry) => entry.name === 'vfs')) {
-      this.entries.push(new VFSRuntime())
+    if (!this.entries.some((entry) => entry.name === 'workspace')) {
+      this.entries.push(new WorkspaceRuntime())
     }
-    init.registry.vfsRuntime =
-      this.entries.find((entry): entry is VFSRuntime => entry instanceof VFSRuntime) ?? null
+    init.registry.workspaceRuntime =
+      this.entries.find((entry): entry is WorkspaceRuntime => entry instanceof WorkspaceRuntime) ??
+      null
     // The live array: add() pushes into it, so the registry view never
     // goes stale (Python re-assigns per add instead).
     init.registry.runtimeEntries = this.entries

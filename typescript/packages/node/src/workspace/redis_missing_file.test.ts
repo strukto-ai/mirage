@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { RedisResource } from '../resource/redis/redis.ts'
+import { RedisVFS } from '../vfs/redis/redis.ts'
 import { Workspace } from '../workspace.ts'
 
 const REDIS_URL = process.env.REDIS_URL
@@ -24,13 +24,11 @@ const DEC = new TextDecoder()
 const RUN_ID = `mirage-missing-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 describe.skipIf(skip)('redis streaming commands on missing files', () => {
-  let redis: RedisResource
+  let redis: RedisVFS
   let ws: Workspace
 
   beforeEach(async () => {
-    redis = new RedisResource(
-      REDIS_URL !== undefined ? { url: REDIS_URL, keyPrefix: `${RUN_ID}:` } : {},
-    )
+    redis = new RedisVFS(REDIS_URL !== undefined ? { url: REDIS_URL, keyPrefix: `${RUN_ID}:` } : {})
     await redis.open()
     ws = new Workspace({ '/redis': redis }, { mode: MountMode.WRITE })
   })
@@ -41,23 +39,23 @@ describe.skipIf(skip)('redis streaming commands on missing files', () => {
   })
 
   it('cat /missing.txt returns exit=1 with stderr', async () => {
-    const res = await ws.execute('cat /redis/missing.txt')
+    const res = await ws.shell('cat /redis/missing.txt')
     expect(res.exitCode).toBe(1)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
 
   it('cat /missing; echo after=$? yields after=1', async () => {
-    const res = await ws.execute('cat /redis/missing.txt; echo after=$?')
+    const res = await ws.shell('cat /redis/missing.txt; echo after=$?')
     expect(DEC.decode(res.stdout)).toBe('after=1\n')
   })
 
   it('cat /missing || echo fallback', async () => {
-    const res = await ws.execute('cat /redis/missing.txt || echo fallback')
+    const res = await ws.shell('cat /redis/missing.txt || echo fallback')
     expect(DEC.decode(res.stdout)).toBe('fallback\n')
   })
 
   it('head /missing returns exit=1', async () => {
-    const res = await ws.execute('head /redis/missing.txt')
+    const res = await ws.shell('head /redis/missing.txt')
     expect(res.exitCode).toBe(1)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
@@ -65,19 +63,19 @@ describe.skipIf(skip)('redis streaming commands on missing files', () => {
   // GNU grep exits 2 for an operand it could not search, unlike the read
   // commands around it, which exit 1.
   it('grep pat /missing returns exit=2', async () => {
-    const res = await ws.execute('grep foo /redis/missing.txt')
+    const res = await ws.shell('grep foo /redis/missing.txt')
     expect(res.exitCode).toBe(2)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
 
   it('tail /missing returns exit=1', async () => {
-    const res = await ws.execute('tail /redis/missing.txt')
+    const res = await ws.shell('tail /redis/missing.txt')
     expect(res.exitCode).toBe(1)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
 
   it('wc /missing returns exit=1', async () => {
-    const res = await ws.execute('wc /redis/missing.txt')
+    const res = await ws.shell('wc /redis/missing.txt')
     expect(res.exitCode).toBe(1)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })

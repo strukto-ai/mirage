@@ -34,7 +34,7 @@ function envRecord(): Record<string, string> {
 
 // A config handed to `load` or `clone`: env-interpolated, and with its
 // relative script paths and code refs rebased onto the file's directory
-// exactly as `create` rebases them, so `resource: ./wiki.mjs:WikiResource`
+// exactly as `create` rebases them, so `vfs: ./wiki.mjs:WikiVFS`
 // in an override means "next to this file", never "wherever the daemon
 // runs". Not validated, because an override may name only a subset of
 // mounts. Mirrors `_resolve_config_arg` in the Python CLI, which is sync:
@@ -73,7 +73,7 @@ interface WorkspaceBrief {
 
 interface MountSummary {
   prefix: string
-  resource: string
+  vfs: string
   mode: string
 }
 
@@ -117,9 +117,9 @@ function formatWorkspaceDetail(d: WorkspaceDetail): string {
     `Created:   ${formatAge(d.createdAt)} ago`,
   ]
   if (d.mounts !== undefined && d.mounts.length > 0) {
-    const rows = d.mounts.map((m) => [m.prefix, m.resource, m.mode])
+    const rows = d.mounts.map((m) => [m.prefix, m.vfs, m.mode])
     lines.push('', 'Mounts:')
-    for (const ln of formatTable(['PREFIX', 'RESOURCE', 'MODE'], rows).split('\n')) {
+    for (const ln of formatTable(['PREFIX', 'VFS', 'MODE'], rows).split('\n')) {
       lines.push('  ' + ln)
     }
   }

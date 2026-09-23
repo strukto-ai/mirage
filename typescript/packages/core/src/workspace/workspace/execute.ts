@@ -19,7 +19,7 @@ import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { VFS } from '../../vfs/base.ts'
 import { getCurrentSessionFor, runWithSession } from '../../context/session_context.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import {
@@ -57,7 +57,7 @@ import { prejudgeLine, unrefusedNodes } from '../node/explain.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
-import { type Session, type StatusWriter, newStatusWriter } from '../session/session.ts'
+import { type SessionState, type StatusWriter, newStatusWriter } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { abortable, joinOrAbort } from '../abort.ts'
 import { failureResult, isControlFlowError } from './failure.ts'
@@ -96,7 +96,7 @@ export interface ExecuteEnv {
   router: Router
   secretSources(): Promise<Readonly<Record<string, ResolvedSource>>>
   registerCloser(fn: () => Promise<void>): void
-  ensureOpen(resource: Resource): Promise<void>
+  ensureOpen(vfs: VFS): Promise<void>
   invalidateAllAfterRemote(): Promise<void>
   provision(
     command: string,
@@ -139,7 +139,7 @@ async function deniedResult(
   env: ExecuteEnv,
   command: string,
   options: ExecuteOptions,
-  session: Session,
+  session: SessionState,
   reason: string,
 ): Promise<ExecuteResult> {
   const cmdName = commandName(command) || command
@@ -187,7 +187,7 @@ async function drainToSink(sink: JobConsole, result: ExecuteResult): Promise<Exe
 }
 
 /**
- * The body of `Workspace.execute`; see its docstring for the argument
+ * The body of `Workspace.shell`; see its docstring for the argument
  * contract. Runs the line, then honors the sink contract for every path
  * `runLine` can answer on.
  */
@@ -201,7 +201,7 @@ export async function executeLine(
     let result = await runLine(env, command, options, frame)
     // A provision run answers with a plan, not output, so it has nothing
     // to stream. The drain is the last await of the line, and a stalled
-    // store would hold `execute` open past an abort; it joins under the
+    // store would hold `shell` open past an abort; it joins under the
     // same grace as the tree.
     const sink = options.sink
     if (sink !== undefined && result instanceof ExecuteResult) {
@@ -231,7 +231,7 @@ export async function executeLine(
  * the line knows them and before anything stamps.
  */
 interface LineFrame {
-  session: Session | null
+  session: SessionState | null
   statusBefore: StatusSnapshot | null
   // Minted per call, never on the session, so two lines on one session
   // each keep their own and neither restores over the other.
@@ -383,7 +383,7 @@ async function runLine(
       registerCloser: (fn: () => Promise<void>) => {
         env.registerCloser(fn)
       },
-      ensureOpen: (resource: Resource) => env.ensureOpen(resource),
+      ensureOpen: (vfs: VFS) => env.ensureOpen(vfs),
       runtimeBindings: env.runtimes.bindings,
       // Alias expansion rewrites the head word and reads the result as a
       // fresh line, so it needs the same parser the line reader used. The
@@ -455,14 +455,14 @@ async function runParsedLine(
   options: ExecuteOptions,
   rootNode: TSNodeLike,
   deps: ExecuteNodeDeps,
-  targetSession: Session,
-  effectiveSession: Session,
+  targetSession: SessionState,
+  effectiveSession: SessionState,
   stdin: ByteSource | null,
   reparse: (line: string) => TSNodeLike,
   nested: NestedRefusal,
   handed: HandOff,
 ): Promise<ExecuteResult> {
-  const cacheable = env.dispatcher.captureCacheablePaths()
+  const cacheFacts = env.dispatcher.captureCacheFacts()
   const callAgentId = options.agentId ?? env.agentId ?? ''
   // The line-reader decision (GNU: history is appended where the typed
   // line is read, never inside the evaluator). Internal evaluations run
@@ -760,7 +760,7 @@ async function runParsedLine(
   let stdoutBytes: Uint8Array
   try {
     if (executionFailure === undefined) {
-      await abortable(env.dispatcher.applyIo(io, opRecords, cacheable), killed)
+      await abortable(env.dispatcher.applyIo(io, opRecords, cacheFacts), killed)
     }
     stdoutBytes =
       materialized === null ? new Uint8Array() : await abortable(materialize(materialized), killed)

@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DROPBOX_IO } from '../../commands/builtin/dropbox/io.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { makeGenericOps } from '../generic/factory.ts'
 import type { RegisteredOp } from '../registry.ts'
 
-export const DROPBOX_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.DROPBOX,
-  DROPBOX_IO,
-  { emulateTruncate: true },
-)
+export const DROPBOX_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.DROPBOX, DROPBOX_IO, {
+  emulateTruncate: true,
+})

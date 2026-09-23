@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeSlackTransport, makeFakeResource } from './_test_util.ts'
+import { FakeSlackTransport, makeFakeVfs } from './_test_util.ts'
 import { SLACK_COMMANDS } from './index.ts'
 
 const SLACK_LS = SLACK_COMMANDS.filter((c) => c.name === 'ls' && c.filetype == null)
@@ -49,18 +49,18 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
       if (endpoint === 'conversations.history') return historyPage
       throw new Error(`unexpected ${endpoint}`)
     })
-    const resource = makeFakeResource(transport)
+    const vfs = makeFakeVfs(transport)
     const cmd = SLACK_LS[0]
     if (cmd === undefined) throw new Error('ls not registered')
     // Prime parent so the channel is cached (mirrors what `cd` would force)
     await cmd.fn(
-      resource.accessor,
+      vfs.accessor,
       [
         new PathSpec({
           virtual: '/slack/channels',
           directory: '/slack/channels',
           resolved: false,
-          resourcePath: mountKey('/slack/channels', '/slack'),
+          vfsPath: mountKey('/slack/channels', '/slack'),
         }),
       ],
       [],
@@ -75,7 +75,7 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
     )
 
     // Now: ls (no args) with cwd = the channel directory, mountPrefix = /slack
-    const out = await cmd.fn(resource.accessor, [], [], {
+    const out = await cmd.fn(vfs.accessor, [], [], {
       stdin: null,
       flags: {},
       filetypeFns: null,

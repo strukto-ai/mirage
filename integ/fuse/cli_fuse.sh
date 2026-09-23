@@ -32,15 +32,15 @@ probe() {
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
     backend: fuse
     mountpoint: $dmnt
   /logs:
-    resource: ram
+    vfs: ram
     backend: fuse
     mountpoint: $lmnt
   /auto:
-    resource: ram
+    vfs: ram
     backend: fuse
 YML
 
@@ -57,11 +57,11 @@ YML
 mode: WRITE
 mounts:
   /one:
-    resource: ram
+    vfs: ram
     backend: fuse
     mountpoint: $collide_mp
   /two:
-    resource: ram
+    vfs: ram
     backend: fuse
     mountpoint: $collide_mp
 YML
@@ -82,7 +82,7 @@ YML
 mode: WRITE
 mounts:
   /one:
-    resource: ram
+    vfs: ram
     backend: fskit
 YML
     $cli workspace delete cff >/dev/null 2>&1 </dev/null || true
@@ -160,7 +160,7 @@ YML
 mode: WRITE
 mounts:
   /data:
-    resource: ram
+    vfs: ram
     backend: fuse
     mountpoint: $dmnt
 YML

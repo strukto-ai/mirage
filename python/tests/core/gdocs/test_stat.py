@@ -41,7 +41,7 @@ def index():
 async def test_stat_root(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gdocs", "/gdocs"),
+        PathSpec(vfs_path=mount_key("/gdocs", "/gdocs"),
                  virtual="/gdocs",
                  directory="/gdocs"), index)
     assert result.type == FileType.DIRECTORY
@@ -52,7 +52,7 @@ async def test_stat_root(accessor, index):
 async def test_stat_owned_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gdocs/owned", "/gdocs"),
+        PathSpec(vfs_path=mount_key("/gdocs/owned", "/gdocs"),
                  virtual="/gdocs/owned",
                  directory="/gdocs/owned"), index)
     assert result.type == FileType.DIRECTORY
@@ -63,7 +63,7 @@ async def test_stat_owned_dir(accessor, index):
 async def test_stat_shared_dir(accessor, index):
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key("/gdocs/shared", "/gdocs"),
+        PathSpec(vfs_path=mount_key("/gdocs/shared", "/gdocs"),
                  virtual="/gdocs/shared",
                  directory="/gdocs/shared"), index)
     assert result.type == FileType.DIRECTORY
@@ -83,7 +83,7 @@ async def test_stat_doc(accessor, index):
     ])
     result = await stat(
         accessor,
-        PathSpec(resource_path=mount_key(
+        PathSpec(vfs_path=mount_key(
             "/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json", "/gdocs"),
                  virtual="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
                  directory="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json"),
@@ -118,7 +118,7 @@ async def test_stat_not_found(accessor, index):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,
-                PathSpec(resource_path=mount_key(
+                PathSpec(vfs_path=mount_key(
                     "/gdocs/owned/nonexistent.gdoc.json", "/gdocs"),
                          virtual="/gdocs/owned/nonexistent.gdoc.json",
                          directory="/gdocs/owned/nonexistent.gdoc.json"),
@@ -144,7 +144,7 @@ async def test_stat_cache_miss_falls_back_via_readdir(accessor, index):
     ) as mock_list:
         result = await stat(
             accessor,
-            PathSpec(resource_path=mount_key(target, "/gdocs"),
+            PathSpec(vfs_path=mount_key(target, "/gdocs"),
                      virtual=target,
                      directory=target), index)
     assert result.content == ContentType.JSON
@@ -179,7 +179,7 @@ async def test_stat_refreshes_invalidated_incomplete_listing(
         "modifiedTime": "2026-04-01T12:00:00.000Z",
         "size": "2000",
     }
-    directory = PathSpec(resource_path="owned",
+    directory = PathSpec(vfs_path="owned",
                          virtual="/gdocs/owned",
                          directory="/gdocs/owned")
     try:
@@ -189,7 +189,7 @@ async def test_stat_refreshes_invalidated_incomplete_listing(
             listed = await readdir(accessor, directory, store)
             assert len(listed) == 1
             target = listed[0]
-            path = PathSpec(resource_path=mount_key(target, "/gdocs"),
+            path = PathSpec(vfs_path=mount_key(target, "/gdocs"),
                             virtual=target,
                             directory=target)
             assert (await store.list_dir("/gdocs/owned")).status == (

@@ -40,7 +40,7 @@ const generic = vi.mocked(rgGeneric)
 const FOLDER = new PathSpec({
   virtual: '/email/INBOX',
   directory: '/email/INBOX',
-  resourcePath: 'INBOX',
+  vfsPath: 'INBOX',
 })
 const ACCESSOR = { config: { maxMessages: 10 } } as unknown as EmailAccessor
 

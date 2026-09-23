@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 const RAM_MKTEMP = RAM_COMMANDS.filter((c) => c.name === 'mktemp' && c.filetype == null)
 
 const DEC = new TextDecoder()
@@ -23,49 +23,49 @@ const DEC = new TextDecoder()
 async function runMktemp(
   flags: Record<string, string | boolean | number | string[]>,
   texts: string[] = [],
-): Promise<{ out: string; resource: RAMResource }> {
-  const resource = new RAMResource()
+): Promise<{ out: string; vfs: RAMVFS }> {
+  const vfs = new RAMVFS()
   const cmd = RAM_MKTEMP[0]
   if (cmd === undefined) throw new Error('mktemp not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], texts, {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
     filetypeFns: null,
     cwd: '/',
   })
-  if (result === null) return { out: '', resource }
+  if (result === null) return { out: '', vfs }
   const [out] = result
-  if (out === null) return { out: '', resource }
+  if (out === null) return { out: '', vfs }
   const buf = out instanceof Uint8Array ? out : await materialize(out as AsyncIterable<Uint8Array>)
-  return { out: DEC.decode(buf), resource }
+  return { out: DEC.decode(buf), vfs }
 }
 
 describe('mktemp', () => {
   it('creates a temp file under /tmp', async () => {
-    const { out, resource } = await runMktemp({})
+    const { out, vfs } = await runMktemp({})
     const path = out.trim()
     expect(path.startsWith('/tmp/')).toBe(true)
-    expect(resource.store.files.has(path)).toBe(true)
+    expect(vfs.store.files.has(path)).toBe(true)
   })
 
   it('-d creates a temp directory under /tmp', async () => {
-    const { out, resource } = await runMktemp({ directory: true })
+    const { out, vfs } = await runMktemp({ directory: true })
     const path = out.trim()
     expect(path.startsWith('/tmp/')).toBe(true)
-    expect(resource.store.dirs.has(path)).toBe(true)
+    expect(vfs.store.dirs.has(path)).toBe(true)
   })
 
   it('uses the directory of an explicit path template', async () => {
-    const { out, resource } = await runMktemp({}, ['/data/mt/f.XXXX'])
+    const { out, vfs } = await runMktemp({}, ['/data/mt/f.XXXX'])
     const path = out.trim()
     expect(path.startsWith('/data/mt/f.')).toBe(true)
-    expect(resource.store.files.has(path)).toBe(true)
+    expect(vfs.store.files.has(path)).toBe(true)
   })
 
   it('-d uses the directory of an explicit path template', async () => {
-    const { out, resource } = await runMktemp({ directory: true }, ['/data/mtd/t.XXXX'])
+    const { out, vfs } = await runMktemp({ directory: true }, ['/data/mtd/t.XXXX'])
     const path = out.trim()
     expect(path.startsWith('/data/mtd/t.')).toBe(true)
-    expect(resource.store.dirs.has(path)).toBe(true)
+    expect(vfs.store.dirs.has(path)).toBe(true)
   })
 })

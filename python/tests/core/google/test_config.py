@@ -19,9 +19,9 @@ from yarl import URL
 from mirage.core.google.client import refresh_access_token
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.constants import TOKEN_URL
-from mirage.resource.gdocs.config import GDocsConfig
-from mirage.resource.gdrive.config import GoogleDriveConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.gdocs.config import GDocsConfig
+from mirage.vfs.gdrive.config import GoogleDriveConfig
+from mirage.vfs.secrets import reveal_secret
 
 
 def test_google_config_creation():

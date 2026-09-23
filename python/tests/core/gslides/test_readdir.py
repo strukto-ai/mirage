@@ -37,7 +37,7 @@ def index():
 async def test_readdir_root(accessor, index):
     result = await readdir(
         accessor,
-        PathSpec(resource_path=mount_key("/gslides", "/gslides"),
+        PathSpec(vfs_path=mount_key("/gslides", "/gslides"),
                  virtual="/gslides",
                  directory="/gslides"), index)
     assert result == ["/gslides/owned", "/gslides/shared"]
@@ -62,7 +62,7 @@ async def test_readdir_owned(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned", "/gslides"),
                      virtual="/gslides/owned",
                      directory="/gslides/owned"), index)
         assert len(result) == 1
@@ -74,8 +74,8 @@ async def test_readdir_file_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned/file.gslide.json",
-                                             "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned/file.gslide.json",
+                                        "/gslides"),
                      virtual="/gslides/owned/file.gslide.json",
                      directory="/gslides/owned/file.gslide.json"), index)
 
@@ -85,7 +85,7 @@ async def test_readdir_invalid_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/bogus", "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/bogus", "/gslides"),
                      virtual="/gslides/bogus",
                      directory="/gslides/bogus"), index)
 
@@ -102,8 +102,8 @@ async def test_readdir_owned_pushes_modified_range(accessor, index):
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned/2026-05-*",
-                                             "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned/2026-05-*",
+                                        "/gslides"),
                      virtual="/gslides/owned/2026-05-*",
                      directory="/gslides/owned",
                      pattern="2026-05-*"), index)
@@ -146,14 +146,14 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, index):
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned/2026-05-*",
-                                             "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned/2026-05-*",
+                                        "/gslides"),
                      virtual="/gslides/owned/2026-05-*",
                      directory="/gslides/owned",
                      pattern="2026-05-*"), index)
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned", "/gslides"),
                      virtual="/gslides/owned",
                      directory="/gslides/owned"), index)
 
@@ -198,13 +198,13 @@ async def test_readdir_owned_filtered_bypasses_warm_cache(accessor, index):
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned", "/gslides"),
                      virtual="/gslides/owned",
                      directory="/gslides/owned"), index)
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned/2026-05-*",
-                                             "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned/2026-05-*",
+                                        "/gslides"),
                      virtual="/gslides/owned/2026-05-*",
                      directory="/gslides/owned",
                      pattern="2026-05-*"), index)
@@ -223,7 +223,7 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, index):
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned", "/gslides"),
                      virtual="/gslides/owned",
                      directory="/gslides/owned"), index)
 
@@ -242,8 +242,7 @@ async def test_readdir_owned_non_date_pattern_omits_range(accessor, index):
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):
         await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned/*foo*",
-                                             "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned/*foo*", "/gslides"),
                      virtual="/gslides/owned/*foo*",
                      directory="/gslides/owned",
                      pattern="*foo*"), index)
@@ -272,7 +271,7 @@ async def test_readdir_entry_size_none_source_size_in_extra(accessor, index):
     ):
         result = await readdir(
             accessor,
-            PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+            PathSpec(vfs_path=mount_key("/gslides/owned", "/gslides"),
                      virtual="/gslides/owned",
                      directory="/gslides/owned"), index)
 
@@ -305,7 +304,7 @@ async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
     async def fake_list(token_manager, mime_type=None, **kwargs):
         return files, complete["v"]
 
-    owned = PathSpec(resource_path=mount_key("/gslides/owned", "/gslides"),
+    owned = PathSpec(vfs_path=mount_key("/gslides/owned", "/gslides"),
                      virtual="/gslides/owned",
                      directory="/gslides/owned")
     with patch("mirage.core.gslides.readdir.list_all_files", new=fake_list):

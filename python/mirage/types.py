@@ -277,14 +277,15 @@ class MountMode(str, Enum):
 class MountBackend(StrEnum):
     """How a mount is exposed to the outside world.
 
-    VFS is the default: the mount lives only inside mirage's own filesystem
-    and is reached through the command surface, with nothing registered with
-    the kernel. FUSE and FSKIT additionally expose it as a real mountpoint.
+    WORKSPACE is the default: the mount lives only inside mirage's own
+    filesystem and is reached through the command surface, with nothing
+    registered with the kernel. FUSE and FSKIT additionally expose it as a
+    real mountpoint.
 
     FSKIT is macOS 15.4+ only and needs no kernel extension. It has no
-    ``direct_io`` equivalent, so it serves correct reads only for resources
+    ``direct_io`` equivalent, so it serves correct reads only for mounts
     that set ``SIZES_ALWAYS_KNOWN``; ``mirage.fuse.backend`` warns at mount
-    time about resources whose size-unknown files will read as empty. Writes
+    time about mounts whose size-unknown files will read as empty. Writes
     are also limited: appends and metadata ops persist, but the macFUSE
     FSKit shim flushes pages a file did not already have (a new file, or
     truncate-then-write) as NUL bytes, a limit pinned in
@@ -293,7 +294,7 @@ class MountBackend(StrEnum):
     degrade every API-backed mount.
     """
 
-    VFS = "vfs"
+    WORKSPACE = "workspace"
     FUSE = "fuse"
     FSKIT = "fskit"
 
@@ -301,6 +302,69 @@ class MountBackend(StrEnum):
 # Backends that register a real mountpoint with the kernel.
 KERNEL_BACKENDS: frozenset[MountBackend] = frozenset(
     {MountBackend.FUSE, MountBackend.FSKIT})
+
+
+class ReadPolicy(str, Enum):
+    """How a mount decides whether cached bytes may be served.
+
+    FRESH revalidates against the backend's content token before serving
+    a cached copy; BOUNDED serves without revalidating, within the
+    staleness bound the mount declares.
+
+    PINNED names the content a commit's fingerprint records. There is no
+    version layer to pin to, so a mount declaring it is refused at mount
+    time rather than quietly degraded to head: the vocabulary is
+    published, so someone will type it, and an informative refusal costs
+    one branch over a generic invalid-value error.
+    """
+
+    FRESH = "fresh"
+    BOUNDED = "bounded"
+    PINNED = "pinned"
+
+
+# Seconds. Matches IndexConfig.ttl (cache/index/config.py) so bodies and
+# listings expire together out of the box; that one is a float, this is
+# whole seconds.
+DEFAULT_READ_TTL: int = 600
+
+
+@dataclass(frozen=True, slots=True)
+class ReadSpec:
+    """One mount's read policy and the bound that goes with it.
+
+    The bound is set under FRESH too, so every cache entry carries one.
+    Two workspaces sharing one Redis cache under different policies would
+    otherwise write entries the other refuses to serve, and bounce them
+    between cold reads indefinitely.
+
+    It is stamped when the entry is written and enforced by the store, so
+    the bound that applies is the writing mount's, not the reading
+    mount's. Those are the same mount inside one workspace; they differ
+    across a shared cache, a lowered ``ttl`` and a restored snapshot, and
+    there the older bound stands until the entry expires. Making the
+    reader authoritative needs a write timestamp every store can read
+    back, which redis does not keep.
+    """
+
+    policy: ReadPolicy = ReadPolicy.BOUNDED
+    ttl: int = DEFAULT_READ_TTL
+
+
+@dataclass(frozen=True, slots=True)
+class CacheFacts:
+    """What the cache write path needs to know about a path's mount.
+
+    Answered per path against the mount table pinned at command start,
+    so a fill that lands after the command is stamped with the bound of
+    the mount that produced the bytes rather than whatever holds the
+    prefix by then. ``cacheable`` is read first and short-circuits, so
+    ``ttl`` is never consulted for a path that is not being cached.
+    """
+
+    cacheable: bool
+    ttl: int
+
 
 MOUNT_MODE_RANK: dict[MountMode, int] = {
     MountMode.READ: 1,
@@ -323,7 +387,7 @@ def weaker_mode(a: MountMode, b: MountMode) -> MountMode:
 class HiddenPaths:
     """What the data door treats as nonexistent for one session.
 
-    A sibling of ``Session.mount_modes``: per-session narrowing that
+    A sibling of ``SessionState.mount_modes``: per-session narrowing that
     the doors enforce, None-on-the-session means unrestricted. Hiding
     is "does not exist", never "forbidden" — matching paths answer
     ENOENT and drop out of listings, the same no-name-leak rule
@@ -463,11 +527,6 @@ def parse_mount_mode(value: MountMode | str) -> MountMode:
     return alias if alias is not None else MountMode(value)
 
 
-class ConsistencyPolicy(str, Enum):
-    LAZY = "lazy"
-    ALWAYS = "always"
-
-
 class OnExceed(str, Enum):
     ERROR = "error"
     TRUNCATE = "truncate"
@@ -595,7 +654,7 @@ class VFSWriteOp(str, Enum):
 WRITE_OPS = frozenset(VFSWriteOp)
 
 
-class ResourceName(str, Enum):
+class VFSName(str, Enum):
     DISK = "disk"
     S3 = "s3"
     RAM = "ram"
@@ -642,7 +701,7 @@ class ResourceName(str, Enum):
 class PathSpec:
     virtual: str
     directory: str
-    resource_path: str
+    vfs_path: str
     raw_path: str
     pattern: str | None = None
     resolved: bool = True
@@ -651,7 +710,7 @@ class PathSpec:
         self,
         virtual: str,
         directory: str,
-        resource_path: str,
+        vfs_path: str,
         pattern: str | None = None,
         resolved: bool = True,
         raw_path: str | None = None,
@@ -661,7 +720,7 @@ class PathSpec:
         Args:
             virtual (str): Absolute path in the workspace.
             directory (str): Directory containing the path.
-            resource_path (str): Path relative to the mounted resource.
+            vfs_path (str): Path relative to the mounted VFS.
             pattern (str | None): Unresolved glob pattern.
             resolved (bool): Whether glob resolution is complete.
             raw_path (str | None): Spelling supplied by the user; defaults
@@ -669,7 +728,7 @@ class PathSpec:
         """
         object.__setattr__(self, "virtual", virtual)
         object.__setattr__(self, "directory", directory)
-        object.__setattr__(self, "resource_path", resource_path)
+        object.__setattr__(self, "vfs_path", vfs_path)
         object.__setattr__(self, "pattern", pattern)
         object.__setattr__(self, "resolved", resolved)
         object.__setattr__(self, "raw_path",
@@ -679,46 +738,44 @@ class PathSpec:
     def mount_path(self) -> str:
         """Mount-relative path with a leading slash.
 
-        Pure formatting of ``resource_path`` ("" -> "/", "sub/x" ->
+        Pure formatting of ``vfs_path`` ("" -> "/", "sub/x" ->
         "/sub/x"); used for byte-accounting keys and path arithmetic that
         work in slash-framed mount-relative space.
         """
-        return "/" + self.resource_path
+        return "/" + self.vfs_path
 
     @property
     def dir(self) -> "PathSpec":
         """Directory PathSpec, carrying pattern for readdir filtering."""
-        # The directory's resource_path is its virtual form with this
+        # The directory's vfs_path is its virtual form with this
         # path's mount prefix removed; the prefix length is recovered from
-        # the (virtual, resource_path) pair. Idempotent for specs that are
+        # the (virtual, vfs_path) pair. Idempotent for specs that are
         # already directories.
-        cut = len(self.virtual.rstrip("/")) - len(self.resource_path)
+        cut = len(self.virtual.rstrip("/")) - len(self.vfs_path)
         return PathSpec(
             virtual=self.directory,
             directory=self.directory,
             pattern=self.pattern,
             resolved=False,
-            resource_path=self.directory[cut:].strip("/"),
+            vfs_path=self.directory[cut:].strip("/"),
         )
 
     def child(self, name: str) -> str:
         return self.virtual.rstrip("/") + "/" + name
 
     @staticmethod
-    def from_str_path(path: str,
-                      resource_path: str | None = None) -> "PathSpec":
-        """Wrap a path string; defaults to a root-mounted resource_path.
+    def from_str_path(path: str, vfs_path: str | None = None) -> "PathSpec":
+        """Wrap a path string; defaults to a root-mounted vfs_path.
 
         Args:
             path (str): virtual path string.
-            resource_path (str | None): backend key; when None the path is
+            vfs_path (str | None): backend key; when None the path is
                 assumed root-mounted (no mount prefix to strip).
         """
         return PathSpec(
             virtual=path,
             directory=path[:path.rfind("/") + 1] or "/",
-            resource_path=(path.strip("/")
-                           if resource_path is None else resource_path),
+            vfs_path=(path.strip("/") if vfs_path is None else vfs_path),
         )
 
 
@@ -864,7 +921,7 @@ class OverflowPolicy(StrEnum):
 
 
 class DriftPolicy(StrEnum):
-    """Behaviour when a remote resource's live fingerprint differs from
+    """Behaviour when a remote VFS's live fingerprint differs from
     the value recorded at snapshot time.
 
     Values:

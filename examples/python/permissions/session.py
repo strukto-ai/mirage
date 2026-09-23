@@ -16,22 +16,22 @@ import asyncio
 import errno
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
-from mirage.workspace import SessionHandle
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Session
 
-# One agent, one handle. `ws.session(id, profile=...)` creates a session
-# under a role and hands back its two doors bound together: `execute`
-# runs a shell line as the session and `fs` is the op facade run as it.
+# One agent, one session. `ws.session(id, profile=...)` creates a session
+# under a role and hands back its two doors bound together: `shell`
+# runs a shell line as the session and `vfs` is the op facade run as it.
 # Whichever door an agent's tools use, the same profile answers.
 #
 # Two roles read one world and see two filesystems. The reviewer's
-# profile hides /repo/secrets and its handle caps /repo at read, so the
+# profile hides /repo/secrets and its session caps /repo at read, so the
 # directory does not exist for it on either door and a write is a
 # read-only file system on either door. The editor may write, and a
 # deny rule keeps it out of the secrets by name, so the same file is
 # "does not exist" for one role and "permission denied" for the other,
-# through the shell and through fs.read alike. The workspace names no
-# default profile, so its own doors (`ws.fs`, bare `ws.execute`) are
+# through the shell and through vfs.read alike. The workspace names no
+# default profile, so its own doors (`ws.vfs`, bare `ws.shell`) are
 # the host's view. A second `ws.session(id)` adopts the session as is;
 # naming a profile for a session that already exists is refused.
 
@@ -75,74 +75,80 @@ def show(role: str, door: str, call: str, answer: str, note: str) -> None:
     """Print one probe as the truth file records it.
 
     Args:
-        role (str): whose handle answered.
+        role (str): whose session answered.
         door (str): which of its doors.
         call (str): what was asked.
         answer (str): what came back.
         note (str): why it matters.
     """
-    print(f"{role:9} {door:8} {call:34} {answer}")
-    print(f"{'':9} {'':8} {'':34} {note}")
+    print(f"{role:9} {door:9} {call:34} {answer}")
+    print(f"{'':9} {'':9} {'':34} {note}")
 
 
-async def line(role: str, handle: SessionHandle | Workspace, cmd: str,
+async def line(role: str, handle: Session | Workspace, cmd: str,
                note: str) -> None:
-    """Run one shell line through a handle's shell door and print it.
+    """Run one shell line through a session's shell door and print it.
 
     Args:
-        role (str): whose handle.
-        handle (SessionHandle | Workspace): the doors; the workspace's
+        role (str): whose session.
+        handle (Session | Workspace): the doors; the workspace's
             own are the host's.
         cmd (str): the shell line.
         note (str): why it matters.
     """
-    res = await handle.execute(cmd)
-    show(role, "execute", cmd,
+    res = await handle.shell(cmd)
+    show(role, "shell", cmd,
          shell(res.stdout or b"", res.stderr or b"", res.exit_code), note)
 
 
-async def read(role: str, handle: SessionHandle | Workspace, path: str,
-               note: str) -> None:
-    """Read one path through a handle's op door and print the answer.
+async def read(role: str,
+               handle: Session | Workspace,
+               path: str,
+               note: str,
+               session_id: str | None = None) -> None:
+    """Read one path through a session's op door and print the answer.
 
     Args:
-        role (str): whose handle.
-        handle (SessionHandle | Workspace): the doors.
+        role (str): whose session.
+        handle (Session | Workspace): the doors.
         path (str): the virtual path.
         note (str): why it matters.
+        session_id (str | None): name one session for this call alone,
+            the way ``shell`` takes one; None reads as the door's own.
     """
+    call = path if session_id is None else f"{path} as {session_id}"
     try:
-        data = await handle.fs.read(path)
+        data = await handle.vfs.read(path, session_id=session_id)
     except OSError as exc:
-        show(role, "fs.read", path, errno.errorcode[exc.errno], note)
+        show(role, "vfs.read", call, errno.errorcode[exc.errno], note)
     else:
-        show(role, "fs.read", path, data.decode().strip(), note)
+        show(role, "vfs.read", call, data.decode().strip(), note)
 
 
-async def write(role: str, handle: SessionHandle | Workspace, path: str,
+async def write(role: str, handle: Session | Workspace, path: str,
                 note: str) -> None:
-    """Write one path through a handle's op door and print the answer.
+    """Write one path through a session's op door and print the answer.
 
     Args:
-        role (str): whose handle.
-        handle (SessionHandle | Workspace): the doors.
+        role (str): whose session.
+        handle (Session | Workspace): the doors.
         path (str): the virtual path.
         note (str): why it matters.
     """
     try:
-        await handle.fs.write(path, f"{role} wrote\n".encode())
+        await handle.vfs.write(path, f"{role} wrote\n".encode())
     except OSError as exc:
-        show(role, "fs.write", path, errno.errorcode[exc.errno], note)
+        show(role, "vfs.write", path, errno.errorcode[exc.errno], note)
     else:
-        show(role, "fs.write", path, "ok", note)
+        show(role, "vfs.write", path, "ok", note)
 
 
 async def main() -> None:
-    ws = Workspace({"/repo/": RAMResource()},
+    ws = Workspace({"/repo/": RAMVFS()},
                    mode=MountMode.WRITE,
                    profiles=PROFILES)
     for seed in SEED:
-        await ws.execute(seed)
+        await ws.shell(seed)
 
     reviewer = await ws.session("reviewer",
                                 profile="reviewer",
@@ -161,6 +167,16 @@ async def main() -> None:
                "the op door, the same rule, the same answer")
     await read("host", ws, "/repo/secrets/key.pem",
                "no default profile: the workspace's own door sees it")
+    await read("host",
+               ws,
+               "/repo/secrets/key.pem",
+               "the same door, named per call: the reviewer's hide",
+               session_id="reviewer")
+    await read("host",
+               ws,
+               "/repo/secrets/key.pem",
+               "and the editor's own rule, from the same call site",
+               session_id="editor")
 
     await write("reviewer", reviewer, "/repo/new.txt",
                 "the reviewer's handle caps /repo at read")

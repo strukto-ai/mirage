@@ -43,7 +43,7 @@ export async function resolveTextInput(
     const spec = new PathSpec({
       virtual: opts.filePath,
       directory: opts.filePath,
-      resourcePath: key,
+      vfsPath: key,
     })
     const data = await read(accessor, spec)
     return DEC.decode(data)

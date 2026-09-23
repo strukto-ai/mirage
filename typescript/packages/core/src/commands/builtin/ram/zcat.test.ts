@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 import { gzip } from '../../../utils/compress.ts'
 const RAM_ZCAT = RAM_COMMANDS.filter((c) => c.name === 'zcat' && c.filetype == null)
@@ -24,13 +24,13 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runZcat(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   stdin: Uint8Array | null = null,
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_ZCAT[0]
   if (cmd === undefined) throw new Error('zcat not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin,
     flags: {},
     filetypeFns: null,
@@ -49,18 +49,18 @@ async function runZcat(
 
 describe('zcat', () => {
   it('decompresses a gzip file', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const compressed = await gzip(ENC.encode('hello world\n'))
-    resource.store.files.set('/f.gz', compressed)
-    const r = await runZcat(resource, [PathSpec.fromStrPath('/f.gz')])
+    vfs.store.files.set('/f.gz', compressed)
+    const r = await runZcat(vfs, [PathSpec.fromStrPath('/f.gz')])
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('hello world\n')
   })
 
   it('decompresses from stdin', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const compressed = await gzip(ENC.encode('stdin data\n'))
-    const r = await runZcat(resource, [], compressed)
+    const r = await runZcat(vfs, [], compressed)
     expect(r.exitCode).toBe(0)
     expect(r.out).toBe('stdin data\n')
   })

@@ -22,9 +22,9 @@ from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.gdocs.client import TokenManager
 from mirage.core.gdocs.read import read, read_doc
-from mirage.resource.gdocs.config import GDocsConfig
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.gdocs.config import GDocsConfig
 
 
 @pytest.fixture
@@ -116,7 +116,7 @@ async def test_read_via_index(accessor, index):
         result = await read(
             accessor,
             PathSpec(
-                resource_path=mount_key(
+                vfs_path=mount_key(
                     "/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
                     "/gdocs"),
                 virtual="/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json",
@@ -149,8 +149,8 @@ async def test_read_auto_bootstraps_from_empty_index(accessor, index):
             ),
     ):
         path = PathSpec(
-            resource_path=mount_key(
-                "/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json", "/gdocs"),
+            vfs_path=mount_key("/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json",
+                               "/gdocs"),
             virtual="/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json",
             directory="/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json",
         )
@@ -173,8 +173,8 @@ async def test_read_missing_file_raises_after_recursion(accessor, index):
             ),
     ):
         path = PathSpec(
-            resource_path=mount_key("/gdocs/owned/Missing__xyz.gdoc.json",
-                                    "/gdocs"),
+            vfs_path=mount_key("/gdocs/owned/Missing__xyz.gdoc.json",
+                               "/gdocs"),
             virtual="/gdocs/owned/Missing__xyz.gdoc.json",
             directory="/gdocs/owned/Missing__xyz.gdoc.json",
         )
@@ -197,8 +197,8 @@ async def test_read_propagates_parent_refresh_failure(accessor, index):
             ),
     ):
         path = PathSpec(
-            resource_path=mount_key("/gdocs/owned/Missing__xyz.gdoc.json",
-                                    "/gdocs"),
+            vfs_path=mount_key("/gdocs/owned/Missing__xyz.gdoc.json",
+                               "/gdocs"),
             virtual="/gdocs/owned/Missing__xyz.gdoc.json",
             directory="/gdocs/owned/Missing__xyz.gdoc.json",
         )

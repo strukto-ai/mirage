@@ -45,7 +45,7 @@ def _accessor() -> GitHubAccessor:
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, prefix),
+    return PathSpec(vfs_path=mount_key(path, prefix),
                     virtual=path,
                     directory=path)
 

@@ -19,11 +19,11 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.discord import DiscordConfig, DiscordResource
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
-from mirage.resource.gmail import GmailConfig, GmailResource
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.vfs.discord import DiscordConfig, DiscordVFS
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
+from mirage.vfs.gmail import GmailConfig, GmailVFS
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
 
@@ -33,19 +33,19 @@ google_kwargs = dict(
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
 
-s3 = S3Resource(config=S3Config(
+s3 = S3VFS(config=S3Config(
     bucket=os.environ["AWS_S3_BUCKET"],
     region=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
     aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
     aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
 ))
-gdrive = GoogleDriveResource(config=GoogleDriveConfig(**google_kwargs))
-gmail = GmailResource(config=GmailConfig(**google_kwargs))
-slack = SlackResource(config=SlackConfig(
+gdrive = GoogleDriveVFS(config=GoogleDriveConfig(**google_kwargs))
+gmail = GmailVFS(config=GmailConfig(**google_kwargs))
+slack = SlackVFS(config=SlackConfig(
     token=os.environ["SLACK_BOT_TOKEN"],
     search_token=os.environ.get("SLACK_USER_TOKEN"),
 ))
-discord = DiscordResource(config=DiscordConfig(
+discord = DiscordVFS(config=DiscordConfig(
     token=os.environ["DISCORD_BOT_TOKEN"]))
 
 # Stable path that both scripts agree on. Override with the env var
@@ -67,7 +67,7 @@ _FINGERPRINT_COMMANDS = [
 
 
 async def _capture(ws, cmd):
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return {
         "command": cmd,
         "exit_code": r.exit_code,
@@ -90,7 +90,7 @@ async def main():
 
     # gdrive needs `ls` of the parent folder first so the index has
     # the file_id mapping the loader will need too.
-    await ws.execute("ls /gdrive/")
+    await ws.shell("ls /gdrive/")
 
     # Warm the cache by running each fingerprint command once and
     # discarding the output. This way the snapshot's cache state
@@ -99,7 +99,7 @@ async def main():
     # format slightly differently between cache-hit and source-read
     # paths; warming makes the comparison apples-to-apples).
     for cmd in _FINGERPRINT_COMMANDS:
-        await ws.execute(cmd)
+        await ws.shell(cmd)
 
     # ── exercise the workspace (read-only for determinism) ──────────
     print("=== capturing fingerprint commands ===\n")

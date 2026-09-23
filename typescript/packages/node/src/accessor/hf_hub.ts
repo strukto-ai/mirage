@@ -14,9 +14,9 @@
 
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
 import type { IndexEntry } from '@struktoai/mirage-core/cache/index/config'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
-import { HF_ENDPOINT, type HfRepoConfig } from '../resource/hf_buckets/config.ts'
+import { HF_ENDPOINT, type HfRepoConfig } from '../vfs/hf_buckets/config.ts'
 import { DEFAULT_REVISION } from '../core/hf_hub/constants.ts'
 import type { TreeEntry } from '../core/hf_hub/tree_entry.ts'
 
@@ -57,7 +57,7 @@ export class HfHubAccessor extends Accessor {
   constructor(
     readonly config: HfRepoConfig,
     private readonly kind = 'model',
-    readonly resourceName: ResourceName = ResourceName.HF_MODELS,
+    readonly vfsName: VFSName = VFSName.HF_MODELS,
   ) {
     super()
   }
@@ -122,18 +122,18 @@ export class HfHubAccessor extends Accessor {
 
 export class HfModelsHubAccessor extends HfHubAccessor {
   constructor(config: HfRepoConfig) {
-    super(config, 'model', ResourceName.HF_MODELS)
+    super(config, 'model', VFSName.HF_MODELS)
   }
 }
 
 export class HfDatasetsHubAccessor extends HfHubAccessor {
   constructor(config: HfRepoConfig) {
-    super(config, 'dataset', ResourceName.HF_DATASETS)
+    super(config, 'dataset', VFSName.HF_DATASETS)
   }
 }
 
 export class HfSpacesHubAccessor extends HfHubAccessor {
   constructor(config: HfRepoConfig) {
-    super(config, 'space', ResourceName.HF_SPACES)
+    super(config, 'space', VFSName.HF_SPACES)
   }
 }

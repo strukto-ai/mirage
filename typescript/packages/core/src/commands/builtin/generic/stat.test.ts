@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { OpsRegistry, type RegisteredOp } from '../../../ops/registry.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { type CommandOpts } from '../../config.ts'
 import {
   ContentType,
@@ -57,7 +57,7 @@ function opts(fmt: string): CommandOpts {
     flags: { c: fmt },
     filetypeFns: null,
     cwd: '/',
-    resource: null,
+    vfs: null,
   } as unknown as CommandOpts
 }
 
@@ -131,7 +131,7 @@ class NoSetattrRegistry extends OpsRegistry {
 }
 
 async function run(ws: Workspace, cmd: string): Promise<[number, string, string]> {
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   return [r.exitCode, r.stdoutText, r.stderrText]
 }
 
@@ -275,10 +275,10 @@ describe('stat -c directive formatting', () => {
 describe('stat -c workspace integration', () => {
   it('reflects overlay chmod/chown on a setattr-less backend', async () => {
     const parser = await getTestParser()
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', new TextEncoder().encode('hello'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
     const ws = new Workspace(
-      { '/data': resource },
+      { '/data': vfs },
       { mode: MountMode.WRITE, shellParser: parser, ops: new NoSetattrRegistry() },
     )
     await run(ws, 'chmod 600 /data/f.txt')
@@ -290,10 +290,10 @@ describe('stat -c workspace integration', () => {
 
   it('defaults owner to the workspace agent', async () => {
     const parser = await getTestParser()
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', new TextEncoder().encode('hello'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
     const ws = new Workspace(
-      { '/data': resource },
+      { '/data': vfs },
       { mode: MountMode.WRITE, shellParser: parser, agentId: 'agent7' },
     )
     const [code, out] = await run(ws, 'stat -c "%U:%G" /data/f.txt')
@@ -305,10 +305,10 @@ describe('stat -c workspace integration', () => {
 
   it('renders the group as the session profile', async () => {
     const parser = await getTestParser()
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', new TextEncoder().encode('hello'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
     const ws = new Workspace(
-      { '/data': resource },
+      { '/data': vfs },
       {
         mode: MountMode.WRITE,
         shellParser: parser,
@@ -324,9 +324,9 @@ describe('stat -c workspace integration', () => {
 
   it('falls back to "-" when the workspace is unclaimed', async () => {
     const parser = await getTestParser()
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', new TextEncoder().encode('hello'))
-    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, shellParser: parser })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
+    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, shellParser: parser })
     const [code, out] = await run(ws, 'stat -c "%U:%G" /data/f.txt')
     expect(code).toBe(0)
     expect(out).toBe('-:-\n')
@@ -334,10 +334,10 @@ describe('stat -c workspace integration', () => {
 
   it('agrees with ls -l on owner', async () => {
     const parser = await getTestParser()
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', new TextEncoder().encode('hello'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', new TextEncoder().encode('hello'))
     const ws = new Workspace(
-      { '/data': resource },
+      { '/data': vfs },
       { mode: MountMode.WRITE, shellParser: parser, agentId: 'agent7' },
     )
     const [, statOwner] = await run(ws, 'stat -c "%U %G" /data/f.txt')

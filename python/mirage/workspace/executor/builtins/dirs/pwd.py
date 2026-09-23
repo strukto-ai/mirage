@@ -19,14 +19,14 @@ from mirage.workspace.executor.builtins.dirs.constants import (PWD_OPTIONS,
                                                                PWD_USAGE)
 from mirage.workspace.executor.builtins.dirs.dirs import split_mode_options
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import logical_cwd
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_pwd(
     operands: list[str | PathSpec],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print the working directory, logical by default and physical
     under ``-P`` (or ``set -P``).
@@ -34,7 +34,7 @@ async def handle_pwd(
     Args:
         operands (list[str | PathSpec]): the words after ``pwd``; GNU
             ignores every operand, so ``pwd extra`` still prints the cwd.
-        session (Session): the shell session.
+        session (SessionState): the shell session.
     """
     shell_physical = bool(session.shell_options.get("physical"))
     _, bad_opt, physical = split_mode_options(operands, PWD_OPTIONS,

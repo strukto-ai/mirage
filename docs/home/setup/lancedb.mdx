@@ -1,7 +1,7 @@
 ---
 title: LanceDB
 icon: database
-description: Set up a LanceDB connection for the LanceDB resource.
+description: Set up a LanceDB connection for the LanceDB VFS.
 ---
 
 LanceDB mounts a table as a read-only filesystem: group-by columns become nested
@@ -47,10 +47,10 @@ function on a source field, so `tbl.search(text)` auto-embeds the query.
 
 ## Limits
 
-The resource is read-only and bounds how much an agent can pull:
+The VFS is read-only and bounds how much an agent can pull:
 
 - `search_limit` (10): default top-k returned by `search`.
 - `max_rows` (1,000): hard ceiling on rows listed per folder.
 
-See the [Python](/python/resource/lancedb) and [TypeScript](/typescript/setup/lancedb)
-resource pages for full config.
+See the [Python](/python/vfs/lancedb) and [TypeScript](/typescript/setup/lancedb)
+VFS pages for full config.

@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { resolveLanceDBConfig } from '../../resource/lancedb/config.ts'
+import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import type { LanceDriver, LanceRow } from './_driver.ts'
 import { readdir } from './readdir.ts'
@@ -53,7 +53,7 @@ function makeAccessor(): { accessor: LanceDBAccessor; rowsMatching: ReturnType<t
 }
 
 function spec(virtual: string): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: virtual.replace(/^\//, '') })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: virtual.replace(/^\//, '') })
 }
 
 describe('lancedb readdir sizes', () => {
@@ -119,7 +119,7 @@ function globbed(virtual: string, pattern: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: virtual.replace(/^\//, ''),
+    vfsPath: virtual.replace(/^\//, ''),
     pattern,
   })
 }

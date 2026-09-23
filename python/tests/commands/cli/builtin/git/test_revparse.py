@@ -231,7 +231,7 @@ async def test_a_peel_naming_the_wrong_type_is_refused(workspace):
 
 @pytest.mark.asyncio
 async def test_a_typed_tag_peel_is_the_tag_itself(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     found = resolve_object(repo, "v1^{tag}")
@@ -241,7 +241,7 @@ async def test_a_typed_tag_peel_is_the_tag_itself(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_bare_peel_still_unwraps_the_tag(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     assert resolve_object(repo, "v1^{}").id == resolve_commit(repo, "HEAD").id
@@ -249,7 +249,7 @@ async def test_a_bare_peel_still_unwraps_the_tag(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_commit_peel_still_unwraps_the_tag(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     found = resolve_object(repo, "v1^{commit}")
@@ -258,7 +258,7 @@ async def test_a_commit_peel_still_unwraps_the_tag(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_lightweight_tag_has_no_tag_to_peel_to(git_rw):
-    await git_rw.execute("git -C /repo tag light")
+    await git_rw.shell("git -C /repo tag light")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     with pytest.raises(AmbiguousArgumentError):
@@ -267,7 +267,7 @@ async def test_a_lightweight_tag_has_no_tag_to_peel_to(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_bare_tag_id_is_the_tag_object(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     held = repo.refs[b"refs/tags/v1"]
@@ -281,7 +281,7 @@ async def test_a_bare_tag_id_is_the_tag_object(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_tag_name_still_peels_where_an_id_does_not(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     # The split is git's own and is observable: a name resolves as a
@@ -291,7 +291,7 @@ async def test_a_tag_name_still_peels_where_an_id_does_not(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_path_reads_through_a_bare_tag_id(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     held = repo.refs[b"refs/tags/v1"].decode()
@@ -304,7 +304,7 @@ async def test_a_path_reads_through_a_bare_tag_id(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_peel_through_a_bare_tag_id_still_reaches_the_tree(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     held = repo.refs[b"refs/tags/v1"].decode()
@@ -314,7 +314,7 @@ async def test_a_peel_through_a_bare_tag_id_still_reaches_the_tree(git_rw):
 
 @pytest.mark.asyncio
 async def test_an_object_peel_keeps_whatever_type_it_finds(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     # ``^{object}`` is an existence check, not a type: every object
@@ -326,7 +326,7 @@ async def test_an_object_peel_keeps_whatever_type_it_finds(git_rw):
 
 @pytest.mark.asyncio
 async def test_an_object_peel_leaves_an_annotated_tag_wrapped(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     # The one thing that separates it from ``^{}``: the named object is
@@ -339,7 +339,7 @@ async def test_an_object_peel_leaves_an_annotated_tag_wrapped(git_rw):
 
 @pytest.mark.asyncio
 async def test_a_commit_ish_still_reads_an_object_peel(git_rw):
-    await git_rw.execute("git -C /repo tag -a v1 -m annotated")
+    await git_rw.shell("git -C /repo tag -a v1 -m annotated")
     location = await discover(*repo_facts(git_rw), "/repo")
     repo = await open_repo(git_rw.dispatch, location)
     head = resolve_commit(repo, "HEAD")

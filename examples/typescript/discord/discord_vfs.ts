@@ -15,7 +15,7 @@
 import { createRequire } from 'node:module'
 import dotenv from 'dotenv'
 import {
-  DiscordResource,
+  DiscordVFS,
   MountMode,
   patchNodeFs,
   Workspace,
@@ -42,8 +42,8 @@ const exists = (p: string): Promise<boolean> =>
   )
 
 async function main(): Promise<void> {
-  const resource = new DiscordResource(buildConfig())
-  const ws = new Workspace({ '/discord': resource }, { mode: MountMode.READ })
+  const vfs = new DiscordVFS(buildConfig())
+  const ws = new Workspace({ '/discord': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.readFile() reads from Discord transparently ===\n')

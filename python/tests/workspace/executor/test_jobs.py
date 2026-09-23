@@ -18,10 +18,10 @@ from functools import partial
 import pytest
 
 from mirage.io import IOResult
-from mirage.resource.ram import RAMResource
 from mirage.shell.console import Channel
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.jobs import (handle_disown, handle_fg,
                                             handle_jobs, handle_kill,
@@ -30,8 +30,7 @@ from mirage.workspace.types import ExecutionNode
 
 
 def _workspace() -> Workspace:
-    return Workspace({"/m": (RAMResource(), MountMode.WRITE)},
-                     mode=MountMode.WRITE)
+    return Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
 
 
 async def _run_bg(cmd: str, job_id: int = 1) -> tuple[bytes, bytes]:
@@ -42,7 +41,7 @@ async def _run_bg(cmd: str, job_id: int = 1) -> tuple[bytes, bytes]:
         job_id (int): job to wait for.
     """
     ws = _workspace()
-    await ws.execute(cmd)
+    await ws.shell(cmd)
     await ws.job_table.wait(job_id, ws.default_session_id)
     job = ws.job_table.get(job_id, ws.default_session_id)
     assert job is not None
@@ -62,7 +61,7 @@ def test_loop_body_streams_each_iteration_instead_of_batching():
 
     async def _do():
         ws = _workspace()
-        await ws.execute("for i in 1 2 3; do echo $i; sleep 0.25; done &")
+        await ws.shell("for i in 1 2 3; do echo $i; sleep 0.25; done &")
         job = ws.job_table.get(1, ws.default_session_id)
         assert job is not None
         await asyncio.sleep(0.35)
@@ -116,11 +115,11 @@ def test_redirected_output_goes_to_the_file_not_the_console():
 
     async def _do():
         ws = _workspace()
-        await ws.execute("echo hi > /m/f.txt &")
+        await ws.shell("echo hi > /m/f.txt &")
         await ws.job_table.wait(1, ws.default_session_id)
         job = ws.job_table.get(1, ws.default_session_id)
         assert job is not None
-        written = await (await ws.execute("cat /m/f.txt")).stdout_str()
+        written = await (await ws.shell("cat /m/f.txt")).stdout_str()
         return await job.console.snapshot(Channel.STDOUT), written
 
     out, written = asyncio.run(_do())
@@ -141,9 +140,9 @@ def test_bare_wait_adopts_output_from_every_job_in_id_order():
 
     async def _do():
         ws = _workspace()
-        await ws.execute("echo a &")
-        await ws.execute("echo b &")
-        result = await ws.execute("wait")
+        await ws.shell("echo a &")
+        await ws.shell("echo b &")
+        result = await ws.shell("wait")
         return await result.stdout_str()
 
     assert asyncio.run(_do()) == "a\nb\n"
@@ -168,7 +167,7 @@ def test_bare_wait_with_no_jobs_returns_nothing():
 
     async def _do():
         ws = _workspace()
-        result = await ws.execute("wait")
+        result = await ws.shell("wait")
         return await result.stdout_str(), result.exit_code
 
     out, code = asyncio.run(_do())
@@ -428,9 +427,9 @@ async def test_wait_bad_option():
 async def test_wait_p_names_the_job_whose_status_is_returned():
     """`wait id1 id2` answers with the last id's status, so `-p` names
     that job however many ids were waited for."""
-    ws = Workspace({"data": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("(exit 3) & (exit 5) & wait -p V %1 %2; "
-                          "echo rc=$? V=$V")
+    ws = Workspace({"data": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("(exit 3) & (exit 5) & wait -p V %1 %2; "
+                        "echo rc=$? V=$V")
     assert (await io.stdout_str()) == "rc=5 V=2\n"
     await ws.close()
 
@@ -439,9 +438,9 @@ async def test_wait_p_names_the_job_whose_status_is_returned():
 async def test_wait_p_with_no_operand_leaves_the_variable_unset():
     """The no-operand form waits for everything and reports no one job,
     so bash leaves the variable unset (having cleared it first)."""
-    ws = Workspace({"data": RAMResource()}, mode=MountMode.WRITE)
-    io = await ws.execute("(exit 0) & V=stale; wait -p V; "
-                          "echo \"V=[${V-UNSET}]\"")
+    ws = Workspace({"data": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("(exit 0) & V=stale; wait -p V; "
+                        "echo \"V=[${V-UNSET}]\"")
     assert (await io.stdout_str()) == "V=[UNSET]\n"
     await ws.close()
 
@@ -466,7 +465,7 @@ _BODY_SHAPES = [
 @pytest.mark.parametrize("line", _BODY_SHAPES)
 async def test_ampersand_inside_a_body_launches_a_job_with_status_zero(line):
     ws = _workspace()
-    res = await ws.execute(f"{line}; echo rc=$?")
+    res = await ws.shell(f"{line}; echo rc=$?")
     assert res.stdout == b"rc=0\n"
     job = ws.job_table.get(1, ws.default_session_id)
     assert job is not None
@@ -478,24 +477,24 @@ async def test_ampersand_inside_a_body_launches_a_job_with_status_zero(line):
 @pytest.mark.asyncio
 async def test_loop_body_jobs_are_still_running_when_the_loop_ends():
     ws = _workspace()
-    res = await ws.execute("for i in 1 2; do sleep 0.3 & done; jobs")
+    res = await ws.shell("for i in 1 2; do sleep 0.3 & done; jobs")
     assert res.stdout == b"[1] running sleep 0.3\n[2] running sleep 0.3\n"
-    await ws.execute("wait")
-    assert (await ws.execute("jobs")).stdout == b""
+    await ws.shell("wait")
+    assert (await ws.shell("jobs")).stdout == b""
 
 
 @pytest.mark.asyncio
 async def test_wait_adopts_loop_body_jobs_in_id_order_after_the_foreground():
     ws = _workspace()
-    res = await ws.execute(
-        "for i in 1 2; do echo $i & done; echo launched; wait")
+    res = await ws.shell("for i in 1 2; do echo $i & done; echo launched; wait"
+                         )
     assert res.stdout == b"launched\n1\n2\n"
 
 
 @pytest.mark.asyncio
 async def test_bang_names_each_loop_body_job():
     ws = _workspace()
-    res = await ws.execute("for i in 1 2; do sleep 0.1 & echo $!; done; wait")
+    res = await ws.shell("for i in 1 2; do sleep 0.1 & echo $!; done; wait")
     assert res.stdout == b"1\n2\n"
 
 
@@ -503,7 +502,7 @@ async def test_bang_names_each_loop_body_job():
 async def test_errexit_does_not_trip_on_a_body_launch():
     ws = _workspace()
     line = "set -e; for i in 1; do false & done; echo ok; wait"
-    res = await ws.execute(line)
+    res = await ws.shell(line)
     assert res.stdout == b"ok\n"
 
 
@@ -532,7 +531,7 @@ async def test_errexit_does_not_trip_on_a_body_launch():
 async def test_background_condition_and_function_scope(line, expected, code):
     ws = _workspace()
     try:
-        result = await ws.execute(line)
+        result = await ws.shell(line)
         assert await result.stdout_str() == expected
         assert await result.stderr_str() == ""
         assert result.exit_code == code
@@ -546,14 +545,14 @@ async def test_jobs_are_scoped_to_the_session_that_launched_them():
     ws.create_session("a")
     ws.create_session("b")
     try:
-        await ws.execute("sleep 30 &", session_id="a")
-        assert (await ws.execute("jobs", session_id="b")).stdout == b""
-        assert b"[1]" in (await ws.execute("jobs", session_id="a")).stdout
-        io = await ws.execute("wait %1", session_id="b")
+        await ws.shell("sleep 30 &", session_id="a")
+        assert (await ws.shell("jobs", session_id="b")).stdout == b""
+        assert b"[1]" in (await ws.shell("jobs", session_id="a")).stdout
+        io = await ws.shell("wait %1", session_id="b")
         assert io.exit_code == 127
         assert b"no such job" in (io.stderr or b"")
-        assert (await ws.execute("ps", session_id="b")).stdout == b""
-        assert (await ws.execute("kill %1", session_id="a")).exit_code == 0
+        assert (await ws.shell("ps", session_id="b")).stdout == b""
+        assert (await ws.shell("kill %1", session_id="a")).exit_code == 0
     finally:
         await ws.close()
 
@@ -564,9 +563,9 @@ async def test_each_session_numbers_its_jobs_from_one():
     ws.create_session("a")
     ws.create_session("b")
     try:
-        first_a = await ws.execute("sleep 30 & echo $!", session_id="a")
-        first_b = await ws.execute("sleep 30 & echo $!", session_id="b")
-        second_a = await ws.execute("sleep 30 & echo $!", session_id="a")
+        first_a = await ws.shell("sleep 30 & echo $!", session_id="a")
+        first_b = await ws.shell("sleep 30 & echo $!", session_id="b")
+        second_a = await ws.shell("sleep 30 & echo $!", session_id="a")
         assert (first_a.stdout, first_b.stdout,
                 second_a.stdout) == (b"1\n", b"1\n", b"2\n")
     finally:
@@ -578,8 +577,8 @@ async def test_closing_a_session_purges_its_jobs():
     ws = _workspace()
     ws.create_session("a")
     try:
-        await ws.execute("sleep 30 &", session_id="a")
-        await ws.execute("sleep 30 &", session_id="a")
+        await ws.shell("sleep 30 &", session_id="a")
+        await ws.shell("sleep 30 &", session_id="a")
         old = ws.job_table.get(2, "a")
         assert old is not None
         await ws.close_session("a")
@@ -587,10 +586,10 @@ async def test_closing_a_session_purges_its_jobs():
         assert ws.job_table.list_jobs("a") == []
         # A session reusing the id starts from one and inherits nothing.
         ws.create_session("a")
-        assert (await ws.execute("jobs", session_id="a")).stdout == b""
-        io = await ws.execute("sleep 30 & echo $!", session_id="a")
+        assert (await ws.shell("jobs", session_id="a")).stdout == b""
+        io = await ws.shell("sleep 30 & echo $!", session_id="a")
         assert io.stdout == b"1\n"
-        io = await ws.execute("wait %2", session_id="a")
+        io = await ws.shell("wait %2", session_id="a")
         assert io.exit_code == 127
         assert b"no such job" in (io.stderr or b"")
     finally:
@@ -603,9 +602,9 @@ async def test_closing_every_session_keeps_the_default_ones_jobs():
     ws.create_session("a")
     ws.create_session("b")
     try:
-        await ws.execute("sleep 30 &")
-        await ws.execute("sleep 30 &", session_id="a")
-        await ws.execute("sleep 30 &", session_id="b")
+        await ws.shell("sleep 30 &")
+        await ws.shell("sleep 30 &", session_id="a")
+        await ws.shell("sleep 30 &", session_id="b")
         await ws.close_all_sessions()
         assert ws.job_table.list_jobs("a") == []
         assert ws.job_table.list_jobs("b") == []
@@ -624,16 +623,16 @@ async def test_a_followed_tail_streams_to_its_job_console_until_killed():
     ws = _workspace()
     ws.create_session("writer")
     try:
-        await ws.execute("printf 'l1\\n' > /m/log")
-        await ws.execute("tail -f -s 0.05 /m/log &")
+        await ws.shell("printf 'l1\\n' > /m/log")
+        await ws.shell("tail -f -s 0.05 /m/log &")
         await asyncio.sleep(0.15)
-        await ws.execute("printf 'l2\\n' >> /m/log", session_id="writer")
+        await ws.shell("printf 'l2\\n' >> /m/log", session_id="writer")
         await asyncio.sleep(0.25)
         job = ws.job_table.get(1, ws.default_session_id)
         assert job is not None
         assert job.status is JobStatus.RUNNING
         assert await job.console.snapshot(Channel.STDOUT) == b"l1\nl2\n"
-        assert (await ws.execute("kill %1")).exit_code == 0
+        assert (await ws.shell("kill %1")).exit_code == 0
     finally:
         await ws.close()
 
@@ -645,7 +644,7 @@ async def test_a_job_evaluating_a_nested_line_survives_the_line_cancel():
     # evaluates on its way.
     ws = _workspace()
     cancel = asyncio.Event()
-    await ws.execute("{ sleep 0.1; echo $(echo inner); } &", cancel=cancel)
+    await ws.shell("{ sleep 0.1; echo $(echo inner); } &", cancel=cancel)
     cancel.set()
     await ws.job_table.wait(1, ws.default_session_id)
     job = ws.job_table.get(1, ws.default_session_id)

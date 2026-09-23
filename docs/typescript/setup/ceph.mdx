@@ -1,7 +1,7 @@
 ---
 title: Ceph
 icon: /images/ceph-logo.svg
-description: Set up Ceph Rados Gateway as a MIRAGE resource from Node or the browser.
+description: Set up Ceph Rados Gateway as a MIRAGE VFS from Node or the browser.
 ---
 
 Ceph Rados Gateway (RGW) speaks the S3 API with AWS Signature V4 against your own gateway endpoint (e.g. `https://ceph.example.com`). RGW is self-hosted, so the endpoint is required and path-style addressing is used by default.
@@ -15,9 +15,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { CephResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { CephVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const ceph = new CephResource({
+const ceph = new CephVFS({
   bucket: process.env.CEPH_BUCKET!,
   endpoint: process.env.CEPH_ENDPOINT_URL!,
   accessKeyId: process.env.CEPH_ACCESS_KEY_ID!,
@@ -25,7 +25,7 @@ const ceph = new CephResource({
 })
 
 const ws = new Workspace({ '/bucket/': ceph }, { mode: MountMode.READ })
-const res = await ws.execute('ls /bucket/')
+const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
@@ -35,7 +35,7 @@ console.log(res.stdoutText)
 pnpm add @struktoai/mirage-browser
 ```
 
-The browser `CephResource` is secret-free, your backend signs each operation using your RGW keys and returns a URL. RGW accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your gateway endpoint.
+The browser `CephVFS` is secret-free, your backend signs each operation using your RGW keys and returns a URL. RGW accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at your gateway endpoint.
 
 ### 1. Server: sign URLs with the RGW endpoint
 
@@ -95,9 +95,9 @@ RGW uses **path-style** URLs (`forcePathStyle: true`), virtual-hosted style requ
 ### 2. Browser: wire it up
 
 ```ts
-import { CephResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { CephVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const ceph = new CephResource({
+const ceph = new CephVFS({
   bucket: 'my-bucket',
   endpoint: 'https://ceph.example.com',
   presignedUrlProvider: async (path, op, opts) => {
@@ -128,4 +128,4 @@ aws s3api put-bucket-cors --bucket "$CEPH_BUCKET" \
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["http://localhost:5173","https://app.example.com"],"AllowedMethods":["GET","PUT","HEAD","DELETE","POST"],"AllowedHeaders":["*"],"ExposeHeaders":["ETag","Content-Length","Content-Type","Last-Modified"]}]}'
 ```
 
-See the [Ceph resource](/python/resource/ceph) docs for the equivalent Python wiring.
+See the [Ceph VFS](/python/vfs/ceph) docs for the equivalent Python wiring.

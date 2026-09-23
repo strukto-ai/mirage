@@ -38,7 +38,7 @@ async def walk(
 
     for child in children:
         child_path = PathSpec.from_str_path(
-            child, rekey(path.virtual, path.resource_path, child))
+            child, rekey(path.virtual, path.vfs_path, child))
         results.extend(await walk(accessor,
                                   child_path,
                                   index,

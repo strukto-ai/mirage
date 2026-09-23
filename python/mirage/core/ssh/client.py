@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from mirage.core.ssh.config import SSHConfig
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 def _key(path: str) -> str:

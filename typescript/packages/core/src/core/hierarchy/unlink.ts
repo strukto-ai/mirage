@@ -66,8 +66,8 @@ export function makeUnlink<A extends Accessor>(
     const entry = await resolveEntry(readdir, accessor, path, store)
     if (entry === null) throw enoent(path.virtual)
     await deleter(accessor, match, entry)
-    const prefix = mountPrefixOf(path.virtual, path.resourcePath)
-    const key = stripSlash(path.resourcePath)
+    const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+    const key = stripSlash(path.vfsPath)
     const virtualKey = key !== '' ? `${prefix}/${key}` : prefix !== '' ? prefix : '/'
     const parentDir = virtualKey.slice(0, virtualKey.lastIndexOf('/')) || '/'
     await store.invalidateDir(parentDir)

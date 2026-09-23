@@ -20,7 +20,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.workspace.executor.builtins.env.constants import ENV_HELP_HINT
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import env_snapshot
 from mirage.workspace.types import ExecutionNode
@@ -37,7 +37,7 @@ def _env_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
 async def handle_env(
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the ``env`` builtin (print environment or run a command).
@@ -52,7 +52,7 @@ async def handle_env(
     Args:
         execute_fn (Callable): shell evaluator for the inner command.
         args (list[str]): words after the ``env`` name.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (ByteSource | None): piped input forwarded to the command.
     """
     ignore_env = False

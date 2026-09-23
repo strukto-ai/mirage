@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { makeIntegrationWS } from '../fixtures/integration_fixture.ts'
 import { RANDOM, RANDOM_MAX, RANDOM_UNSET } from '../../shell/constants.ts'
 import { makeVar, type ShellVar } from '../../shell/variable.ts'
-import { Session } from './session.ts'
+import { SessionState } from './session.ts'
 import { ArithError } from '../../shell/errors.ts'
 import {
   conversionScalar,
@@ -30,14 +30,14 @@ import {
   shadowLocal,
 } from './state.ts'
 
-function stored(s: Session): string | undefined {
+function stored(s: SessionState): string | undefined {
   const v = s.vars[RANDOM]?.value
   return typeof v === 'string' ? v : undefined
 }
 
 describe('RANDOM generator', () => {
   it('evaluates the seed word as arithmetic', () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     s.vars.x = makeVar('42')
     expect(seedFrom('42', s)).toBe(42)
     expect(seedFrom('-1', s)).toBe(2 ** 32 - 1)
@@ -56,7 +56,7 @@ describe('RANDOM generator', () => {
   it('leaves the generator alone on a word that does not evaluate', async () => {
     // bash 5.2.37: `RANDOM=0; echo $RANDOM; RANDOM=1.5; echo $RANDOM`
     // prints the error for 1.5 and then 24386, the second draw of seed 0.
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     expect(nextRandom(s, '0')).toBe(20814)
     await sessionView(s, null).set(RANDOM, '1.5')
     expect(s.diagnostics).toEqual(['1.5: syntax error: invalid character "."'])
@@ -78,14 +78,14 @@ describe('RANDOM generator', () => {
     // 32 bits, 4294967338 is 42 past 2**32, seed 32768 renders 0 on its
     // first step, which the no-repeat rule redraws, and the last three
     // are arithmetic words: 3, 16, and an unset name.
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     const drawn: (number | null)[] = []
     for (let i = 0; i < 3; i++) drawn.push(nextRandom(s, i === 0 ? seed : stored(s)))
     expect(drawn).toEqual(expected)
   })
 
   it('is deterministic per seed and pins the python sequence', () => {
-    const s = new Session({ sessionId: 'a' })
+    const s = new SessionState({ sessionId: 'a' })
     const seq: (number | null)[] = []
     for (let i = 0; i < 5; i++) seq.push(nextRandom(s, i === 0 ? '42' : stored(s)))
     expect(seq).toEqual([17772, 26794, 1435, 24388, 11074])
@@ -93,15 +93,15 @@ describe('RANDOM generator', () => {
   })
 
   it('reseeds only on a new stored word and writes its value back', () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     const first = nextRandom(s, '7')
     expect(stored(s)).toBe(String(first))
-    const again = new Session({ sessionId: 't' })
+    const again = new SessionState({ sessionId: 't' })
     expect(nextRandom(again, '7')).toBe(first)
   })
 
   it('reseeds in a child shell and hands the parent its state back', () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     const parent = [nextRandom(s, '42'), nextRandom(s, stored(s))]
     const saved = s.snapshot()
     const child = nextRandom(s, stored(s))
@@ -113,12 +113,12 @@ describe('RANDOM generator', () => {
   })
 
   it('does not replay a pending seed in the child, and keeps unset unset', () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     s.vars[RANDOM] = makeVar('42')
     s.snapshot()
     expect(s.randomSeed).toBe('42')
     expect(s.randomState).toBeNull()
-    const unset = new Session({ sessionId: 'u' })
+    const unset = new SessionState({ sessionId: 'u' })
     nextRandom(unset, undefined)
     expect(nextRandom(unset, undefined)).toBeNull()
     unset.snapshot()
@@ -126,7 +126,7 @@ describe('RANDOM generator', () => {
   })
 
   it('unset after a read strips the meaning', () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     expect(nextRandom(s, undefined)).not.toBeNull()
     expect(nextRandom(s, undefined)).toBeNull()
   })
@@ -147,7 +147,7 @@ describe('child RANDOM isolation', () => {
       const { ws } = await makeIntegrationWS()
       try {
         const prefix = 'RANDOM=42; ' + (drawFirst ? ': $RANDOM; ' : '')
-        const io = await ws.execute(prefix + child + '; echo $RANDOM')
+        const io = await ws.shell(prefix + child + '; echo $RANDOM')
         expect(io.exitCode).toBe(0)
         expect(io.stdoutText).toBe(drawFirst ? '26794\n' : '17772\n')
         expect(io.stderrText).toBe('')
@@ -175,7 +175,7 @@ it.each([
 ])('reports seed assignment diagnostics: %s', async (command, stdout, prefix) => {
   const { ws } = await makeIntegrationWS()
   try {
-    const io = await ws.execute(command)
+    const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
     expect(io.stdoutText).toBe(stdout)
     if (prefix) {
@@ -206,7 +206,7 @@ it.each([
 ])('draws RANDOM lazily in arithmetic: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {
-    const io = await ws.execute(command)
+    const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
     expect(io.stdoutText).toBe(stdout)
     expect(io.stderrText).toBe('')
@@ -265,7 +265,7 @@ it.each([
 ])('seeds RANDOM within the expression that assigns it: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {
-    const io = await ws.execute(command)
+    const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
     expect(io.stdoutText).toBe(stdout)
     expect(io.stderrText).toBe('')
@@ -319,7 +319,7 @@ it.each([
 ])('lands the assignments a subscript or offset makes: %s', async (command, stdout) => {
   const { ws } = await makeIntegrationWS()
   try {
-    const io = await ws.execute(command)
+    const io = await ws.shell(command)
     expect(io.exitCode).toBe(0)
     expect(io.stdoutText).toBe(stdout)
     expect(io.stderrText).toBe('')
@@ -332,7 +332,7 @@ it('draws from the pending seed and settles once the door has landed it', () => 
   // The reader is told of the assignment, draws from a scratch
   // generator seeded with it, and replays those draws on the session
   // only once the door has landed the same seed.
-  const s = new Session({ sessionId: 's' })
+  const s = new SessionState({ sessionId: 's' })
   s.vars[RANDOM] = makeVar('1')
   const reader = randomReader(s)
   expect(reader.read('X')).toBeNull()
@@ -361,12 +361,12 @@ it.each([
 ])('a subscript or operand that fails ends the line: %s', async (command, stderr) => {
   const { ws } = await makeIntegrationWS()
   try {
-    const io = await ws.execute(command)
+    const io = await ws.shell(command)
     expect(io.exitCode).toBe(1)
     expect(io.stdoutText).toBe('')
     expect(io.stderrText).toBe(stderr)
     if (command.includes('x=3')) {
-      const landed = await ws.execute('echo $x')
+      const landed = await ws.shell('echo $x')
       expect(landed.stdoutText).toBe('3\n')
     }
   } finally {
@@ -381,7 +381,7 @@ it('lays the pending writes over the visible env as a view', async () => {
   // write.
   const { ws } = await makeIntegrationWS()
   try {
-    const io = await ws.execute(
+    const io = await ws.shell(
       'declare -a nrb=(1); declare -n nrc=nrb; v=abcdef; echo "${v:(x=1):2}" $x',
     )
     expect(io.stdoutText).toBe('bc 1\n')
@@ -406,7 +406,7 @@ it.each([
   async (command, stdout, stderr) => {
     const { ws } = await makeIntegrationWS()
     try {
-      const io = await ws.execute(command)
+      const io = await ws.shell(command)
       expect(io.exitCode).toBe(0)
       expect(io.stdoutText).toBe(stdout)
       expect(io.stderrText).toBe(stderr)
@@ -473,7 +473,7 @@ describe('RANDOM as an array', () => {
   ])('ends the special meaning: %s', async (command, stdout) => {
     const { ws } = await makeIntegrationWS()
     try {
-      const io = await ws.execute(command)
+      const io = await ws.shell(command)
       expect(io.stderrText).toBe('')
       expect(io.exitCode).toBe(0)
       expect(io.stdoutText).toBe(stdout)
@@ -483,34 +483,34 @@ describe('RANDOM as an array', () => {
   })
 
   it('ends the meaning through every store door on a non-string', async () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     seedVar(s, RANDOM, ['1', '2'])
     expect(nextRandom(s, undefined)).toBeNull()
     expect(s.vars[RANDOM]?.value).toEqual(['1', '2'])
-    const t = new Session({ sessionId: 't' })
+    const t = new SessionState({ sessionId: 't' })
     await sessionView(t, null).set(RANDOM, { k: 'v' })
     expect(nextRandom(t, undefined)).toBeNull()
     expect(t.vars[RANDOM]?.value).toEqual({ k: 'v' })
-    const u = new Session({ sessionId: 'u' })
+    const u = new SessionState({ sessionId: 'u' })
     noteRandomKind(u, 'other', ['1'])
     expect(nextRandom(u, undefined)).not.toBeNull()
   })
 
   it('conversion draws once for a live RANDOM', () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     seedVar(s, RANDOM, '42')
     expect(conversionScalar(s, RANDOM)).toBe('17772')
     expect(s.vars[RANDOM]?.value).toBe('17772')
     seedVar(s, 'x', '5')
     expect(conversionScalar(s, 'x')).toBe('5')
     expect(conversionScalar(s, 'absent')).toBeUndefined()
-    const u = new Session({ sessionId: 'u' })
+    const u = new SessionState({ sessionId: 'u' })
     u.randomSeed = RANDOM_UNSET
     expect(conversionScalar(u, RANDOM)).toBeUndefined()
   })
 
   it('a local RANDOM parks the marker and restores it', () => {
-    const s = new Session({ sessionId: 's' })
+    const s = new SessionState({ sessionId: 's' })
     seedVar(s, RANDOM, '42')
     expect(nextRandom(s, '42')).toBe(17772)
     const frame = new Map<string, ShellVar | null>()

@@ -51,7 +51,7 @@ function spec(virtual: string): PathSpec {
   return new PathSpec({
     virtual,
     directory: virtual,
-    resourcePath: stripSlash(virtual),
+    vfsPath: stripSlash(virtual),
   })
 }
 

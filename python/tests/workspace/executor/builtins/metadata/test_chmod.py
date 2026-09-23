@@ -1,12 +1,12 @@
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
-class _OverlayRAMResource(RAMResource):
-    """RAM resource with the native setattr op stripped, standing in for
+class _OverlayRAMVFS(RAMVFS):
+    """RAM VFS with the native setattr op stripped, standing in for
     an API backend that has no attribute slot."""
 
     def __init__(self) -> None:
@@ -15,12 +15,11 @@ class _OverlayRAMResource(RAMResource):
 
 
 def _make_overlay_ws(
-        files: dict[str, bytes]) -> tuple[Workspace, _OverlayRAMResource]:
-    resource = _OverlayRAMResource()
-    resource._store.files.update(files)
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
-                   mode=MountMode.WRITE)
-    return ws, resource
+        files: dict[str, bytes]) -> tuple[Workspace, _OverlayRAMVFS]:
+    vfs = _OverlayRAMVFS()
+    vfs._store.files.update(files)
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    return ws, vfs
 
 
 async def _stat_mode(ws: Workspace, path: str) -> int | None:
@@ -29,13 +28,13 @@ async def _stat_mode(ws: Workspace, path: str) -> int | None:
 
 
 def _make_ws(mode: MountMode = MountMode.WRITE) -> Workspace:
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    return Workspace({"/data/": (resource, mode)}, mode=MountMode.WRITE)
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    return Workspace({"/data/": (vfs, mode)}, mode=MountMode.WRITE)
 
 
 async def _run(ws: Workspace, cmd: str) -> tuple[int, str, str]:
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return r.exit_code, await r.stdout_str(), await r.stderr_str()
 
 

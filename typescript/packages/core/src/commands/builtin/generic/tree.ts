@@ -113,7 +113,7 @@ async function walkTree(
       virtual: childPath,
       directory: childPath,
       resolved: false,
-      resourcePath: mountKey(childPath, mountPrefixOf(path.virtual, path.resourcePath)),
+      vfsPath: mountKey(childPath, mountPrefixOf(path.virtual, path.vfsPath)),
     })
     const crossing = nested.includes(childPath) && treeOpts.crossReaddir !== null
     let isDir: boolean
@@ -145,7 +145,7 @@ async function walkTree(
       dirs += 1
       if (treeOpts.maxDepth !== null && depth + 1 >= treeOpts.maxDepth) continue
       const nextPrefix = prefix + (last ? '    ' : '|   ')
-      // Past a mount root the subtree belongs to another resource, so the
+      // Past a mount root the subtree belongs to another VFS, so the
       // rest of this branch reads through the dispatcher. Deeper mounts
       // under it need no second switch: the dispatcher already routes
       // every path to its owner.
@@ -197,7 +197,7 @@ export async function treeGeneric(
             virtual: opts.cwd,
             directory: opts.cwd,
             resolved: false,
-            resourcePath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
+            vfsPath: mountKey(opts.cwd, opts.mountPrefix ?? ''),
           }),
         ]
   const depthRaw = fl.asStr('L') ?? null

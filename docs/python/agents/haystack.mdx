@@ -31,8 +31,8 @@ from haystack_integrations.tools.mirage import (
 )
 
 workspace = MirageWorkspace([
-    MirageMount(path="/data", resource="ram"),
-    MirageMount(path="/s3", resource="s3", config={"bucket": "my-bucket"},
+    MirageMount(path="/data", vfs="ram"),
+    MirageMount(path="/s3", vfs="s3", config={"bucket": "my-bucket"},
                 read_only=True),
 ])
 
@@ -66,7 +66,7 @@ Commands never reach the host shell either way. Mirage interprets them itself, s
 | Symbol | Purpose |
 | --- | --- |
 | `MirageWorkspace` | Declares the mount tree, and runs commands against it with `run` / `run_async`. Serializable with `to_dict` / `from_dict`. |
-| `MirageMount` | One mount: `path`, `resource`, `config`, `read_only`. |
+| `MirageMount` | One mount: `path`, `vfs`, `config`, `read_only`. |
 | `MirageShellTool` | The Haystack `Tool` that gives an `Agent` the bash surface. |
 | `MirageError` | Base error, with `MirageConfigError` and `MirageCommandNotAllowedError`. |
 

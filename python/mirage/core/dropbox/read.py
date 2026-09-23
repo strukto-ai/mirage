@@ -41,7 +41,7 @@ async def _resolve_entry(
     path: PathSpec,
     index: IndexCacheStore,
 ) -> tuple[IndexEntry, str, str]:
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     p = path.virtual
     if prefix and p.startswith(prefix):
         p = p[len(prefix):] or "/"
@@ -85,7 +85,7 @@ async def read(
     if index is NULL_INDEX:
         # Index-less callers (the ops factory's emulated truncate)
         # download directly; the API 409s on missing paths and folders.
-        prefix = mount_prefix_of(path.virtual, path.resource_path)
+        prefix = mount_prefix_of(path.virtual, path.vfs_path)
         dropbox_path = dropbox_path_from_virtual(accessor.root_path,
                                                  path.virtual, prefix)
         try:

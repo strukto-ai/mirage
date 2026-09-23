@@ -11,9 +11,9 @@ from mirage.commands.builtin.generic.tree import tree as generic_tree
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.readdir import readdir
 from mirage.core.databricks_volume.stat import stat
-from mirage.resource.databricks_volume import DatabricksVolumeConfig
 from mirage.types import LsSortBy, PathSpec
 from mirage.utils.key_prefix import mount_key
+from mirage.vfs.databricks_volume import DatabricksVolumeConfig
 from tests.core.databricks_volume.conftest import (FakeClient, FakeFiles,
                                                    directory_entry, file_entry)
 

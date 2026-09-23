@@ -37,11 +37,11 @@ def make_accessor(content_search: bool = True) -> BoxAccessor:
 
 
 def scope() -> PathSpec:
-    return PathSpec(resource_path="", virtual="/data", directory="/data")
+    return PathSpec(vfs_path="", virtual="/data", directory="/data")
 
 
 def spec(virtual: str) -> PathSpec:
-    return PathSpec(resource_path=virtual.removeprefix("/data/"),
+    return PathSpec(vfs_path=virtual.removeprefix("/data/"),
                     virtual=virtual,
                     directory="",
                     resolved=True)

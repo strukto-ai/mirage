@@ -1,10 +1,10 @@
 ---
 title: Databricks Volume
 icon: /images/databricks-logo.svg
-description: Set up a Databricks Unity Catalog volume as a MIRAGE resource from Node.
+description: Set up a Databricks Unity Catalog volume as a MIRAGE VFS from Node.
 ---
 
-`DatabricksVolumeResource` exposes files from a Unity Catalog volume through
+`DatabricksVolumeVFS` exposes files from a Unity Catalog volume through
 MIRAGE's standard filesystem interface. Agents can list, stat, read, stream,
 glob, and write files under the configured volume root.
 
@@ -22,13 +22,13 @@ pnpm add @struktoai/mirage-node
 
 ```ts
 import {
-  DatabricksVolumeResource,
+  DatabricksVolumeVFS,
   MountMode,
   Workspace,
   normalizeDatabricksVolumeConfig,
 } from '@struktoai/mirage-node'
 
-const resource = await DatabricksVolumeResource.create(
+const vfs = await DatabricksVolumeVFS.create(
   normalizeDatabricksVolumeConfig({
     catalog: 'main',
     schema: 'default',
@@ -36,8 +36,8 @@ const resource = await DatabricksVolumeResource.create(
     root_path: '/reports',
   }),
 )
-const ws = new Workspace({ '/dbx/': resource }, { mode: MountMode.READ })
-const res = await ws.execute('ls /dbx/')
+const ws = new Workspace({ '/dbx/': vfs }, { mode: MountMode.READ })
+const res = await ws.shell('ls /dbx/')
 console.log(res.stdoutText)
 ```
 
@@ -88,7 +88,7 @@ server-side rename.
 
 ## Snapshot behavior
 
-`token` is redacted in resource state. Loading a snapshot back requires an
+`token` is redacted in VFS state. Loading a snapshot back requires an
 override config that provides fresh credentials if the runtime auth chain does
 not already supply them.
 

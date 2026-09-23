@@ -28,7 +28,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("wc", resource="postgres", spec=SPECS["wc"])
+@command("wc", vfs="postgres", spec=SPECS["wc"])
 async def wc(accessor: PostgresAccessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

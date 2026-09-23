@@ -14,15 +14,15 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { buildTree, emitStartPath, keep, startBasename } from '../../commands/builtin/find_eval.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import type { PathSpec } from '../../types.ts'
 import { isFolder, resolveKey } from './resolve.ts'
 import { iterTree } from './tree.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 async function dirExists(accessor: GDriveAccessor, path: PathSpec): Promise<boolean> {
-  if (path.resourcePath === '') return true
-  const node = await resolveKey(accessor, path.resourcePath)
+  if (path.vfsPath === '') return true
+  const node = await resolveKey(accessor, path.vfsPath)
   return node !== null && isFolder(node)
 }
 
@@ -34,7 +34,7 @@ export async function find(
   path: PathSpec,
   options: FindOptions = {},
 ): Promise<string[]> {
-  const base = path.resourcePath
+  const base = path.vfsPath
   const startName = startBasename(path.virtual)
   const results: string[] = []
   let sawDescendant = false

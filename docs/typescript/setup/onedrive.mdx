@@ -4,12 +4,12 @@ icon: microsoft
 description: Mount OneDrive through Microsoft Graph from Node or the browser.
 ---
 
-`OneDriveResource` exposes one Microsoft Graph drive as a read-write filesystem. It uses the same browser-safe core in the Node and browser packages.
+`OneDriveVFS` exposes one Microsoft Graph drive as a read-write filesystem. It uses the same browser-safe core in the Node and browser packages.
 
 ```ts
-import { MountMode, OneDriveResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OneDriveVFS, Workspace } from '@struktoai/mirage-node'
 
-const drive = new OneDriveResource({
+const drive = new OneDriveVFS({
   accessToken: () => getMicrosoftGraphToken(),
   // Name at most one drive; none means /me/drive.
   // driveId: '...',       // explicit Graph drive ID
@@ -21,7 +21,7 @@ const drive = new OneDriveResource({
 })
 
 const ws = new Workspace({ '/onedrive': drive }, { mode: MountMode.WRITE })
-await ws.execute('ls /onedrive/')
+await ws.shell('ls /onedrive/')
 ```
 
 Use `@struktoai/mirage-browser` for the same API in a browser. An access-token callback is recommended so a `401` can refresh the token and retry once.
@@ -34,7 +34,7 @@ Use `@struktoai/mirage-browser` for the same API in a browser. An access-token c
 | `groupId` | unset | Use a Teams / Microsoft 365 group's document library. |
 | `userId` | unset | Use another user's drive, by id or UPN (app-only auth). |
 | `graphBaseUrl` | unset | Full service root, for any deployment but the worldwide one. |
-| `keyPrefix` | unset | Mount a folder subtree as the resource root. |
+| `keyPrefix` | unset | Mount a folder subtree as the VFS root. |
 | `tenantHost` | unset | Tenant metadata retained for Graph-compatible configuration. |
 | `timeout` | `30` | Request and copy-monitor timeout in seconds. |
 | `maxRetries` | `5` | Retries for `429`, `503`, and `504`. |
@@ -53,4 +53,4 @@ wrong root fails outright. mirage ships no table of their hostnames, having no
 way to verify one; take the root from Microsoft's national cloud
 documentation for your tenant.
 
-Reads, writes, resumable uploads, recursive copy, move, delete, directory creation, and version-pinned snapshot reads mirror the [Python OneDrive resource](/python/resource/onedrive).
+Reads, writes, resumable uploads, recursive copy, move, delete, directory creation, and version-pinned snapshot reads mirror the [Python OneDrive VFS](/python/vfs/onedrive).

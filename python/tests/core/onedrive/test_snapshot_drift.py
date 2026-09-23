@@ -5,8 +5,8 @@ import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.onedrive import OneDriveConfig
-from mirage.resource.onedrive import OneDriveResource
 from mirage.types import MountMode
+from mirage.vfs.onedrive import OneDriveVFS
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot.drift import ContentDriftError, check_drift
 
@@ -14,7 +14,7 @@ _ITEM = re.compile(r".*/root:/a\.txt(\?.*)?$")
 
 
 def _mount_for():
-    backend = OneDriveResource(OneDriveConfig(access_token="tok"))
+    backend = OneDriveVFS(OneDriveConfig(access_token="tok"))
     ws = Workspace({"/od": (backend, MountMode.WRITE)}, mode=MountMode.WRITE)
     return ws._registry.mount_for
 

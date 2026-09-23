@@ -34,7 +34,7 @@ from mirage.workspace.executor.builtins.exec.constants import (
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.create import create_file
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 async def handle_exec_command(
     args: list[str],
-    session: Session,
+    session: SessionState,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """The `exec` builtin without redirects.
 
@@ -56,7 +56,7 @@ async def handle_exec_command(
 
     Args:
         args (list[str]): the words after `exec`.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     if not args:
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
@@ -70,7 +70,7 @@ async def handle_exec_command(
 
 async def install_exec_redirects(
     dispatch: DispatchFn,
-    session: Session,
+    session: SessionState,
     redirects: list[Redirect],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Point the shell's own streams at files for the rest of the shell.
@@ -91,7 +91,7 @@ async def install_exec_redirects(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         redirects (list[Redirect]): the expanded redirects.
     """
     bad_fd = unsupported_descriptor(redirects)
@@ -104,7 +104,7 @@ async def install_exec_redirects(
     return await _roll_back(dispatch, session, saved, err)
 
 
-async def _install(dispatch: DispatchFn, session: Session,
+async def _install(dispatch: DispatchFn, session: SessionState,
                    redirects: list[Redirect]) -> bytes | None:
     """Bind the redirects onto the session's streams, in line order.
 
@@ -113,7 +113,7 @@ async def _install(dispatch: DispatchFn, session: Session,
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         redirects (list[Redirect]): the expanded redirects.
     """
     for r in redirects:
@@ -221,7 +221,7 @@ async def _install(dispatch: DispatchFn, session: Session,
 
 async def _roll_back(
     dispatch: DispatchFn,
-    session: Session,
+    session: SessionState,
     saved: dict[str, str | bytes | bool | None],
     err: bytes,
 ) -> tuple[bytes | None, IOResult, ExecutionNode]:
@@ -236,7 +236,7 @@ async def _roll_back(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         saved (dict[str, str | bytes | bool | None]): the stream fields
             as they stood before the line.
         err (bytes): the diagnostic of the redirect that failed.
@@ -249,8 +249,8 @@ async def _roll_back(
     return _exec_failure(err_bytes, out)
 
 
-async def _open_target(dispatch: DispatchFn, session: Session, scope: PathSpec,
-                       append: bool) -> bool:
+async def _open_target(dispatch: DispatchFn, session: SessionState,
+                       scope: PathSpec, append: bool) -> bool:
     """Open an `exec` redirect target, the way bash does at `exec` time.
 
     Truncating creates the file empty; appending creates it only when it
@@ -261,7 +261,7 @@ async def _open_target(dispatch: DispatchFn, session: Session, scope: PathSpec,
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): the session holding the umask.
+        session (SessionState): the session holding the umask.
         scope (PathSpec): the target.
         append (bool): whether the redirect is `>>`.
     """
@@ -328,7 +328,7 @@ async def read_open_source(dispatch: DispatchFn, identity: str) -> bytes:
         return b""
 
 
-def _identity(session: Session, fd: int) -> tuple[str, bool]:
+def _identity(session: SessionState, fd: int) -> tuple[str, bool]:
     """What a descriptor points at right now, named so a dup can copy it.
 
     A path with its append flag, `CLOSED`, a file's read end
@@ -342,7 +342,7 @@ def _identity(session: Session, fd: int) -> tuple[str, bool]:
     write.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         fd (int): the descriptor being copied.
     """
     if fd == FD_STDIN:
@@ -358,14 +358,14 @@ def _identity(session: Session, fd: int) -> tuple[str, bool]:
             session.exec_stdout_append)
 
 
-def _bind(session: Session, fd: int, identity: str, append: bool) -> None:
+def _bind(session: SessionState, fd: int, identity: str, append: bool) -> None:
     """Point a writing stream at an identity.
 
     A stream on its own terminal end is stored as None, the undiverted
     state every reader of `exec_stdout`/`exec_stderr` already knows.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         fd (int): the descriptor being bound, 1 or 2.
         identity (str): what `_identity` named, or `CLOSED`.
         append (bool): whether writes append, for a path.
@@ -380,7 +380,7 @@ def _bind(session: Session, fd: int, identity: str, append: bool) -> None:
 
 async def _route(
     dispatch: DispatchFn,
-    session: Session,
+    session: SessionState,
     binding: str | None,
     data: bytes,
     own: str,
@@ -395,7 +395,7 @@ async def _route(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         binding (str | None): the stream's `exec` binding.
         data (bytes): what the statement wrote on it.
         own (str): the stream's own terminal end, used when undiverted.
@@ -433,7 +433,7 @@ def stdout_to_stderr(node: Any) -> bool:
 
 async def divert_statement(
     dispatch: DispatchFn,
-    session: Session,
+    session: SessionState,
     stdout: bytes | None,
     io: IOResult,
     command: str,
@@ -455,7 +455,7 @@ async def divert_statement(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdout (bytes | None): the statement's materialized stdout.
         io (IOResult): the statement's result; its stderr and exit
             status are amended in place.
@@ -497,13 +497,13 @@ async def divert_statement(
     return b"".join(out_parts) or None
 
 
-async def _append(dispatch: DispatchFn, session: Session, target: str,
+async def _append(dispatch: DispatchFn, session: SessionState, target: str,
                   data: bytes) -> None:
     """Append bytes to an `exec` target, or drop them if it is closed.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         target (str): the target path, or `""` for a closed stream.
         data (bytes): the bytes to write.
     """

@@ -76,7 +76,7 @@ import {
   walksMounts,
   wordPolicy,
 } from '../lookup/index.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { innerLines, innerReadable, wordValue, type Word } from './inner_lines.ts'
 import {
@@ -267,7 +267,7 @@ export function policyScopes(
  * the line runs on to the door, which answers ENOENT like any other
  * absent path.
  */
-function seen(session: Session, specs: readonly PathSpec[]): PathSpec[] {
+function seen(session: SessionState, specs: readonly PathSpec[]): PathSpec[] {
   return specs.filter((p) => sessionPathAllowed(session, p.virtual))
 }
 
@@ -293,7 +293,7 @@ function seen(session: Session, specs: readonly PathSpec[]): PathSpec[] {
 export function classifiedWords(
   name: string,
   args: readonly string[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
 ): (string | PathSpec)[] {
   const line = [name, ...args]
@@ -342,7 +342,7 @@ export async function gate(
   name: string,
   args: readonly string[],
   operands: readonly (string | PathSpec)[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId = '',
@@ -387,7 +387,7 @@ export async function admit(
   name: string,
   args: readonly string[],
   operands: readonly (string | PathSpec)[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId = '',
@@ -471,7 +471,7 @@ function unreadable(raw: string): string {
  */
 function wordHints(
   line: readonly string[],
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
 ): [(ValueType | null)[] | null, (string | null)[] | null] {
   const consumed = registry.matchCommandPrefix([...line])
@@ -502,7 +502,7 @@ function wordHints(
 async function admitWords(
   words: readonly Word[],
   open: boolean,
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,
@@ -645,7 +645,7 @@ async function admitWords(
  */
 export async function admitLine(
   root: TSNodeLike,
-  session: Session,
+  session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
   agentId: string,

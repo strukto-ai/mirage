@@ -27,7 +27,7 @@ from mirage.utils.errors import enoent
 
 async def range_read(accessor: HfBucketsAccessor, path: PathSpec, start: int,
                      end: int) -> bytes:
-    """Read a byte range, in the resource API's end-exclusive spelling.
+    """Read a byte range, in the VFS API's end-exclusive spelling.
 
     Args:
         accessor (HfBucketsAccessor): bucket accessor.
@@ -47,7 +47,7 @@ async def read_stream(
     raw = path.mount_path
     key = raw.lstrip("/")
     op = accessor.operator()
-    rec = record_stream("read", raw, accessor.RESOURCE_NAME)
+    rec = record_stream("read", raw, accessor.VFS_NAME)
     try:
         async with await op.open(key, "rb") as f:
             while True:

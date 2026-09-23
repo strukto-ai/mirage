@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '../ops/registry.ts'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { getTestParser, stdoutStr } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -27,7 +27,7 @@ const ENC = new TextEncoder()
 
 async function makeWs(): Promise<Workspace> {
   const parser = await getTestParser()
-  const r = new RAMResource()
+  const r = new RAMVFS()
   r.store.dirs.add('/')
   r.store.dirs.add('/data')
   r.store.files.set('/data/a.txt', ENC.encode('orange line\nplain line\nlast line\n'))
@@ -36,14 +36,14 @@ async function makeWs(): Promise<Workspace> {
   r.store.files.set('/data/p2.txt', ENC.encode('last\n'))
   r.store.files.set('/data/empty.txt', new Uint8Array())
   const registry = new OpsRegistry()
-  registry.registerResource(r)
+  registry.registerVfs(r)
   return new Workspace({ '/': r }, { mode: MountMode.WRITE, ops: registry, shellParser: parser })
 }
 
 describe('grep -e pattern flag', () => {
   it('matches like a positional pattern', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep -e orange /data/a.txt')
+    const io = await ws.shell('grep -e orange /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\n')
     await ws.close()
@@ -51,7 +51,7 @@ describe('grep -e pattern flag', () => {
 
   it('positional pattern still works', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep orange /data/a.txt')
+    const io = await ws.shell('grep orange /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\n')
     await ws.close()
@@ -59,7 +59,7 @@ describe('grep -e pattern flag', () => {
 
   it('repeated -e matches lines hitting any pattern', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep -e orange -e plain /data/a.txt')
+    const io = await ws.shell('grep -e orange -e plain /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\nplain line\n')
     await ws.close()
@@ -67,7 +67,7 @@ describe('grep -e pattern flag', () => {
 
   it('-f reads patterns from a workspace file', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep -f /data/pats.txt /data/a.txt')
+    const io = await ws.shell('grep -f /data/pats.txt /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\nlast line\n')
     await ws.close()
@@ -75,7 +75,7 @@ describe('grep -e pattern flag', () => {
 
   it('-e and -f union', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep -e plain -f /data/pats.txt /data/a.txt')
+    const io = await ws.shell('grep -e plain -f /data/pats.txt /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\nplain line\nlast line\n')
     await ws.close()
@@ -83,7 +83,7 @@ describe('grep -e pattern flag', () => {
 
   it('repeated -f unions pattern files', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep -f /data/p1.txt -f /data/p2.txt /data/a.txt')
+    const io = await ws.shell('grep -f /data/p1.txt -f /data/p2.txt /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\nlast line\n')
     await ws.close()
@@ -91,7 +91,7 @@ describe('grep -e pattern flag', () => {
 
   it('-e with repeated -f unions everything', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep -e plain -f /data/p1.txt -f /data/p2.txt /data/a.txt')
+    const io = await ws.shell('grep -e plain -f /data/p1.txt -f /data/p2.txt /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\nplain line\nlast line\n')
     await ws.close()
@@ -99,7 +99,7 @@ describe('grep -e pattern flag', () => {
 
   it('empty -f file matches nothing (GNU semantics)', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep -f /data/empty.txt /data/a.txt')
+    const io = await ws.shell('grep -f /data/empty.txt /data/a.txt')
     expect(io.exitCode).toBe(1)
     expect(stdoutStr(io)).toBe('')
     await ws.close()
@@ -107,7 +107,7 @@ describe('grep -e pattern flag', () => {
 
   it('-v with empty -f file matches everything', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep -v -f /data/empty.txt /data/a.txt')
+    const io = await ws.shell('grep -v -f /data/empty.txt /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\nplain line\nlast line\n')
     await ws.close()
@@ -115,7 +115,7 @@ describe('grep -e pattern flag', () => {
 
   it('--color=auto is accepted as a GNU no-op', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep --color=auto orange /data/a.txt')
+    const io = await ws.shell('grep --color=auto orange /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('orange line\n')
     const stderr = io.stderr instanceof Uint8Array ? new TextDecoder().decode(io.stderr) : ''
@@ -125,7 +125,7 @@ describe('grep -e pattern flag', () => {
 
   it('unknown flags refuse with the GNU error and exit 2', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('grep --bogus orange /data/a.txt')
+    const io = await ws.shell('grep --bogus orange /data/a.txt')
     expect(io.exitCode).toBe(2)
     const stderr = io.stderr instanceof Uint8Array ? new TextDecoder().decode(io.stderr) : ''
     expect(stderr).toContain("grep: unrecognized option '--bogus'")
@@ -134,7 +134,7 @@ describe('grep -e pattern flag', () => {
 
   it('rg -f reads patterns from a workspace file', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('rg -f /data/pats.txt /data/a.txt')
+    const io = await ws.shell('rg -f /data/pats.txt /data/a.txt')
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toContain('orange line')
     expect(stdoutStr(io)).toContain('last line')
@@ -144,9 +144,9 @@ describe('grep -e pattern flag', () => {
 
   it('zgrep -f reads plain-text pattern files', async () => {
     const ws = await makeWs()
-    const io = await ws.execute('cat /data/a.txt | gzip | tee /data/a.gz > /dev/null')
+    const io = await ws.shell('cat /data/a.txt | gzip | tee /data/a.gz > /dev/null')
     expect(io.exitCode).toBe(0)
-    const z = await ws.execute('zgrep -f /data/pats.txt /data/a.gz')
+    const z = await ws.shell('zgrep -f /data/pats.txt /data/a.gz')
     expect(z.exitCode).toBe(0)
     expect(stdoutStr(z)).toBe('orange line\nlast line\n')
     await ws.close()
@@ -164,7 +164,7 @@ describe('grep -e pattern flag', () => {
       zgrep: 'zgrep: usage: zgrep [flags] pattern [path]\n',
     }
     for (const cmd of ['grep', 'rg', 'zgrep']) {
-      const io = await ws.execute(cmd)
+      const io = await ws.shell(cmd)
       expect(io.exitCode).toBe(2)
       const stderr = io.stderr instanceof Uint8Array ? new TextDecoder().decode(io.stderr) : ''
       expect(stderr).toBe(expected[cmd])
@@ -174,10 +174,10 @@ describe('grep -e pattern flag', () => {
 
   it('rg -e and repeated rg -e work like grep', async () => {
     const ws = await makeWs()
-    const single = await ws.execute('rg -e orange /data/a.txt')
+    const single = await ws.shell('rg -e orange /data/a.txt')
     expect(single.exitCode).toBe(0)
     expect(stdoutStr(single)).toContain('orange line')
-    const multi = await ws.execute('rg -e orange -e plain /data/a.txt')
+    const multi = await ws.shell('rg -e orange -e plain /data/a.txt')
     expect(multi.exitCode).toBe(0)
     expect(stdoutStr(multi)).toContain('orange line')
     expect(stdoutStr(multi)).toContain('plain line')

@@ -56,7 +56,7 @@ def _patch(monkeypatch):
 
 
 def _spec(original: str, prefix: str = "") -> PathSpec:
-    return PathSpec(resource_path=mount_key(original, prefix),
+    return PathSpec(vfs_path=mount_key(original, prefix),
                     virtual=original,
                     directory=original)
 

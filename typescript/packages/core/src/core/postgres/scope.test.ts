@@ -18,14 +18,14 @@ import { PathSpec } from '../../types.ts'
 import { detectScope } from './scope.ts'
 
 function ps(p: string): PathSpec {
-  return new PathSpec({ resourcePath: stripSlash(p), virtual: p, directory: p })
+  return new PathSpec({ vfsPath: stripSlash(p), virtual: p, directory: p })
 }
 
 describe('detectScope', () => {
   it('detects root from "/"', () => {
     const s = detectScope(ps('/'))
     expect(s.kind).toBe('root')
-    expect(s.resourcePath).toBe('/')
+    expect(s.vfsPath).toBe('/')
   })
 
   it('detects root from empty string', () => {

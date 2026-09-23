@@ -14,7 +14,7 @@
 
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { record, startOp } from '../../observe/context.ts'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../utils/errors.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
@@ -46,6 +46,6 @@ export async function read(
   if (data === null) {
     throw enoent(path)
   }
-  record('read', p, ResourceName.REDIS, data.byteLength, timer)
+  record('read', p, VFSName.REDIS, data.byteLength, timer)
   return data
 }

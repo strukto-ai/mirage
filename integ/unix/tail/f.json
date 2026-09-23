@@ -212,7 +212,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/tfd3; printf 'a\\n' > /data/tfd3/f; (sleep 1.5; rm /data/tfd3/f; mkdir /data/tfd3/f) & tail --follow=name -s 3 /data/tfd3/f; echo code=$?",
+      "command": "mkdir -p /data/tfd3; printf 'a\\n' > /data/tfd3/f; (sleep 3; rm /data/tfd3/f; mkdir /data/tfd3/f) & tail --follow=name -s 8 /data/tfd3/f; echo code=$?",
       "expect": {
         "exit": 0,
         "stdout": "a\ncode=1\n",
@@ -221,7 +221,8 @@
       "flags": [
         "follow",
         "s"
-      ]
+      ],
+      "note": "The only racing case in this file, and both of its margins have now failed once on dropbox-root. The sleep gives tail time to stat AND download before the file goes; the poll interval gives `rm` plus `mkdir` time to both land before tail looks again. Miss the first and tail's download 409s on a path the stat had just found, so the initial line never prints; miss the second and a poll lands between the two writes, stats ENOENT and reports `has become inaccessible` instead of the EISDIR answer this case is about. Each margin is two round trips against a fake shared with every other target, so the budget is contention, not backend latency: sleep 3 with -s 8 leaves 3s for the first and 5s for the second, against the 1.5s and 1.5s that have each broken."
     },
     {
       "id": "tail_follow_quotes_a_multibyte_word",
@@ -250,7 +251,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "tail --follow='xé' /data/a.txt",
+      "command": "tail --follow='x\u00e9' /data/a.txt",
       "expect": {
         "exit": 1,
         "stdout": "",

@@ -35,7 +35,7 @@ async def read_doc(token_manager: TokenManager, doc_id: str) -> bytes:
     `includeTabsContent` a multi-tab document renders as tab 1 and the
     rest are absent rather than truncated. Asking for it moves the
     content under `tabs[]` and leaves `body` empty, which is the shape
-    the resource prompt documents.
+    the VFS prompt documents.
 
     Args:
         token_manager (TokenManager): manages OAuth2 tokens.

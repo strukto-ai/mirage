@@ -1,7 +1,7 @@
 import opendal
 
 from mirage.accessor.base import Accessor
-from mirage.resource.secrets import reveal_secret
+from mirage.vfs.secrets import reveal_secret
 
 
 class NextcloudAccessor(Accessor):

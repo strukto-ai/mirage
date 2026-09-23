@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import RunArgs, RunResult
 
@@ -36,10 +36,10 @@ class ProcessRuntime(PythonRuntime):
 async def test_custom_process_version_never_executes_code(mode):
     runtime = ProcessRuntime()
     assert runtime.reach == "process"
-    ws = Workspace({"/": RAMResource()}, mode=mode, runtimes=[runtime, "vfs"])
+    ws = Workspace({"/": RAMVFS()}, mode=mode, runtimes=[runtime, "workspace"])
     try:
         for line in ["python --version", "python3 -V", "python -VV"]:
-            io = await ws.execute(line, env={"PYTHONPATH": "/startup"})
+            io = await ws.shell(line, env={"PYTHONPATH": "/startup"})
             assert io.exit_code == 1
             assert await io.stdout_str() == ""
             assert await io.stderr_str(

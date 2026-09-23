@@ -48,71 +48,70 @@ from mirage.commands.cli.types import CLISpec
 from mirage.core.databricks_volume.path import configured_root
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.email.config import EmailConfig
-from mirage.resource.aliyun import AliyunConfig, AliyunResource
-from mirage.resource.backblaze import BackblazeConfig, BackblazeResource
-from mirage.resource.box import BoxConfig, BoxResource
-from mirage.resource.ceph import CephConfig, CephResource
-from mirage.resource.chroma import ChromaConfig, ChromaResource
-from mirage.resource.databricks_volume import (DatabricksVolumeConfig,
-                                               DatabricksVolumeResource)
-from mirage.resource.dify import DifyConfig, DifyResource
-from mirage.resource.digitalocean import (DigitalOceanConfig,
-                                          DigitalOceanResource)
-from mirage.resource.discord.discord import DiscordResource
-from mirage.resource.disk import DiskResource
-from mirage.resource.dropbox import DropboxConfig, DropboxResource
-from mirage.resource.email.email import EmailResource
-from mirage.resource.gcal.config import GCalConfig
-from mirage.resource.gcal.gcal import GCalResource
-from mirage.resource.gcs import GCSConfig, GCSResource
-from mirage.resource.gdocs.config import GDocsConfig
-from mirage.resource.gdocs.gdocs import GDocsResource
-from mirage.resource.gdrive.config import GoogleDriveConfig
-from mirage.resource.gdrive.gdrive import GoogleDriveResource
-from mirage.resource.github import GitHubConfig, GitHubResource
-from mirage.resource.gmail.config import GmailConfig
-from mirage.resource.gmail.gmail import GmailResource
-from mirage.resource.gridfs import GridFSConfig, GridFSResource
-from mirage.resource.gsheets.config import GSheetsConfig
-from mirage.resource.gsheets.gsheets import GSheetsResource
-from mirage.resource.gslides.config import GSlidesConfig
-from mirage.resource.gslides.gslides import GSlidesResource
-from mirage.resource.hf_buckets import HfBucketsConfig, HfBucketsResource
-from mirage.resource.hf_datasets import HfDatasetsConfig, HfDatasetsResource
-from mirage.resource.hf_models import HfModelsConfig, HfModelsResource
-from mirage.resource.hf_spaces import HfSpacesConfig, HfSpacesResource
-from mirage.resource.jaeger import JaegerConfig, JaegerResource
-from mirage.resource.lancedb import LanceDBConfig, LanceDBResource
-from mirage.resource.langfuse import LangfuseConfig, LangfuseResource
-from mirage.resource.linear import LinearConfig, LinearResource
-from mirage.resource.mem0 import Mem0Config, Mem0Resource
-from mirage.resource.minio import MinIOConfig, MinIOResource
-from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
-from mirage.resource.nextcloud import NextcloudConfig, NextcloudResource
-from mirage.resource.notion import NotionConfig, NotionResource
-from mirage.resource.oci import OCIConfig, OCIResource
-from mirage.resource.onedrive.onedrive import OneDriveResource
-from mirage.resource.postgres import PostgresConfig, PostgresResource
-from mirage.resource.qdrant import QdrantConfig, QdrantResource
-from mirage.resource.qingstor import QingStorConfig, QingStorResource
-from mirage.resource.r2 import R2Config, R2Resource
-from mirage.resource.ram import RAMResource
-from mirage.resource.redis import RedisResource
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.scaleway import ScalewayConfig, ScalewayResource
-from mirage.resource.seaweedfs import SeaweedFSConfig, SeaweedFSResource
-from mirage.resource.sharepoint.sharepoint import SharePointResource
-from mirage.resource.slack import SlackConfig, SlackResource
-from mirage.resource.ssh import SSHConfig, SSHResource
-from mirage.resource.supabase import SupabaseConfig, SupabaseResource
-from mirage.resource.tencent import TencentConfig, TencentResource
-from mirage.resource.trello import TrelloConfig, TrelloResource
-from mirage.resource.wasabi import WasabiConfig, WasabiResource
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.shell.job_table import ConsoleFactory
-from mirage.types import ConsistencyPolicy
+from mirage.types import ReadSpec
+from mirage.vfs.aliyun import AliyunConfig, AliyunVFS
+from mirage.vfs.backblaze import BackblazeConfig, BackblazeVFS
+from mirage.vfs.box import BoxConfig, BoxVFS
+from mirage.vfs.ceph import CephConfig, CephVFS
+from mirage.vfs.chroma import ChromaConfig, ChromaVFS
+from mirage.vfs.databricks_volume import (DatabricksVolumeConfig,
+                                          DatabricksVolumeVFS)
+from mirage.vfs.dify import DifyConfig, DifyVFS
+from mirage.vfs.digitalocean import DigitalOceanConfig, DigitalOceanVFS
+from mirage.vfs.discord.discord import DiscordVFS
+from mirage.vfs.disk import DiskVFS
+from mirage.vfs.dropbox import DropboxConfig, DropboxVFS
+from mirage.vfs.email.email import EmailVFS
+from mirage.vfs.gcal.config import GCalConfig
+from mirage.vfs.gcal.gcal import GCalVFS
+from mirage.vfs.gcs import GCSVFS, GCSConfig
+from mirage.vfs.gdocs.config import GDocsConfig
+from mirage.vfs.gdocs.gdocs import GDocsVFS
+from mirage.vfs.gdrive.config import GoogleDriveConfig
+from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
+from mirage.vfs.github import GitHubConfig, GitHubVFS
+from mirage.vfs.gmail.config import GmailConfig
+from mirage.vfs.gmail.gmail import GmailVFS
+from mirage.vfs.gridfs import GridFSConfig, GridFSVFS
+from mirage.vfs.gsheets.config import GSheetsConfig
+from mirage.vfs.gsheets.gsheets import GSheetsVFS
+from mirage.vfs.gslides.config import GSlidesConfig
+from mirage.vfs.gslides.gslides import GSlidesVFS
+from mirage.vfs.hf_buckets import HfBucketsConfig, HfBucketsVFS
+from mirage.vfs.hf_datasets import HfDatasetsConfig, HfDatasetsVFS
+from mirage.vfs.hf_models import HfModelsConfig, HfModelsVFS
+from mirage.vfs.hf_spaces import HfSpacesConfig, HfSpacesVFS
+from mirage.vfs.jaeger import JaegerConfig, JaegerVFS
+from mirage.vfs.lancedb import LanceDBConfig, LanceDBVFS
+from mirage.vfs.langfuse import LangfuseConfig, LangfuseVFS
+from mirage.vfs.linear import LinearConfig, LinearVFS
+from mirage.vfs.mem0 import Mem0Config, Mem0VFS
+from mirage.vfs.minio import MinIOConfig, MinIOVFS
+from mirage.vfs.mongodb import MongoDBConfig, MongoDBVFS
+from mirage.vfs.nextcloud import NextcloudConfig, NextcloudVFS
+from mirage.vfs.notion import NotionConfig, NotionVFS
+from mirage.vfs.oci import OCIVFS, OCIConfig
+from mirage.vfs.onedrive.onedrive import OneDriveVFS
+from mirage.vfs.postgres import PostgresConfig, PostgresVFS
+from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
+from mirage.vfs.qingstor import QingStorConfig, QingStorVFS
+from mirage.vfs.r2 import R2VFS, R2Config
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.redis import RedisVFS
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.scaleway import ScalewayConfig, ScalewayVFS
+from mirage.vfs.seaweedfs import SeaweedFSConfig, SeaweedFSVFS
+from mirage.vfs.sharepoint.sharepoint import SharePointVFS
+from mirage.vfs.slack import SlackConfig, SlackVFS
+from mirage.vfs.ssh import SSHVFS, SSHConfig
+from mirage.vfs.supabase import SupabaseConfig, SupabaseVFS
+from mirage.vfs.tencent import TencentConfig, TencentVFS
+from mirage.vfs.trello import TrelloConfig, TrelloVFS
+from mirage.vfs.wasabi import WasabiConfig, WasabiVFS
 
 from .secrets import build_secrets_env
 
@@ -144,8 +143,8 @@ S3_ACCESS = os.environ.get("AWS_ACCESS_KEY_ID", "testing")
 S3_SECRET = os.environ.get("AWS_SECRET_ACCESS_KEY", "testing")
 
 
-def object_storage_resource(name: str, bucket: str, endpoint: str,
-                            key_prefix: str | None) -> S3Resource:
+def object_storage_vfs(name: str, bucket: str, endpoint: str,
+                       key_prefix: str | None) -> S3VFS:
     common = {
         "bucket": bucket,
         "region": S3_REGION,
@@ -155,7 +154,7 @@ def object_storage_resource(name: str, bucket: str, endpoint: str,
         "key_prefix": key_prefix,
     }
     if name == "s3":
-        return S3Resource(
+        return S3VFS(
             S3Config(bucket=bucket,
                      region=S3_REGION,
                      endpoint_url=endpoint,
@@ -164,35 +163,34 @@ def object_storage_resource(name: str, bucket: str, endpoint: str,
                      path_style=True,
                      key_prefix=key_prefix))
     if name == "aliyun":
-        return AliyunResource(AliyunConfig(**common, path_style=True))
+        return AliyunVFS(AliyunConfig(**common, path_style=True))
     if name == "backblaze":
-        return BackblazeResource(BackblazeConfig(**common, path_style=True))
+        return BackblazeVFS(BackblazeConfig(**common, path_style=True))
     if name == "ceph":
-        return CephResource(CephConfig(**common))
+        return CephVFS(CephConfig(**common))
     if name == "digitalocean":
-        return DigitalOceanResource(
-            DigitalOceanConfig(**common, path_style=True))
+        return DigitalOceanVFS(DigitalOceanConfig(**common, path_style=True))
     if name == "gcs":
-        return GCSResource(GCSConfig(**common, path_style=True))
+        return GCSVFS(GCSConfig(**common, path_style=True))
     if name == "minio":
-        return MinIOResource(MinIOConfig(**common))
+        return MinIOVFS(MinIOConfig(**common))
     if name == "oci":
-        return OCIResource(OCIConfig(**common, namespace="integ"))
+        return OCIVFS(OCIConfig(**common, namespace="integ"))
     if name == "qingstor":
-        return QingStorResource(QingStorConfig(**common, path_style=True))
+        return QingStorVFS(QingStorConfig(**common, path_style=True))
     if name == "r2":
-        return R2Resource(R2Config(**common, path_style=True))
+        return R2VFS(R2Config(**common, path_style=True))
     if name == "scaleway":
-        return ScalewayResource(ScalewayConfig(**common, path_style=True))
+        return ScalewayVFS(ScalewayConfig(**common, path_style=True))
     if name == "seaweedfs":
-        return SeaweedFSResource(SeaweedFSConfig(**common))
+        return SeaweedFSVFS(SeaweedFSConfig(**common))
     if name == "supabase":
-        return SupabaseResource(SupabaseConfig(**common))
+        return SupabaseVFS(SupabaseConfig(**common))
     if name == "tencent":
-        return TencentResource(TencentConfig(**common, path_style=True))
+        return TencentVFS(TencentConfig(**common, path_style=True))
     if name == "wasabi":
-        return WasabiResource(WasabiConfig(**common, path_style=True))
-    raise ValueError(f"unknown object storage resource: {name}")
+        return WasabiVFS(WasabiConfig(**common, path_style=True))
+    raise ValueError(f"unknown object storage VFS: {name}")
 
 
 async def _noop() -> None:
@@ -260,10 +258,9 @@ class S3Service:
             self.buckets.add(name)
         return name
 
-    def resource(self, mount: dict) -> S3Resource:
-        return object_storage_resource(mount["resource"],
-                                       self.bucket_for(mount), self.endpoint,
-                                       mount.get("prefix"))
+    def vfs(self, mount: dict) -> S3VFS:
+        return object_storage_vfs(mount["vfs"], self.bucket_for(mount),
+                                  self.endpoint, mount.get("prefix"))
 
     async def teardown(self) -> None:
         for bucket in self.buckets:
@@ -281,8 +278,8 @@ class GridFSService:
         self.uri = MONGODB_URI
         self.database = f"mirage_integ_{run_id}"
 
-    def resource(self, mount: dict) -> GridFSResource:
-        return GridFSResource(
+    def vfs(self, mount: dict) -> GridFSVFS:
+        return GridFSVFS(
             GridFSConfig(uri=self.uri,
                          database=self.database,
                          bucket=mount["bucket"],
@@ -326,7 +323,7 @@ class DatabricksVolumeService:
         base, process = await start_kit_fake("databricks")
         return cls(run_id, base, process)
 
-    def resource(self, mount: dict) -> DatabricksVolumeResource:
+    def vfs(self, mount: dict) -> DatabricksVolumeVFS:
         volume = f"mirage-integ-{self.run_id}-{mount['volume']}"
         config = DatabricksVolumeConfig(catalog="main",
                                         schema="default",
@@ -334,7 +331,7 @@ class DatabricksVolumeService:
                                         root_path=mount.get("prefix") or "/")
         client = HttpFilesClient(self.base, self.token)
         client.files.create_directory(configured_root(config))
-        return DatabricksVolumeResource(config, client=client)
+        return DatabricksVolumeVFS(config, client=client)
 
     async def teardown(self) -> None:
         await stop_kit_fake(self.process)
@@ -403,7 +400,7 @@ def _load_ssh_server() -> ModuleType:
 
 
 async def _admin_exec(ws: Workspace, command: str) -> None:
-    result = await ws.execute(command)
+    result = await ws.shell(command)
     if result.exit_code:
         raise RuntimeError(f"admin command failed: {command}: "
                            f"{await result.stderr_str()}")
@@ -412,7 +409,7 @@ async def _admin_exec(ws: Workspace, command: str) -> None:
 class SSHService:
 
     def __init__(self, host: str, port: int, server, root_dir: str | None,
-                 admin: SSHResource, admin_ws: Workspace, base: str) -> None:
+                 admin: SSHVFS, admin_ws: Workspace, base: str) -> None:
         self.host = host
         self.port = port
         self.server = server
@@ -420,7 +417,7 @@ class SSHService:
         self.admin = admin
         self.admin_ws = admin_ws
         self.base = base
-        self.resources: list[SSHResource] = []
+        self.mounts: list[SSHVFS] = []
 
     @classmethod
     async def create(cls, run_id: str, target: dict) -> "SSHService":
@@ -436,7 +433,7 @@ class SSHService:
             host = "127.0.0.1"
             port = server.get_port()
         base = f"mirage-integ-{run_id}"
-        admin = SSHResource(SSHConfig(host=host, port=port, username="integ"))
+        admin = SSHVFS(SSHConfig(host=host, port=port, username="integ"))
         admin_ws = Workspace({"/admin": admin}, mode=MountMode.WRITE)
         paths = " ".join(f"/admin/{base}/{m['root']}"
                          for m in target["mounts"])
@@ -452,20 +449,20 @@ class SSHService:
                                    f"/{base}/{m['root']}/poem_link.txt")
         return cls(host, port, server, root_dir, admin, admin_ws, base)
 
-    def resource(self, mount: dict) -> SSHResource:
-        res = SSHResource(
+    def vfs(self, mount: dict) -> SSHVFS:
+        res = SSHVFS(
             SSHConfig(host=self.host,
                       port=self.port,
                       username="integ",
                       root=f"/{self.base}/{mount['root']}"))
-        self.resources.append(res)
+        self.mounts.append(res)
         return res
 
     async def teardown(self) -> None:
         await _admin_exec(self.admin_ws, f"rm -rf /admin/{self.base}")
-        # Workspace.close() does not close resource accessors; an in-process
+        # Workspace.close() does not close VFS accessors; an in-process
         # server's wait_closed() blocks until every client connection is gone.
-        for res in self.resources:
+        for res in self.mounts:
             await res.accessor.close()
         await self.admin_ws.close()
         await self.admin.accessor.close()
@@ -492,7 +489,7 @@ class NextcloudService:
         username = os.environ.get("NEXTCLOUD_USERNAME", "admin")
         password = os.environ.get("NEXTCLOUD_PASSWORD", "admin123")
         base = f"mirage-integ-{run_id}"
-        admin = NextcloudResource(
+        admin = NextcloudVFS(
             NextcloudConfig(url=url, username=username, password=password))
         admin_ws = Workspace({"/admin": admin}, mode=MountMode.WRITE)
         paths = " ".join(f"/admin/{base}/{m['root']}"
@@ -500,9 +497,9 @@ class NextcloudService:
         await _admin_exec(admin_ws, f"mkdir -p {paths}")
         return cls(url, username, password, admin_ws, base)
 
-    def resource(self, mount: dict) -> NextcloudResource:
+    def vfs(self, mount: dict) -> NextcloudVFS:
         url = f"{self.url.rstrip('/')}/{self.base}/{mount['root']}/"
-        return NextcloudResource(
+        return NextcloudVFS(
             NextcloudConfig(url=url,
                             username=self.username,
                             password=self.password))
@@ -706,42 +703,42 @@ class GwsService:
             resp.raise_for_status()
             return (await resp.json())["id"]
 
-    def resource(self, mount: dict) -> GoogleDriveResource:
-        return GoogleDriveResource(
+    def vfs(self, mount: dict) -> GoogleDriveVFS:
+        return GoogleDriveVFS(
             GoogleDriveConfig(client_id="integ",
                               refresh_token="integ",
                               api_base=self.url,
                               folder_id=self.folder_ids[mount["path"]]))
 
-    def gdocs_resource(self) -> GDocsResource:
-        return GDocsResource(
+    def gdocs_vfs(self) -> GDocsVFS:
+        return GDocsVFS(
             GDocsConfig(client_id="integ",
                         refresh_token="integ",
                         api_base=self.url))
 
-    def gsheets_resource(self) -> GSheetsResource:
-        return GSheetsResource(
+    def gsheets_vfs(self) -> GSheetsVFS:
+        return GSheetsVFS(
             GSheetsConfig(client_id="integ",
                           refresh_token="integ",
                           api_base=self.url))
 
-    def gslides_resource(self) -> GSlidesResource:
-        return GSlidesResource(
+    def gslides_vfs(self) -> GSlidesVFS:
+        return GSlidesVFS(
             GSlidesConfig(client_id="integ",
                           refresh_token="integ",
                           api_base=self.url))
 
-    def gcal_resource(self) -> GCalResource:
+    def gcal_vfs(self) -> GCalVFS:
         # today is pinned so the rolling window is the same on both hosts
         # and lands on the seeded events.
-        return GCalResource(
+        return GCalVFS(
             GCalConfig(client_id="integ",
                        refresh_token="integ",
                        api_base=self.url,
                        today="2026-02-11"))
 
-    def gmail_resource(self) -> GmailResource:
-        return GmailResource(
+    def gmail_vfs(self) -> GmailVFS:
+        return GmailVFS(
             GmailConfig(client_id="integ",
                         refresh_token="integ",
                         api_base=self.url))
@@ -809,8 +806,8 @@ class EmailService:
                 resp.raise_for_status()
         return cls(os.environ["EMAIL_HOST"], run_id)
 
-    def resource(self, mount: dict) -> EmailResource:
-        return EmailResource(
+    def vfs(self, mount: dict) -> EmailVFS:
+        return EmailVFS(
             EmailConfig(imap_host=self.host,
                         imap_port=EMAIL_IMAP_PORT,
                         smtp_host=self.host,
@@ -869,8 +866,8 @@ class OneDriveService:
         url = os.environ["ONEDRIVE_URL"].rstrip("/")
         return cls(f"{run_id}-{target['id']}", url)
 
-    def resource(self, mount: dict) -> OneDriveResource:
-        return OneDriveResource(
+    def vfs(self, mount: dict) -> OneDriveVFS:
+        return OneDriveVFS(
             OneDriveConfig(access_token=self.token,
                            graph_base_url=self.url,
                            key_prefix=mount.get("prefix")))
@@ -899,8 +896,8 @@ class Mem0Service:
         endpoint, process = await start_kit_fake("mem0")
         return cls(endpoint, process)
 
-    def resource(self, mount: dict) -> Mem0Resource:
-        return Mem0Resource(
+    def vfs(self, mount: dict) -> Mem0VFS:
+        return Mem0VFS(
             Mem0Config(api_key="integ-key",
                        host=self.endpoint,
                        user_id="integ-user",
@@ -968,8 +965,8 @@ class DropboxService:
         bucket = mount.get("bucket") or mount["path"].strip("/")
         return f"{self.run_id}-{bucket}"
 
-    def resource(self, mount: dict) -> DropboxResource:
-        return DropboxResource(
+    def vfs(self, mount: dict) -> DropboxVFS:
+        return DropboxVFS(
             # The fake supports full-text search_v2, so exercise grep/rg
             # narrowing in the battery.
             DropboxConfig(client_id="integ-client",
@@ -1007,10 +1004,10 @@ class HfService:
     async def create(cls, run_id: str) -> "HfService":
         return cls(run_id, os.environ["HF_URL"].rstrip("/"))
 
-    def resource(self, mount: dict) -> HfBucketsResource:
+    def vfs(self, mount: dict) -> HfBucketsVFS:
         # Buckets auto-create on first touch, exactly as a real one does for a
         # namespace the token owns.
-        return HfBucketsResource(
+        return HfBucketsVFS(
             HfBucketsConfig(
                 bucket=f"integ/{mount['bucket']}",
                 token=self.token,
@@ -1035,7 +1032,7 @@ class HfHubService:
     repositories a target mounts must exist before the mount is built;
     `/reset` seeds them from integ/fixtures/hf-hub/v1.json. The file CONTENT
     then arrives the ordinary way, through each mount's own `fixture:` seed,
-    which writes over the resource's commit path rather than behind it.
+    which writes over the VFS's commit path rather than behind it.
 
     Args:
         run_id (str): this run's id, which names its account.
@@ -1043,9 +1040,9 @@ class HfHubService:
     """
 
     KINDS = {
-        "hf_models": HfModelsResource,
-        "hf_datasets": HfDatasetsResource,
-        "hf_spaces": HfSpacesResource,
+        "hf_models": HfModelsVFS,
+        "hf_datasets": HfDatasetsVFS,
+        "hf_spaces": HfSpacesVFS,
     }
     CONFIGS = {
         "hf_models": HfModelsConfig,
@@ -1071,8 +1068,8 @@ class HfHubService:
                 resp.raise_for_status()
         return cls(run_id, endpoint)
 
-    def resource(self, mount: dict) -> object:
-        kind = mount["resource"]
+    def vfs(self, mount: dict) -> object:
+        kind = mount["vfs"]
         config = self.CONFIGS[kind](
             repo_id=mount["repo"],
             token=self.token,
@@ -1229,8 +1226,8 @@ class BoxService:
                             f"box web_link seed failed: {resp.status}")
         return folder_id
 
-    def resource(self, mount: dict) -> BoxResource:
-        return BoxResource(
+    def vfs(self, mount: dict) -> BoxVFS:
+        return BoxVFS(
             BoxConfig(
                 access_token=self.token,
                 endpoint=self.url,
@@ -1284,9 +1281,9 @@ class SlackService:
         """
         return f"xoxb-{self.workspace}", f"xoxp-{self.workspace}"
 
-    def resource(self, mount: dict) -> SlackResource:
+    def vfs(self, mount: dict) -> SlackVFS:
         bot, search = self._tokens()
-        return SlackResource(
+        return SlackVFS(
             SlackConfig(token=bot,
                         search_token=search,
                         base_url=f"{self.url}/api"))
@@ -1310,7 +1307,7 @@ class GitHubService:
     The server (integ/server/github) is a kit fake running out of process
     on GITHUB_URL, mirroring the fake Slack and Google Workspace servers
     and shared with the typescript host. It used to be out of process by
-    necessity — GitHubResource fetched the repo tree with a blocking
+    necessity — GitHubVFS fetched the repo tree with a blocking
     urlopen from its constructor, which would starve an aiohttp fake on
     the runner's loop. That constraint is gone now that the constructor
     touches no network and the tree hydrates on first read; sharing one
@@ -1337,9 +1334,9 @@ class GitHubService:
             async with session.post(f"{self.url}/reset") as resp:
                 resp.raise_for_status()
 
-    async def resource(self, mount: dict) -> GitHubResource:
+    async def vfs(self, mount: dict) -> GitHubVFS:
         owner, _, repo = mount["repo"].partition("/")
-        return GitHubResource(
+        return GitHubVFS(
             GitHubConfig(token="ghp-integ",
                          owner=owner,
                          repo=repo,
@@ -1383,8 +1380,8 @@ class DifyService:
         base, process = await start_kit_fake("dify")
         return cls(base, target.get("dataset", "kb-7f3a"), process)
 
-    def resource(self, mount: dict) -> DifyResource:
-        return DifyResource(
+    def vfs(self, mount: dict) -> DifyVFS:
+        return DifyVFS(
             DifyConfig(api_key="integ-key",
                        base_url=self.base,
                        dataset_id=self.dataset))
@@ -1415,8 +1412,8 @@ class TrelloService:
                 resp.raise_for_status()
         return cls(base)
 
-    def resource(self, mount: dict) -> TrelloResource:
-        return TrelloResource(
+    def vfs(self, mount: dict) -> TrelloVFS:
+        return TrelloVFS(
             TrelloConfig(api_key="integ-key",
                          api_token="integ-token",
                          base_url=self.base))
@@ -1449,8 +1446,8 @@ class DiscordService:
                 resp.raise_for_status()
         return cls(base)
 
-    def resource(self, mount: dict) -> DiscordResource:
-        return DiscordResource(
+    def vfs(self, mount: dict) -> DiscordVFS:
+        return DiscordVFS(
             DiscordConfig(token="integ-bot-token",
                           base_url=f"{self.base}/api/v10"))
 
@@ -1489,8 +1486,8 @@ class LinearService:
                 resp.raise_for_status()
         return cls(base)
 
-    def resource(self, mount: dict) -> LinearResource:
-        return LinearResource(
+    def vfs(self, mount: dict) -> LinearVFS:
+        return LinearVFS(
             LinearConfig(api_key="integ-key", base_url=self.graphql))
 
     def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
@@ -1519,8 +1516,8 @@ class JaegerService:
     async def create(cls) -> "JaegerService":
         return cls(os.environ["JAEGER_URL"])
 
-    def resource(self, mount: dict) -> JaegerResource:
-        return JaegerResource(JaegerConfig(host=self.host))
+    def vfs(self, mount: dict) -> JaegerVFS:
+        return JaegerVFS(JaegerConfig(host=self.host))
 
     async def teardown(self) -> None:
         return None
@@ -1547,8 +1544,8 @@ class LangfuseService:
             os.environ.get("LANGFUSE_SECRET_KEY", "sk-lf-mirage-integ"),
         )
 
-    def resource(self, mount: dict) -> LangfuseResource:
-        return LangfuseResource(
+    def vfs(self, mount: dict) -> LangfuseVFS:
+        return LangfuseVFS(
             LangfuseConfig(public_key=self.public_key,
                            secret_key=self.secret_key,
                            host=self.host))
@@ -1625,8 +1622,8 @@ class SharePointService:
                             f"sharepoint mkdir {name} -> {resp.status}")
                 parent = f"{parent}/{name}" if parent else name
 
-    def resource(self, mount: dict) -> SharePointResource:
-        return SharePointResource(
+    def vfs(self, mount: dict) -> SharePointVFS:
+        return SharePointVFS(
             SharePointConfig(access_token=self.token,
                              graph_base_url=self.url,
                              site="Main",
@@ -1654,7 +1651,7 @@ class NotionService:
 
     So the RUN is the axis that separates the hosts, and it rides the base URL
     as a leading `/_run/<id>` segment. A header or a query parameter cannot do
-    this job: the mount hands its base URL to the resource and never sees the
+    this job: the mount hands its base URL to the VFS and never sees the
     request again. With the run in the URL the two hosts keep the one shared
     token, get a SQLite file each, and can reset concurrently.
 
@@ -1689,9 +1686,9 @@ class NotionService:
                 resp.raise_for_status()
         return made
 
-    def resource(self, mount: dict) -> NotionResource:
-        return NotionResource(config=NotionConfig(api_key=self.token,
-                                                  base_url=f"{self.base}/v1"))
+    def vfs(self, mount: dict) -> NotionVFS:
+        return NotionVFS(config=NotionConfig(api_key=self.token,
+                                             base_url=f"{self.base}/v1"))
 
     def cli_installs(self) -> dict[str, tuple[CLISpec, dict[str, object]]]:
         return {
@@ -1759,9 +1756,9 @@ class LanceDBService:
             db.create_table("animals", data=LANCEDB_ROWS)
         return cls(uri, window)
 
-    def resource(self, mount: dict) -> LanceDBResource:
+    def vfs(self, mount: dict) -> LanceDBVFS:
         if self.window:
-            return LanceDBResource(
+            return LanceDBVFS(
                 LanceDBConfig(uri=self.uri,
                               table="wide",
                               group_by=["label"],
@@ -1769,7 +1766,7 @@ class LanceDBService:
                               title_column="name",
                               text_column="name",
                               max_rows=LANCEDB_WIDE_CAP))
-        return LanceDBResource(
+        return LanceDBVFS(
             LanceDBConfig(uri=self.uri,
                           group_by=["label", "kind"],
                           id_column="id",
@@ -1856,9 +1853,9 @@ class QdrantService:
             await client.close()
         return cls(host, port, collection, window)
 
-    def resource(self, mount: dict) -> QdrantResource:
+    def vfs(self, mount: dict) -> QdrantVFS:
         if self.window:
-            return QdrantResource(
+            return QdrantVFS(
                 QdrantConfig(host=self.host,
                              port=self.port,
                              collection=self.collection,
@@ -1866,7 +1863,7 @@ class QdrantService:
                              id_field="id",
                              text_field="name",
                              max_rows=QDRANT_WIDE_CAP))
-        return QdrantResource(
+        return QdrantVFS(
             QdrantConfig(host=self.host,
                          port=self.port,
                          collection=self.collection,
@@ -1932,8 +1929,8 @@ class ChromaService:
                              embeddings=embeddings)
         return cls(host, port, collection_name)
 
-    def resource(self, mount: dict) -> ChromaResource:
-        return ChromaResource(
+    def vfs(self, mount: dict) -> ChromaVFS:
+        return ChromaVFS(
             config=ChromaConfig(host=self.host,
                                 port=self.port,
                                 collection_name=self.collection_name))
@@ -2034,8 +2031,8 @@ class MongoDBService:
             await client.close()
         return cls(uri)
 
-    def resource(self, mount: dict) -> MongoDBResource:
-        return MongoDBResource(
+    def vfs(self, mount: dict) -> MongoDBVFS:
+        return MongoDBVFS(
             config=MongoDBConfig(uri=self.uri, databases=[MONGODB_DB]))
 
     async def teardown(self) -> None:
@@ -2095,9 +2092,8 @@ class PostgresService:
             await conn.close()
         return cls(dsn)
 
-    def resource(self, mount: dict) -> PostgresResource:
-        return PostgresResource(PostgresConfig(dsn=self.dsn,
-                                               max_read_rows=200))
+    def vfs(self, mount: dict) -> PostgresVFS:
+        return PostgresVFS(PostgresConfig(dsn=self.dsn, max_read_rows=200))
 
     async def teardown(self) -> None:
         return None
@@ -2116,7 +2112,7 @@ Service = (S3Service | OneDriveService | SharePointService | Mem0Service
 def build_ram(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
-    return RAMResource(), _noop
+    return RAMVFS(), _noop
 
 
 def build_disk(
@@ -2127,7 +2123,7 @@ def build_disk(
     async def cleanup() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
-    return DiskResource(root=root), cleanup
+    return DiskVFS(root=root), cleanup
 
 
 def build_redis(
@@ -2135,242 +2131,242 @@ def build_redis(
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     safe_path = mount["path"].strip("/").replace("/", "-") or "root"
     prefix = f"mirage-integ-{run_id}-{safe_path}/"
-    return RedisResource(url=REDIS_URL, key_prefix=prefix), _noop
+    return RedisVFS(url=REDIS_URL, key_prefix=prefix), _noop
 
 
 def build_s3(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, S3Service)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_gridfs(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GridFSService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_databricks_volume(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, DatabricksVolumeService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_onedrive(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, OneDriveService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_sharepoint(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, SharePointService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_mem0(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, Mem0Service)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_postgres(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, PostgresService)
-    resource = service.resource(mount)
-    return resource, resource.accessor.close
+    vfs = service.vfs(mount)
+    return vfs, vfs.accessor.close
 
 
 def build_mongodb(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, MongoDBService)
-    resource = service.resource(mount)
-    return resource, resource.accessor.close
+    vfs = service.vfs(mount)
+    return vfs, vfs.accessor.close
 
 
 def build_chroma(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, ChromaService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_qdrant(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, QdrantService)
-    resource = service.resource(mount)
-    return resource, resource.accessor.close
+    vfs = service.vfs(mount)
+    return vfs, vfs.accessor.close
 
 
 def build_lancedb(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, LanceDBService)
-    resource = service.resource(mount)
-    return resource, resource.accessor.close
+    vfs = service.vfs(mount)
+    return vfs, vfs.accessor.close
 
 
 def build_notion(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, NotionService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_hf(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, HfService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_hf_hub(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, HfHubService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_box(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, BoxService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_dropbox(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, DropboxService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_dify(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, DifyService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_trello(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, TrelloService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_discord(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, DiscordService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_linear(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, LinearService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_jaeger(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, JaegerService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_langfuse(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, LangfuseService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_ssh(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, SSHService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_gdrive(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GwsService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_gdocs(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GwsService)
-    return service.gdocs_resource(), _noop
+    return service.gdocs_vfs(), _noop
 
 
 def build_gsheets(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GwsService)
-    return service.gsheets_resource(), _noop
+    return service.gsheets_vfs(), _noop
 
 
 def build_gslides(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GwsService)
-    return service.gslides_resource(), _noop
+    return service.gslides_vfs(), _noop
 
 
 def build_email(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, EmailService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 def build_gcal(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GwsService)
-    return service.gcal_resource(), _noop
+    return service.gcal_vfs(), _noop
 
 
 def build_gmail(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GwsService)
-    return service.gmail_resource(), _noop
+    return service.gmail_vfs(), _noop
 
 
 def build_nextcloud(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, NextcloudService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 async def build_github(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, GitHubService)
-    return await service.resource(mount), _noop
+    return await service.vfs(mount), _noop
 
 
 def build_slack(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
     assert isinstance(service, SlackService)
-    return service.resource(mount), _noop
+    return service.vfs(mount), _noop
 
 
 # Backends reachable with dummy credentials and no server, for the arg-error
@@ -2379,64 +2375,64 @@ def build_slack(
 # targets ever need. github, notion and hf_buckets are absent on purpose:
 # github needs a live repo at construct, notion an OAuth provider, and
 # hf_buckets validates the bucket id.
-ARG_ERROR_RESOURCES: dict[str, tuple[type, type, dict[str, object]]] = {
-    "databricks": (DatabricksVolumeResource, DatabricksVolumeConfig, {
+ARG_ERROR_VFS: dict[str, tuple[type, type, dict[str, object]]] = {
+    "databricks": (DatabricksVolumeVFS, DatabricksVolumeConfig, {
         "host": "h",
         "token": "t",
         "catalog": "c",
         "schema": "s",
         "volume": "v",
     }),
-    "discord": (DiscordResource, DiscordConfig, {
+    "discord": (DiscordVFS, DiscordConfig, {
         "token": "x"
     }),
-    "email": (EmailResource, EmailConfig, {
+    "email": (EmailVFS, EmailConfig, {
         "imap_host": "h",
         "smtp_host": "h",
         "username": "u",
         "password": "p",
     }),
-    "gdocs": (GDocsResource, GDocsConfig, {
+    "gdocs": (GDocsVFS, GDocsConfig, {
         "client_id": "c",
         "refresh_token": "r"
     }),
-    "gdrive": (GoogleDriveResource, GoogleDriveConfig, {
+    "gdrive": (GoogleDriveVFS, GoogleDriveConfig, {
         "client_id": "c",
         "refresh_token": "r"
     }),
-    "gmail": (GmailResource, GmailConfig, {
+    "gmail": (GmailVFS, GmailConfig, {
         "client_id": "c",
         "refresh_token": "r"
     }),
-    "gsheets": (GSheetsResource, GSheetsConfig, {
+    "gsheets": (GSheetsVFS, GSheetsConfig, {
         "client_id": "c",
         "refresh_token": "r"
     }),
-    "gslides": (GSlidesResource, GSlidesConfig, {
+    "gslides": (GSlidesVFS, GSlidesConfig, {
         "client_id": "c",
         "refresh_token": "r"
     }),
-    "langfuse": (LangfuseResource, LangfuseConfig, {
+    "langfuse": (LangfuseVFS, LangfuseConfig, {
         "public_key": "p",
         "secret_key": "s"
     }),
-    "linear": (LinearResource, LinearConfig, {
+    "linear": (LinearVFS, LinearConfig, {
         "api_key": "k"
     }),
-    "mem0": (Mem0Resource, Mem0Config, {
+    "mem0": (Mem0VFS, Mem0Config, {
         "api_key": "k",
         "user_id": "u"
     }),
-    "onedrive": (OneDriveResource, OneDriveConfig, {
+    "onedrive": (OneDriveVFS, OneDriveConfig, {
         "access_token": "t"
     }),
-    "sharepoint": (SharePointResource, SharePointConfig, {
+    "sharepoint": (SharePointVFS, SharePointConfig, {
         "access_token": "t"
     }),
-    "slack": (SlackResource, SlackConfig, {
+    "slack": (SlackVFS, SlackConfig, {
         "token": "x"
     }),
-    "trello": (TrelloResource, TrelloConfig, {
+    "trello": (TrelloVFS, TrelloConfig, {
         "api_key": "k",
         "api_token": "t"
     }),
@@ -2446,8 +2442,8 @@ ARG_ERROR_RESOURCES: dict[str, tuple[type, type, dict[str, object]]] = {
 def build_arg_error(
         mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
-    resource_cls, config_cls, kwargs = ARG_ERROR_RESOURCES[mount["backend"]]
-    return resource_cls(config_cls(**kwargs)), _noop
+    vfs_cls, config_cls, kwargs = ARG_ERROR_VFS[mount["backend"]]
+    return vfs_cls(config_cls(**kwargs)), _noop
 
 
 BUILDERS = {
@@ -2587,29 +2583,29 @@ async def build_mounts(
         if alias_of is not None:
             # Two prefixes over one store: the shape that made cross-mount
             # mv copy an object onto itself and then unlink the source.
-            # Reusing the built resource is the only way to express it,
+            # Reusing the built VFS is the only way to express it,
             # since every builder otherwise allocates fresh storage.
-            resource = built[alias_of]
+            vfs = built[alias_of]
             cleanup = _noop
         else:
-            builder = BUILDERS[mount["resource"]]
-            # A builder is async only when its resource needs I/O to come
+            builder = BUILDERS[mount["vfs"]]
+            # A builder is async only when its VFS needs I/O to come
             # up — github fetches the repo tree. Awaiting whatever the
             # table returns keeps the other forty builders plain.
             pair = builder(mount, run_id, service)
             if inspect.isawaitable(pair):
                 pair = await pair
-            resource, cleanup = pair
-        built[mount["path"]] = resource
+            vfs, cleanup = pair
+        built[mount["path"]] = vfs
         mode = (MountMode.READ if mount.get("mode") == "read" else
                 MountMode.EXEC if mount.get("mode") == "exec" else None)
         # A mount states infrastructure only: what it is, where it is,
         # how it is served. Its permissions live in the profile, under
         # `profiles.<name>.mounts.<prefix>`.
         if mode is not None:
-            mounts[mount["path"]] = (resource, mode)
+            mounts[mount["path"]] = (vfs, mode)
         else:
-            mounts[mount["path"]] = resource
+            mounts[mount["path"]] = vfs
         cleanups.append(cleanup)
     return mounts, cleanups
 
@@ -2641,7 +2637,7 @@ def cli_install(service: "Service | None",
 
 async def mutate_write(shadow_ws: Workspace, path: str,
                        content: bytes) -> None:
-    await shadow_ws.fs.write(path, content)
+    await shadow_ws.vfs.write(path, content)
 
 
 async def teardown_target(
@@ -2695,7 +2691,7 @@ def console_factory(target: dict, run_id: str) -> ConsoleFactory | None:
 
 async def open_target(
     target: dict,
-    consistency: ConsistencyPolicy | None = None
+    read: ReadSpec | None = None
 ) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
@@ -2712,10 +2708,10 @@ async def open_target(
     # door validates with.
     profiles = scripted_profiles(target.get("profiles") or None)
     default_profile = target.get("profile")
-    if consistency is not None:
+    if read is not None:
         ws = Workspace(mounts,
                        mode=MountMode.WRITE,
-                       consistency=consistency,
+                       read=read,
                        agent_id=agent_id,
                        console_factory=factory,
                        profiles=profiles,
@@ -2749,7 +2745,7 @@ async def open_target(
 
 
 async def open_consistency(
-    target: dict, consistency: ConsistencyPolicy
+    target: dict, read: ReadSpec
 ) -> tuple[
         Workspace,
         Callable[[str, bytes], Awaitable[None]],
@@ -2760,9 +2756,7 @@ async def open_consistency(
     read_mounts, read_cleanups = await build_mounts(target, run_id, service)
     shadow_mounts, shadow_cleanups = await build_mounts(
         target, run_id, service)
-    read_ws = Workspace(read_mounts,
-                        mode=MountMode.WRITE,
-                        consistency=consistency)
+    read_ws = Workspace(read_mounts, mode=MountMode.WRITE, read=read)
     shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
     # Same rule as open_target: a target's declared environment reaches
     # every workspace a case can run against, or a consistency scenario

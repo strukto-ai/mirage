@@ -33,7 +33,7 @@ from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.executor.jobs import run_statement
 from mirage.workspace.executor.statement import finish_statement, record_status
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
@@ -54,7 +54,7 @@ def _line_buffer(stdin: ByteSource) -> AsyncLineIterator:
 async def _execute_body(
     execute_node: Callable[..., Any],
     body: list[TSNodeLike],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     job_table: JobTable | None,
@@ -151,7 +151,7 @@ async def handle_if(
     execute_node: Callable[..., Any],
     branches: list[tuple[TSNodeLike, list[TSNodeLike]]],
     else_body: list[TSNodeLike] | None,
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -190,7 +190,7 @@ async def handle_for(
     variable: str,
     values: list[str | PathSpec],
     body: list[TSNodeLike],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     policies: Policies | None = None,
@@ -268,7 +268,7 @@ async def _condition_loop(
     execute_node: Callable[..., Any],
     condition: TSNodeLike,
     body: list[TSNodeLike],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
     label: str,
@@ -347,7 +347,7 @@ async def handle_cfor(
     exprs: list[list[TSNodeLike]],
     body: list[TSNodeLike],
     eval_expr: Callable[..., Any],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -368,7 +368,7 @@ async def handle_cfor(
             default when the slot is empty; raises ArithError with the
             offending expression text on an invalid expression, or
             ReadonlyError when it assigns to a readonly variable.
-        session (Session): shell session.
+        session (SessionState): shell session.
         stdin (ByteSource | None): input stream, line-buffered across
             iterations like for/while.
         call_stack (CallStack | None): function-call scope, if any.
@@ -455,7 +455,7 @@ async def handle_while(
     execute_node: Callable[..., Any],
     condition: TSNodeLike,
     body: list[TSNodeLike],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -481,7 +481,7 @@ async def handle_until(
     execute_node: Callable[..., Any],
     condition: TSNodeLike,
     body: list[TSNodeLike],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -507,7 +507,7 @@ async def handle_case(
     execute_node: Callable[..., Any],
     word: str,
     items: list[tuple[list[str], list[TSNodeLike], str]],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
@@ -554,7 +554,7 @@ async def handle_select(
     variable: str,
     values: list[str | PathSpec],
     body: list[TSNodeLike],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     policies: Policies | None = None,
@@ -576,7 +576,7 @@ async def handle_select(
         variable (str): the select variable name.
         values (list[str | PathSpec]): menu entries, already expanded.
         body (list[TSNodeLike]): loop body statements.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (ByteSource | None): line source for choices.
         call_stack (CallStack | None): function-call scope, if any.
         job_table (JobTable | None): the job plane for a body statement

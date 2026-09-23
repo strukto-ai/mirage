@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
@@ -23,7 +23,7 @@ import { ArithError } from '../../../shell/errors.ts'
 import { Namespace } from '../../mount/namespace/namespace.ts'
 import type { ResolveFn } from '../../dispatcher/index.ts'
 import { MountRegistry } from '../../mount/registry.ts'
-import { Session } from '../../session/session.ts'
+import { SessionState } from '../../session/session.ts'
 import { sessionView } from '../../session/state.ts'
 import { IDENTIFIER_RE } from './constants.ts'
 import {
@@ -145,16 +145,16 @@ describe('builtins/shared: expandOperands', () => {
   it('expands a pattern per mount and passes a plain path through', async () => {
     const parser = await getTestParser()
     const ws = new Workspace(
-      { '/data': new RAMResource() },
+      { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, shellParser: parser },
     )
-    await ws.execute('echo a > /data/a.txt && echo b > /data/b.txt')
+    await ws.shell('echo a > /data/a.txt && echo b > /data/b.txt')
     const globSpec = new PathSpec({
       virtual: '/data/*.txt',
       directory: '/data/',
       pattern: '*.txt',
       resolved: false,
-      resourcePath: '*.txt',
+      vfsPath: '*.txt',
     })
     const expanded = await expandOperands(ws.namespace, [globSpec, '/data/c.md'])
     expect(expanded.map((p) => p.virtual).sort()).toEqual([
@@ -168,7 +168,7 @@ describe('builtins/shared: expandOperands', () => {
 
 describe('builtins/shared: the session helpers', () => {
   it('requireView returns the threaded view', () => {
-    const session = new Session({ sessionId: 's1' })
+    const session = new SessionState({ sessionId: 's1' })
     const view = sessionView(session)
     expect(requireView(view)).toBe(view)
   })
@@ -218,7 +218,7 @@ describe('builtins/shared: the session helpers', () => {
     // command tier renders this line for a backend operand and the node
     // table renders it for a symlink, so `rm f.txt` and `rm lk` under one
     // read grant answer identically.
-    const ws = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+    const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
     const owned = PathSpec.fromStrPath('/data/lk')
     expect(readOnlyError('rm', ws.namespace, owned)).toBe('rm: read-only mount at /data/\n')
   })

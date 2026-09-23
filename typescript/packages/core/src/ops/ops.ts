@@ -41,7 +41,7 @@ export type OwnerOf = (path: string) => MountOwner | null
  */
 export type SessionBind = <T>(sessionId: string | null, run: () => Promise<T>) => Promise<T>
 
-/** What `forSession` carries over and a constructor may set. */
+/** What a derived facade carries over and a constructor may set. */
 export interface OpsOptions {
   bind?: SessionBind | null
   sessionId?: string | null
@@ -62,7 +62,7 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
 /**
  * The typed op facade FUSE and programmatic embedders call.
  *
- * Every op delegates to the workspace dispatcher, so `ws.fs` walks the
+ * Every op delegates to the workspace dispatcher, so `ws.vfs` walks the
  * same pipeline as a shell command: link follow, session grants,
  * admission policies, cache read-through, namespace structure, and
  * post-write invalidation all fire once, at that one door. The facade
@@ -75,13 +75,20 @@ function payloadBytes(result: unknown, args: readonly unknown[]): number {
  * The facade runs as one session, `sessionId`, through `bind`: every
  * op is judged under that session's profile (hides, mount modes,
  * grants) exactly as a shell line in it would be, so an agent whose
- * file tool reads through `ws.fs` is confined the way its shell is.
+ * file tool reads through `ws.vfs` is confined the way its shell is.
  * null names the workspace's default session as it is when the op
  * runs, since a snapshot load can rename it. A session already bound
  * when the op arrives (a command's own runtime, a kernel mount serving
  * one session) is kept, so the facade never widens the caller's view,
- * and the record names the session that judged the op. `forSession`
+ * and the record names the session that judged the op. `Session`
  * derives a facade for another session over the same ledger.
+ *
+ * Every op also takes a trailing `sessionId` for the one-call case,
+ * the way `Workspace.shell` does. One rule decides between them: a
+ * shell line *sets* the session, an op *inherits* it. So the argument
+ * is the session to run as when no line is already running, and the
+ * line's session wins when one is, which is what keeps a handler
+ * reaching this door from widening the view it was given.
  */
 export class Ops {
   private readonly dispatch: DispatchFn
@@ -119,6 +126,14 @@ export class Ops {
   /**
    * The same facade run as another session, over the same ledger, so
    * the workspace-wide account stays one list.
+   *
+   * @internal The mechanism behind `Session.vfs`, not a door of
+   * its own: a host binds a session with `ws.session(id)` (creating it
+   * when the id is new) or `new Session(ws, id)` (adopting one
+   * that exists), so there is one way to say it rather than two.
+   * TypeScript has no package-private, so this stays reachable; it is
+   * not part of the supported surface. Python spells it
+   * `Ops._for_session`.
    */
   forSession(sessionId: string): Ops {
     return new Ops(this.dispatch, this.sink, this.links, this.ownerOf, {
@@ -180,6 +195,7 @@ export class Ops {
     path: string,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
+    sessionId?: string,
   ): Promise<unknown> {
     const timer = startOp()
     // `nofollow` is the caller's AT_SYMLINK_NOFOLLOW and suppresses
@@ -200,7 +216,8 @@ export class Ops {
     let result: unknown
     let owner: MountOwner | null = null
     try {
-      const [value] = await (this.bind === null ? run() : this.bind(this.sessionId, run))
+      const bound = sessionId ?? this.sessionId
+      const [value] = await (this.bind === null ? run() : this.bind(bound, run))
       result = value
       owner = this.ownerOf(followed)
     } catch (err) {
@@ -287,24 +304,31 @@ export class Ops {
   async readFile(
     path: string,
     options: { raw?: boolean; offset?: number; size?: number | null } = {},
+    sessionId?: string,
   ): Promise<Uint8Array> {
     const kwargs: OpKwargs = options.raw === true ? { filetype: null } : {}
     const offset = options.offset ?? 0
     const size = options.size ?? null
     if (offset !== 0 || size !== null) {
-      return (await this.through('read', path, [], { ...kwargs, offset, size })) as Uint8Array
+      return (await this.through(
+        'read',
+        path,
+        [],
+        { ...kwargs, offset, size },
+        sessionId,
+      )) as Uint8Array
     }
-    return (await this.through('read', path, [], kwargs)) as Uint8Array
+    return (await this.through('read', path, [], kwargs, sessionId)) as Uint8Array
   }
 
-  async readFileText(path: string, encoding = 'utf-8'): Promise<string> {
-    const bytes = await this.readFile(path)
+  async readFileText(path: string, encoding = 'utf-8', sessionId?: string): Promise<string> {
+    const bytes = await this.readFile(path, {}, sessionId)
     return new TextDecoder(encoding, { fatal: false }).decode(bytes)
   }
 
-  async writeFile(path: string, data: Uint8Array | string): Promise<void> {
+  async writeFile(path: string, data: Uint8Array | string, sessionId?: string): Promise<void> {
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
-    await this.through('write', path, [bytes])
+    await this.through('write', path, [bytes], {}, sessionId)
   }
 
   /**
@@ -313,16 +337,16 @@ export class Ops {
    * RuntimeVFS's business, where a guest holds the full buffer; an
    * embedder calling the facade gets the mount's real answer.
    */
-  async append(path: string, data: Uint8Array): Promise<void> {
-    await this.through('append', path, [data])
+  async append(path: string, data: Uint8Array, sessionId?: string): Promise<void> {
+    await this.through('append', path, [data], {}, sessionId)
   }
 
-  async readdir(path: string): Promise<string[]> {
-    return ((await this.through('readdir', path)) as string[] | null) ?? []
+  async readdir(path: string, sessionId?: string): Promise<string[]> {
+    return ((await this.through('readdir', path, [], {}, sessionId)) as string[] | null) ?? []
   }
 
-  async stat(path: string): Promise<FileStat> {
-    return (await this.through('stat', path)) as FileStat
+  async stat(path: string, sessionId?: string): Promise<FileStat> {
+    return (await this.through('stat', path, [], {}, sessionId)) as FileStat
   }
 
   // The three probes below answer "is this path there?", so only a genuine
@@ -330,9 +354,9 @@ export class Ops {
   // backend bug is not an answer to that question: swallowing it would let a
   // caller act on a false "missing" (overwrite, recreate, skip). Mirrors
   // Python's `(FileNotFoundError, ValueError)` swallow set.
-  async exists(path: string): Promise<boolean> {
+  async exists(path: string, sessionId?: string): Promise<boolean> {
     try {
-      await this.stat(path)
+      await this.stat(path, sessionId)
       return true
     } catch (err) {
       if (isMissingPath(err)) return false
@@ -340,9 +364,9 @@ export class Ops {
     }
   }
 
-  async isDir(path: string): Promise<boolean> {
+  async isDir(path: string, sessionId?: string): Promise<boolean> {
     try {
-      const s = await this.stat(path)
+      const s = await this.stat(path, sessionId)
       return s.type === FileType.DIRECTORY
     } catch (err) {
       if (isMissingPath(err)) return false
@@ -350,9 +374,9 @@ export class Ops {
     }
   }
 
-  async isFile(path: string): Promise<boolean> {
+  async isFile(path: string, sessionId?: string): Promise<boolean> {
     try {
-      const s = await this.stat(path)
+      const s = await this.stat(path, sessionId)
       return s.type !== FileType.DIRECTORY
     } catch (err) {
       if (isMissingPath(err)) return false
@@ -360,12 +384,12 @@ export class Ops {
     }
   }
 
-  async mkdir(path: string): Promise<void> {
-    await this.through('mkdir', path)
+  async mkdir(path: string, sessionId?: string): Promise<void> {
+    await this.through('mkdir', path, [], {}, sessionId)
   }
 
-  async create(path: string): Promise<void> {
-    await this.through('create', path)
+  async create(path: string, sessionId?: string): Promise<void> {
+    await this.through('create', path, [], {}, sessionId)
   }
 
   /**
@@ -379,13 +403,13 @@ export class Ops {
    * the layer that can see both planes to tell. Mirrors Python's
    * Ops.symlink.
    */
-  async symlink(path: string, target: string): Promise<void> {
-    await this.through('symlink', path, [], { target })
+  async symlink(path: string, target: string, sessionId?: string): Promise<void> {
+    await this.through('symlink', path, [], { target }, sessionId)
   }
 
   /** The stored target of the link at `path`; EINVAL when not a link. */
-  async readlink(path: string): Promise<string> {
-    return (await this.through('readlink', path)) as string
+  async readlink(path: string, sessionId?: string): Promise<string> {
+    return (await this.through('readlink', path, [], {}, sessionId)) as string
   }
 
   /**
@@ -399,24 +423,94 @@ export class Ops {
    * the access control. Returns what the backend could not keep.
    * Mirrors Python's Ops.setattr.
    */
-  async setattr(path: string, attrs: SetAttrFields = {}): Promise<Record<string, number | string>> {
+  async setattr(
+    path: string,
+    attrs: SetAttrFields = {},
+    sessionId?: string,
+  ): Promise<Record<string, number | string>> {
     const { nofollow = false, ...fields } = attrs
-    return (await this.through('setattr', path, [], { ...fields, nofollow })) as Record<
+    return (await this.through('setattr', path, [], { ...fields, nofollow }, sessionId)) as Record<
       string,
       number | string
     >
   }
 
-  async truncate(path: string, length: number): Promise<void> {
-    await this.through('truncate', path, [length])
+  /**
+   * One extended attribute's value. The node table answers with what a
+   * caller set. `nofollow` reads a link entry's own
+   * attributes. Throws ENODATA when the path has no such attribute.
+   * Mirrors Python's Ops.getxattr.
+   */
+  async getxattr(
+    path: string,
+    name: string,
+    opts: { nofollow?: boolean } = {},
+    sessionId?: string,
+  ): Promise<Uint8Array> {
+    const kwargs = { name, nofollow: opts.nofollow === true }
+    return (await this.through('getxattr', path, [], kwargs, sessionId)) as Uint8Array
   }
 
-  async unlink(path: string): Promise<void> {
-    await this.through('unlink', path)
+  /** Every extended attribute name a path carries, sorted. */
+  async listxattr(
+    path: string,
+    opts: { nofollow?: boolean } = {},
+    sessionId?: string,
+  ): Promise<string[]> {
+    const kwargs = { nofollow: opts.nofollow === true }
+    return (await this.through('listxattr', path, [], kwargs, sessionId)) as string[]
   }
 
-  async rmdir(path: string): Promise<void> {
-    await this.through('rmdir', path)
+  /**
+   * Store an extended attribute on a path's namespace node, so it works
+   * on every backend and moves with a rename. `create` refuses with
+   * EEXIST when it is set (XATTR_CREATE) and `replace` with ENODATA when
+   * it is not (XATTR_REPLACE).
+   * Mirrors Python's Ops.setxattr.
+   */
+  async setxattr(
+    path: string,
+    name: string,
+    value: Uint8Array,
+    opts: { create?: boolean; replace?: boolean; nofollow?: boolean } = {},
+    sessionId?: string,
+  ): Promise<void> {
+    const kwargs = {
+      name,
+      value,
+      create: opts.create === true,
+      replace: opts.replace === true,
+      nofollow: opts.nofollow === true,
+    }
+    await this.through('setxattr', path, [], kwargs, sessionId)
+  }
+
+  /** Drop an extended attribute; ENODATA when it is not set. */
+  async removexattr(
+    path: string,
+    name: string,
+    opts: { nofollow?: boolean } = {},
+    sessionId?: string,
+  ): Promise<void> {
+    await this.through(
+      'removexattr',
+      path,
+      [],
+      { name, nofollow: opts.nofollow === true },
+      sessionId,
+    )
+  }
+
+  async truncate(path: string, length: number, sessionId?: string): Promise<void> {
+    await this.through('truncate', path, [length], {}, sessionId)
+  }
+
+  async unlink(path: string, sessionId?: string): Promise<void> {
+    await this.through('unlink', path, [], {}, sessionId)
+  }
+
+  async rmdir(path: string, sessionId?: string): Promise<void> {
+    await this.through('rmdir', path, [], {}, sessionId)
   }
 
   /**
@@ -428,22 +522,22 @@ export class Ops {
    * back to its copy+unlink path instead of corrupting one backend's
    * key space with the other's path. Mirrors Python's Ops.rename.
    */
-  async rename(src: string, dst: string): Promise<void> {
+  async rename(src: string, dst: string, sessionId?: string): Promise<void> {
     if ((this.ownerOf(src)?.prefix ?? '') !== (this.ownerOf(dst)?.prefix ?? '')) {
       throw exdev(src)
     }
-    await this.through('rename', src, [PathSpec.fromStrPath(dst)])
+    await this.through('rename', src, [PathSpec.fromStrPath(dst)], {}, sessionId)
   }
 
-  async cat(path: string): Promise<string> {
-    return this.readFileText(path)
+  async cat(path: string, sessionId?: string): Promise<string> {
+    return this.readFileText(path, 'utf-8', sessionId)
   }
 
-  async listFiles(path: string): Promise<string[]> {
-    const entries = await this.readdir(path)
+  async listFiles(path: string, sessionId?: string): Promise<string[]> {
+    const entries = await this.readdir(path, sessionId)
     const files: string[] = []
     for (const fullPath of entries) {
-      if (await this.isFile(fullPath)) {
+      if (await this.isFile(fullPath, sessionId)) {
         files.push(fullPath.slice(fullPath.lastIndexOf('/') + 1))
       }
     }

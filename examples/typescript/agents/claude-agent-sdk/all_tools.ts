@@ -26,7 +26,7 @@
 import { config as loadEnv } from 'dotenv'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { buildOptions } from '@struktoai/mirage-agents/claude-agent-sdk'
 
@@ -48,7 +48,7 @@ const EXPECTED = new Set(
   ['execute_command', 'read', 'write', 'edit', 'ls', 'grep'].map((n) => `mcp__mirage__${n}`),
 )
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -83,6 +83,6 @@ console.log(
   missing.length > 0 ? missing : 'none',
 )
 
-const final = await ws.fs.readFileText('/notes.txt')
+const final = await ws.vfs.readFileText('/notes.txt')
 console.log('\n=== /notes.txt final content (from the Mirage workspace) ===')
 console.log(final)

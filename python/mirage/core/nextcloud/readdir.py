@@ -34,7 +34,7 @@ async def _is_dir(accessor: NextcloudAccessor, key: str) -> bool:
 async def readdir(accessor: NextcloudAccessor,
                   path: PathSpec,
                   index: IndexCacheStore = NULL_INDEX) -> list[str]:
-    prefix = mount_prefix_of(path.virtual, path.resource_path)
+    prefix = mount_prefix_of(path.virtual, path.vfs_path)
     target = path.directory if path.pattern else path.virtual
     if prefix and target.startswith(prefix):
         rest = target[len(prefix):]

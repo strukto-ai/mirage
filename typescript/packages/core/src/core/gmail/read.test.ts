@@ -82,7 +82,7 @@ describe('gmail read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json',
       directory: '/gmail/INBOX/2026-04-27',
-      resourcePath: mountKey('/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json', '/gmail'),
+      vfsPath: mountKey('/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json', '/gmail'),
     })
     const out = await read(accessor, path, index)
     const parsed = JSON.parse(new TextDecoder().decode(out)) as { subject: string }
@@ -102,7 +102,7 @@ describe('gmail read auto-bootstrap', () => {
     const path = new PathSpec({
       virtual: '/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json',
       directory: '/gmail/INBOX/2026-04-27',
-      resourcePath: mountKey('/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json', '/gmail'),
+      vfsPath: mountKey('/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json', '/gmail'),
     })
     await expect(read(accessor, path, index)).rejects.toMatchObject({ code: 'ENOENT' })
   })

@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 
 load_dotenv(".env.development")
 
@@ -29,32 +29,32 @@ config = GoogleDriveConfig(
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
 
-backend = GoogleDriveResource(config=config)
+backend = GoogleDriveVFS(config=config)
 ws = Workspace({"/gdrive/": backend}, mode=MountMode.READ)
 
 
 def ops_summary() -> str:
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
 
 async def main():
     # ── prime the cache: gdrive resolves paths via file IDs ──
-    await ws.execute("ls /gdrive/")
-    await ws.execute("ls /gdrive/mirage/")
+    await ws.shell("ls /gdrive/")
+    await ws.shell("ls /gdrive/mirage/")
 
     # ── plan: estimate before executing ──
     print("=== PLAN ESTIMATES ===\n")
 
-    dr = await ws.execute("grep mirage /gdrive/mirage/example.jsonl",
-                          provision=True)
+    dr = await ws.shell("grep mirage /gdrive/mirage/example.jsonl",
+                        provision=True)
     print("--- plan: grep mirage /gdrive/mirage/example.jsonl ---")
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
     print(f"  read_ops: {dr.read_ops}, precision: {dr.precision}")
 
-    dr = await ws.execute(
-        "grep mirage /gdrive/mirage/example.jsonl | head -n 3", provision=True)
+    dr = await ws.shell("grep mirage /gdrive/mirage/example.jsonl | head -n 3",
+                        provision=True)
     print("\n--- plan: grep mirage ... | head -n 3 ---")
     print(f"  op: {dr.op}, children: {len(dr.children)}")
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
@@ -63,7 +63,7 @@ async def main():
         net, cache = c.network_read, c.cache_read
         print(f"    {c.command}: net={net}, cache={cache}, {c.precision}")
 
-    dr = await ws.execute(
+    dr = await ws.shell(
         "grep mirage /gdrive/mirage/example.jsonl && echo found",
         provision=True)
     print("\n--- plan: grep ... && echo found ---")
@@ -75,12 +75,12 @@ async def main():
 
     # ── cache-aware plan ──
     print("\n--- caching: cat /gdrive/mirage/example.jsonl | wc -l ---")
-    result = await ws.execute("cat /gdrive/mirage/example.jsonl | wc -l")
+    result = await ws.shell("cat /gdrive/mirage/example.jsonl | wc -l")
     print(f"  lines: {(await result.stdout_str()).strip()}")
     print(f"  Stats after caching: {ops_summary()}")
 
-    dr = await ws.execute("grep mirage /gdrive/mirage/example.jsonl",
-                          provision=True)
+    dr = await ws.shell("grep mirage /gdrive/mirage/example.jsonl",
+                        provision=True)
     print("\n--- plan after cache: grep mirage ... ---")
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
     print(f"  cache_hits: {dr.cache_hits}, read_ops: {dr.read_ops}")
@@ -91,7 +91,7 @@ async def main():
     print("--- grep mirage /gdrive/mirage/example.jsonl ---")
     output = await (
         await
-        ws.execute("grep mirage /gdrive/mirage/example.jsonl")).stdout_str()
+        ws.shell("grep mirage /gdrive/mirage/example.jsonl")).stdout_str()
     lines = output.strip().splitlines() if output.strip() else []
     print(f"  Matches: {len(lines)}")
     if lines:
@@ -101,7 +101,7 @@ async def main():
     # ── grep with limit ──
     print("\n--- grep -m 1 mirage /gdrive/mirage/example.jsonl ---")
     output = await (await
-                    ws.execute("grep -m 1 mirage /gdrive/mirage/example.jsonl")
+                    ws.shell("grep -m 1 mirage /gdrive/mirage/example.jsonl")
                     ).stdout_str()
     lines = output.strip().splitlines() if output.strip() else []
     print(f"  Matches: {len(lines)}")
@@ -109,15 +109,14 @@ async def main():
 
     # ── pipe: grep | wc -l ──
     print("\n--- grep mirage /gdrive/mirage/example.jsonl | wc -l ---")
-    result = await ws.execute(
-        "grep mirage /gdrive/mirage/example.jsonl | wc -l")
+    result = await ws.shell("grep mirage /gdrive/mirage/example.jsonl | wc -l")
     print(f"  Count: {(await result.stdout_str()).strip()}")
     print(f"  Exit code: {result.exit_code}")
     print(f"  Stats: {ops_summary()}")
 
     # ── pipe: grep | head ──
     print("\n--- grep mirage /gdrive/mirage/example.jsonl | head -n 3 ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "grep mirage /gdrive/mirage/example.jsonl | head -n 3")
     lines = (await result.stdout_str()).strip().splitlines()
     print(f"  Lines: {len(lines)}")
@@ -128,8 +127,8 @@ async def main():
     # ── pipe: cat | grep | sort | uniq ──
     print("\n--- cat /gdrive/mirage/example.jsonl"
           " | grep queue-operation | sort | uniq ---")
-    result = await ws.execute("cat /gdrive/mirage/example.jsonl"
-                              " | grep queue-operation | sort | uniq")
+    result = await ws.shell("cat /gdrive/mirage/example.jsonl"
+                            " | grep queue-operation | sort | uniq")
     lines = ((await result.stdout_str()).strip().splitlines() if
              (await result.stdout_str()).strip() else [])
     print(f"  Unique lines: {len(lines)}")
@@ -138,15 +137,15 @@ async def main():
     # ── pipe: grep | cut (extract field) ──
     print("\n--- rg queue-operation /gdrive/mirage/example.jsonl"
           " | head -n 5 | cut -d , -f 2 ---")
-    result = await ws.execute("rg queue-operation /gdrive/mirage/example.jsonl"
-                              " | head -n 5 | cut -d , -f 2")
+    result = await ws.shell("rg queue-operation /gdrive/mirage/example.jsonl"
+                            " | head -n 5 | cut -d , -f 2")
     print(f"  Fields:\n    {(await result.stdout_str()).strip()}")
     print(f"  Stats: {ops_summary()}")
 
     # ── && chain: grep && echo ──
     print("\n--- grep -m 1 mirage /gdrive/mirage/example.jsonl"
           " && echo 'found mirage' ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "grep -m 1 mirage /gdrive/mirage/example.jsonl && echo found")
     print(f"  Exit code: {result.exit_code}")
     print(
@@ -156,7 +155,7 @@ async def main():
     # ── || chain: grep nonexistent || echo fallback ──
     print("\n--- grep NONEXISTENT /gdrive/mirage/example.jsonl"
           " || echo 'not found' ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "grep NONEXISTENT /gdrive/mirage/example.jsonl || echo not_found")
     print(f"  Exit code: {result.exit_code}")
     print(f"  Output: {(await result.stdout_str()).strip()}")
@@ -165,7 +164,7 @@ async def main():
     # ── subshell: (grep | sort | uniq) | wc -l ──
     print("\n--- (grep queue-operation /gdrive/mirage/example.jsonl"
           " | sort | uniq) | wc -l ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "(grep queue-operation /gdrive/mirage/example.jsonl"
         " | sort | uniq) | wc -l")
     print(f"  Unique queue ops: {(await result.stdout_str()).strip()}")
@@ -174,19 +173,18 @@ async def main():
     # ── semicolon: multiple independent reads ──
     print("\n--- head -n 1 /gdrive/mirage/example.jsonl"
           " ; wc -l /gdrive/mirage/example.jsonl ---")
-    result = await ws.execute("head -n 1 /gdrive/mirage/example.jsonl"
-                              " ; wc -l /gdrive/mirage/example.jsonl")
+    result = await ws.shell("head -n 1 /gdrive/mirage/example.jsonl"
+                            " ; wc -l /gdrive/mirage/example.jsonl")
     print(f"  Output: {(await result.stdout_str()).strip()}")
     print(f"  Stats: {ops_summary()}")
 
     # ── lazy multi-pipe: grep | grep | head | cut ──
     print("\n--- lazy multi-pipe: grep | grep -v | head | cut ---")
-    result = await ws.execute(
-        "grep queue-operation /gdrive/mirage/example.jsonl"
-        " | grep -v error | head -n 2 | cut -d , -f 1")
+    result = await ws.shell("grep queue-operation /gdrive/mirage/example.jsonl"
+                            " | grep -v error | head -n 2 | cut -d , -f 1")
     print(f"  Output:\n    {(await result.stdout_str()).strip()}")
 
-    result_full = await ws.execute(
+    result_full = await ws.shell(
         "grep queue-operation /gdrive/mirage/example.jsonl"
         " | grep -v error | cut -d , -f 1")
     full_lines = (await result_full.stdout_str()).strip().splitlines()
@@ -194,8 +192,7 @@ async def main():
 
     # ── recursive search ──
     print("\n--- rg -l mirage /gdrive/mirage ---")
-    output = await (await
-                    ws.execute("rg -l mirage /gdrive/mirage")).stdout_str()
+    output = await (await ws.shell("rg -l mirage /gdrive/mirage")).stdout_str()
     lines = output.strip().splitlines() if output.strip() else []
     print(f"  Files: {lines}")
     print(f"  Stats: {ops_summary()}")
@@ -204,16 +201,16 @@ async def main():
     print("\n=== GOOGLE NATIVE FILES ===\n")
 
     print("--- ls /gdrive (find native files) ---")
-    r = await ws.execute("ls /gdrive/ | head -n 20")
+    r = await ws.shell("ls /gdrive/ | head -n 20")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print("\n--- grep in Google Docs (.gdoc.json) ---")
-    r = await ws.execute("ls /gdrive/")
+    r = await ws.shell("ls /gdrive/")
     listing = (await r.stdout_str()).strip().splitlines()
     gdoc = next((f.strip() for f in listing if ".gdoc.json" in f), None)
     if gdoc:
         print(f"  Found doc: {gdoc}")
-        r = await ws.execute(f'grep -i "title" "/gdrive/{gdoc}"')
+        r = await ws.shell(f'grep -i "title" "/gdrive/{gdoc}"')
         out = (await r.stdout_str()).strip()
         if out:
             print(f"  grep title: {out[:120]}...")
@@ -225,7 +222,7 @@ async def main():
     if gsheet:
         print("\n--- grep in Google Sheets (.gsheet.json) ---")
         print(f"  Found sheet: {gsheet}")
-        r = await ws.execute(
+        r = await ws.shell(
             f'grep -i "properties" "/gdrive/{gsheet}" | head -n 3')
         out = (await r.stdout_str()).strip()
         if out:
@@ -236,7 +233,7 @@ async def main():
     if gslide:
         print("\n--- grep in Google Slides (.gslide.json) ---")
         print(f"  Found slide: {gslide}")
-        r = await ws.execute(f'grep -i "slide" "/gdrive/{gslide}" | head -n 3')
+        r = await ws.shell(f'grep -i "slide" "/gdrive/{gslide}" | head -n 3')
         out = (await r.stdout_str()).strip()
         if out:
             print(f"  grep slide: {out[:120]}...")
@@ -247,16 +244,15 @@ async def main():
 
     print("--- grep -c title in Google Doc (eager read) ---")
     if gdoc:
-        r = await ws.execute(f'grep -c title "/gdrive/{gdoc}"')
+        r = await ws.shell(f'grep -c title "/gdrive/{gdoc}"')
         print(f"  {gdoc}: {(await r.stdout_str()).strip()} matches")
 
     print("\n--- grep in regular file (streaming) ---")
-    r = await ws.execute("grep -c queue-operation /gdrive/mirage/example.jsonl"
-                         )
+    r = await ws.shell("grep -c queue-operation /gdrive/mirage/example.jsonl")
     print(f"  example.jsonl: {(await r.stdout_str()).strip()} matches")
 
     print("\n--- rg across mirage folder (regular files) ---")
-    r = await ws.execute("rg -l queue /gdrive/mirage/")
+    r = await ws.shell("rg -l queue /gdrive/mirage/")
     files = (await r.stdout_str()).strip().splitlines()
     print(f"  Files matching 'queue': {files}")
     print(f"  Stats: {ops_summary()}")
@@ -265,38 +261,38 @@ async def main():
     print("\n=== JQ QUERIES ===\n")
 
     print("--- jq .metadata ---")
-    result = await ws.execute("jq .metadata /gdrive/mirage/example.json")
+    result = await ws.shell("jq .metadata /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: all team names (nested [] iterator) ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "jq \".departments[].teams[].name\" /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: all employee names ---")
-    result = await ws.execute("jq \".departments[].teams[].members[].name\""
-                              " /gdrive/mirage/example.json")
+    result = await ws.shell("jq \".departments[].teams[].members[].name\""
+                            " /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: senior engineers on platform ---")
-    result = await ws.execute("jq \".departments[0].teams[0].members"
-                              " | map(select(.level == \\\"senior\\\"))"
-                              " | map(.name)\" /gdrive/mirage/example.json")
+    result = await ws.shell("jq \".departments[0].teams[0].members"
+                            " | map(select(.level == \\\"senior\\\"))"
+                            " | map(.name)\" /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: all active project names ---")
-    result = await ws.execute("jq \".departments[].teams[].projects"
-                              " | map(select(.status == \\\"active\\\"))"
-                              " | map(.name)\" /gdrive/mirage/example.json")
+    result = await ws.shell("jq \".departments[].teams[].projects"
+                            " | map(select(.status == \\\"active\\\"))"
+                            " | map(.name)\" /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: mirage project metrics ---")
-    result = await ws.execute("jq .departments[0].teams[0].projects[0].metrics"
-                              " /gdrive/mirage/example.json")
+    result = await ws.shell("jq .departments[0].teams[0].projects[0].metrics"
+                            " /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: total budget ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "jq .metadata.total_budget /gdrive/mirage/example.json")
     budget = (await result.stdout_str()).strip()
     if budget:
@@ -305,28 +301,28 @@ async def main():
         print("  (no output)")
 
     print("\n--- jq: vendor costs ---")
-    result = await ws.execute("jq \".vendor_contracts | map(.annual_cost)\""
-                              " /gdrive/mirage/example.json")
+    result = await ws.shell("jq \".vendor_contracts | map(.annual_cost)\""
+                            " /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: office locations ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "jq \".locations | map(.city)\" /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: all incident titles ---")
-    result = await ws.execute("jq \".departments[].teams[].incidents[].title\""
-                              " /gdrive/mirage/example.json")
+    result = await ws.shell("jq \".departments[].teams[].incidents[].title\""
+                            " /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- jq: OKR key results ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "jq \".okrs[0].objectives[0].key_results"
         " | map(.description)\" /gdrive/mirage/example.json")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- pipe: cat | jq (from cache) ---")
-    result = await ws.execute(
+    result = await ws.shell(
         "cat /gdrive/mirage/example.json | jq .metadata.version")
     print(f"  Version: {(await result.stdout_str()).strip()}")
 
@@ -334,22 +330,22 @@ async def main():
     print("\n=== SESSION: cd + export ===\n")
 
     print("--- cd /gdrive/mirage && ls ---")
-    await ws.execute("cd /gdrive/mirage")
-    result = await ws.execute("ls")
+    await ws.shell("cd /gdrive/mirage")
+    result = await ws.shell("ls")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- export + variable expansion ---")
-    await ws.execute("export SEARCH=mirage")
-    result = await ws.execute("grep $SEARCH example.jsonl | head -n 2")
+    await ws.shell("export SEARCH=mirage")
+    result = await ws.shell("grep $SEARCH example.jsonl | head -n 2")
     print(f"  {(await result.stdout_str()).strip()[:80]}...")
 
     print("\n--- printenv ---")
-    result = await ws.execute("printenv")
+    result = await ws.shell("printenv")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- plan: cd + grep ---")
-    await ws.execute("cd /gdrive/mirage")
-    dr = await ws.execute("grep mirage example.jsonl", provision=True)
+    await ws.shell("cd /gdrive/mirage")
+    dr = await ws.shell("grep mirage example.jsonl", provision=True)
     print(f"  network_read: {dr.network_read}, cache_read: {dr.cache_read}")
 
     # ── execution history: hidden recorder + GNU views ──
@@ -363,12 +359,12 @@ async def main():
     print(f"  Exit code: {entry['exit_code']}")
 
     print("\n  --- history (shell builtin, this session) ---")
-    r = await ws.execute("history 5")
+    r = await ws.shell("history 5")
     for line in (await r.stdout_str()).splitlines():
         print(f"  {line[:100]}")
 
     print("\n  --- tail -n 6 /.bash_history (all sessions, GNU file) ---")
-    r = await ws.execute("tail -n 6 /.bash_history")
+    r = await ws.shell("tail -n 6 /.bash_history")
     for line in (await r.stdout_str()).splitlines():
         print(f"  {line[:100]}")
 
@@ -380,7 +376,7 @@ async def main():
     print("\n=== BACKGROUND JOBS ===\n")
 
     print("--- launch two background greps ---")
-    r = await ws.execute(
+    r = await ws.shell(
         "grep mirage /gdrive/mirage/example.jsonl &"
         " grep queue-operation /gdrive/mirage/example.jsonl &",
         agent_id="demo-agent",
@@ -388,15 +384,15 @@ async def main():
     print(f"  Output: {(await r.stdout_str()).strip()}")
 
     print("\n--- ps: show running jobs ---")
-    r = await ws.execute("ps u")
+    r = await ws.shell("ps u")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print("\n--- jobs: list all ---")
-    r = await ws.execute("jobs")
+    r = await ws.shell("jobs")
     print(f"  {(await r.stdout_str()).strip()}")
 
     print("\n--- wait %1: get first grep result ---")
-    r = await ws.execute("wait %1")
+    r = await ws.shell("wait %1")
     lines = (await r.stdout_str()).strip().splitlines() if (
         await r.stdout_str()).strip() else []
     print(f"  Matches: {len(lines)}, exit_code: {r.exit_code}")
@@ -404,33 +400,33 @@ async def main():
         print(f"  First: {lines[0][:80]}...")
 
     print("\n--- wait %2: get second grep result ---")
-    r = await ws.execute("wait %2")
+    r = await ws.shell("wait %2")
     lines = (await r.stdout_str()).strip().splitlines() if (
         await r.stdout_str()).strip() else []
     print(f"  Matches: {len(lines)}, exit_code: {r.exit_code}")
 
     print("\n--- background pipe: grep | head & ---")
-    await ws.execute(
+    await ws.shell(
         "grep queue-operation /gdrive/mirage/example.jsonl | head -n 3 &")
-    r = await ws.execute("wait %3")
+    r = await ws.shell("wait %3")
     print(f"  Output:\n    {(await r.stdout_str()).strip()}")
 
     print("\n--- kill demo ---")
-    await ws.execute("grep mirage /gdrive/mirage/example.jsonl &")
-    await ws.execute("kill %4")
-    r = await ws.execute("wait %4")
+    await ws.shell("grep mirage /gdrive/mirage/example.jsonl &")
+    await ws.shell("kill %4")
+    r = await ws.shell("wait %4")
     print(f"  Exit code after kill: {r.exit_code}")
 
     print("\n--- wait || fallback pattern ---")
-    await ws.execute("grep NONEXISTENT /gdrive/mirage/example.jsonl &")
-    await ws.execute("grep mirage /gdrive/mirage/example.jsonl &")
-    r = await ws.execute("wait %5 || wait %6")
+    await ws.shell("grep NONEXISTENT /gdrive/mirage/example.jsonl &")
+    await ws.shell("grep mirage /gdrive/mirage/example.jsonl &")
+    r = await ws.shell("wait %5 || wait %6")
     lines = (await r.stdout_str()).strip().splitlines() if (
         await r.stdout_str()).strip() else []
     print(f"  Fallback matches: {len(lines)}")
 
     print("\n--- jobs after all done ---")
-    r = await ws.execute("jobs")
+    r = await ws.shell("jobs")
     print(f"  {(await r.stdout_str()).strip() or '(empty)'}")
 
     print("\n--- background job history ---")
@@ -446,11 +442,11 @@ async def main():
     print("\n=== BASH HISTORY ===\n")
 
     print("--- ls -a / (dotfile view) ---")
-    result = await ws.execute("ls -a /")
+    result = await ws.shell("ls -a /")
     print(f"  {(await result.stdout_str()).strip()}")
 
     print("\n--- grep grep /.bash_history | head -n 3 ---")
-    result = await ws.execute("grep grep /.bash_history | head -n 3")
+    result = await ws.shell("grep grep /.bash_history | head -n 3")
     for line in (await result.stdout_str()).strip().splitlines():
         print(f"  {line[:120]}")
 

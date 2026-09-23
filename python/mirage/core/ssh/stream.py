@@ -43,7 +43,7 @@ async def read_stream(accessor: SSHAccessor,
 
 async def range_read(accessor: SSHAccessor, path: PathSpec, start: int,
                      end: int) -> bytes:
-    """Read a byte range, in the resource API's end-exclusive spelling.
+    """Read a byte range, in the VFS API's end-exclusive spelling.
 
     Args:
         accessor (SSHAccessor): SSH accessor.

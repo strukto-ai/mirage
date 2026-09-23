@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { Resource } from '../resource/base.ts'
+import type { VFS } from '../vfs/base.ts'
 import type { PathSpec } from '../types.ts'
 import { enotsup, type MissingOpError } from '../utils/errors.ts'
 
@@ -34,7 +34,7 @@ export type OpFn = (
 /* eslint-disable @typescript-eslint/no-invalid-void-type */
 export interface RegisteredOp {
   name: string
-  resource: string | null
+  vfs: string | null
   filetype: string | null
   fn(
     this: void,
@@ -48,7 +48,7 @@ export interface RegisteredOp {
 /* eslint-enable @typescript-eslint/no-invalid-void-type */
 
 export interface OpOptions {
-  resource: string | string[]
+  vfs: string | string[]
   filetype?: string | null
   write?: boolean
 }
@@ -61,17 +61,17 @@ interface OpCarrier {
 
 export function op(name: string, options: OpOptions) {
   return function methodDecorator(target: OpFn, _context: ClassMethodDecoratorContext): void {
-    const resources = Array.isArray(options.resource) ? options.resource : [options.resource]
+    const vfsNames = Array.isArray(options.vfs) ? options.vfs : [options.vfs]
     const carrier = target as OpFn & OpCarrier
     let list = carrier[REGISTERED_OPS]
     if (!list) {
       list = []
       carrier[REGISTERED_OPS] = list
     }
-    for (const r of resources) {
+    for (const r of vfsNames) {
       list.push({
         name,
-        resource: r,
+        vfs: r,
         filetype: options.filetype ?? null,
         fn: target,
         write: options.write ?? false,
@@ -82,42 +82,38 @@ export function op(name: string, options: OpOptions) {
 
 export class OpsRegistry {
   private readonly registered = new Map<string, RegisteredOp>()
-  private readonly owners = new Map<string, Resource>()
-  private readonly scoped = new WeakMap<Resource, Map<string, RegisteredOp>>()
+  private readonly owners = new Map<string, VFS>()
+  private readonly scoped = new WeakMap<VFS, Map<string, RegisteredOp>>()
 
   register(ro: RegisteredOp): void {
-    const key = keyFor(ro.name, ro.filetype, ro.resource)
+    const key = keyFor(ro.name, ro.filetype, ro.vfs)
     this.registered.set(key, ro)
     this.owners.delete(key)
   }
 
-  unregisterResource(resourceKind: string | Resource): void {
+  unregisterVfs(vfsKind: string | VFS): void {
     for (const [key, ro] of this.registered) {
-      if (
-        typeof resourceKind === 'string'
-          ? ro.resource === resourceKind
-          : this.owners.get(key) === resourceKind
-      ) {
+      if (typeof vfsKind === 'string' ? ro.vfs === vfsKind : this.owners.get(key) === vfsKind) {
         this.registered.delete(key)
         this.owners.delete(key)
       }
     }
   }
 
-  registerResource(resource: Resource, overwrite = true): void {
-    const entries = this.collectResource(resource)
-    this.scoped.set(resource, entries)
+  registerVfs(vfs: VFS, overwrite = true): void {
+    const entries = this.collectVfs(vfs)
+    this.scoped.set(vfs, entries)
     for (const [key, ro] of entries) {
       if (!overwrite && this.registered.has(key)) continue
       this.register(ro)
-      if (this.registered.get(key) === ro) this.owners.set(key, resource)
+      if (this.registered.get(key) === ro) this.owners.set(key, vfs)
     }
   }
 
-  private collectResource(resource: Resource): Map<string, RegisteredOp> {
+  private collectVfs(vfs: VFS): Map<string, RegisteredOp> {
     const entries = new Map<string, RegisteredOp>()
     const chain: object[] = []
-    let proto = Object.getPrototypeOf(resource) as object | null
+    let proto = Object.getPrototypeOf(vfs) as object | null
     while (proto !== null && proto !== Object.prototype) {
       chain.push(proto)
       proto = Object.getPrototypeOf(proto) as object | null
@@ -132,27 +128,27 @@ export class OpsRegistry {
         const carrier = method as OpFn & OpCarrier
         const ops = carrier[REGISTERED_OPS]
         if (!ops) continue
-        const bound = method.bind(resource) as OpFn
+        const bound = method.bind(vfs) as OpFn
         for (const ro of ops) {
-          entries.set(keyFor(ro.name, ro.filetype, ro.resource), { ...ro, fn: bound })
+          entries.set(keyFor(ro.name, ro.filetype, ro.vfs), { ...ro, fn: bound })
         }
       }
     }
-    for (const ro of resource.ops?.() ?? []) {
-      entries.set(keyFor(ro.name, ro.filetype, ro.resource), ro)
+    for (const ro of vfs.ops?.() ?? []) {
+      entries.set(keyFor(ro.name, ro.filetype, ro.vfs), ro)
     }
     return entries
   }
 
-  private entry(key: string, resource: Resource | null): RegisteredOp | null {
+  private entry(key: string, vfs: VFS | null): RegisteredOp | null {
     const registered = this.registered.get(key)
     if (registered === undefined) return null
     // Explicit registry overrides and removals remain authoritative.
-    if (resource === null || !this.owners.has(key)) return registered
-    let entries = this.scoped.get(resource)
+    if (vfs === null || !this.owners.has(key)) return registered
+    let entries = this.scoped.get(vfs)
     if (entries === undefined) {
-      entries = this.collectResource(resource)
-      this.scoped.set(resource, entries)
+      entries = this.collectVfs(vfs)
+      this.scoped.set(vfs, entries)
     }
     // An instance-bound operation from a sibling mount is never a fallback.
     return entries.get(key) ?? null
@@ -160,26 +156,26 @@ export class OpsRegistry {
 
   find(
     name: string,
-    resource: string | Resource | null,
+    vfs: string | VFS | null,
     filetype: string | null = null,
   ): RegisteredOp | null {
-    const owner = typeof resource === 'object' ? resource : null
-    const kind = typeof resource === 'object' ? (resource?.kind ?? null) : resource
+    const owner = typeof vfs === 'object' ? vfs : null
+    const kind = typeof vfs === 'object' ? (vfs?.kind ?? null) : vfs
     return this.entry(keyFor(name, filetype, kind), owner)
   }
 
-  resolve(name: string, resource: string, filetype: string | null = null): OpFn {
+  resolve(name: string, vfs: string, filetype: string | null = null): OpFn {
     if (filetype !== null) {
-      const specific = this.registered.get(keyFor(name, filetype, resource))
+      const specific = this.registered.get(keyFor(name, filetype, vfs))
       if (specific) return specific.fn
     }
-    const byResource = this.registered.get(keyFor(name, null, resource))
-    if (byResource) return byResource.fn
+    const byVfs = this.registered.get(keyFor(name, null, vfs))
+    if (byVfs) return byVfs.fn
     const global = this.registered.get(keyFor(name, null, null))
     if (global) return global.fn
     // No operand here; stamp code + op so callers can still test for the
     // capability gap by type instead of message text.
-    const err = new Error(`no op registered: ${name} for resource ${resource}`) as MissingOpError
+    const err = new Error(`no op registered: ${name} for VFS ${vfs}`) as MissingOpError
     err.code = 'ENOTSUP'
     err.op = name
     throw err
@@ -187,22 +183,22 @@ export class OpsRegistry {
 
   async call(
     name: string,
-    resourceKind: string | Resource,
+    vfsKind: string | VFS,
     accessor: Accessor,
     path: PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
   ): Promise<unknown> {
     const filetype = kwargs.filetype ?? null
-    const owner = typeof resourceKind === 'string' ? null : resourceKind
-    const kind = typeof resourceKind === 'string' ? resourceKind : resourceKind.kind
+    const owner = typeof vfsKind === 'string' ? null : vfsKind
+    const kind = typeof vfsKind === 'string' ? vfsKind : vfsKind.kind
     const levels: OpFn[] = []
     if (filetype !== null) {
       const specific = this.entry(keyFor(name, filetype, kind), owner)
       if (specific) levels.push(specific.fn)
     }
-    const byResource = this.entry(keyFor(name, null, kind), owner)
-    if (byResource) levels.push(byResource.fn)
+    const byVfs = this.entry(keyFor(name, null, kind), owner)
+    if (byVfs) levels.push(byVfs.fn)
     const global = this.entry(keyFor(name, null, null), owner)
     if (global) levels.push(global.fn)
 
@@ -226,14 +222,14 @@ export function registerOp(
   fn: OpFn,
   options: OpOptions,
 ): void {
-  const resources = Array.isArray(options.resource) ? options.resource : [options.resource]
+  const vfsNames = Array.isArray(options.vfs) ? options.vfs : [options.vfs]
   const filetype = options.filetype ?? null
   const write = options.write ?? false
-  for (const r of resources) {
-    registry.register({ name, resource: r, filetype, fn, write })
+  for (const r of vfsNames) {
+    registry.register({ name, vfs: r, filetype, fn, write })
   }
 }
 
-function keyFor(name: string, filetype: string | null, resource: string | null): string {
-  return `${name}\u0000${filetype ?? ''}\u0000${resource ?? ''}`
+function keyFor(name: string, filetype: string | null, vfs: string | null): string {
+  return `${name}\u0000${filetype ?? ''}\u0000${vfs ?? ''}`
 }

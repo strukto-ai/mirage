@@ -102,7 +102,7 @@ def test_forms_passthroughs_nest_by_discovery_resource():
 async def test_missing_required_flag_exits_2():
     ws = Workspace({})
     ws.register_cli("gws", GWS, CONFIG)
-    io = await ws.execute("gws gmail send --subject Hi --body yo")
+    io = await ws.shell("gws gmail send --subject Hi --body yo")
     assert io.exit_code == 2
     err = await materialize(io.stderr)
     assert err.startswith(b"gws gmail send: option '--to' is required")
@@ -113,7 +113,7 @@ async def test_missing_required_flag_exits_2():
 async def test_unknown_verb_uses_git_wording():
     ws = Workspace({})
     ws.register_cli("gws", GWS, CONFIG)
-    io = await ws.execute("gws drive bogus")
+    io = await ws.shell("gws drive bogus")
     assert io.exit_code == 1
     err = await materialize(io.stderr)
     assert err == (b"gws: 'bogus' is not a gws drive command. "

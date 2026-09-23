@@ -46,7 +46,7 @@ async def stream_any(accessor: MongoDBAccessor, path: PathSpec, *,
     return await mongodb_read(accessor, path, index)
 
 
-@command("cat", resource="mongodb", spec=SPECS["cat"])
+@command("cat", vfs="mongodb", spec=SPECS["cat"])
 async def cat(accessor: MongoDBAccessor, paths: list[PathSpec],
               texts: list[str],
               opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

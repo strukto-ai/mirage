@@ -20,7 +20,7 @@ from mirage.policy.types import AdmissionRules, CommandRule, Decision, Scope
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.constants import (CHILD_SHELL_FIELDS,
                                                 INHERITED_FIELDS,
                                                 TRANSIENT_FIELDS)
@@ -30,7 +30,7 @@ from mirage.workspace.session.state import seed_var, set_attr
 
 
 def test_session_defaults():
-    s = Session(session_id="test")
+    s = SessionState(session_id="test")
     assert s.session_id == "test"
     assert s.cwd == "/"
     # bash exports `$PWD` from startup, so even a session that never
@@ -42,18 +42,18 @@ def test_session_defaults():
 
 
 def test_session_custom_cwd():
-    s = Session(session_id="s1", cwd="/data")
+    s = SessionState(session_id="s1", cwd="/data")
     assert s.cwd == "/data"
 
 
 def test_session_env():
-    s = Session(session_id="s1", vars=vars_from_env({"A": "1", "B": "2"}))
+    s = SessionState(session_id="s1", vars=vars_from_env({"A": "1", "B": "2"}))
     assert s.env["A"] == "1"
     assert s.env["B"] == "2"
 
 
 def test_session_env_mutation():
-    s = Session(session_id="s1")
+    s = SessionState(session_id="s1")
     seed_var(s, "X", "hello")
     assert s.env["X"] == "hello"
     del s.vars["X"]
@@ -61,19 +61,19 @@ def test_session_env_mutation():
 
 
 def test_session_functions():
-    s = Session(session_id="s1")
+    s = SessionState(session_id="s1")
     s.functions["myfunc"] = []
     assert "myfunc" in s.functions
 
 
 def test_session_exit_code():
-    s = Session(session_id="s1")
+    s = SessionState(session_id="s1")
     s.last_exit_code = 42
     assert s.last_exit_code == 42
 
 
 def test_session_stdin_buffer():
-    s = Session(session_id="s1")
+    s = SessionState(session_id="s1")
     s._stdin_buffer = b"hello\n"
     assert s._stdin_buffer == b"hello\n"
     s._stdin_buffer = None
@@ -81,7 +81,9 @@ def test_session_stdin_buffer():
 
 
 def test_session_to_dict():
-    s = Session(session_id="s1", cwd="/data", vars=vars_from_env({"K": "V"}))
+    s = SessionState(session_id="s1",
+                     cwd="/data",
+                     vars=vars_from_env({"K": "V"}))
     d = s.to_dict()
     assert d["session_id"] == "s1"
     assert d["cwd"] == "/data"
@@ -98,7 +100,7 @@ def test_session_from_dict():
         },
         "created_at": 123.0
     }
-    s = Session.from_dict(d)
+    s = SessionState.from_dict(d)
     assert s.session_id == "s2"
     assert s.cwd == "/tmp"
     assert s.env["A"] == "1"
@@ -106,35 +108,35 @@ def test_session_from_dict():
 
 
 def test_session_roundtrip():
-    original = Session(session_id="rt",
-                       cwd="/x",
-                       vars=vars_from_env({"K": "V"}))
-    restored = Session.from_dict(original.to_dict())
+    original = SessionState(session_id="rt",
+                            cwd="/x",
+                            vars=vars_from_env({"K": "V"}))
+    restored = SessionState.from_dict(original.to_dict())
     assert restored.session_id == original.session_id
     assert restored.cwd == original.cwd
     assert restored.env == original.env
 
 
 def test_session_independent_envs():
-    s1 = Session(session_id="a")
-    s2 = Session(session_id="b")
+    s1 = SessionState(session_id="a")
+    s2 = SessionState(session_id="b")
     seed_var(s1, "X", "1")
     assert "X" not in s2.env
 
 
 def test_session_mount_modes_default_none():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     assert s.mount_modes is None
 
 
 def test_session_mount_modes_set():
     grants = {"/s3": MountMode.READ, "/slack": MountMode.WRITE}
-    s = Session(session_id="s", mount_modes=grants)
+    s = SessionState(session_id="s", mount_modes=grants)
     assert s.mount_modes == grants
 
 
 def test_fork_copies_every_field_including_mount_modes():
-    original = Session(
+    original = SessionState(
         session_id="orig",
         cwd="/disk",
         functions={"f": object()},
@@ -168,14 +170,14 @@ def test_fork_copies_every_field_including_mount_modes():
 
 
 def test_to_dict_round_trips_mount_modes():
-    s = Session(session_id="s",
-                mount_modes={
-                    "/s3": MountMode.READ,
-                    "/scratch": MountMode.WRITE,
-                })
+    s = SessionState(session_id="s",
+                     mount_modes={
+                         "/s3": MountMode.READ,
+                         "/scratch": MountMode.WRITE,
+                     })
     data = s.to_dict()
     assert data["mount_modes"] == {"/s3": "read", "/scratch": "write"}
-    restored = Session.from_dict(data)
+    restored = SessionState.from_dict(data)
     assert restored.mount_modes == {
         "/s3": MountMode.READ,
         "/scratch": MountMode.WRITE,
@@ -184,16 +186,16 @@ def test_to_dict_round_trips_mount_modes():
 
 
 def test_to_dict_omits_grants_when_unrestricted():
-    s = Session(session_id="s")
+    s = SessionState(session_id="s")
     data = s.to_dict()
     assert "mount_modes" not in data
-    assert Session.from_dict(data).mount_modes is None
+    assert SessionState.from_dict(data).mount_modes is None
 
 
 def test_fork_overrides_apply_without_mutating_original():
-    original = Session(session_id="orig",
-                       cwd="/disk",
-                       vars=vars_from_env({"FOO": "bar"}))
+    original = SessionState(session_id="orig",
+                            cwd="/disk",
+                            vars=vars_from_env({"FOO": "bar"}))
     forked = original.fork(cwd="/ram", vars=vars_from_env({"BAZ": "qux"}))
     assert forked.cwd == "/ram"
     # `$PWD` follows the caller-supplied cwd rather than staying stale.
@@ -206,25 +208,25 @@ def test_fork_drops_the_logical_cwd_when_the_caller_overrides_cwd():
     # A caller-supplied cwd has no typed spelling behind it, so carrying
     # the source's logical name over would make the fork's `pwd` describe
     # a directory it is not in -- the bug an `execute(cwd=...)` call hit.
-    original = Session(session_id="orig",
-                       cwd="/data/deep/real",
-                       logical_cwd="/data/lk")
+    original = SessionState(session_id="orig",
+                            cwd="/data/deep/real",
+                            logical_cwd="/data/lk")
     assert original.fork(cwd="/ram").logical_cwd is None
     assert original.fork().logical_cwd == "/data/lk"
 
 
 def test_fork_keeps_an_explicit_logical_cwd_beside_a_cwd_override():
-    original = Session(session_id="orig", cwd="/a")
+    original = SessionState(session_id="orig", cwd="/a")
     forked = original.fork(cwd="/data/deep/real", logical_cwd="/data/lk")
     assert forked.logical_cwd == "/data/lk"
 
 
 def test_fork_deep_copies_mutable_containers():
-    original = Session(session_id="orig",
-                       vars={
-                           "FOO": ShellVar("bar"),
-                           "A": ShellVar(["1"]),
-                       })
+    original = SessionState(session_id="orig",
+                            vars={
+                                "FOO": ShellVar("bar"),
+                                "A": ShellVar(["1"]),
+                            })
     forked = original.fork()
     seed_var(forked, "NEW", "leaked?")
     forked.arrays["A"].append("2")
@@ -233,25 +235,25 @@ def test_fork_deep_copies_mutable_containers():
 
 
 def test_every_field_is_classified_as_inherited_or_transient():
-    declared = {f.name for f in dataclasses.fields(Session)}
+    declared = {f.name for f in dataclasses.fields(SessionState)}
     classified = set(INHERITED_FIELDS) | set(TRANSIENT_FIELDS)
     assert declared == classified
 
 
 def test_child_shell_fields_are_a_subset_of_the_declared_fields():
-    declared = {f.name for f in dataclasses.fields(Session)}
+    declared = {f.name for f in dataclasses.fields(SessionState)}
     assert set(CHILD_SHELL_FIELDS) <= declared
 
 
 def test_fork_carries_every_inherited_field():
-    original = Session(session_id="orig", script_name="/data/run.sh")
+    original = SessionState(session_id="orig", script_name="/data/run.sh")
     assert original.fork().script_name == "/data/run.sh"
 
 
 def test_snapshot_and_restore_undo_a_child_shell():
-    session = Session(session_id="s",
-                      cwd="/data",
-                      vars=vars_from_env({"A": "1"}))
+    session = SessionState(session_id="s",
+                           cwd="/data",
+                           vars=vars_from_env({"A": "1"}))
     saved = session.snapshot()
     session.cwd = "/other"
     seed_var(session, "A", "2")
@@ -265,12 +267,12 @@ def test_snapshot_and_restore_undo_a_child_shell():
 
 
 def test_argv0_keeps_an_empty_script_name():
-    assert Session(session_id="s").argv0 == "mirage"
-    assert Session(session_id="s", script_name="").argv0 == ""
+    assert SessionState(session_id="s").argv0 == "mirage"
+    assert SessionState(session_id="s", script_name="").argv0 == ""
 
 
 def test_to_dict_carries_the_attributes_beside_the_values():
-    s = Session(session_id="s1")
+    s = SessionState(session_id="s1")
     seed_var(s, "PLAIN", "hello")
     s.vars["EXPO"] = ShellVar("world", frozenset({VarAttr.EXPORT}))
     s.vars["MARKED"] = ShellVar(None,
@@ -288,13 +290,13 @@ def test_var_attrs_is_written_even_when_empty():
     # with nothing in it. Written only when non-empty, a session whose
     # last attribute had been cleared serialized as a bare process
     # environment, and the reload re-exported everything it held.
-    s = Session(session_id="s1")
+    s = SessionState(session_id="s1")
     seed_var(s, "X", "secret")
     # `export -n PWD` clears the one attribute a fresh session carries.
     set_attr(s, "PWD", VarAttr.EXPORT, False)
     data = s.to_dict()
     assert data["var_attrs"] == {}
-    back = Session.from_dict(data)
+    back = SessionState.from_dict(data)
     assert back.vars["X"] == ShellVar("secret", frozenset())
     assert VarAttr.EXPORT not in back.vars["PWD"].attrs
 
@@ -304,11 +306,11 @@ def test_a_stored_session_round_trips_without_promoting_anything():
     # `from_dict` read `env` as a process environment, so one flush and
     # reload turned a plain `X=hello` into an exported one and shipped it
     # to every child runtime.
-    s = Session(session_id="s1")
+    s = SessionState(session_id="s1")
     seed_var(s, "PLAIN", "hello")
     s.vars["EXPO"] = ShellVar("world", frozenset({VarAttr.EXPORT}))
     s.vars["MARKED"] = ShellVar(None, frozenset({VarAttr.READONLY}))
-    back = Session.from_dict(s.to_dict())
+    back = SessionState.from_dict(s.to_dict())
     assert back.vars["PLAIN"] == ShellVar("hello", frozenset())
     assert back.vars["EXPO"] == ShellVar("world", frozenset({VarAttr.EXPORT}))
     assert back.vars["MARKED"] == ShellVar(None, frozenset({VarAttr.READONLY}))
@@ -319,7 +321,7 @@ def test_a_payload_with_no_attributes_is_read_as_a_process_environment():
     # values and no letters. That shape *is* a process environment, so
     # every name in it is exported -- which is what `ws.env = {...}` and
     # a cross-language handoff both mean.
-    back = Session.from_dict({"session_id": "x", "env": {"A": "1"}})
+    back = SessionState.from_dict({"session_id": "x", "env": {"A": "1"}})
     assert back.vars["A"] == ShellVar("1", frozenset({VarAttr.EXPORT}))
 
 
@@ -330,7 +332,7 @@ def test_session_command_tier_round_trips_through_the_record():
                                           paths=("/repo/*", ),
                                           mount="/repo"), ),
                          deny=(CommandRule(reason="no", commands=("rm", )), ))
-    s = Session(session_id="s1", commands=own)
+    s = SessionState(session_id="s1", commands=own)
     d = s.to_dict()
     assert d["commands"] == {
         "allow": ["ls", "git log"],
@@ -346,14 +348,15 @@ def test_session_command_tier_round_trips_through_the_record():
             "paths": []
         }],
     }
-    assert Session.from_dict(d).commands == own
+    assert SessionState.from_dict(d).commands == own
     # None means unstated and is not written; a tier without an allow
     # list writes allow as null, distinct from an empty list.
-    assert "commands" not in Session(session_id="s2").to_dict()
-    bare = Session(session_id="s3",
-                   commands=AdmissionRules(deny=(CommandRule(reason="x"), )))
+    assert "commands" not in SessionState(session_id="s2").to_dict()
+    bare = SessionState(
+        session_id="s3",
+        commands=AdmissionRules(deny=(CommandRule(reason="x"), )))
     assert bare.to_dict()["commands"]["allow"] is None
-    assert Session.from_dict(bare.to_dict()).commands == bare.commands
+    assert SessionState.from_dict(bare.to_dict()).commands == bare.commands
 
 
 def test_session_decisions_round_trip_through_the_record():
@@ -379,14 +382,14 @@ def test_session_decisions_round_trip_through_the_record():
                         reason="sign-off",
                         rule=rule,
                         outcome=Outcome.DENY))
-    s = Session(session_id="s1", decisions=records)
+    s = SessionState(session_id="s1", decisions=records)
     d = s.to_dict()
     assert [r["id"] for r in d["decisions"]] == ["d1", "d2"]
     assert [r["outcome"] for r in d["decisions"]] == ["allow", "deny"]
     assert [r["scope"] for r in d["decisions"]] == ["session", "once"]
-    assert Session.from_dict(d).decisions == records
+    assert SessionState.from_dict(d).decisions == records
     # Nothing held writes nothing, and a fork carries what is held.
-    assert "decisions" not in Session(session_id="s2").to_dict()
+    assert "decisions" not in SessionState(session_id="s2").to_dict()
     assert s.fork().decisions == records
 
 
@@ -454,23 +457,22 @@ def test_vars_from_entries_keeps_readonly_on_managed():
     assert out["T"].value is None
 
 
-def _managed_session() -> Session:
+def _managed_session() -> SessionState:
     exported = frozenset({VarAttr.EXPORT})
-    return Session(session_id="s1",
-                   vars={
-                       "FETCHED":
-                       ShellVar("s3cr3t",
-                                exported,
-                                managed=ManagedRef("aws-sm", "prod", "api",
-                                                   False)),
-                       "PENDING":
-                       ShellVar(None,
-                                exported,
-                                managed=ManagedRef("env", "", "PENDING",
-                                                   True)),
-                       "PLAIN":
-                       ShellVar("hello", frozenset()),
-                   })
+    return SessionState(
+        session_id="s1",
+        vars={
+            "FETCHED":
+            ShellVar("s3cr3t",
+                     exported,
+                     managed=ManagedRef("aws-sm", "prod", "api", False)),
+            "PENDING":
+            ShellVar(None,
+                     exported,
+                     managed=ManagedRef("env", "", "PENDING", True)),
+            "PLAIN":
+            ShellVar("hello", frozenset()),
+        })
 
 
 def test_managed_vars_serialize_as_pointers_never_values():
@@ -498,7 +500,7 @@ def test_managed_vars_serialize_as_pointers_never_values():
 
 
 def test_managed_vars_restore_declared_but_unfetched():
-    restored = Session.from_dict(_managed_session().to_dict())
+    restored = SessionState.from_dict(_managed_session().to_dict())
     for name, eager in (("FETCHED", False), ("PENDING", True)):
         var = restored.vars[name]
         assert var.value is None, name
@@ -513,13 +515,13 @@ def test_a_smuggled_value_for_a_managed_name_is_discarded_on_load():
     d = _managed_session().to_dict()
     tampered = dict(d)
     tampered["env"] = {**d["env"], "FETCHED": "planted"}
-    restored = Session.from_dict(tampered)
+    restored = SessionState.from_dict(tampered)
     assert restored.vars["FETCHED"].value is None
     assert restored.vars["FETCHED"].managed is not None
 
 
 def test_a_session_with_no_managed_vars_writes_no_managed_key():
-    s = Session(session_id="s2", vars=vars_from_env({"A": "1"}))
+    s = SessionState(session_id="s2", vars=vars_from_env({"A": "1"}))
     assert "managed" not in s.to_dict()
 
 
@@ -567,9 +569,9 @@ def test_vars_fields_never_writes_a_fetched_value():
 
 
 def test_session_profile_round_trips_and_is_omitted_when_none():
-    assert "profile" not in Session(session_id="a").to_dict()
-    original = Session(session_id="rt", profile="admin")
+    assert "profile" not in SessionState(session_id="a").to_dict()
+    original = SessionState(session_id="rt", profile="admin")
     data = original.to_dict()
     assert data["profile"] == "admin"
-    assert Session.from_dict(data).profile == "admin"
+    assert SessionState.from_dict(data).profile == "admin"
     assert original.fork().profile == "admin"

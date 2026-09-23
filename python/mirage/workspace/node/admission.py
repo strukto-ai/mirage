@@ -59,7 +59,7 @@ from mirage.workspace.node.inner_lines import Word, inner_lines
 from mirage.workspace.node.occurrence import (Frame, argv_frame, line_frame,
                                               occurrence_in, root_frame,
                                               whole_occurrence)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
 
 # The nodes a redirected statement may wrap whose last command is the
@@ -221,7 +221,8 @@ def policy_scopes(
     return scopes
 
 
-def _seen(session: Session, specs: list[PathSpec]) -> tuple[PathSpec, ...]:
+def _seen(session: SessionState,
+          specs: list[PathSpec]) -> tuple[PathSpec, ...]:
     """The paths of a line the session can see.
 
     A hidden path is nonexistent for the session, so no policy may
@@ -231,7 +232,7 @@ def _seen(session: Session, specs: list[PathSpec]) -> tuple[PathSpec, ...]:
     door, which answers ENOENT like any other absent path.
 
     Args:
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         specs (list[PathSpec]): the paths as the gate collected them.
     """
     return tuple(p for p in specs if session_path_allowed(session, p.virtual))
@@ -241,7 +242,7 @@ async def gate(
     name: str,
     args: list[str],
     operands: Sequence[str | PathSpec],
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str = "",
@@ -262,7 +263,7 @@ async def gate(
         name (str): command name, expanded.
         args (list[str]): the words after it.
         operands (Sequence[str | PathSpec]): the same words, classified.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies and the
             CLI installs.
         namespace (Namespace | None): the link table.
@@ -317,7 +318,7 @@ async def admit(
     name: str,
     args: list[str],
     operands: Sequence[str | PathSpec],
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str = "",
@@ -345,7 +346,7 @@ async def admit(
         name (str): command name, expanded.
         args (list[str]): the words after it.
         operands (Sequence[str | PathSpec]): the same words, classified.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
@@ -435,7 +436,7 @@ def _unreadable(raw: str) -> str:
 
 
 def _word_hints(
-    line: list[str], session: Session, registry: MountRegistry
+    line: list[str], session: SessionState, registry: MountRegistry
 ) -> tuple[list[ValueType | None] | None, list[str | None] | None]:
     """The spec's per-position classification hints for a literal line,
     the way ``expand_argv`` computes them for an expanded one.
@@ -447,7 +448,7 @@ def _word_hints(
 
     Args:
         line (list[str]): the literal words, name first.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the specs.
     """
     consumed = registry.match_command_prefix(line)
@@ -466,7 +467,7 @@ def _word_hints(
     return word_kinds, word_bases
 
 
-def classified_words(name: str, args: list[str], session: Session,
+def classified_words(name: str, args: list[str], session: SessionState,
                      registry: MountRegistry) -> list[str | PathSpec]:
     """One command's literal words, classified the way the runtime would
     classify them, so the gate and the run name the same paths.
@@ -474,7 +475,7 @@ def classified_words(name: str, args: list[str], session: Session,
     Args:
         name (str): the head word.
         args (list[str]): the words after it.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the specs.
     """
     line = [name, *args]
@@ -511,7 +512,7 @@ def redirect_paths(words: Sequence[Word], registry: MountRegistry,
 async def _admit_words(
     words: list[Word],
     open_: bool,
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str,
@@ -527,7 +528,7 @@ async def _admit_words(
         words (list[Word]): the command's words, name first.
         open_ (bool): whether the runtime appends operands the gate
             cannot read (``xargs``, ``find -exec``).
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.
@@ -612,7 +613,7 @@ async def _admit_words(
 
 async def admit_line(
     ast: Any,
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
     agent_id: str = "",
@@ -658,7 +659,7 @@ async def admit_line(
 
     Args:
         ast (Any): the parsed tree-sitter root node.
-        session (Session): the session running the line.
+        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
         namespace (Namespace | None): the link table.

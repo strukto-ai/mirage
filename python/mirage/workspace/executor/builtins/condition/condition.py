@@ -26,7 +26,7 @@ from mirage.workspace.executor.builtins.condition.types import (CondContext,
                                                                 CondNode)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
@@ -35,7 +35,7 @@ async def handle_test(
     dispatch: DispatchFn,
     namespace: Namespace,
     args: list[str | PathSpec] | CondNode,
-    session: Session,
+    session: SessionState,
     name: str = "test",
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -46,7 +46,7 @@ async def handle_test(
         namespace (Namespace): addressing authority (symlink table).
         args (list[str | PathSpec] | CondNode): flat operands for
             test/[, a CondNode tree for [[.
-        session (Session): session for cwd, env, and BASH_REMATCH.
+        session (SessionState): session for cwd, env, and BASH_REMATCH.
         name (str): invocation name for diagnostics: "test", "[", "[[".
         view (SessionView | None): the session plane's gated door, for
             an assignment inside a numeric operand.

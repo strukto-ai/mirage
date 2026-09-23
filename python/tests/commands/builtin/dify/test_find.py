@@ -83,8 +83,7 @@ async def test_find_uses_cwd_when_path_missing(monkeypatch, dify_accessor,
 async def test_find_resolves_glob_patterns(monkeypatch, dify_accessor,
                                            dify_index):
     monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
-    path = PathSpec(resource_path=mount_key("/knowledge/guides/*.md",
-                                            "/knowledge"),
+    path = PathSpec(vfs_path=mount_key("/knowledge/guides/*.md", "/knowledge"),
                     virtual="/knowledge/guides/*.md",
                     directory="/knowledge/guides",
                     pattern="*.md",

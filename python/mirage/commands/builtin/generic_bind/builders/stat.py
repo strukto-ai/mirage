@@ -28,7 +28,7 @@ async def stat(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
-        raise ValueError("stat: no resource")
+        raise ValueError("stat: no VFS")
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
     stat_fn = bound_op(ops.stat, accessor, opts.index)
     overlay = opts.ns.stat_overlay if opts.ns is not None else None

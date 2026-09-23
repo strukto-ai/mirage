@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GDocsResource, GWS, MountMode, Workspace, type FileStat, type GDocsConfig } from '@struktoai/mirage-node'
+import { GDocsVFS, GWS, MountMode, Workspace, type FileStat, type GDocsConfig } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../.env.development'), override: true })
@@ -32,7 +32,7 @@ function buildConfig(): GDocsConfig {
 
 async function run(ws: Workspace, cmd: string): Promise<{ out: string; err: string; code: number }> {
   try {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
   } catch (err) {
     return { out: '', err: err instanceof Error ? err.message : String(err), code: 1 }
@@ -47,8 +47,8 @@ function printOut(label: string, out: string, err: string, max = 500): void {
 
 async function main(): Promise<void> {
   const config = buildConfig()
-  const resource = new GDocsResource(config)
-  const ws = new Workspace({ '/gdocs': resource }, { mode: MountMode.WRITE })
+  const vfs = new GDocsVFS(config)
+  const ws = new Workspace({ '/gdocs': vfs }, { mode: MountMode.WRITE })
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })
   try {
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /gdocs/owned/${first} ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/gdocs/owned/${first}" && chown 500:dev "/gdocs/owned/${first}" && touch -t 202601021530 "/gdocs/owned/${first}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

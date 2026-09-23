@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { DiskResource } from '../resource/disk/disk.ts'
+import { DiskVFS } from '../vfs/disk/disk.ts'
 import { Workspace } from '../workspace.ts'
 
 const DEC = new TextDecoder()
@@ -28,7 +28,7 @@ describe('disk streaming commands on missing files', () => {
 
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), 'mirage-missing-'))
-    ws = new Workspace({ '/disk': new DiskResource({ root }) }, { mode: MountMode.WRITE })
+    ws = new Workspace({ '/disk': new DiskVFS({ root }) }, { mode: MountMode.WRITE })
   })
 
   afterEach(async () => {
@@ -37,23 +37,23 @@ describe('disk streaming commands on missing files', () => {
   })
 
   it('cat /missing returns exit=1 with stderr', async () => {
-    const res = await ws.execute('cat /disk/missing.txt')
+    const res = await ws.shell('cat /disk/missing.txt')
     expect(res.exitCode).toBe(1)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
 
   it('cat /missing.txt; echo after=$? yields after=1', async () => {
-    const res = await ws.execute('cat /disk/missing.txt; echo after=$?')
+    const res = await ws.shell('cat /disk/missing.txt; echo after=$?')
     expect(DEC.decode(res.stdout)).toBe('after=1\n')
   })
 
   it('cat /missing || echo fallback runs fallback', async () => {
-    const res = await ws.execute('cat /disk/missing.txt || echo fallback')
+    const res = await ws.shell('cat /disk/missing.txt || echo fallback')
     expect(DEC.decode(res.stdout)).toBe('fallback\n')
   })
 
   it('head /missing.txt returns exit=1', async () => {
-    const res = await ws.execute('head /disk/missing.txt')
+    const res = await ws.shell('head /disk/missing.txt')
     expect(res.exitCode).toBe(1)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
@@ -61,19 +61,19 @@ describe('disk streaming commands on missing files', () => {
   // GNU grep exits 2 for an operand it could not search, unlike the read
   // commands around it, which exit 1.
   it('grep pat /missing.txt returns exit=2', async () => {
-    const res = await ws.execute('grep foo /disk/missing.txt')
+    const res = await ws.shell('grep foo /disk/missing.txt')
     expect(res.exitCode).toBe(2)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
 
   it('tail /missing.txt returns exit=1', async () => {
-    const res = await ws.execute('tail /disk/missing.txt')
+    const res = await ws.shell('tail /disk/missing.txt')
     expect(res.exitCode).toBe(1)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
 
   it('wc /missing.txt returns exit=1', async () => {
-    const res = await ws.execute('wc /disk/missing.txt')
+    const res = await ws.shell('wc /disk/missing.txt')
     expect(res.exitCode).toBe(1)
     expect(DEC.decode(res.stderr)).toMatch(/No such file or directory/)
   })
@@ -81,21 +81,21 @@ describe('disk streaming commands on missing files', () => {
   it('cat works on existing disk file', async () => {
     await mkdir(root, { recursive: true })
     await writeFile(path.join(root, 'hello.txt'), 'hello\n')
-    const res = await ws.execute('cat /disk/hello.txt')
+    const res = await ws.shell('cat /disk/hello.txt')
     expect(res.exitCode).toBe(0)
     expect(DEC.decode(res.stdout)).toBe('hello\n')
   })
 
   it('head works on existing disk file', async () => {
     await writeFile(path.join(root, 'lines.txt'), 'a\nb\nc\n')
-    const res = await ws.execute('head -n 2 /disk/lines.txt')
+    const res = await ws.shell('head -n 2 /disk/lines.txt')
     expect(res.exitCode).toBe(0)
     expect(DEC.decode(res.stdout)).toBe('a\nb\n')
   })
 
   it('grep works on existing disk file', async () => {
     await writeFile(path.join(root, 'words.txt'), 'foo\nbar\nfoo baz\n')
-    const res = await ws.execute('grep foo /disk/words.txt')
+    const res = await ws.shell('grep foo /disk/words.txt')
     expect(res.exitCode).toBe(0)
     expect(DEC.decode(res.stdout)).toMatch(/foo/)
   })

@@ -17,7 +17,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_cat_single_file(databricks_text_workspace):
-    io = await databricks_text_workspace.execute("cat /dbx/words.txt")
+    io = await databricks_text_workspace.shell("cat /dbx/words.txt")
 
     assert io.exit_code == 0
     assert io.stdout == b"beta\nalpha\nalpha\n"
@@ -25,7 +25,7 @@ async def test_cat_single_file(databricks_text_workspace):
 
 @pytest.mark.asyncio
 async def test_cat_multiple_files_concatenated(databricks_text_workspace):
-    io = await databricks_text_workspace.execute(
+    io = await databricks_text_workspace.shell(
         "cat /dbx/words.txt /dbx/more.txt")
 
     assert io.exit_code == 0
@@ -34,7 +34,7 @@ async def test_cat_multiple_files_concatenated(databricks_text_workspace):
 
 @pytest.mark.asyncio
 async def test_cat_n_numbers_lines(databricks_text_workspace):
-    io = await databricks_text_workspace.execute("cat -n /dbx/words.txt")
+    io = await databricks_text_workspace.shell("cat -n /dbx/words.txt")
 
     assert io.exit_code == 0
     assert io.stdout == b"     1\tbeta\n     2\talpha\n     3\talpha\n"

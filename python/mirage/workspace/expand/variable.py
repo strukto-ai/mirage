@@ -31,7 +31,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
-from mirage.workspace.session import (Session, ensure_var_visible,
+from mirage.workspace.session import (SessionState, ensure_var_visible,
                                       visible_arrays, visible_env)
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.errors import ReadonlyVariableError
@@ -83,7 +83,7 @@ def _unbound(var: str) -> ExitSignal:
                       contained_code=1)
 
 
-def guard_expansion_write(session: Session, *names: str) -> None:
+def guard_expansion_write(session: SessionState, *names: str) -> None:
     """Refuse expansion-time writes that name hidden variables.
 
     ``${X:=d}`` and ``$((X=5))`` land on the raw session env rather
@@ -92,7 +92,7 @@ def guard_expansion_write(session: Session, *names: str) -> None:
     fatal expansion-error shape ``${var:?}`` uses.
 
     Args:
-        session (Session): shell session the write would land on.
+        session (SessionState): shell session the write would land on.
         *names (str): the variable names about to be written.
 
     Raises:
@@ -120,7 +120,7 @@ def _write_refusal(exc: PolicyDenied | ArithError) -> ExitSignal:
     return ExitSignal(1, stderr=f"bash: {why}\n".encode(), contained_code=1)
 
 
-async def _expansion_index(session: Session, view: SessionView | None,
+async def _expansion_index(session: SessionState, view: SessionView | None,
                            subscript: str) -> int:
     """``subscript_index`` in the expansion's voice.
 
@@ -129,7 +129,7 @@ async def _expansion_index(session: Session, view: SessionView | None,
     refused one dies the way ``expansion_write``'s does.
 
     Args:
-        session (Session): the session the subscript reads.
+        session (SessionState): the session the subscript reads.
         view (SessionView | None): the gated door; None outside a
             workspace.
         subscript (str): the raw subscript text.
@@ -140,7 +140,7 @@ async def _expansion_index(session: Session, view: SessionView | None,
         raise _write_refusal(exc) from exc
 
 
-async def land_arith_writes(session: Session, view: SessionView | None,
+async def land_arith_writes(session: SessionState, view: SessionView | None,
                             writes: tuple[ArithWrite,
                                           ...], reader: RandomReader) -> None:
     """Land an arithmetic expansion's assignments and settle its draws.
@@ -152,7 +152,7 @@ async def land_arith_writes(session: Session, view: SessionView | None,
     binds each assignment as it is made.
 
     Args:
-        session (Session): the shell session.
+        session (SessionState): the shell session.
         view (SessionView | None): the gated door; None outside a
             workspace.
         writes (tuple[ArithWrite, ...]): the assignments, in order.
@@ -164,7 +164,7 @@ async def land_arith_writes(session: Session, view: SessionView | None,
     reader.settle()
 
 
-async def expansion_write(session: Session, view: SessionView | None,
+async def expansion_write(session: SessionState, view: SessionView | None,
                           name: str, key: str | None, value: str) -> None:
     """One expansion-time write, through the session plane's door.
 
@@ -187,7 +187,7 @@ async def expansion_write(session: Session, view: SessionView | None,
     arrives with its key already canonical.
 
     Args:
-        session (Session): shell session the write lands on.
+        session (SessionState): shell session the write lands on.
         view (SessionView | None): the session plane's gated door,
             None outside a workspace.
         name (str): the variable being written.
@@ -218,14 +218,14 @@ async def expansion_write(session: Session, view: SessionView | None,
 
 
 def _lookup_var(var: str,
-                session: Session,
+                session: SessionState,
                 call_stack: CallStack | None,
                 strict: bool = True) -> str:
     """Resolve one variable name to its value.
 
     Args:
         var (str): variable name (plain name, digit, or special).
-        session (Session): shell session (env, arrays, positionals).
+        session (SessionState): shell session (env, arrays, positionals).
         call_stack (CallStack | None): function-call scope, if any.
         strict (bool): honor ``set -u`` — an unset plain name or
             positional raises; the defaulting operators (``:-`` family)
@@ -431,13 +431,13 @@ def _ref_end(text: str, start: int) -> tuple[str, int] | None:
     return name, k
 
 
-def _dquoted_pattern(inner: str, session: Session,
+def _dquoted_pattern(inner: str, session: SessionState,
                      call_stack: CallStack | None) -> str:
     """A double-quoted pattern segment: everything in it is literal.
 
     Args:
         inner (str): the text between the double quotes.
-        session (Session): shell session for name resolution.
+        session (SessionState): shell session for name resolution.
         call_stack (CallStack | None): function-call scope, if any.
     """
     out: list[str] = []
@@ -461,7 +461,7 @@ def _dquoted_pattern(inner: str, session: Session,
     return "".join(out)
 
 
-def _pattern_text(text: str, session: Session,
+def _pattern_text(text: str, session: SessionState,
                   call_stack: CallStack | None) -> str:
     """Render an opaque pattern token with bash quoting semantics.
 
@@ -476,7 +476,7 @@ def _pattern_text(text: str, session: Session,
 
     Args:
         text (str): the raw pattern text.
-        session (Session): shell session for name resolution.
+        session (SessionState): shell session for name resolution.
         call_stack (CallStack | None): function-call scope, if any.
     """
     if not any(c in text for c in "$\\'\""):
@@ -522,7 +522,7 @@ def _pattern_text(text: str, session: Session,
 
 
 async def _expand_operand(node: TSNodeLike, expand_child: ExpandChild,
-                          pattern_mode: bool, session: Session,
+                          pattern_mode: bool, session: SessionState,
                           call_stack: CallStack | None) -> str:
     if node.type == NT.CONCATENATION:
         return await _expand_group(tuple(node.children), expand_child,
@@ -537,9 +537,10 @@ async def _expand_operand(node: TSNodeLike, expand_child: ExpandChild,
     return await expand_child(node)
 
 
-async def _expand_group(nodes: tuple[TSNodeLike, ...],
-                        expand_child: ExpandChild, pattern_mode: bool,
-                        session: Session, call_stack: CallStack | None) -> str:
+async def _expand_group(nodes: tuple[TSNodeLike,
+                                     ...], expand_child: ExpandChild,
+                        pattern_mode: bool, session: SessionState,
+                        call_stack: CallStack | None) -> str:
     """Expand adjacent operand nodes, preserving inter-node whitespace.
 
     ``${x:?custom msg}`` carries its message as sibling nodes whose gap
@@ -687,13 +688,13 @@ class _ArithOperand:
     (``${v:a[0]}``).
 
     Args:
-        session (Session): the session the operands read.
+        session (SessionState): the session the operands read.
     """
 
     __slots__ = ("session", "reader", "writes", "ref", "_pending",
                  "_pending_elems")
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: SessionState) -> None:
         self.session = session
         self.reader = random_reader(session)
         self.writes: list[ArithWrite] = []
@@ -784,14 +785,14 @@ _LAZY_OPS = frozenset({"?", ":?", "=", ":=", ":-", "-", ":+", "+"})
 
 
 async def _operator_word(p: _BraceParse, expand_child: ExpandChild,
-                         session: Session,
+                         session: SessionState,
                          call_stack: CallStack | None) -> str:
     """The word of a conditional operator, expanded now that it is needed.
 
     Args:
         p (_BraceParse): the parsed expansion.
         expand_child (ExpandChild): nested-node expander.
-        session (Session): shell session.
+        session (SessionState): shell session.
         call_stack (CallStack | None): function-call scope, if any.
     """
     if not p.groups:
@@ -838,7 +839,7 @@ def _value_op(op: str, val: str, groups: list[str],
 
 
 async def expand_braces(node: TSNodeLike,
-                        session: Session,
+                        session: SessionState,
                         call_stack: CallStack | None,
                         expand_child: ExpandChild,
                         view: SessionView | None = None) -> str:
@@ -851,7 +852,7 @@ async def expand_braces(node: TSNodeLike,
 
     Args:
         node (TSNodeLike): the ``expansion`` tree-sitter node.
-        session (Session): shell session (env, arrays, positionals).
+        session (SessionState): shell session (env, arrays, positionals).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): callback that expands a nested node
             (dependency-injected to avoid a cycle with ``expand_node``).
@@ -873,7 +874,7 @@ async def expand_braces(node: TSNodeLike,
     return value
 
 
-async def _expand_braces(node: TSNodeLike, session: Session,
+async def _expand_braces(node: TSNodeLike, session: SessionState,
                          call_stack: CallStack | None,
                          expand_child: ExpandChild, view: SessionView | None,
                          operand: _ArithOperand) -> str:
@@ -1112,12 +1113,12 @@ def _is_at_splat(p: _BraceParse) -> bool:
     return p.subscript is None and p.var_name == "@"
 
 
-def _positional_args(session: Session,
+def _positional_args(session: SessionState,
                      call_stack: CallStack | None) -> list[str]:
     """The positional parameters in scope, function args winning.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         call_stack (CallStack | None): function-call scope, if any.
     """
     if call_stack and call_stack.get_all_positional():
@@ -1153,7 +1154,7 @@ def is_multiword_at(node: TSNodeLike) -> bool:
 
 
 async def expand_array_at(node: TSNodeLike,
-                          session: Session,
+                          session: SessionState,
                           call_stack: CallStack | None,
                           expand_child: ExpandChild,
                           view: SessionView | None = None) -> list[str]:
@@ -1167,7 +1168,7 @@ async def expand_array_at(node: TSNodeLike,
 
     Args:
         node (TSNodeLike): the ``expansion`` node.
-        session (Session): shell session (arrays, env).
+        session (SessionState): shell session (arrays, env).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): nested-node expander for op operands.
         view (SessionView | None): the gated door the slice's writes
@@ -1186,7 +1187,7 @@ async def expand_array_at(node: TSNodeLike,
     return words
 
 
-async def _expand_array_at(node: TSNodeLike, session: Session,
+async def _expand_array_at(node: TSNodeLike, session: SessionState,
                            call_stack: CallStack | None,
                            expand_child: ExpandChild,
                            operand: _ArithOperand) -> list[str]:

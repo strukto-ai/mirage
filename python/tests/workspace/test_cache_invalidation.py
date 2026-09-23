@@ -19,8 +19,8 @@ import boto3
 import pytest
 from moto.server import ThreadedMotoServer
 
-from mirage.resource.s3.s3 import S3Config, S3Resource
 from mirage.types import MountMode
+from mirage.vfs.s3.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 
 CREDS = dict(aws_access_key_id="testing",
@@ -40,7 +40,7 @@ def s3_endpoint() -> Iterator[str]:
 def _s3_workspace(endpoint: str, bucket: str) -> Workspace:
     boto3.client("s3", endpoint_url=endpoint,
                  **CREDS).create_bucket(Bucket=bucket)
-    s3 = S3Resource(
+    s3 = S3VFS(
         S3Config(bucket=bucket,
                  region="us-east-1",
                  endpoint_url=endpoint,
@@ -51,7 +51,7 @@ def _s3_workspace(endpoint: str, bucket: str) -> Workspace:
 
 
 async def _exec(ws: Workspace, cmd: str) -> tuple[int, str, str]:
-    result = await ws.execute(cmd)
+    result = await ws.shell(cmd)
     out = await result.stdout_str()
     err = await result.stderr_str()
     return result.exit_code, out, err

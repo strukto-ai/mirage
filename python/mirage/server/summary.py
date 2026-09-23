@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage import Workspace
-from mirage.resource.history import HISTORY_PREFIX
 from mirage.server.registry import WorkspaceEntry
 from mirage.server.schemas import (MountSummary, SessionSummary,
                                    WorkspaceBrief, WorkspaceDetail,
                                    WorkspaceInternals)
+from mirage.vfs.history import HISTORY_PREFIX
 from mirage.workspace.snapshot.utils import norm_mount_prefix
 
 _AUTO_PREFIXES = {"/dev/", norm_mount_prefix(HISTORY_PREFIX)}
@@ -28,8 +28,8 @@ def _is_auto_prefix(prefix: str) -> bool:
     return prefix in _AUTO_PREFIXES
 
 
-def _mount_description(resource) -> str:
-    raw = getattr(resource, "PROMPT", "") or ""
+def _mount_description(vfs) -> str:
+    raw = getattr(vfs, "PROMPT", "") or ""
     if len(raw) <= _DESCRIPTION_MAX:
         return raw
     return raw[:_DESCRIPTION_MAX - 1].rstrip() + "\u2026"
@@ -71,9 +71,9 @@ async def make_detail(entry: WorkspaceEntry,
     mounts = [
         MountSummary(
             prefix=m.prefix,
-            resource=m.resource.name,
+            vfs=m.vfs.name,
             mode=m.mode.value,
-            description=_mount_description(m.resource),
+            description=_mount_description(m.vfs),
         ) for m in user_mounts
     ]
     sessions = [

@@ -16,20 +16,20 @@ import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { patchGeneric } from '../generic/patch.ts'
 import { PathSpec } from '../../../types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 const RAM_PATCH = RAM_COMMANDS.filter((c) => c.name === 'patch' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runPatch(
-  resource: RAMResource,
+  vfs: RAMVFS,
   flags: Record<string, string | boolean | number | string[]>,
   stdin: Uint8Array | null,
 ): Promise<void> {
   const cmd = RAM_PATCH[0]
   if (cmd === undefined) throw new Error('patch not registered')
-  await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+  await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin,
     flags,
     filetypeFns: null,
@@ -39,8 +39,8 @@ async function runPatch(
 
 describe('patch', () => {
   it('applies a simple patch from stdin', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/hello.txt', ENC.encode('hello\nworld\n'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/hello.txt', ENC.encode('hello\nworld\n'))
     const diffText =
       '--- a/hello.txt\n' +
       '+++ b/hello.txt\n' +
@@ -48,14 +48,14 @@ describe('patch', () => {
       ' hello\n' +
       '-world\n' +
       '+universe\n'
-    await runPatch(resource, { p: '1' }, ENC.encode(diffText))
-    const out = resource.store.files.get('/hello.txt')
+    await runPatch(vfs, { p: '1' }, ENC.encode(diffText))
+    const out = vfs.store.files.get('/hello.txt')
     expect(out).toBeDefined()
     expect(DEC.decode(out)).toContain('universe')
   })
 
   it('applies a patch from -i file', async () => {
-    const resource = new RAMResource()
+    const vfs = new RAMVFS()
     const diffText =
       '--- a/hello.txt\n' +
       '+++ b/hello.txt\n' +
@@ -63,17 +63,17 @@ describe('patch', () => {
       ' hello\n' +
       '-world\n' +
       '+universe\n'
-    resource.store.files.set('/hello.txt', ENC.encode('hello\nworld\n'))
-    resource.store.files.set('/fix.patch', ENC.encode(diffText))
-    await runPatch(resource, { p: '1', i: '/fix.patch' }, null)
-    const out = resource.store.files.get('/hello.txt')
+    vfs.store.files.set('/hello.txt', ENC.encode('hello\nworld\n'))
+    vfs.store.files.set('/fix.patch', ENC.encode(diffText))
+    await runPatch(vfs, { p: '1', i: '/fix.patch' }, null)
+    const out = vfs.store.files.get('/hello.txt')
     expect(out).toBeDefined()
     expect(DEC.decode(out)).toContain('universe')
   })
 
   it('-N skips already-applied hunks', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/hello.txt', ENC.encode('hello\nuniverse\n'))
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/hello.txt', ENC.encode('hello\nuniverse\n'))
     const diffText =
       '--- a/hello.txt\n' +
       '+++ b/hello.txt\n' +
@@ -81,8 +81,8 @@ describe('patch', () => {
       ' hello\n' +
       '-world\n' +
       '+universe\n'
-    await runPatch(resource, { p: '1', N: true }, ENC.encode(diffText))
-    const out = resource.store.files.get('/hello.txt')
+    await runPatch(vfs, { p: '1', N: true }, ENC.encode(diffText))
+    const out = vfs.store.files.get('/hello.txt')
     expect(out).toBeDefined()
     expect(DEC.decode(out)).toContain('universe')
   })
@@ -101,15 +101,15 @@ it.each(['', '/data', '/nested/data'])(
       ])
       const seen: string[] = []
       const stream = async function* (path: PathSpec): AsyncIterable<Uint8Array> {
-        expect(path.virtual).toBe(prefix + '/' + path.resourcePath)
-        seen.push(path.resourcePath)
-        const bytes = files.get(path.resourcePath)
+        expect(path.virtual).toBe(prefix + '/' + path.vfsPath)
+        seen.push(path.vfsPath)
+        const bytes = files.get(path.vfsPath)
         if (bytes === undefined) throw new Error('missing fixture')
         yield Promise.resolve(bytes)
       }
       const write = (path: PathSpec, data: Uint8Array): Promise<void> => {
-        expect(path.virtual).toBe(prefix + '/' + path.resourcePath)
-        files.set(path.resourcePath, data)
+        expect(path.virtual).toBe(prefix + '/' + path.vfsPath)
+        files.set(path.vfsPath, data)
         return Promise.resolve()
       }
       const input = PathSpec.fromStrPath(prefix + '/fix.diff', 'fix.diff')

@@ -54,7 +54,7 @@ async def test_rg_chat_jsonl_scans_the_named_day(accessor, index):
                   return_value=(b"", None)) as mock_generic,
     ):
         await rg(accessor, [
-            PathSpec(resource_path=mount_key(
+            PathSpec(vfs_path=mount_key(
                 '/channels/general__C001/2026-04-10/chat.jsonl', ''),
                      virtual='/channels/general__C001/2026-04-10/chat.jsonl',
                      directory='/channels/general__C001/2026-04-10/chat.jsonl')
@@ -76,7 +76,7 @@ async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
                   return_value=(b"", None)) as mock_generic,
     ):
         await rg(accessor, [
-            PathSpec(resource_path=mount_key(
+            PathSpec(vfs_path=mount_key(
                 '/channels/general__C001/2026-04-10/files', ''),
                      virtual='/channels/general__C001/2026-04-10/files',
                      directory='/channels/general__C001/2026-04-10/files')
@@ -99,8 +99,8 @@ async def test_rg_both_when_channel_or_day_root(accessor, index):
                   return_value=files_payload) as mock_files,
     ):
         await rg(accessor, [
-            PathSpec(resource_path=mount_key(
-                '/channels/general__C001/2026-04-10', ''),
+            PathSpec(vfs_path=mount_key('/channels/general__C001/2026-04-10',
+                                        ''),
                      virtual='/channels/general__C001/2026-04-10',
                      directory='/channels/general__C001/2026-04-10')
         ], ['foo'], CommandOpts(index=index, flags={'w': True}))
@@ -124,7 +124,7 @@ async def test_grep_chat_jsonl_scans_the_named_day(accessor, index):
     ):
         from mirage.commands.builtin.slack.grep import grep
         await grep(accessor, [
-            PathSpec(resource_path=mount_key(
+            PathSpec(vfs_path=mount_key(
                 '/channels/general__C001/2026-04-10/chat.jsonl', ''),
                      virtual='/channels/general__C001/2026-04-10/chat.jsonl',
                      directory='/channels/general__C001/2026-04-10/chat.jsonl')
@@ -138,7 +138,7 @@ async def test_grep_chat_jsonl_scans_the_named_day(accessor, index):
 @pytest.mark.asyncio
 async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
     blob = PathSpec(
-        resource_path=mount_key(
+        vfs_path=mount_key(
             "/channels/general__C001/2026-04-10/files/report.txt", ""),
         virtual="/channels/general__C001/2026-04-10/files/report.txt",
         directory="/channels/general__C001/2026-04-10/files/report.txt",
@@ -162,7 +162,7 @@ async def test_grep_files_dir_redirects_to_per_file_scan(accessor, index):
     ):
         from mirage.commands.builtin.slack.grep import grep
         out, io = await grep(accessor, [
-            PathSpec(resource_path=mount_key(
+            PathSpec(vfs_path=mount_key(
                 '/channels/general__C001/2026-04-10/files', ''),
                      virtual='/channels/general__C001/2026-04-10/files',
                      directory='/channels/general__C001/2026-04-10/files')

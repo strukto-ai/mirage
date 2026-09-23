@@ -896,12 +896,12 @@ class TestJqMemoryBackend:
 class TestJqDiskBackend:
 
     def _disk_ws(self, tmp_path, files):
-        from mirage.resource.disk.disk import DiskResource
+        from mirage.vfs.disk.disk import DiskVFS
         for name, data in files.items():
             fp = tmp_path / name.lstrip("/")
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_bytes(data)
-        disk = DiskResource(str(tmp_path))
+        disk = DiskVFS(str(tmp_path))
         from mirage.workspace import Workspace
         return Workspace(
             {"/disk": (disk, MountMode.WRITE)},
@@ -967,10 +967,10 @@ class TestJqDiskBackend:
 class TestJqS3Backend:
 
     def _s3_ws(self):
-        from mirage.resource.s3.s3 import S3Config, S3Resource
+        from mirage.vfs.s3.s3 import S3VFS, S3Config
         from mirage.workspace import Workspace
         config = S3Config(bucket="test-bucket", region="us-east-1")
-        s3 = S3Resource(config)
+        s3 = S3VFS(config)
         return Workspace(
             {"/s3": (s3, MountMode.READ)},
             mode=MountMode.READ,
@@ -1002,7 +1002,7 @@ class TestJqS3Backend:
                         stat=None,
                         is_mounted=lambda a: True,
                         local=False)
-        path = PathSpec(resource_path="s3/data.json",
+        path = PathSpec(vfs_path="s3/data.json",
                         virtual="/s3/data.json",
                         directory="/s3",
                         resolved=True)
@@ -1045,11 +1045,11 @@ class TestJqS3Backend:
         assert result == [1, 2, 3]
 
     def test_disk_multiple_paths(self, tmp_path):
-        from mirage.resource.disk.disk import DiskResource
+        from mirage.vfs.disk.disk import DiskVFS
         from mirage.workspace import Workspace
         (tmp_path / "a.json").write_bytes(b'{"x": 1}')
         (tmp_path / "b.json").write_bytes(b'{"x": 2}')
-        disk = DiskResource(str(tmp_path))
+        disk = DiskVFS(str(tmp_path))
         ws = Workspace(
             {"/disk": (disk, MountMode.WRITE)},
             mode=MountMode.WRITE,

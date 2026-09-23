@@ -1,7 +1,7 @@
 ---
 title: Chroma
 icon: /images/chroma-logo.svg
-description: Prepare a ChromaDB collection for the Chroma resource.
+description: Prepare a ChromaDB collection for the Chroma VFS.
 ---
 
 ## Requirements
@@ -14,7 +14,7 @@ filesystem. The collection must already contain:
 - A metadata field that maps each chunk to a virtual file path slug.
 - A metadata field that orders chunks within each file.
 
-The Python resource connects via Chroma's `AsyncHttpClient`.
+The Python VFS connects via Chroma's `AsyncHttpClient`.
 
 ## Path Tree Document
 
@@ -103,4 +103,4 @@ print(tree["documents"][0])
 print(len(chunks["documents"]))
 ```
 
-For Python configuration, see the [Python Chroma resource](/python/resource/chroma) page.
+For Python configuration, see the [Python Chroma VFS](/python/vfs/chroma) page.

@@ -21,8 +21,8 @@ from mirage.policy import Policy
 from mirage.policy.types import (Action, AdmissionRules, Ask, CommandContext,
                                  Deny)
 from mirage.provision import Precision
-from mirage.resource.ram import RAMResource
 from mirage.shell.node_kind import NodeKind
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.node.provision_node import provision_node
 
 # Drift guard: every statement kind the executor supports must have a
@@ -78,9 +78,9 @@ def test_plans_cover_the_full_enum():
 @pytest.mark.parametrize("kind", list(NodeKind))
 async def test_every_kind_plans(kind):
     snippet, net, write, precision = PLANS[kind]
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-    result = await ws.execute(snippet, provision=True)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+    result = await ws.shell(snippet, provision=True)
     if kind is NodeKind.UNSUPPORTED:
         assert result.exit_code == 2
         assert await result.stderr_str(
@@ -115,15 +115,15 @@ async def test_provision_asks_the_command_gate_first():
     # so a command the policy refuses is not estimated either: the
     # denied session must not learn byte counts the run itself would
     # never be allowed to produce.
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.WRITE,
                    policies=[_NoCat()])
     try:
-        await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-        result = await ws.execute("cat /data/a.txt", provision=True)
+        await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+        result = await ws.shell("cat /data/a.txt", provision=True)
         assert result.precision is Precision.UNKNOWN
         assert result.network_read == "0"
-        priced = await ws.execute("head /data/a.txt", provision=True)
+        priced = await ws.shell("head /data/a.txt", provision=True)
         assert priced.network_read == "0-24"
     finally:
         await ws.close()
@@ -134,12 +134,12 @@ async def test_provision_does_not_run_ahead_of_an_ask():
     # An ask cannot be raised from a dry run (nothing here may reach
     # the host), so a command that would ask is not priced before the
     # approval it would need.
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.WRITE,
                    policies=[_AskCat()])
     try:
-        await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-        result = await ws.execute("cat /data/a.txt", provision=True)
+        await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+        result = await ws.shell("cat /data/a.txt", provision=True)
         assert result.precision is Precision.UNKNOWN
         assert result.network_read == "0"
     finally:
@@ -179,13 +179,13 @@ async def test_provision_consults_pre_command_once_per_redirected_command():
     # its verdict to the inner COMMAND recursion, so a stateful or
     # metered hook is consulted exactly once per statement, never twice.
     counting = _Counting()
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.WRITE,
                    policies=[counting])
     try:
-        await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+        await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
         counting.commands.clear()
-        result = await ws.execute("cat < /data/a.txt", provision=True)
+        result = await ws.shell("cat < /data/a.txt", provision=True)
         assert result.network_read == "24"
         assert counting.commands == ["cat"]
     finally:
@@ -198,20 +198,20 @@ async def test_provision_gates_a_builtin_before_pricing_its_redirect():
     # the statement's redirect targets judged on the same call. A
     # denied `read < file` must plan the same way: no exact-looking
     # builtin plan, and the redirect source never stat'd or priced.
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.WRITE,
                    policies=[_NoRead()])
     try:
-        await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-        result = await ws.execute("read x < /data/a.txt", provision=True)
+        await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+        result = await ws.shell("read x < /data/a.txt", provision=True)
         assert result.precision is Precision.UNKNOWN
         assert result.network_read == "0"
     finally:
         await ws.close()
-    control = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    control = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        await control.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-        priced = await control.execute("read x < /data/a.txt", provision=True)
+        await control.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+        priced = await control.shell("read x < /data/a.txt", provision=True)
         assert priced.network_read == "24"
     finally:
         await control.close()
@@ -221,13 +221,12 @@ async def test_provision_gates_a_builtin_before_pricing_its_redirect():
 async def test_provision_gates_a_function_before_walking_its_body():
     # A denied shell function must not have its body walked: the body's
     # own reads are byte counts the refusal is protecting.
-    ws = Workspace({"/data": RAMResource()},
+    ws = Workspace({"/data": RAMVFS()},
                    mode=MountMode.WRITE,
                    policies=[_NoF()])
     try:
-        await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-        result = await ws.execute("f() { cat /data/a.txt; }; f",
-                                  provision=True)
+        await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+        result = await ws.shell("f() { cat /data/a.txt; }; f", provision=True)
         assert result.precision is Precision.UNKNOWN
         assert result.network_read == "0"
     finally:
@@ -241,13 +240,12 @@ async def test_provision_vouches_for_a_function_the_script_defines():
     # The walk vouches for its own definitions, so a script that
     # defines and calls a function still plans its body under a
     # commands.allow profile that lists only the real tools it uses.
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+        await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
         session = ws._session_mgr.get(ws._session_mgr.default_id)
         session.commands = AdmissionRules(allow=("cat", "tee"))
-        result = await ws.execute("f() { cat /data/a.txt; }; f",
-                                  provision=True)
+        result = await ws.shell("f() { cat /data/a.txt; }; f", provision=True)
         assert result.network_read == "24"
         assert result.precision.value == "exact"
     finally:
@@ -268,21 +266,21 @@ async def test_unsupported_node_plans_unknown():
 
 @pytest.mark.asyncio
 async def test_function_call_and_env_prefix_plan():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-    result = await ws.execute("f() { cat /data/a.txt; }; f", provision=True)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+    result = await ws.shell("f() { cat /data/a.txt; }; f", provision=True)
     assert result.network_read == "24"
     assert result.precision.value == "exact"
-    result = await ws.execute("f() { f; }; f", provision=True)
+    result = await ws.shell("f() { f; }; f", provision=True)
     assert result.precision.value == "unknown"
-    result = await ws.execute("FOO=1 cat /data/a.txt", provision=True)
+    result = await ws.shell("FOO=1 cat /data/a.txt", provision=True)
     assert result.network_read == "24"
     assert result.precision.value == "exact"
-    result = await ws.execute("eval 'cat /data/a.txt'", provision=True)
+    result = await ws.shell("eval 'cat /data/a.txt'", provision=True)
     assert result.precision.value == "unknown"
-    result = await ws.execute("wc -l < /data/a.txt", provision=True)
+    result = await ws.shell("wc -l < /data/a.txt", provision=True)
     assert result.network_read == "24"
-    result = await ws.execute("cat /data/a.txt > /dev/null", provision=True)
+    result = await ws.shell("cat /data/a.txt > /dev/null", provision=True)
     assert result.network_write == "0"
     assert result.precision.value == "exact"
     await ws.close()
@@ -291,78 +289,77 @@ async def test_function_call_and_env_prefix_plan():
 @pytest.mark.asyncio
 async def test_provision_follows_symlinks_and_spans_mounts():
     ws = Workspace({
-        "/data": RAMResource(),
-        "/data2": RAMResource()
+        "/data": RAMVFS(),
+        "/data2": RAMVFS()
     },
                    mode=MountMode.WRITE)
-    await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-    await ws.execute("tee /data2/b.txt > /dev/null", stdin=b"y" * 6)
-    await ws.execute("ln -s /data/a.txt /data2/lnk.txt")
-    result = await ws.execute("cat /data2/lnk.txt", provision=True)
+    await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+    await ws.shell("tee /data2/b.txt > /dev/null", stdin=b"y" * 6)
+    await ws.shell("ln -s /data/a.txt /data2/lnk.txt")
+    result = await ws.shell("cat /data2/lnk.txt", provision=True)
     assert result.network_read == "24"
     assert result.precision.value == "exact"
-    result = await ws.execute("cat /data/a.txt /data2/b.txt", provision=True)
+    result = await ws.shell("cat /data/a.txt /data2/b.txt", provision=True)
     assert result.network_read == "30"
     assert result.read_ops == 2
     assert result.precision.value == "exact"
-    result = await ws.execute("cat /data2/b.txt /data/a.txt", provision=True)
+    result = await ws.shell("cat /data2/b.txt /data/a.txt", provision=True)
     assert result.network_read == "30"
     await ws.close()
 
 
 @pytest.mark.asyncio
 async def test_provision_is_dry_and_case_arms_run_fully():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
     # a dry run must not execute command substitutions
-    result = await ws.execute(
+    result = await ws.shell(
         "cat $(tee /data/leak.txt > /dev/null; echo /data/a.txt)",
         provision=True)
     assert result.precision.value == "unknown"
-    listing = await (await ws.execute("ls /data")).stdout_str()
+    listing = await (await ws.shell("ls /data")).stdout_str()
     assert "leak.txt" not in listing
     # a case arm runs every statement up to its ;; terminator
     out = await (
-        await
-        ws.execute("case x in x) echo one; echo two;; esac")).stdout_str()
+        await ws.shell("case x in x) echo one; echo two;; esac")).stdout_str()
     assert out == "one\ntwo\n"
-    result = await ws.execute(
+    result = await ws.shell(
         "case x in x) cat /data/a.txt; cat /data/a.txt;; esac", provision=True)
     assert result.network_read == "48"
     # sed reads its operands; -i degrades to a floor
-    result = await ws.execute("sed s/x/y/ /data/a.txt", provision=True)
+    result = await ws.shell("sed s/x/y/ /data/a.txt", provision=True)
     assert result.network_read == "24"
     assert result.precision.value == "exact"
-    result = await ws.execute("sed -i s/x/y/ /data/a.txt", provision=True)
+    result = await ws.shell("sed -i s/x/y/ /data/a.txt", provision=True)
     assert result.precision.value == "unknown"
     await ws.close()
 
 
 @pytest.mark.asyncio
 async def test_stdin_driven_and_expanded_estimates():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
-    await ws.execute("mkdir /data/tree")
-    await ws.execute("tee /data/tree/b.txt > /dev/null", stdin=b"y" * 10)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+    await ws.shell("mkdir /data/tree")
+    await ws.shell("tee /data/tree/b.txt > /dev/null", stdin=b"y" * 10)
     # heredoc-fed stdin is local bytes: exact zero backend I/O
-    result = await ws.execute("wc -l <<EOF\nabc\nEOF", provision=True)
+    result = await ws.shell("wc -l <<EOF\nabc\nEOF", provision=True)
     assert result.network_read == "0"
     assert result.precision.value == "exact"
     # globs expand during planning
-    result = await ws.execute("cat /data/tree/*.txt", provision=True)
+    result = await ws.shell("cat /data/tree/*.txt", provision=True)
     assert result.network_read == "10"
     assert result.precision.value == "exact"
     # recursive search walks the tree
-    result = await ws.execute("grep -r y /data/tree", provision=True)
+    result = await ws.shell("grep -r y /data/tree", provision=True)
     assert result.network_read == "10"
     assert result.precision.value == "exact"
     # a suppressed substitution degrades the loop count to a floor
-    result = await ws.execute("for i in $(echo 1 2); do cat /data/a.txt; done",
-                              provision=True)
+    result = await ws.shell("for i in $(echo 1 2); do cat /data/a.txt; done",
+                            provision=True)
     assert result.network_read == "24"
     assert result.precision.value == "unknown"
     # a suppressed substitution hides the redirect target
-    result = await ws.execute("cat /data/a.txt > $(echo /data/out.txt)",
-                              provision=True)
+    result = await ws.shell("cat /data/a.txt > $(echo /data/out.txt)",
+                            provision=True)
     assert result.precision.value == "unknown"
     await ws.close()

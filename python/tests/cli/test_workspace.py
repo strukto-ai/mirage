@@ -19,11 +19,11 @@ from mirage.cli.workspace import _resolve_config_arg
 OVERRIDE = """
 mounts:
   /wiki:
-    resource: ./backends/wiki.py:WikiResource
+    vfs: ./backends/wiki.py:WikiVFS
   /pkg:
-    resource: my_pkg.backends:WikiResource
+    vfs: my_pkg.backends:WikiVFS
   /ram:
-    resource: ram
+    vfs: ram
 clis:
   tally:
     cli: ../tools/tally.py:TALLY
@@ -41,11 +41,10 @@ def test_a_load_override_rebases_relative_code_refs_onto_its_dir(
     path.write_text(OVERRIDE)
     resolved = _resolve_config_arg(path)
     mounts = resolved["mounts"]
-    assert mounts["/wiki"]["resource"] == (
-        f"{deploy}/backends/wiki.py:WikiResource")
+    assert mounts["/wiki"]["vfs"] == (f"{deploy}/backends/wiki.py:WikiVFS")
     # A module dotpath is importlib's to resolve, and a builtin name is
     # not a reference at all: both pass through untouched.
-    assert mounts["/pkg"]["resource"] == "my_pkg.backends:WikiResource"
-    assert mounts["/ram"]["resource"] == "ram"
+    assert mounts["/pkg"]["vfs"] == "my_pkg.backends:WikiVFS"
+    assert mounts["/ram"]["vfs"] == "ram"
     assert resolved["clis"]["tally"]["cli"] == (
         f"{deploy}/../tools/tally.py:TALLY")

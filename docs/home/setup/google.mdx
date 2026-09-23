@@ -1,12 +1,12 @@
 ---
 title: Google Workspace
 icon: google
-description: Set up Google OAuth2 credentials for Docs, Sheets, Slides, Drive, and Gmail resources.
+description: Set up Google OAuth2 credentials for Docs, Sheets, Slides, Drive, and Gmail mounts.
 ---
 
 ## Overview
 
-The Google resources use OAuth2 with a refresh token to authenticate against:
+The Google mounts use OAuth2 with a refresh token to authenticate against:
 
 - **Google Drive API v3** - lists documents, reads metadata
 - **Google Docs API v1** - reads/writes document content
@@ -120,7 +120,7 @@ A published refresh token only gets revoked if:
 - Token unused for 6 months
 - 100+ outstanding refresh tokens per account per client (oldest revoked)
 
-For personal use with a published app, you do the auth flow **once** and it works indefinitely. The `TokenManager` in the resource automatically uses the refresh token to obtain fresh access tokens (which expire hourly) behind the scenes.
+For personal use with a published app, you do the auth flow **once** and it works indefinitely. The `TokenManager` in the VFS automatically uses the refresh token to obtain fresh access tokens (which expire hourly) behind the scenes.
 
 ## Scopes Reference
 
@@ -142,4 +142,4 @@ For personal use with a published app, you do the auth flow **once** and it work
 | Refresh token expires after 7 days | Publish the app (Step 3.9)                                        |
 | Auth code doesn't work twice       | Codes are single-use - re-authorize if exchange fails             |
 
-For Python configuration, see the resource pages: [Gmail](/python/resource/gmail), [Drive](/python/resource/gdrive), [Docs](/python/resource/gdocs), [Sheets](/python/resource/gsheets), [Slides](/python/resource/gslides).
+For Python configuration, see the VFS pages: [Gmail](/python/vfs/gmail), [Drive](/python/vfs/gdrive), [Docs](/python/vfs/gdocs), [Sheets](/python/vfs/gsheets), [Slides](/python/vfs/gslides).

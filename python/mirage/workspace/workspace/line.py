@@ -24,13 +24,13 @@ from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import ShellExecution
 from mirage.types import PathSpec, Producer
 from mirage.workspace.mount import MountEntry
-from mirage.workspace.session import Session, env_snapshot
+from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.workspace.utils import command_name
 
 
 async def run_whole_line(
         runtime: LineExecutorMixin, command: str, stdin: ByteSource | None,
-        session: Session, mounts: list[MountEntry], policies: Policies,
+        session: SessionState, mounts: list[MountEntry], policies: Policies,
         invalidate: Callable[[], Awaitable[None]]) -> IOResult:
     """Hand the raw line to one runtime instead of walking its tree.
 
@@ -43,7 +43,7 @@ async def run_whole_line(
             whole line.
         command (str): the raw command line.
         stdin (ByteSource | None): bytes piped into the line.
-        session (Session): session supplying cwd and env.
+        session (SessionState): session supplying cwd and env.
         mounts (list[MountEntry]): mounts the line may span (every
             mount: a whole-line runtime sees the full workspace).
         policies (Policies): the workspace's policies.

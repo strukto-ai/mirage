@@ -45,7 +45,7 @@ TREE = {
 
 
 def _spec(path: str) -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, "/data"),
+    return PathSpec(vfs_path=mount_key(path, "/data"),
                     virtual=path,
                     directory=path)
 
@@ -215,7 +215,7 @@ async def test_file_read_expands_globs():
     pattern = PathSpec(virtual="/data/tree/*.txt",
                        directory="/data/tree/",
                        pattern="*.txt",
-                       resource_path="tree/*.txt")
+                       vfs_path="tree/*.txt")
     result = await provision(None, [pattern], [], CommandOpts(command='cat'))
     assert result.precision == Precision.EXACT
     assert result.network_read_high == 7
@@ -228,7 +228,7 @@ async def test_file_read_unmatched_glob_unknown():
     pattern = PathSpec(virtual="/data/tree/*.nope",
                        directory="/data/tree/",
                        pattern="*.nope",
-                       resource_path="tree/*.nope")
+                       vfs_path="tree/*.nope")
     result = await provision(None, [pattern], [], CommandOpts(command='cat'))
     assert result.precision == Precision.UNKNOWN
     assert result.network_read_high == 0
@@ -290,10 +290,10 @@ async def test_index_hit_read_provision_counts_cached_operands():
     paths = [
         PathSpec(virtual="/chat/a.jsonl",
                  directory="/chat",
-                 resource_path="a.jsonl"),
+                 vfs_path="a.jsonl"),
         PathSpec(virtual="/chat/missing.jsonl",
                  directory="/chat",
-                 resource_path="missing.jsonl"),
+                 vfs_path="missing.jsonl"),
     ]
     result = await index_hit_read_provision(
         None, paths, [], CommandOpts(command="cat", index=index))
@@ -319,7 +319,7 @@ async def _noop_stat(*args, **kwargs):
 def _make_command(name: str, provision=None, filetype: str | None = None):
 
     @command(name,
-             resource="ram",
+             vfs="ram",
              spec=SPECS[name],
              provision=provision,
              filetype=filetype)

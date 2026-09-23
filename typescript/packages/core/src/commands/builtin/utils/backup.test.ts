@@ -21,7 +21,7 @@ function spec(path: string): PathSpec {
   return new PathSpec({
     virtual: path,
     directory: path,
-    resourcePath: path.replace(/^\/+|\/+$/g, ''),
+    vfsPath: path.replace(/^\/+|\/+$/g, ''),
   })
 }
 
@@ -100,10 +100,10 @@ describe('siblingPath and parentPath', () => {
     const target = spec('/data/sub/b.txt')
     const backup = siblingPath(target, '~')
     expect(backup.virtual).toBe('/data/sub/b.txt~')
-    expect(backup.resourcePath).toBe('data/sub/b.txt~')
+    expect(backup.vfsPath).toBe('data/sub/b.txt~')
     const parent = parentPath(target)
     expect(parent.virtual).toBe('/data/sub')
-    expect(parent.resourcePath).toBe('data/sub')
+    expect(parent.vfsPath).toBe('data/sub')
     expect(parentPath(spec('/b.txt')).virtual).toBe('/')
   })
 })

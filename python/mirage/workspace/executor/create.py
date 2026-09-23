@@ -18,13 +18,13 @@ from mirage.context import DEFAULT_UMASK
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
 
 
-async def create_file(dispatch: DispatchFn, session: Session, scope: PathSpec,
-                      data: bytes) -> None:
+async def create_file(dispatch: DispatchFn, session: SessionState,
+                      scope: PathSpec, data: bytes) -> None:
     """Write a file, giving it the umask's mode if the write created it.
 
     Every shell path that opens a file for writing goes through here, so
@@ -41,7 +41,7 @@ async def create_file(dispatch: DispatchFn, session: Session, scope: PathSpec,
 
     Args:
         dispatch (DispatchFn): op dispatcher.
-        session (Session): the session holding the umask.
+        session (SessionState): the session holding the umask.
         scope (PathSpec): the target.
         data (bytes): the bytes to write.
     """

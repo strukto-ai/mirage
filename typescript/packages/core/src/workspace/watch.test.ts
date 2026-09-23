@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileChangeKind, FileEvent, MountMode, PathSpec } from '../types.ts'
 import { RAMWatchQueue } from '../watch/queue/ram.ts'
 import { Watcher } from '../watch/watcher.ts'
@@ -17,7 +17,7 @@ function change(virtual: string): FileEvent {
 
 describe('Workspace watch integration', () => {
   it('lazily attaches, delivers, and detaches the default runtime', async () => {
-    const workspace = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+    const workspace = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
     const iterator = workspace.watch('/data')[Symbol.asyncIterator]()
     const next = iterator.next()
     await Promise.resolve()
@@ -30,7 +30,7 @@ describe('Workspace watch integration', () => {
   })
 
   it('accepts string lists and globs', async () => {
-    const workspace = new Workspace({ '/data': new RAMResource() })
+    const workspace = new Workspace({ '/data': new RAMVFS() })
     const iterator = workspace.watch(['/data/a', '/data/*.txt'])[Symbol.asyncIterator]()
     const next = iterator.next()
     await Promise.resolve()
@@ -42,7 +42,7 @@ describe('Workspace watch integration', () => {
   })
 
   it('supports a custom queue factory', async () => {
-    const workspace = new Workspace({ '/data': new RAMResource() })
+    const workspace = new Workspace({ '/data': new RAMVFS() })
     workspace.attachWatchRuntime(
       new Watcher(workspace.registry, (roots) => new RAMWatchQueue(roots, { maxPending: 8 })),
     )
@@ -57,7 +57,7 @@ describe('Workspace watch integration', () => {
   })
 
   it('rejects watch operations after close', async () => {
-    const workspace = new Workspace({ '/data': new RAMResource() })
+    const workspace = new Workspace({ '/data': new RAMVFS() })
     await workspace.close()
     expect(() => workspace.watch('/data')).toThrow('Workspace is closed')
     await expect(workspace.notify(change('/data/a.txt'))).rejects.toThrow('Workspace is closed')
@@ -67,7 +67,7 @@ describe('Workspace watch integration', () => {
   })
 
   it('rejects replacing an attached runtime', async () => {
-    const workspace = new Workspace({ '/data': new RAMResource() })
+    const workspace = new Workspace({ '/data': new RAMVFS() })
     await workspace.notify(change('/data/a.txt'))
     expect(() => {
       workspace.attachWatchRuntime(new Watcher(workspace.registry))

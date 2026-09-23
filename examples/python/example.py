@@ -18,8 +18,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
 
 load_dotenv(".env.development")
 
@@ -30,8 +30,8 @@ config = S3Config(
     aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
 )
 
-s3 = S3Resource(config)
-mem = RAMResource()
+s3 = S3VFS(config)
+mem = RAMVFS()
 # The stdin-piping demos below need `sys.stdin`, which only the local
 # runtime provides; the default monty sandbox has no stdin.
 ws = Workspace(
@@ -41,12 +41,12 @@ ws = Workspace(
         "/work/": (mem, MountMode.EXEC),
     },
     mode=MountMode.EXEC,
-    runtimes=["local", "vfs"],
+    runtimes=["local", "workspace"],
 )
 
 
 def ops_summary() -> str:
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     return f"{len(records)} ops, {total} bytes transferred"
 
@@ -63,7 +63,7 @@ async def main():
     print("=== pipe S3 data into python3 -c via stdin ===\n")
 
     print("--- cat example.jsonl | python3 -c (single line) ---")
-    result = await ws.execute(
+    result = await ws.shell(
         'cat /s3/data/example.jsonl | python3 -c "import sys; '
         "print(f'lines: {sum(1 for _ in sys.stdin)}')\"")
     print(await result.stdout_str())
@@ -71,36 +71,36 @@ async def main():
     print(f"Stats: {ops_summary()}\n")
 
     print("--- head -n 3 example.jsonl | python3 -c (multiline) ---")
-    result = await ws.execute('head -n 3 /s3/data/example.jsonl | '
-                              'python3 -c "import sys, json\n'
-                              'for line in sys.stdin:\n'
-                              '    rec = json.loads(line)\n'
-                              "    print(rec.get('type', 'unknown'))\n"
-                              '"')
+    result = await ws.shell('head -n 3 /s3/data/example.jsonl | '
+                            'python3 -c "import sys, json\n'
+                            'for line in sys.stdin:\n'
+                            '    rec = json.loads(line)\n'
+                            "    print(rec.get('type', 'unknown'))\n"
+                            '"')
     print(await result.stdout_str())
     print(f"Exit code: {result.exit_code}")
     print(f"Stats: {ops_summary()}\n")
 
     print("=== pipe S3 data into python3 -c (extract + head) ===\n")
 
-    result = await ws.execute('cat /s3/data/example.jsonl | '
-                              'python3 -c "import sys, json\n'
-                              'for line in sys.stdin:\n'
-                              '    rec = json.loads(line)\n'
-                              '    print(json.dumps(rec)[:80])\n'
-                              '" | head -n 3')
+    result = await ws.shell('cat /s3/data/example.jsonl | '
+                            'python3 -c "import sys, json\n'
+                            'for line in sys.stdin:\n'
+                            '    rec = json.loads(line)\n'
+                            '    print(json.dumps(rec)[:80])\n'
+                            '" | head -n 3')
     print(await result.stdout_str())
     print(f"Exit code: {result.exit_code}")
     print(f"Stats: {ops_summary()}\n")
 
     print("=== python3 script file via VFS ===\n")
 
-    await ws.execute("mkdir /work/scripts")
-    await ws.execute(f"echo '{STDIN_SCRIPT}' > /work/scripts/parse_stdin.py")
+    await ws.shell("mkdir /work/scripts")
+    await ws.shell(f"echo '{STDIN_SCRIPT}' > /work/scripts/parse_stdin.py")
 
     print("--- head -n 5 example.jsonl | python3 parse_stdin.py ---")
-    result = await ws.execute("head -n 5 /s3/data/example.jsonl"
-                              " | python3 /work/scripts/parse_stdin.py")
+    result = await ws.shell("head -n 5 /s3/data/example.jsonl"
+                            " | python3 /work/scripts/parse_stdin.py")
     print(await result.stdout_str())
     if result.stderr:
         print("STDERR:", await result.stderr_str())
@@ -109,24 +109,24 @@ async def main():
 
     print("=== python3 -c: count + aggregate ===\n")
 
-    result = await ws.execute('cat /s3/data/example.jsonl | '
-                              'python3 -c "import sys, json\n'
-                              'from collections import Counter\n'
-                              'counts = Counter()\n'
-                              'for line in sys.stdin:\n'
-                              '    rec = json.loads(line)\n'
-                              "    counts[rec.get('type', 'unknown')] += 1\n"
-                              'for k, v in counts.most_common(5):\n'
-                              "    print(f'{k}: {v}')\n"
-                              '"')
+    result = await ws.shell('cat /s3/data/example.jsonl | '
+                            'python3 -c "import sys, json\n'
+                            'from collections import Counter\n'
+                            'counts = Counter()\n'
+                            'for line in sys.stdin:\n'
+                            '    rec = json.loads(line)\n'
+                            "    counts[rec.get('type', 'unknown')] += 1\n"
+                            'for k, v in counts.most_common(5):\n'
+                            "    print(f'{k}: {v}')\n"
+                            '"')
     print(await result.stdout_str())
     print(f"Exit code: {result.exit_code}")
     print(f"Stats: {ops_summary()}\n")
 
     print("=== python3 -c with session env ===\n")
 
-    await ws.execute("export GREETING=hello_from_mirage")
-    result = await ws.execute(
+    await ws.shell("export GREETING=hello_from_mirage")
+    result = await ws.shell(
         'python3 -c "import os; print(os.environ.get(\'GREETING\', \'none\'))"'
     )
     print(await result.stdout_str())
@@ -137,39 +137,39 @@ async def main():
     # These exercise the heredoc fixes: dash-strip + quoted delimiter.
 
     print("\n=== python3 << 'PYEOF' (quoted: $X stays literal) ===")
-    await ws.execute("export X=shellval")
-    result = await ws.execute("python3 << 'PYEOF'\n"
-                              "x = '$X'  # literal, no shell expansion\n"
-                              "print(x)\n"
-                              "PYEOF")
+    await ws.shell("export X=shellval")
+    result = await ws.shell("python3 << 'PYEOF'\n"
+                            "x = '$X'  # literal, no shell expansion\n"
+                            "print(x)\n"
+                            "PYEOF")
     print(f"  stdout: {(await result.stdout_str()).strip()} "
           f"(expect '$X')")
 
     print("\n=== python3 << PYEOF (unquoted: $X expanded) ===")
-    result = await ws.execute("python3 << PYEOF\n"
-                              "print('$X')\n"
-                              "PYEOF")
+    result = await ws.shell("python3 << PYEOF\n"
+                            "print('$X')\n"
+                            "PYEOF")
     print(f"  stdout: {(await result.stdout_str()).strip()} "
           f"(expect 'shellval')")
 
     print("\n=== python3 <<-PYEOF (dash: tabs stripped, indented body) ===")
-    result = await ws.execute("python3 <<-PYEOF\n"
-                              "\tfor i in range(3):\n"
-                              "\t    print(f'item-{i}')\n"
-                              "\tPYEOF")
+    result = await ws.shell("python3 <<-PYEOF\n"
+                            "\tfor i in range(3):\n"
+                            "\t    print(f'item-{i}')\n"
+                            "\tPYEOF")
     out = (await result.stdout_str()).strip()
     print(f"  stdout: {out!r} (expect 3 items)")
 
     print("\n=== python3 << EOF | grep keep (heredoc + pipe) ===")
-    result = await ws.execute("python3 << EOF | grep keep\n"
-                              "for i in range(5):\n"
-                              "    print('keep' if i % 2 else 'drop', i)\n"
-                              "EOF")
+    result = await ws.shell("python3 << EOF | grep keep\n"
+                            "for i in range(5):\n"
+                            "    print('keep' if i % 2 else 'drop', i)\n"
+                            "EOF")
     out = (await result.stdout_str()).strip()
     print(f"  filtered: {out.splitlines()}")
 
     print("\n=== heredoc in for-loop (body re-fires per iter) ===")
-    result = await ws.execute(
+    result = await ws.shell(
         "for name in alice bob carol; do python3 <<-PYEOF\n"
         "\tname = '$name'\n"
         "\tprint(f'hello, {name}!')\n"

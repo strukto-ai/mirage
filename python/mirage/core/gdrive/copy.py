@@ -51,10 +51,10 @@ async def copy_children(token_manager: TokenManager, src: DriveNode,
 @eacces_on_denied
 async def copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec) -> None:
     token_manager = accessor.token_manager
-    src_node = await resolve_key(accessor, src.resource_path)
+    src_node = await resolve_key(accessor, src.vfs_path)
     if src_node is None:
         raise enoent(src.virtual)
-    dst_node = await resolve_key(accessor, dst.resource_path)
+    dst_node = await resolve_key(accessor, dst.vfs_path)
     if src_node.is_folder:
         if dst_node is not None and not dst_node.is_folder:
             raise NotADirectoryError(dst.virtual)
@@ -62,7 +62,7 @@ async def copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec) -> None:
             # cp -r merges into an existing directory and creates a missing
             # one, mirroring the msgraph copy_tree.
             dst_parent_id, _ = await resolve_parent(accessor, dst)
-            name = posixpath.basename(dst.resource_path)
+            name = posixpath.basename(dst.vfs_path)
             created = await create_folder(token_manager, name, dst_parent_id)
             dst_node = DriveNode(id=created["id"],
                                  name=name,
@@ -75,7 +75,6 @@ async def copy(accessor: GDriveAccessor, src: PathSpec, dst: PathSpec) -> None:
         if dst_node is not None:
             await delete_file(token_manager, dst_node.id)
         dst_parent_id, _ = await resolve_parent(accessor, dst)
-        name = drive_target_name(posixpath.basename(dst.resource_path),
-                                 src_node)
+        name = drive_target_name(posixpath.basename(dst.vfs_path), src_node)
         await copy_file(token_manager, src_node.id, name, dst_parent_id)
     await invalidate_after_write(dst)

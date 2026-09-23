@@ -47,13 +47,13 @@ async def _normalize_find_output(
         return None
     data = stdout if isinstance(stdout, bytes) else b""
     root = mount_prefix_of(search_path.virtual,
-                           search_path.resource_path).rstrip("/") or "/"
+                           search_path.vfs_path).rstrip("/") or "/"
     lines = data.decode().splitlines()
     normalized = [root if line == root + "/" else line for line in lines]
     return format_records(normalized)
 
 
-@command("find", resource="dify", spec=SPECS["find"])
+@command("find", vfs="dify", spec=SPECS["find"])
 async def find(
     accessor: DifyAccessor,
     paths: list[PathSpec],

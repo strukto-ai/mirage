@@ -16,7 +16,7 @@ import { IOResult } from '../../../../io/types.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { evalFlat } from './flat.ts'
@@ -37,7 +37,7 @@ export async function handleTest(
   dispatch: DispatchFn,
   namespace: Namespace,
   args: (string | PathSpec)[] | CondNode,
-  session: Session,
+  session: SessionState,
   name = 'test',
   view?: SessionView,
 ): Promise<Result> {

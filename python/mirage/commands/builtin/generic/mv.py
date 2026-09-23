@@ -28,10 +28,10 @@ from mirage.types import (MoveStrategy, NativeMove, PathSpec, PrimitiveMove,
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 from mirage.commands.builtin.generic.cp import (  # isort: skip
-    TransferPolicy, backup_displaces, backup_raw, copy_entries, entry_kind,
+    TransferPolicy, backup_displaces, backup_raw, copy_entries, dest_kind,
     source_kind, make_backup, overwrite_gate, overwrite_type_error,
-    split_operands, suffix_flag, target_dir_error, target_flags, update_mode,
-    walk, wrap_target_dir)
+    slash_refuses_file, split_operands, suffix_flag, target_dir_error,
+    target_flags, update_mode, walk, wrap_target_dir)
 
 _logger = logging.getLogger(__name__)
 
@@ -340,11 +340,13 @@ async def mv(
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)
         dst_is_dir = True
         dst_exists = True
+        dst_err = None
     elif flags.no_target_dir:
         dst_is_dir = False
         dst_exists = True
+        dst_err = None
     else:
-        dst_exists, dst_is_dir = await entry_kind(stat, dst)
+        dst_exists, dst_is_dir, dst_err = await dest_kind(stat, dst)
     if readdir is None and isinstance(strategy, PrimitiveMove):
         readdir = strategy.readdir
     policy = TransferPolicy(cmd_name="mv",
@@ -355,10 +357,11 @@ async def mv(
     writes: dict[str, ByteSource] = {}
     lines: list[str] = []
     errors: list[str] = []
-    for src, target in copy_targets(sources, dst, dst_is_dir, dst_exists):
+    for src, target in copy_targets(sources, dst, dst_is_dir, dst_exists,
+                                    dst_err):
         src_exists, src_is_dir, src_err = await source_kind(stat, src)
         if not src_exists:
-            errors.append(f"mv: cannot stat '{src.virtual}': {src_err}")
+            errors.append(f"mv: cannot stat '{src.raw_path}': {src_err}")
             continue
         if key_of(src) == key_of(target):
             errors.append(f"mv: '{src.virtual}' and '{target.virtual}' "
@@ -373,9 +376,25 @@ async def mv(
                           f"subdirectory of itself, '{target.virtual}'")
             continue
         if not flags.no_target_dir and target.virtual == dst.virtual:
-            target_exists, target_is_dir = dst_exists, dst_is_dir
+            target_exists, target_is_dir, target_err = (dst_exists, dst_is_dir,
+                                                        dst_err)
         else:
-            target_exists, target_is_dir = await entry_kind(stat, target)
+            target_exists, target_is_dir, target_err = await dest_kind(
+                stat, target)
+        # mv's own order: the destination's stat refuses before the
+        # rename does. A chain that is merely absent is left to the
+        # backend rename below, which answers ENOENT in the same words
+        # (and on a dirless store may well succeed), unless a slash
+        # asked for a directory a file source can never be.
+        if target_err == "Not a directory":
+            errors.append(f"mv: cannot stat '{target.raw_path}': "
+                          "Not a directory")
+            continue
+        if slash_refuses_file(target, target_exists, src_is_dir):
+            errors.append(f"mv: cannot move '{src.virtual}' to "
+                          f"'{target.raw_path}': "
+                          f"{target_err or 'Not a directory'}")
+            continue
         mismatch = overwrite_type_error("mv", src, src_is_dir, target,
                                         target_exists, target_is_dir)
         if mismatch is not None:

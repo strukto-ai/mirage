@@ -21,7 +21,7 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '../resource/ram/ram.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -32,7 +32,7 @@ const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter
 const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 function cachingWorkspace(): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   // Force the cache on so reads are cached and write-site invalidation matters,
   // mirroring an S3-style caching backend (local RAM does not cache by default).
   ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
@@ -46,7 +46,7 @@ function cachingWorkspace(): Workspace {
 }
 
 async function exec(ws: Workspace, cmd: string): Promise<{ code: number; out: string }> {
-  const res = await ws.execute(cmd)
+  const res = await ws.shell(cmd)
   return { code: res.exitCode, out: DEC.decode(res.stdout) }
 }
 

@@ -167,6 +167,7 @@ FIND_BARE_PREDICATES = frozenset({
     "-delete",
     "-ls",
     "-depth",
+    "-prune",
 })
 
 FIND_OPERATORS = frozenset({

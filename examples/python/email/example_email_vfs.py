@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.email import EmailConfig, EmailResource
+from mirage.vfs.email import EmailConfig, EmailVFS
 
 load_dotenv(".env.development")
 
@@ -30,11 +30,11 @@ config = EmailConfig(
     password=os.environ["EMAIL_PASSWORD"],
     max_messages=20,
 )
-resource = EmailResource(config=config)
+vfs = EmailVFS(config=config)
 
 
 async def main():
-    with Workspace({"/email/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/email/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE ===\n")
 
         print("--- os.listdir() folders ---")
@@ -77,7 +77,7 @@ async def main():
                 nope = f"/email/{folder}/nope.txt"
                 print(f"  nope.txt: {os.path.exists(nope)}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

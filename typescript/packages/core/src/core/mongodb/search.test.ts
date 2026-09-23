@@ -21,7 +21,7 @@ vi.mock('./client.ts', () => ({
 }))
 
 import { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { resolveMongoDBConfig } from '../../resource/mongodb/config.ts'
+import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import * as client from './client.ts'
 import { arrayIter, stubMongoDriver } from './_test_util.ts'
 import { formatGrepResults, searchCollection, searchDatabase } from './search.ts'

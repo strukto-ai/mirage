@@ -15,7 +15,7 @@
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.resource.databricks_volume.config import DatabricksVolumeConfig
+from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
 
 WorkspaceClient: Any
 WorkspaceConfig: Any
@@ -44,7 +44,7 @@ class DatabricksVolumeAccessor(Accessor):
     def client(self) -> Any:
         if self._client is None:
             if WorkspaceClient is None or WorkspaceConfig is None:
-                raise ImportError("DatabricksVolumeResource requires the "
+                raise ImportError("DatabricksVolumeVFS requires the "
                                   "'databricks' extra. Install with: "
                                   "pip install mirage-ai[databricks]")
             kwargs: dict[str, Any] = {

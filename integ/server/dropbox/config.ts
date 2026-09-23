@@ -21,7 +21,7 @@ export type C = PrismaClient
 // isolated accounts a target mounts. /oauth2/token echoes the caller's refresh
 // token back as the access token, so the account rides the ordinary
 // Authorization header the RPC layer already sends on every call, and no
-// mirage-only header has to reach into a resource's request builder.
+// mirage-only header has to reach into a VFS's request builder.
 export const config = parseConfig({
   service: 'dropbox',
   schema: schemaFor('dropbox'),

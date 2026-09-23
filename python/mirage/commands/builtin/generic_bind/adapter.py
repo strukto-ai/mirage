@@ -1176,7 +1176,7 @@ async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
         index (IndexCacheStore): Index cache store for ``readdir``.
     """
     target = norm(path.virtual)
-    key = path.resource_path.strip("/")
+    key = path.vfs_path.strip("/")
     if not key:
         try:
             entries = await ops.readdir(accessor, path, index)
@@ -1187,7 +1187,7 @@ async def _is_implicit_dir(ops: CommandIO, accessor: Accessor, path: PathSpec,
     parent_virtual = parent(target)
     parent_path = PathSpec(virtual=parent_virtual,
                            directory=parent_virtual,
-                           resource_path=parent_key)
+                           vfs_path=parent_key)
     try:
         entries = await ops.readdir(accessor, parent_path, index)
     except MISS_ERRORS:
@@ -1202,7 +1202,7 @@ def _is_namespace_dir(opts: CommandOpts, path: PathSpec) -> bool:
     stat row and the implicit keyed-backend prefix. A directory that
     exists only because a mount or a link sits under it (``/repos`` when
     ``/repos/alpha`` is mounted) belongs to no backend at all: the keys
-    live in another resource, so the mount this command is bound to can
+    live in another VFS, so the mount this command is bound to can
     neither stat it nor list it, and every read command reported it
     missing while stat, file, ls, du, find and tree all called it a
     directory.
@@ -1255,7 +1255,7 @@ async def _read_hit_a_dir(ops: CommandIO, accessor: Accessor,
     through deeper keys. The namespace's child names cost nothing and are
     the only authority for a directory that exists because a mount or a
     link sits under it, which no backend can see because those keys live
-    in another resource.
+    in another VFS.
 
     A no leaves the original error untouched, so nothing is swallowed:
     the caller re-raises what the backend said. Both probes are broad for

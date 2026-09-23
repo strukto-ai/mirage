@@ -3,7 +3,7 @@ from typing import Any
 
 from mirage.accessor.dify import DifyAccessor
 from mirage.core.api.client import RetryPolicy, api_request, status_error
-from mirage.resource.dify.config import DifyConfig
+from mirage.vfs.dify.config import DifyConfig
 
 
 def _policy(config: DifyConfig) -> RetryPolicy:

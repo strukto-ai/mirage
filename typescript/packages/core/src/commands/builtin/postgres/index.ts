@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PostgresAccessor } from '../../../accessor/postgres.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { POSTGRES_GREP } from './grep.ts'
@@ -28,7 +28,7 @@ import { resolveGlobOf } from '../generic_bind/adapter.ts'
 const POSTGRES_OVERRIDES = new Set(['grep', 'head', 'rg', 'tail', 'wc'])
 
 export const POSTGRES_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<PostgresAccessor>(ResourceName.POSTGRES, POSTGRES_IO, {
+  ...makeGenericCommands<PostgresAccessor>(VFSName.POSTGRES, POSTGRES_IO, {
     overrides: POSTGRES_OVERRIDES,
   }),
   ...withDefaultProvisions(

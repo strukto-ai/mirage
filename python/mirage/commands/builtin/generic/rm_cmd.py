@@ -29,7 +29,7 @@ from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 def make_rm(
     *,
-    resource: str,
+    vfs: str,
     glob_fn: Callable[..., Awaitable[list[PathSpec]]],
     unlink: Callable[..., Awaitable[None]],
 ) -> Callable[..., Any]:
@@ -43,14 +43,14 @@ def make_rm(
     axis like the command it stands in for.
 
     Args:
-        resource (str): resource name the command registers under.
+        vfs (str): VFS name the command registers under.
         glob_fn (Callable): backend resolve_glob ``(accessor, paths,
             index)``.
         unlink (Callable): backend unlink ``(accessor, path, index)``.
     """
     unlink = with_write_guards(unlink)
 
-    @command("rm", resource=resource, spec=SPECS["rm"], write=True)
+    @command("rm", vfs=vfs, spec=SPECS["rm"], write=True)
     async def rm(
         accessor: Accessor,
         paths: list[PathSpec],

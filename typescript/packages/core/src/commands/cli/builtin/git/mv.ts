@@ -218,7 +218,7 @@ export async function check(
 /**
  * Whether renaming a path would leave a mount behind.
  *
- * A mount nested in the repository is served by another resource, and the
+ * A mount nested in the repository is served by another VFS, and the
  * rename op reaches only the backend holding the parent path: that backend
  * cannot see the child's keys, so it moves everything except them and the index
  * is then re-keyed onto files that never moved. The mount root itself is the

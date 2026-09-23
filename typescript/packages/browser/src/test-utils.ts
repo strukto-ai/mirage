@@ -145,14 +145,14 @@ export function makeMockRoot(name = 'root'): FileSystemDirectoryHandle {
   return new MockDirectoryHandle(node) as unknown as FileSystemDirectoryHandle
 }
 
-function fakeOPFSResource(handle: FileSystemDirectoryHandle): {
+function fakeOPFSVfs(handle: FileSystemDirectoryHandle): {
   requireHandle: () => FileSystemDirectoryHandle
 } {
   return { requireHandle: () => handle }
 }
 
 export function makeMockAccessor(name = 'root'): OPFSAccessor {
-  return new OPFSAccessor(fakeOPFSResource(makeMockRoot(name)))
+  return new OPFSAccessor(fakeOPFSVfs(makeMockRoot(name)))
 }
 
 export function installFakeNavigator(getRoot: () => FileSystemDirectoryHandle): () => void {

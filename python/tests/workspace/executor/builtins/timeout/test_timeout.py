@@ -6,7 +6,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.workspace.executor.builtins.timeout.timeout import (handle_timeout,
                                                                 parse_duration)
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 
 class FakeShell:
@@ -23,8 +23,8 @@ class FakeShell:
         return IOResult(stdout=b"done\n", exit_code=self.exit_code)
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
 def test_parse_duration_units():

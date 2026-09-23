@@ -1,4 +1,4 @@
-# Cross-resource workspace (CLI)
+# Cross-VFS workspace (CLI)
 
 Drive a multi-mount workspace (`/s3`, `/gdrive`, `/gmail`, `/slack`,
 `/discord`) end-to-end from the shell using `workspace.yaml`.

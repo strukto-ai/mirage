@@ -26,10 +26,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-@command("head",
-         resource="history",
-         spec=SPECS["head"],
-         aggregate=header_aggregate)
+@command("head", vfs="history", spec=SPECS["head"], aggregate=header_aggregate)
 async def head(accessor: HistoryAccessor, paths: list[PathSpec],
                texts: list[str],
                opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

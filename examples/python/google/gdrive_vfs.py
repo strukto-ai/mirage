@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.gdrive import GoogleDriveConfig, GoogleDriveResource
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 
 load_dotenv(".env.development")
 
@@ -28,11 +28,11 @@ config = GoogleDriveConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-resource = GoogleDriveResource(config=config)
+vfs = GoogleDriveVFS(config=config)
 
 
 async def main():
-    with Workspace({"/gdrive/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/gdrive/": vfs}, mode=MountMode.READ) as ws:
         print(
             "=== VFS MODE: open() reads from Google Drive transparently ===\n")
 
@@ -91,7 +91,7 @@ async def main():
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 

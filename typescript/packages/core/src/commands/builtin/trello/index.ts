@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TrelloAccessor } from '../../../accessor/trello.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { ProvisionFn, RegisteredCommand } from '../../config.ts'
 import { fileReadProvision } from './_provision.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
@@ -31,7 +31,7 @@ import { makeTrelloReadCommands } from './reads.ts'
 const TRELLO_OVERRIDES = new Set<string>()
 
 export const TRELLO_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<TrelloAccessor>(ResourceName.TRELLO, TRELLO_IO, {
+  ...makeGenericCommands<TrelloAccessor>(VFSName.TRELLO, TRELLO_IO, {
     overrides: TRELLO_OVERRIDES,
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,

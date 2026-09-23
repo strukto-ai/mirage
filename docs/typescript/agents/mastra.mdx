@@ -19,12 +19,12 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-node @mastra/core
 ## Usage
 
 ```ts
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent } from '@mastra/core/agent'
 import { mirageTools } from '@struktoai/mirage-agents/mastra'
 import { buildSystemPrompt } from '@struktoai/mirage-agents/openai'
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })

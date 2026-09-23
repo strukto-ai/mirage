@@ -43,7 +43,7 @@ def _build_path(p: str | PathSpec | None, t: bool, texts: tuple[str, ...],
     virtual = f"{parent.virtual.rstrip('/')}/{name}"
     return PathSpec.from_str_path(
         virtual,
-        rekey(parent.virtual, parent.resource_path, virtual),
+        rekey(parent.virtual, parent.vfs_path, virtual),
     ), parent
 
 

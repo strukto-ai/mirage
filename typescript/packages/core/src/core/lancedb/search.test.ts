@@ -15,7 +15,7 @@
 import { expect, it } from 'vitest'
 
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import { resolveLanceDBConfig } from '../../resource/lancedb/config.ts'
+import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import type { LanceDriver } from './_driver.ts'
 import { searchRowsOutput } from './search.ts'
@@ -39,7 +39,7 @@ it('spells a group value in the canonical path the way the listing does', async 
       ]),
   } as unknown as LanceDriver
   const accessor = new LanceDBAccessor(driver, config)
-  const path = new PathSpec({ virtual: '/db/docs', directory: '/db/docs', resourcePath: 'docs' })
+  const path = new PathSpec({ virtual: '/db/docs', directory: '/db/docs', vfsPath: 'docs' })
   const output = new TextDecoder().decode(
     await searchRowsOutput(accessor, 'one', [path], 3, 0, '/db'),
   )

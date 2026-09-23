@@ -19,7 +19,7 @@ from mirage.types import PathSpec
 from mirage.utils.ranges import slice_window
 
 
-@op("read", resource=["gdocs", "gdrive"], filetype=".gdoc.json")
+@op("read", vfs=["gdocs", "gdrive"], filetype=".gdoc.json")
 async def read(accessor: GDocsAccessor,
                path: PathSpec,
                *,

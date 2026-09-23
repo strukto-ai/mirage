@@ -19,7 +19,7 @@ import sys
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.mongodb import MongoDBConfig, MongoDBResource
+from mirage.vfs.mongodb import MongoDBConfig, MongoDBVFS
 
 load_dotenv(".env.development")
 
@@ -28,12 +28,11 @@ COLL = "heterogeneous"
 VIEW = "high_rated_films"
 
 config = MongoDBConfig(uri=os.environ["MONGODB_URI"], databases=[DB])
-resource = MongoDBResource(config=config)
+vfs = MongoDBVFS(config=config)
 
-with Workspace({
-        "/mongodb/":
-        Mount(resource, mode=MountMode.READ, backend=MountBackend.FUSE)
-}) as ws:
+with Workspace(
+    {"/mongodb/": Mount(vfs, mode=MountMode.READ,
+                        backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
 
     print(f"=== FUSE MODE: mounted at {mp} ===\n")
@@ -101,7 +100,7 @@ with Workspace({
     else:
         print(">>> (non-interactive: unmounting now)")
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, "
           f"{total} bytes transferred")

@@ -10,7 +10,7 @@ daemon over HTTP and auto-spawns one on first use if none is running.
 cat > workspace.yaml <<'YAML'
 mounts:
   /:
-    resource: ram
+    vfs: ram
     mode: WRITE
 YAML
 

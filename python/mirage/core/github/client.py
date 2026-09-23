@@ -21,8 +21,8 @@ from pydantic import SecretStr
 from mirage.core.api.client import (ApiResponse, SessionArg, api_request,
                                     status_error)
 from mirage.core.github.constants import API_BASE, API_VERSION
-from mirage.resource.secrets import reveal_secret
 from mirage.types import JsonValue
+from mirage.vfs.secrets import reveal_secret
 
 
 class _NoBody:

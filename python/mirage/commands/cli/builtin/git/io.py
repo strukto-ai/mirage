@@ -408,7 +408,7 @@ def refuse_mount(mounts: MountView | None, path: str) -> None:
     """Refuse a removal that would take a nested mount with it.
 
     A mount nested inside the working tree is served by another
-    resource, and ``readdir`` merges it into the parent's listing, so a
+    VFS, and ``readdir`` merges it into the parent's listing, so a
     walk that empties a directory walks straight into the child backend
     and unlinks what is in it. No branch ever recorded any of that, and
     the ``rmdir`` that follows takes the mount root itself. Asking the

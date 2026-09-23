@@ -27,7 +27,7 @@ from mirage.workspace.executor.builtins.dirs.dirs import (join_raw, norm,
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.expand.classify import classify_bare_path
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.shell_dirs import (change_dir, home_dir,
                                                  logical_cwd)
 from mirage.workspace.types import ExecutionNode
@@ -51,7 +51,7 @@ def _cdpath_searchable(target: str) -> bool:
 def _cd_candidates(
     raw: str,
     cdpath_target: str | None,
-    session: Session,
+    session: SessionState,
     cwd: str,
 ) -> list[tuple[str, bool]]:
     """Build the ordered list of directories ``cd`` should try.
@@ -85,7 +85,7 @@ async def handle_cd(
     dispatch: DispatchFn,
     is_mount_root: Callable[[str], bool],
     path: str | PathSpec,
-    session: Session,
+    session: SessionState,
     print_path: bool = False,
     cdpath_target: str | None = None,
     links: dict[str, str] | None = None,
@@ -148,7 +148,7 @@ async def handle_cd(
 
 
 def _cd_success(
-    session: Session,
+    session: SessionState,
     resolved: str,
     logical: str,
     spelled: str,
@@ -158,7 +158,7 @@ def _cd_success(
     """Land the session on ``resolved`` and print what GNU prints.
 
     Args:
-        session (Session): the session to move.
+        session (SessionState): the session to move.
         resolved (str): the physical directory to land on.
         logical (str): the name to remember as the cwd's spelling --
             ``resolved`` under ``-P``, which collapses the pair.

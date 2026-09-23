@@ -69,7 +69,7 @@ export const FD_CLOSE = -1
 export const SHELL_FDS: ReadonlySet<number> = new Set([FD_STDIN, FD_STDOUT, FD_STDERR])
 
 // The two dynamic variables the shell answers itself: PIPESTATUS reads the
-// session's record of the last pipeline (`Session.pipeStatus`) and RANDOM
+// session's record of the last pipeline (`SessionState.pipeStatus`) and RANDOM
 // steps a generator (`session/rng.ts`). Neither lives in the variable
 // store.
 export const PIPESTATUS = 'PIPESTATUS'
@@ -87,18 +87,18 @@ export const RANDOM_M = 0x7fffffff
 export const RANDOM_ZERO_SEED = 123459876
 export const RANDOM_MODULUS = 2 ** 32
 export const RANDOM_MAX = 32767
-// What `Session.randomSeed` holds once `unset RANDOM` has stripped the name
+// What `SessionState.randomSeed` holds once `unset RANDOM` has stripped the name
 // of its meaning: no generated word is ever empty.
 export const RANDOM_UNSET = ''
 
 // What the shell calls itself when no script is running, bash's "bash".
-// A nested `bash`/`sh` overrides it through Session.scriptName, and
-// `Session.argv0` is the one place the two are folded together.
+// A nested `bash`/`sh` overrides it through SessionState.scriptName, and
+// `SessionState.argv0` is the one place the two are folded together.
 export const SHELL_ARGV0 = 'mirage'
 
 // Node types whose failure never triggers `set -e` by shape alone.
 // Lists are NOT exempt: bash exits when the command after the final
-// `&&`/`||` fails; short-circuit failures set Session.errexitImmune
+// `&&`/`||` fails; short-circuit failures set SessionState.errexitImmune
 // instead, so the executor loops skip only those.
 export const ERREXIT_EXEMPT_TYPES: ReadonlySet<string> = new Set<string>([NodeType.NEGATED_COMMAND])
 

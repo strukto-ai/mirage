@@ -27,7 +27,7 @@ from mirage.shell.array import ShellArray, array_set
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.shared import fail, require_view
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (session_view, visible_arrays,
                                             visible_assocs)
 from mirage.workspace.types import ExecutionNode
@@ -49,7 +49,7 @@ def _count(text: str) -> int | None:
 
 async def handle_mapfile(
     args: list[str],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None,
     execute_fn: Callable[..., Any],
     state: SessionView | None = None,
@@ -72,7 +72,7 @@ async def handle_mapfile(
 
     Args:
         args (list[str]): the words after the builtin.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (ByteSource | None): the input source.
         execute_fn (Callable): the executor's nested eval, for `-C`.
         state (SessionView | None): the session plane's gated door.

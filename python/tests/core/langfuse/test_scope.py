@@ -26,7 +26,7 @@ def _spec(path: str) -> PathSpec:
     """
     key = path.strip("/")
     return PathSpec(
-        resource_path=key,
+        vfs_path=key,
         virtual="/langfuse/" + key,
         directory="/langfuse",
         pattern=None,
@@ -99,7 +99,7 @@ def test_datasets_name():
 
 def test_glob_scope_root():
     gs = PathSpec(
-        resource_path=mount_key("/langfuse/", "/langfuse"),
+        vfs_path=mount_key("/langfuse/", "/langfuse"),
         virtual="/langfuse/",
         directory="/langfuse/",
         pattern=None,
@@ -110,7 +110,7 @@ def test_glob_scope_root():
 
 def test_glob_scope_traces():
     gs = PathSpec(
-        resource_path=mount_key("/langfuse/traces", "/langfuse"),
+        vfs_path=mount_key("/langfuse/traces", "/langfuse"),
         virtual="/langfuse/traces",
         directory="/langfuse/",
         pattern=None,
@@ -121,7 +121,7 @@ def test_glob_scope_traces():
 
 def test_glob_scope_file():
     gs = PathSpec(
-        resource_path=mount_key("/langfuse/traces/abc.json", "/langfuse"),
+        vfs_path=mount_key("/langfuse/traces/abc.json", "/langfuse"),
         virtual="/langfuse/traces/abc.json",
         directory="/langfuse/traces/",
         pattern="*.json",

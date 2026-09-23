@@ -59,7 +59,7 @@ from mirage.workspace.node.declaration import execute_declaration
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (expand_double_bracket,
                                              expand_test_expr)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (ensure_var_visible, random_reader,
                                             session_elements, session_view,
@@ -76,7 +76,7 @@ from mirage.shell.helpers import (  # isort: skip
 async def _eval_cfor_expr(
     exprs: list[Any],
     default: int,
-    session: Session,
+    session: SessionState,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None,
     view: SessionView | None = None,
@@ -88,7 +88,7 @@ async def _eval_cfor_expr(
             per comma-separated expression; empty for an empty slot.
         default (int): value an empty slot yields (1 for the condition
             so `for ((;;))` loops, 0 for init/update).
-        session (Session): shell session; arithmetic assignments land
+        session (SessionState): shell session; arithmetic assignments land
             in its env.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
@@ -167,7 +167,7 @@ async def _recurse_reassociated(
     redirects: list[Any],
     right: Any,
     node: Any,
-    session: Session,
+    session: SessionState,
     stdin: Any = None,
     call_stack: CallStack | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -185,7 +185,7 @@ async def _recurse_reassociated(
         redirects (list): parsed redirects hoisted off the list.
         right (Any): the list's last command node.
         node (Any): node being executed by handle_connection.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
@@ -219,7 +219,7 @@ async def _recurse_pipe_stderr(
     registry: MountRegistry,
     targets: list[Any],
     node: Any,
-    session: Session,
+    session: SessionState,
     stdin: Any = None,
     call_stack: CallStack | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -257,7 +257,7 @@ async def _run_redirected(
     view: SessionView | None,
     command: Any,
     redirects: list[Redirect],
-    session: Session,
+    session: SessionState,
     stdin: Any,
     call_stack: CallStack | None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -273,7 +273,7 @@ async def _run_redirected(
         command (Any): the redirected command node, None for a bare
             redirect.
         redirects (list[Redirect]): the statement's parsed redirects.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
@@ -326,7 +326,7 @@ async def _run_continuation(
     run_left: Callable[..., Any],
     left: Any,
     steps: tuple[tuple[str, Any], ...],
-    session: Session,
+    session: SessionState,
     stdin: Any,
     call_stack: CallStack | None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -349,7 +349,7 @@ async def _run_continuation(
             left side in ``handle_connection``.
         steps (tuple[tuple[str, Any], ...]): the ``(operator, right)``
             steps, in order.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
@@ -368,7 +368,7 @@ async def _recurse_continuation(
     left: Any,
     steps: tuple[tuple[str, Any], ...],
     node: Any,
-    session: Session,
+    session: SessionState,
     stdin: Any = None,
     call_stack: CallStack | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
@@ -382,7 +382,7 @@ async def _recurse_continuation(
         steps (tuple[tuple[str, Any], ...]): the steps before the
             current one.
         node (Any): the node ``handle_connection`` asks for.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
@@ -418,7 +418,7 @@ async def execute_node(
     execute_fn: Callable[..., Any],
     agent_id: str,
     node: Any,
-    session: Session,
+    session: SessionState,
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
@@ -447,7 +447,7 @@ async def execute_node(
         session._diagnostics = outer
 
 
-def _diagnostic_stderr(node: Any, session: Session) -> bytes:
+def _diagnostic_stderr(node: Any, session: SessionState) -> bytes:
     if not session._diagnostics:
         return b""
     head = get_text(node).split(None, 1)[0]
@@ -469,7 +469,7 @@ async def _execute_node(
     execute_fn: Callable[..., Any],
     agent_id: str,
     node: Any,
-    session: Session,
+    session: SessionState,
     stdin: Any = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
@@ -487,7 +487,7 @@ async def _execute_node(
         execute_fn (Callable): recursive execute (for source/eval).
         agent_id (str): current agent ID for jobs.
         node (Any): tree-sitter node to execute.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
         cancel (asyncio.Event | None): event used to abort mid-flight.

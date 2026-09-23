@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { unlink } from '../../../core/gcal/unlink.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
 import { GCAL_IO } from './io.ts'
 
-export const GCAL_RM = makeRm(ResourceName.GCAL, GCAL_IO, unlink)
+export const GCAL_RM = makeRm(VFSName.GCAL, GCAL_IO, unlink)

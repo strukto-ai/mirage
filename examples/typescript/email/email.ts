@@ -16,7 +16,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
-  EmailResource,
+  EmailVFS,
   HIMALAYA,
   MountMode,
   Workspace,
@@ -53,7 +53,7 @@ async function run(
   cmd: string,
 ): Promise<{ out: string; err: string; code: number }> {
   try {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
   } catch (err) {
     return {
@@ -72,8 +72,8 @@ function printSection(label: string, out: string, err: string, max = 500): void 
 
 async function main(): Promise<void> {
   const config = buildConfig()
-  const resource = new EmailResource(config)
-  const ws = new Workspace({ '/email': resource }, { mode: MountMode.READ })
+  const vfs = new EmailVFS(config)
+  const ws = new Workspace({ '/email': vfs }, { mode: MountMode.READ })
   // The mail verbs are a CLI install, separate from the mount: the
   // mount serves files, himalaya acts on the account.
   ws.registerCli('himalaya', HIMALAYA, { ...config })
@@ -136,7 +136,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${firstMsg} ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "${firstMsg}" && chown 500:dev "${firstMsg}" && touch -t 202601021530 "${firstMsg}"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

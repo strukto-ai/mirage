@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { destError, resolveFileHandle, toWritableChunk } from './utils.ts'
+import { openError, resolveFileHandle, toWritableChunk } from './utils.ts'
 
 export async function appendBytes(
   accessor: OPFSAccessor,
@@ -30,7 +30,7 @@ export async function appendBytes(
   try {
     handle = await resolveFileHandle(root, virtual, { create: true })
   } catch (err) {
-    throw destError(err, p)
+    throw await openError(root, virtual, err, p)
   }
   const existing = await handle.getFile()
   const existingBytes = new Uint8Array(await existing.arrayBuffer())
@@ -40,5 +40,5 @@ export async function appendBytes(
   const writable = await handle.createWritable()
   await writable.write(toWritableChunk(merged))
   await writable.close()
-  record('append', virtual, ResourceName.OPFS, data.byteLength, timer)
+  record('append', virtual, VFSName.OPFS, data.byteLength, timer)
 }

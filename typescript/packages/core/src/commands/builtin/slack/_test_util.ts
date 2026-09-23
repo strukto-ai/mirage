@@ -16,7 +16,7 @@ import { SlackAccessor, type SlackResourceLike } from '../../../accessor/slack.t
 import { IndexEntry } from '../../../cache/index/config.ts'
 import type { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import type { SlackResponse, SlackTransport } from '../../../core/slack/client.ts'
-import type { Resource } from '../../../resource/base.ts'
+import type { VFS } from '../../../vfs/base.ts'
 
 export interface FakeCall {
   endpoint: string
@@ -39,9 +39,9 @@ export class FakeSlackTransport implements SlackTransport {
   }
 }
 
-export function makeFakeResource(transport: SlackTransport): SlackResourceLike {
+export function makeFakeVfs(transport: SlackTransport): SlackResourceLike {
   const accessor = new SlackAccessor(transport)
-  const resource: Resource & { accessor: SlackAccessor } = {
+  const vfs: VFS & { accessor: SlackAccessor } = {
     kind: 'slack',
     accessor,
     open: () => Promise.resolve(),
@@ -51,7 +51,7 @@ export function makeFakeResource(transport: SlackTransport): SlackResourceLike {
       // Nothing to take back.
     },
   }
-  return resource as SlackResourceLike
+  return vfs as SlackResourceLike
 }
 
 export async function seedChannel(

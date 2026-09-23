@@ -16,8 +16,8 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.stat import stat
-from mirage.resource.ram.store import RAMStore
 from mirage.types import ContentType, FileType, PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 @pytest.fixture
@@ -42,8 +42,7 @@ async def test_stat_root():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    result = await stat(a,
-                        PathSpec(resource_path="", virtual="/", directory="/"))
+    result = await stat(a, PathSpec(vfs_path="", virtual="/", directory="/"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
@@ -52,7 +51,7 @@ async def test_stat_root():
 async def test_stat_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path="hello.txt",
+        PathSpec(vfs_path="hello.txt",
                  virtual="/hello.txt",
                  directory="/hello.txt"))
     assert result.name == "hello.txt"
@@ -63,8 +62,7 @@ async def test_stat_file(accessor):
 @pytest.mark.asyncio
 async def test_stat_directory(accessor):
     result = await stat(
-        accessor,
-        PathSpec(resource_path="sub", virtual="/sub", directory="/sub"))
+        accessor, PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "sub"
     assert result.size is None
@@ -75,14 +73,14 @@ async def test_stat_not_found(accessor):
     with pytest.raises(FileNotFoundError):
         await stat(
             accessor,
-            PathSpec(resource_path="nope", virtual="/nope", directory="/nope"))
+            PathSpec(vfs_path="nope", virtual="/nope", directory="/nope"))
 
 
 @pytest.mark.asyncio
 async def test_stat_json_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path="data.json",
+        PathSpec(vfs_path="data.json",
                  virtual="/data.json",
                  directory="/data.json"))
     assert result.content == ContentType.JSON
@@ -93,7 +91,5 @@ async def test_stat_json_file(accessor):
 async def test_stat_image_file(accessor):
     result = await stat(
         accessor,
-        PathSpec(resource_path="img.png",
-                 virtual="/img.png",
-                 directory="/img.png"))
+        PathSpec(vfs_path="img.png", virtual="/img.png", directory="/img.png"))
     assert result.content == ContentType.IMAGE_PNG

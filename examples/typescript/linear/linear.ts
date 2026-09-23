@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { LINEAR } from '@struktoai/mirage-core'
 import {
-  LinearResource,
+  LinearVFS,
   MountMode,
   Workspace,
   type FileStat,
@@ -37,7 +37,7 @@ function buildConfig(): LinearConfig {
 
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
-  const r = await ws.execute(cmd)
+  const r = await ws.shell(cmd)
   if (r.exitCode !== 0 && r.stderrText !== '') {
     console.log(`  STDERR: ${r.stderrText.slice(0, 200)}`)
   }
@@ -50,7 +50,7 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 
 async function main(): Promise<void> {
   const ws = new Workspace(
-    { '/linear': new LinearResource(buildConfig()) },
+    { '/linear': new LinearVFS(buildConfig()) },
     { mode: MountMode.READ },
   )
   ws.registerCli('linear', LINEAR, buildConfig() as unknown as Record<string, unknown>)
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${issuePath}/issue.json ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "${issuePath}/issue.json" && chown 500:dev "${issuePath}/issue.json" && touch -t 202601021530 "${issuePath}/issue.json"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
     // ── mid-path glob: the team segment is the pattern, the literal
     // tail keeps walking (lists teams once, then filters).
     console.log('\n=== echo /linear/teams/*/issues (mid-path glob) ===')
-    const globR = await ws.execute('echo /linear/teams/*/issues')
+    const globR = await ws.shell('echo /linear/teams/*/issues')
     const globOut = globR.stdoutText.trim()
     console.log(`  ${globOut.slice(0, 200)}`)
     if (!globOut.endsWith('/issues')) {
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
     // A glob that matches nothing stays the literal word, so the
     // command reports it like GNU coreutils.
     console.log('\n=== cat /linear/teams/zz-none-*/team.json (no match) ===')
-    const litR = await ws.execute('cat /linear/teams/zz-none-*/team.json')
+    const litR = await ws.shell('cat /linear/teams/zz-none-*/team.json')
     const litErr = litR.stderrText.trim()
     console.log(`  exit=${litR.exitCode}  ${litErr.slice(0, 120)}`)
     if (litR.exitCode !== 1 || !litErr.includes('zz-none-*')) {

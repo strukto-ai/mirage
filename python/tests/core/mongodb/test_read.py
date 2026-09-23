@@ -21,8 +21,8 @@ from bson import ObjectId
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.mongodb.read import read
-from mirage.resource.mongodb.config import MongoDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 DOCS_PATH = "/sample_mflix/collections/movies/documents.jsonl"
 SCHEMA_PATH = "/sample_mflix/collections/movies/schema.json"
@@ -51,7 +51,7 @@ def _patched_iter(docs):
 
 
 def _path(s: str) -> PathSpec:
-    return PathSpec(virtual=s, directory=s, resource_path=s.strip("/"))
+    return PathSpec(virtual=s, directory=s, vfs_path=s.strip("/"))
 
 
 @pytest.fixture(autouse=True)

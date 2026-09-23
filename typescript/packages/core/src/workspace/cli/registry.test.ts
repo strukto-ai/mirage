@@ -139,7 +139,7 @@ describe('CLIRegistry zod config schemas', () => {
   })
 
   // The same snake_case YAML config block must serve the Python and TS
-  // sides alike (the resource registries already promise this); the
+  // sides alike (the VFS registries already promise this); the
   // pydantic arm is snake_case-native, so the zod arm normalizes.
   it('accepts python-style snake_case keys for camelCase fields', () => {
     const reg = new CLIRegistry()

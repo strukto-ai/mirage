@@ -1,7 +1,7 @@
 {
   "lineage": {
     "kind": "synthetic",
-    "purpose": "Mirage resource integration; not Toolathlon benchmark observations",
+    "purpose": "Mirage VFS integration; not Toolathlon benchmark observations",
     "contract": "wandb/wandb v0.21.1 public GraphQL client",
     "source_projects": []
   },

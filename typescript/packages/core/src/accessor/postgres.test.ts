@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { PgDriver } from '../core/postgres/_driver.ts'
-import { resolvePostgresConfig } from '../resource/postgres/config.ts'
+import { resolvePostgresConfig } from '../vfs/postgres/config.ts'
 import { PostgresAccessor } from './postgres.ts'
 
 describe('PostgresAccessor', () => {

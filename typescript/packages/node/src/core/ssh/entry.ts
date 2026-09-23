@@ -40,7 +40,7 @@ export function attrsToFileStat(name: string, attrs: SshAttrs): FileStat {
   const mode = attrs.mode !== undefined ? attrs.mode & 0o7777 : null
   const atime = attrs.atime !== undefined ? epochToIso(attrs.atime) : null
   // The remote mtime is the only cheap change token SFTP offers, so it is
-  // also the fingerprint: without one, the ALWAYS consistency policy has
+  // also the fingerprint: without one, a `read: fresh` mount has
   // nothing to compare and keeps serving a cached copy that the server has
   // already replaced. Mirrors the python stat.
   if (isDirectoryAttrs(attrs)) {

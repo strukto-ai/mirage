@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 
@@ -46,7 +46,7 @@ export class CondError extends Error {
 export interface CondContext {
   dispatch: DispatchFn
   namespace: Namespace
-  session: Session
+  session: SessionState
   name: string
   // The session plane's gated door, which an assignment inside a numeric
   // operand lands through; absent outside a workspace.

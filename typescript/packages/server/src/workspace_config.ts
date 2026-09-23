@@ -14,7 +14,6 @@
 
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import type { Limit } from '@struktoai/mirage-core/types'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import type { Workspace } from '@struktoai/mirage-node'
@@ -72,19 +71,16 @@ export async function buildWorkspaceFromConfig(configPath: string): Promise<Work
     await import('@struktoai/mirage-node')
   const config = loadWorkspaceConfigFile(configPath)
   const args = await configToWorkspaceArgs(config)
-  const resources: Record<string, MountSpec> = {}
-  const commandLimits: Record<string, Record<string, Limit>> = {}
-  for (const [prefix, [resource, mode, limits]] of Object.entries(args.resources)) {
-    resources[prefix] = [resource, mode]
-    if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
-  }
+  // The Mounts ride through whole. Flattening them to [vfs, mode] here is
+  // what would drop the read policy -- and used to mean re-lifting
+  // commandLimits by hand, which core's normalizeMounts now does.
+  const mounts: Record<string, MountSpec> = { ...args.mounts }
   // Every option the config produced rides through, so a new config
   // knob needs no edit here (the hand-written list is what dropped
   // `clis` on the daemon's own create route).
-  const workspace = new Workspace(resources, {
+  const workspace = new Workspace(mounts, {
     ...args.options,
     workspaceId: args.options.workspaceId ?? newWorkspaceId(),
-    ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
   })
   try {
     for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {

@@ -24,7 +24,7 @@ import { SEARCH_KINDS, detectScope } from './scope.ts'
 function spec(path: string): PathSpec {
   const key = path.replace(/^\/+|\/+$/g, '')
   return new PathSpec({
-    resourcePath: key,
+    vfsPath: key,
     virtual: `/langfuse/${key}`,
     directory: '/langfuse',
     pattern: null,
@@ -99,7 +99,7 @@ describe('langfuse detectScope', () => {
 describe('langfuse detectScope glob specs', () => {
   it('classifies a glob-scope root', () => {
     const gs = new PathSpec({
-      resourcePath: mountKey('/langfuse/', '/langfuse'),
+      vfsPath: mountKey('/langfuse/', '/langfuse'),
       virtual: '/langfuse/',
       directory: '/langfuse/',
       pattern: null,
@@ -110,7 +110,7 @@ describe('langfuse detectScope glob specs', () => {
 
   it('classifies a glob-scope traces dir', () => {
     const gs = new PathSpec({
-      resourcePath: mountKey('/langfuse/traces', '/langfuse'),
+      vfsPath: mountKey('/langfuse/traces', '/langfuse'),
       virtual: '/langfuse/traces',
       directory: '/langfuse/',
       pattern: null,
@@ -121,7 +121,7 @@ describe('langfuse detectScope glob specs', () => {
 
   it('classifies a glob-resolved file', () => {
     const gs = new PathSpec({
-      resourcePath: mountKey('/langfuse/traces/abc.json', '/langfuse'),
+      vfsPath: mountKey('/langfuse/traces/abc.json', '/langfuse'),
       virtual: '/langfuse/traces/abc.json',
       directory: '/langfuse/traces/',
       pattern: '*.json',

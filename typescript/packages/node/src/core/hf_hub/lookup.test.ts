@@ -32,7 +32,7 @@ function ps(path: string, prefix = ''): PathSpec {
   const virtual =
     stem === '' ? (rel === '' ? '/' : `/${rel}`) : rel === '' ? stem : `${stem}/${rel}`
   const parent = virtual.slice(0, virtual.lastIndexOf('/')) || '/'
-  return new PathSpec({ virtual, directory: parent, resourcePath: rel })
+  return new PathSpec({ virtual, directory: parent, vfsPath: rel })
 }
 
 /** The errno an fs op refused with, which is what a backend test pins. */

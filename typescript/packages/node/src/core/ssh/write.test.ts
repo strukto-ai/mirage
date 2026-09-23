@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
-import { PathSpec, ResourceName } from '@struktoai/mirage-core/types'
+import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
@@ -79,7 +79,7 @@ describe('core/ssh/write', () => {
     })
     expect(records).toHaveLength(1)
     expect(records[0]?.op).toBe('write')
-    expect(records[0]?.source).toBe(ResourceName.SSH)
+    expect(records[0]?.source).toBe(VFSName.SSH)
     expect(records[0]?.bytes).toBe(5)
   })
 })

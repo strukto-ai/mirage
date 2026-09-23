@@ -110,7 +110,7 @@ export function isReadOnlyError(err: unknown): boolean {
 // Route one attribute write through the op door. The door applies what
 // the backend can hold natively and stores the residual in the namespace
 // overlay (dropping overlay fields the backend applied, so a stale
-// overlay never shadows the fresh backend value); a resource with no
+// overlay never shadows the fresh backend value); a VFS with no
 // setattr op overlays everything. Kept as a seam so every metadata
 // builtin shares one call shape.
 export async function setattrVia(

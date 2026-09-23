@@ -28,13 +28,13 @@ async def ls(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
              texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     if not ops.is_mounted(accessor):
-        raise ValueError("ls: no resource")
+        raise ValueError("ls: no VFS")
     if not paths:
         paths = [
             PathSpec(virtual=opts.cwd.virtual,
                      directory=opts.cwd.virtual,
                      resolved=False,
-                     resource_path=opts.cwd.resource_path)
+                     vfs_path=opts.cwd.vfs_path)
         ]
     resolved = await ops.resolve_glob(accessor, paths, opts.index)
     stat_fn: Callable[..., Awaitable[FileStat]] = partial(ops.stat, accessor)

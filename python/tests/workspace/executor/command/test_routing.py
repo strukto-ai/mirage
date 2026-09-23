@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.cli.specs import cli_spec_for
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.command.routing import (merge_scopes,
                                                        path_flag_scopes,
@@ -24,7 +24,7 @@ from mirage.workspace.executor.command.routing import (merge_scopes,
 def _path(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path="",
+                    vfs_path="",
                     resolved=True)
 
 
@@ -45,7 +45,7 @@ def test_path_flag_scopes_unknown_command_is_empty():
 
 
 def test_program_tokens_walks_a_cli_verb_path_and_keeps_the_rest_raw():
-    ws = Workspace(resources={"/ram": (RAMResource(), MountMode.WRITE)})
+    ws = Workspace(mounts={"/ram": (RAMVFS(), MountMode.WRITE)})
     try:
         ws.register_cli("git", cli_spec_for("git"))
         reg = ws._registry

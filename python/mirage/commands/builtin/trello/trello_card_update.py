@@ -38,7 +38,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("trello card update", resource="trello", spec=SPEC, write=True)
+@command("trello card update", vfs="trello", spec=SPEC, write=True)
 async def trello_card_update(
         accessor: TrelloAccessor, paths: list[PathSpec], texts: list[str],
         opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

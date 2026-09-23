@@ -17,7 +17,7 @@ from collections.abc import Iterable
 
 from mirage.workspace.record.types import RecordFields
 
-# One session's durable fields: the JSON-able ``Session.to_dict()``
+# One session's durable fields: the JSON-able ``SessionState.to_dict()``
 # payload (session_id, cwd, env, created_at, mount_modes). Volatile
 # shell state (functions, arrays, stdin buffers) never persists.
 # A session's stored shape is one keyed record like any other, so the

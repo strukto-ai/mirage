@@ -79,7 +79,7 @@ async def test_stat_file(tree):
     index = _index_from_tree(tree)
     result = await stat(
         None,
-        PathSpec(resource_path="src/main.py",
+        PathSpec(vfs_path="src/main.py",
                  virtual="/src/main.py",
                  directory="/src/main.py"), index)
     assert result.name == "main.py"
@@ -92,7 +92,7 @@ async def test_stat_file(tree):
 async def test_stat_directory(tree):
     index = _index_from_tree(tree)
     result = await stat(
-        None, PathSpec(resource_path="src", virtual="/src", directory="/src"),
+        None, PathSpec(vfs_path="src", virtual="/src", directory="/src"),
         index)
     assert result.name == "src"
     assert result.type == FileType.DIRECTORY
@@ -101,9 +101,8 @@ async def test_stat_directory(tree):
 @pytest.mark.asyncio
 async def test_stat_root(tree):
     index = _index_from_tree(tree)
-    result = await stat(None,
-                        PathSpec(resource_path="", virtual="/", directory="/"),
-                        index)
+    result = await stat(None, PathSpec(vfs_path="", virtual="/",
+                                       directory="/"), index)
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
@@ -114,7 +113,7 @@ async def test_stat_not_found(tree):
     with pytest.raises(FileNotFoundError):
         await stat(
             None,
-            PathSpec(resource_path="nonexistent.py",
+            PathSpec(vfs_path="nonexistent.py",
                      virtual="/nonexistent.py",
                      directory="/nonexistent.py"), index)
 
@@ -124,7 +123,7 @@ async def test_stat_strip_slashes(tree):
     index = _index_from_tree(tree)
     result = await stat(
         None,
-        PathSpec(resource_path="README.md",
+        PathSpec(vfs_path="README.md",
                  virtual="/README.md",
                  directory="/README.md"), index)
     assert result.name == "README.md"
@@ -181,7 +180,7 @@ async def test_direct_lookup_after_invalidation(backend, truncated, deleted,
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", tree_fetch)
     monkeypatch.setitem(readdir.__globals__, "fetch_dir_tree", dir_fetch)
     monkeypatch.setitem(read.__globals__, "read_bytes", blob_fetch)
-    path = PathSpec(resource_path="src/main.py",
+    path = PathSpec(vfs_path="src/main.py",
                     virtual="/repo/src/main.py",
                     directory="/repo/src")
     try:
@@ -236,10 +235,8 @@ async def test_parallel_snapshot_readers_share_one_replacement(
 
     fetch_mock = AsyncMock(side_effect=fetch)
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_mock)
-    path = PathSpec(virtual="/repo/a.txt",
-                    directory="/repo",
-                    resource_path="a.txt")
-    root = PathSpec(virtual="/repo", directory="/repo", resource_path="")
+    path = PathSpec(virtual="/repo/a.txt", directory="/repo", vfs_path="a.txt")
+    root = PathSpec(virtual="/repo", directory="/repo", vfs_path="")
     try:
         await index.set_dir("/repo", [
             ("a.txt", IndexEntry(id="old", name="a.txt", resource_type="file"))

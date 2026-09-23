@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { IOResult } from '../../../io/types.ts'
 import type { CommandOpts } from '../../config.ts'
@@ -36,10 +36,10 @@ async function runCurl(
   url: string,
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: Uint8Array; io: IOResult }> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = GENERAL_CURL[0]
   if (cmd === undefined) throw new Error('curl not registered')
-  const result = await cmd.fn(resource.accessor, [] as PathSpec[], [url], opts({ flags }))
+  const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], opts({ flags }))
   if (result === null) throw new Error('null result')
   const [out, io] = result
   if (out === null) return { out: new Uint8Array(), io }
@@ -51,10 +51,10 @@ async function runWget(
   url: string,
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: Uint8Array; io: IOResult }> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = GENERAL_WGET[0]
   if (cmd === undefined) throw new Error('wget not registered')
-  const result = await cmd.fn(resource.accessor, [] as PathSpec[], [url], opts({ flags }))
+  const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], opts({ flags }))
   if (result === null) throw new Error('null result')
   const [out, io] = result
   if (out === null) return { out: new Uint8Array(), io }

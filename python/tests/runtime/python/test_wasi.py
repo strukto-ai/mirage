@@ -19,10 +19,10 @@ from pathlib import Path
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.resource.ram import RAMResource
 from mirage.runtime.python import WasiRuntime
 from mirage.runtime.python.wasi import WASI_HOME_ENV
 from mirage.runtime.types import RunArgs
+from mirage.vfs.ram import RAMVFS
 
 
 def _build_dir() -> str | None:
@@ -106,16 +106,16 @@ def test_wasi_host_fs_and_network_invisible():
 @live
 @pytest.mark.asyncio
 async def test_wasi_python3_command_end_to_end():
-    ram = RAMResource()
+    ram = RAMVFS()
     ram._store.files["/calc.py"] = (b"import sys\n"
                                     b"print(int(sys.argv[1]) * 6)\n")
     ws = Workspace({"/ram": ram}, mode=MountMode.EXEC, runtimes=["wasi"])
-    r = await ws.execute("python3 -c \"print('wasi says', 6 * 7)\"")
+    r = await ws.shell("python3 -c \"print('wasi says', 6 * 7)\"")
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "wasi says 42\n"
     # Script files resolve through the workspace before the run, so a
     # mounted script executes even though the code cannot see mounts.
-    r2 = await ws.execute("python3 /ram/calc.py 7")
+    r2 = await ws.shell("python3 /ram/calc.py 7")
     assert r2.exit_code == 0
     assert (await r2.stdout_str()) == "42\n"
     await ws.close()
@@ -154,19 +154,17 @@ def test_wasi_reuses_compiled_module():
 async def test_wasi_mounts_read_write_listdir():
     # Guest file I/O bridges through the workspace dispatch: reads see
     # shell writes, guest writes land in the mount, listdir lists it.
-    ws = Workspace({"/data": RAMResource()},
-                   mode=MountMode.EXEC,
-                   runtimes=["wasi"])
-    await ws.execute("echo hello-mount > /data/in.txt")
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["wasi"])
+    await ws.shell("echo hello-mount > /data/in.txt")
     code = ("import os\n"
             "print(open('/data/in.txt').read().strip())\n"
             "open('/data/out.txt', 'w').write('from-wasi\\n')\n"
             "print(sorted(os.listdir('/data')))\n")
-    r = await ws.execute(f'python3 -c "{code}"')
+    r = await ws.shell(f'python3 -c "{code}"')
     assert r.exit_code == 0
     assert (await r.stdout_str()) == ("hello-mount\n"
                                       "['in.txt', 'out.txt']\n")
-    r = await ws.execute("cat /data/out.txt")
+    r = await ws.shell("cat /data/out.txt")
     assert (await r.stdout_str()) == "from-wasi\n"
     await ws.close()
 
@@ -176,14 +174,12 @@ async def test_wasi_mounts_read_write_listdir():
 async def test_wasi_root_mount_coexists_with_the_build():
     # Mount prefixes route to the workspace; everything else is served
     # from the build directory, so a root mount and the stdlib coexist.
-    ws = Workspace({"/": RAMResource()},
-                   mode=MountMode.EXEC,
-                   runtimes=["wasi"])
-    await ws.execute("echo root-mount > /f.txt")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=["wasi"])
+    await ws.shell("echo root-mount > /f.txt")
     code = ("import sys\n"
             "print(open('/f.txt').read().strip())\n"
             "print('stdlib', sys.version_info[0])\n")
-    r = await ws.execute(f'python3 -c "{code}"')
+    r = await ws.shell(f'python3 -c "{code}"')
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "root-mount\nstdlib 3\n"
     await ws.close()
@@ -215,26 +211,24 @@ def test_wasi_build_directory_is_read_only():
 async def test_wasi_session_narrowing_reaches_the_guest():
     # A session narrowed to read on the mount denies guest writes at
     # open() and still serves reads; the default session is unaffected.
-    ws = Workspace({"/data": RAMResource()},
-                   mode=MountMode.EXEC,
-                   runtimes=["wasi"])
-    await ws.execute("echo seeded > /data/f0.txt")
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["wasi"])
+    await ws.shell("echo seeded > /data/f0.txt")
     ws.create_session("narrow", {"/data": "read"})
     code = ("\ntry:\n"
             "    open('/data/f.txt', 'w')\n"
             "except PermissionError:\n"
             "    print('denied')\n")
-    r = await ws.execute(f'python3 -c "{code}"', session_id="narrow")
+    r = await ws.shell(f'python3 -c "{code}"', session_id="narrow")
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "denied\n"
-    r = await ws.execute(
+    r = await ws.shell(
         "python3 -c \"print(open('/data/f0.txt').read().strip())\"",
         session_id="narrow")
     assert (await r.stdout_str()) == "seeded\n"
-    r = await ws.execute(f'python3 -c "{code}"')
+    r = await ws.shell(f'python3 -c "{code}"')
     assert (await r.stdout_str()) == ""
     await ws.close()
 
 
 def test_reach_is_vfs():
-    assert WasiRuntime.reach == "vfs"
+    assert WasiRuntime.reach == "workspace"

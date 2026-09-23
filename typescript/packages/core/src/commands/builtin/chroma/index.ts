@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChromaAccessor } from '../../../accessor/chroma.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { CHROMA_FIND } from './find.ts'
@@ -23,7 +23,7 @@ import { CHROMA_SEARCH } from './search.ts'
 const CHROMA_OVERRIDES = new Set(['find', 'search'])
 
 export const CHROMA_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<ChromaAccessor>(ResourceName.CHROMA, CHROMA_IO, {
+  ...makeGenericCommands<ChromaAccessor>(VFSName.CHROMA, CHROMA_IO, {
     overrides: CHROMA_OVERRIDES,
   }),
   ...CHROMA_FIND,

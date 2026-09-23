@@ -12,18 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { POSTGRES_OPS } from './index.ts'
 
 describe('POSTGRES_OPS', () => {
-  it('registers exactly read, readdir, and stat for the postgres resource', () => {
+  it('registers exactly read, readdir, and stat for the postgres VFS', () => {
     expect(POSTGRES_OPS.map((o) => o.name).sort()).toEqual(['read', 'readdir', 'stat'])
   })
 
-  it('all ops target ResourceName.POSTGRES and are read-only', () => {
+  it('all ops target VFSName.POSTGRES and are read-only', () => {
     for (const op of POSTGRES_OPS) {
-      expect(op.resource).toBe(ResourceName.POSTGRES)
+      expect(op.vfs).toBe(VFSName.POSTGRES)
       expect(op.write).toBe(false)
       expect(op.filetype).toBeNull()
     }

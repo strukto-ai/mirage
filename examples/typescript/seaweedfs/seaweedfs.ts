@@ -15,7 +15,7 @@
 import dotenv from 'dotenv'
 import {
   MountMode,
-  SeaweedFSResource,
+  SeaweedFSVFS,
   Workspace,
   type SeaweedFSConfig,
   type FileStat,
@@ -35,31 +35,31 @@ function configFromEnv(): SeaweedFSConfig {
 async function main(): Promise<void> {
   const config = configFromEnv()
   const ws = new Workspace(
-    { '/seaweedfs/': new SeaweedFSResource(config) },
+    { '/seaweedfs/': new SeaweedFSVFS(config) },
     { mode: MountMode.WRITE },
   )
   try {
     console.log(`=== SeaweedFS at ${config.endpoint} (bucket ${config.bucket}) ===`)
 
     // Seed a few objects so the demo is self-contained (WRITE mode).
-    await ws.execute(
+    await ws.shell(
       `echo '{"event":"queue-operation","tool":"mirage"}' > /seaweedfs/data/example.jsonl`,
     )
-    await ws.execute(`echo '{"event":"read","tool":"mirage"}' >> /seaweedfs/data/example.jsonl`)
-    await ws.execute(
+    await ws.shell(`echo '{"event":"read","tool":"mirage"}' >> /seaweedfs/data/example.jsonl`)
+    await ws.shell(
       `echo '{"event":"queue-operation","tool":"other"}' >> /seaweedfs/data/example.jsonl`,
     )
-    await ws.execute(
+    await ws.shell(
       `echo '{"name":"mirage","version":1,"tags":["s3","seaweedfs"]}' > /seaweedfs/data/config.json`,
     )
-    await ws.execute('echo "hello from seaweedfs" > /seaweedfs/notes.txt')
+    await ws.shell('echo "hello from seaweedfs" > /seaweedfs/notes.txt')
 
 
     // chmod/chown/touch never hit the SeaweedFS API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /seaweedfs/notes.txt ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/seaweedfs/notes.txt" && chown 500:dev "/seaweedfs/notes.txt" && touch -t 202601021530 "/seaweedfs/notes.txt"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
@@ -70,41 +70,41 @@ async function main(): Promise<void> {
     )
 
     console.log('\n--- ls /seaweedfs/ ---')
-    let r = await ws.execute('ls /seaweedfs/')
+    let r = await ws.shell('ls /seaweedfs/')
     console.log(r.stdoutText)
 
     console.log('--- tree /seaweedfs/ ---')
-    r = await ws.execute('tree /seaweedfs/')
+    r = await ws.shell('tree /seaweedfs/')
     console.log(r.stdoutText)
 
     console.log('--- stat /seaweedfs/notes.txt ---')
-    r = await ws.execute('stat /seaweedfs/notes.txt')
+    r = await ws.shell('stat /seaweedfs/notes.txt')
     console.log(`  ${r.stdoutText.trim()}`)
 
     console.log('\n--- cat /seaweedfs/notes.txt ---')
-    r = await ws.execute('cat /seaweedfs/notes.txt')
+    r = await ws.shell('cat /seaweedfs/notes.txt')
     console.log(`  ${JSON.stringify(r.stdoutText.trim())}`)
 
     console.log('\n--- head -c 40 /seaweedfs/data/example.jsonl (byte range) ---')
-    r = await ws.execute('head -c 40 /seaweedfs/data/example.jsonl')
+    r = await ws.shell('head -c 40 /seaweedfs/data/example.jsonl')
     console.log(`  ${JSON.stringify(r.stdoutText.trim())}`)
 
     console.log('\n--- grep -c queue-operation /seaweedfs/data/example.jsonl ---')
-    r = await ws.execute('grep -c queue-operation /seaweedfs/data/example.jsonl')
+    r = await ws.shell('grep -c queue-operation /seaweedfs/data/example.jsonl')
     console.log(`  count: ${r.stdoutText.trim()}`)
 
     console.log("--- find /seaweedfs/ -name '*.json' ---")
-    r = await ws.execute("find /seaweedfs/ -name '*.json'")
+    r = await ws.shell("find /seaweedfs/ -name '*.json'")
     console.log(r.stdoutText)
 
     console.log('--- jq .tags /seaweedfs/data/config.json ---')
-    r = await ws.execute('jq .tags /seaweedfs/data/config.json')
+    r = await ws.shell('jq .tags /seaweedfs/data/config.json')
     console.log(`  ${r.stdoutText.trim()}`)
 
     console.log('\n--- PROVISION: cat (plan only) vs head -c (byte budget) ---')
-    let plan = await ws.execute('cat /seaweedfs/data/example.jsonl', { provision: true })
+    let plan = await ws.shell('cat /seaweedfs/data/example.jsonl', { provision: true })
     console.log(`  cat: network_read=${plan.networkRead} precision=${plan.precision}`)
-    plan = await ws.execute('head -c 20 /seaweedfs/data/example.jsonl', { provision: true })
+    plan = await ws.shell('head -c 20 /seaweedfs/data/example.jsonl', { provision: true })
     console.log(`  head -c 20: network_read=${plan.networkRead} precision=${plan.precision}`)
 
     console.log('\n--- rm seeded objects ---')
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
       '/seaweedfs/data/config.json',
       '/seaweedfs/notes.txt',
     ]) {
-      await ws.execute(`rm ${key}`)
+      await ws.shell(`rm ${key}`)
     }
     console.log('  cleaned')
 

@@ -1,6 +1,6 @@
 # Browser Discord demo
 
-Two-part demo of the browser `DiscordResource` pattern. The browser package never sees the bot token directly — instead, a small Node proxy holds the token and forwards requests to the Discord API. This same shape works for a real frontend (the proxy lives on your server, the browser hits a relative path).
+Two-part demo of the browser `DiscordVFS` pattern. The browser package never sees the bot token directly — instead, a small Node proxy holds the token and forwards requests to the Discord API. This same shape works for a real frontend (the proxy lives on your server, the browser hits a relative path).
 
 ## Run
 

@@ -25,8 +25,8 @@ from mirage.policy import (Action, Ask, CommandContext, CommandRule, Deny,
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.rule import RulePolicy
 from mirage.policy.types import SessionContext
-from mirage.resource.ram import RAMResource
 from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
 
 
@@ -94,14 +94,14 @@ class SyncDeny(Policy):
 
 def _registry() -> MountRegistry:
     registry = MountRegistry()
-    registry.mount("/data", RAMResource(), MountMode.WRITE)
+    registry.mount("/data", RAMVFS(), MountMode.WRITE)
     return registry
 
 
 def _path(virtual: str) -> PathSpec:
     return PathSpec(virtual=virtual,
                     directory=virtual,
-                    resource_path="",
+                    vfs_path="",
                     raw_path=virtual,
                     resolved=True)
 

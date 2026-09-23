@@ -28,8 +28,6 @@ from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.commands.cli.types import CLISpec
 from mirage.policy.profile import SessionProfile
-from mirage.resource.loader import load_attr
-from mirage.resource.registry import build_resource
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import Language, ScriptSource
@@ -39,8 +37,13 @@ from mirage.secrets.sources import (config_holds_pointer,
                                     resolve_sources_for)
 from mirage.shell.console import JobConsole
 from mirage.shell.job_table import ConsoleFactory
-from mirage.types import (KERNEL_BACKENDS, ConsistencyPolicy, Limit,
-                          MountBackend, MountMode, parse_mount_mode)
+from mirage.types import (KERNEL_BACKENDS, Limit, MountBackend, MountMode,
+                          ReadPolicy, parse_mount_mode)
+from mirage.vfs.loader import load_attr
+from mirage.vfs.registry import build_vfs
+from mirage.workspace.mount.read_policy import (coerce_read_policy,
+                                                coerce_read_ttl,
+                                                resolve_read_spec)
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.store import (DEFAULT_STATE_ROOT,
                                     DiskWorkspaceStateStore,
@@ -68,14 +71,6 @@ def _coerce_mount_mode(value):
         return value
     if isinstance(value, str):
         return parse_mount_mode(value.lower())
-    return value
-
-
-def _coerce_consistency(value):
-    if isinstance(value, ConsistencyPolicy):
-        return value
-    if isinstance(value, str):
-        return ConsistencyPolicy(value.lower())
     return value
 
 
@@ -330,14 +325,20 @@ class CLIBlock(BaseModel):
 class MountBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    resource: str
+    vfs: str
     mode: MountMode | None = None
     config: dict[str, Any] = Field(default_factory=dict)
     command_limits: dict[str, Limit] = Field(default_factory=dict)
-    # How the mount is exposed: vfs (default, mirage's own filesystem only),
-    # fuse, or fskit. mountpoint is honored by the kernel backends.
-    backend: MountBackend = MountBackend.VFS
+    # How the mount is exposed: workspace (default, mirage's own filesystem
+    # only), fuse, or fskit. mountpoint is honored by the kernel backends.
+    backend: MountBackend = MountBackend.WORKSPACE
     mountpoint: str | None = None
+    # How cached bytes for this mount are revalidated, and the bound
+    # that goes with `bounded`. The bound lives only here, where no
+    # other `ttl` does: at workspace level it would sit beside
+    # `index: {ttl:}` and mean a different thing.
+    read: ReadPolicy | None = None
+    ttl: int | None = None
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -345,6 +346,48 @@ class MountBlock(BaseModel):
         if v is None:
             return v
         return _coerce_mount_mode(v)
+
+    @field_validator("read", mode="before")
+    @classmethod
+    def _v_read(cls, v):
+        if v is None:
+            return v
+        return coerce_read_policy(v)
+
+    @field_validator("ttl", mode="before")
+    @classmethod
+    def _v_ttl(cls, v):
+        # Ahead of pydantic's own coercion, which is lax where this key
+        # cannot afford to be: `ttl: "30"` arrives as 30 and `ttl: true`
+        # as 1, so a document TypeScript refuses outright would load
+        # here and the two hosts would disagree about the same bytes --
+        # `ttl: true` silently bounding the mount at one second. The
+        # snapshot door reads its bound through the same coercer.
+        if v is None:
+            return v
+        return coerce_read_ttl(v)
+
+    @model_validator(mode="after")
+    def _v_bound(self) -> "MountBlock":
+        # Two dependent-key rules, refused here rather than in the mount
+        # verdict: by the time a ReadSpec exists its ttl has already
+        # defaulted, so `bounded` written without a bound is
+        # indistinguishable from `read:` left out entirely.
+        if self.ttl is not None and self.read is None:
+            raise ValueError("ttl pins the read bound; it takes "
+                             "read: bounded")
+        if self.read is ReadPolicy.BOUNDED and self.ttl is None:
+            raise ValueError("read: bounded needs a bound; set ttl:")
+        # Last, so the dependent-key rules name the missing key first,
+        # as TypeScript's `validateReadBlock` does. `resolve_read_spec`
+        # refuses this too, but only at `to_workspace_kwargs`, which is
+        # a door later than the one TypeScript refuses it at: the shared
+        # `integ/fixtures/config/rejected.json` loads the config and
+        # nothing more.
+        if self.ttl is not None and self.ttl < 1:
+            raise ValueError(f"ttl must be at least 1 second, got "
+                             f"{self.ttl}")
+        return self
 
 
 def _is_script_path(value: str) -> bool:
@@ -437,7 +480,7 @@ def _absolutize_scripts(raw: dict[str, Any], base: Path) -> None:
     if isinstance(mounts, dict):
         for block in mounts.values():
             if isinstance(block, dict):
-                _absolutize_code_ref(block, "resource", base)
+                _absolutize_code_ref(block, "vfs", base)
     profiles = raw.get("profiles")
     if isinstance(profiles, dict):
         for block in profiles.values():
@@ -465,7 +508,7 @@ def _absolutize_script_key(entry: dict[str, Any], base: Path) -> None:
 def _absolutize_code_ref(entry: dict[str, Any], key: str, base: Path) -> None:
     """Rebase a path-form colon reference under ``key``.
 
-    ``cli: ./tool.py:TREE``, ``resource: ./wiki.py:WikiResource`` and a
+    ``cli: ./tool.py:TREE``, ``vfs: ./wiki.py:WikiVFS`` and a
     runtime entry's ``name: ./box.py:EchoBox`` all mean "next to the
     config file", the same build-context rule ``script:`` follows;
     without this the pointer reaches ``load_attr`` relative and resolves
@@ -478,7 +521,7 @@ def _absolutize_code_ref(entry: dict[str, Any], key: str, base: Path) -> None:
         entry (dict[str, Any]): a ``clis``, ``mounts`` or ``runtimes``
             mapping entry, mutated in place.
         key (str): the field holding the reference, ``cli``,
-            ``resource`` or ``name``.
+            ``vfs`` or ``name``.
         base (Path): directory containing the config file.
     """
     ref = entry.get(key)
@@ -511,7 +554,7 @@ def _rebase_code_ref(ref: str, base: Path) -> str:
 def _runtime_class(ref: str) -> type[Runtime]:
     """Load the ``Runtime`` subclass a ``source:Class`` reference names.
 
-    The runtime twin of the ``resource:`` and ``cli:`` reference forms:
+    The runtime twin of the ``vfs:`` and ``cli:`` reference forms:
     a deployment ships a runtime as a file and names it from yaml with no
     host program calling ``register_runtime``. The class is constructed
     with the uniform ``(captures, config, script)`` options like a
@@ -610,7 +653,10 @@ class WorkspaceConfig(BaseModel):
     # and a profile of that name exists.
     profile: str | None = None
     mode: MountMode = MountMode.WRITE
-    consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
+    # The read policy a mount inherits when it declares none. There is
+    # deliberately no workspace-level bound: `ttl:` exists only inside a
+    # mount block, where it cannot be confused with `index: {ttl:}`.
+    read: ReadPolicy | None = None
     default_session_id: str | None = None
     default_agent_id: str | None = None
     workspace_id: str | None = None
@@ -636,10 +682,12 @@ class WorkspaceConfig(BaseModel):
     def _v_mode(cls, v):
         return _coerce_mount_mode(v)
 
-    @field_validator("consistency", mode="before")
+    @field_validator("read", mode="before")
     @classmethod
-    def _v_cons(cls, v):
-        return _coerce_consistency(v)
+    def _v_read_default(cls, v):
+        if v is None:
+            return v
+        return coerce_read_policy(v)
 
     @model_validator(mode="after")
     def _v_profile(self) -> "WorkspaceConfig":
@@ -654,30 +702,34 @@ class WorkspaceConfig(BaseModel):
         """Produce kwargs ready to splat into ``Workspace(**kwargs)``.
 
         Synchronous, and must stay that way: this is the YAML door, and
-        :func:`mirage.resource.registry.build_resource` behind it is the
+        :func:`mirage.vfs.registry.build_vfs` behind it is the
         one every embedder calls. A backend needing I/O hydrates lazily
         instead of moving that cost into construction; see
-        ``build_resource`` for the full rule. Deliberately diverges from
+        ``build_vfs`` for the full rule. Deliberately diverges from
         the TypeScript ``configToWorkspaceArgs``, which is async.
 
         Returns:
-            dict[str, Any]: resource instances, cache config, and
+            dict[str, Any]: VFS instances, cache config, and
                 workspace-level settings, in the shape the
                 ``Workspace`` constructor expects.
         """
-        resources: dict[str, Mount] = {}
+        mounts: dict[str, Mount] = {}
+        default_read = resolve_read_spec(self.read, None)
         for prefix, block in self.mounts.items():
-            prov = build_resource(block.resource, block.config)
+            prov = build_vfs(block.vfs, block.config)
             mode = block.mode if block.mode is not None else self.mode
-            resources[prefix] = Mount(
-                resource=prov,
+            read = (default_read if block.read is None else resolve_read_spec(
+                block.read, block.ttl))
+            mounts[prefix] = Mount(
+                vfs=prov,
                 mode=mode,
                 command_limits=block.command_limits,
+                read=read,
             )
         kwargs: dict[str, Any] = {
-            "resources": resources,
+            "mounts": mounts,
             "mode": self.mode,
-            "consistency": self.consistency,
+            "read": default_read,
             "session_id": self.default_session_id,
             "agent_id": self.default_agent_id,
         }
@@ -722,7 +774,7 @@ class WorkspaceConfig(BaseModel):
     def kernel_mounts(self) -> dict[str, tuple[MountBackend, str | None]]:
         """Declarative kernel mounts keyed by mount prefix.
 
-        Mounts left on the default ``vfs`` backend are absent: they are
+        Mounts left on the default ``workspace`` backend are absent: they are
         served inside mirage's own filesystem and register nothing with the
         kernel.
 
@@ -842,8 +894,8 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
     The async half of the YAML door, and the reason
     :meth:`WorkspaceConfig.to_workspace_kwargs` can stay sync: a
     `{from, ref, key}` in `mounts.*.config` or `clis.*.config` is
-    fetched here, so `build_resource` receives the credential itself
-    and no resource config, client or backend learns that this plane
+    fetched here, so `build_vfs` receives the credential itself
+    and no VFS config, client or backend learns that this plane
     exists. Mirrors the TypeScript `configToWorkspaceArgs`, which does
     the same thing inline because it is async already.
 

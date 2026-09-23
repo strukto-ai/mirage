@@ -16,7 +16,7 @@ from typing import Any
 
 from mirage.provision import Precision, ProvisionResult, scaled
 from mirage.provision.rollup import rollup_list
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 async def _plan_body(provision_node_fn, body: list[Any],
@@ -37,7 +37,7 @@ async def handle_function_provision(
     name: str,
     body: list[Any],
     planning: set[str],
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Plan a shell function call: the body's cost.
 
@@ -49,7 +49,7 @@ async def handle_function_provision(
         name (str): function name.
         body (list): function body statement nodes.
         planning (set[str]): names currently being planned (guard).
-        session (Session): shell session state.
+        session (SessionState): shell session state.
     """
     if name in planning:
         return ProvisionResult(command=name, precision=Precision.UNKNOWN)
@@ -67,7 +67,7 @@ async def handle_if_provision(
     provision_node_fn,
     branches: list[tuple[Any, Any]],
     else_body: Any | None,
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Plan an if: branches bracket as alternatives.
 
@@ -92,7 +92,7 @@ async def handle_for_provision(
     provision_node_fn,
     body: list[Any],
     n: int,
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Plan a for loop: body cost x iteration count."""
     result = await _plan_body(provision_node_fn, body, session)
@@ -102,7 +102,7 @@ async def handle_for_provision(
 async def handle_while_provision(
     provision_node_fn,
     body: list[Any],
-    session: Session,
+    session: SessionState,
 ) -> ProvisionResult:
     """Plan while: unknown iterations."""
     result = await _plan_body(provision_node_fn, body, session)

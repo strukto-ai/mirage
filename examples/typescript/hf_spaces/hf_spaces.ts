@@ -14,7 +14,7 @@
 
 // Read-only Hugging Face Space demo against a public space repo.
 // No credentials required. Set HF_SPACE_REPO / HF_TOKEN for private repos.
-import { HfSpacesResource, Workspace, MountMode, type FileStat, type HfRepoConfig } from '@struktoai/mirage-node'
+import { HfSpacesVFS, Workspace, MountMode, type FileStat, type HfRepoConfig } from '@struktoai/mirage-node'
 
 function configFromEnv(): HfRepoConfig {
   return {
@@ -25,14 +25,14 @@ function configFromEnv(): HfRepoConfig {
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
   console.log(`=== ${cmd} ===`)
-  process.stdout.write((await ws.execute(cmd)).stdoutText)
+  process.stdout.write((await ws.shell(cmd)).stdoutText)
   console.log()
 }
 
 async function main(): Promise<void> {
-  const resource = new HfSpacesResource(configFromEnv())
-  const ws = new Workspace({ '/s/': resource }, { mode: MountMode.READ })
-  console.log(`=== mounted ${resource.accessor.bucketUri} at /s/ ===\n`)
+  const vfs = new HfSpacesVFS(configFromEnv())
+  const ws = new Workspace({ '/s/': vfs }, { mode: MountMode.READ })
+  console.log(`=== mounted ${vfs.accessor.bucketUri} at /s/ ===\n`)
 
   try {
     await run(ws, 'ls /s/')
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /s/README.md ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/s/README.md" && chown 500:dev "/s/README.md" && touch -t 202601021530 "/s/README.md"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

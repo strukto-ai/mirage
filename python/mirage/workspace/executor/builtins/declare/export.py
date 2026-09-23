@@ -25,13 +25,13 @@ from mirage.workspace.executor.builtins.declare.declare import (
 from mirage.workspace.executor.builtins.shared import (readonly_refusal,
                                                        refusal, require_view)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (exported_names, session_view,
                                             set_attr)
 from mirage.workspace.types import ExecutionNode
 
 
-def _export_lines(session: Session, flags: set[str]) -> list[str]:
+def _export_lines(session: SessionState, flags: set[str]) -> list[str]:
     """Build sorted declaration lines for every exported name.
 
     The exported set, not every shell variable: ``X=hello`` is absent
@@ -48,7 +48,7 @@ def _export_lines(session: Session, flags: set[str]) -> list[str]:
     ``declare -x AR`` because it looked the value up among the scalars.
 
     Args:
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         flags (set[str]): option letters the caller supplied.
 
     Returns:
@@ -62,7 +62,7 @@ def _export_lines(session: Session, flags: set[str]) -> list[str]:
 
 async def handle_export(
     assignments: list[str],
-    session: Session,
+    session: SessionState,
     state: SessionView | None = None,
     arrays: list[tuple[str, bool, list[str]]] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:

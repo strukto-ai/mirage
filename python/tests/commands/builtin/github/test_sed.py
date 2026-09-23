@@ -50,7 +50,7 @@ sed = _sed_command()
 def _scope(path: str) -> PathSpec:
     norm = "/" + path.lstrip("/")
     directory = norm.rsplit("/", 1)[0] + "/"
-    return PathSpec(resource_path=(norm).strip("/"),
+    return PathSpec(vfs_path=(norm).strip("/"),
                     virtual=norm,
                     directory=directory,
                     resolved=True)

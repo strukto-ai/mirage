@@ -21,10 +21,7 @@ import { statGeneric } from '../generic/stat.ts'
 import { overlaidStat, resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 
 /** Build the index-threaded stat override for one keyed store. */
-export function makeStat<A extends Accessor>(
-  resource: string,
-  io: CommandIO<A>,
-): RegisteredCommand[] {
+export function makeStat<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
   const statCore = io.stat
   const resolveGlob = resolveGlobOf(io)
 
@@ -45,7 +42,7 @@ export function makeStat<A extends Accessor>(
 
   return command<A>({
     name: 'stat',
-    resource,
+    vfs,
     spec: specOf('stat'),
     fn: statCommand,
   })

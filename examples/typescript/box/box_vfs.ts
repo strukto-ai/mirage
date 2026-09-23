@@ -16,7 +16,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { BoxResource, MountMode, patchNodeFs, Workspace, type BoxConfig } from '@struktoai/mirage-node'
+import { BoxVFS, MountMode, patchNodeFs, Workspace, type BoxConfig } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
@@ -45,8 +45,8 @@ function buildConfig(): BoxConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new BoxResource(buildConfig())
-  const ws = new Workspace({ '/box': resource }, { mode: MountMode.READ })
+  const vfs = new BoxVFS(buildConfig())
+  const ws = new Workspace({ '/box': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
     console.log('=== VFS MODE: fs.promises.* reads from Box transparently ===\n')

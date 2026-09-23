@@ -23,7 +23,7 @@ from mirage.utils.key_prefix import mount_key
 
 
 def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
-    return PathSpec(resource_path=mount_key(path, prefix),
+    return PathSpec(vfs_path=mount_key(path, prefix),
                     virtual=path,
                     directory=path.rsplit("/", 1)[0] or "/")
 

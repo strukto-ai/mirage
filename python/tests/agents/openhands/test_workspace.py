@@ -20,8 +20,8 @@ pytest.importorskip("openhands")
 
 from mirage.agents.openhands import MirageWorkspace  # noqa: E402
 from mirage.policy import Action, CommandContext, Deny, Policy  # noqa: E402
-from mirage.resource.ram import RAMResource  # noqa: E402
 from mirage.types import MountMode  # noqa: E402
+from mirage.vfs.ram import RAMVFS  # noqa: E402
 from mirage.workspace import Workspace  # noqa: E402
 
 
@@ -34,7 +34,7 @@ class _NoDeletes(Policy):
 
 
 def _make_backing() -> Workspace:
-    ram = RAMResource()
+    ram = RAMVFS()
     return Workspace({"/": (ram, MountMode.WRITE)}, mode=MountMode.WRITE)
 
 
@@ -120,7 +120,7 @@ def test_git_methods_not_supported():
 def test_execute_command_names_the_reason_beside_a_refusal():
     # stderr is bash's bare `Permission denied`; the reason rides the
     # refusal record, and a text surface appends it as one more line.
-    backing = Workspace({"/": (RAMResource(), MountMode.WRITE)},
+    backing = Workspace({"/": (RAMVFS(), MountMode.WRITE)},
                         mode=MountMode.WRITE,
                         policies=[_NoDeletes()])
     with MirageWorkspace(workspace=backing) as mw:

@@ -25,7 +25,7 @@ def _guarded_config() -> dict:
         "config": {
             "mounts": {
                 "/": {
-                    "resource": "ram",
+                    "vfs": "ram",
                     "mode": "WRITE"
                 }
             },

@@ -19,7 +19,7 @@ import { PathSpec } from '../../types.ts'
 import { virtualKeyFor } from './path.ts'
 
 function ps(virtual: string, prefix = ''): PathSpec {
-  return new PathSpec({ virtual, directory: virtual, resourcePath: mountKey(virtual, prefix) })
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
 describe('virtualKeyFor', () => {
@@ -52,7 +52,7 @@ describe('virtualKeyFor', () => {
       directory: '/knowledge/guides/',
       pattern: '*.md',
       resolved: false,
-      resourcePath: mountKey('/knowledge/guides/*.md', '/knowledge'),
+      vfsPath: mountKey('/knowledge/guides/*.md', '/knowledge'),
     })
     expect(virtualKeyFor(spec)).toBe('/knowledge/guides')
   })

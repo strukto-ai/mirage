@@ -45,7 +45,7 @@ from mirage.utils.key_prefix import mount_prefix_of
 logger = logging.getLogger(__name__)
 
 
-@command("rg", resource="slack", spec=SPECS["rg"])
+@command("rg", vfs="slack", spec=SPECS["rg"])
 async def rg(accessor: SlackAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])
@@ -61,7 +61,7 @@ async def rg(accessor: SlackAccessor, paths: list[PathSpec], texts: list[str],
         if match.kind in NATIVE_KINDS and search_available(accessor.config):
             target = search_target(match)
             file_prefix = mount_prefix_of(operand.virtual,
-                                          operand.resource_path) or ""
+                                          operand.vfs_path) or ""
             query = build_query(pattern_str, target)
             # Every kind that reaches here searches messages, and each of
             # them (the root, the containers, a channel, a date dir)

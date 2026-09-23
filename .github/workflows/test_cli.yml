@@ -23,10 +23,10 @@ permissions:
       - integ/cli_config.sh
       - integ/cli_env.sh
       - integ/cli_ref.sh
-      - integ/resource_ref.sh
+      - integ/vfs_ref.sh
       - integ/runtime_ref.sh
       - integ/fixtures/cli/**
-      - integ/fixtures/resource/**
+      - integ/fixtures/vfs/**
       - integ/fixtures/runtime/**
       - integ/package.json
       - integ/tsconfig.json
@@ -74,10 +74,10 @@ jobs:
               - 'integ/cli_config.sh'
               - 'integ/cli_env.sh'
               - 'integ/cli_ref.sh'
-              - 'integ/resource_ref.sh'
+              - 'integ/vfs_ref.sh'
               - 'integ/runtime_ref.sh'
               - 'integ/fixtures/cli/**'
-              - 'integ/fixtures/resource/**'
+              - 'integ/fixtures/vfs/**'
               - 'integ/fixtures/runtime/**'
               - 'integ/package.json'
               - 'integ/tsconfig.json'
@@ -149,7 +149,7 @@ jobs:
           cat > /tmp/ws.yaml <<'YAML'
           mounts:
             /:
-              resource: ram
+              vfs: ram
               mode: WRITE
           YAML
 
@@ -225,7 +225,7 @@ jobs:
           cat > /tmp/sg.yaml <<'YAML'
           mounts:
             /:
-              resource: ram
+              vfs: ram
               mode: WRITE
               command_limits:
                 cat:
@@ -235,7 +235,7 @@ jobs:
           cat > /tmp/sgerr.yaml <<'YAML'
           mounts:
             /:
-              resource: ram
+              vfs: ram
               mode: WRITE
               command_limits:
                 cat:
@@ -270,7 +270,7 @@ jobs:
           cat > /tmp/cfgkeys.yaml <<'YAML'
           mounts:
             /:
-              resource: ram
+              vfs: ram
               mode: WRITE
           default_session_id: mysess
           default_agent_id: myagent
@@ -459,7 +459,7 @@ jobs:
           cat > /tmp/ws.yaml <<'YAML'
           mounts:
             /:
-              resource: ram
+              vfs: ram
               mode: WRITE
           YAML
 
@@ -535,7 +535,7 @@ jobs:
           cat > /tmp/sg.yaml <<'YAML'
           mounts:
             /:
-              resource: ram
+              vfs: ram
               mode: WRITE
               command_limits:
                 cat:
@@ -545,7 +545,7 @@ jobs:
           cat > /tmp/sgerr.yaml <<'YAML'
           mounts:
             /:
-              resource: ram
+              vfs: ram
               mode: WRITE
               command_limits:
                 cat:
@@ -580,7 +580,7 @@ jobs:
           cat > /tmp/cfgkeys.yaml <<'YAML'
           mounts:
             /:
-              resource: ram
+              vfs: ram
               mode: WRITE
           default_session_id: mysess
           default_agent_id: myagent
@@ -804,7 +804,7 @@ jobs:
       # BOTH buckets, always. mirage-cross is cross.yaml's /minio mount and
       # mirage-state is the state_store S3 round. cross.sh compares writer
       # output against READER output rather than a literal and never checks an
-      # exit code, and S3Resource does no network I/O at construction, so a
+      # exit code, and S3VFS does no network I/O at construction, so a
       # missing mirage-cross reads as '' on both sides and the battery passes
       # having tested nothing.
       - name: Create MinIO buckets
@@ -873,7 +873,7 @@ jobs:
   cross-ref-fuse:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: Resource/runtime ref and CLI FUSE batteries
+    name: VFS/runtime ref and CLI FUSE batteries
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -884,9 +884,9 @@ jobs:
         with:
           libfuse: "true"
 
-      - name: Run resource ref battery (a backend mounted from a file, snapshotted and reloaded)
+      - name: Run vfs ref battery (a backend mounted from a file, snapshotted and reloaded)
         run: |
-          bash integ/resource_ref.sh \
+          bash integ/vfs_ref.sh \
             "python/.venv/bin/mirage" \
             "node typescript/packages/cli/dist/bin/mirage.js"
 

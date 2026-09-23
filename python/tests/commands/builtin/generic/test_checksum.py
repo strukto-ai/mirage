@@ -35,7 +35,7 @@ class _FakeDigest:
 def _spec(path: str) -> PathSpec:
     return PathSpec(virtual=path,
                     directory=path,
-                    resource_path=path.lstrip("/"),
+                    vfs_path=path.lstrip("/"),
                     raw_path=path)
 
 

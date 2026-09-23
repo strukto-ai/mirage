@@ -14,12 +14,12 @@
 
 import { makeGenericOps } from '@struktoai/mirage-core/ops/generic/factory'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { OPFS_IO } from '../../commands/builtin/opfs/io.ts'
 
 // mkdirParents because OPFS resolves one directory handle per segment:
 // a mkdir that refused to create intermediates would make the op fail on
 // any nested path, and the VFS/FUSE callers pass whole paths.
-export const OPFS_OPS: readonly RegisteredOp[] = makeGenericOps(ResourceName.OPFS, OPFS_IO, {
+export const OPFS_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.OPFS, OPFS_IO, {
   mkdirParents: true,
 })

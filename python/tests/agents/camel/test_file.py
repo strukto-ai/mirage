@@ -18,12 +18,12 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.agents.camel import MirageFileToolkit
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 
 @pytest.fixture
 def workspace():
-    ram = RAMResource()
+    ram = RAMVFS()
     yield Workspace({"/": ram}, mode=MountMode.WRITE)
 
 
@@ -102,7 +102,7 @@ def test_grep_files(toolkit):
 def test_search_files_names_the_reason_beside_a_refusal():
     # stderr is bash's bare `Permission denied`; the reason rides the
     # refusal record, and a text surface appends it as one more line.
-    ws = Workspace({"/": RAMResource()},
+    ws = Workspace({"/": RAMVFS()},
                    mode=MountMode.WRITE,
                    route_policy=lambda ctx: {"deny": "no walks"}
                    if ctx.command == "find" else None)

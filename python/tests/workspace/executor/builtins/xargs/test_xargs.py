@@ -3,7 +3,7 @@ import pytest
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.workspace.executor.builtins.xargs import handle_xargs
-from mirage.workspace.session.session import Session
+from mirage.workspace.session.session import SessionState
 
 
 class FakeShell:
@@ -19,8 +19,8 @@ class FakeShell:
         return IOResult(stdout=f"ran:{line}\n".encode(), exit_code=code)
 
 
-def make_session() -> Session:
-    return Session(session_id="s1")
+def make_session() -> SessionState:
+    return SessionState(session_id="s1")
 
 
 @pytest.mark.asyncio

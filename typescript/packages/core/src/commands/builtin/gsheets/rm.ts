@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { unlink } from '../../../core/gsheets/unlink.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import { makeRm } from '../generic/rm_cmd.ts'
 import { GSHEETS_IO } from './io.ts'
 
-export const GSHEETS_RM = makeRm(ResourceName.GSHEETS, GSHEETS_IO, unlink)
+export const GSHEETS_RM = makeRm(VFSName.GSHEETS, GSHEETS_IO, unlink)

@@ -4,7 +4,7 @@ icon: discord
 description: Mount Discord guilds, channels, and members as a virtual filesystem from Node or the browser.
 ---
 
-MIRAGE ships `DiscordResource` in **two runtimes**:
+MIRAGE ships `DiscordVFS` in **two runtimes**:
 
 - `@struktoai/mirage-node`, talks to `https://discord.com/api/v10/*` directly using a bot token.
 - `@struktoai/mirage-browser`, stays secret-free: a small proxy server on your backend holds the token and forwards `/api/discord/*` to `https://discord.com/api/v10/*`. The browser only ever sees the proxy URL.
@@ -37,14 +37,14 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { DiscordResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { DiscordVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const discord = new DiscordResource({
+const discord = new DiscordVFS({
   token: process.env.DISCORD_BOT_TOKEN!,
 })
 
 const ws = new Workspace({ '/discord': discord }, { mode: MountMode.READ })
-const res = await ws.execute('ls /discord/')
+const res = await ws.shell('ls /discord/')
 console.log(res.stdoutText)
 ```
 
@@ -101,16 +101,16 @@ Discord bot tokens use the `Bot <token>` auth scheme, **not** `Bearer`. Sending 
 ### 2. Browser: wire it up
 
 ```ts
-import { DiscordResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { DiscordVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const discord = new DiscordResource({
+const discord = new DiscordVFS({
   proxyUrl: '/api/discord',
   // For multi-tenant setups, return per-request auth headers:
   // getHeaders: async () => ({ Authorization: `Bearer ${userJwt}` }),
 })
 
 const ws = new Workspace({ '/discord': discord }, { mode: MountMode.READ })
-const res = await ws.execute('ls /discord/')
+const res = await ws.shell('ls /discord/')
 console.log(res.stdoutText)
 ```
 
@@ -138,7 +138,7 @@ Calling `https://discord.com/api/v10/*` directly from a browser fails CORS. The 
 
 The root lists one directory per guild the bot has access to. Each guild contains a `channels/` directory with text channels (types 0, 5, 15) and a `members/` directory with one `.json` file per member. Each channel directory contains day-partitioned **directories** for the 30 days leading up to the channel's last message, inactive channels show dates around their last activity, not today. Each day directory holds `chat.jsonl` (one JSON object per message) and a `files/` directory with that day's attachments, `cat`'ing a blob downloads it from the Discord CDN. Soft errors (403 missing permissions, 404 unknown channel, 429 rate limit) on a single day are swallowed so listings, `find`, and `grep` keep working across the rest of the tree.
 
-Display names keep their original spelling from Discord (spaces, apostrophes, emoji are all preserved). Only `/` is replaced with `∕` (U+2215) so it cannot collide with a directory boundary. The Discord snowflake ID is appended after `__` (double underscore) on guild, channel, member, and attachment names so resource-specific commands can extract it without an extra lookup, and so two same named entities never collide. Quote names containing spaces in shell commands.
+Display names keep their original spelling from Discord (spaces, apostrophes, emoji are all preserved). Only `/` is replaced with `∕` (U+2215) so it cannot collide with a directory boundary. The Discord snowflake ID is appended after `__` (double underscore) on guild, channel, member, and attachment names so VFS-specific commands can extract it without an extra lookup, and so two same named entities never collide. Quote names containing spaces in shell commands.
 
 ## Shell commands
 
@@ -179,7 +179,7 @@ tree stays read-oriented.
     The browser cannot call `https://discord.com/api/v10/*` directly, Discord does not set permissive CORS headers. You must run the proxy server shown above (or your own equivalent) and point `proxyUrl` at it.
   </Accordion>
   <Accordion title="`rate_limited` from Discord">
-    `DiscordResource` uses an `IndexCacheStore` (default TTL 600s) to deduplicate guild / channel / member listings, but high-volume reads of `.jsonl` files can still hit Discord's per-route rate limits. The HTTP transport retries 429 responses honoring `retry_after` up to 3 times, repeated failures usually mean you should slow down or scope reads to specific channels.
+    `DiscordVFS` uses an `IndexCacheStore` (default TTL 600s) to deduplicate guild / channel / member listings, but high-volume reads of `.jsonl` files can still hit Discord's per-route rate limits. The HTTP transport retries 429 responses honoring `retry_after` up to 3 times, repeated failures usually mean you should slow down or scope reads to specific channels.
   </Accordion>
 </AccordionGroup>
 
@@ -188,6 +188,6 @@ tree stays read-oriented.
 - [`examples/typescript/discord/discord.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/discord/discord.ts), shell commands against `/discord/` (`ls`, `cat`, `grep`, `jq`, `tree`, `find`, `cd`, glob).
 - [`examples/typescript/discord/discord_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/discord/discord_vfs.ts), `patchNodeFs(ws)` so native `node:fs` calls route through the workspace.
 - [`examples/typescript/discord/discord_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/discord/discord_fuse.ts), FUSE-mount the workspace so external processes can browse `/discord/` as a real filesystem.
-- [`examples/typescript/discord/discord_browser/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/discord/discord_browser), proxy server + `@struktoai/mirage-browser` DiscordResource demo.
+- [`examples/typescript/discord/discord_browser/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/discord/discord_browser), proxy server + `@struktoai/mirage-browser` DiscordVFS demo.
 
-See [Python Discord Resource](/python/resource/discord) for the equivalent Python wiring.
+See [Python Discord VFS](/python/vfs/discord) for the equivalent Python wiring.

@@ -35,7 +35,7 @@ SPEC = CommandSpec(options=(
 ), )
 
 
-@command("trello card comment", resource="trello", spec=SPEC, write=True)
+@command("trello card comment", vfs="trello", spec=SPEC, write=True)
 async def trello_card_comment_add(
         accessor: TrelloAccessor, paths: list[PathSpec], texts: list[str],
         opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:

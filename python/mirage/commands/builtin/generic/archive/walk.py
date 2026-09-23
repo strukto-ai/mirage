@@ -44,11 +44,11 @@ def _child_spec(virtual: str, root: PathSpec) -> PathSpec:
         virtual (str): the descendant's absolute virtual path.
         root (PathSpec): the operand it was walked from.
     """
-    cut = len(root.virtual.rstrip("/")) - len(root.resource_path.strip("/"))
+    cut = len(root.virtual.rstrip("/")) - len(root.vfs_path.strip("/"))
     prefix = root.virtual[:cut].rstrip("/")
     return PathSpec(virtual=virtual,
                     directory=virtual[:virtual.rfind("/") + 1] or "/",
-                    resource_path=mount_key(virtual, prefix),
+                    vfs_path=mount_key(virtual, prefix),
                     raw_path=virtual)
 
 
@@ -79,7 +79,7 @@ async def _subtree(
     Three sources have to be merged because no single one can see them
     all: the backend walk (files and directories), the namespace (its
     symlinks, which no backend readdir reports), and the mount table (a
-    nested mount, whose keys live in another resource entirely).
+    nested mount, whose keys live in another VFS entirely).
 
     ``base`` and ``name_base`` differ only when a link is being followed:
     the walk runs over the target while the members keep the link's own

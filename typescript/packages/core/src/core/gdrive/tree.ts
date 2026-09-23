@@ -32,7 +32,7 @@ export async function* iterTree(
   accessor: GDriveAccessor,
   path: PathSpec,
 ): AsyncIterable<[string, DriveFile, boolean]> {
-  const base = path.resourcePath
+  const base = path.vfsPath
   const [folderId, driveId] = await resolveDir(accessor, base, path.virtual)
   const stack: [string, string, string | null][] = [[base, folderId, driveId]]
   for (let head = stack.shift(); head !== undefined; head = stack.shift()) {

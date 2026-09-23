@@ -9,20 +9,20 @@ icon: life-ring
 ### Import Errors After Install (Python)
 
 - Make sure you installed the package into the environment you are actually using.
-- If you need resource-specific dependencies, install the matching extra such as `mirage-ai[s3]`, `mirage-ai[redis]`, or `mirage-ai[fuse]`.
+- If you need VFS-specific dependencies, install the matching extra such as `mirage-ai[s3]`, `mirage-ai[redis]`, or `mirage-ai[fuse]`.
 - For source installs, run `uv sync --all-extras --no-extra camel` (the `camel` extra conflicts with the `openai` stack, so excluding it keeps the rest installable).
 
 ### Import Errors After Install (TypeScript)
 
 - Pick the entrypoint that matches your runtime: `mirage/node` for Node servers and CLIs, `mirage/browser` for browser and edge runtimes, `mirage/core` for runtime-agnostic primitives.
-- Native peers like FUSE and Redis are opt-in. Install them only on Node, alongside `mirage`, when you need those resources.
+- Native peers like FUSE and Redis are opt-in. Install them only on Node, alongside `mirage`, when you need those mounts.
 - If your bundler complains about Node built-ins, you are probably importing `mirage/node` from a browser entry. Switch to `mirage/browser` or `mirage/core`.
 
 ### Credential Errors
 
-- Check that the resource-specific environment variables are set in the current shell.
+- Check that the VFS-specific environment variables are set in the current shell.
 - Confirm you followed the right setup guide from the [Setup](/home/setup/s3) section.
-- If a resource depends on Google OAuth or bot tokens, verify the scopes and app installation steps.
+- If a VFS depends on Google OAuth or bot tokens, verify the scopes and app installation steps.
 
 ### FUSE Does Not Mount
 
@@ -33,12 +33,12 @@ icon: life-ring
 ### Commands Return Empty Output
 
 - Verify the mount prefix and the path you are querying.
-- Start with `ls`, `tree`, or `stat` before assuming the resource is broken.
-- For remote systems, confirm the underlying account has access to the target resource.
+- Start with `ls`, `tree`, or `stat` before assuming the VFS is broken.
+- For remote systems, confirm the underlying account has access to the target VFS.
 
 ### Docs and Examples Disagree
 
-- Prefer the Python quickstart and the current resource docs over older snippets copied from issues or experiments.
+- Prefer the Python quickstart and the current VFS docs over older snippets copied from issues or experiments.
 - If something still looks inconsistent, open an issue or contact the team directly.
 
 ## Book Time With The Team

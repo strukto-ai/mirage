@@ -4,7 +4,7 @@ icon: google
 description: Mount a Gmail mailbox as a Mirage filesystem from Node or the browser.
 ---
 
-`GmailResource` browses messages, threads, and labels via the Gmail API.
+`GmailVFS` browses messages, threads, and labels via the Gmail API.
 
 Both runtimes share the same OAuth config: a Google Cloud `clientId` / `clientSecret` plus a long-lived `refreshToken` for the user. Setup steps live at [Google Workspace Credentials](/home/setup/google).
 
@@ -15,16 +15,16 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { GmailResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { GmailVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const gmail = new GmailResource({
+const gmail = new GmailVFS({
   clientId: process.env.GOOGLE_CLIENT_ID!,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
   refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
 })
 
 const ws = new Workspace({ '/mail': gmail }, { mode: MountMode.READ })
-await ws.execute('ls /mail/INBOX/')
+await ws.shell('ls /mail/INBOX/')
 ```
 
 ## Browser
@@ -34,9 +34,9 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { GmailResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GmailVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-const gmail = new GmailResource({
+const gmail = new GmailVFS({
   clientId: GOOGLE_CLIENT_ID,
   clientSecret: GOOGLE_CLIENT_SECRET,
   refreshToken: localStorage.getItem('gmail.refresh_token')!,
@@ -60,4 +60,4 @@ For OAuth in a browser, prefer PKCE so secrets stay off the page; the [Google se
 
 `read`. Partial write (drafts, labels) is exposed via Python and may land in TS in a future release.
 
-For the mounted layout (labels, dates, attachments) see the [Python Gmail docs](/python/resource/gmail).
+For the mounted layout (labels, dates, attachments) see the [Python Gmail docs](/python/vfs/gmail).

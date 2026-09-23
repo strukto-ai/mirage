@@ -17,8 +17,8 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.io import IOResult
 from mirage.ops.registry import op
-from mirage.resource.ram import RAMResource
 from mirage.types import PathSpec
+from mirage.vfs.ram import RAMVFS
 
 # A raw read is what read-modify-write needs: FUSE hands the merged
 # buffer straight back to ``write``, which always stores, so a read that
@@ -28,39 +28,39 @@ from mirage.types import PathSpec
 # rendered read already filled under the same path.
 
 
-@op("read", resource="ram", filetype=".tally")
+@op("read", vfs="ram", filetype=".tally")
 async def _read_tally(accessor, path: PathSpec, **kwargs) -> bytes:
     return b"RENDERED"
 
 
-class _CachingRAM(RAMResource):
+class _CachingRAM(RAMVFS):
     caches_reads = True
 
 
-def _workspace(resource: RAMResource) -> Workspace:
-    resource.register_op(_read_tally)
-    return Workspace({"/data/": resource}, mode=MountMode.WRITE)
+def _workspace(vfs: RAMVFS) -> Workspace:
+    vfs.register_op(_read_tally)
+    return Workspace({"/data/": vfs}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_read_resolves_the_filetype_op():
-    ws = _workspace(RAMResource())
-    await ws.fs.write("/data/books.tally", b"STORED")
-    assert await ws.fs.read("/data/books.tally") == b"RENDERED"
+    ws = _workspace(RAMVFS())
+    await ws.vfs.write("/data/books.tally", b"STORED")
+    assert await ws.vfs.read("/data/books.tally") == b"RENDERED"
 
 
 @pytest.mark.asyncio
 async def test_raw_read_skips_the_filetype_op():
-    ws = _workspace(RAMResource())
-    await ws.fs.write("/data/books.tally", b"STORED")
-    assert await ws.fs.read("/data/books.tally", raw=True) == b"STORED"
+    ws = _workspace(RAMVFS())
+    await ws.vfs.write("/data/books.tally", b"STORED")
+    assert await ws.vfs.read("/data/books.tally", raw=True) == b"STORED"
 
 
 @pytest.mark.asyncio
 async def test_raw_read_leaves_an_unregistered_extension_alone():
-    ws = _workspace(RAMResource())
-    await ws.fs.write("/data/notes.txt", b"plain")
-    assert await ws.fs.read("/data/notes.txt", raw=True) == b"plain"
+    ws = _workspace(RAMVFS())
+    await ws.vfs.write("/data/notes.txt", b"plain")
+    assert await ws.vfs.read("/data/notes.txt", raw=True) == b"plain"
 
 
 @pytest.mark.asyncio
@@ -68,14 +68,14 @@ async def test_raw_read_is_not_served_from_the_file_cache():
     # A command's rendered read lands in the file cache keyed on the
     # path alone, so a raw read of that same path must not be served it.
     ws = _workspace(_CachingRAM())
-    await ws.fs.write("/data/books.tally", b"STORED")
+    await ws.vfs.write("/data/books.tally", b"STORED")
     # Distinct from the filetype op's own bytes, so a warm hit is
     # distinguishable from the op running again.
     await ws.apply_io(
         IOResult(reads={"/data/books.tally": b"CACHED"},
                  cache=["/data/books.tally"]))
-    assert await ws.fs.read("/data/books.tally") == b"CACHED"
-    assert await ws.fs.read("/data/books.tally", raw=True) == b"STORED"
+    assert await ws.vfs.read("/data/books.tally") == b"CACHED"
+    assert await ws.vfs.read("/data/books.tally", raw=True) == b"STORED"
 
 
 @pytest.mark.asyncio
@@ -85,21 +85,21 @@ async def test_a_warm_cache_still_answers_a_ranged_read_with_the_window():
     # git reads pack indexes this way (4 bytes at a known offset), and
     # the dispatcher is the door it reaches too.
     ws = _workspace(_CachingRAM())
-    await ws.fs.write("/data/f.bin", b"0123456789")
+    await ws.vfs.write("/data/f.bin", b"0123456789")
     await ws.apply_io(
         IOResult(reads={"/data/f.bin": b"0123456789"}, cache=["/data/f.bin"]))
-    assert await ws.fs.read("/data/f.bin", 2, 3) == b"234"
-    assert await ws.fs.read("/data/f.bin") == b"0123456789"
-    assert await ws.fs.read("/data/f.bin", 7) == b"789"
-    assert await ws.fs.read("/data/f.bin", 2, 0) == b""
-    assert await ws.fs.read("/data/f.bin", 99, 3) == b""
+    assert await ws.vfs.read("/data/f.bin", 2, 3) == b"234"
+    assert await ws.vfs.read("/data/f.bin") == b"0123456789"
+    assert await ws.vfs.read("/data/f.bin", 7) == b"789"
+    assert await ws.vfs.read("/data/f.bin", 2, 0) == b""
+    assert await ws.vfs.read("/data/f.bin", 99, 3) == b""
 
 
 @pytest.mark.asyncio
 async def test_a_cold_and_a_warm_ranged_read_agree():
     ws = _workspace(_CachingRAM())
-    await ws.fs.write("/data/f.bin", b"0123456789")
-    cold = await ws.fs.read("/data/f.bin", 2, 3)
+    await ws.vfs.write("/data/f.bin", b"0123456789")
+    cold = await ws.vfs.read("/data/f.bin", 2, 3)
     await ws.apply_io(
         IOResult(reads={"/data/f.bin": b"0123456789"}, cache=["/data/f.bin"]))
-    assert await ws.fs.read("/data/f.bin", 2, 3) == cold
+    assert await ws.vfs.read("/data/f.bin", 2, 3) == cold

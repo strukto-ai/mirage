@@ -22,10 +22,10 @@ import asyncio
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import MountMode, RAMVFS, Workspace
 from mirage.agents.agno import MirageToolkit
 
-ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
 
 agent = Agent(
     model=OpenAIChat(id="gpt-5.4-mini"),
@@ -37,7 +37,7 @@ agent = Agent(
 
 
 async def main() -> None:
-    await ws.execute('echo "hello from mirage" | tee /data/hello.txt')
+    await ws.shell('echo "hello from mirage" | tee /data/hello.txt')
     await agent.aprint_response(
         "List all files under /data and show the contents of each one.")
 
@@ -51,7 +51,7 @@ Every tool is registered as a sync + async pair under one name; Agno picks the a
 
 | Tool | Mirage translation |
 | --- | --- |
-| `execute(command)` | `await ws.execute(command)`, full shell with pipes |
+| `execute(command)` | `await ws.shell(command)`, full shell with pipes |
 | `read(path)` | `cat <path>` |
 | `write(path, content)` | `mkdir -p <parent>`, then `tee <path>` with `stdin=` |
 | `ls(path="/")` | `ls <path>` |
@@ -61,7 +61,7 @@ Every tool is registered as a sync + async pair under one name; Agno picks the a
 
 | Symbol | Purpose |
 | --- | --- |
-| `MirageToolkit` | Agno `Toolkit` exposing the 5 shell tools, backed by `Workspace.execute`. |
+| `MirageToolkit` | Agno `Toolkit` exposing the 5 shell tools, backed by `Workspace.shell`. |
 | `MIRAGE_SYSTEM_PROMPT` | Default system prompt describing the virtual filesystem. |
 | `build_system_prompt` | Compose the default prompt with mount info and extra instructions. |
 

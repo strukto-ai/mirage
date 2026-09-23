@@ -9,9 +9,9 @@ mode: WRITE
 
 mounts:
   /repo:
-    resource: ram
+    vfs: ram
   /scratch:
-    resource: ram
+    vfs: ram
 
 profiles:
   reviewer:

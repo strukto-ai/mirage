@@ -15,7 +15,7 @@
 import { expect, it } from 'vitest'
 
 import type { QdrantAccessor } from '../../accessor/qdrant.ts'
-import { resolveQdrantConfig } from '../../resource/qdrant/config.ts'
+import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import { read } from './read.ts'
 
@@ -40,7 +40,7 @@ it('reads a payload-named chunk by its embedded point id', async () => {
     },
   } as unknown as QdrantAccessor
   const path = '/refund.pdf/004__17.txt'
-  const spec = new PathSpec({ virtual: path, directory: path, resourcePath: path.slice(1) })
+  const spec = new PathSpec({ virtual: path, directory: path, vfsPath: path.slice(1) })
 
   expect(new TextDecoder().decode(await read(accessor, spec))).toBe(
     'Refunds are processed within 14 days\n',
@@ -68,7 +68,7 @@ it('rejects a stem the listing never published', async () => {
       }),
   } as unknown as QdrantAccessor
   for (const path of ['/refund.pdf/wrong__17.txt', '/refund.pdf/17.txt']) {
-    const spec = new PathSpec({ virtual: path, directory: path, resourcePath: path.slice(1) })
+    const spec = new PathSpec({ virtual: path, directory: path, vfsPath: path.slice(1) })
     await expect(read(accessor, spec)).rejects.toHaveProperty('code', 'ENOENT')
   }
 })

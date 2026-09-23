@@ -71,7 +71,7 @@ async def narrow_paths(
         leading slash and the original mount prefix. Empty when search
         returned nothing.
     """
-    mount_prefix = (mount_prefix_of(paths[0].virtual, paths[0].resource_path)
+    mount_prefix = (mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
                     if paths and isinstance(paths[0], PathSpec) else "")
     narrowed: list[str] = []
     for p in paths:
@@ -96,7 +96,7 @@ async def narrow_paths(
     return [
         PathSpec(virtual=mount_prefix + "/" + n.lstrip("/"),
                  directory="",
-                 resource_path=mount_key(mount_prefix + "/" + n.lstrip("/"),
-                                         mount_prefix),
+                 vfs_path=mount_key(mount_prefix + "/" + n.lstrip("/"),
+                                    mount_prefix),
                  resolved=True) for n in narrowed
     ]

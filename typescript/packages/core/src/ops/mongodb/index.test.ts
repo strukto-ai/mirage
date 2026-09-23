@@ -13,17 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ResourceName } from '../../types.ts'
+import { VFSName } from '../../types.ts'
 import { MONGODB_OPS } from './index.ts'
 
 describe('MONGODB_OPS', () => {
-  it('registers exactly read, readdir, and stat for the mongodb resource', () => {
+  it('registers exactly read, readdir, and stat for the mongodb VFS', () => {
     expect(MONGODB_OPS.map((o) => o.name).sort()).toEqual(['read', 'readdir', 'stat'])
   })
 
-  it('all ops target ResourceName.MONGODB and are read-only', () => {
+  it('all ops target VFSName.MONGODB and are read-only', () => {
     for (const op of MONGODB_OPS) {
-      expect(op.resource).toBe(ResourceName.MONGODB)
+      expect(op.vfs).toBe(VFSName.MONGODB)
       expect(op.write).toBe(false)
       expect(op.filetype).toBeNull()
     }

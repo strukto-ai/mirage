@@ -15,26 +15,26 @@
 import functools
 from typing import Callable
 
-from mirage.resource.base import BaseResource
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import strip_mount
+from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.registry import MountRegistry
 
 
-def resource_storage_id(resource: BaseResource) -> str:
-    """Storage identity of a resource, with a fallback for custom ones.
+def vfs_storage_id(vfs: BaseVFS) -> str:
+    """Storage identity of a VFS, with a fallback for custom ones.
 
-    ``BaseResource`` supplies ``storage_id``, but a third-party resource
+    ``BaseVFS`` supplies ``storage_id``, but a third-party VFS
     may implement the protocol without inheriting it. Falling back to
-    object identity keeps such a resource correct when it is mounted
+    object identity keeps such a VFS correct when it is mounted
     twice, instead of reading as two separate stores.
 
     Args:
-        resource (BaseResource): The mounted resource.
+        vfs (BaseVFS): The mounted VFS.
     """
-    fn = getattr(resource, "storage_id", None)
+    fn = getattr(vfs, "storage_id", None)
     if fn is None:
-        return f"resource:{id(resource):x}"
+        return f"vfs:{id(vfs):x}"
     return fn()
 
 
@@ -47,7 +47,7 @@ def storage_key(registry: MountRegistry, path: PathSpec) -> str:
     store, and there a move would copy an object over itself and then
     unlink the source.
 
-    The resource's storage id and the mount-relative path are joined
+    The VFS's storage id and the mount-relative path are joined
     into one path-like string rather than kept as separate components,
     so nested backings collapse onto the same key. Two disk mounts
     rooted at ``/srv/data`` and ``/srv/data/sub`` make ``/a/sub/x`` and
@@ -70,7 +70,7 @@ def storage_key(registry: MountRegistry, path: PathSpec) -> str:
         # command tries to read it.
         return path.virtual.rstrip("/")
     rel = strip_mount(path.virtual, entry.prefix.rstrip("/")).rstrip("/")
-    return resource_storage_id(entry.resource) + rel
+    return vfs_storage_id(entry.vfs) + rel
 
 
 def make_storage_key(registry: MountRegistry) -> Callable[[PathSpec], str]:

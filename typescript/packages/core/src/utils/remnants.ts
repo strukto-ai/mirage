@@ -85,11 +85,11 @@ export function visibleBelow(base: string, names: Iterable<string>, allowed: All
 /** The child PathSpec one cascade step descends to. */
 export function childSpec(spec: PathSpec, name: string): PathSpec {
   const base = spec.virtual.replace(/\/+$/, '')
-  const key = spec.resourcePath.replace(/\/+$/, '')
+  const key = spec.vfsPath.replace(/\/+$/, '')
   return new PathSpec({
     virtual: `${base}/${name}`,
     directory: spec.virtual,
-    resourcePath: key === '' ? name : `${key}/${name}`,
+    vfsPath: key === '' ? name : `${key}/${name}`,
   })
 }
 

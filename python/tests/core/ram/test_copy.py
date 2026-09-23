@@ -16,14 +16,12 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.copy import copy
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 def spec(path: str) -> PathSpec:
-    return PathSpec(resource_path=path.lstrip("/"),
-                    virtual=path,
-                    directory=path)
+    return PathSpec(vfs_path=path.lstrip("/"), virtual=path, directory=path)
 
 
 @pytest.fixture

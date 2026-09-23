@@ -31,11 +31,11 @@ import {
   type ProcessExecutor,
 } from '../../../runtime/mixin.ts'
 import type { ProcessExecution, RunResult, RuntimeOptions } from '../../../runtime/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../../../types.ts'
 import * as globs from '../../expand/globs.ts'
 import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
-import { Session } from '../../session/session.ts'
+import { SessionState } from '../../session/session.ts'
 import { sleep } from '../../abort.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { getTestParser } from '../../fixtures/workspace_fixture.ts'
@@ -77,7 +77,7 @@ class DelayedProcessProbe extends ProcessProbe {
 
 async function workspace(probe: Runtime, others: Runtime[] = []): Promise<Workspace> {
   return new Workspace(
-    { '/': new RAMResource() },
+    { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
       shellParser: await getTestParser(),
@@ -91,10 +91,10 @@ describe('external program capture', () => {
     const probe = new ProcessProbe()
     const ws = await workspace(probe)
     try {
-      const result = await ws.execute("printf 'GPU ready\nother\n' | native-tool | grep GPU > /out")
+      const result = await ws.shell("printf 'GPU ready\nother\n' | native-tool | grep GPU > /out")
       expect(result.exitCode).toBe(0)
       expect(DEC.decode(result.stdout)).toBe('')
-      expect(DEC.decode((await ws.execute('cat /out')).stdout)).toBe('GPU ready\n')
+      expect(DEC.decode((await ws.shell('cat /out')).stdout)).toBe('GPU ready\n')
       expect(probe.requests).toHaveLength(1)
       expect(probe.requests[0]?.argv).toEqual(['native-tool'])
       expect(DEC.decode(probe.requests[0]?.stdin ?? undefined)).toBe('GPU ready\nother\n')
@@ -107,10 +107,8 @@ describe('external program capture', () => {
     const probe = new ProcessProbe({ captures: ['python3', EXTERNAL_COMMANDS] })
     const ws = await workspace(probe)
     try {
-      await ws.execute('mkdir /work; cd /work')
-      const result = await ws.execute(
-        "TOKEN=one python3 -c 'print(1)' -u 'a b' '$(echo literal)' ''",
-      )
+      await ws.shell('mkdir /work; cd /work')
+      const result = await ws.shell("TOKEN=one python3 -c 'print(1)' -u 'a b' '$(echo literal)' ''")
       expect(result.exitCode).toBe(0)
       expect(probe.requests[0]?.argv).toEqual([
         'python3',
@@ -123,7 +121,7 @@ describe('external program capture', () => {
       ])
       expect(probe.requests[0]?.cwd.virtual).toBe('/work')
       expect(probe.requests[0]?.env.TOKEN).toBe('one')
-      await ws.execute('native-tool')
+      await ws.shell('native-tool')
       expect(probe.requests[1]?.env.TOKEN).toBeUndefined()
     } finally {
       await ws.close()
@@ -134,8 +132,8 @@ describe('external program capture', () => {
     const probe = new ProcessProbe()
     const ws = await workspace(probe)
     try {
-      await ws.execute('mkdir /work; touch /work/a.txt /work/b.txt')
-      const result = await ws.execute("native-tool /work/*.txt '/work/*.txt'")
+      await ws.shell('mkdir /work; touch /work/a.txt /work/b.txt')
+      const result = await ws.shell("native-tool /work/*.txt '/work/*.txt'")
       expect(result.exitCode).toBe(0)
       expect(probe.requests[0]?.argv).toEqual([
         'native-tool',
@@ -154,10 +152,10 @@ describe('external program capture', () => {
     fallback.name = 'fallback'
     const ws = await workspace(probe, [fallback])
     try {
-      expect((await ws.execute('native-tool')).exitCode).toBe(126)
+      expect((await ws.shell('native-tool')).exitCode).toBe(126)
       expect(probe.requests).toHaveLength(0)
       expect(fallback.requests).toHaveLength(0)
-      expect((await ws.execute('another-tool')).exitCode).toBe(0)
+      expect((await ws.shell('another-tool')).exitCode).toBe(0)
       expect(fallback.requests).toHaveLength(1)
     } finally {
       await ws.close()
@@ -171,11 +169,11 @@ describe('external program capture', () => {
     const probe = new ProcessProbe({ captures, script: () => false })
     const ws = await workspace(probe)
     try {
-      expect(DEC.decode((await ws.execute('echo mirage')).stdout)).toBe('mirage\n')
-      await ws.execute('shopt -s failglob')
+      expect(DEC.decode((await ws.shell('echo mirage')).stdout)).toBe('mirage\n')
+      await ws.shell('shopt -s failglob')
       const resolved = vi.spyOn(globs, 'resolveGlobs')
       try {
-        const result = await ws.execute('native-tool /api/*')
+        const result = await ws.shell('native-tool /api/*')
         expect(result.exitCode).toBe(126)
         expect(DEC.decode(result.stderr)).toBe('native-tool: no runtime accepted this line\n')
         expect(resolved).not.toHaveBeenCalled()
@@ -192,9 +190,9 @@ describe('external program capture', () => {
     const probe = new ProcessProbe()
     const ws = await workspace(probe)
     try {
-      expect(DEC.decode((await ws.execute('type -t native-tool')).stdout)).toBe('external\n')
-      await ws.execute('native-tool() { echo function; }')
-      expect(DEC.decode((await ws.execute('native-tool')).stdout)).toBe('function\n')
+      expect(DEC.decode((await ws.shell('type -t native-tool')).stdout)).toBe('external\n')
+      await ws.shell('native-tool() { echo function; }')
+      expect(DEC.decode((await ws.shell('native-tool')).stdout)).toBe('function\n')
       expect(probe.requests).toHaveLength(0)
     } finally {
       await ws.close()
@@ -223,7 +221,7 @@ describe('external program timeout', () => {
       mount.commandLimits.set(name, new Limit({ timeoutSeconds: timeout }))
     }
     try {
-      const result = await ws.execute(`PROGRAM=${name}; $PROGRAM`)
+      const result = await ws.shell(`PROGRAM=${name}; $PROGRAM`)
       expect(result.exitCode).toBe(0)
       expect(DEC.decode(result.stdout)).toBe('completed\n')
       expect(probe.requests).toHaveLength(1)
@@ -245,7 +243,7 @@ describe('external program timeout', () => {
       }
     }
     try {
-      const result = await ws.execute('native-tool')
+      const result = await ws.shell('native-tool')
       expect(result.exitCode).toBe(124)
       expect(DEC.decode(result.stderr)).toContain('native-tool: timed out after 0.05s')
       expect(probe.requests).toHaveLength(1)
@@ -264,7 +262,7 @@ describe('external program timeout', () => {
       yield ENC.encode('late\n')
     }
     try {
-      const result = await ws.execute('native-tool', { stdin: slowStdin() })
+      const result = await ws.shell('native-tool', { stdin: slowStdin() })
       expect(result.exitCode).toBe(124)
       expect(DEC.decode(result.stderr)).toContain('native-tool: timed out after 0.05s')
       expect(probe.requests).toHaveLength(0)
@@ -289,7 +287,7 @@ class ShellProbe extends Runtime implements LineExecutor {
 function registerBoardList(ws: Workspace): void {
   for (const registered of command({
     name: 'trello board list',
-    resource: 'ram',
+    vfs: 'ram',
     spec: new CommandSpec({ positional: [new Operand()], rest: new Operand({ type: 'str' }) }),
     fn: () => [ENC.encode('ok\n'), new IOResult()],
   }))
@@ -308,7 +306,7 @@ describe('external command routing regressions', () => {
     const ws = await workspace(probe)
     registerBoardList(ws)
     try {
-      const result = await ws.execute(head + " 'a b' '$(echo literal)' ''")
+      const result = await ws.shell(head + " 'a b' '$(echo literal)' ''")
       expect(result.exitCode).toBe(0)
       const tokens = [...expected, 'a b', '$(echo literal)', '']
       if (probe instanceof ProcessProbe) expect(probe.requests[0]?.argv).toEqual(tokens)
@@ -332,9 +330,9 @@ describe('external command routing regressions', () => {
       const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
       const ws = new Workspace(
         {
-          '/': new RAMResource(),
-          '/base/inner': new RAMResource(),
-          '/base/other': new RAMResource(),
+          '/': new RAMVFS(),
+          '/base/inner': new RAMVFS(),
+          '/base/other': new RAMVFS(),
         },
         { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [probe] },
       )
@@ -344,7 +342,7 @@ describe('external command routing regressions', () => {
         .spyOn(globs, 'resolveGlobs')
         .mockImplementationOnce((parts) => Promise.resolve([...parts]))
       try {
-        const result = await ws.execute(`${head} ${pattern} 'a b' ''`)
+        const result = await ws.shell(`${head} ${pattern} 'a b' ''`)
         expect(result.exitCode).toBe(0)
         const tokens = [...prefix, ...matches, 'a b', '']
         if (probe instanceof ProcessProbe) expect(probe.requests[0]?.argv).toEqual(tokens)
@@ -373,7 +371,7 @@ describe('external command routing regressions', () => {
       const ws = await workspace(probe, [new MontyRuntime({ captures: [] })])
       registerBoardList(ws)
       try {
-        expect((await ws.execute('echo ok | trello board list /allowed')).exitCode).toBe(0)
+        expect((await ws.shell('echo ok | trello board list /allowed')).exitCode).toBe(0)
         const tokens = ['trello', 'board', 'list', '/allowed']
         if (probe instanceof ProcessProbe) {
           expect(probe.requests[0]?.argv).toEqual(tokens)
@@ -382,7 +380,7 @@ describe('external command routing regressions', () => {
           expect(probe.lines[0]).toBe(shellJoin(tokens))
           probe.lines.length = 0
         }
-        expect((await ws.execute('echo ok | trello board list /denied')).exitCode).toBe(126)
+        expect((await ws.shell('echo ok | trello board list /denied')).exitCode).toBe(126)
         expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
       } finally {
         await ws.close()
@@ -409,14 +407,14 @@ describe('external command routing regressions', () => {
           'custom-cli',
           new CLISpec({ name: 'custom-cli', fn: () => [ENC.encode('ok\n'), new IOResult()] }),
         )
-        await ws.execute('echo ok > /input')
-        await ws.execute('custom-stage() { echo ok; }')
+        await ws.shell('echo ok > /input')
+        await ws.shell('custom-stage() { echo ok; }')
         seen.length = 0
-        expect((await ws.execute(head + ' | native-tool')).exitCode).toBe(0)
+        expect((await ws.shell(head + ' | native-tool')).exitCode).toBe(0)
         expect(probe.requests).toHaveLength(1)
         expect(seen).toEqual(['native-tool'])
         probe.requests.length = 0
-        expect((await ws.execute(head + ' | denied-tool')).exitCode).toBe(126)
+        expect((await ws.shell(head + ' | denied-tool')).exitCode).toBe(126)
         expect(probe.requests).toHaveLength(0)
       } finally {
         await ws.close()
@@ -430,7 +428,7 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
     const options = { captures: ['cat', 'grep', 'tar'] }
     const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
     const ws = new Workspace(
-      { '/work': new RAMResource() },
+      { '/work': new RAMVFS() },
       {
         shellParser: await getTestParser(),
         runtimes: [probe],
@@ -444,9 +442,9 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
         ],
       },
     )
-    expect((await ws.execute('echo secret > /work/secret.txt')).exitCode).toBe(0)
-    expect((await ws.execute('echo public > /work/public.txt')).exitCode).toBe(0)
-    await ws.execute('cd /work')
+    expect((await ws.shell('echo secret > /work/secret.txt')).exitCode).toBe(0)
+    expect((await ws.shell('echo public > /work/public.txt')).exitCode).toBe(0)
+    await ws.shell('cd /work')
     return [ws, probe]
   }
 
@@ -461,7 +459,7 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
   ])('refuses %s before delegating to a runtime', async (line) => {
     const [ws, probe] = await guardedWorkspace()
     try {
-      const result = await ws.execute(line)
+      const result = await ws.shell(line)
       expect(result.exitCode).not.toBe(0)
       expect(DEC.decode(result.stderr)).toContain('protected')
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
@@ -473,7 +471,7 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
   it('preserves text operands and shell glob expansion', async () => {
     const [ws, probe] = await guardedWorkspace()
     try {
-      const result = await ws.execute('grep secret.txt public*.txt')
+      const result = await ws.shell('grep secret.txt public*.txt')
       expect(result.exitCode).toBe(0)
       const tokens = ['grep', 'secret.txt', 'public.txt']
       if (probe instanceof ProcessProbe) expect(probe.requests[0]?.argv).toEqual(tokens)
@@ -490,7 +488,7 @@ describe.each(['process', 'shell'] as const)('native %s builtin precedence', (ki
     const probe = kind === 'process' ? new ProcessProbe(options) : new ShellProbe(options)
     const ws = await workspace(probe)
     try {
-      const session = new Session({ sessionId: 'lookup' })
+      const session = new SessionState({ sessionId: 'lookup' })
       for (const name of SHELL_NAMES) {
         if (['python', 'python3', 'node', 'js'].includes(name)) continue
         expect(lookup(name, session, ws.registry), name).toBe(Consumer.SESSION)
@@ -498,18 +496,16 @@ describe.each(['process', 'shell'] as const)('native %s builtin precedence', (ki
         expect(layers[0], name).toBe(Consumer.SESSION)
         expect(layers, name).not.toContain(Consumer.EXTERNAL)
       }
-      await ws.execute('mkdir /work')
-      expect((await ws.execute('cd /work')).exitCode).toBe(0)
-      expect(DEC.decode((await ws.execute('pwd')).stdout)).toBe('/work\n')
-      expect((await ws.execute('export NATIVE_TEST=kept')).exitCode).toBe(0)
-      expect(DEC.decode((await ws.execute('printf "%s\n" "$NATIVE_TEST"')).stdout)).toBe('kept\n')
-      expect(DEC.decode((await ws.execute('echo shell')).stdout)).toBe('shell\n')
-      expect(DEC.decode((await ws.execute('type -a echo')).stdout)).toBe(
-        'echo is a shell builtin\n',
-      )
+      await ws.shell('mkdir /work')
+      expect((await ws.shell('cd /work')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('pwd')).stdout)).toBe('/work\n')
+      expect((await ws.shell('export NATIVE_TEST=kept')).exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell('printf "%s\n" "$NATIVE_TEST"')).stdout)).toBe('kept\n')
+      expect(DEC.decode((await ws.shell('echo shell')).stdout)).toBe('shell\n')
+      expect(DEC.decode((await ws.shell('type -a echo')).stdout)).toBe('echo is a shell builtin\n')
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
       for (const name of ['python', 'python3', 'node', 'js']) {
-        expect((await ws.execute(name + ' --version')).exitCode).toBe(willing ? 0 : 126)
+        expect((await ws.shell(name + ' --version')).exitCode).toBe(willing ? 0 : 126)
       }
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(
         willing ? 4 : 0,

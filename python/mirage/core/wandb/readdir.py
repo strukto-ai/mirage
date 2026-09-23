@@ -80,7 +80,7 @@ async def listing(
             raise enoent(path)
         if index is not None:
             root = mount_prefix_of(path.virtual,
-                                   path.resource_path) + "/" + "/".join(ps[:4])
+                                   path.vfs_path) + "/" + "/".join(ps[:4])
             await index.invalidate_prefix(root)
             await index.put(root, entry("files", True))
             for directory, entries in tree.items():

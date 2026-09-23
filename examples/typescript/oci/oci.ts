@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dotenv from 'dotenv'
-import { MountMode, OCIResource, Workspace, type FileStat, type OCIConfig } from '@struktoai/mirage-node'
+import { MountMode, OCIVFS, Workspace, type FileStat, type OCIConfig } from '@struktoai/mirage-node'
 
 dotenv.config({ path: '.env.development' })
 
@@ -49,7 +49,7 @@ async function run(
   ws: Workspace,
   command: string,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const r = await ws.execute(command)
+  const r = await ws.shell(command)
   return {
     stdout: r.stdoutText,
     stderr: r.stderrText,
@@ -59,8 +59,8 @@ async function run(
 
 async function main(): Promise<void> {
   const config = configFromEnv()
-  const resource = new OCIResource(config)
-  const ws = new Workspace({ '/oci/': resource }, { mode: MountMode.READ })
+  const vfs = new OCIVFS(config)
+  const ws = new Workspace({ '/oci/': vfs }, { mode: MountMode.READ })
 
   try {
     console.log('=== ls /oci/ ===')
@@ -255,7 +255,7 @@ async function main(): Promise<void> {
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /oci/data/example.jsonl ===`)
-    const metaRes = await ws.execute(
+    const metaRes = await ws.shell(
       `chmod 640 "/oci/data/example.jsonl" && chown 500:dev "/oci/data/example.jsonl" && touch -t 202601021530 "/oci/data/example.jsonl"`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)

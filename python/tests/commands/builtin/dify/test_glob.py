@@ -11,7 +11,7 @@ from tests.core.dify.conftest import list_nested_documents
 async def test_resolve_glob_keeps_unresolved_non_pattern_path(
         monkeypatch, dify_accessor, dify_index):
     monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
-    path = PathSpec(resource_path=mount_key("/knowledge/guides", "/knowledge"),
+    path = PathSpec(vfs_path=mount_key("/knowledge/guides", "/knowledge"),
                     virtual="/knowledge/guides",
                     directory="/knowledge/guides",
                     resolved=False)
@@ -26,8 +26,8 @@ async def test_resolve_glob_matches_directory_pattern(monkeypatch,
                                                       dify_accessor,
                                                       dify_index):
     monkeypatch.setattr(tree, "list_all_documents", list_nested_documents)
-    path = PathSpec(resource_path=mount_key("/knowledge/guides/quick*",
-                                            "/knowledge"),
+    path = PathSpec(vfs_path=mount_key("/knowledge/guides/quick*",
+                                       "/knowledge"),
                     virtual="/knowledge/guides/quick*",
                     directory="/knowledge/guides",
                     pattern="quick*",

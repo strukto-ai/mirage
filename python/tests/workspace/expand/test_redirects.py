@@ -17,13 +17,13 @@ from pathlib import Path
 
 import pytest
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 
 
 async def _workspace_at(cwd: str) -> Workspace:
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute(f"mkdir -p {cwd}")
-    await ws.execute(f"cd {cwd}")
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell(f"mkdir -p {cwd}")
+    await ws.shell(f"cd {cwd}")
     return ws
 
 
@@ -32,47 +32,47 @@ async def test_redirect_bare_target_resolves_against_cwd():
     # A redirect target is a path by definition: `> BARE` must write
     # cwd/BARE even though the bare word would classify as text.
     ws = await _workspace_at("/data")
-    await ws.execute("echo hi > BARE")
-    io = await ws.execute("cat /data/BARE")
+    await ws.shell("echo hi > BARE")
+    io = await ws.shell("cat /data/BARE")
     assert (io.stdout or b"") == b"hi\n"
 
 
 @pytest.mark.asyncio
 async def test_redirect_extensionless_relative_target():
     ws = await _workspace_at("/data")
-    await ws.execute("mkdir -p /data/sub")
-    await ws.execute("echo hi > sub/OUT")
-    io = await ws.execute("cat /data/sub/OUT")
+    await ws.shell("mkdir -p /data/sub")
+    await ws.shell("echo hi > sub/OUT")
+    io = await ws.shell("cat /data/sub/OUT")
     assert (io.stdout or b"") == b"hi\n"
 
 
 @pytest.mark.asyncio
 async def test_redirect_append_relative_target():
     ws = await _workspace_at("/data")
-    await ws.execute("echo one > LOG")
-    await ws.execute("echo two >> LOG")
-    io = await ws.execute("cat /data/LOG")
+    await ws.shell("echo one > LOG")
+    await ws.shell("echo two >> LOG")
+    io = await ws.shell("cat /data/LOG")
     assert (io.stdout or b"") == b"one\ntwo\n"
 
 
 @pytest.mark.asyncio
 async def test_redirect_stdin_relative_source():
     ws = await _workspace_at("/data")
-    await ws.execute("echo hi > IN")
-    io = await ws.execute("wc -l < IN")
+    await ws.shell("echo hi > IN")
+    io = await ws.shell("wc -l < IN")
     assert (io.stdout or b"").strip() == b"1"
 
 
 @pytest.mark.asyncio
 async def test_redirect_absolute_target_unchanged():
     ws = await _workspace_at("/data")
-    await ws.execute("echo hi > /data/ABS")
-    io = await ws.execute("cat /data/ABS")
+    await ws.shell("echo hi > /data/ABS")
+    io = await ws.shell("cat /data/ABS")
     assert (io.stdout or b"") == b"hi\n"
 
 
 async def _stdout(ws: Workspace, cmd: str) -> str:
-    io = await ws.execute(cmd)
+    io = await ws.shell(cmd)
     return (io.stdout or b"").decode()
 
 
@@ -163,7 +163,7 @@ async def test_procsub_output_redirect_errors_loudly():
     # and write silently wrong state; it must fail like argv-position
     # output procsub.
     ws = await _workspace_at("/data")
-    io = await ws.execute("echo hi > >(cat)")
+    io = await ws.shell("echo hi > >(cat)")
     assert io.exit_code == 2
     assert b"unsupported: process substitution" in (io.stderr or b"")
 
@@ -178,7 +178,7 @@ async def test_redirect_target_quoting_is_syntactic(target: str):
     # single-quoted target used to leave the parsed target empty, so the
     # write silently went nowhere and exited 0 (silent data loss).
     ws = await _workspace_at("/data")
-    io = await ws.execute(f"printf 'V\\n' > {target}")
+    io = await ws.shell(f"printf 'V\\n' > {target}")
     assert io.exit_code == 0
     assert (io.stderr or b"") == b""
     assert await _stdout(ws, "cat /data/Q") == "V\n"
@@ -187,8 +187,8 @@ async def test_redirect_target_quoting_is_syntactic(target: str):
 @pytest.mark.asyncio
 async def test_redirect_single_quoted_target_appends():
     ws = await _workspace_at("/data")
-    await ws.execute("printf 'one\\n' > '/data/APP'")
-    await ws.execute("printf 'two\\n' >> '/data/APP'")
+    await ws.shell("printf 'one\\n' > '/data/APP'")
+    await ws.shell("printf 'two\\n' >> '/data/APP'")
     assert await _stdout(ws, "cat /data/APP") == "one\ntwo\n"
 
 
@@ -197,7 +197,7 @@ async def test_redirect_single_quoted_stderr_target_captures():
     # The empty-target fallback swallowed stderr entirely: the command
     # failed with no message anywhere.
     ws = await _workspace_at("/data")
-    io = await ws.execute("cat /data/missing 2> '/data/ERR'")
+    io = await ws.shell("cat /data/missing 2> '/data/ERR'")
     assert io.exit_code != 0
     assert b"No such file or directory" in (await
                                             _stdout(ws,
@@ -207,14 +207,14 @@ async def test_redirect_single_quoted_stderr_target_captures():
 @pytest.mark.asyncio
 async def test_redirect_single_quoted_stdin_source_reads_file():
     ws = await _workspace_at("/data")
-    await ws.execute("printf 'a\\nb\\n' > /data/IN")
+    await ws.shell("printf 'a\\nb\\n' > /data/IN")
     assert await _stdout(ws, "wc -l < '/data/IN'") == "2\n"
 
 
 @pytest.mark.asyncio
 async def test_redirect_single_quoted_both_streams_target():
     ws = await _workspace_at("/data")
-    await ws.execute("{ echo out; echo err >&2; } &> '/data/BOTH'")
+    await ws.shell("{ echo out; echo err >&2; } &> '/data/BOTH'")
     assert await _stdout(ws, "cat /data/BOTH") == "out\nerr\n"
 
 
@@ -226,8 +226,8 @@ async def test_single_quoted_targets_do_not_alias_each_other():
     # bytes rather than the message: the missing-source wording for `<`
     # still differs between the hosts and from GNU.
     ws = await _workspace_at("/data")
-    await ws.execute("printf 'first\\n' > '/data/A1'")
-    io = await ws.execute("cat < '/data/A2'")
+    await ws.shell("printf 'first\\n' > '/data/A1'")
+    io = await ws.shell("cat < '/data/A2'")
     assert io.exit_code != 0
     assert b"first" not in (io.stdout or b"")
 
@@ -235,7 +235,7 @@ async def test_single_quoted_targets_do_not_alias_each_other():
 @pytest.mark.asyncio
 async def test_redirect_single_quoted_target_with_space():
     ws = await _workspace_at("/data")
-    await ws.execute("printf 'S\\n' > '/data/sp ace.txt'")
+    await ws.shell("printf 'S\\n' > '/data/sp ace.txt'")
     assert await _stdout(ws, "cat '/data/sp ace.txt'") == "S\n"
 
 
@@ -244,7 +244,7 @@ async def test_herestring_single_quoted_body_into_redirect():
     # `<<< 'text'` shares the target-type gate; it delivered an empty
     # body (a bare newline) instead of the text.
     ws = await _workspace_at("/data")
-    await ws.execute("cat <<< 'hi' > /data/HS")
+    await ws.shell("cat <<< 'hi' > /data/HS")
     assert await _stdout(ws, "cat /data/HS") == "hi\n"
 
 
@@ -257,8 +257,8 @@ async def test_herestring_single_quoted_body_into_redirect():
 @pytest.mark.asyncio
 async def test_redirect_second_unbraced_var_with_suffix():
     ws = await _workspace_at("/data")
-    await ws.execute("c=aa; id=1; mkdir -p /api/$c")
-    io = await ws.execute("echo hi > /api/$c/$id.json")
+    await ws.shell("c=aa; id=1; mkdir -p /api/$c")
+    io = await ws.shell("echo hi > /api/$c/$id.json")
     assert io.exit_code == 0
     assert await _stdout(ws, "cat /api/aa/1.json") == "hi\n"
     assert await _stdout(ws, "find /api -type f") == "/api/aa/1.json\n"
@@ -267,16 +267,16 @@ async def test_redirect_second_unbraced_var_with_suffix():
 @pytest.mark.asyncio
 async def test_heredoc_into_second_unbraced_var_target():
     ws = await _workspace_at("/data")
-    await ws.execute("c=aa; id=1; mkdir -p /api/$c")
-    await ws.execute("cat > /api/$c/$id.json <<EOF\nbody\nEOF")
+    await ws.shell("c=aa; id=1; mkdir -p /api/$c")
+    await ws.shell("cat > /api/$c/$id.json <<EOF\nbody\nEOF")
     assert await _stdout(ws, "cat /api/aa/1.json") == "body\n"
 
 
 @pytest.mark.asyncio
 async def test_redirect_three_unbraced_vars_no_suffix():
     ws = await _workspace_at("/data")
-    await ws.execute("a=x; b=y; c=z; mkdir -p /w/$a/$b")
-    await ws.execute("echo hi > /w/$a/$b/$c")
+    await ws.shell("a=x; b=y; c=z; mkdir -p /w/$a/$b")
+    await ws.shell("echo hi > /w/$a/$b/$c")
     assert await _stdout(ws, "cat /w/x/y/z") == "hi\n"
 
 
@@ -310,7 +310,7 @@ async def test_heredoc_keeps_a_leading_backslash_line():
 @pytest.mark.asyncio
 async def test_heredoc_leading_backslash_line_round_trips_through_a_file():
     ws = await _workspace_at("/data")
-    await ws.execute("cat > /data/HB <<'END'\n\\first\nsecond\nEND")
+    await ws.shell("cat > /data/HB <<'END'\n\\first\nsecond\nEND")
     assert await _stdout(ws, "cat /data/HB") == "\\first\nsecond\n"
 
 
@@ -346,7 +346,7 @@ async def test_heredoc_backslash_line_does_not_reach_the_pipeline():
 @pytest.mark.asyncio
 async def test_heredoc_apostrophe_on_a_backslash_line_is_body_text():
     ws = await _workspace_at("/data")
-    io = await ws.execute(
+    io = await ws.shell(
         "cat <<'END'\n\\item Don't stop; echo not-a-command\nsecond\nEND")
     assert io.exit_code == 0
     assert (io.stdout or b"").decode() == (
@@ -415,7 +415,7 @@ async def test_heredoc_reads_an_escaped_quote_in_a_quoted_delimiter():
 @pytest.mark.asyncio
 async def test_heredoc_leading_empty_line_round_trips_through_a_file():
     ws = await _workspace_at("/data")
-    await ws.execute("cat > /data/HB7 <<'END'\n\nfirst\nEND")
+    await ws.shell("cat > /data/HB7 <<'END'\n\nfirst\nEND")
     assert await _stdout(ws, "cat /data/HB7") == "\nfirst\n"
 
 
@@ -477,7 +477,7 @@ async def test_heredoc_body_after_a_quote_inside_a_substitution():
     ws = await _workspace_at("/data")
     line = ('cat <<EOF >"$( : "a\n  b"; echo /data/HB8)"\n'
             "\\first\nsecond\nEOF\n")
-    await ws.execute(line)
+    await ws.shell(line)
     assert await _stdout(ws, "cat /data/HB8") == "\\first\nsecond\n"
 
 
@@ -486,7 +486,7 @@ async def test_heredoc_body_after_a_quote_inside_a_backtick():
     ws = await _workspace_at("/data")
     line = ('cat <<EOF >"`  : "a\n  b"; echo /data/HB9 `"\n'
             "\\first\nsecond\nEOF\n")
-    await ws.execute(line)
+    await ws.shell(line)
     assert await _stdout(ws, "cat /data/HB9") == "\\first\nsecond\n"
 
 
@@ -498,9 +498,9 @@ HEREDOC_CASES = json.loads(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", HEREDOC_CASES, ids=lambda case: case["id"])
 async def test_heredoc_reader_integration(case):
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        io = await ws.execute(case["command"])
+        io = await ws.shell(case["command"])
         assert {
             "exit": io.exit_code,
             "stdout": await io.stdout_str(),
@@ -520,7 +520,7 @@ NESTED_HEREDOC_CASES = json.loads(
                          NESTED_HEREDOC_CASES,
                          ids=lambda case: case["id"])
 async def test_heredoc_nested_mount_integration(case):
-    parent, child, ghost = RAMResource(), RAMResource(), RAMResource()
+    parent, child, ghost = RAMVFS(), RAMVFS(), RAMVFS()
     ws = Workspace(
         {
             "/data": parent,
@@ -529,7 +529,7 @@ async def test_heredoc_nested_mount_integration(case):
         },
         mode=MountMode.WRITE)
     try:
-        io = await ws.execute(case["command"])
+        io = await ws.shell(case["command"])
         assert {
             "exit": io.exit_code,
             "stdout": await io.stdout_str(),

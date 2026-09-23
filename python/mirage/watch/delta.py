@@ -25,16 +25,15 @@ def spec_for(root: PathSpec, virtual: str) -> PathSpec:
     """Build a PathSpec for ``virtual`` using ``root``'s mount framing.
 
     The mount prefix length is recovered from the (virtual,
-    resource_path) pair of the root, the same arithmetic as
+    vfs_path) pair of the root, the same arithmetic as
     ``PathSpec.dir``.
 
     Args:
         root (PathSpec): Watch root carrying the mount prefix.
         virtual (str): Workspace-virtual path under the same mount.
     """
-    cut = len(root.virtual.rstrip("/")) - len(root.resource_path)
-    return PathSpec.from_str_path(virtual,
-                                  resource_path=virtual[cut:].strip("/"))
+    cut = len(root.virtual.rstrip("/")) - len(root.vfs_path)
+    return PathSpec.from_str_path(virtual, vfs_path=virtual[cut:].strip("/"))
 
 
 class ListingDeltaHook:

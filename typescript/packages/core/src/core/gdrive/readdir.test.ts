@@ -144,7 +144,7 @@ describe('readdir parent recursion', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/docs' }),
+      new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
       index,
     )
     expect(out).toContain('/docs/notes.txt')
@@ -170,7 +170,7 @@ describe('readdir parent recursion', () => {
     await expect(
       readdir(
         accessor,
-        new PathSpec({ resourcePath: 'docs', virtual: '/docs', directory: '/docs' }),
+        new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
         index,
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -197,7 +197,7 @@ describe('readdir parent recursion', () => {
     await expect(
       readdir(
         makeAccessor(),
-        new PathSpec({ resourcePath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt/x' }),
+        new PathSpec({ vfsPath: 'a.txt/x', virtual: '/a.txt/x', directory: '/a.txt/x' }),
         new RAMIndexCacheStore(),
       ),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
@@ -220,7 +220,7 @@ describe('readdir shared drives', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       index,
     )
     expect(out).toContain('/readme.txt')
@@ -242,7 +242,7 @@ describe('readdir shared drives', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       index,
     )
     expect(out).toEqual(['/Team/', '/Team [Shared Drive 2]/', '/Team [Shared Drive]/'])
@@ -266,7 +266,7 @@ describe('readdir shared drives', () => {
     const index = new RAMIndexCacheStore()
     const out = await readdir(
       accessor,
-      new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }),
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
       index,
     )
     expect(out).toContain('/readme.txt')
@@ -290,7 +290,7 @@ describe('readdir shared drives', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    const root = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+    const root = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
     await readdir(accessor, root, index)
     expect((await index.listDir('/')).entries).toBeUndefined()
     expect((await index.get('/readme.txt')).entry?.id).toBe('f1')
@@ -321,14 +321,14 @@ describe('readdir shared drives', () => {
       return Promise.resolve([])
     })
     try {
-      const root = new PathSpec({ resourcePath: '', virtual: '/', directory: '/' })
+      const root = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
       await readdir(accessor, root, index)
       expect((await index.listDir('/')).entries).toBeUndefined()
       expect((await index.get('/readme.txt')).entry?.id).toBe('old-file')
       await index.invalidate()
       phase = 'refresh'
       const path = new PathSpec({
-        resourcePath: 'readme.txt',
+        vfsPath: 'readme.txt',
         virtual: '/readme.txt',
         directory: '/',
       })
@@ -366,11 +366,11 @@ describe('readdir shared drives', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    await readdir(accessor, new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }), index)
+    await readdir(accessor, new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }), index)
     const out = await readdir(
       accessor,
       new PathSpec({
-        resourcePath: 'Team Drive',
+        vfsPath: 'Team Drive',
         virtual: '/Team Drive',
         directory: '/Team Drive',
       }),
@@ -403,7 +403,7 @@ describe('readdir sizes', () => {
 
     const accessor = makeAccessor()
     const index = new RAMIndexCacheStore()
-    await readdir(accessor, new PathSpec({ resourcePath: '', virtual: '/', directory: '/' }), index)
+    await readdir(accessor, new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }), index)
 
     // Binary files download raw: Drive's size is the rendered byte length.
     const binary = (await index.get('/report.pdf')).entry

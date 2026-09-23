@@ -63,7 +63,7 @@ async def grep_provision(accessor: EmailAccessor, paths: list[PathSpec],
 
 
 @command("grep",
-         resource="email",
+         vfs="email",
          spec=SPECS["grep"],
          provision=grep_provision,
          aggregate=prefix_aggregate)
@@ -137,7 +137,7 @@ async def _grep_server_side(
     max_count: int | None = None,
     basic: bool = False,
 ) -> tuple[ByteSource | None, IOResult] | None:
-    file_prefix = mount_prefix_of(operand.virtual, operand.resource_path)
+    file_prefix = mount_prefix_of(operand.virtual, operand.vfs_path)
     pairs = await search_and_format(
         accessor,
         folder,

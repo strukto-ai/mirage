@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/redis_resource/example_redis_index.py"
+        "examples/python/redis_vfs/example_redis_index.py"
       ]
     }
   },

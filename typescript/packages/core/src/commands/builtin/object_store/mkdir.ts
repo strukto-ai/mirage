@@ -26,10 +26,7 @@ import { mkdirLinkRefusal } from '../utils/slash_links.ts'
 const ENC = new TextEncoder()
 
 /** Build the implicit-parents mkdir override for one keyed store. */
-export function makeMkdir<A extends Accessor>(
-  resource: string,
-  io: CommandIO<A>,
-): RegisteredCommand[] {
+export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): RegisteredCommand[] {
   const mkdirImpl = requireOp(io.mkdir, 'mkdir')
   const resolveGlob = resolveGlobOf(io)
 
@@ -76,7 +73,7 @@ export function makeMkdir<A extends Accessor>(
 
   return command<A>({
     name: 'mkdir',
-    resource,
+    vfs,
     spec: specOf('mkdir'),
     fn: mkdirCommand,
     write: true,

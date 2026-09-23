@@ -4,23 +4,23 @@ icon: /images/mem0.svg
 description: Mount scoped Mem0 Platform memories as JSON files from Node or the browser.
 ---
 
-`Mem0Resource` is a browser-safe, read-only view of one Mem0 user, agent, or run scope. Every memory is rendered as `<memory-id>.json`; `search` performs semantic search in that same scope.
+`Mem0VFS` is a browser-safe, read-only view of one Mem0 user, agent, or run scope. Every memory is rendered as `<memory-id>.json`; `search` performs semantic search in that same scope.
 
 <Warning>
-  Mem0 API keys are secrets. Use this resource from Node or another trusted runtime; do not embed a Platform API key in a public browser bundle. Browser applications should call a server-side proxy instead.
+  Mem0 API keys are secrets. Use this VFS from Node or another trusted runtime; do not embed a Platform API key in a public browser bundle. Browser applications should call a server-side proxy instead.
 </Warning>
 
 ```ts
-import { Mem0Resource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { Mem0VFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const memories = new Mem0Resource({
+const memories = new Mem0VFS({
   apiKey: process.env.MEM0_API_KEY!,
   userId: 'alex',
 })
 
 const ws = new Workspace({ '/memories': memories }, { mode: MountMode.READ })
-await ws.execute('ls /memories/')
-await ws.execute('search --top-k 5 "quarterly planning" /memories/')
+await ws.shell('ls /memories/')
+await ws.shell('search --top-k 5 "quarterly planning" /memories/')
 ```
 
 Exactly one of `userId`, `agentId`, or `runId` is required.
@@ -33,4 +33,4 @@ Exactly one of `userId`, `agentId`, or `runId` is required.
 | `defaultPageSize` | `100` | Page size while listing memories. |
 | `defaultSearchLimit` | `10` | Default semantic result count. |
 
-The TypeScript resource mirrors the [Python Mem0 resource](/python/resource/mem0), including pagination, JSON rendering, score formatting, path-limited search, and `--threshold`.
+The TypeScript VFS mirrors the [Python Mem0 VFS](/python/vfs/mem0), including pagination, JSON rendering, score formatting, path-limited search, and `--threshold`.

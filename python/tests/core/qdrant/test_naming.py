@@ -14,8 +14,8 @@
 
 from mirage.core.hierarchy.codec import PATH_SAFE
 from mirage.core.qdrant.naming import group_name, point_id_from_stem, row_stem
-from mirage.resource.qdrant.config import QdrantConfig
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_len
+from mirage.vfs.qdrant.config import QdrantConfig
 
 
 def test_source_url_can_render_as_its_basename():

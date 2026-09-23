@@ -22,7 +22,7 @@ async function createWs(app: ReturnType<typeof buildApp>, id: string): Promise<v
   await app.inject({
     method: 'POST',
     url: '/v1/workspaces',
-    payload: { id, config: { mounts: { '/': { resource: 'ram', mode: 'write' } } } },
+    payload: { id, config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
   })
 }
 
@@ -34,7 +34,7 @@ describe('execute router', () => {
     ['disk', true],
   ] as const)(
     'preserves large multipart stdin on %s (background=%s)',
-    async (resource, background) => {
+    async (vfs, background) => {
       const root = await mkdtemp(join(tmpdir(), 'execute-stdin-'))
       const app = buildApp()
       try {
@@ -46,9 +46,9 @@ describe('execute router', () => {
             config: {
               mounts: {
                 '/work': {
-                  resource,
+                  vfs,
                   mode: 'write',
-                  ...(resource === 'disk' ? { config: { root } } : {}),
+                  ...(vfs === 'disk' ? { config: { root } } : {}),
                 },
               },
             },
@@ -163,7 +163,7 @@ describe('execute router', () => {
   it('passes the runtime argument through to execution', async () => {
     const app = buildApp()
     await createWs(app, 'ert')
-    // An unknown entry name fails loud inside Workspace.execute,
+    // An unknown entry name fails loud inside Workspace.shell,
     // proving the field reaches the runtime argument.
     const res = await app.inject({
       method: 'POST',

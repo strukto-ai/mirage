@@ -29,7 +29,7 @@ function op(data: string, exitCode = 0): OperandRun {
       virtual: path,
       directory: path,
       resolved: true,
-      resourcePath: mountKey(path, ''),
+      vfsPath: mountKey(path, ''),
     }),
     data: ENC.encode(data),
     io: new IOResult({ exitCode }),

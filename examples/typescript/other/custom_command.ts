@@ -17,12 +17,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   command,
-  DiskResource,
+  DiskVFS,
   IOResult,
   MountMode,
   type PathSpec,
-  RAMResource,
-  ResourceName,
+  RAMVFS,
+  VFSName,
   specOf,
   Workspace,
 } from '@struktoai/mirage-node'
@@ -31,7 +31,7 @@ const ENC = new TextEncoder()
 
 const greet = command({
   name: 'greet',
-  resource: [ResourceName.RAM, ResourceName.DISK],
+  vfs: [VFSName.RAM, VFSName.DISK],
   spec: specOf('cat'),
   fn: (accessor, paths: readonly PathSpec[]) => {
     const backend = accessor.constructor.name
@@ -47,28 +47,28 @@ async function main(): Promise<void> {
 
   const ws = new Workspace(
     {
-      '/ram/': new RAMResource(),
-      '/disk/': new DiskResource({ root: tmpRoot }),
+      '/ram/': new RAMVFS(),
+      '/disk/': new DiskVFS({ root: tmpRoot }),
     },
     { mode: MountMode.WRITE },
   )
 
   console.log('=== bindings on greet ===')
   for (const rc of greet) {
-    console.log(`  resource='${rc.resource ?? ''}'  name='${rc.name}'`)
+    console.log(`  VFS='${rc.vfs ?? ''}'  name='${rc.name}'`)
   }
 
   ws.mount('/ram/')?.registerFns(greet)
   ws.mount('/disk/')?.registerFns(greet)
 
-  await ws.execute('echo content > /ram/note.txt')
+  await ws.shell('echo content > /ram/note.txt')
 
   console.log('\n=== greet on /ram/ (RAMAccessor wins) ===')
-  const ramRes = await ws.execute('greet /ram/note.txt')
+  const ramRes = await ws.shell('greet /ram/note.txt')
   process.stdout.write(ramRes.stdoutText)
 
   console.log('=== greet on /disk/ (DiskAccessor wins) ===')
-  const diskRes = await ws.execute('greet /disk/note.txt')
+  const diskRes = await ws.shell('greet /disk/note.txt')
   process.stdout.write(diskRes.stdoutText)
 
   await ws.close()

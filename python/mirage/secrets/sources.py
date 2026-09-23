@@ -254,7 +254,7 @@ async def _resolve_value(value: Any, label: str, fetched: dict[tuple[str, str],
             for i, item in enumerate(value)
         ]
         # A tuple stays a tuple: this walk runs over every config the
-        # yaml door loads, pointer or not, so it must hand a resource
+        # yaml door loads, pointer or not, so it must hand a VFS
         # back what it was given.
         return tuple(items) if isinstance(value, tuple) else items
     return value
@@ -269,7 +269,7 @@ async def resolve_config_secrets(config: Mapping[str, Any],
     The same `config_value` a source's own config goes through, over
     the config of a thing that reaches one. Resolved **before** the
     config is constructed, so a credential field stays the plain
-    `SecretStr` its client already reads and no resource, accessor or
+    `SecretStr` its client already reads and no VFS, accessor or
     backend learns this plane exists.
 
     One `fetched` cache spans the whole config, so two fields naming

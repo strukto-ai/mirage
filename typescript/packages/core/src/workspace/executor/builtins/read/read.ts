@@ -21,7 +21,7 @@ import { ArithError } from '../../../../shell/errors.ts'
 import { isFsError } from '../../../../utils/errors.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -191,7 +191,7 @@ async function readRaw(
  */
 export async function handleRead(
   args: string[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   state: SessionView | null = null,
   signal?: AbortSignal,
@@ -318,7 +318,7 @@ export async function handleRead(
  * records. Returns the refusal result, or null when the write landed.
  */
 async function readStore(
-  session: Session,
+  session: SessionState,
   view: SessionView,
   varName: string,
   value: string,

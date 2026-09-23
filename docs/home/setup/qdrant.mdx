@@ -1,7 +1,7 @@
 ---
 title: Qdrant
 icon: /images/qdrant-logo.svg
-description: Set up a Qdrant connection for the Qdrant resource.
+description: Set up a Qdrant connection for the Qdrant VFS.
 ---
 
 [Qdrant](https://qdrant.tech/) mounts a collection as a read-only filesystem: group-by payload fields
@@ -47,7 +47,7 @@ Either way the collection must already store vectors produced by the same model.
 
 ## Limits
 
-The resource is read-only and bounds how much an agent can pull:
+The VFS is read-only and bounds how much an agent can pull:
 
 - `search_limit` (10): default top-k returned by `search`.
 - `max_rows` (1,000): hard ceiling on points listed per folder.
@@ -62,5 +62,5 @@ use `group_by=["metadata.source"]`, `basename_fields=["metadata.source"]`,
 source-document folder with readable page/chunk filenames. TypeScript uses the
 camelCase equivalents `groupBy`, `basenameFields`, `nameField`, and `textField`.
 
-See the [Python](/python/resource/qdrant) and [TypeScript](/typescript/setup/qdrant)
-resource pages for full config.
+See the [Python](/python/vfs/qdrant) and [TypeScript](/typescript/setup/qdrant)
+VFS pages for full config.

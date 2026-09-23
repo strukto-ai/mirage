@@ -1,12 +1,12 @@
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
-class _OverlayRAMResource(RAMResource):
-    """RAM resource with the native setattr op stripped, standing in for
+class _OverlayRAMVFS(RAMVFS):
+    """RAM VFS with the native setattr op stripped, standing in for
     an API backend that has no attribute slot."""
 
     def __init__(self) -> None:
@@ -15,13 +15,13 @@ class _OverlayRAMResource(RAMResource):
 
 
 def _make_ws(mode: MountMode = MountMode.WRITE) -> Workspace:
-    resource = RAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    return Workspace({"/data/": (resource, mode)}, mode=MountMode.WRITE)
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    return Workspace({"/data/": (vfs, mode)}, mode=MountMode.WRITE)
 
 
 async def _run(ws: Workspace, cmd: str) -> tuple[int, str, str]:
-    r = await ws.execute(cmd)
+    r = await ws.shell(cmd)
     return r.exit_code, await r.stdout_str(), await r.stderr_str()
 
 
@@ -75,13 +75,12 @@ async def test_chgrp_refuses_read_only_mount():
 
 @pytest.mark.asyncio
 async def test_chgrp_overlay_fallback_writes_only_gid():
-    resource = _OverlayRAMResource()
-    resource._store.files["/f.txt"] = b"hello"
-    ws = Workspace({"/data/": (resource, MountMode.WRITE)},
-                   mode=MountMode.WRITE)
+    vfs = _OverlayRAMVFS()
+    vfs._store.files["/f.txt"] = b"hello"
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, _, _ = await _run(ws, "chgrp dev /data/f.txt")
     assert code == 0
-    assert resource._store.attrs == {}
+    assert vfs._store.attrs == {}
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path("/data/f.txt"))
     assert st.gid == "dev"
     assert st.uid is None

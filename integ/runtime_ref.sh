@@ -51,12 +51,12 @@ write_yaml() {
 mode: EXEC
 mounts:
   /ram:
-    resource: ram
+    vfs: ram
 runtimes:
   - name: $ref_file:ShoutPython
     captures: [python3]
   - $ref_file:$box_attr
-  - vfs
+  - workspace
 YML
 }
 

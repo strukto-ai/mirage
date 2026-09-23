@@ -4,8 +4,8 @@ from functools import partial
 
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import Delta, FileChangeKind, FileEvent, MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.watch import RAMWatchQueue, Watcher
 from mirage.workspace import Workspace
 
@@ -43,7 +43,7 @@ def _attach_custom(ws, **queue_kwargs):
 async def test_watch_lazily_attaches_default_runtime():
     # No attach call anywhere: the runtime attaches on first use, and
     # ws.notify is the consumer's injection point.
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     assert ws._watch.runtime is None
     agen = ws.watch("/data")
@@ -59,7 +59,7 @@ async def test_watch_lazily_attaches_default_runtime():
 
 @pytest.mark.asyncio
 async def test_idle_workspace_has_no_watch_state():
-    ws = Workspace({"/data": RAMResource()})
+    ws = Workspace({"/data": RAMVFS()})
     assert ws._watch.runtime is None
     await ws.close()
     assert ws._watch.runtime is None
@@ -67,7 +67,7 @@ async def test_idle_workspace_has_no_watch_state():
 
 @pytest.mark.asyncio
 async def test_attach_after_first_use_raises():
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     await ws.notify(_change(FileChangeKind.UPDATE, "/data/a.txt"))
     with pytest.raises(RuntimeError):
@@ -77,7 +77,7 @@ async def test_attach_after_first_use_raises():
 
 @pytest.mark.asyncio
 async def test_attached_custom_runtime_serves_watch():
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     watcher = _attach_custom(ws, max_pending=8)
     assert ws._watch.runtime is watcher
@@ -94,7 +94,7 @@ async def test_attached_custom_runtime_serves_watch():
 
 @pytest.mark.asyncio
 async def test_detach_closes_queues_and_resets_to_idle():
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     watcher = _attach_custom(ws, max_pending=8)
     agen = ws.watch("/data")
@@ -111,7 +111,7 @@ async def test_detach_closes_queues_and_resets_to_idle():
 
 @pytest.mark.asyncio
 async def test_detach_then_lazy_reattach_delivers_again():
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     old = _attach_custom(ws, max_pending=8)
     await ws.detach_watch_runtime()
@@ -129,7 +129,7 @@ async def test_detach_then_lazy_reattach_delivers_again():
 
 @pytest.mark.asyncio
 async def test_detach_idle_workspace_is_noop():
-    ws = Workspace({"/data": RAMResource()})
+    ws = Workspace({"/data": RAMVFS()})
     await ws.detach_watch_runtime()
     assert ws._watch.runtime is None
     await ws.close()
@@ -139,7 +139,7 @@ async def test_detach_idle_workspace_is_noop():
 async def test_each_watch_owns_its_queue():
     # Two watches on overlapping scopes: one event fans out into both
     # queues independently.
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     gen_a = ws.watch("/data")
     gen_b = ws.watch("/data/*.txt")
@@ -164,7 +164,7 @@ async def test_each_watch_owns_its_queue():
 async def test_multi_root_overflow_collapses_per_root():
     # A multi-root watch that overflows emits one UNKNOWN per root, so
     # the re-inventory signal covers every scope the watch spans.
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     _attach_custom(ws, max_pending=2)
     agen = ws.watch(["/data/a", "/data/b"])
@@ -192,8 +192,8 @@ async def test_watch_spans_nested_mounts():
     # invalidation hits the true owner.
     ws = Workspace(
         {
-            "/nc1": (RAMResource(), MountMode.WRITE),
-            "/nc1/abc/inner": (RAMResource(), MountMode.WRITE),
+            "/nc1": (RAMVFS(), MountMode.WRITE),
+            "/nc1/abc/inner": (RAMVFS(), MountMode.WRITE),
         },
         mode=MountMode.WRITE)
     agen = ws.watch("/nc1/abc")
@@ -202,13 +202,13 @@ async def test_watch_spans_nested_mounts():
     await ws.notify(_change(FileChangeKind.CREATE, "/nc1/abc/report.txt"))
     outer = await asyncio.wait_for(task, timeout=2)
     assert outer.path.virtual == "/nc1/abc/report.txt"
-    assert outer.path.resource_path == "abc/report.txt"
+    assert outer.path.vfs_path == "abc/report.txt"
     task = asyncio.ensure_future(agen.__anext__())
     await asyncio.sleep(0.03)
     await ws.notify(_change(FileChangeKind.CREATE, "/nc1/abc/inner/x.txt"))
     inner = await asyncio.wait_for(task, timeout=2)
     assert inner.path.virtual == "/nc1/abc/inner/x.txt"
-    assert inner.path.resource_path == "x.txt"
+    assert inner.path.vfs_path == "x.txt"
     await agen.aclose()
     await ws.close()
 
@@ -218,7 +218,7 @@ async def test_watch_accepts_plain_string_path():
     # The issue-450 snippet shape: workspace.watch("/dir").
     # Coercion happens at the workspace boundary; the runtime below
     # only ever sees PathSpec.
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     agen = ws.watch("/data")
     task = asyncio.ensure_future(agen.__anext__())
@@ -232,7 +232,7 @@ async def test_watch_accepts_plain_string_path():
 
 @pytest.mark.asyncio
 async def test_watch_accepts_string_list_and_glob():
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     agen = ws.watch(["/data/a", "/data/*.txt"])
     task = asyncio.ensure_future(agen.__anext__())
@@ -247,8 +247,8 @@ async def test_watch_accepts_string_list_and_glob():
 @pytest.mark.asyncio
 async def test_pull_loop_over_delta_hook_feeds_notify():
     # The consumer-owned poller pattern: pull a delta from the
-    # resource hook, feed each change to notify.
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    # VFS hook, feed each change to notify.
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     agen = ws.watch(PathSpec.from_str_path("/data"))
     task = asyncio.ensure_future(agen.__anext__())
@@ -272,7 +272,7 @@ async def test_pull_loop_over_delta_hook_feeds_notify():
 
 @pytest.mark.asyncio
 async def test_close_workspace_stops_watcher():
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     watcher = _attach_custom(ws, max_pending=8)
     agen = ws.watch(PathSpec.from_str_path("/data"))
@@ -287,7 +287,7 @@ async def test_close_workspace_stops_watcher():
 
 @pytest.mark.asyncio
 async def test_closed_workspace_rejects_watch_operations():
-    ws = Workspace({"/data": (RAMResource(), MountMode.WRITE)},
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
                    mode=MountMode.WRITE)
     await ws.close()
     with pytest.raises(RuntimeError, match="Workspace is closed"):

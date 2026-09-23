@@ -29,10 +29,10 @@ from mirage.core.qdrant.query import (distinct_values, list_tables,
                                       table_exists)
 from mirage.core.qdrant.render import blob_bytes, render_json, render_text
 from mirage.core.qdrant.scope import detect_for, filters_of, table_of
-from mirage.resource.qdrant.config import QdrantConfig
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.glob_walk import (glob_prefix, glob_stem_prefix,
                                     has_glob_prefix)
+from mirage.vfs.qdrant.config import QdrantConfig
 
 logger = logging.getLogger(__name__)
 

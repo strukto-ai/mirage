@@ -19,7 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.resource.postgres import PostgresConfig, PostgresResource
+from mirage.vfs.postgres import PostgresConfig, PostgresVFS
 
 load_dotenv(".env.development")
 
@@ -28,11 +28,11 @@ config = PostgresConfig(
     max_read_rows=200,
     max_read_bytes=1024 * 1024,
 )
-resource = PostgresResource(config=config)
+vfs = PostgresVFS(config=config)
 
 
 async def main():
-    with Workspace({"/pg/": resource}, mode=MountMode.READ) as ws:
+    with Workspace({"/pg/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE: open() reads from Postgres ===\n")
 
         print("--- os.listdir(/pg) — root entries ---")
@@ -105,11 +105,11 @@ async def main():
                     break
                 print(f"  {line.rstrip()[:120]}")
 
-        records = ws.fs.records
+        records = ws.vfs.records
         total = sum(r.bytes for r in records)
         print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 
-    await resource.accessor.close()
+    await vfs.accessor.close()
 
 
 asyncio.run(main())

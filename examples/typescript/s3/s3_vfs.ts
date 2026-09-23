@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// S3 in VFS mode — agent-style workflow using only `ws.execute()`. No FUSE.
+// S3 in VFS mode — agent-style workflow using only `ws.shell()`. No FUSE.
 //
 // Two mounts:
 //   /s3/    — unscoped, full bucket
@@ -20,7 +20,7 @@
 //             /deep/example.jsonl resolves to s3://<bucket>/subdata/subsubdata/example.jsonl
 //
 // Loads credentials from .env.development at the repo root.
-import { MountMode, S3Resource, Workspace, type S3Config } from '@struktoai/mirage-node'
+import { MountMode, S3VFS, Workspace, type S3Config } from '@struktoai/mirage-node'
 import dotenv from 'dotenv'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -51,14 +51,14 @@ async function main(): Promise<void> {
 
   const ws = new Workspace(
     {
-      '/s3/': new S3Resource(cfg),
-      '/deep/': new S3Resource(deepCfg),
+      '/s3/': new S3VFS(cfg),
+      '/deep/': new S3VFS(deepCfg),
     },
     { mode: MountMode.READ },
   )
 
   const run = async (cmd: string): Promise<void> => {
-    const r = await ws.execute(cmd)
+    const r = await ws.shell(cmd)
     const out = r.stdoutText.trimEnd()
     const lines = out ? out.split('\n') : []
     const head = lines[0] ?? ''
@@ -104,9 +104,9 @@ async function main(): Promise<void> {
     await run('grep -m 1 mirage /deep/example.jsonl && echo found')
 
     console.log('\n[parity: /deep vs /s3/subdata/subsubdata/]')
-    const a = (await ws.execute('grep -c mirage /deep/example.jsonl')).stdoutText.trim()
+    const a = (await ws.shell('grep -c mirage /deep/example.jsonl')).stdoutText.trim()
     const b = (
-      await ws.execute('grep -c mirage /s3/subdata/subsubdata/example.jsonl')
+      await ws.shell('grep -c mirage /s3/subdata/subsubdata/example.jsonl')
     ).stdoutText.trim()
     console.log(`  /deep/example.jsonl                       grep -c: ${a}`)
     console.log(`  /s3/subdata/subsubdata/example.jsonl      grep -c: ${b}`)

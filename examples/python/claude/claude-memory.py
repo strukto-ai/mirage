@@ -29,8 +29,8 @@ import sys
 import tempfile
 
 from mirage.fuse.mount import mount_background
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
@@ -48,7 +48,7 @@ def main() -> None:
                         default="write a hello world script in /hello.py")
     args = parser.parse_args()
 
-    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
     with tempfile.TemporaryDirectory() as mountpoint:
         t = mount_background(ws, mountpoint)

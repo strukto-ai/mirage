@@ -25,14 +25,14 @@ from mirage.runtime.types import ProcessExecution, RunResult, ShellExecution
 from mirage.types import PathSpec, Producer
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import Session, env_snapshot
+from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 
 async def run_external(
     argv: Argv,
     stdin: ByteSource | None,
-    session: Session,
+    session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision | None = None
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:

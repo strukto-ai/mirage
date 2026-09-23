@@ -15,24 +15,24 @@
 import asyncio
 from contextlib import ExitStack
 
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.types import ConsistencyPolicy, MountMode
+from mirage.types import MountMode, ReadPolicy, ReadSpec
+from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.e2e.s3_mock import patch_s3_multi
 
 
-def _make_ws(consistency: ConsistencyPolicy) -> Workspace:
+def _make_ws(policy: ReadPolicy) -> Workspace:
     config = S3Config(
         bucket="shared-bucket",
         region="us-east-1",
         aws_access_key_id="fake",
         aws_secret_access_key="fake",
     )
-    resource = S3Resource(config)
+    vfs = S3VFS(config)
     return Workspace(
-        {"/data": (resource, MountMode.WRITE)},
+        {"/data": (vfs, MountMode.WRITE)},
         mode=MountMode.WRITE,
-        consistency=consistency,
+        read=ReadSpec(policy=policy),
     )
 
 
@@ -41,23 +41,23 @@ def test_two_workspaces_always_sees_other_writers_update():
     stack = ExitStack()
     stack.enter_context(patch_s3_multi({"shared-bucket": store}))
     try:
-        ws_a = _make_ws(ConsistencyPolicy.ALWAYS)
-        ws_b = _make_ws(ConsistencyPolicy.ALWAYS)
+        ws_a = _make_ws(ReadPolicy.FRESH)
+        ws_b = _make_ws(ReadPolicy.FRESH)
 
         async def run() -> tuple[bytes, bytes]:
-            io_b1 = await ws_b.execute("cat /data/file.txt")
+            io_b1 = await ws_b.shell("cat /data/file.txt")
             b_first = await io_b1.materialize_stdout()
 
-            await ws_a.execute('echo -n "v2" > /data/file.txt')
+            await ws_a.shell('echo -n "v2" > /data/file.txt')
 
-            io_b2 = await ws_b.execute("cat /data/file.txt")
+            io_b2 = await ws_b.shell("cat /data/file.txt")
             b_second = await io_b2.materialize_stdout()
             return b_first, b_second
 
         b_first, b_second = asyncio.run(run())
         assert b_first == b"v1"
         assert b_second == b"v2", (
-            "Workspace B under ALWAYS must see Workspace A's write "
+            "Workspace B under `fresh` must see Workspace A's write "
             "via fingerprint mismatch; got stale cached bytes")
     finally:
         stack.close()
@@ -68,16 +68,16 @@ def test_two_workspaces_lazy_may_serve_stale_after_other_writer():
     stack = ExitStack()
     stack.enter_context(patch_s3_multi({"shared-bucket": store}))
     try:
-        ws_a = _make_ws(ConsistencyPolicy.LAZY)
-        ws_b = _make_ws(ConsistencyPolicy.LAZY)
+        ws_a = _make_ws(ReadPolicy.BOUNDED)
+        ws_b = _make_ws(ReadPolicy.BOUNDED)
 
         async def run() -> bytes:
-            io_b1 = await ws_b.execute("cat /data/file.txt")
+            io_b1 = await ws_b.shell("cat /data/file.txt")
             await io_b1.materialize_stdout()
 
-            await ws_a.execute('echo -n "v2" > /data/file.txt')
+            await ws_a.shell('echo -n "v2" > /data/file.txt')
 
-            io_b2 = await ws_b.execute("cat /data/file.txt")
+            io_b2 = await ws_b.shell("cat /data/file.txt")
             return await io_b2.materialize_stdout()
 
         b_second = asyncio.run(run())

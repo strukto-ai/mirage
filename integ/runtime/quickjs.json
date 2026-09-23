@@ -12,7 +12,7 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -31,7 +31,7 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -49,11 +49,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "data.txt": "hello from ram\n"
             }
@@ -75,11 +75,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -98,7 +98,7 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -117,14 +117,14 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           },
           "/other": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -184,7 +184,7 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -223,11 +223,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "deny.txt": "node\n"
             }
@@ -257,11 +257,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "route_policy": "ctx.command === 'node' ? {deny: 'no js here'} : null"
@@ -291,11 +291,11 @@
             "name": "quickjs",
             "script": "!ctx.line.includes('keep-out')"
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -321,7 +321,7 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -353,11 +353,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "t.txt": "hello\n"
             }
@@ -386,24 +386,24 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "one.txt": "one",
               "unused.txt": "unused"
             }
           },
           "/data/nested": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "inside.txt": "nested"
             }
           },
           "/large": {
-            "resource": "ram",
+            "vfs": "ram",
             "generated_files": 47000
           }
         },
@@ -548,11 +548,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n",
               "sub/inner.txt": "inner\n"
@@ -581,11 +581,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n",
               "sub/inner.txt": "inner\n"
@@ -614,11 +614,11 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/data": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "seed.txt": "seed\n",
               "sub/inner.txt": "inner\n"
@@ -642,7 +642,7 @@
       "world": {
         "runtimes": [
           "quickjs",
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -660,6 +660,32 @@
             "exit": 0,
             "stdout": "next\n",
             "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "no_extended_attribute_calls",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(['getxattr', 'listxattr', 'removexattr', 'setxattr'].filter((n) => n in os).length)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
           }
         }
       ]

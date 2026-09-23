@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.workspace.runner import WorkspaceRunner
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
-from mirage.workspace.workspace import SessionHandle, Workspace
+from mirage.workspace.workspace import Session, Workspace
 
 __all__ = [
     "ExecutionNode",
+    "SessionState",
     "Session",
-    "SessionHandle",
     "Workspace",
     "WorkspaceRunner",
 ]

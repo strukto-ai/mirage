@@ -36,7 +36,7 @@ import os
 from mirage import Workspace
 from mirage.cache.index import (IndexEntry, LookupStatus, RedisIndexCacheStore,
                                 RedisIndexConfig)
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 TTL = 600.0
@@ -64,7 +64,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 def make_store(prefix: str) -> tuple[Workspace, RedisIndexCacheStore]:
     """A RAM mount whose index the workspace config points at Redis."""
-    ram = RAMResource()
+    ram = RAMVFS()
     ws = Workspace({DIR: ram},
                    index=RedisIndexConfig(url=REDIS_URL,
                                           key_prefix=prefix,

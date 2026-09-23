@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DatabricksVolumeConfig } from '../../resource/databricks_volume/config.ts'
+import type { DatabricksVolumeConfig } from '../../vfs/databricks_volume/config.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash, rstripSlash } from '../../utils/slash.ts'
 

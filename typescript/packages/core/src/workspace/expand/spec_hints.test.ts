@@ -14,12 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { BUILTIN_SPECS, specOf } from '../../commands/spec/builtins.ts'
-import { BaseResource, type Resource } from '../../resource/base.ts'
+import { BaseVFS, type VFS } from '../../vfs/base.ts'
 import { MountMode } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
 
-class StubResource extends BaseResource implements Resource {
+class StubVFS extends BaseVFS implements VFS {
   readonly kind = 'stub'
   open(): Promise<void> {
     return Promise.resolve()
@@ -100,12 +100,12 @@ describe('specWordKinds', () => {
 
 describe('specForCommand', () => {
   it('falls back to the shared specs when the mount lacks the command', () => {
-    const reg = new MountRegistry({ '/ram': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/ram': new StubVFS() }, MountMode.WRITE)
     expect(specForCommand('grep', reg, '/ram')).toBe(BUILTIN_SPECS.grep)
   })
 
   it('unknown name is null', () => {
-    const reg = new MountRegistry({ '/ram': new StubResource() }, MountMode.WRITE)
+    const reg = new MountRegistry({ '/ram': new StubVFS() }, MountMode.WRITE)
     expect(specForCommand('no-such-command', reg, '/ram')).toBeNull()
   })
 })

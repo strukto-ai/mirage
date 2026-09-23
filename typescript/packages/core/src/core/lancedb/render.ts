@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LanceRow } from './_driver.ts'
-import type { LanceDBConfigResolved } from '../../resource/lancedb/config.ts'
+import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 
 const ENC = new TextEncoder()
 const SKIP_KEYS = new Set(['_distance', '_rowid', '_score'])

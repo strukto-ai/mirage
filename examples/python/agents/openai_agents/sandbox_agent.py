@@ -22,21 +22,21 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.agents.openai_agents import MirageSandboxClient
-from mirage.resource.ram import RAMResource
-from mirage.resource.s3 import S3Config, S3Resource
-from mirage.resource.slack import SlackConfig, SlackResource
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.slack import SlackConfig, SlackVFS
 
 load_dotenv(".env.development")
 
-ram = RAMResource()
-s3 = S3Resource(
+ram = RAMVFS()
+s3 = S3VFS(
     S3Config(
         bucket=os.environ["AWS_S3_BUCKET"],
         region=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
         aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
     ))
-slack = SlackResource(config=SlackConfig(
+slack = SlackVFS(config=SlackConfig(
     token=os.environ["SLACK_BOT_TOKEN"],
     search_token=os.environ.get("SLACK_USER_TOKEN"),
 ))
@@ -72,7 +72,7 @@ async def main():
     print(result.final_output)
 
     ws = client._ws
-    find_all = await ws.execute("find / -type f")
+    find_all = await ws.shell("find / -type f")
     print("\n--- Files in workspace ---")
     print((find_all.stdout or b"").decode())
 
@@ -91,15 +91,15 @@ async def main():
     # finds the same prefixes to restore content into.
     fresh_ws = Workspace(
         {
-            "/": (RAMResource(), MountMode.WRITE),
-            "/s3": (S3Resource(
+            "/": (RAMVFS(), MountMode.WRITE),
+            "/s3": (S3VFS(
                 S3Config(
                     bucket=os.environ["AWS_S3_BUCKET"],
                     region=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
                     aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
                     aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
                 )), MountMode.READ),
-            "/slack": (SlackResource(config=SlackConfig(
+            "/slack": (SlackVFS(config=SlackConfig(
                 token=os.environ["SLACK_BOT_TOKEN"],
                 search_token=os.environ.get("SLACK_USER_TOKEN"),
             )), MountMode.READ),
@@ -110,7 +110,7 @@ async def main():
     fresh_session = await fresh_client.create()
     await fresh_session.hydrate_workspace(snapshot)
 
-    fresh_find = await fresh_ws.execute("find / -type f")
+    fresh_find = await fresh_ws.shell("find / -type f")
     print("--- Files in hydrated workspace ---")
     print((fresh_find.stdout or b"").decode())
 
@@ -127,8 +127,8 @@ async def main():
     for path in sorted(orig_files):
         if not path:
             continue
-        orig = await ws.execute(f"cat {path}")
-        fresh = await fresh_ws.execute(f"cat {path}")
+        orig = await ws.shell(f"cat {path}")
+        fresh = await fresh_ws.shell(f"cat {path}")
         orig_bytes = orig.stdout or b""
         fresh_bytes = fresh.stdout or b""
         if orig_bytes == fresh_bytes:
@@ -145,7 +145,7 @@ async def main():
 
     # Show /report.txt explicitly so the user can read what the agent wrote
     if "/report.txt" in orig_files:
-        report = await fresh_ws.execute("cat /report.txt")
+        report = await fresh_ws.shell("cat /report.txt")
         body = (report.stdout or b"").decode()
         print(f"\n--- /report.txt from hydrated workspace "
               f"({len(body)} chars) ---")

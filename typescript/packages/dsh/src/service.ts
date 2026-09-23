@@ -19,7 +19,7 @@ import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { parseMountMode } from '@struktoai/mirage-core/types'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { Workspace, buildResource, parseSessionProfile } from '@struktoai/mirage-node'
+import { Workspace, buildVfs, parseSessionProfile } from '@struktoai/mirage-node'
 import type { Mount, NodeWorkspaceOptions, SessionProfile } from '@struktoai/mirage-node'
 import { askThroughApproval } from './approval.ts'
 
@@ -30,18 +30,18 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /**
- * A declarative mount, YAML-friendly: the resource is named by its
- * registry type and built through `buildResource`, so a dsh bundle
+ * A declarative mount, YAML-friendly: the VFS is named by its
+ * registry type and built through `buildVfs`, so a dsh bundle
  * patch can mount anything without holding a live instance. Told apart
- * from a live `Mount` by the type of `resource`: a string names a
+ * from a live `Mount` by the type of `vfs`: a string names a
  * registry entry, an object is the instance itself.
  */
 export interface MirageMountBlock {
-  /** Resource registry name (`ram`, `s3`, `slack`, `redis`, ...). */
-  resource: string
+  /** VFS registry name (`ram`, `s3`, `slack`, `redis`, ...). */
+  vfs: string
   /** Mount mode: `read`, `write`, or `exec`. Omitted = the workspace default. */
   mode?: string
-  /** Resource constructor config, passed to the registry factory. */
+  /** VFS constructor config, passed to the registry factory. */
   config?: Record<string, unknown>
 }
 
@@ -100,13 +100,13 @@ export interface MirageConfig {
 
 function isMountBlock(entry: MirageMount): entry is MirageMountBlock {
   if (Array.isArray(entry)) return false
-  return typeof (entry as MirageMountBlock).resource === 'string'
+  return typeof (entry as MirageMountBlock).vfs === 'string'
 }
 
 async function resolveMount(entry: MirageMountBlock): Promise<MountSpec> {
-  const resource = await buildResource(entry.resource, entry.config ?? {})
-  if (entry.mode === undefined) return resource
-  return [resource, parseMountMode(entry.mode)]
+  const vfs = await buildVfs(entry.vfs, entry.config ?? {})
+  if (entry.mode === undefined) return vfs
+  return [vfs, parseMountMode(entry.mode)]
 }
 
 /**
@@ -144,8 +144,8 @@ function builtEntry(entry: RuntimeEntry): Runtime {
  * which is what keeps `ctx.fs` targets and `ctx.shell` commands in one
  * execution world: a `processPath` handed to the shell resolves there.
  *
- * Construction with live resources is synchronous; a declarative mount
- * block defers to `buildResource`, so consumers await `ready` (the
+ * Construction with live mounts is synchronous; a declarative mount
+ * block defers to `buildVfs`, so consumers await `ready` (the
  * adapters do) and `workspace` throws until it resolves, mirroring how
  * the E2B service owner exposes its sandbox.
  */
@@ -310,7 +310,7 @@ export class MirageService extends Service {
    */
   get vfsOnly(): boolean {
     const entries = this.built === null ? (this.plannedRuntimes ?? []) : this.built.runtimeEntries
-    return entries.every((entry) => entry.reach === 'vfs')
+    return entries.every((entry) => entry.reach === 'workspace')
   }
 
   private async open(

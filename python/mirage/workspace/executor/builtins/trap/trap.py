@@ -15,12 +15,12 @@
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
 async def handle_trap(
-        session: Session,  # noqa: E125
+        session: SessionState,  # noqa: E125
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     return None, IOResult(), ExecutionNode(command="trap", exit_code=0)
 

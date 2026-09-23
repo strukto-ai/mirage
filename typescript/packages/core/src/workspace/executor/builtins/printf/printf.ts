@@ -20,7 +20,7 @@ import { PolicyDenied } from '../../../../policy/errors.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { runPrintf } from './format.ts'
 import type { BuiltinCall, Result } from '../types.ts'
@@ -86,7 +86,7 @@ export const HELP =
  * rule's own words reach the user as they do from `export`.
  */
 async function assignPrintfTarget(
-  session: Session,
+  session: SessionState,
   view: SessionView | undefined,
   name: string,
   subscript: string | undefined,
@@ -118,7 +118,7 @@ async function assignPrintfTarget(
  */
 export async function handlePrintf(
   args: string[],
-  session: Session,
+  session: SessionState,
   view?: SessionView,
 ): Promise<Result> {
   let target: string | null = null

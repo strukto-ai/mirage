@@ -40,7 +40,7 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 
 
-@command("rg", resource="email", spec=SPECS["rg"])
+@command("rg", vfs="email", spec=SPECS["rg"])
 async def rg(accessor: EmailAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])
@@ -79,7 +79,7 @@ async def rg(accessor: EmailAccessor, paths: list[PathSpec], texts: list[str],
 
         all_results: list[str] = []
         any_match = False
-        file_prefix = mount_prefix_of(operand.virtual, operand.resource_path)
+        file_prefix = mount_prefix_of(operand.virtual, operand.vfs_path)
         for uid in uids:
             msg = await fetch_message(accessor, folder, uid)
             msg_text = message_json_text(msg)

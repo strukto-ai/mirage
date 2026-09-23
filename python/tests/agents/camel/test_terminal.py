@@ -16,12 +16,12 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.agents.camel import MirageTerminalToolkit
-from mirage.resource.ram import RAMResource
+from mirage.vfs.ram import RAMVFS
 
 
 @pytest.fixture
 def workspace():
-    ram = RAMResource()
+    ram = RAMVFS()
     ws = Workspace({"/": ram}, mode=MountMode.WRITE)
     yield ws
 

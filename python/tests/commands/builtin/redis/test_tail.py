@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from mirage import MountMode, Workspace
-from mirage.resource.redis import RedisResource
+from mirage.vfs.redis import RedisVFS
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -26,19 +26,19 @@ pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
 
 @pytest_asyncio.fixture()
 async def workspace():
-    resource = RedisResource(url=REDIS_URL, key_prefix="test:tail:")
-    await resource._store.clear()
-    ws = Workspace({"/": resource}, mode=MountMode.WRITE)
+    vfs = RedisVFS(url=REDIS_URL, key_prefix="test:tail:")
+    await vfs._store.clear()
+    ws = Workspace({"/": vfs}, mode=MountMode.WRITE)
     yield ws
-    await resource._store.clear()
-    await resource._store.close()
+    await vfs._store.clear()
+    await vfs._store.close()
 
 
 @pytest.mark.asyncio
 async def test_tail_default_n_10(workspace):
     body = b"\n".join(f"line{i}".encode() for i in range(1, 21)) + b"\n"
-    await workspace.fs.write("/f.txt", body)
-    io = await workspace.execute("tail /f.txt")
+    await workspace.vfs.write("/f.txt", body)
+    io = await workspace.shell("tail /f.txt")
     assert io.exit_code == 0
     expected = b"\n".join(f"line{i}".encode() for i in range(11, 21)) + b"\n"
     assert io.stdout == expected
@@ -46,33 +46,33 @@ async def test_tail_default_n_10(workspace):
 
 @pytest.mark.asyncio
 async def test_tail_n_explicit(workspace):
-    await workspace.fs.write("/f.txt", b"a\nb\nc\nd\ne\n")
-    io = await workspace.execute("tail -n 3 /f.txt")
+    await workspace.vfs.write("/f.txt", b"a\nb\nc\nd\ne\n")
+    io = await workspace.shell("tail -n 3 /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"c\nd\ne\n"
 
 
 @pytest.mark.asyncio
 async def test_tail_c_bytes(workspace):
-    await workspace.fs.write("/f.txt", b"hello world")
-    io = await workspace.execute("tail -c 5 /f.txt")
+    await workspace.vfs.write("/f.txt", b"hello world")
+    io = await workspace.shell("tail -c 5 /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"world"
 
 
 @pytest.mark.asyncio
 async def test_tail_plus_n_streams_from_line(workspace):
-    await workspace.fs.write("/f.txt", b"a\nb\nc\nd\ne\n")
-    io = await workspace.execute("tail -n +3 /f.txt")
+    await workspace.vfs.write("/f.txt", b"a\nb\nc\nd\ne\n")
+    io = await workspace.shell("tail -n +3 /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"c\nd\ne\n"
 
 
 @pytest.mark.asyncio
 async def test_tail_multi_file_emits_headers(workspace):
-    await workspace.fs.write("/a.txt", b"x\ny\n")
-    await workspace.fs.write("/b.txt", b"z\n")
-    io = await workspace.execute("tail /a.txt /b.txt")
+    await workspace.vfs.write("/a.txt", b"x\ny\n")
+    await workspace.vfs.write("/b.txt", b"z\n")
+    io = await workspace.shell("tail /a.txt /b.txt")
     assert io.exit_code == 0
     assert b"==> /a.txt <==" in io.stdout
     assert b"==> /b.txt <==" in io.stdout

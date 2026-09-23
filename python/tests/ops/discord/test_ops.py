@@ -24,7 +24,7 @@ def _op(name: str):
 
 
 def test_registers_read_only_trio():
-    rows = {(o.name, o.resource, o.filetype, o.write) for o in OPS}
+    rows = {(o.name, o.vfs, o.filetype, o.write) for o in OPS}
     assert rows == {
         ("read", "discord", None, False),
         ("readdir", "discord", None, False),

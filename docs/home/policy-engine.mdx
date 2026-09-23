@@ -54,7 +54,7 @@ silent allow.
   head (a CLI's verb path canonicalized), the cwd, and the session and
   agent ids. May answer **Deny or Ask**.
 - **`pre_ops`** — once per VFS op at the op doors (the dispatcher and
-  the `ws.fs` facade, which is also how FUSE, the runtime guests,
+  the `ws.vfs` facade, which is also how FUSE, the runtime guests,
   `find -delete` and the warm cache arrive) and on the command tier's
   backend I/O, before any backend or cache read. The op is named per
   door, so a portable policy keys on `write` and `path`. May answer

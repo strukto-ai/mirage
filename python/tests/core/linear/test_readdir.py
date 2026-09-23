@@ -42,9 +42,9 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, index):
-    result = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    result = await readdir(accessor,
+                           PathSpec(vfs_path="", virtual="/", directory="/"),
+                           index)
     assert result == ["/teams"]
 
 
@@ -64,9 +64,8 @@ async def test_readdir_teams(accessor, index):
                return_value=teams):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="teams",
-                     virtual="/teams",
-                     directory="/teams"), index)
+            PathSpec(vfs_path="teams", virtual="/teams", directory="/teams"),
+            index)
     assert result == ["/teams/ENG__Engineering__TEAM1"]
     team_entry = await index.get("/teams/ENG__Engineering__TEAM1")
     assert team_entry.entry is not None
@@ -87,7 +86,7 @@ async def test_readdir_teams_keeps_prefix_on_warm_cache_hit(accessor, index):
             "nodes": []
         },
     }]
-    spec = PathSpec(resource_path=mount_key("/linear/teams", "/linear"),
+    spec = PathSpec(vfs_path=mount_key("/linear/teams", "/linear"),
                     virtual="/linear/teams",
                     directory="/linear/teams")
     with patch("mirage.core.linear.readdir.list_teams",
@@ -127,7 +126,7 @@ async def test_readdir_team_members(accessor, index):
                return_value=users):
         result = await readdir(
             accessor,
-            PathSpec(resource_path="teams/ENG__Engineering__TEAM1/members",
+            PathSpec(vfs_path="teams/ENG__Engineering__TEAM1/members",
                      virtual="/teams/ENG__Engineering__TEAM1/members",
                      directory="/teams/ENG__Engineering__TEAM1/members"),
             index,
@@ -176,7 +175,7 @@ async def test_readdir_issue_folder(accessor, index):
         result = await readdir(
             accessor,
             PathSpec(
-                resource_path=_ISSUE_DIR.strip("/"),
+                vfs_path=_ISSUE_DIR.strip("/"),
                 virtual=_ISSUE_DIR,
                 directory=_ISSUE_DIR,
             ),
@@ -209,7 +208,7 @@ async def test_readdir_unrecognized_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path="__nf_missing__",
+            PathSpec(vfs_path="__nf_missing__",
                      virtual="/__nf_missing__",
                      directory="/__nf_missing__"), index)
 
@@ -219,6 +218,6 @@ async def test_readdir_unrecognized_nested_path_raises(accessor, index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             accessor,
-            PathSpec(resource_path="teams/x/nope/deeper",
+            PathSpec(vfs_path="teams/x/nope/deeper",
                      virtual="/teams/x/nope/deeper",
                      directory="/teams/x/nope/deeper"), index)

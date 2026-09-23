@@ -18,8 +18,8 @@ from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.hierarchy.codec import PATH_SAFE
 from mirage.core.lancedb.query import search_rows
 from mirage.core.lancedb.render import render_card
-from mirage.resource.lancedb.config import LanceDBConfig
 from mirage.types import PathSpec
+from mirage.vfs.lancedb.config import LanceDBConfig
 
 
 def _target_table(paths: list[PathSpec], config: LanceDBConfig) -> str | None:

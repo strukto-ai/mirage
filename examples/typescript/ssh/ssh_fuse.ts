@@ -21,7 +21,7 @@ import {
   Mount,
   MountBackend,
   MountMode,
-  SSHResource,
+  SSHVFS,
   type SSHConfig,
   Workspace,
 } from "@struktoai/mirage-node";
@@ -54,9 +54,9 @@ function buildConfig(): SSHConfig {
 }
 
 async function main(): Promise<void> {
-  const resource = new SSHResource(buildConfig());
+  const vfs = new SSHVFS(buildConfig());
   const ws = new Workspace({
-    "/ssh": new Mount(resource, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+    "/ssh": new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
   });
   await ws.fuseReady();
   const mp = ws.fuseMountpoint as string;

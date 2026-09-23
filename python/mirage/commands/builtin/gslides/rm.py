@@ -16,4 +16,4 @@ from mirage.commands.builtin.generic.rm_cmd import make_rm
 from mirage.commands.builtin.gslides.io import resolve_glob
 from mirage.core.gslides.unlink import unlink
 
-rm = make_rm(resource="gslides", glob_fn=resolve_glob, unlink=unlink)
+rm = make_rm(vfs="gslides", glob_fn=resolve_glob, unlink=unlink)

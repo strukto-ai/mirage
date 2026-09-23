@@ -21,7 +21,7 @@ def _to_scope(path: str) -> PathSpec:
     directory = path[:last_slash + 1] if last_slash >= 0 else "/"
     return PathSpec(virtual=path,
                     directory=directory,
-                    resource_path="",
+                    vfs_path="",
                     resolved=True)
 
 

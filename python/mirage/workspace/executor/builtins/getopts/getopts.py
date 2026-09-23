@@ -20,14 +20,14 @@ from mirage.shell.call_stack import CallStack
 from mirage.workspace.executor.builtins.shared import (is_valid_name,
                                                        require_view)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.errors import ReadonlyVariableError
 from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 
 async def _getopts_finish(
-    session: Session,
+    session: SessionState,
     view: SessionView,
     name: str,
     opt_value: str,
@@ -73,7 +73,7 @@ async def _getopts_finish(
 
 async def handle_getopts(
     args: list[str],
-    session: Session,
+    session: SessionState,
     call_stack: CallStack | None = None,
     state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -83,7 +83,7 @@ async def handle_getopts(
         args (list[str]): words after `getopts`: the optstring, the name
             variable, then optional explicit arguments (the positional
             parameters are scanned when no explicit ones are given).
-        session (Session): shell session; OPTIND/OPTARG live in its env
+        session (SessionState): shell session; OPTIND/OPTARG live in its env
             and the hidden per-word scan offset in its getopts state.
         call_stack (CallStack | None): function-call positional frames;
             inside a shell function getopts scans the function's own

@@ -23,7 +23,7 @@ import { isMissingOp } from '@struktoai/mirage-core/utils/errors'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { DIR_MODE, FILE_MODE, mtimeMs } from '@struktoai/mirage-core/utils/stat_view'
-import type { Session } from '@struktoai/mirage-core/workspace/session/session'
+import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { errnoError } from './errors.ts'
 import { isMacosMetadata } from './platform/macos.ts'
 
@@ -61,7 +61,7 @@ export interface MountCoreOptions {
    * travels with it. Enforcement happens inside dispatch/Ops via the
    * session context, so binding at the op entry point is sufficient.
    */
-  session?: Session
+  session?: SessionState
 }
 
 /**
@@ -76,7 +76,7 @@ export interface MountCoreOptions {
  * interface. Adapters translate the errors thrown here into their own
  * error codes with `classifyErrno`. Mirrors Python's `MountCore`.
  *
- * Every op goes through `ws.fs`, which delegates to the dispatcher, so
+ * Every op goes through `ws.vfs`, which delegates to the dispatcher, so
  * a mount walks the same door as a shell line (mount modes, policies,
  * cache, invalidation) and every op it runs lands in `ws.records` for
  * `drainOps`. Reaching `ws.dispatch` from here instead would skip the
@@ -84,13 +84,10 @@ export interface MountCoreOptions {
  */
 export class MountCore {
   readonly ops: Ops
-  readonly session: Session | null
+  readonly session: SessionState | null
   private readonly now: Date
   private readonly root: string
   readonly handles = new FileTable<Handle>()
-  // In-memory extended attributes, keyed by path. Backends have no POSIX
-  // xattrs, so these are advisory and never persisted; see setxattr.
-  readonly xattrs = new Map<string, Map<string, Buffer>>()
   readonly prefetchCache = new Map<string, PrefetchEntry>()
   private readonly prefetchInflight = new Map<string, Promise<Uint8Array | null>>()
   // Bumped whenever the file changes underneath an in-flight prefetch, so
@@ -332,7 +329,7 @@ export class MountCore {
     if (isMacosMetadata(name)) {
       throw errnoError('ENOENT', `no such file or directory: ${path}`)
     }
-    // Link check must precede the workspace stat: the fs facade follows
+    // Link check must precede the workspace stat: the op facade follows
     // namespace links, so stat on a link path reports the target.
     const target = this.linkTarget(path)
     if (target !== null) return this.linkStat(target, this.resolve(path))
@@ -402,9 +399,9 @@ export class MountCore {
   async create(path: string): Promise<number> {
     const key = this.identity(path)
     await this.mutate(key, async () => {
-      // Route through the resource's `create` op so backends that distinguish
+      // Route through the VFS's `create` op so backends that distinguish
       // "create empty" from "write bytes" get the right code path. Falls back
-      // to writeFile(empty) when the resource doesn't expose `create`.
+      // to writeFile(empty) when the VFS doesn't expose `create`.
       try {
         await this.ops.create(this.resolve(path))
       } catch (dispatchErr) {
@@ -455,7 +452,6 @@ export class MountCore {
   async unlink(path: string): Promise<void> {
     await this.mutate(this.identity(path), async () => {
       await this.ops.unlink(this.resolve(path))
-      this.xattrs.delete(path)
       await this.changed(path, false)
     })
   }
@@ -512,11 +508,6 @@ export class MountCore {
       await this.ops.rename(this.resolve(src), this.resolve(dst))
       await this.changed(src, false)
       await this.changed(dst, false)
-      const moved = this.xattrs.get(src)
-      if (moved !== undefined) {
-        this.xattrs.delete(src)
-        this.xattrs.set(dst, moved)
-      }
     })
   }
 
@@ -526,7 +517,6 @@ export class MountCore {
   // catch that wrapped it swallowed whatever readdir raised.
   async rmdir(path: string): Promise<void> {
     await this.ops.rmdir(this.resolve(path))
-    this.xattrs.delete(path)
   }
 
   /**
@@ -575,8 +565,8 @@ export class MountCore {
       for (const ctx of this.handles.values()) {
         if (ctx.key === key) await this.persistBuffered(ctx)
       }
-      // Prefer the resource's dedicated `truncate` op (atomic on most
-      // backends). Fall back to read/resize/write for resources that don't
+      // Prefer the VFS's dedicated `truncate` op (atomic on most
+      // backends). Fall back to read/resize/write for mounts that don't
       // expose one.
       try {
         await this.ops.truncate(this.resolve(path), size)
@@ -607,26 +597,35 @@ export class MountCore {
     }
   }
 
-  setxattr(path: string, name: string, value: Buffer): void {
-    let attrs = this.xattrs.get(path)
-    if (attrs === undefined) {
-      attrs = new Map()
-      this.xattrs.set(path, attrs)
-    }
-    attrs.set(name, Buffer.from(value))
+  /**
+   * Store an extended attribute through the workspace door, which keeps
+   * it on the path's namespace node: it outlives the mount, moves with a
+   * rename, and is the attribute every other surface (the shell's
+   * getfattr, a guest's os.getxattr) reads. Tools that set xattrs as a
+   * matter of course (rsync -aX, tar --xattrs, cp -p, Finder writing
+   * com.apple.*) succeed on a backend with no attribute slot of its own.
+   * Mirrors the python MountCore.
+   */
+  async setxattr(
+    path: string,
+    name: string,
+    value: Uint8Array,
+    opts: { create?: boolean; replace?: boolean } = {},
+  ): Promise<void> {
+    await this.ops.setxattr(this.resolve(path), name, Uint8Array.from(value), opts)
   }
 
-  getxattr(path: string, name: string): Buffer | undefined {
-    return this.xattrs.get(path)?.get(name)
+  /** One attribute, the backend's own facts included; ENODATA when unset. */
+  async getxattr(path: string, name: string): Promise<Uint8Array> {
+    return this.ops.getxattr(this.resolve(path), name)
   }
 
-  listxattr(path: string): string[] {
-    const attrs = this.xattrs.get(path)
-    return attrs ? [...attrs.keys()] : []
+  async listxattr(path: string): Promise<string[]> {
+    return this.ops.listxattr(this.resolve(path))
   }
 
-  removexattr(path: string, name: string): void {
-    this.xattrs.get(path)?.delete(name)
+  async removexattr(path: string, name: string): Promise<void> {
+    await this.ops.removexattr(this.resolve(path), name)
   }
 
   async open(path: string, flags = 0): Promise<number> {

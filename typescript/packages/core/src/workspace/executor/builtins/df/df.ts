@@ -21,7 +21,7 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { MountEntry } from '../../../mount/mount.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { fail, ok, operandText, splitValueFlags } from '../shared.ts'
 import { BLOCK_SUFFIX, SI_UNITS } from './constants.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -152,7 +152,7 @@ function pctCell(cap: CapacityResult, inodes: boolean): string {
 async function targetMounts(
   registry: MountRegistry,
   dispatch: DispatchFn,
-  session: Session,
+  session: SessionState,
   operands: (string | PathSpec)[],
 ): Promise<MountEntry[] | { missing: string }> {
   // Python is `sorted(registry.mounts(), key=lambda m: m.prefix)`.
@@ -222,7 +222,7 @@ function renderTable(header: string[], rows: string[][], showType: boolean): str
 // than a fabricated total.
 export async function handleDf(
   registry: MountRegistry,
-  session: Session,
+  session: SessionState,
   dispatch: DispatchFn,
   args: (string | PathSpec)[],
 ): Promise<Result> {
@@ -277,10 +277,10 @@ export async function handleDf(
   const data: string[][] = []
   for (const mount of mounts) {
     const cap = await mount.use(async () =>
-      mount.resource.statfs ? mount.resource.statfs() : { state: CapacityState.UNKNOWN },
+      mount.vfs.statfs ? mount.vfs.statfs() : { state: CapacityState.UNKNOWN },
     )
-    const cells = [mount.resource.kind]
-    if (showType) cells.push(mount.resource.kind)
+    const cells = [mount.vfs.kind]
+    if (showType) cells.push(mount.vfs.kind)
     cells.push(...numCells(cap, human, si, block, inodes))
     cells.push(pctCell(cap, inodes))
     cells.push(rstripSlash(mount.prefix) || '/')

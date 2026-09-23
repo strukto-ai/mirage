@@ -26,7 +26,7 @@ import { enoent } from '../../utils/errors.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 function stripPrefix(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   let p = path.pattern !== null ? path.directory : path.virtual
   if (prefix !== '' && p.startsWith(prefix)) {
     p = p.slice(prefix.length) || '/'
@@ -40,7 +40,7 @@ export async function readdir(
   index?: IndexCacheStore,
 ): Promise<string[]> {
   if (index === undefined) return readdirUnlocked(accessor, path, index)
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   return withIndexLock(index, rstripSlash(prefix) || '/', () =>
     readdirUnlocked(accessor, path, index),
   )
@@ -55,7 +55,7 @@ export async function readdirUnlocked(
   if (index === undefined) {
     throw enoent(path.virtual)
   }
-  const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
   const rel = stripSlash(stripPrefix(path))
   const key =
     rel === '' ? (prefix === '' ? '/' : rstripSlash(prefix)) : `${rstripSlash(prefix)}/${rel}`

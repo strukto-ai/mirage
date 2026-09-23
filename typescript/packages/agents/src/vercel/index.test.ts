@@ -14,13 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { mirageTools } from './index.ts'
 
 function mkWs(): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -57,7 +57,7 @@ describe('vercel mirageTools.execute', () => {
 describe('vercel mirageTools.readFile', () => {
   it('reads file content as text', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/notes.txt', 'hello')
+    await ws.vfs.writeFile('/notes.txt', 'hello')
     const r = await callTool<{ kind: string; content: string; mimeType: string }>(
       mirageTools(ws).readFile,
       { path: '/notes.txt' },
@@ -78,7 +78,7 @@ describe('vercel mirageTools.readFile', () => {
   it('returns base64 + mime for image files', async () => {
     const ws = mkWs()
     const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82])
-    await ws.fs.writeFile('/photo.png', png)
+    await ws.vfs.writeFile('/photo.png', png)
     const r = await callTool<{
       kind: string
       mimeType: string
@@ -95,7 +95,7 @@ describe('vercel mirageTools.readFile', () => {
   it('returns base64 + mime for PDFs', async () => {
     const ws = mkWs()
     const pdf = new TextEncoder().encode('%PDF-1.4\n%%EOF\n')
-    await ws.fs.writeFile('/doc.pdf', pdf)
+    await ws.vfs.writeFile('/doc.pdf', pdf)
     const r = await callTool<{ kind: string; mimeType: string; base64: string }>(
       mirageTools(ws).readFile,
       { path: '/doc.pdf' },
@@ -107,7 +107,7 @@ describe('vercel mirageTools.readFile', () => {
 
   it('returns binary stub for unsupported binary mimes', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/blob.bin', new Uint8Array([0, 1, 2, 3]))
+    await ws.vfs.writeFile('/blob.bin', new Uint8Array([0, 1, 2, 3]))
     const r = await callTool<{ kind: string; mimeType: string; note: string }>(
       mirageTools(ws).readFile,
       { path: '/blob.bin' },
@@ -188,7 +188,7 @@ describe('vercel mirageTools.writeFile', () => {
       content: 'data',
     })
     expect(r.path).toBe('/out.txt')
-    expect(await ws.fs.readFileText('/out.txt')).toBe('data')
+    expect(await ws.vfs.readFileText('/out.txt')).toBe('data')
   })
 
   it('mkdirs missing parent directories', async () => {
@@ -198,26 +198,26 @@ describe('vercel mirageTools.writeFile', () => {
       content: 'x',
     })
     expect(r.path).toBe('/a/b/c.txt')
-    expect(await ws.fs.readFileText('/a/b/c.txt')).toBe('x')
+    expect(await ws.vfs.readFileText('/a/b/c.txt')).toBe('x')
   })
 })
 
 describe('vercel mirageTools.editFile', () => {
   it('replaces single occurrence', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/f.txt', 'foo bar baz')
+    await ws.vfs.writeFile('/f.txt', 'foo bar baz')
     const r = await callTool<{ occurrences: number }>(mirageTools(ws).editFile, {
       path: '/f.txt',
       oldString: 'bar',
       newString: 'BAR',
     })
     expect(r.occurrences).toBe(1)
-    expect(await ws.fs.readFileText('/f.txt')).toBe('foo BAR baz')
+    expect(await ws.vfs.readFileText('/f.txt')).toBe('foo BAR baz')
   })
 
   it('rejects multiple occurrences without replaceAll', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/f.txt', 'aa aa')
+    await ws.vfs.writeFile('/f.txt', 'aa aa')
     const r = await callTool<{ error: string }>(mirageTools(ws).editFile, {
       path: '/f.txt',
       oldString: 'aa',
@@ -228,7 +228,7 @@ describe('vercel mirageTools.editFile', () => {
 
   it('replaces all when replaceAll is true', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/f.txt', 'aa aa')
+    await ws.vfs.writeFile('/f.txt', 'aa aa')
     const r = await callTool<{ occurrences: number }>(mirageTools(ws).editFile, {
       path: '/f.txt',
       oldString: 'aa',
@@ -236,15 +236,15 @@ describe('vercel mirageTools.editFile', () => {
       replaceAll: true,
     })
     expect(r.occurrences).toBe(2)
-    expect(await ws.fs.readFileText('/f.txt')).toBe('X X')
+    expect(await ws.vfs.readFileText('/f.txt')).toBe('X X')
   })
 })
 
 describe('vercel mirageTools.ls', () => {
   it('lists entries with is_dir flags', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/a.txt', 'a')
-    await ws.fs.mkdir('/d')
+    await ws.vfs.writeFile('/a.txt', 'a')
+    await ws.vfs.mkdir('/d')
     const r = await callTool<{ files: { path: string; is_dir: boolean }[] }>(mirageTools(ws).ls, {
       path: '/',
     })

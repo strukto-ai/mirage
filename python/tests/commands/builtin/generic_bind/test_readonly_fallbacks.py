@@ -74,7 +74,7 @@ def _ops() -> CommandIO:
 
 
 def _spec(original: str) -> PathSpec:
-    return PathSpec(resource_path=(original).strip("/"),
+    return PathSpec(vfs_path=(original).strip("/"),
                     virtual=original,
                     directory=original,
                     resolved=True)

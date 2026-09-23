@@ -20,7 +20,7 @@ import type { ExecutionNode } from '../types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import type { Session, StatusWriter } from '../session/session.ts'
+import type { SessionState, StatusWriter } from '../session/session.ts'
 import { abortedLine, lineStatusWriter, makeAbortError } from '../abort.ts'
 
 /**
@@ -37,7 +37,7 @@ import { abortedLine, lineStatusWriter, makeAbortError } from '../abort.ts'
  * overwrites, because bash reports the last pipeline that ran *inside* it
  * (`{ false | true; }` keeps `1 0`).
  */
-export function recordStatus(session: Session, code: number, transparent = false): void {
+export function recordStatus(session: SessionState, code: number, transparent = false): void {
   // A statement that settles after the caller was released is an orphan.
   // Its status is nobody's `$?`, and the throw ends the loop that would
   // otherwise run the next statement on a shell nobody is waiting on.
@@ -76,7 +76,7 @@ export interface StatusSnapshot {
 }
 
 /** Capture `$?` and `${PIPESTATUS[@]}` before a line runs. */
-export function snapshotStatus(session: Session): StatusSnapshot {
+export function snapshotStatus(session: SessionState): StatusSnapshot {
   return {
     lastExitCode: session.lastExitCode,
     pipeStatus: session.pipeStatus,
@@ -100,7 +100,7 @@ export function snapshotStatus(session: Session): StatusSnapshot {
  * point.
  */
 export function restoreStatus(
-  session: Session,
+  session: SessionState,
   snapshot: StatusSnapshot,
   writer: StatusWriter | null,
 ): void {
@@ -118,7 +118,7 @@ export function restoreStatus(
  * `true | false && true` keeps `0 1`. The list is not a pipeline of its
  * own, so without this its boundary would stamp the aggregate `1`.
  */
-export function carryStatus(session: Session): void {
+export function carryStatus(session: SessionState): void {
   session.pipeStatusPending = session.pipeStatus
 }
 
@@ -137,7 +137,7 @@ export function carryStatus(session: Session): void {
 export async function finishStatement(
   stdout: ByteSource | null,
   io: IOResult,
-  session: Session,
+  session: SessionState,
   node: TSNodeLike | null = null,
   execNode: ExecutionNode | null = null,
 ): Promise<ByteSource | null> {
@@ -172,7 +172,7 @@ export async function finishStatement(
  * command substitutions, in which case the status of the last
  * substitution performed becomes the statement's own.
  */
-export function assignmentStatus(session: Session, seqBefore: number): number {
+export function assignmentStatus(session: SessionState, seqBefore: number): number {
   if (session.cmdsubSeq !== seqBefore) return session.cmdsubStatus
   return 0
 }

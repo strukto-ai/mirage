@@ -28,7 +28,7 @@ import { cachedEntry } from './readdir.ts'
 export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): StatFn<A> {
   return async function stat(accessor, path, index) {
     const original = path.virtual
-    const prefix = mountPrefixOf(path.virtual, path.resourcePath)
+    const prefix = mountPrefixOf(path.virtual, path.vfsPath)
     const rawPath =
       prefix !== '' && original.startsWith(prefix) ? original.slice(prefix.length) || '/' : original
 

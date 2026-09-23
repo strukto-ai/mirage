@@ -14,7 +14,7 @@
 
 import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import { ResourceName, type PathSpec } from '../../types.ts'
+import { VFSName, type PathSpec } from '../../types.ts'
 import { norm, nowIso } from './utils.ts'
 import { invalidateAfterWrite } from '../../cache/context.ts'
 import { checkDestParents } from './dest.ts'
@@ -28,7 +28,7 @@ export async function create(accessor: RAMAccessor, path: PathSpec): Promise<voi
   checkDestParents(accessor, path, p)
   accessor.store.files.set(p, new Uint8Array())
   accessor.store.modified.set(p, nowIso())
-  record('create', p, ResourceName.RAM, 0, timer)
+  record('create', p, VFSName.RAM, 0, timer)
   await invalidateAfterWrite(path)
   return Promise.resolve()
 }

@@ -18,7 +18,7 @@ import { PolicyDenied } from '../../../../policy/errors.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
 import { setAttr } from '../../../session/state.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import type { SessionView } from '../../../../ops/types.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -37,7 +37,7 @@ import {
 } from './declare.ts'
 import type { Result } from '../types.ts'
 
-function readonlyLines(session: Session, flags: Set<string>): string[] {
+function readonlyLines(session: SessionState, flags: Set<string>): string[] {
   // -a narrows to indexed arrays and -A to associative ones, as bash
   // does. -f selects functions, which mirage carries no readonly
   // attribute for, so that form lists nothing.
@@ -85,7 +85,7 @@ function readonlyLines(session: Session, flags: Set<string>): string[] {
  */
 export async function handleReadonly(
   assignments: string[],
-  session: Session,
+  session: SessionState,
   state: SessionView | null = null,
   arrays: { name: string; append: boolean; items: string[] }[] | null = null,
   stored: string[] | null = null,

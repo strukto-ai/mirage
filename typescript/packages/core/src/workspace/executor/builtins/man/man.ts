@@ -21,7 +21,7 @@ import type { CLIInstall } from '../../../cli/types.ts'
 import { DEV_PREFIX } from '../../../mount/registry.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { commandVisible, verbVisible } from '../../../lookup/lookup.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { ManEntry } from './types.ts'
@@ -65,7 +65,7 @@ function builtinEntry(name: string): ManEntry | null {
  * One entry per name registered on any mount that the session can see,
  * first registration wins.
  */
-function commandEntries(registry: MountRegistry, session: Session): ManEntry[] {
+function commandEntries(registry: MountRegistry, session: SessionState): ManEntry[] {
   const seen = new Map<string, ManEntry>()
   for (const mount of registry.allMounts()) {
     if (mount.prefix === DEV_PREFIX) continue
@@ -79,7 +79,7 @@ function commandEntries(registry: MountRegistry, session: Session): ManEntry[] {
 }
 
 /** One entry per installed CLI head word the session can see. */
-function cliEntries(registry: MountRegistry, session: Session): ManEntry[] {
+function cliEntries(registry: MountRegistry, session: SessionState): ManEntry[] {
   return [...registry.clis.items()]
     .filter(([name]) => commandVisible(name, session))
     .map(([name, install]) => ({ name, spec: install.spec }))
@@ -135,7 +135,7 @@ function renderCliEntry(
   head: string,
   verbs: readonly string[],
   spec: CLISpec,
-  session: Session,
+  session: SessionState,
 ): string | null {
   const found = findNode(spec, verbs)
   if (found === null) return null
@@ -155,7 +155,7 @@ function renderCliEntry(
  * register it, and no row says which: the manual documents words, and
  * dispatch by name already picks the mount that serves one.
  */
-function renderManIndex(registry: MountRegistry, session: Session): string {
+function renderManIndex(registry: MountRegistry, session: SessionState): string {
   const sections = [
     renderSection('commands', commandEntries(registry, session)),
     renderSection('clis', cliEntries(registry, session)),
@@ -176,7 +176,7 @@ function cliMan(
   verbs: readonly string[],
   cmdStr: string,
   registry: MountRegistry,
-  session: Session,
+  session: SessionState,
 ): Result {
   const enc = new TextEncoder()
   const head = install.name
@@ -199,7 +199,7 @@ function cliMan(
   ]
 }
 
-export function handleMan(args: string[], registry: MountRegistry, session: Session): Result {
+export function handleMan(args: string[], registry: MountRegistry, session: SessionState): Result {
   const enc = new TextEncoder()
   const name = args[0]
   if (name === undefined) {

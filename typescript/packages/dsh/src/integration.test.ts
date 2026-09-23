@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { MirageFileSystem } from './fs.ts'
@@ -29,7 +29,7 @@ type ToolCallId = Extract<SaveTextSpill['source'], { kind: 'tool' }>['callId']
 const workspaces: Workspace[] = []
 
 async function makeWorld(): Promise<Context> {
-  const ws = new Workspace({ '/data': [new RAMResource(), MountMode.WRITE] })
+  const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] })
   workspaces.push(ws)
   const ctx = new Context()
   await ctx.plugin(MirageService, { workspace: ws }).await()

@@ -28,13 +28,13 @@ from mirage.workspace.executor.builtins.shared import (expand_operands, fail,
                                                        split_value_flags)
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 
 async def handle_touch(
     namespace: Namespace,
     dispatch: DispatchFn,
-    session: Session,
+    session: SessionState,
     args: list[str | PathSpec],
 ) -> Result:
     """touch: set access/modification times, creating missing files.
@@ -46,7 +46,7 @@ async def handle_touch(
     Args:
         namespace (Namespace): addressing authority.
         dispatch (DispatchFn): op dispatcher.
-        session (Session): session whose cwd resolves relative -r paths.
+        session (SessionState): session whose cwd resolves relative -r paths.
         args (list[str | PathSpec]): args after the command name.
     """
     flags, values, operands, bad = split_value_flags(args, "acmh", "tdr")

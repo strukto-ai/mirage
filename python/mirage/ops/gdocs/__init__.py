@@ -16,6 +16,6 @@ from mirage.commands.builtin.gdocs.io import IO
 from mirage.ops.gdocs.read import read
 from mirage.ops.generic import make_generic_ops
 
-# The only read is the dual-resource .gdoc.json filetype op (registered for
+# The only read is the dual-VFS .gdoc.json filetype op (registered for
 # both gdocs and gdrive), so the factory's plain read is overridden.
 OPS = [*make_generic_ops("gdocs", IO, overrides={"read"}), read]

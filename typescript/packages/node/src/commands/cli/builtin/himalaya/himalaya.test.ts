@@ -26,7 +26,7 @@ import type { IOResult } from '@struktoai/mirage-core/io/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/utils/errors'
 import { EmailAccessor } from '../../../../accessor/email.ts'
-import { EmailResource } from '../../../../resource/email/email.ts'
+import { EmailVFS } from '../../../../vfs/email/email.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { messageJsonBytes } from '../../../../core/email/render.ts'
 import { Workspace } from '../../../../workspace.ts'
@@ -797,13 +797,13 @@ describe('himalaya dispatch', () => {
       username: 'me@example.com',
       password: 'p',
     })
-    const io = await ws.execute('himalaya message compose --to a@b.com --subject Hi --body yo')
+    const io = await ws.shell('himalaya message compose --to a@b.com --subject Hi --body yo')
     expect(io.exitCode).toBe(0)
     expect(new TextDecoder().decode(io.stdout)).toContain('To: a@b.com')
     await ws.close()
   })
 
-  // The email resource normalizes snake_case; the CLI install used to
+  // The email VFS normalizes snake_case; the CLI install used to
   // validate the raw keys against the camelCase schema and reject the
   // very same config block ("unknown config keys: imap_host, ...").
   it('installs from the same snake_case config block the Python side uses', async () => {
@@ -817,7 +817,7 @@ describe('himalaya dispatch', () => {
       password: 'p',
       use_ssl: true,
     })
-    const io = await ws.execute('himalaya message compose --to a@b.com --subject Hi --body yo')
+    const io = await ws.shell('himalaya message compose --to a@b.com --subject Hi --body yo')
     expect(io.exitCode).toBe(0)
     expect(new TextDecoder().decode(io.stdout)).toContain('To: a@b.com')
     await ws.close()
@@ -831,7 +831,7 @@ describe('himalaya dispatch', () => {
       username: 'u',
       password: 'p',
     })
-    const io = await ws.execute('himalaya message move 7 --to Archive')
+    const io = await ws.shell('himalaya message move 7 --to Archive')
     expect(io.exitCode).toBe(1)
     expect(new TextDecoder().decode(io.stderr)).toBe(
       "himalaya: 'move' is not a himalaya message command. See 'himalaya message --help'.\n",
@@ -843,7 +843,7 @@ describe('himalaya dispatch', () => {
 describe('himalaya writes and a mounted account', () => {
   // The CLI and a mount are two doors to one account, so a message the CLI
   // files has to show in the mount's listing without waiting out the index
-  // TTL. The mailbox here is test state; the resource, the CLI, the workspace
+  // TTL. The mailbox here is test state; the VFS, the CLI, the workspace
   // and its caches are the real ones.
   const store = new Map<string, string[]>()
   const added = new Map<string, unknown>()
@@ -866,15 +866,15 @@ describe('himalaya writes and a mounted account', () => {
 
   function workspace(): Workspace {
     const ws = new Workspace({
-      '/mail': new EmailResource(CONFIG),
-      '/alias': new EmailResource(CONFIG),
+      '/mail': new EmailVFS(CONFIG),
+      '/alias': new EmailVFS(CONFIG),
     })
     ws.registerCli('himalaya', HIMALAYA, CONFIG)
     return ws
   }
 
   async function out(ws: Workspace, line: string): Promise<string> {
-    const io = await ws.execute(line)
+    const io = await ws.shell(line)
     expect(io.exitCode, new TextDecoder().decode(io.stderr)).toBe(0)
     return new TextDecoder().decode(io.stdout)
   }

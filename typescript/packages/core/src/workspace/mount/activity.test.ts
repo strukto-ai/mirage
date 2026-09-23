@@ -14,12 +14,12 @@
 
 import { expect, it } from 'vitest'
 import { CachableAsyncIterator } from '../../io/cachable_iterator.ts'
-import { ResourceActivity } from './activity.ts'
+import { VFSActivity } from './activity.ts'
 
 it.each(['eof', 'error', 'close', 'bounded'])(
-  'resource usage ends with its stream (%s)',
+  'VFS usage ends with its stream (%s)',
   async (finish) => {
-    const activity = new ResourceActivity()
+    const activity = new VFSActivity()
     async function* chunks(): AsyncGenerator<Uint8Array> {
       yield await Promise.resolve(new Uint8Array([1]))
       if (finish === 'error') throw new Error('read failed')
@@ -61,19 +61,19 @@ it.each(['eof', 'error', 'close', 'bounded'])(
   },
 )
 
-it('exhausted cache streams do not keep a resource active', async () => {
+it('exhausted cache streams do not keep a VFS active', async () => {
   async function* chunks(): AsyncGenerator<Uint8Array> {
     yield await Promise.resolve(new Uint8Array([1]))
   }
   const cached = new CachableAsyncIterator(chunks())
   await cached.drain()
-  const activity = new ResourceActivity()
+  const activity = new VFSActivity()
   activity.hold(cached)
   await activity.wait()
 })
 
 it('close waits for a pending pull before releasing usage', async () => {
-  const activity = new ResourceActivity()
+  const activity = new VFSActivity()
   let entered = (): void => undefined
   let resume = (): void => undefined
   const started = new Promise<void>((resolve) => {

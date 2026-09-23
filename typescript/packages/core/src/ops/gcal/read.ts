@@ -14,13 +14,13 @@
 
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import { read as coreRead } from '../../core/gcal/read.ts'
-import { type PathSpec, ResourceName } from '../../types.ts'
+import { type PathSpec, VFSName } from '../../types.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 
 export const readOp: RegisteredOp = {
   name: 'read',
-  resource: ResourceName.GCAL,
+  vfs: VFSName.GCAL,
   filetype: '.gcal.json',
   write: false,
   // A backend that registers its own read op does not go through

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_DATE } from './date.ts'
 
 const DEC = new TextDecoder()
@@ -23,10 +23,10 @@ async function runDate(
   texts: string[] = [],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<string> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = GENERAL_DATE[0]
   if (cmd === undefined) throw new Error('date not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], texts, {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -78,10 +78,10 @@ async function runDateIo(
   texts: string[] = [],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<[string, string, number]> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = GENERAL_DATE[0]
   if (cmd === undefined) throw new Error('date not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], texts, {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -176,10 +176,10 @@ async function runDateEnv(
   texts: string[] = [],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<[string, string, number]> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = GENERAL_DATE[0]
   if (cmd === undefined) throw new Error('date not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], texts, {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -358,10 +358,10 @@ it('renders the implicit host zone in explicit and default formats', async () =>
 // Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a raw
 // `bytes` argv (`date -d x<B>`). Mirrors test_date.py.
 async function runDateStderr(d: string): Promise<[string, number]> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = GENERAL_DATE[0]
   if (cmd === undefined) throw new Error('date not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
     stdin: null,
     flags: { d },
     filetypeFns: null,

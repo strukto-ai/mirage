@@ -25,13 +25,13 @@ from dulwich.repo import Repo
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.constants import GITLINK
 from mirage.commands.cli.types import CLIDoors
-from mirage.resource.disk import DiskResource
 from mirage.types import MountMode
+from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.links import path_stat
 from mirage.workspace.executor.command.run import (mount_root_of,
                                                    namespace_view_of)
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 
 AUTHOR = b"Test Author <test@example.com>"
@@ -228,7 +228,7 @@ def mounted(repo_path: Path):
     Args:
         repo_path (Path): the repository's working tree.
     """
-    with Workspace({MOUNT: DiskResource(root=str(repo_path))}) as ws:
+    with Workspace({MOUNT: DiskVFS(root=str(repo_path))}) as ws:
         yield ws
 
 
@@ -242,7 +242,7 @@ def mounted_rw(repo_path: Path):
     Args:
         repo_path (Path): the repository's working tree.
     """
-    with Workspace({MOUNT: DiskResource(root=str(repo_path))},
+    with Workspace({MOUNT: DiskVFS(root=str(repo_path))},
                    mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
         yield ws
@@ -255,7 +255,7 @@ def workspace(repo_path: Path):
     Args:
         repo_path (Path): the repository's working tree.
     """
-    with Workspace({MOUNT: DiskResource(root=str(repo_path))}) as ws:
+    with Workspace({MOUNT: DiskVFS(root=str(repo_path))}) as ws:
         yield ws
 
 
@@ -269,7 +269,7 @@ def git_ws(repo_path: Path):
     Args:
         repo_path (Path): the repository's working tree.
     """
-    with Workspace({MOUNT: DiskResource(root=str(repo_path))}) as ws:
+    with Workspace({MOUNT: DiskVFS(root=str(repo_path))}) as ws:
         ws.register_cli("git", GIT)
         yield ws
 
@@ -285,7 +285,7 @@ def git_rw(repo_path: Path):
     Args:
         repo_path (Path): the repository's working tree.
     """
-    with Workspace({MOUNT: DiskResource(root=str(repo_path))},
+    with Workspace({MOUNT: DiskVFS(root=str(repo_path))},
                    mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
         yield ws
@@ -316,7 +316,7 @@ def repo_doors(ws) -> CLIDoors:
                     stat_path=functools.partial(path_stat, ws.dispatch),
                     ns=namespace_view_of(ws._registry, ws._namespace,
                                          ws.dispatch),
-                    session_view=session_view(Session(session_id="test")))
+                    session_view=session_view(SessionState(session_id="test")))
 
 
 @pytest.fixture
@@ -343,7 +343,7 @@ def unborn_rw(unborn_path: Path):
     Args:
         unborn_path (Path): the repository's working tree.
     """
-    with Workspace({MOUNT: DiskResource(root=str(unborn_path))},
+    with Workspace({MOUNT: DiskVFS(root=str(unborn_path))},
                    mode=MountMode.WRITE) as ws:
         ws.register_cli("git", GIT)
         yield ws

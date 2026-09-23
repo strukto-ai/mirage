@@ -1,12 +1,12 @@
 ---
 title: Nextcloud
 icon: /images/nextcloud-logo.svg
-description: Set up Nextcloud / ownCloud / WebDAV credentials for the Nextcloud resource.
+description: Set up Nextcloud / ownCloud / WebDAV credentials for the Nextcloud VFS.
 ---
 
 ## Overview
 
-The Nextcloud resource talks to any [WebDAV](http://www.webdav.org/specs/rfc4918.html)
+The Nextcloud VFS talks to any [WebDAV](http://www.webdav.org/specs/rfc4918.html)
 server: self-hosted Nextcloud, ownCloud, Hetzner Storage Share, or any
 generic WebDAV endpoint. Authentication is HTTP Basic with an
 **app password** (not your account password).
@@ -54,4 +54,4 @@ NEXTCLOUD_PASSWORD=<app-password>
 ```
 
 For Python configuration, see the
-[Nextcloud resource](/python/resource/nextcloud) docs.
+[Nextcloud VFS](/python/vfs/nextcloud) docs.

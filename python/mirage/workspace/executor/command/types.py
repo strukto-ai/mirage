@@ -22,7 +22,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -35,8 +35,8 @@ class ExecuteNodeFn(Protocol):
     """
 
     def __call__(
-        self, node: TSNodeLike, session: Session, stdin: ByteSource | None,
-        call_stack: CallStack
+        self, node: TSNodeLike, session: SessionState,
+        stdin: ByteSource | None, call_stack: CallStack
     ) -> Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]:
         ...
 

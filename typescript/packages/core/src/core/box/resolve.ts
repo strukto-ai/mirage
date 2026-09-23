@@ -17,7 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import { listFolderItems, type BoxItem } from './api.ts'
 
 export function pathParts(path: PathSpec): string[] {
-  return path.resourcePath.split('/').filter((p) => p !== '')
+  return path.vfsPath.split('/').filter((p) => p !== '')
 }
 
 // Box has no path-addressing endpoint, so writes resolve ids by listing each

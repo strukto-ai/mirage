@@ -28,11 +28,11 @@ def validate_max_drain_bytes(cache_limit: int,
 
 
 class FileCacheMixin:
-    """LRU file cache mixin for resources.
+    """LRU file cache mixin for mounts.
 
     Adds cache tracking (sizes, fingerprints, TTL, LRU order)
-    on top of any resource. Data lives in the resource's storage —
-    subclass implements the cache methods using resource's store.
+    on top of any VFS. Data lives in the VFS's storage —
+    subclass implements the cache methods using VFS's store.
     """
 
     _max_drain_bytes: int | None = None
@@ -62,6 +62,24 @@ class FileCacheMixin:
         raise NotImplementedError
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
+        raise NotImplementedError
+
+    async def is_unbounded(self, key: str) -> bool:
+        """Whether an entry exists for ``key`` and carries no bound.
+
+        A `bounded` mount cannot serve one: nothing stamped a ttl before
+        the read policy existed, and a warm read short-circuits rather
+        than re-setting, so such an entry would never acquire a bound and
+        never expire. Dropping it makes the cold read that follows stamp
+        one.
+
+        Asked as one question rather than ``exists`` plus a ttl lookup so
+        a warm bounded read costs one store round trip, and so a missing
+        entry answers False rather than reading as unbounded.
+
+        Args:
+            key (str): mount-absolute cache key.
+        """
         raise NotImplementedError
 
     async def clear(self) -> None:

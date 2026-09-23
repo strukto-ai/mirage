@@ -13,13 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CLISpec } from '../../commands/cli/types.ts'
-import type { ConsistencyPolicy, MountMode } from '../../types.ts'
-import type { Resource } from '../../resource/base.ts'
+import type { Mount } from '../mount/spec.ts'
 
 export interface MountArgs {
   clis?: Record<string, [string | CLISpec, Record<string, unknown> | null]>
-  mountArgs: Record<string, [Resource, MountMode]>
-  consistency: ConsistencyPolicy
+  mountArgs: Record<string, Mount>
   defaultSessionId: string | undefined
   defaultAgentId: string | null
 }

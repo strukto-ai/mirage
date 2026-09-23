@@ -22,7 +22,7 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-browser @openai/agents
 ## Usage
 
 ```ts
-import { MountMode, OpsRegistry, RAMResource, Workspace } from '@struktoai/mirage-node'
+import { MountMode, OpsRegistry, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent, applyPatchTool, run, shellTool } from '@openai/agents'
 import {
   MirageEditor,
@@ -31,7 +31,7 @@ import {
   mirageReadFileTool,
 } from '@struktoai/mirage-agents/openai'
 
-const ram = new RAMResource()
+const ram = new RAMVFS()
 const ops = new OpsRegistry()
 for (const op of ram.ops()) ops.register(op)
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -65,10 +65,10 @@ The examples also support OpenAI-compatible providers. Set `OPENAI_API_KEY`, `OP
 | `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
 | `MIRAGE_SYSTEM_PROMPT` | The default system prompt template (used by `buildSystemPrompt`). |
 
-Unsupported binary formats return a metadata description instead of being decoded as corrupt text. The tool reads raw workspace bytes, so files mounted from RAM, S3, and other Mirage resources use the same model-input path.
+Unsupported binary formats return a metadata description instead of being decoded as corrupt text. The tool reads raw workspace bytes, so files mounted from RAM, S3, and other Mirage mounts use the same model-input path.
 
 ## Examples
 
 - [`examples/typescript/agents/openai/ram_agent.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/ram_agent.ts), RAM-only sandbox.
-- [`examples/typescript/agents/openai/multi_resource_agent.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/multi_resource_agent.ts), RAM + S3 mounts.
+- [`examples/typescript/agents/openai/multi_vfs_agent.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/multi_vfs_agent.ts), RAM + S3 mounts.
 - [`examples/typescript/agents/openai/snapshot.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/agents/openai/snapshot.ts), branch & roll back agent state.

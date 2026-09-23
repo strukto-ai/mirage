@@ -20,8 +20,8 @@ import pytest_asyncio
 
 from mirage.commands.cli.builtin.git import lazyfile
 from mirage.commands.cli.builtin.git.lazyfile import LazyFile
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 CONTENT = bytes(range(256)) * 8
@@ -52,8 +52,8 @@ async def opened(ws) -> LazyFile:
 @pytest_asyncio.fixture
 async def ram_ws():
     """A workspace holding one binary blob."""
-    with Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE) as ws:
-        await ws.fs.write(PATH, CONTENT)
+    with Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.vfs.write(PATH, CONTENT)
         yield ws
 
 

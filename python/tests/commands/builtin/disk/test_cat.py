@@ -14,27 +14,26 @@
 
 import pytest
 
-from mirage import DiskResource, MountMode, Workspace
+from mirage import DiskVFS, MountMode, Workspace
 
 
 @pytest.fixture
 def workspace(tmp_path):
-    return Workspace({"/": DiskResource(root=str(tmp_path))},
-                     mode=MountMode.WRITE)
+    return Workspace({"/": DiskVFS(root=str(tmp_path))}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
 async def test_cat_basic(workspace):
-    await workspace.fs.write("/f.txt", b"hello\nworld\n")
-    io = await workspace.execute("cat /f.txt")
+    await workspace.vfs.write("/f.txt", b"hello\nworld\n")
+    io = await workspace.shell("cat /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"hello\nworld\n"
 
 
 @pytest.mark.asyncio
 async def test_cat_n_single_digit_alignment(workspace):
-    await workspace.fs.write("/f.txt", b"a\nb\n")
-    io = await workspace.execute("cat -n /f.txt")
+    await workspace.vfs.write("/f.txt", b"a\nb\n")
+    io = await workspace.shell("cat -n /f.txt")
     assert io.exit_code == 0
     assert io.stdout == b"     1\ta\n     2\tb\n"
 
@@ -42,8 +41,8 @@ async def test_cat_n_single_digit_alignment(workspace):
 @pytest.mark.asyncio
 async def test_cat_n_multidigit_alignment(workspace):
     body = b"".join(f"line{i}\n".encode() for i in range(1, 13))
-    await workspace.fs.write("/big.txt", body)
-    io = await workspace.execute("cat -n /big.txt")
+    await workspace.vfs.write("/big.txt", body)
+    io = await workspace.shell("cat -n /big.txt")
     assert io.exit_code == 0
     lines = io.stdout.split(b"\n")
     assert lines[0] == b"     1\tline1"
@@ -54,31 +53,31 @@ async def test_cat_n_multidigit_alignment(workspace):
 
 @pytest.mark.asyncio
 async def test_cat_preserves_no_trailing_newline(workspace):
-    await workspace.fs.write("/partial.txt", b"hello")
-    io = await workspace.execute("cat /partial.txt")
+    await workspace.vfs.write("/partial.txt", b"hello")
+    io = await workspace.shell("cat /partial.txt")
     assert io.exit_code == 0
     assert io.stdout == b"hello"
 
 
 @pytest.mark.asyncio
 async def test_cat_n_preserves_no_trailing_newline(workspace):
-    await workspace.fs.write("/partial.txt", b"hello")
-    io = await workspace.execute("cat -n /partial.txt")
+    await workspace.vfs.write("/partial.txt", b"hello")
+    io = await workspace.shell("cat -n /partial.txt")
     assert io.exit_code == 0
     assert io.stdout == b"     1\thello"
 
 
 @pytest.mark.asyncio
 async def test_cat_empty_file(workspace):
-    await workspace.fs.write("/empty.txt", b"")
-    io = await workspace.execute("cat /empty.txt")
+    await workspace.vfs.write("/empty.txt", b"")
+    io = await workspace.shell("cat /empty.txt")
     assert io.exit_code == 0
     assert io.stdout == b""
 
 
 @pytest.mark.asyncio
 async def test_cat_only_newlines(workspace):
-    await workspace.fs.write("/nl.txt", b"\n\n\n")
-    io = await workspace.execute("cat -n /nl.txt")
+    await workspace.vfs.write("/nl.txt", b"\n\n\n")
+    io = await workspace.shell("cat -n /nl.txt")
     assert io.exit_code == 0
     assert io.stdout == b"     1\t\n     2\t\n     3\t\n"

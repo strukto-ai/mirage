@@ -14,13 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { OpsRegistry } from '@struktoai/mirage-core/ops/registry'
-import { RAMResource } from '@struktoai/mirage-core/resource/ram/ram'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { mirageTools } from './index.ts'
 
 function mkWs(): Workspace {
-  const ram = new RAMResource()
+  const ram = new RAMVFS()
   const ops = new OpsRegistry()
   for (const op of ram.ops()) ops.register(op)
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE, ops })
@@ -61,7 +61,7 @@ describe('mastra mirageTools.execute', () => {
 describe('mastra mirageTools.readFile', () => {
   it('reads file content as text', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/notes.txt', 'hello')
+    await ws.vfs.writeFile('/notes.txt', 'hello')
     const r = await runTool<{ content: string }>(mirageTools(ws).readFile, { path: '/notes.txt' })
     expect(r.content).toBe('hello')
   })
@@ -82,7 +82,7 @@ describe('mastra mirageTools.writeFile', () => {
       content: 'data',
     })
     expect(r.path).toBe('/out.txt')
-    expect(await ws.fs.readFileText('/out.txt')).toBe('data')
+    expect(await ws.vfs.readFileText('/out.txt')).toBe('data')
   })
 
   it('mkdirs missing parent directories', async () => {
@@ -92,26 +92,26 @@ describe('mastra mirageTools.writeFile', () => {
       content: 'x',
     })
     expect(r.path).toBe('/a/b/c.txt')
-    expect(await ws.fs.readFileText('/a/b/c.txt')).toBe('x')
+    expect(await ws.vfs.readFileText('/a/b/c.txt')).toBe('x')
   })
 })
 
 describe('mastra mirageTools.editFile', () => {
   it('replaces single occurrence', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/f.txt', 'foo bar baz')
+    await ws.vfs.writeFile('/f.txt', 'foo bar baz')
     const r = await runTool<{ occurrences: number }>(mirageTools(ws).editFile, {
       path: '/f.txt',
       oldString: 'bar',
       newString: 'BAR',
     })
     expect(r.occurrences).toBe(1)
-    expect(await ws.fs.readFileText('/f.txt')).toBe('foo BAR baz')
+    expect(await ws.vfs.readFileText('/f.txt')).toBe('foo BAR baz')
   })
 
   it('rejects multiple occurrences without replaceAll', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/f.txt', 'aa aa')
+    await ws.vfs.writeFile('/f.txt', 'aa aa')
     const r = await runTool<{ error: string }>(mirageTools(ws).editFile, {
       path: '/f.txt',
       oldString: 'aa',
@@ -122,7 +122,7 @@ describe('mastra mirageTools.editFile', () => {
 
   it('replaces all when replaceAll is true', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/f.txt', 'aa aa')
+    await ws.vfs.writeFile('/f.txt', 'aa aa')
     const r = await runTool<{ occurrences: number }>(mirageTools(ws).editFile, {
       path: '/f.txt',
       oldString: 'aa',
@@ -130,15 +130,15 @@ describe('mastra mirageTools.editFile', () => {
       replaceAll: true,
     })
     expect(r.occurrences).toBe(2)
-    expect(await ws.fs.readFileText('/f.txt')).toBe('X X')
+    expect(await ws.vfs.readFileText('/f.txt')).toBe('X X')
   })
 })
 
 describe('mastra mirageTools.ls', () => {
   it('lists entries with is_dir flags', async () => {
     const ws = mkWs()
-    await ws.fs.writeFile('/a.txt', 'a')
-    await ws.fs.mkdir('/d')
+    await ws.vfs.writeFile('/a.txt', 'a')
+    await ws.vfs.mkdir('/d')
     const r = await runTool<{ files: { path: string; is_dir: boolean }[] }>(mirageTools(ws).ls, {
       path: '/',
     })

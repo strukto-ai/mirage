@@ -23,7 +23,7 @@ import {
   type ShellArray,
 } from '../../shell/array.ts'
 import type { ShellValue } from '../../shell/variable.ts'
-import type { Session } from './session.ts'
+import type { SessionState } from './session.ts'
 import {
   conversionScalar,
   subscriptIndex,
@@ -50,7 +50,7 @@ const ELEMENT_REF = /^([A-Za-z_]\w*)(?:\[([\s\S]+)\])?$/
  * ungated, outside a workspace.
  */
 export async function elementIsSet(
-  session: Session,
+  session: SessionState,
   ref: string,
   view: SessionView | null = null,
 ): Promise<boolean> {
@@ -99,7 +99,7 @@ export async function elementIsSet(
  * rule's own message reaches the caller.
  */
 export async function assignElement(
-  session: Session,
+  session: SessionState,
   view: SessionView | null,
   name: string,
   subscript: string | null,

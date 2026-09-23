@@ -27,7 +27,7 @@ from mirage.workspace.executor.builtins.script.script import (read_script_file,
                                                               script_error)
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 
@@ -89,7 +89,7 @@ async def handle_bash(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: Session,
+    session: SessionState,
     stdin: ByteSource | None = None,
     name: str = "bash",
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -106,7 +106,7 @@ async def handle_bash(
         dispatch (DispatchFn): op dispatcher, used to read a script file.
         execute_fn (Callable): runs the program text in this session.
         args (list[str]): words after the head word.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         stdin (ByteSource | None): input stream, also the program source
             when no operand names one.
         name (str): the head word (``bash`` or ``sh``). bash reports

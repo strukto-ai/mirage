@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.workspace.session.session import Session, vars_from_env
+from mirage.workspace.session.session import SessionState, vars_from_env
 from mirage.workspace.workspace.utils import command_name, fork_for_call
 
 
@@ -29,13 +29,13 @@ def test_command_name_reads_the_leading_word(line, expected):
     assert command_name(line) == expected
 
 
-def _session() -> Session:
-    return Session(session_id="s1",
-                   cwd="/home",
-                   vars=vars_from_env({
-                       "A": "1",
-                       "B": "2"
-                   }))
+def _session() -> SessionState:
+    return SessionState(session_id="s1",
+                        cwd="/home",
+                        vars=vars_from_env({
+                            "A": "1",
+                            "B": "2"
+                        }))
 
 
 def test_no_overrides_reuses_the_persistent_session():

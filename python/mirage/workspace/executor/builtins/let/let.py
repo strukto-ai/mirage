@@ -21,7 +21,7 @@ from mirage.shell.errors import ArithError
 from mirage.workspace.executor.builtins.shared import (readonly_refusal,
                                                        refusal, require_view)
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (ensure_var_visible, random_reader,
                                             session_elements, session_view,
@@ -31,7 +31,7 @@ from mirage.workspace.types import ExecutionNode
 
 async def handle_let(
     args: list[str],
-    session: Session,
+    session: SessionState,
     state: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Evaluate each operand as an arithmetic expression.
@@ -47,7 +47,7 @@ async def handle_let(
 
     Args:
         args (list[str]): the words after ``let``, one expression each.
-        session (Session): shell session state.
+        session (SessionState): shell session state.
         state (SessionView | None): the session plane's gated door.
     """
     if not args:

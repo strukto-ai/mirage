@@ -16,4 +16,4 @@ from mirage.commands.builtin.gdocs.io import resolve_glob
 from mirage.commands.builtin.generic.rm_cmd import make_rm
 from mirage.core.gdocs.unlink import unlink
 
-rm = make_rm(resource="gdocs", glob_fn=resolve_glob, unlink=unlink)
+rm = make_rm(vfs="gdocs", glob_fn=resolve_glob, unlink=unlink)

@@ -96,7 +96,7 @@ export function flatten(scopes: PathSpec[]): PathSpec[] {
         directory: s.directory,
         pattern: s.pattern,
         resolved: s.resolved,
-        resourcePath: mountKey(s.virtual, ''),
+        vfsPath: mountKey(s.virtual, ''),
         rawPath: s.rawPath,
       }),
   )

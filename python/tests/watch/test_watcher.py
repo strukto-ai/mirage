@@ -32,14 +32,14 @@ class FakeCacheManager:
         self._log.append(f"inv-ancestors:{path.virtual}")
 
 
-class PlainResource:
+class PlainVFS:
     name = "ram"
 
 
 @dataclass
 class FakeMountEntry:
     prefix: str
-    resource: object
+    vfs: object
     cache_manager: object = None
 
 
@@ -60,7 +60,7 @@ def _change(kind, virtual):
 def _watcher(log=None):
     manager = FakeCacheManager(log) if log is not None else None
     entry = FakeMountEntry(prefix="/nc/",
-                           resource=PlainResource(),
+                           vfs=PlainVFS(),
                            cache_manager=manager)
     return Watcher(FakeRegistry(entry))
 
@@ -118,7 +118,7 @@ async def test_a_nested_create_drops_every_listing_to_the_mount_root():
             ("child", IndexEntry(id="1", name="child", resource_type="file"))
         ])
     entry = FakeMountEntry(prefix="/nc/",
-                           resource=PlainResource(),
+                           vfs=PlainVFS(),
                            cache_manager=CacheManager(None, index, "/nc/",
                                                       False))
     w = Watcher(FakeRegistry(entry))
@@ -165,22 +165,22 @@ async def test_notify_update_does_not_reach_the_subtree():
 
 
 @pytest.mark.asyncio
-async def test_notify_reframes_resource_path():
+async def test_notify_reframes_vfs_path():
     seen: list[str] = []
 
     class RecordingManager:
 
         async def invalidate_after_write(self, path):
-            seen.append(path.resource_path)
+            seen.append(path.vfs_path)
 
         async def invalidate_after_unlink(self, path):
-            seen.append(path.resource_path)
+            seen.append(path.vfs_path)
 
         async def invalidate_ancestors(self, path):
             return None
 
     entry = FakeMountEntry(prefix="/nc/",
-                           resource=PlainResource(),
+                           vfs=PlainVFS(),
                            cache_manager=RecordingManager())
     w = Watcher(FakeRegistry(entry))
     agen, task = await _start_blocked_watch(w)
@@ -244,7 +244,7 @@ async def test_notify_skips_out_of_scope_watch():
 
 
 @pytest.mark.asyncio
-async def test_plain_resource_is_watchable():
+async def test_plain_vfs_is_watchable():
     # No delta_hook capability required: delivery is notify-driven.
     w = _watcher()
     agen, task = await _start_blocked_watch(w)

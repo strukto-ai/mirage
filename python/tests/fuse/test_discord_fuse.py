@@ -25,8 +25,8 @@ from mirage.core.discord.entry import (channel_dirname, channel_entry,
                                        member_filename)
 from mirage.fuse.fs import MirageFS
 from mirage.ops import Ops
-from mirage.resource.discord import DiscordConfig, DiscordResource
 from mirage.types import ContentType, FileType, MountMode
+from mirage.vfs.discord import DiscordConfig, DiscordVFS
 
 GUILD_PAYLOAD = {"id": "G1", "name": "TestGuild"}
 CHANNEL_PAYLOAD = {"id": "C1", "name": "general", "type": 0}
@@ -62,15 +62,15 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _make_world() -> tuple[DiscordResource, Workspace]:
-    # Seeding happens after the mount: installing a resource re-derives
+def _make_world() -> tuple[DiscordVFS, Workspace]:
+    # Seeding happens after the mount: installing a VFS re-derives
     # its index from the workspace's config, so an index seeded before
-    # is thrown away, and a second workspace over the same resource
+    # is thrown away, and a second workspace over the same VFS
     # would throw away this one.
     config = DiscordConfig(token="test-token")
-    resource = DiscordResource(config=config)
-    ws = Workspace({f"{PREFIX}/": resource}, mode=MountMode.READ)
-    index = resource.index
+    vfs = DiscordVFS(config=config)
+    ws = Workspace({f"{PREFIX}/": vfs}, mode=MountMode.READ)
+    index = vfs.index
     _run(index.set_dir(PREFIX, [(GUILD, guild_entry(GUILD_PAYLOAD))]))
     _run(index.put(f"{PREFIX}/{CHANNEL_PATH}", channel_entry(CHANNEL_PAYLOAD)))
     _run(
@@ -90,7 +90,7 @@ def _make_world() -> tuple[DiscordResource, Workspace]:
     _run(
         index.set_dir(f"{PREFIX}/{GUILD}/members",
                       [(MEMBER, member_entry(MEMBER_PAYLOAD))]))
-    return resource, ws
+    return vfs, ws
 
 
 @pytest.fixture
@@ -100,7 +100,7 @@ def world():
 
 @pytest.fixture
 def ops(world) -> Ops:
-    return world[1].fs
+    return world[1].vfs
 
 
 @pytest.fixture

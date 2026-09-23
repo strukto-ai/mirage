@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_CURL, responseLines as renderResponseLines } from './curl.ts'
 
 const ENC = new TextEncoder()
@@ -93,10 +93,10 @@ async function runCurl(
   exitCode: number
   writes: Record<string, Uint8Array | AsyncIterable<Uint8Array>>
 }> {
-  const resource = new RAMResource()
+  const vfs = new RAMVFS()
   const cmd = GENERAL_CURL[0]
   if (cmd === undefined) throw new Error('curl not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, [], texts, {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
     flags,
     filetypeFns: null,

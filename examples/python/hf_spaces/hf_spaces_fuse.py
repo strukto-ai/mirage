@@ -17,7 +17,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import Mount, MountBackend, MountMode, Workspace
-from mirage.resource.hf_spaces import HfSpacesConfig, HfSpacesResource
+from mirage.vfs.hf_spaces import HfSpacesConfig, HfSpacesVFS
 
 load_dotenv(".env.development")
 
@@ -25,11 +25,10 @@ config = HfSpacesConfig(
     repo_id=os.environ.get("HF_SPACE_REPO", "HuggingFaceBio/carbon-demo"),
     token=os.environ.get("HF_TOKEN"),
 )
-resource = HfSpacesResource(config)
+vfs = HfSpacesVFS(config)
 
 with Workspace(
-    {"/s/": Mount(resource, mode=MountMode.READ,
-                  backend=MountBackend.FUSE)}) as ws:
+    {"/s/": Mount(vfs, mode=MountMode.READ, backend=MountBackend.FUSE)}) as ws:
     mp = ws.fuse_mountpoint
     print(f"=== FUSE: mounted at {mp} ===\n")
 
@@ -58,6 +57,6 @@ with Workspace(
     except EOFError:
         pass
 
-    records = ws.fs.records
+    records = ws.vfs.records
     total = sum(r.bytes for r in records)
     print(f"\nStats: {len(records)} ops, {total} bytes transferred")

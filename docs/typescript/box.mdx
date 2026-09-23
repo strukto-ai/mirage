@@ -1,10 +1,10 @@
 ---
 title: Box
 icon: /images/box-logo.svg
-description: Mount Box as a MIRAGE resource from Node or the browser via OAuth2.
+description: Mount Box as a MIRAGE VFS from Node or the browser via OAuth2.
 ---
 
-Mirage ships `BoxResource` in **two runtimes**:
+Mirage ships `BoxVFS` in **two runtimes**:
 
 - `@struktoai/mirage-node`, uses `client_id` + `client_secret` + refresh token (rotated on each use)
 - `@struktoai/mirage-browser`, supports the same refresh token via PKCE (no client secret in the bundle)
@@ -18,22 +18,22 @@ Both `READ` and `WRITE` modes are supported (mount with `{ mode: MountMode.WRITE
 enable `tee`/`cp`/`mv`/`rm`/`mkdir`/`touch`). Pass `rootFolderId` to mount a single Box
 folder as the workspace root instead of the whole account; folder ids are stable across
 renames and moves. The Python package ships the same backend, see
-[Box (Python)](/python/resource/box).
+[Box (Python)](/python/vfs/box).
 
 ## Quick start: developer token
 
 For exploration, skip the OAuth flow and use a developer token (one-button-click in the Box
-app console, 60-minute lifetime). The `BoxResource` accepts an `accessToken` field that
+app console, 60-minute lifetime). The `BoxVFS` accepts an `accessToken` field that
 short-circuits the refresh logic:
 
 ```ts
-import { BoxResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const box = new BoxResource({
+const box = new BoxVFS({
   accessToken: process.env.BOX_DEVELOPER_TOKEN!,
 })
 const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
-await ws.execute('ls /box/')
+await ws.shell('ls /box/')
 ```
 
 When the token expires (Box 401s with `invalid_token`), regenerate it in the console and
@@ -46,7 +46,7 @@ For headless server auth, skip OAuth and refresh tokens entirely. Create a Box a
 admin console (**Apps -> Custom Apps Manager**), and pass the enterprise ID:
 
 ```ts
-const box = new BoxResource({
+const box = new BoxVFS({
   clientId: process.env.BOX_CLIENT_ID!,
   clientSecret: process.env.BOX_CLIENT_SECRET!,
   enterpriseId: process.env.BOX_ENTERPRISE_ID!,
@@ -69,9 +69,9 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
-import { BoxResource, MountMode, Workspace } from '@struktoai/mirage-node'
+import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
-const box = new BoxResource({
+const box = new BoxVFS({
   clientId: process.env.BOX_CLIENT_ID!,
   clientSecret: process.env.BOX_CLIENT_SECRET!,
   refreshToken: process.env.BOX_REFRESH_TOKEN!,
@@ -82,7 +82,7 @@ const box = new BoxResource({
 })
 
 const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
-const res = await ws.execute('ls /box/')
+const res = await ws.shell('ls /box/')
 console.log(res.stdoutText)
 ```
 
@@ -97,17 +97,17 @@ pnpm add @struktoai/mirage-browser
 ```
 
 ```ts
-import { BoxResource, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 // Refresh token obtained via the PKCE flow, see examples/typescript/browser/src/box_pkce.ts.
-const box = new BoxResource({
+const box = new BoxVFS({
   clientId: import.meta.env.VITE_BOX_CLIENT_ID,
   refreshToken: localStorage.getItem('box-refresh')!,
   onRefreshTokenRotated: (next) => localStorage.setItem('box-refresh', next),
 })
 
 const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
-await ws.execute('ls /box/')
+await ws.shell('ls /box/')
 ```
 
 Box requires the origin to be allowlisted on the app's **Allowed Origins** config (see
@@ -119,7 +119,7 @@ runs the full PKCE dance and persists the rotated refresh token to `localStorage
 
 ```ts
 import { createRequire } from 'node:module'
-import { BoxResource, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage-node'
+import { BoxVFS, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage-node'
 
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
@@ -139,7 +139,7 @@ Only `fs.promises.*` is patched, sync forms aren't supported.
 ## FUSE mode
 
 ```ts
-import { BoxResource, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
+import { BoxVFS, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace({ '/box': new Mount(box, { mode: MountMode.READ, backend: MountBackend.FUSE }) })
 await ws.fuseReady()
@@ -156,11 +156,11 @@ Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux.
 ## Path → ID resolution
 
 Box uses numeric folder/file IDs internally (root folder is id `0`). Mirage caches the path → ID
-mapping in the `RAMIndexCacheStore` attached to the resource. The first time you `ls /box/foo/bar/`,
+mapping in the `RAMIndexCacheStore` attached to the VFS. The first time you `ls /box/foo/bar/`,
 it walks the tree top-down (one API call per level) and caches each entry's ID. Subsequent reads
 of `/box/foo/bar/anyfile.json` hit the cache instead of re-walking.
 
-The cache TTL defaults to 24h. To force re-resolution, recreate the `BoxResource`.
+The cache TTL defaults to 24h. To force re-resolution, recreate the `BoxVFS`.
 
 ## Box-native file types
 
@@ -180,7 +180,7 @@ commands operate on Google file IDs and do not apply to Box.
 
 ## Available commands
 
-`BoxResource` ships the same shell command set as `GDriveResource` and `DropboxResource`:
+`BoxVFS` ships the same shell command set as `GDriveVFS` and `DropboxVFS`:
 
 - **Filesystem**: `ls`, `cat`, `head`, `tail`, `nl`, `wc`, `stat`, `find`, `tree`, `du`, `file`,
   `realpath`, `basename`, `dirname`
@@ -194,6 +194,6 @@ commands operate on Google file IDs and do not apply to Box.
 End-to-end runnable scripts are in
 [`examples/typescript/box/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/box):
 
-- [`box.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box.ts), `Workspace.execute('ls/stat/cat/tree …')` shell demo
+- [`box.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box.ts), `Workspace.shell('ls/stat/cat/tree …')` shell demo
 - [`box_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
 - [`box_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_fuse.ts), FUSE mount with shell access in another terminal

@@ -21,12 +21,12 @@ from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.core.ram.rm import rm_r
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 def _spec(virtual: str) -> PathSpec:
-    return PathSpec(resource_path=virtual.strip("/"),
+    return PathSpec(vfs_path=virtual.strip("/"),
                     virtual=virtual,
                     directory="/",
                     pattern=None,

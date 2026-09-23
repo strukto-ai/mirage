@@ -21,7 +21,7 @@ import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arraySet, type ShellArray } from '../../../../shell/array.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import type { SessionView } from '../../../../ops/types.ts'
-import type { Session } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { sessionView, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { fail, requireView } from '../shared.ts'
@@ -45,7 +45,7 @@ function count(text: string): number | null {
  */
 export async function handleMapfile(
   args: string[],
-  session: Session,
+  session: SessionState,
   stdin: ByteSource | null,
   executeFn: ExecuteStringFn,
   state: SessionView | null = null,

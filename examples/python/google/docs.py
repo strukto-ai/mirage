@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
 from mirage.commands.cli.builtin.gws import GWS
-from mirage.resource.gdocs import GDocsConfig, GDocsResource
+from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
 
 load_dotenv(".env.development")
 
@@ -29,47 +29,47 @@ config = GDocsConfig(
     client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
 )
-resource = GDocsResource(config=config)
+vfs = GDocsVFS(config=config)
 
 
 async def main():
-    ws = Workspace({"/gdocs": resource}, mode=MountMode.WRITE)
+    ws = Workspace({"/gdocs": vfs}, mode=MountMode.WRITE)
     # The gws verbs are a CLI install, separate from the mounts.
     ws.register_cli("gws", GWS, config.model_dump())
 
-    r = await ws.execute("ls /gdocs/owned/ | head -n 3")
+    r = await ws.shell("ls /gdocs/owned/ | head -n 3")
     print("=== ls (first 3) ===")
     print(await r.stdout_str())
 
     first = (await r.stdout_str()).strip().split("\n")[0]
 
     print("=== plan: cat ===")
-    dr = await ws.execute(f"cat /gdocs/owned/{first}", provision=True)
+    dr = await ws.shell(f"cat /gdocs/owned/{first}", provision=True)
     print(f"  network_read={dr.network_read}, precision={dr.precision}")
 
     print("=== plan: grep ===")
-    dr = await ws.execute(f"grep textRun /gdocs/owned/{first}", provision=True)
+    dr = await ws.shell(f"grep textRun /gdocs/owned/{first}", provision=True)
     print(f"  network_read={dr.network_read}, precision={dr.precision}")
 
     print("=== jq .title ===")
-    r = await ws.execute(f'jq ".title" /gdocs/owned/{first}')
+    r = await ws.shell(f'jq ".title" /gdocs/owned/{first}')
     print(await r.stdout_str())
 
     print("=== head -c 200 ===")
-    r = await ws.execute(f"head -c 200 /gdocs/owned/{first}")
+    r = await ws.shell(f"head -c 200 /gdocs/owned/{first}")
     print(await r.stdout_str())
 
     print("=== grep textRun ===")
-    r = await ws.execute(f"grep textRun /gdocs/owned/{first} | head -c 200")
+    r = await ws.shell(f"grep textRun /gdocs/owned/{first} | head -c 200")
     print(await r.stdout_str())
 
     print("=== tail -c 200 ===")
-    r = await ws.execute(f"tail -c 200 /gdocs/owned/{first}")
+    r = await ws.shell(f"tail -c 200 /gdocs/owned/{first}")
     print(await r.stdout_str())
 
     print("=== gws docs documents create ===")
-    r = await ws.execute('gws docs documents create'
-                         ' --json \'{"title": "MIRAGE Example Doc"}\'')
+    r = await ws.shell('gws docs documents create'
+                       ' --json \'{"title": "MIRAGE Example Doc"}\'')
     doc = json.loads(await r.stdout_str())
     doc_id = doc["documentId"]
     print(f"Created: {doc_id}")
@@ -86,14 +86,14 @@ async def main():
         }]
     })
     params = json.dumps({"documentId": doc_id})
-    r = await ws.execute(f"gws docs documents batchUpdate"
-                         f" --params '{params}' --json '{body}'")
+    r = await ws.shell(f"gws docs documents batchUpdate"
+                       f" --params '{params}' --json '{body}'")
     print(f"Updated: {(await r.stdout_str())[:80]}")
 
     print("\n=== gws docs write ===")
-    r = await ws.execute(f'gws docs write'
-                         f' --document {doc_id}'
-                         f' --text "Appended via gws docs write."')
+    r = await ws.shell(f'gws docs write'
+                       f' --document {doc_id}'
+                       f' --text "Appended via gws docs write."')
     print(f"Written: {(await r.stdout_str())[:80]}")
 
     url = f"https://docs.google.com/document/d/{doc_id}/edit"

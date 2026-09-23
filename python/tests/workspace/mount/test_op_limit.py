@@ -16,8 +16,8 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.errors import LimitExceededError
-from mirage.resource.ram import RAMResource
 from mirage.types import Limit, OnExceed, PathSpec
+from mirage.vfs.ram import RAMVFS
 
 
 async def _read_long(accessor, scope, *args, **kwargs):
@@ -33,8 +33,8 @@ async def _read_short(accessor, scope, *args, **kwargs):
 
 
 async def _ws_mount():
-    ws = Workspace({"/data": RAMResource()}, mode=MountMode.WRITE)
-    await ws.execute("echo hi > /data/f.txt")
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo hi > /data/f.txt")
     mount = next(m for m in ws._registry._mounts if m.prefix == "/data/")
     return ws, mount
 

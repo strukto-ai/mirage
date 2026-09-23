@@ -18,12 +18,12 @@ from deepagents import create_deep_agent
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
 
-from mirage import MountMode, RAMResource, Workspace
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.langchain import LangchainWorkspace, extract_text
 
 load_dotenv(".env.development")
 
-ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 backend = LangchainWorkspace(ws)
 backend.upload_files([("/example.pdf", Path("data/example.pdf").read_bytes())])
 
@@ -40,5 +40,5 @@ for text in extract_text(result["messages"][-1:]):
     print(text)
 
 pdf_read_count = sum(record.op == "read" and record.path == "/example.pdf"
-                     for record in ws.fs.records)
+                     for record in ws.vfs.records)
 print(f"\nPDF reads through Mirage: {pdf_read_count}")

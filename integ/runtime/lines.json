@@ -43,7 +43,7 @@
             "name": "monty",
             "captures": []
           },
-          "vfs"
+          "workspace"
         ]
       },
       "steps": [
@@ -80,7 +80,7 @@
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram",
+            "vfs": "ram",
             "files": {
               "secret.txt": "secret\n",
               "public.txt": "public\n"
@@ -192,11 +192,11 @@
           {
             "name": "echobox"
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -275,11 +275,11 @@
             "name": "monty",
             "captures": []
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         }
       },
@@ -311,11 +311,11 @@
               "*"
             ]
           },
-          "vfs"
+          "workspace"
         ],
         "mounts": {
           "/ram": {
-            "resource": "ram"
+            "vfs": "ram"
           }
         },
         "profiles": {

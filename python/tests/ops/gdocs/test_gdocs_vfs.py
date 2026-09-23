@@ -19,13 +19,12 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.ops import Ops
-from mirage.resource.gdocs import GDocsConfig, GDocsResource
+from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
 
 
 def _make_gdocs_ops() -> Ops:
-    resource = GDocsResource(
-        config=GDocsConfig(client_id="x", refresh_token="y"))
-    return Workspace({"/gdocs/": resource}, mode=MountMode.READ).fs
+    vfs = GDocsVFS(config=GDocsConfig(client_id="x", refresh_token="y"))
+    return Workspace({"/gdocs/": vfs}, mode=MountMode.READ).vfs
 
 
 @pytest.mark.asyncio

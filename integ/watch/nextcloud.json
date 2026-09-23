@@ -1,5 +1,5 @@
 {
-  "resource": "nextcloud",
+  "vfs": "nextcloud",
   "mount": "/nc",
   "watch_dir": "/nc/data",
   "seed": ["keep.txt"],

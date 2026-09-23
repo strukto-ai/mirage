@@ -117,7 +117,7 @@ class CLIRegistry:
             # lands, the same as a mount's, and the create route answers
             # `str(e)` as its 400 detail: pydantic's own rendering would
             # hand the refused value back. Field and type only, chain
-            # cut, the way `build_resource` reports its config class.
+            # cut, the way `build_vfs` reports its config class.
             raise ValueError(f"CLI {name!r}: {error_summary(exc)}") from None
 
     def uninstall(self, name: str) -> None:

@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { DiskResource, MountMode, RAMResource, RedisResource, Workspace } from './index.ts'
+import { DiskVFS, MountMode, RAMVFS, RedisVFS, Workspace } from './index.ts'
 
 const CONFORMANCE_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -162,19 +162,19 @@ async function seedWorkspace(ws: Workspace): Promise<void> {
       const dir = '/' + parts.slice(0, depth).join('/')
       if (!made.has(dir)) {
         made.add(dir)
-        await ws.fs.mkdir(dir)
+        await ws.vfs.mkdir(dir)
       }
     }
-    await ws.fs.writeFile(path, content)
+    await ws.vfs.writeFile(path, content)
   }
 }
 
 // Each case gets a workspace with fresh backend state: a new RAM store, a
 // new temp directory, or a Redis key prefix cleared before the run.
 //
-// Teardown is split because Workspace.close() closes the mount's resource,
+// Teardown is split because Workspace.close() closes the mount's VFS,
 // and for Redis that destroys the client. Anything needing a live connection
-// has to run in `reset` (before the close); anything outliving the resource
+// has to run in `reset` (before the close); anything outliving the VFS
 // runs in `dispose` (after). Clearing Redis in `dispose` would silently open
 // a second connection per case just to delete keys.
 interface Backend {
@@ -187,12 +187,12 @@ const NOOP = (): Promise<void> => Promise.resolve()
 
 async function buildBackend(backend: string, caseId: string): Promise<Backend> {
   if (backend === 'ram') {
-    const ws = new Workspace({ '/': new RAMResource() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     return { ws, reset: NOOP, dispose: NOOP }
   }
   if (backend === 'disk') {
     const root = mkdtempSync(join(tmpdir(), 'mirage-conformance-'))
-    const ws = new Workspace({ '/': new DiskResource({ root }) }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/': new DiskVFS({ root }) }, { mode: MountMode.WRITE })
     return {
       ws,
       reset: NOOP,
@@ -203,13 +203,13 @@ async function buildBackend(backend: string, caseId: string): Promise<Backend> {
     }
   }
   if (backend === 'redis') {
-    const resource = new RedisResource({
+    const vfs = new RedisVFS({
       url: REDIS_URL,
       keyPrefix: `test:conformance:ts:${caseId}:`,
     })
-    await resource.store.clear()
-    const ws = new Workspace({ '/': resource }, { mode: MountMode.WRITE })
-    return { ws, reset: () => resource.store.clear(), dispose: NOOP }
+    await vfs.store.clear()
+    const ws = new Workspace({ '/': vfs }, { mode: MountMode.WRITE })
+    return { ws, reset: () => vfs.store.clear(), dispose: NOOP }
   }
   throw new Error(`unknown typescript backend in matrix: ${backend}`)
 }
@@ -220,7 +220,7 @@ async function runCase(c: ConformanceCase, backend: string): Promise<void> {
     await seedWorkspace(ws)
     const hasStdin = 'stdin_text' in c || 'stdin_base64' in c
     const stdin = hasStdin ? decodeBytes(c, 'stdin_text', 'stdin_base64') : undefined
-    const result = await ws.execute(c.cmd, stdin === undefined ? undefined : { stdin })
+    const result = await ws.shell(c.cmd, stdin === undefined ? undefined : { stdin })
     expect(result.exitCode).toBe(c.expect.exit)
     expect(comparable(result.stdout)).toBe(
       comparable(decodeBytes(c.expect, 'stdout_text', 'stdout_base64')),

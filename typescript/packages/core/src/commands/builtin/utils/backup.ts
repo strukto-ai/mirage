@@ -66,18 +66,16 @@ export function backupControl(
 // A path next to `path` whose name carries an appended suffix (e.g. '~').
 export function siblingPath(path: PathSpec, appended: string): PathSpec {
   const virtual = rstripSlash(path.virtual) + appended
-  return PathSpec.fromStrPath(virtual, rekey(path.virtual, path.resourcePath, virtual))
+  return PathSpec.fromStrPath(virtual, rekey(path.virtual, path.vfsPath, virtual))
 }
 
 // The directory containing `path` on the same mount.
 export function parentPath(path: PathSpec): PathSpec {
   const strippedVirtual = rstripSlash(path.virtual)
   const virtual = strippedVirtual.slice(0, strippedVirtual.lastIndexOf('/')) || '/'
-  const strippedResource = rstripSlash(path.resourcePath)
-  const resource = strippedResource.includes('/')
-    ? strippedResource.slice(0, strippedResource.lastIndexOf('/'))
-    : ''
-  return PathSpec.fromStrPath(virtual, resource)
+  const strippedVfs = rstripSlash(path.vfsPath)
+  const vfs = strippedVfs.includes('/') ? strippedVfs.slice(0, strippedVfs.lastIndexOf('/')) : ''
+  return PathSpec.fromStrPath(virtual, vfs)
 }
 
 // Existing numbered-backup versions (`name.~N~`) next to a target. A missing

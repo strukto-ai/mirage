@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { Accessor } from './base.ts'
-import type { DifyConfigResolved } from '../resource/dify/config.ts'
+import type { DifyConfigResolved } from '../vfs/dify/config.ts'
 
 export interface DifyRequestOptions {
   params?: Record<string, string | number | boolean>

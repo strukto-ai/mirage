@@ -15,7 +15,7 @@
 import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
-import { RAMResource } from '../../../resource/ram/ram.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
 const RAM_READLINK = RAM_COMMANDS.filter((c) => c.name === 'readlink' && c.filetype == null)
 
@@ -23,13 +23,13 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 async function runReadlink(
-  resource: RAMResource,
+  vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
 ): Promise<{ out: string; exitCode: number }> {
   const cmd = RAM_READLINK[0]
   if (cmd === undefined) throw new Error('readlink not registered')
-  const result = await cmd.fn((resource as { accessor?: unknown }).accessor as never, paths, [], {
+  const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -48,29 +48,29 @@ async function runReadlink(
 
 describe('readlink', () => {
   it('-f prints the normalized path', async () => {
-    const resource = new RAMResource()
-    resource.store.files.set('/f.txt', ENC.encode('x'))
-    const r = await runReadlink(resource, [PathSpec.fromStrPath('/f.txt')], { f: true })
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/f.txt', ENC.encode('x'))
+    const r = await runReadlink(vfs, [PathSpec.fromStrPath('/f.txt')], { f: true })
     expect(r.exitCode).toBe(0)
     expect(r.out).toContain('/f.txt')
   })
 
   it('missing operand returns exit code 1', async () => {
-    const resource = new RAMResource()
-    const r = await runReadlink(resource, [], {})
+    const vfs = new RAMVFS()
+    const r = await runReadlink(vfs, [], {})
     expect(r.exitCode).toBe(1)
   })
 
   it('-n omits trailing newline', async () => {
-    const resource = new RAMResource()
-    const r = await runReadlink(resource, [PathSpec.fromStrPath('/f.txt')], { n: true })
+    const vfs = new RAMVFS()
+    const r = await runReadlink(vfs, [PathSpec.fromStrPath('/f.txt')], { n: true })
     expect(r.exitCode).toBe(0)
     expect(r.out.endsWith('\n')).toBe(false)
   })
 
   it('without -n includes trailing newline', async () => {
-    const resource = new RAMResource()
-    const r = await runReadlink(resource, [PathSpec.fromStrPath('/f.txt')])
+    const vfs = new RAMVFS()
+    const r = await runReadlink(vfs, [PathSpec.fromStrPath('/f.txt')])
     expect(r.exitCode).toBe(0)
     expect(r.out.endsWith('\n')).toBe(true)
   })

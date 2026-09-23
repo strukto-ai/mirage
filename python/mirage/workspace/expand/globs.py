@@ -26,7 +26,7 @@ from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
-from mirage.workspace.session import Session
+from mirage.workspace.session import SessionState
 
 # How deep a `**` descends. bash has no cap, but every level here is one
 # listing per directory, so an accidental `**` over a large tree is
@@ -60,11 +60,11 @@ class GlobOptions:
         return self.nullglob or self.failglob or self.globstar
 
 
-def glob_options(session: Session) -> GlobOptions:
+def glob_options(session: SessionState) -> GlobOptions:
     """The session's pathname-expansion options.
 
     Args:
-        session (Session): the session holding the `shopt` table.
+        session (SessionState): the session holding the `shopt` table.
     """
     return GlobOptions(nullglob=session.shopts.get("nullglob",
                                                    SHOPT_DEFAULTS["nullglob"]),
@@ -80,7 +80,7 @@ def _namespace_children(registry: MountRegistry, links: NamespaceLinks | None,
 
     Child mounts and symlinks are namespace state no backend can see, so
     a glob that stops at one backend misses both: a nested mount's keys
-    live in another resource, and no resource stores a link. This is the
+    live in another VFS, and no VFS stores a link. This is the
     union ``merge_readdir`` already applies to a listing, filtered by the
     glob segment with the same matcher backends use, and session-filtered
     by ``namespace_names`` so a scoped session never learns an ungranted
@@ -128,7 +128,7 @@ def _merge_namespace(matches: list[str | PathSpec], extra: list[str],
     A match is a child of the directory it was globbed in, so a spec that
     is the directory itself is not one. The shared resolver never answers
     a dir-shaped ask that way, but ``resolve_glob`` is a public hook and a
-    resource reinstating the literal on its own would hand back the spec
+    VFS reinstating the literal on its own would hand back the spec
     it was given. Unlike the word comparison this replaces, the test
     cannot discard a real match: a match is strictly longer than the
     directory holding it, while a word can be spelled exactly like one.
@@ -236,7 +236,7 @@ async def _level_matches(registry: MountRegistry, mount: MountEntry,
     prefix = owner.prefix.rstrip("/")
     spec = PathSpec(virtual=real,
                     directory=real,
-                    resource_path=mount_key(real, prefix),
+                    vfs_path=mount_key(real, prefix),
                     pattern=seg,
                     resolved=False)
     try:
@@ -502,7 +502,7 @@ async def resolve_globs(
 ) -> list[str | PathSpec]:
     """Resolve glob patterns in PathSpec args, preserving PathSpec type.
 
-    Globs are resolved via resource.resolve_glob. Non-glob PathSpec
+    Globs are resolved via VFS.resolve_glob. Non-glob PathSpec
     and plain str items pass through unchanged. Spec-TEXT words never
     arrive here as PathSpec: per-position kinds keep them plain text at
     classification time.
@@ -548,9 +548,9 @@ async def resolve_globs(
                                            raw_path=item.raw_path.rstrip("/"))
             prefix = mount.prefix.rstrip("/")
             # Stamp the backend key so readdir addresses the correct
-            # resource-relative path.
+            # VFS-relative path.
             item = dataclasses.replace(item,
-                                       resource_path=mount_key(
+                                       vfs_path=mount_key(
                                            item.virtual, prefix))
             await mount.ensure_ready()
             try:
@@ -647,7 +647,7 @@ async def expand_boundary_globs(
     A glob operand is normally left for the owning backend to resolve,
     which is how a prefix store pushes the listing down. That only holds
     while every match belongs to that backend: a nested mount's root is a
-    child of the directory but its keys live in another resource, so the
+    child of the directory but its keys live in another VFS, so the
     backend answers "no such file" for a name its own listing shows. When
     the glob's fixed head holds a child mount, the word is expanded here
     instead, before routing, so the matches route per mount exactly as

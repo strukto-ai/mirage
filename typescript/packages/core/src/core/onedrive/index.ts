@@ -22,7 +22,7 @@ import {
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { startBasename } from '../../commands/builtin/find_eval.ts'
 import { record, startOp } from '../../observe/context.ts'
-import type { FindOptions } from '../../resource/base.ts'
+import type { FindOptions } from '../../vfs/base.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent, enotempty } from '../../utils/errors.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
@@ -52,12 +52,8 @@ function directoryPath(path: PathSpec): PathSpec {
 
 function virtualKey(path: PathSpec): string {
   const target = directoryPath(path)
-  const prefix = mountPrefixOf(target.virtual, target.resourcePath)
-  return target.resourcePath !== ''
-    ? `${prefix}/${target.resourcePath}`
-    : prefix !== ''
-      ? prefix
-      : '/'
+  const prefix = mountPrefixOf(target.virtual, target.vfsPath)
+  return target.vfsPath !== '' ? `${prefix}/${target.vfsPath}` : prefix !== '' ? prefix : '/'
 }
 
 function parentPath(path: string): string {
@@ -87,9 +83,9 @@ export async function read(
 ): Promise<Uint8Array> {
   return readItem(
     accessor.config,
-    accessor.loc(path.resourcePath),
+    accessor.loc(path.vfsPath),
     path.virtual,
-    path.resourcePath,
+    path.vfsPath,
     'onedrive',
     options?.offset ?? 0,
     options?.size ?? null,
@@ -103,9 +99,9 @@ export async function* stream(
 ): AsyncIterable<Uint8Array> {
   yield* streamItem(
     accessor.config,
-    accessor.loc(path.resourcePath),
+    accessor.loc(path.vfsPath),
     path.virtual,
-    path.resourcePath,
+    path.vfsPath,
     'onedrive',
   )
 }
@@ -121,13 +117,13 @@ export async function readdir(
     const cached = await index.listDir(key)
     if (cached.entries !== undefined && cached.entries !== null) return cached.entries
   }
-  const prefix = mountPrefixOf(target.virtual, target.resourcePath)
+  const prefix = mountPrefixOf(target.virtual, target.vfsPath)
   return readdirItems(
     accessor.config,
-    accessor.loc(target.resourcePath),
+    accessor.loc(target.vfsPath),
     index,
     prefix,
-    target.resourcePath,
+    target.vfsPath,
     key,
     target,
   )
@@ -138,7 +134,7 @@ export async function stat(
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<FileStat> {
-  if (path.resourcePath === '') {
+  if (path.vfsPath === '') {
     try {
       const item = await graphGet(accessor.config, accessor.loc('').item())
       // The root's `size` is Graph's aggregate subtree storage number, not
@@ -155,7 +151,7 @@ export async function stat(
       throw error
     }
   }
-  return statItem(accessor.config, accessor.loc(path.resourcePath), path, virtualKey(path), index)
+  return statItem(accessor.config, accessor.loc(path.vfsPath), path, virtualKey(path), index)
 }
 
 export async function write(
@@ -164,8 +160,8 @@ export async function write(
   data: Uint8Array,
 ): Promise<void> {
   const timer = startOp()
-  await writeItem(accessor.config, accessor.loc(path.resourcePath), data)
-  record('write', path.resourcePath, 'onedrive', data.length, timer)
+  await writeItem(accessor.config, accessor.loc(path.vfsPath), data)
+  record('write', path.vfsPath, 'onedrive', data.length, timer)
   await invalidateAfterWrite(path)
 }
 
@@ -183,7 +179,7 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
-  const key = path.resourcePath
+  const key = path.vfsPath
   if (key === '') return
   if (parents) {
     const parts = key.split('/')
@@ -199,7 +195,7 @@ export async function mkdir(
 
 export async function unlink(accessor: OneDriveAccessor, path: PathSpec): Promise<void> {
   try {
-    await graphDelete(accessor.config, accessor.loc(path.resourcePath).item())
+    await graphDelete(accessor.config, accessor.loc(path.vfsPath).item())
   } catch (error) {
     if (error instanceof GraphError && error.status === 404) throw enoent(path)
     throw error
@@ -208,8 +204,8 @@ export async function unlink(accessor: OneDriveAccessor, path: PathSpec): Promis
 }
 
 export async function rmR(accessor: OneDriveAccessor, path: PathSpec): Promise<void> {
-  if (path.resourcePath === '') return
-  await graphDelete(accessor.config, accessor.loc(path.resourcePath).item())
+  if (path.vfsPath === '') return
+  await graphDelete(accessor.config, accessor.loc(path.vfsPath).item())
   await invalidateSubtree(path)
 }
 
@@ -221,12 +217,12 @@ export async function rmR(accessor: OneDriveAccessor, path: PathSpec): Promise<v
  * emptiness check is the only thing separating them. Aliasing the two --
  * which this was -- destroyed the whole subtree for every caller that does
  * not pre-check emptiness itself, and the command builders are the only
- * callers that do: FUSE, `ws.fs` and the sandbox runtimes all reach the op
+ * callers that do: FUSE, `ws.vfs` and the sandbox runtimes all reach the op
  * directly.
  */
 export async function rmdir(accessor: OneDriveAccessor, path: PathSpec): Promise<void> {
-  if (path.resourcePath === '') return
-  const loc = accessor.loc(path.resourcePath)
+  if (path.vfsPath === '') return
+  const loc = accessor.loc(path.vfsPath)
   if (!(await driveRootEmpty(accessor.config, loc))) throw enotempty(path)
   await graphDelete(accessor.config, loc.item())
   await invalidateAfterUnlink(path)
@@ -239,11 +235,7 @@ export async function rename(
   src: PathSpec,
   dst: PathSpec,
 ): Promise<void> {
-  await renameReplace(
-    accessor.config,
-    accessor.loc(src.resourcePath),
-    accessor.loc(dst.resourcePath),
-  )
+  await renameReplace(accessor.config, accessor.loc(src.vfsPath), accessor.loc(dst.vfsPath))
   await invalidateSubtree(dst)
   await invalidateSubtree(src)
 }
@@ -253,7 +245,7 @@ export async function copy(
   src: PathSpec,
   dst: PathSpec,
 ): Promise<void> {
-  await copyTree(accessor.config, accessor.loc(src.resourcePath), accessor.loc(dst.resourcePath))
+  await copyTree(accessor.config, accessor.loc(src.vfsPath), accessor.loc(dst.vfsPath))
   await invalidateAfterWrite(dst)
 }
 
@@ -270,7 +262,7 @@ export async function du(
   } catch (error) {
     if ((error as { code?: unknown }).code !== 'ENOENT') throw error
   }
-  return duTreeTotal(accessor.config, accessor.loc(path.resourcePath))
+  return duTreeTotal(accessor.config, accessor.loc(path.vfsPath))
 }
 
 export async function duEntries(
@@ -284,7 +276,7 @@ export async function duEntries(
   } catch (error) {
     if ((error as { code?: unknown }).code !== 'ENOENT') throw error
   }
-  return duTreeEntries(accessor.config, accessor.loc(path.resourcePath))
+  return duTreeEntries(accessor.config, accessor.loc(path.vfsPath))
 }
 
 export async function find(
@@ -294,7 +286,7 @@ export async function find(
 ): Promise<string[]> {
   return findItems(
     accessor.config,
-    accessor.loc(path.resourcePath),
+    accessor.loc(path.vfsPath),
     startBasename(path.virtual),
     async () => (await stat(accessor, path)).type === FileType.DIRECTORY,
     options,

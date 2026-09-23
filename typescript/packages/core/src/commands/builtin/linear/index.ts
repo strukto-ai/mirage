@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LinearAccessor } from '../../../accessor/linear.ts'
-import { ResourceName } from '../../../types.ts'
+import { VFSName } from '../../../types.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { makeGenericCommands } from '../generic_bind/index.ts'
 import { LINEAR_IO } from './io.ts'
@@ -21,7 +21,7 @@ import { LINEAR_IO } from './io.ts'
 const LINEAR_OVERRIDES = new Set<string>()
 
 export const LINEAR_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<LinearAccessor>(ResourceName.LINEAR, LINEAR_IO, {
+  ...makeGenericCommands<LinearAccessor>(VFSName.LINEAR, LINEAR_IO, {
     overrides: LINEAR_OVERRIDES,
   }),
 ]

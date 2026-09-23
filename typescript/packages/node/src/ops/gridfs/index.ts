@@ -14,11 +14,7 @@
 
 import { makeGenericOps } from '@struktoai/mirage-core/ops/generic/factory'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
-import { ResourceName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { GRIDFS_IO } from '../../commands/builtin/gridfs/io.ts'
 
-export const GRIDFS_OPS: readonly RegisteredOp[] = makeGenericOps(
-  ResourceName.GRIDFS,
-  GRIDFS_IO,
-  {},
-)
+export const GRIDFS_OPS: readonly RegisteredOp[] = makeGenericOps(VFSName.GRIDFS, GRIDFS_IO, {})

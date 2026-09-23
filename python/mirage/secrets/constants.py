@@ -18,7 +18,7 @@ from mirage.secrets.config import (AWSSMConfig, DotenvConfig, EnvConfig,
                                    OnePasswordConfig)
 
 # Builtin fetchers are import paths, not imports, so a source's SDK
-# loads only when a workspace actually uses it (`build_resource`'s
+# loads only when a workspace actually uses it (`build_vfs`'s
 # trick: aws.py imports aioboto3, which is an extra). The config models
 # are imported eagerly because config.py costs only pydantic.
 BUILTINS: dict[str, tuple[type[BaseModel], str]] = {

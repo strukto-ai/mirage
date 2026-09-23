@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { resolveQdrantConfig } from '../../resource/qdrant/config.ts'
+import { resolveQdrantConfig } from '../../vfs/qdrant/config.ts'
 import { byteLength, NAME_MAX_BYTES } from '../../utils/sanitize.ts'
 import { PATH_SAFE } from '../hierarchy/codec.ts'
 import { groupName, pointIdFromStem, rowStem } from './naming.ts'

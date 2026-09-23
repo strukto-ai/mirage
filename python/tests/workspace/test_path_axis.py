@@ -18,9 +18,9 @@ import errno
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode, PathSpec
-from mirage.workspace import Workspace
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Session, Workspace
 
 CARVE_PROFILE = {
     "mounts": {
@@ -36,10 +36,10 @@ CARVE_PROFILE = {
 
 
 def _seeded(mode: MountMode = MountMode.WRITE) -> Workspace:
-    ws = Workspace({"/repo": (RAMResource(), mode)}, mode=MountMode.WRITE)
+    ws = Workspace({"/repo": (RAMVFS(), mode)}, mode=MountMode.WRITE)
 
     async def seed():
-        io = await ws.execute(
+        io = await ws.shell(
             "mkdir -p /repo/secrets /repo/public/docs && "
             "printf 'hello repo\\n' > /repo/README.md && "
             "printf 'PRIVATE needle\\n' > /repo/secrets/key.pem && "
@@ -60,7 +60,7 @@ def _carved() -> Workspace:
 def _run(ws: Workspace, line: str):
 
     async def go():
-        return await ws.execute(line, session_id="rev")
+        return await ws.shell(line, session_id="rev")
 
     return asyncio.run(go())
 
@@ -127,19 +127,19 @@ def test_hide_speaks_before_the_mode():
     clobber = _run(ws, "echo x > /repo/secrets/key.pem")
     assert (clobber.stderr
             or b"") == b"/repo/secrets/key.pem: No such file or directory\n"
-    kept = asyncio.run(ws.execute("cat /repo/secrets/key.pem"))
+    kept = asyncio.run(ws.shell("cat /repo/secrets/key.pem"))
     assert kept.stdout == b"PRIVATE needle\n"
 
 
 def test_the_op_door_runs_as_the_default_session():
-    # `ws.fs`, `ws.dispatch`, `ws.stat` and `ws.readdir` are judged
+    # `ws.vfs`, `ws.dispatch`, `ws.stat` and `ws.readdir` are judged
     # under the default session's profile, the way a bare `execute`
     # is, so an agent whose file tool reads through the facade is
     # confined like its shell. A session already bound is kept, and
-    # `for_session` runs the same door as another session over the
+    # A handle runs the same door as another session over the
     # same ledger; a session with an explicit empty profile is the
     # host's door to what the default profile hides.
-    ws = Workspace({"/data/": RAMResource()},
+    ws = Workspace({"/data/": RAMVFS()},
                    mode=MountMode.WRITE,
                    profiles={"agent": {
                        "paths": {
@@ -150,23 +150,23 @@ def test_the_op_door_runs_as_the_default_session():
     host = ws.create_session("host", profile={})
 
     async def run():
-        door = ws.fs.for_session(host.session_id)
-        assert door.records is ws.fs.records
+        door = Session(ws, host.session_id).vfs
+        assert door.records is ws.vfs.records
         await door.mkdir("/data/vault")
         await door.write("/data/vault/secret", b"top\n")
         assert await door.read("/data/vault/secret") == b"top\n"
         with pytest.raises(FileNotFoundError):
-            await ws.fs.read("/data/vault/secret")
+            await ws.vfs.read("/data/vault/secret")
         with pytest.raises(FileNotFoundError):
             await ws.stat("/data/vault")
         with pytest.raises(FileNotFoundError):
             await ws.dispatch("read",
                               PathSpec.from_str_path("/data/vault/secret"))
         assert await ws.readdir("/data") == []
-        assert await ws.fs.readdir("/data") == []
+        assert await ws.vfs.readdir("/data") == []
         token = set_current_session(host)
         try:
-            assert await ws.fs.read("/data/vault/secret") == b"top\n"
+            assert await ws.vfs.read("/data/vault/secret") == b"top\n"
         finally:
             reset_current_session(token)
 
@@ -174,7 +174,7 @@ def test_the_op_door_runs_as_the_default_session():
 
 
 def _hiding() -> Workspace:
-    return Workspace({"/data/": RAMResource()},
+    return Workspace({"/data/": RAMVFS()},
                      mode=MountMode.WRITE,
                      profiles={"agent": {
                          "paths": {
@@ -191,25 +191,25 @@ def test_the_op_door_does_not_adopt_another_workspaces_session():
     # session it arrived under. A binding that names no owner is a
     # deliberate placement (a kernel mount binds one that way) and is
     # kept as before.
-    other = Workspace({"/data/": RAMResource()}, mode=MountMode.WRITE)
+    other = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     wide = other.create_session("wide", profile={})
     ws = _hiding()
     host = ws.create_session("host", profile={})
 
     async def run():
-        door = ws.fs.for_session(host.session_id)
+        door = Session(ws, host.session_id).vfs
         await door.mkdir("/data/vault")
         await door.write("/data/vault/secret", b"top\n")
         token = set_current_session(wide, other._session_mgr)
         try:
             with pytest.raises(FileNotFoundError):
-                await ws.fs.read("/data/vault/secret")
+                await ws.vfs.read("/data/vault/secret")
             assert await door.read("/data/vault/secret") == b"top\n"
         finally:
             reset_current_session(token)
         token = set_current_session(wide)
         try:
-            assert await ws.fs.read("/data/vault/secret") == b"top\n"
+            assert await ws.vfs.read("/data/vault/secret") == b"top\n"
         finally:
             reset_current_session(token)
 
@@ -227,15 +227,15 @@ def test_the_op_door_does_not_follow_a_link_the_session_cannot_see():
     host = ws.create_session("host", profile={})
 
     async def run():
-        door = ws.fs.for_session(host.session_id)
+        door = Session(ws, host.session_id).vfs
         await door.write("/data/pub.txt", b"pub\n")
         await door.mkdir("/data/vault")
         await door.symlink("/data/vault/lk", "/data/pub.txt")
         assert await door.read("/data/vault/lk") == b"pub\n"
         with pytest.raises(FileNotFoundError):
-            await ws.fs.read("/data/vault/lk")
+            await ws.vfs.read("/data/vault/lk")
         with pytest.raises(FileNotFoundError):
-            await ws.fs.write("/data/vault/lk", b"x\n")
+            await ws.vfs.write("/data/vault/lk", b"x\n")
         assert await door.read("/data/pub.txt") == b"pub\n"
 
     asyncio.run(run())
@@ -278,7 +278,7 @@ def test_a_deeper_show_mode_refines_the_mount_cap():
 def test_a_show_mode_never_grants_past_the_configured_mode():
     # The mount's own mode stays the strongest answer possible: a show
     # stating rw on a READ-configured mount changes nothing.
-    ws = Workspace({"/repo": (RAMResource(), MountMode.READ)})
+    ws = Workspace({"/repo": (RAMVFS(), MountMode.READ)})
     ws.create_session("rev",
                       profile={"paths": {
                           "show": {
@@ -333,7 +333,7 @@ def test_scripts_run_only_from_an_x_region():
 
 
 def test_inline_permissions_cannot_add_show():
-    ws = Workspace({"/repo": RAMResource()})
+    ws = Workspace({"/repo": RAMVFS()})
     try:
         ws.create_session("rev",
                           profile=CARVE_PROFILE,
@@ -389,9 +389,9 @@ def test_a_subtree_mutation_answers_for_the_regions_below_it():
     ws = _seeded()
 
     async def grow():
-        io = await ws.execute("mkdir -p /repo/tree/locked && "
-                              "printf 'kept\\n' > /repo/tree/locked/f.txt && "
-                              "printf 'open\\n' > /repo/tree/open.txt")
+        io = await ws.shell("mkdir -p /repo/tree/locked && "
+                            "printf 'kept\\n' > /repo/tree/locked/f.txt && "
+                            "printf 'open\\n' > /repo/tree/open.txt")
         assert io.exit_code == 0, io.stderr
 
     asyncio.run(grow())
@@ -455,14 +455,14 @@ def test_a_fork_carries_the_carve_out():
 
 
 def _boxed(profile: dict) -> Workspace:
-    ws = Workspace({"/repo": RAMResource()}, mode=MountMode.WRITE)
+    ws = Workspace({"/repo": RAMVFS()}, mode=MountMode.WRITE)
 
     async def seed():
-        io = await ws.execute("mkdir -p /repo/box/sec /repo/only && "
-                              "printf 'v\\n' > /repo/box/a.txt && "
-                              "printf 's\\n' > /repo/box/sec/k && "
-                              "printf 't\\n' > /repo/box/x.tkn && "
-                              "printf 'h\\n' > /repo/only/h")
+        io = await ws.shell("mkdir -p /repo/box/sec /repo/only && "
+                            "printf 'v\\n' > /repo/box/a.txt && "
+                            "printf 's\\n' > /repo/box/sec/k && "
+                            "printf 't\\n' > /repo/box/x.tkn && "
+                            "printf 'h\\n' > /repo/only/h")
         assert io.exit_code == 0, io.stderr
 
     asyncio.run(seed())
@@ -473,7 +473,7 @@ def _boxed(profile: dict) -> Workspace:
 def _host(ws: Workspace, line: str):
 
     async def go():
-        return await ws.execute(line)
+        return await ws.shell(line)
 
     return asyncio.run(go())
 
@@ -602,13 +602,13 @@ def test_a_mounted_child_keeps_the_command_planes_refusal():
     # not-empty refusal stays instead of the cascade destroying the
     # hidden remnant and reporting success while the mount remains.
     ws = Workspace({
-        "/repo": RAMResource(),
-        "/repo/only/m": RAMResource()
+        "/repo": RAMVFS(),
+        "/repo/only/m": RAMVFS()
     },
                    mode=MountMode.WRITE)
 
     async def seed():
-        io = await ws.execute(
+        io = await ws.shell(
             "mkdir -p /repo/only && printf 'h\\n' > /repo/only/h")
         assert io.exit_code == 0, io.stderr
 
@@ -629,15 +629,10 @@ def test_ops_rmdir_keeps_the_refusal_when_a_mounted_child_remains():
     # keeps the not-empty refusal instead of the arm destroying the
     # hidden backend remnants and reporting a successful rmdir while
     # the mount remains.
-    ws = Workspace({
-        "/a": RAMResource(),
-        "/a/d/m": RAMResource()
-    },
-                   mode=MountMode.WRITE)
+    ws = Workspace({"/a": RAMVFS(), "/a/d/m": RAMVFS()}, mode=MountMode.WRITE)
 
     async def seed():
-        io = await ws.execute("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k"
-                              )
+        io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
         assert io.exit_code == 0, io.stderr
 
     asyncio.run(seed())
@@ -645,7 +640,7 @@ def test_ops_rmdir_keeps_the_refusal_when_a_mounted_child_remains():
 
     async def probe():
         try:
-            await ws.fs.rmdir("/a/d")
+            await ws.vfs.rmdir("/a/d")
         except OSError as exc:
             return exc
         return None

@@ -16,15 +16,15 @@ import asyncio
 
 import pytest
 
-from mirage.resource.ram import RAMResource
 from mirage.types import MountMode
 from mirage.utils.errors import ReadOnlyError
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import reset_current_session, set_current_session
 
 
-def _seed(name: str, body: bytes) -> RAMResource:
-    r = RAMResource()
+def _seed(name: str, body: bytes) -> RAMVFS:
+    r = RAMVFS()
     r._store.files[f"/{name}"] = body
     return r
 
@@ -40,9 +40,9 @@ def test_a_hidden_mount_reads_as_absent():
     ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
 
     async def run():
-        ok = await ws.execute("cat /a/x.txt", session_id="agent")
-        denied = await ws.execute("cat /b/secret.txt", session_id="agent")
-        listed = await ws.execute("ls /", session_id="agent")
+        ok = await ws.shell("cat /a/x.txt", session_id="agent")
+        denied = await ws.shell("cat /b/secret.txt", session_id="agent")
+        listed = await ws.shell("ls /", session_id="agent")
         return ok, denied, listed
 
     ok, denied, listed = asyncio.run(run())
@@ -63,7 +63,7 @@ def test_a_mount_the_role_does_not_name_stays_reachable():
     ws.create_session("agent", mounts={"/a": "read"})
 
     async def run():
-        return await ws.execute("cat /b/y.txt", session_id="agent")
+        return await ws.shell("cat /b/y.txt", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -75,7 +75,7 @@ def test_default_session_unrestricted():
     ws = Workspace({"/a": a})
 
     async def run():
-        return await ws.execute("cat /a/x.txt")
+        return await ws.shell("cat /a/x.txt")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -88,7 +88,7 @@ def test_a_named_mount_keeps_its_write_mode():
     ws.create_session("agent", mounts={"/a": "write"})
 
     async def run():
-        return await ws.execute("echo new > /a/y.txt", session_id="agent")
+        return await ws.shell("echo new > /a/y.txt", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0, f"unexpected denial: {io}"
@@ -101,8 +101,8 @@ def test_history_view_always_reachable():
     ws.create_session("agent", mounts={"/a": "read"})
 
     async def run():
-        await ws.execute("ls /a", session_id="agent")
-        return await ws.execute("history", session_id="agent")
+        await ws.shell("ls /a", session_id="agent")
+        return await ws.shell("history", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0, (
@@ -118,9 +118,9 @@ def test_ops_blocks_a_programmatic_read_of_a_hidden_mount():
     async def run():
         token = set_current_session(sess)
         try:
-            assert await ws.fs.read("/a/x.txt") == b"public"
+            assert await ws.vfs.read("/a/x.txt") == b"public"
             with pytest.raises(FileNotFoundError):
-                await ws.fs.read("/b/secret.txt")
+                await ws.vfs.read("/b/secret.txt")
         finally:
             reset_current_session(token)
 
@@ -144,8 +144,7 @@ def test_pipe_across_mounts_blocks_forbidden_read():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("cat /b/secret.txt | wc -l",
-                                session_id="agent")
+        return await ws.shell("cat /b/secret.txt | wc -l", session_id="agent")
 
     io = asyncio.run(run())
     # Bash convention: a downstream success masks an upstream failure
@@ -160,7 +159,7 @@ def test_pipe_within_a_visible_mount_succeeds():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("cat /a/x.txt | wc -c", session_id="agent")
+        return await ws.shell("cat /a/x.txt | wc -c", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0, f"in-allowlist pipe must succeed, got {io}"
@@ -170,8 +169,7 @@ def test_command_substitution_into_forbidden_mount_is_denied():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("echo $(cat /b/secret.txt)",
-                                session_id="agent")
+        return await ws.shell("echo $(cat /b/secret.txt)", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0 or b"SECRET" not in (io.stdout or b""), (
@@ -182,7 +180,7 @@ def test_subshell_inherits_session_capability():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("(cat /b/secret.txt)", session_id="agent")
+        return await ws.shell("(cat /b/secret.txt)", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -193,8 +191,8 @@ def test_and_chain_short_circuits_on_denial():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("cat /b/secret.txt && cat /a/x.txt",
-                                session_id="agent")
+        return await ws.shell("cat /b/secret.txt && cat /a/x.txt",
+                              session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -206,8 +204,8 @@ def test_or_chain_falls_through_to_allowed():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("cat /b/secret.txt || cat /a/x.txt",
-                                session_id="agent")
+        return await ws.shell("cat /b/secret.txt || cat /a/x.txt",
+                              session_id="agent")
 
     io = asyncio.run(run())
     assert b"public-A" in (io.stdout or b""), (
@@ -218,8 +216,8 @@ def test_redirect_to_forbidden_mount_is_denied():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("echo leaked > /b/leaked.txt",
-                                session_id="agent")
+        return await ws.shell("echo leaked > /b/leaked.txt",
+                              session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -240,8 +238,8 @@ def test_append_to_forbidden_mount_is_shell_attributed():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("echo leaked >> /b/leaked.txt; echo next",
-                                session_id="agent")
+        return await ws.shell("echo leaked >> /b/leaked.txt; echo next",
+                              session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -253,8 +251,7 @@ def test_cross_mount_copy_into_forbidden_mount_is_denied():
     ws = _two_mounts_with_secret()
 
     async def run():
-        return await ws.execute("cp /a/x.txt /b/leaked.txt",
-                                session_id="agent")
+        return await ws.shell("cp /a/x.txt /b/leaked.txt", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -275,10 +272,10 @@ def test_concurrent_sessions_isolated():
 
     async def run():
         results = await asyncio.gather(
-            ws.execute("cat /a/x.txt", session_id="agent_a"),
-            ws.execute("cat /b/y.txt", session_id="agent_b"),
-            ws.execute("cat /b/y.txt", session_id="agent_a"),
-            ws.execute("cat /a/x.txt", session_id="agent_b"),
+            ws.shell("cat /a/x.txt", session_id="agent_a"),
+            ws.shell("cat /b/y.txt", session_id="agent_b"),
+            ws.shell("cat /b/y.txt", session_id="agent_a"),
+            ws.shell("cat /a/x.txt", session_id="agent_b"),
         )
         return results
 
@@ -295,7 +292,7 @@ def test_background_job_inherits_the_sessions_view():
     async def run():
         # Background a forbidden read; the job runs in a Task that
         # snapshots the contextvar. wait reaps it; jobs reports state.
-        return await ws.execute(
+        return await ws.shell(
             "cat /b/secret.txt & wait",
             session_id="agent",
         )
@@ -312,8 +309,8 @@ def test_read_grant_blocks_command_write():
     ws.create_session("agent", mounts={"/a": "read"})
 
     async def run():
-        ok = await ws.execute("cat /a/x.txt", session_id="agent")
-        denied = await ws.execute("rm /a/x.txt", session_id="agent")
+        ok = await ws.shell("cat /a/x.txt", session_id="agent")
+        denied = await ws.shell("rm /a/x.txt", session_id="agent")
         return ok, denied
 
     ok, denied = asyncio.run(run())
@@ -329,7 +326,7 @@ def test_read_grant_blocks_redirect_write():
     ws.create_session("agent", mounts={"/a": "read"})
 
     async def run():
-        return await ws.execute("echo leaked > /a/y.txt", session_id="agent")
+        return await ws.shell("echo leaked > /a/y.txt", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -343,7 +340,7 @@ def test_write_grant_allows_write():
     ws.create_session("agent", mounts={"/a": MountMode.WRITE})
 
     async def run():
-        return await ws.execute("echo new > /a/y.txt", session_id="agent")
+        return await ws.shell("echo new > /a/y.txt", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -356,7 +353,7 @@ def test_grant_cannot_widen_read_mount():
     ws.create_session("agent", mounts={"/a": "write"})
 
     async def run():
-        return await ws.execute("echo up > /a/y.txt", session_id="agent")
+        return await ws.shell("echo up > /a/y.txt", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
@@ -383,10 +380,10 @@ def test_the_user_root_mount_is_governed_like_any_other():
     ws.create_session("root_ro", mounts={"/a": "write", "/": "read"})
 
     async def run():
-        denied = await ws.execute("cat /root.txt", session_id="no_root")
-        read_ok = await ws.execute("cat /root.txt", session_id="root_ro")
-        write_denied = await ws.execute("echo x > /root.txt",
-                                        session_id="root_ro")
+        denied = await ws.shell("cat /root.txt", session_id="no_root")
+        read_ok = await ws.shell("cat /root.txt", session_id="root_ro")
+        write_denied = await ws.shell("echo x > /root.txt",
+                                      session_id="root_ro")
         return denied, read_ok, write_denied
 
     denied, read_ok, write_denied = asyncio.run(run())
@@ -403,7 +400,7 @@ def test_implicit_root_keeps_pathless_commands_working():
     ws.create_session("agent", mounts={"/a": "read"})
 
     async def run():
-        return await ws.execute("echo hi | wc -l", session_id="agent")
+        return await ws.shell("echo hi | wc -l", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -417,8 +414,8 @@ def test_exec_gate_is_per_session():
     ws.create_session("with_exec", mounts={"/e": "exec"})
 
     async def run():
-        denied = await ws.execute("python -c 'print(1)'", session_id="no_exec")
-        ok = await ws.execute("python -c 'print(1)'", session_id="with_exec")
+        denied = await ws.shell("python -c 'print(1)'", session_id="no_exec")
+        ok = await ws.shell("python -c 'print(1)'", session_id="with_exec")
         return denied, ok
 
     denied, ok = asyncio.run(run())
@@ -434,11 +431,11 @@ def test_ops_facade_respects_read_grant():
     async def run():
         token = set_current_session(sess)
         try:
-            assert await ws.fs.read("/a/x.txt") == b"hi"
+            assert await ws.vfs.read("/a/x.txt") == b"hi"
             with pytest.raises(ReadOnlyError, match="Read-only"):
-                await ws.fs.write("/a/y.txt", b"leaked")
+                await ws.vfs.write("/a/y.txt", b"leaked")
             with pytest.raises(ReadOnlyError, match="Read-only"):
-                await ws.fs.rename("/a/x.txt", "/a/z.txt")
+                await ws.vfs.rename("/a/x.txt", "/a/z.txt")
         finally:
             reset_current_session(token)
 
@@ -476,7 +473,7 @@ def test_tree_does_not_disclose_a_hidden_nested_mount():
     ws.create_session("agent", profile={"paths": {"hide": ["/base/private"]}})
 
     async def run():
-        return await ws.execute("tree /base", session_id="agent")
+        return await ws.shell("tree /base", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0
@@ -493,7 +490,7 @@ def test_tree_still_crosses_a_visible_nested_mount():
     ws.create_session("agent", mounts={"/base": "read"})
 
     async def run():
-        return await ws.execute("tree /base", session_id="agent")
+        return await ws.shell("tree /base", session_id="agent")
 
     io = asyncio.run(run())
     assert io.exit_code == 0

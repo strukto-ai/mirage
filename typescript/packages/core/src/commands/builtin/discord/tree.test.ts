@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { FakeDiscordTransport, makeFakeResource, seedChannel, seedGuild } from './_test_util.ts'
+import { FakeDiscordTransport, makeFakeVfs, seedChannel, seedGuild } from './_test_util.ts'
 import { DISCORD_COMMANDS } from './index.ts'
 
 const DISCORD_TREE = DISCORD_COMMANDS.filter((c) => c.name === 'tree' && c.filetype == null)
@@ -32,8 +32,8 @@ async function runTree(
   const cmd = DISCORD_TREE[0]
   if (cmd === undefined) throw new Error('tree not registered')
   const transport = options.transport ?? new FakeDiscordTransport()
-  const resource = makeFakeResource(transport)
-  const result = await cmd.fn(resource.accessor, paths, [], {
+  const vfs = makeFakeVfs(transport)
+  const result = await cmd.fn(vfs.accessor, paths, [], {
     stdin: null,
     flags,
     filetypeFns: null,
@@ -57,7 +57,7 @@ describe('discord tree', () => {
           virtual: '/mnt/discord/My Server__G1',
           directory: '/mnt/discord/My Server__G1',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1', '/mnt/discord'),
         }),
       ],
       { L: '1' },
@@ -84,7 +84,7 @@ describe('discord tree', () => {
           virtual: '/mnt/discord/My Server__G1/channels',
           directory: '/mnt/discord/My Server__G1/channels',
           resolved: false,
-          resourcePath: mountKey('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
+          vfsPath: mountKey('/mnt/discord/My Server__G1/channels', '/mnt/discord'),
         }),
       ],
       {},

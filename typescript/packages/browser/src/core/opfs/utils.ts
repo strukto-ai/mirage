@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent, enotdir } from '@struktoai/mirage-core/utils/errors'
+import { eisdir, enoent, enotdir } from '@struktoai/mirage-core/utils/errors'
 
 export { gnuBasename as basename, norm, parent } from '@struktoai/mirage-core/utils/path'
 
@@ -101,6 +101,20 @@ export function destError(err: unknown, spec: PathSpec): unknown {
   if (isNotFound(err)) return enoent(spec)
   if (isTypeMismatch(err)) return enotdir(spec)
   return err
+}
+
+// OPFS raises one TypeMismatchError for a file in the parent chain and for
+// a directory at the leaf, where open(2) tells them apart: ENOTDIR for the
+// chain, EISDIR for the target itself (`> d`, tee, truncate). A leaf that
+// resolves as a directory takes the second.
+export async function openError(
+  root: FileSystemDirectoryHandle,
+  key: string,
+  err: unknown,
+  spec: PathSpec,
+): Promise<unknown> {
+  if (isTypeMismatch(err) && (await kindAt(root, key)) === 'dir') return eisdir(spec)
+  return destError(err, spec)
 }
 
 // What lives at a mount-local key: 'file', 'dir', or null when nothing does.

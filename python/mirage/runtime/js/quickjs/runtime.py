@@ -88,7 +88,7 @@ class QuickJsRuntime(JsRuntime, EvaluatorMixin):
     name = "quickjs"
     # The engine is a WASI guest whose `std.open`/`os.readdir` suspend
     # into the workspace bridge: guest I/O has no door around the gate.
-    reach: RuntimeReach = "vfs"
+    reach: RuntimeReach = "workspace"
     filesystem: ClassVar[tuple[FilesystemOperation,
                                ...]] = ('read', 'write', 'list', 'stat')
 

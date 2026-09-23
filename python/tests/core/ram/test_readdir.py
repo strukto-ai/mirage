@@ -17,8 +17,8 @@ import pytest
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.readdir import readdir
-from mirage.resource.ram.store import RAMStore
 from mirage.types import PathSpec
+from mirage.vfs.ram.store import RAMStore
 
 
 @pytest.fixture
@@ -48,9 +48,9 @@ def index():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor, store, index):
-    entries = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    entries = await readdir(accessor,
+                            PathSpec(vfs_path="", virtual="/", directory="/"),
+                            index)
     assert "/a.txt" in entries
     assert "/b.txt" in entries
     assert "/sub" in entries
@@ -60,8 +60,8 @@ async def test_readdir_root(accessor, store, index):
 @pytest.mark.asyncio
 async def test_readdir_subdir(accessor, index):
     entries = await readdir(
-        accessor,
-        PathSpec(resource_path="sub", virtual="/sub", directory="/sub"), index)
+        accessor, PathSpec(vfs_path="sub", virtual="/sub", directory="/sub"),
+        index)
     assert "/sub/c.txt" in entries
     assert "/sub/d.txt" in entries
     assert "/sub/deep" in entries
@@ -76,9 +76,8 @@ async def test_readdir_empty_dir(index):
     s.dirs.add("/empty")
     a = RAMAccessor(s)
     entries = await readdir(
-        a, PathSpec(resource_path="empty",
-                    virtual="/empty",
-                    directory="/empty"), index)
+        a, PathSpec(vfs_path="empty", virtual="/empty", directory="/empty"),
+        index)
     assert entries == []
 
 
@@ -90,7 +89,7 @@ async def test_readdir_not_found(index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             a,
-            PathSpec(resource_path="nonexistent",
+            PathSpec(vfs_path="nonexistent",
                      virtual="/nonexistent",
                      directory="/nonexistent"), index)
 
@@ -99,7 +98,7 @@ async def test_readdir_not_found(index):
 async def test_readdir_deep(accessor, index):
     entries = await readdir(
         accessor,
-        PathSpec(resource_path="sub/deep",
+        PathSpec(vfs_path="sub/deep",
                  virtual="/sub/deep",
                  directory="/sub/deep"), index)
     assert "/sub/deep/e.txt" in entries
@@ -108,13 +107,13 @@ async def test_readdir_deep(accessor, index):
 
 @pytest.mark.asyncio
 async def test_readdir_cached(accessor, store, index):
-    entries1 = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    entries1 = await readdir(accessor,
+                             PathSpec(vfs_path="", virtual="/", directory="/"),
+                             index)
     store.store.files["/new.txt"] = b"new"
-    entries2 = await readdir(
-        accessor, PathSpec(resource_path="", virtual="/", directory="/"),
-        index)
+    entries2 = await readdir(accessor,
+                             PathSpec(vfs_path="", virtual="/", directory="/"),
+                             index)
     assert entries1 == entries2
 
 
@@ -127,7 +126,7 @@ async def test_readdir_missing_stays_not_found_at_any_depth(index):
     with pytest.raises(FileNotFoundError):
         await readdir(
             a,
-            PathSpec(resource_path="nope/deeper",
+            PathSpec(vfs_path="nope/deeper",
                      virtual="/nope/deeper",
                      directory="/nope/deeper"), index)
 
@@ -144,7 +143,7 @@ async def test_readdir_file_component_is_not_a_directory(index):
         with pytest.raises(NotADirectoryError):
             await readdir(
                 a,
-                PathSpec(resource_path=virtual.lstrip("/"),
+                PathSpec(vfs_path=virtual.lstrip("/"),
                          virtual=virtual,
                          directory=virtual), index)
 
@@ -164,6 +163,6 @@ async def test_readdir_orphan_below_a_missing_dir_is_not_found(index):
         with pytest.raises(FileNotFoundError):
             await readdir(
                 a,
-                PathSpec(resource_path=virtual.lstrip("/"),
+                PathSpec(vfs_path=virtual.lstrip("/"),
                          virtual=virtual,
                          directory=virtual), index)

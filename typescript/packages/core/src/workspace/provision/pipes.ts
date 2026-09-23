@@ -13,15 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProvisionResult } from '../../provision/types.ts'
-import type { Session } from '../session/session.ts'
+import type { SessionState } from '../session/session.ts'
 import { rollupList, rollupPipe } from '../../provision/rollup.ts'
 
-export type ProvisionNodeFn = (node: unknown, session: Session) => Promise<ProvisionResult>
+export type ProvisionNodeFn = (node: unknown, session: SessionState) => Promise<ProvisionResult>
 
 export async function handlePipeProvision(
   provisionNode: ProvisionNodeFn,
   commands: readonly unknown[],
-  session: Session,
+  session: SessionState,
 ): Promise<ProvisionResult> {
   const children: ProvisionResult[] = []
   for (const cmd of commands) children.push(await provisionNode(cmd, session))
@@ -33,7 +33,7 @@ export async function handleConnectionProvision(
   left: unknown,
   op: string,
   right: unknown,
-  session: Session,
+  session: SessionState,
 ): Promise<ProvisionResult> {
   const children: ProvisionResult[] = []
   children.push(await provisionNode(left, session))
