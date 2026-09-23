@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { closeQuietly } from '../../io/stream.ts'
-import { decodeLine, encodeLine, matchOffset, prefixOf } from './grep_offsets.ts'
+import { decodeLine, encodeLine, MatchOffsets, prefixOf } from './grep_offsets.ts'
 import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { IOResult } from '../../io/types.ts'
 import type { WalkFilters } from './grep_select.ts'
@@ -138,7 +139,9 @@ export async function* grepInput(
   // input's first context group with the separator, as it does between
   // groups within one input.
   afterOutput = false,
+  signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
+  const budget = new YieldBudget(signal)
   io.exitCode = 1
   pat = utf8Pattern(pat)
   const binary = new BinaryInput(f.binaryMode)
@@ -199,7 +202,10 @@ export async function* grepInput(
         if (f.onlyMatching) {
           if (!f.invert) {
             const re = new RegExp(pat.source, pat.flags.includes('g') ? pat.flags : pat.flags + 'g')
+            const offsets = f.byteOffsets ? new MatchOffsets(lineStart, line) : null
             for (const m of line.matchAll(re)) {
+              const pending = budget.run()
+              if (pending !== undefined) await pending
               if (m[0] !== '')
                 chunks.push(
                   outputLine(
@@ -209,7 +215,7 @@ export async function* grepInput(
                     path,
                     showFilename,
                     f,
-                    matchOffset(lineStart, line, m.index),
+                    offsets?.at(m.index) ?? 0,
                   ),
                 )
             }

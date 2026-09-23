@@ -36,6 +36,9 @@ class GridFSVFS(BaseVFS):
     caches_reads: bool = True
     prompt: str = PROMPT
     supports_snapshot: bool = True
+    # stat and read both stamp str(file_id), so the gate compares like
+    # with like.
+    read_revalidatable: bool = True
 
     def __init__(self, config: GridFSConfig) -> None:
         super().__init__()

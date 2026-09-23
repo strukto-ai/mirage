@@ -5,7 +5,7 @@ from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.builtin.sort_keys import (build_config, compare_lines,
                                                sort_lines)
 from mirage.commands.builtin.utils.lines import split_lines
-from mirage.commands.builtin.utils.stream import read_stdin_async
+from mirage.commands.builtin.utils.stream import read_stdin_async, stdin_bytes
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
@@ -155,6 +155,7 @@ async def sort(
             encode(),
             exit_code=2,
         )
+    read_bytes = stdin_bytes(read_bytes, stdin)
     raw = b""
     if paths:
         for path in paths:

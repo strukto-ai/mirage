@@ -16,7 +16,7 @@ import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { destError, isNotFound, resolveFileHandle, toWritableChunk } from './utils.ts'
+import { isNotFound, openError, resolveFileHandle, toWritableChunk } from './utils.ts'
 
 export async function truncate(
   accessor: OPFSAccessor,
@@ -37,11 +37,11 @@ export async function truncate(
       try {
         handle = await resolveFileHandle(root, virtual, { create: true })
       } catch (cerr) {
-        throw destError(cerr, path)
+        throw await openError(root, virtual, cerr, path)
       }
       existing = new Uint8Array()
     } else {
-      throw destError(err, path)
+      throw await openError(root, virtual, err, path)
     }
   }
   const out = new Uint8Array(length)

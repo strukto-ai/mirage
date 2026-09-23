@@ -303,6 +303,69 @@ class MountBackend(StrEnum):
 KERNEL_BACKENDS: frozenset[MountBackend] = frozenset(
     {MountBackend.FUSE, MountBackend.FSKIT})
 
+
+class ReadPolicy(str, Enum):
+    """How a mount decides whether cached bytes may be served.
+
+    FRESH revalidates against the backend's content token before serving
+    a cached copy; BOUNDED serves without revalidating, within the
+    staleness bound the mount declares.
+
+    PINNED names the content a commit's fingerprint records. There is no
+    version layer to pin to, so a mount declaring it is refused at mount
+    time rather than quietly degraded to head: the vocabulary is
+    published, so someone will type it, and an informative refusal costs
+    one branch over a generic invalid-value error.
+    """
+
+    FRESH = "fresh"
+    BOUNDED = "bounded"
+    PINNED = "pinned"
+
+
+# Seconds. Matches IndexConfig.ttl (cache/index/config.py) so bodies and
+# listings expire together out of the box; that one is a float, this is
+# whole seconds.
+DEFAULT_READ_TTL: int = 600
+
+
+@dataclass(frozen=True, slots=True)
+class ReadSpec:
+    """One mount's read policy and the bound that goes with it.
+
+    The bound is set under FRESH too, so every cache entry carries one.
+    Two workspaces sharing one Redis cache under different policies would
+    otherwise write entries the other refuses to serve, and bounce them
+    between cold reads indefinitely.
+
+    It is stamped when the entry is written and enforced by the store, so
+    the bound that applies is the writing mount's, not the reading
+    mount's. Those are the same mount inside one workspace; they differ
+    across a shared cache, a lowered ``ttl`` and a restored snapshot, and
+    there the older bound stands until the entry expires. Making the
+    reader authoritative needs a write timestamp every store can read
+    back, which redis does not keep.
+    """
+
+    policy: ReadPolicy = ReadPolicy.BOUNDED
+    ttl: int = DEFAULT_READ_TTL
+
+
+@dataclass(frozen=True, slots=True)
+class CacheFacts:
+    """What the cache write path needs to know about a path's mount.
+
+    Answered per path against the mount table pinned at command start,
+    so a fill that lands after the command is stamped with the bound of
+    the mount that produced the bytes rather than whatever holds the
+    prefix by then. ``cacheable`` is read first and short-circuits, so
+    ``ttl`` is never consulted for a path that is not being cached.
+    """
+
+    cacheable: bool
+    ttl: int
+
+
 MOUNT_MODE_RANK: dict[MountMode, int] = {
     MountMode.READ: 1,
     MountMode.WRITE: 2,
@@ -462,11 +525,6 @@ def parse_mount_mode(value: MountMode | str) -> MountMode:
         return value
     alias = MOUNT_MODE_ALIASES.get(value)
     return alias if alias is not None else MountMode(value)
-
-
-class ConsistencyPolicy(str, Enum):
-    LAZY = "lazy"
-    ALWAYS = "always"
 
 
 class OnExceed(str, Enum):

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
+import { coerceReadPolicy } from './read_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -45,7 +46,14 @@ import { uuid7 } from '../../utils/ids.ts'
 import { VFSActivity } from './activity.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
-import { type Limit, ConsistencyPolicy, FileType, MountMode, PathSpec } from '../../types.ts'
+import {
+  type Limit,
+  type ReadSpec,
+  DEFAULT_READ_SPEC,
+  FileType,
+  MountMode,
+  PathSpec,
+} from '../../types.ts'
 import { ebusy, enotsup, erofsReadOnly } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
@@ -87,7 +95,8 @@ export interface MountInit {
   prefix: string
   vfs: BaseVFS
   mode?: MountMode
-  consistency?: ConsistencyPolicy
+  /** How this mount's cached bytes are revalidated. */
+  read?: ReadSpec
   // The store this mount runs its driver under; the registry builds
   // one, shared with any alias of the same instance. A bare entry gets
   // a RAM store at the driver's TTL.
@@ -102,7 +111,7 @@ export class MountEntry {
   readonly prefix: string
   readonly vfs: BaseVFS
   mode: MountMode
-  readonly consistency: ConsistencyPolicy
+  readonly read: ReadSpec
   // `index` is this same store scoped by the cache manager, which is
   // what ops and commands receive.
   readonly indexStore: IndexCacheStore
@@ -149,7 +158,21 @@ export class MountEntry {
     this.prefix = prefix
     this.vfs = init.vfs
     this.mode = init.mode ?? MountMode.READ
-    this.consistency = init.consistency ?? ConsistencyPolicy.LAZY
+    // A frozen copy carrying the coerced policy, not the caller's object.
+    //
+    // Frozen because Python's `ReadSpec` is a frozen dataclass, so the
+    // same spec cannot be edited after the mount-time verdict passed it;
+    // a plain JS object can, which would let a caller flip a RAM mount to
+    // `fresh` behind the verdict's back.
+    //
+    // Coerced because `ReadPolicy` is a string-const object: a runtime
+    // spec carrying `'FRESH'` matches no `===` downstream -- the gate, the
+    // routing reconcile -- so the mount would pass its capability check
+    // and then read as `bounded` everywhere, which is the silent
+    // downgrade the policy exists to remove. The Python twin normalizes
+    // at this same point.
+    const spec = init.read ?? DEFAULT_READ_SPEC
+    this.read = Object.freeze({ ...spec, policy: coerceReadPolicy(spec.policy) })
     this.indexStore = init.index ?? buildIndex(undefined, init.vfs.indexTtl)
     this.vfsRef = init.vfsRef ?? null
   }

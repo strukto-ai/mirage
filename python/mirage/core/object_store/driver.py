@@ -240,9 +240,19 @@ class ObjectStoreDriver(Generic[A, C]):
         head (Callable): point lookup of one key, None when absent;
             classification failures propagate.
         get (Callable): full object bytes, None when absent.
-        put (Callable): write one object; a store error meaning the
-            container is absent (``is_not_found``) propagates, and
-            the write factory restates it as ENOENT on the path.
+        put (Callable): write one object, returning what the store's
+            write response said about it, or None when the store's
+            write API reports nothing at all (opendal). The meta is
+            partial: ``size`` is the bytes written and ``fingerprint``
+            is the store's token, spelled exactly as ``head`` spells
+            it so the two can be compared; ``modified`` is absent,
+            because no store's write response carries one. A store
+            that answers without a token gives a meta whose
+            ``fingerprint`` is None; callers read only that field, so
+            they cannot tell it from None and do not need to.
+            A store error meaning the container is absent
+            (``is_not_found``) propagates, and the write factory
+            restates it as ENOENT on the path.
         delete_file (Callable): delete one key (every revision on a
             versioned store); silent on a missing key.
         delete_prefix (Callable): delete every key under a prefix.
@@ -278,7 +288,7 @@ class ObjectStoreDriver(Generic[A, C]):
     list_subtree: Callable[[C, str], AsyncIterator[TreeEntry]]
     head: Callable[[C, str], Awaitable[ObjectMeta | None]]
     get: Callable[[C, str], Awaitable[bytes | None]]
-    put: Callable[[C, str, bytes], Awaitable[None]]
+    put: Callable[[C, str, bytes], Awaitable[ObjectMeta | None]]
     delete_file: Callable[[C, str], Awaitable[None]]
     delete_prefix: Callable[[C, str], Awaitable[None]]
     probe_prefix: Callable[[C, str], Awaitable[bool]]

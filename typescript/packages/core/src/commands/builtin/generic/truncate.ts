@@ -63,6 +63,11 @@ function parseSize(value: string, current: number): number {
   return number
 }
 
+// GNU opens the operand with O_CREAT before it looks at anything, so a name
+// typed with a slash is settled by the open: `missing/` and `reg/` are both
+// "Is a directory" and nothing is created. The size is read first here only
+// because a relative spec needs it, so for a slashed operand a stat that
+// misses is not the verdict; the truncate op answers, as the open would.
 export async function truncateGeneric(
   paths: readonly PathSpec[],
   size: string,
@@ -71,7 +76,13 @@ export async function truncateGeneric(
 ): Promise<CommandFnResult> {
   if (paths.length === 0) throw new Error('truncate: missing file operand')
   for (const path of paths) {
-    const current = (await stat(path)).size ?? 0
+    let current = 0
+    try {
+      current = (await stat(path)).size ?? 0
+    } catch (err) {
+      const code = (err as { code?: unknown }).code
+      if (!path.rawPath.endsWith('/') || (code !== 'ENOENT' && code !== 'ENOTDIR')) throw err
+    }
     await truncate(path, parseSize(size, current))
   }
   return [null, new IOResult()]

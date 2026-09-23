@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { ConsistencyPolicy, MountMode } from '@struktoai/mirage-core/types'
+import { DEFAULT_READ_TTL, MountMode, ReadPolicy } from '@struktoai/mirage-core/types'
 import { DiskVFS } from '../vfs/disk/disk.ts'
 import { Workspace } from '../workspace.ts'
 
@@ -27,7 +27,7 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-describe('fingerprint spike (ConsistencyPolicy port of test_fingerprint_spike.py)', () => {
+describe('fingerprint spike (port of test_fingerprint_spike.py)', () => {
   let root: string
 
   beforeEach(() => {
@@ -37,11 +37,26 @@ describe('fingerprint spike (ConsistencyPolicy port of test_fingerprint_spike.py
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('Disk + ALWAYS refetches after external mtime change', async () => {
+  // Disk is answered by the first rule, not the token-quality one: it
+  // does not cache reads, so there is no gate to revalidate at.
+  it('disk cannot declare fresh', () => {
+    writeFileSync(join(root, 'file.txt'), 'v1')
+    expect(
+      () =>
+        new Workspace(
+          { '/data': new DiskVFS({ root }) },
+          { mode: MountMode.WRITE, read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL } },
+        ),
+    ).toThrow(/needs a resource that caches reads/)
+  })
+
+  it('disk under bounded reads current bytes, because it caches none', async () => {
     writeFileSync(join(root, 'file.txt'), 'v1')
     const vfs = new DiskVFS({ root })
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
-    ws.registry.setConsistency(ConsistencyPolicy.ALWAYS)
+    const ws = new Workspace(
+      { '/data': vfs },
+      { mode: MountMode.WRITE, read: { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL } },
+    )
 
     const io1 = await ws.shell('cat /data/file.txt')
     const first = DEC.decode(io1.stdout)
@@ -51,36 +66,26 @@ describe('fingerprint spike (ConsistencyPolicy port of test_fingerprint_spike.py
     const second = DEC.decode(io2.stdout)
 
     expect(first).toBe('v1')
+    // Disk does not cache reads at all, so `bounded` has nothing to serve
+    // stale. The old assertion allowed either byte string, which no
+    // implementation could fail.
     expect(second).toBe('v2')
     await ws.close()
   })
 
-  it('Disk + LAZY may serve stale cache (no crash guaranteed)', async () => {
-    writeFileSync(join(root, 'file.txt'), 'v1')
-    const vfs = new DiskVFS({ root })
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
-    ws.registry.setConsistency(ConsistencyPolicy.LAZY)
-
-    const io1 = await ws.shell('cat /data/file.txt')
-    const first = DEC.decode(io1.stdout)
-    await sleep(1100)
-    writeFileSync(join(root, 'file.txt'), 'v2')
-    const io2 = await ws.shell('cat /data/file.txt')
-    const second = DEC.decode(io2.stdout)
-
-    expect(first).toBe('v1')
-    expect(['v1', 'v2']).toContain(second)
-    await ws.close()
-  })
-
-  it('RAM + ALWAYS falls back gracefully when fingerprint absent', async () => {
+  // This used to assert the opposite: that a RAM mount under `fresh` "falls
+  // back gracefully" when no fingerprint is present. That fallback is the
+  // bug the read policy exists to remove -- a mount that asked to
+  // revalidate and quietly did not.
+  it('ram cannot declare fresh', () => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/file.txt', new TextEncoder().encode('v1'))
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
-    ws.registry.setConsistency(ConsistencyPolicy.ALWAYS)
-
-    const io1 = await ws.shell('cat /data/file.txt')
-    expect(DEC.decode(io1.stdout)).toBe('v1')
-    await ws.close()
+    expect(
+      () =>
+        new Workspace(
+          { '/data': vfs },
+          { mode: MountMode.WRITE, read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL } },
+        ),
+    ).toThrow(/needs a resource that caches reads/)
   })
 })

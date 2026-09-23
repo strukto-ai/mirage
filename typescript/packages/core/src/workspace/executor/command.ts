@@ -33,7 +33,6 @@ import { abortable, mergeSignals } from '../abort.ts'
 import { ExecutionNode } from '../types.ts'
 import { strategyFor } from '../../commands/builtin/generic/crossmount/detect.ts'
 import type { Cmd } from '../../commands/builtin/generic/crossmount/types.ts'
-import { isCreateMode } from '../../commands/builtin/generic/tar/mode.ts'
 import { Strategy } from '../../commands/builtin/generic/crossmount/types.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -325,14 +324,8 @@ export async function handleCommand(
   }
 
   // Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
-  // exactly like a positional destination would. A create-mode tar is
-  // the one relay member kept out: its planner walks a single backend's
-  // tree, so a span there falls through to the refusal below instead of
-  // a relay run that would cross nested mounts.
-  if (
-    isCrossMount(cmdName, routingScopes, registry) &&
-    !(cmdName === 'tar' && isCreateMode(rawArgv))
-  ) {
+  // exactly like a positional destination would.
+  if (isCrossMount(cmdName, routingScopes, registry)) {
     // Parse against the shared spec so flags and text operands do not
     // depend on the source mount: raw argv would hand flag tokens ("-c")
     // to the generic as the search pattern. The bound single-mount runner

@@ -101,7 +101,7 @@ function parseFlags(fl: FlagView): RgFlags {
 // The stream reports selection on `io` rather than the caller reading it off
 // an empty output: under -o a line whose only match is empty prints nothing
 // and is still selected, so it exits 0 (GNU grep 3.11).
-function streamOptionsOf(flags: RgFlags, io: IOResult): GrepStreamOptions {
+function streamOptionsOf(flags: RgFlags, io: IOResult, signal?: AbortSignal): GrepStreamOptions {
   return {
     invert: flags.invert,
     lineNumbers: flags.lineNumbers,
@@ -112,6 +112,7 @@ function streamOptionsOf(flags: RgFlags, io: IOResult): GrepStreamOptions {
     afterContext: flags.afterContext,
     beforeContext: flags.beforeContext,
     io,
+    signal,
   }
 }
 
@@ -171,7 +172,7 @@ export async function rgGeneric(
       if (flags.maxCount === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       const probe = new IOResult({ exitCode: 1 })
       const scan = grepStream(source, pat, {
-        ...streamOptionsOf(flags, probe),
+        ...streamOptionsOf(flags, probe, opts.signal),
         maxCount: 1,
         countOnly: true,
       })
@@ -179,7 +180,7 @@ export async function rgGeneric(
       if (probe.exitCode === 0) return [new Uint8Array(0), new IOResult({ exitCode: 1 })]
       return [ENC.encode('<stdin>\n'), new IOResult()]
     }
-    return [grepStream(source, pat, streamOptionsOf(flags, io)), io]
+    return [grepStream(source, pat, streamOptionsOf(flags, io, opts.signal)), io]
   }
 
   const mounts = opts.ns?.mounts
@@ -295,6 +296,7 @@ export async function rgGeneric(
       countOnly: true,
       afterContext: 0,
       beforeContext: 0,
+      signal: opts.signal,
     }
     if (paths.length > 1 || flags.withFilename) {
       const results: string[] = []
@@ -341,7 +343,7 @@ export async function rgGeneric(
       let data: Uint8Array
       const fileIO = new IOResult({ exitCode: 1 })
       try {
-        const matched = grepStream(stream(p), pat, streamOptionsOf(flags, fileIO))
+        const matched = grepStream(stream(p), pat, streamOptionsOf(flags, fileIO, opts.signal))
         data = await materialize(label ? prefixLines(matched, p.rawPath + ':') : matched)
       } catch (error) {
         if (!isFsError(error)) throw error
@@ -373,5 +375,5 @@ export async function rgGeneric(
     ]
   }
   const io = new IOResult({ exitCode: 1 })
-  return [grepStream(stream(first), pat, streamOptionsOf(flags, io)), io]
+  return [grepStream(stream(first), pat, streamOptionsOf(flags, io, opts.signal)), io]
 }

@@ -177,6 +177,9 @@ async def action(ws: Workspace, step: dict[str, Any],
             "stderr": await result.stderr_str(),
             "refusal": result.refusal.reason if result.refusal else None,
         }
+    elif op == "concurrent":
+        return list(await asyncio.gather(*(action(ws, sub, policies, held)
+                                           for sub in step["steps"])))
     elif op == "snapshot":
         held["state"] = await to_state_dict(ws)
     elif op == "checkout":
@@ -219,6 +222,10 @@ async def run(case: dict[str, Any]) -> int:
 
 def matches(actual: Any, expected: Any) -> bool:
     """Objects select fields; error and *_contains assertions select text."""
+    if isinstance(expected, list):
+        return (isinstance(actual, list) and len(actual) == len(expected)
+                and all(
+                    matches(got, want) for got, want in zip(actual, expected)))
     if not isinstance(expected, dict):
         return actual == expected
     if not isinstance(actual, dict):

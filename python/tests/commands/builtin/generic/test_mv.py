@@ -785,3 +785,145 @@ async def test_primitive_directory_target_backup_transfers_the_tree():
     assert files["/d~/y.txt"] == b"Y"
     assert files["/d~/sub/z.txt"] == b"Z"
     assert files["/d/x.txt"] == b"X"
+
+
+def _slashed(path: str) -> PathSpec:
+    # The operand as the shell classifies `path/`: a normalized virtual
+    # path with the typed spelling, slash included, kept in raw_path.
+    return PathSpec(virtual=path,
+                    directory=path.rsplit("/", 1)[0] or "/",
+                    vfs_path=path.strip("/"),
+                    raw_path=path + "/")
+
+
+@pytest.mark.asyncio
+async def test_slashed_missing_destination_refuses_a_file_source():
+    # GNU 9.7: rename(2) reads `missing/` as `missing/.`, so a file can
+    # never land there; the source stays put and nothing named `missing`
+    # appears (issue #1142 renamed the file to it).
+    files = {"/a.txt": b"AAA"}
+    stat, rename = _make_backend(files, set())
+    _, io = await mv([_spec("/a.txt"), _slashed("/missing")],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags())
+    assert io.exit_code == 1
+    assert io.stderr == (b"mv: cannot move '/a.txt' to '/missing/': "
+                         b"Not a directory\n")
+    assert files == {"/a.txt": b"AAA"}
+
+
+@pytest.mark.asyncio
+async def test_many_sources_to_a_slashed_file_report_not_a_directory():
+    # GNU 9.7: `mv a b reg/` is `target 'reg/': Not a directory`, the
+    # destination probe's verdict, where only a genuinely absent target
+    # is `No such file or directory`.
+    files = {"/a.txt": b"AAA", "/b.txt": b"BBB", "/reg": b"R"}
+    stat, rename = _make_backend(files, set())
+    with pytest.raises(NotADirectoryError, match="target '/reg/'"):
+        await mv([_spec("/a.txt"),
+                  _spec("/b.txt"),
+                  _slashed("/reg")],
+                 strategy=NativeMove(rename=rename),
+                 stat=stat,
+                 flags=MvFlags())
+    with pytest.raises(FileNotFoundError, match="target '/missing/'"):
+        await mv([_spec("/a.txt"),
+                  _spec("/b.txt"),
+                  _slashed("/missing")],
+                 strategy=NativeMove(rename=rename),
+                 stat=stat,
+                 flags=MvFlags())
+    assert files == {"/a.txt": b"AAA", "/b.txt": b"BBB", "/reg": b"R"}
+
+
+@pytest.mark.asyncio
+async def test_slashed_missing_destination_refuses_under_t_too():
+    files = {"/a.txt": b"AAA"}
+    stat, rename = _make_backend(files, set())
+    _, io = await mv([_spec("/a.txt"), _slashed("/missing")],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags(no_target_dir=True))
+    assert io.exit_code == 1
+    assert io.stderr == (b"mv: cannot move '/a.txt' to '/missing/': "
+                         b"Not a directory\n")
+    assert files == {"/a.txt": b"AAA"}
+
+
+@pytest.mark.asyncio
+async def test_slashed_missing_destination_takes_a_directory_source():
+    # The slash asked for a directory and the source is one: GNU renames.
+    files = {"/d/f": b"F"}
+    stat, _ = _make_backend(files, {"/d"})
+    renamed: list[tuple[str, str]] = []
+
+    async def rename(src, dst) -> None:
+        renamed.append((src.virtual, dst.virtual))
+
+    _, io = await mv([_spec("/d"), _slashed("/missing")],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags())
+    assert io.exit_code == 0
+    assert renamed == [("/d", "/missing")]
+
+
+@pytest.mark.asyncio
+async def test_slashed_destination_under_missing_parent_keeps_enoent():
+    # mv's own order: the absent parent chain is the refusal GNU reports,
+    # `cannot move 'a.txt' to 'deep/missing/': No such file or directory`.
+    files = {"/a.txt": b"AAA"}
+    stat, rename = _make_backend(files, set())
+    _, io = await mv(
+        [_spec("/a.txt"), _slashed("/deep/missing")],
+        strategy=NativeMove(rename=rename),
+        stat=stat,
+        flags=MvFlags())
+    assert io.exit_code == 1
+    assert io.stderr == (b"mv: cannot move '/a.txt' to '/deep/missing/': "
+                         b"No such file or directory\n")
+    assert files == {"/a.txt": b"AAA"}
+
+
+@pytest.mark.asyncio
+async def test_slashed_file_destination_reports_cannot_stat():
+    # `mv a.txt reg/` fails the destination's stat in GNU, and the stat
+    # itself decides here whether or not the backend's is slash-aware.
+    files = {"/a.txt": b"AAA", "/reg": b"R"}
+    stat, rename = _make_backend(files, set())
+    _, io = await mv([_spec("/a.txt"), _slashed("/reg")],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags())
+    assert io.exit_code == 1
+    assert io.stderr == b"mv: cannot stat '/reg/': Not a directory\n"
+    assert files == {"/a.txt": b"AAA", "/reg": b"R"}
+
+
+@pytest.mark.asyncio
+async def test_slashed_file_source_reports_cannot_stat():
+    files = {"/reg": b"R"}
+    stat, rename = _make_backend(files, set())
+    _, io = await mv([_slashed("/reg"), _spec("/x")],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags())
+    assert io.exit_code == 1
+    assert io.stderr == b"mv: cannot stat '/reg/': Not a directory\n"
+    assert files == {"/reg": b"R"}
+
+
+@pytest.mark.asyncio
+async def test_destination_under_a_file_reports_cannot_stat():
+    # A plain file in the destination's chain fails GNU's stat phase,
+    # `cannot stat 'plain/c.txt': Not a directory`, before any rename.
+    files = {"/a.txt": b"AAA", "/plain": b"P"}
+    stat, rename = _make_backend(files, set())
+    _, io = await mv([_spec("/a.txt"), _spec("/plain/c.txt")],
+                     strategy=NativeMove(rename=rename),
+                     stat=stat,
+                     flags=MvFlags())
+    assert io.exit_code == 1
+    assert io.stderr == b"mv: cannot stat '/plain/c.txt': Not a directory\n"
+    assert files == {"/a.txt": b"AAA", "/plain": b"P"}

@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 
-from mirage.fuse.fs import MirageFS
+from mirage.fuse.fs import XATTR_CREATE, XATTR_REPLACE, MirageFS
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -537,7 +537,7 @@ async def test_xattr_cleared_on_unlink(seed_ws):
     fs.setxattr("/a.txt", "user.keep", b"v", 0)
     fs.unlink("/a.txt")
     assert fs.listxattr("/sub") == []
-    assert "/a.txt" not in fs.core._xattrs
+    assert seed_ws.namespace.meta_for("/a.txt") is None
 
 
 @pytest.mark.asyncio
@@ -546,7 +546,32 @@ async def test_xattr_follows_rename(seed_ws):
     fs.setxattr("/a.txt", "user.keep", b"v", 0)
     fs.rename("/a.txt", "/renamed.txt")
     assert fs.getxattr("/renamed.txt", "user.keep") == b"v"
-    assert "/a.txt" not in fs.core._xattrs
+    assert seed_ws.namespace.meta_for("/a.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_xattr_is_the_same_attribute_every_surface_reads(seed_ws):
+    # The kernel's attribute is the door's, not an advisory copy held
+    # for the mount's lifetime: the shell and a guest read what the
+    # mountpoint wrote, and the mountpoint reads what they wrote.
+    fs = MirageFS(seed_ws.vfs)
+    fs.setxattr("/a.txt", "user.kernel", b"k", 0)
+    assert await seed_ws.vfs.getxattr("/a.txt", "user.kernel") == b"k"
+    await seed_ws.vfs.setxattr("/a.txt", "user.door", b"d")
+    assert fs.getxattr("/a.txt", "user.door") == b"d"
+
+
+@pytest.mark.asyncio
+async def test_xattr_create_and_replace_flags_reach_the_door(seed_ws):
+    fs = MirageFS(seed_ws.vfs)
+    fs.setxattr("/a.txt", "user.once", b"1", XATTR_CREATE)
+    with pytest.raises(OSError) as exists:
+        fs.setxattr("/a.txt", "user.once", b"2", XATTR_CREATE)
+    assert exists.value.errno == errno.EEXIST
+    with pytest.raises(OSError) as absent:
+        fs.setxattr("/a.txt", "user.none", b"2", XATTR_REPLACE)
+    assert absent.value.errno in (errno.ENODATA,
+                                  getattr(errno, "ENOATTR", errno.ENODATA))
 
 
 class _SizelessOps:

@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CommandSpec } from '../../spec/types.ts'
+import { RegisteredCommand } from '../../config.ts'
+import { withDefaultProvisions } from './provision.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IndexEntry } from '../../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
@@ -353,5 +356,45 @@ describe('chat/KB provision helpers', () => {
   it('indexHitReadProvision without paths is unknown', async () => {
     const result = await indexHitReadProvision(null as unknown as Accessor, [], [], opts('grep x'))
     expect(result.precision).toBe(Precision.UNKNOWN)
+  })
+})
+
+describe('withDefaultProvisions preserves every field', () => {
+  // It rebuilt the command field by field until this test existed, which
+  // silently dropped anything the rebuild forgot. `withOverrides` is itself an
+  // enumeration, so this does not make a drop impossible -- it centralises one
+  // list instead of two. The guard is therefore structural rather than about
+  // any one field: every own property in must come out.
+  const stat = () => Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE, size: 1 }))
+
+  it('carries every field through', () => {
+    const cat = new RegisteredCommand({
+      name: 'cat',
+      spec: new CommandSpec({}),
+      vfs: 's3',
+      fn: () => Promise.resolve(null),
+      write: true,
+      limit: { timeoutSeconds: 7 } as never,
+      src: 'a',
+      dst: 'b',
+    })
+    const [out] = withDefaultProvisions([cat], stat as never)
+    expect(out?.provisionFn).not.toBeNull()
+    for (const key of Object.keys(cat) as (keyof typeof cat)[]) {
+      if (key === 'provisionFn') continue
+      expect([key, out?.[key]]).toEqual([key, cat[key]])
+    }
+  })
+
+  it('leaves a command that already has a provision untouched', () => {
+    const provisioned = new RegisteredCommand({
+      name: 'cat',
+      spec: new CommandSpec({}),
+      vfs: 's3',
+      fn: () => Promise.resolve(null),
+      provisionFn: (() => Promise.resolve(null)) as never,
+    })
+    const [out] = withDefaultProvisions([provisioned], stat as never)
+    expect(out).toBe(provisioned)
   })
 })

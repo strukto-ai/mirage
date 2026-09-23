@@ -17,6 +17,7 @@ import { record, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
+import { checkWriteTarget } from './dest.ts'
 import { norm, nowIso } from './utils.ts'
 
 export async function truncate(
@@ -27,6 +28,7 @@ export async function truncate(
   const timer = startOp()
   const p = norm(path.mountPath)
   const store = accessor.store
+  await checkWriteTarget(store, path, p)
   const existing = await store.getFile(p)
   const data = existing ?? new Uint8Array(0)
   const out = new Uint8Array(length)

@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.commands.cli.types import CLISpec
-from mirage.types import ConsistencyPolicy
 
 
 @dataclass
@@ -27,7 +26,6 @@ class MountArgs:
     code never constructs Workspace itself.
     """
     mount_args: dict[str, Any]
-    consistency: ConsistencyPolicy
     default_session_id: str
     default_agent_id: str | None
     clis: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] | None = None

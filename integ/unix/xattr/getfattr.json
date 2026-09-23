@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "xattr_hex_encoding",
+      "seq": 900003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "getfattr -n user.tag -e hex /data/xattr.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "# file: data/xattr.txt\nuser.tag=0x626c7565\n\n",
+        "stderr": "getfattr: Removing leading '/' from absolute path names\n"
+      }
+    },
+    {
+      "id": "xattr_only_values",
+      "seq": 900004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "getfattr -n user.tag --only-values /data/xattr.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "blue",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xattr_missing_file",
+      "seq": 900008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "getfattr -d /data/xattr-none.txt; setfattr -n user.tag /data/xattr-none.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "getfattr: /data/xattr-none.txt: No such file or directory\nsetfattr: /data/xattr-none.txt: No such file or directory\n"
+      }
+    },
+    {
+      "id": "xattr_bad_option",
+      "seq": 900010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "getfattr -Z /data/xattr.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "getfattr: invalid option -- 'Z'\nUsage: getfattr [-hRLP] [-n name|-d] [-e en] [-m pattern] path...\nTry `getfattr --help' for more information.\n"
+      }
+    }
+  ]
+}

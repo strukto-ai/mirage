@@ -24,7 +24,6 @@ from typing import Any, Coroutine
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
-from mirage.fuse.errors import NO_XATTR
 from mirage.fuse.platform.macos import is_macos_metadata
 from mirage.ops import Ops
 from mirage.runtime.handles import FileTable, merge_writes
@@ -83,9 +82,6 @@ class MountCore:
         self._handles: FileTable[Handle] = FileTable()
         # Prefetched content for size-unknown files: path -> (data, expiry).
         self._prefetch: dict[str, tuple[bytes, float]] = {}
-        # In-memory extended attributes, keyed by path. Backends have no
-        # POSIX xattrs, so these are advisory, not persisted (see setxattr).
-        self._xattrs: dict[str, dict[str, bytes]] = {}
         # Windows has no getuid/getgid; the values are irrelevant there
         # because the mount passes uid=-1,gid=-1 and WinFsp presents files
         # as owned by the mounting user (see mount.py). Mirrors fs.ts.
@@ -545,15 +541,11 @@ class MountCore:
 
     def rename(self, old: str, new: str) -> None:
         self._run(self._ops.rename(self.resolve(old), self.resolve(new)))
-        moved = self._xattrs.pop(old, None)
-        if moved is not None:
-            self._xattrs[new] = moved
         self._changed(old, rehydrate=False)
         self._changed(new, rehydrate=False)
 
     def rmdir(self, path: str) -> None:
         self._run(self._ops.rmdir(self.resolve(path)))
-        self._xattrs.pop(path, None)
 
     def statfs(self) -> dict[str, Any]:
         return {
@@ -568,26 +560,37 @@ class MountCore:
             "f_namemax": 255,
         }
 
-    def setxattr(self, path: str, name: str, value: bytes) -> None:
-        """Record an advisory extended attribute for this mount's lifetime.
+    def setxattr(self,
+                 path: str,
+                 name: str,
+                 value: bytes,
+                 create: bool = False,
+                 replace: bool = False) -> None:
+        """Store an extended attribute through the workspace door.
 
-        Mirage backends (S3, etc.) have no POSIX extended attributes, so
-        there is nothing to persist xattrs to. Keeping them in memory per
-        mount lets tools that probe or set xattrs (sandbox runtimes, rsync
-        -aX, tar --xattrs, cp -p, macOS Finder writing com.apple.*) succeed
-        instead of failing with ENOTSUP. The values are intentionally never
-        written to the backend.
+        The door keeps it on the path's namespace node, so it outlives
+        the mount, moves with a rename, and is the same attribute every
+        other surface (the shell's getfattr, a guest's os.getxattr)
+        reads. Tools that set xattrs as a matter of course (rsync -aX,
+        tar --xattrs, cp -p, Finder writing com.apple.*) succeed on a
+        backend with no attribute slot of its own.
 
         Args:
             path (str): mount path the attribute belongs to.
             name (str): attribute name.
             value (bytes): attribute payload.
+            create (bool): refuse with EEXIST when it is already set.
+            replace (bool): refuse when it is not set yet.
         """
-        self.getattr(path)
-        self._xattrs.setdefault(path, {})[name] = bytes(value)
+        self._run(
+            self._ops.setxattr(self.resolve(path),
+                               name,
+                               bytes(value),
+                               create=create,
+                               replace=replace))
 
     def getxattr(self, path: str, name: str) -> bytes:
-        """Read an advisory extended attribute.
+        """Read an extended attribute, the backend's own facts included.
 
         Args:
             path (str): mount path the attribute belongs to.
@@ -599,19 +602,13 @@ class MountCore:
         Raises:
             OSError: ENOATTR/ENODATA when the attribute is not set.
         """
-        self.getattr(path)
-        attrs = self._xattrs.get(path)
-        if attrs is None or name not in attrs:
-            raise OSError(NO_XATTR, os.strerror(NO_XATTR), path)
-        return attrs[name]
+        return bytes(self._run(self._ops.getxattr(self.resolve(path), name)))
 
     def listxattr(self, path: str) -> list[str]:
-        self.getattr(path)
-        return list(self._xattrs.get(path, {}).keys())
+        return list(self._run(self._ops.listxattr(self.resolve(path))))
 
     def removexattr(self, path: str, name: str) -> None:
-        self.getattr(path)
-        self._xattrs.get(path, {}).pop(name, None)
+        self._run(self._ops.removexattr(self.resolve(path), name))
 
     def flush(self, path: str, fh: int | None) -> None:
         """Merge a handle's buffered writes and persist them.
@@ -755,5 +752,4 @@ class MountCore:
             ctx.data = data
 
     def _forget(self, path: str) -> None:
-        self._xattrs.pop(path, None)
         self._changed(path, rehydrate=False)

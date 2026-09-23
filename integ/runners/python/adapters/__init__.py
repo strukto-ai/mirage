@@ -52,7 +52,7 @@ from mirage.runtime.types import ScriptSource
 from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.shell.job_table import ConsoleFactory
-from mirage.types import ConsistencyPolicy
+from mirage.types import ReadSpec
 from mirage.vfs.aliyun import AliyunConfig, AliyunVFS
 from mirage.vfs.backblaze import BackblazeConfig, BackblazeVFS
 from mirage.vfs.box import BoxConfig, BoxVFS
@@ -2691,7 +2691,7 @@ def console_factory(target: dict, run_id: str) -> ConsoleFactory | None:
 
 async def open_target(
     target: dict,
-    consistency: ConsistencyPolicy | None = None
+    read: ReadSpec | None = None
 ) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
@@ -2708,10 +2708,10 @@ async def open_target(
     # door validates with.
     profiles = scripted_profiles(target.get("profiles") or None)
     default_profile = target.get("profile")
-    if consistency is not None:
+    if read is not None:
         ws = Workspace(mounts,
                        mode=MountMode.WRITE,
-                       consistency=consistency,
+                       read=read,
                        agent_id=agent_id,
                        console_factory=factory,
                        profiles=profiles,
@@ -2745,7 +2745,7 @@ async def open_target(
 
 
 async def open_consistency(
-    target: dict, consistency: ConsistencyPolicy
+    target: dict, read: ReadSpec
 ) -> tuple[
         Workspace,
         Callable[[str, bytes], Awaitable[None]],
@@ -2756,9 +2756,7 @@ async def open_consistency(
     read_mounts, read_cleanups = await build_mounts(target, run_id, service)
     shadow_mounts, shadow_cleanups = await build_mounts(
         target, run_id, service)
-    read_ws = Workspace(read_mounts,
-                        mode=MountMode.WRITE,
-                        consistency=consistency)
+    read_ws = Workspace(read_mounts, mode=MountMode.WRITE, read=read)
     shadow_ws = Workspace(shadow_mounts, mode=MountMode.WRITE)
     # Same rule as open_target: a target's declared environment reaches
     # every workspace a case can run against, or a consistency scenario

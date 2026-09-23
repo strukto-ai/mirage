@@ -40,6 +40,10 @@ from mirage.workspace.executor.builtins.metadata import (handle_chgrp,
                                                          handle_chmod,
                                                          handle_chown,
                                                          handle_touch)
+from mirage.workspace.executor.builtins.metadata.getfattr import \
+    handle_getfattr
+from mirage.workspace.executor.builtins.metadata.setfattr import \
+    handle_setfattr
 from mirage.workspace.executor.builtins.printenv import handle_printenv
 from mirage.workspace.executor.builtins.printf import handle_printf
 from mirage.workspace.executor.builtins.read import handle_read
@@ -99,6 +103,8 @@ __all__ = [
     'handle_chgrp',
     'handle_chmod',
     'handle_chown',
+    'handle_getfattr',
+    'handle_setfattr',
     'handle_touch',
     'prepare_mv',
     'strip_link_operands',

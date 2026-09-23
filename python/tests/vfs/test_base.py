@@ -27,8 +27,9 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import IOResult
 from mirage.ops.registry import RegisteredOp
 from mirage.types import (CapacityState, ContentType, FileStat, FileType,
-                          PathSpec)
+                          PathSpec, ReadPolicy, ReadSpec)
 from mirage.vfs.base import BaseVFS
+from mirage.workspace.mount.read_policy import check_read_capability
 
 PAGES = {
     "guides": {
@@ -234,15 +235,19 @@ def test_table_built_state_asks_to_be_handed_back():
 
 
 def test_declaration_flags_forwarded():
-    vfs = make_vfs(sizes_always_known=True, supports_snapshot=True)
+    vfs = make_vfs(sizes_always_known=True,
+                   supports_snapshot=True,
+                   read_revalidatable=True)
     assert vfs.sizes_always_known is True
     assert vfs.supports_snapshot is True
+    assert vfs.read_revalidatable is True
 
 
 def test_declaration_flags_default_off():
     vfs = make_vfs()
     assert vfs.sizes_always_known is False
     assert vfs.supports_snapshot is False
+    assert vfs.read_revalidatable is False
 
 
 def test_prompts_set():
@@ -310,3 +315,17 @@ def test_user_ops_shadow_derived():
     reads = [ro for ro in vfs.ops() if ro.name == "read"]
     assert len(reads) == 1
     assert reads[0].fn is my_read
+
+
+def test_a_script_registered_vfs_is_named_in_the_read_refusal():
+    """`vfs.name` is a plain string here, not a `VFSName`.
+
+    ``str()`` of the enum renders its repr, so the refusal builds the
+    name through a getattr fallback; only a script-registered backend
+    exercises the other side of it.
+    """
+    vfs = make_vfs(caches_reads=True)
+    assert vfs.read_revalidatable is False
+    with pytest.raises(ValueError) as exc:
+        check_read_capability("/w/", vfs, ReadSpec(policy=ReadPolicy.FRESH))
+    assert "wiki does not" in str(exc.value)

@@ -103,6 +103,24 @@ model NotionBlock {
   @@index([tenant, parentId, position])
 }
 
+// The workspace's members and bots, which `GET /v1/users` lists. The
+// integration's own bot is not a row: it is the NotionMeta identity, the same
+// one `/v1/users/me` answers with, so the two cannot disagree. `detailJson` is
+// the object under the user's `type` key (`person` or `bot`), kept whole
+// because its fields grow with the API version (`email_verified` is newer than
+// `email`) and nothing reads it but the renderer.
+model NotionUser {
+  tenant     String
+  id         String
+  name       String
+  avatarUrl  String?
+  type       String
+  detailJson String
+  seq        Int
+
+  @@id([tenant, id])
+}
+
 model NotionComment {
   tenant         String
   id             String

@@ -19,7 +19,7 @@ import type { ParsedQuery } from './query.ts'
 import { channels, users } from './store.ts'
 import type { MessageRow } from './store.ts'
 import type { ChannelRow, FileRow, UserRow } from './wire.ts'
-import { fail } from './wire.ts'
+import { argsOf, fail } from './wire.ts'
 
 interface Scope {
   parsed: ParsedQuery
@@ -42,7 +42,7 @@ function userToken(ctx: Ctx<C>): boolean {
 }
 
 async function scopeOf(ctx: Ctx<C>): Promise<Scope> {
-  const parsed = parseQuery(ctx.query.get('query') ?? '')
+  const parsed = parseQuery(argsOf(ctx).get('query') ?? '')
   const chans: ChannelRow[] = await channels(ctx.db, ctx.tenant)
   const people: UserRow[] = await users(ctx.db, ctx.tenant)
   const userName = new Map(people.map((u) => [u.id, u.name]))
@@ -67,7 +67,7 @@ async function scopeOf(ctx: Ctx<C>): Promise<Scope> {
     if (from !== undefined) fromUserId = from.id
     else fromMissing = true
   }
-  const raw = ctx.query.get('count')
+  const raw = argsOf(ctx).get('count')
   const out: Scope = {
     parsed,
     fromMissing,
@@ -107,7 +107,7 @@ export async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
     status: 200,
     body: {
       ok: true,
-      query: ctx.query.get('query') ?? '',
+      query: argsOf(ctx).get('query') ?? '',
       messages: {
         total: matches.length,
         pagination: { total_count: matches.length, page: 1, page_count: 1 },
@@ -152,7 +152,7 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
     status: 200,
     body: {
       ok: true,
-      query: ctx.query.get('query') ?? '',
+      query: argsOf(ctx).get('query') ?? '',
       files: {
         total: matches.length,
         pagination: { total_count: matches.length, page: 1, page_count: 1 },

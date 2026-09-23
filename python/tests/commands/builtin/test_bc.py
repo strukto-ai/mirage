@@ -1245,3 +1245,307 @@ def test_bc_the_terminating_semicolon_carries_its_own_line():
     assert _stderr_text(io) == ("(standard_in) 1: syntax error\n"
                                 "(standard_in) 1: illegal character: @\n")
     assert io.exit_code == 0
+
+
+# -- `print` and string statements --------------------------------------
+#
+# Measured against GNU bc 1.07.1 in docker (`debian:stable-slim`).
+
+
+def test_bc_print_writes_no_newline():
+    # The whole point of `print`: an expression statement ends its line
+    # and `print` does not, so the next write continues it.
+    assert _out("bc", b'print "hi"\n')[0] == b"hi"
+    assert _out("bc", b"print 5\n6\n")[0] == b"56\n"
+
+
+def test_bc_print_takes_a_comma_separated_list():
+    assert _out("bc", b'print "a=", 1+1, "\\n"\n')[0] == b"a=2\n"
+    assert _out("bc", b'print "a", "b"\n')[0] == b"ab"
+    assert _out("bc", b'print (1+2)*3, "\\n"\n')[0] == b"9\n"
+
+
+def test_bc_each_element_is_written_where_it_is_reached():
+    # GNU writes a value where its own instruction runs, not at the end
+    # of the statement, so an element sees everything the elements before
+    # it changed and nothing a later one will: `print 5, last` writes the
+    # 5 twice, and `print 255, obase=16` writes the 255 in base ten and
+    # then the 16 in the base it just set.
+    assert _out("bc", b"print 5, last\n")[0] == b"55"
+    assert _out("bc", b"print last, 5\n")[0] == b"05"
+    assert _out("bc", b"print 1, last, last\n")[0] == b"111"
+    assert _out("bc", b"print 255, obase=16\n")[0] == b"25510"
+    assert _out("bc", b"print obase=16, 255\n")[0] == b"10FF"
+    assert _out("bc", b"print 255, obase=16, 255\n")[0] == b"25510FF"
+    assert _out("bc", b"x=1\nprint x, x=9, x\n")[0] == b"199"
+    assert _out("bc", b"scale=3\nprint 1/3, scale=1, 1/3\n")[0] == b".3331.3"
+
+
+def test_bc_an_expression_statement_renders_where_it_is_reached_too():
+    # The same rule outside `print`: the 255 is written before the `;`
+    # changes the base, so only the second one comes out hexadecimal.
+    assert _out("bc", b"255; obase=16\n")[0] == b"255\n"
+    assert _out("bc", b"obase=16; 255\n")[0] == b"FF\n"
+    assert _out("bc", b"255; obase=16; 255\n")[0] == b"255\nFF\n"
+
+
+def test_bc_last_follows_its_line_being_discarded():
+    # `last` is state, so a syntax error later on the line rolls it back
+    # with everything else the line wrote.
+    assert _out("bc", b"print 5\nlast\n")[0] == b"55\n"
+    stdout, io = _out("bc", b"print 5; 1 2\nlast\n")
+    assert stdout == b"0\n"
+    assert _stderr_text(io) == "(standard_in) 1: syntax error\n"
+    # A runtime error does not roll it back: the element before it stands.
+    assert _out("bc", b"print 5, 1/0\nlast\n")[0] == b"55\n"
+
+
+def test_bc_print_sets_last_where_a_string_does_not():
+    # A printed value reaches `last`, so `print 5; .` answers 5 twice;
+    # a string never does, so `last` still holds the 2.
+    assert _out("bc", b"print 5; .\n")[0] == b"55\n"
+    assert _out("bc", b"print 5; last\n")[0] == b"55\n"
+    assert _out("bc", b'1+1; print "x"; last\n')[0] == b"2\nx2\n"
+    # The last value of a list wins.
+    assert _out("bc", b"print 5, 6; last\n")[0] == b"566\n"
+
+
+def test_bc_print_element_is_a_whole_expression():
+    # Assignment is part of the expression grammar, so it prints here
+    # where the statement `x=5` prints nothing.
+    assert _out("bc", b"print x=5\nx\n")[0] == b"55\n"
+    assert _out("bc", b"print (x=5); x\n")[0] == b"55\n"
+    assert _out("bc", b"x=1; print x++, x, \"\\n\"\n")[0] == b"12\n"
+    assert _out("bc", b'print sqrt(4), "\\n"\n')[0] == b"2\n"
+    assert _out("bc", b'obase=16\nprint 255, "\\n"\n')[0] == b"FF\n"
+
+
+def test_bc_print_expands_the_escapes_gnu_has_a_rule_for():
+    # `\a \b \f \n \q \r \t \\`, and `\q` is the double quote.
+    assert _out("bc", b'print "A\\aB\\bC\\fD\\nE\\qF\\rG\\tH\\\\I"\n')[0] == (
+        b'A\x07B\x08C\x0cD\nE"F\rG\tH\\I')
+
+
+def test_bc_print_writes_nothing_for_an_escape_it_has_no_rule_for():
+    # Both characters vanish, digits and a trailing backslash included.
+    for text in (b'print "x\\zy"\n', b'print "a\\0b\\1c"\n',
+                 b'print "a\\eb\\vc"\n', b'print "a\\Nb\\Tc"\n'):
+        assert _out("bc", text)[0] in (b"xy", b"abc"), text
+    assert _out("bc", b'print "ab\\\\"\n')[0] == b"ab\\"
+    # A lone backslash before the closing quote: the quote still closes
+    # the token, and the backslash writes nothing.
+    assert _out("bc", b'print "ab\\"\n')[0] == b"ab"
+
+
+def test_bc_a_bare_string_is_a_statement_written_raw():
+    assert _out("bc", b'"raw"\n')[0] == b"raw"
+    assert _out("bc", b'"a"; 1+1\n')[0] == b"a2\n"
+    assert _out("bc", b'"a";"b"\n')[0] == b"ab"
+    assert _out("bc", b'""\n')[0] == b""
+    # No escape expansion: `print` alone does that.
+    assert _out("bc", b'"A\\nB\\tC\\zD"\n')[0] == b"A\\nB\\tC\\zD"
+
+
+def test_bc_a_string_is_never_an_expression():
+    for text in (b'1+"a"\n', b'"a"1\n', b'print "a" "b"\n', b'print "a" 1\n',
+                 b'print , "a"\n'):
+        stdout, io = _out("bc", text)
+        assert stdout == b"", text
+        assert _stderr_text(io) == "(standard_in) 1: syntax error\n", text
+        assert io.exit_code == 0, text
+
+
+def test_bc_print_stays_a_reserved_word():
+    for text in (b"print=1\n", b"1+print\n"):
+        stdout, io = _out("bc", text)
+        assert stdout == b"", text
+        assert _stderr_text(io) == "(standard_in) 1: syntax error\n", text
+    # Only a whole identifier is the keyword.
+    assert _out("bc", b"printx=5\nprintx\n")[0] == b"5\n"
+    # And no space is needed after it.
+    assert _out("bc", b'print"a"\n')[0] == b"a"
+
+
+def test_bc_print_with_no_element_is_charged_to_the_next_line():
+    # A legal prefix that ran out of input, so GNU charges the newline's
+    # line rather than the keyword's, and the next line still runs.
+    stdout, io = _out("bc", b"print\n1+1\n")
+    assert stdout == b"2\n"
+    assert _stderr_text(io) == "(standard_in) 2: syntax error\n"
+    # A trailing comma is the same shape.
+    stdout, io = _out("bc", b'print "a",\n')
+    assert stdout == b""
+    assert _stderr_text(io) == "(standard_in) 2: syntax error\n"
+    # A second element with nothing between them is not: `2` is the token
+    # that fails, and it sits on its own line.
+    stdout, io = _out("bc", b"print 1 2\n")
+    assert stdout == b""
+    assert _stderr_text(io) == "(standard_in) 1: syntax error\n"
+
+
+def test_bc_a_string_hides_a_separator_and_a_comment():
+    # `;`, `#` and `/*` are content inside a string, not syntax.
+    assert _out("bc", b'print "a;b", "\\n"\n')[0] == b"a;b\n"
+    assert _out("bc", b'print "a#b", "\\n"\n')[0] == b"a#b\n"
+    assert _out("bc", b'print "a/*b*/c", "\\n"\n')[0] == b"a/*b*/c\n"
+    # A `quit` in one does not end the run either.
+    assert _out("bc", b'print "quit"; print "after"\n')[0] == b"quitafter"
+    # A comment outside one still eats the string behind it.
+    assert _out("bc", b'print "a" # "b"\nprint "c"\n')[0] == b"ac"
+
+
+def test_bc_a_string_runs_to_the_next_quote_across_lines():
+    # The token has no line limit, so the statement stays open and the
+    # line counter still advances: the `1 2` below is on line 3.
+    assert _out("bc", b'print "a\nb"\n')[0] == b"a\nb"
+    stdout, io = _out("bc", b'print "a\nb"\n1 2\n')
+    assert stdout == b"a\nb"
+    assert _stderr_text(io) == "(standard_in) 3: syntax error\n"
+    # A `#` or a `/*` on the string's later line is content too.
+    assert _out("bc", b'print "a\nb # c"\nprint "d"\n')[0] == b"a\nb # cd"
+    assert _out("bc", b'print "a\n/*x*/b"\nprint "d"\n')[0] == b"a\n/*x*/bd"
+    assert _out("bc", b'print "a\nquit b"\nprint "c"\n')[0] == b"a\nquit bc"
+
+
+def test_bc_an_unclosed_quote_is_an_illegal_character():
+    # GNU's lexer has no rule a lone `"` matches, so it is reported the
+    # way `@` is and scanning resumes right after it -- the next line
+    # runs, comments included.
+    for text in (b'"abc\n', b'print "abc\n', b'1+"abc\n'):
+        stdout, io = _out("bc", text)
+        assert stdout == b"", text
+        assert _stderr_text(
+            io) == '(standard_in) 1: illegal character: "\n', text
+        assert io.exit_code == 0, text
+    stdout, io = _out("bc", b'"abc\n1+1\n')
+    assert stdout == b"2\n"
+    assert _stderr_text(io) == '(standard_in) 1: illegal character: "\n'
+    # The `;` behind it still separates, so the `1 2` is its own bad
+    # statement and reports separately.
+    stdout, io = _out("bc", b'"abc; 1 2\n')
+    assert stdout == b""
+    assert _stderr_text(io) == ('(standard_in) 1: illegal character: "\n'
+                                "(standard_in) 1: syntax error\n")
+    # Two quotes on different lines are one token, so nothing is illegal:
+    # the `def` after it is simply a name in the wrong place.
+    stdout, io = _out("bc", b'"abc\n"def\n')
+    assert stdout == b""
+    assert _stderr_text(io) == "(standard_in) 2: syntax error\n"
+
+
+def test_bc_a_syntax_error_discards_what_its_line_printed():
+    # GNU compiles a whole line before running any of it, so a later
+    # statement's refusal undoes an earlier one's `print`.
+    stdout, io = _out("bc", b'print "x"; 1 2\n')
+    assert stdout == b""
+    assert _stderr_text(io) == "(standard_in) 1: syntax error\n"
+
+
+def test_bc_a_runtime_error_keeps_what_the_statement_already_wrote():
+    # A runtime error is not a parse error: everything written before it
+    # stays, the rest of the line is abandoned, and the next line runs.
+    stdout, io = _out("bc", b'print "a", 1/0, "z"\n')
+    assert stdout == b"a"
+    assert _stderr_text(io) == (
+        "Runtime error (func=(main), adr=3): Divide by zero\n")
+    assert _out("bc", b'print "x", 1/0\n2+2\n')[0] == b"x4\n"
+
+
+def test_bc_halt_and_quit_still_bound_a_printing_line():
+    # `halt` acts where it is reached, so the `print` before it stands.
+    assert _out("bc", b'print "a"; halt; print "b"\n')[0] == b"a"
+    assert _out("bc", b'"a"; halt; "b"\n')[0] == b"a"
+    # `quit` is read by the lexer, so its whole line never runs at all.
+    assert _out("bc", b'print "a"; quit\nprint "b"\n')[0] == b""
+
+
+# -- The output column, once `print` can leave a line open --------------
+
+
+def test_bc_the_fold_column_carries_across_a_print():
+    # The column is one counter for the whole run, so a `print` that left
+    # the line two characters in folds the value that follows two
+    # characters early: 66 digits here rather than 68.
+    digits = UNFOLDED_300.rstrip(b"\n")
+    assert _out("bc",
+                b'print "ab"; 2^300\n')[0] == (b"ab" + digits[:66] + b"\\\n" +
+                                               digits[66:] + b"\n")
+    # And a `print`ed value leaves the column where it ended, so the next
+    # statement's value continues the same line.
+    assert _out("bc", b"print 2^300; 1+1\n")[0] == (digits[:68] + b"\\\n" +
+                                                    digits[68:] + b"2\n")
+
+
+def test_bc_a_printed_string_folds_and_counts_like_a_value():
+    assert _out("bc", b'print "' + b"x" * 100 +
+                b'"\n')[0] == (b"x" * 68 + b"\\\n" + b"x" * 32)
+    # A bare string counts too.
+    assert _out("bc", b'"' + b"x" * 100 + b'"\n')[0] == (b"x" * 68 + b"\\\n" +
+                                                         b"x" * 32)
+    # Two statements share the counter: 60 then 20 folds inside the 20.
+    assert _out("bc", b'print "' + b"x" * 60 + b'"; print "' + b"y" * 20 +
+                b'"\n')[0] == (b"x" * 60 + b"y" * 8 + b"\\\n" + b"y" * 12)
+    # Across input lines as well.
+    assert _out("bc", b'print "' + b"x" * 60 + b'"\nprint "' + b"y" * 20 +
+                b'"\n')[0] == (b"x" * 60 + b"y" * 8 + b"\\\n" + b"y" * 12)
+
+
+def test_bc_a_newline_anywhere_starts_the_column_over():
+    assert _out("bc", b'print "' + b"x" * 60 + b'\\n"; print "' + b"y" * 20 +
+                b'"\n')[0] == (b"x" * 60 + b"\n" + b"y" * 20)
+    # An expanded escape is one column, not its source width: 66 x's, a
+    # tab and a `y` fill the line, so the second `y` folds.
+    assert _out("bc", b'print "' + b"x" * 66 + b'\\tyy"\n')[0] == (b"x" * 66 +
+                                                                   b"\ty\\\ny")
+
+
+def test_bc_a_discarded_line_rolls_the_column_back():
+    # The line never ran, so its `print` never moved the counter and the
+    # 20 characters after it do not fold.
+    stdout, io = _out(
+        "bc", b'print "' + b"x" * 60 + b'"; 1 2\nprint "' + b"y" * 20 + b'"\n')
+    assert stdout == b"y" * 20
+    assert _stderr_text(io) == "(standard_in) 1: syntax error\n"
+    # A runtime error does not roll it back: the 60 characters stand.
+    stdout, io = _out(
+        "bc", b'print "' + b"x" * 60 + b'", 1/0\nprint "' + b"y" * 20 + b'"\n')
+    assert stdout == b"x" * 60 + b"y" * 8 + b"\\\n" + b"y" * 12
+
+
+def test_bc_line_length_bounds_a_printed_string_too():
+    assert _out("BC_LINE_LENGTH=10 bc",
+                b'print "abcdefghijklmno"\n')[0] == b"abcdefgh\\\nijklmno"
+    assert _out("BC_LINE_LENGTH=3 bc",
+                b'print "abcdef"\n')[0] == b"a\\\nb\\\nc\\\nd\\\ne\\\nf"
+    assert _out("BC_LINE_LENGTH=0 bc",
+                b'print "' + b"x" * 100 + b'"\n')[0] == b"x" * 100
+
+
+def test_bc_the_issue_1156_program():
+    # The report's own heredoc. GNU prints `a=50.204700469970704`; the
+    # last digits differ because bc's values are float64 here, which is
+    # the separate gap tracked in #1119.
+    program = (b"scale=15\n"
+               b"a=7*7.172100067138672\n"
+               b'print "a="; a; print "\\n"\n')
+    assert _out("bc -l", program)[0] == b"a=50.204700469970700\n\n"
+
+
+def test_bc_the_fold_column_counts_utf8_bytes():
+    # GNU counts the bytes it writes, not the characters, so a four-byte
+    # character fills the 68-column line seventeen at a time.
+    globe = "\N{EARTH GLOBE EUROPE-AFRICA}"
+    assert _out(
+        "bc",
+        f'print "{globe * 80}"\n'.encode())[0] == ((globe * 17 + "\\\n") * 4 +
+                                                   globe * 12).encode()
+    # A two-byte one moves it two: 66 x's and one `é` fill the line.
+    assert _out("bc", f'print "{"x" * 66}éé"\n'.encode())[0] == ("x" * 66 +
+                                                                 "é" + "\\\n" +
+                                                                 "é").encode()
+    # Where GNU would split a character across the fold it is moved whole
+    # instead, so the output stays UTF-8: 67 x's leave one column and the
+    # `é` needs two.
+    assert _out("bc",
+                f'print "{"x" * 67}éé"\n'.encode())[0] == ("x" * 67 + "\\\n" +
+                                                           "éé").encode()

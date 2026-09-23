@@ -96,33 +96,6 @@ it('preserves a long line and its unterminated tail', async () => {
   expect(await reader.readline()).toBeNull()
 })
 
-it('allows timer progress while populating a file-cache fingerprint', async () => {
-  const cache = new RAMFileCacheStore()
-  let fired = false
-  const timer = setTimeout(() => {
-    fired = true
-  }, 1)
-  try {
-    await cache.set('/big', new Uint8Array(20_000_000))
-    expect(fired).toBe(true)
-  } finally {
-    clearTimeout(timer)
-  }
-})
-
-it.each(['set', 'add'] as const)(
-  'discards a pending %s when the cache is cleared',
-  async (operation) => {
-    const cache = new RAMFileCacheStore()
-    const pending = cache[operation]('/large', new Uint8Array(20_000_000))
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await cache.clear()
-    await pending
-    expect(await cache.get('/large')).toBeNull()
-    expect(cache.cacheSize).toBe(0)
-  },
-)
-
 it.each(['mapfile values', 'read -N 131072 value'])(
   'aborts %s while consuming ready stdin and closes the producer',
   async (command) => {

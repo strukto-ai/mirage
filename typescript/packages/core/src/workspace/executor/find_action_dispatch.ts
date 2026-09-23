@@ -16,6 +16,13 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { fsStrerror, gnuStrerror, isFsError } from '../../utils/errors.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
+import {
+  expandPrintf,
+  printfKind,
+  printfNeedsStat,
+  type PrintfStatFacts,
+} from '../../commands/builtin/find_printf.ts'
+import { modifiedTs } from '../../core/generic/find.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { shellJoin } from '../../shell/join.ts'
@@ -41,7 +48,7 @@ import {
   parseFindExpression,
 } from '../../commands/builtin/find_parse.ts'
 import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
-import type { ExecAction, FindAction } from '../../commands/builtin/types.ts'
+import type { ExecAction, FindAction, PrintfAction } from '../../commands/builtin/types.ts'
 import type { ExecuteFn } from '../expand/node.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 
@@ -386,6 +393,56 @@ function lsRow(ps: PathSpec, st: FileStat, identity: Identity | null): Uint8Arra
 }
 
 /**
+ * The facts one `-printf` row renders from, off the stat find holds for
+ * it. A symlink row is the link itself, and %Y reads what it points at
+ * through the workspace, so a link into another mount classifies and a
+ * dangling one reads N.
+ */
+async function printfFacts(
+  ps: PathSpec,
+  st: FileStat,
+  ns: NamespaceView | null,
+): Promise<PrintfStatFacts> {
+  const links = ns?.links ?? null
+  const link = links !== null && links.statAt(ps.virtual) !== null
+  const target = link ? await links.targetStat(ps.virtual) : null
+  return {
+    size: st.size ?? 0,
+    kind: link ? 'l' : printfKind(st),
+    mtimeEpoch: modifiedTs(st.modified) ?? 0,
+    mode: st.mode,
+    targetKind: !link ? null : target === null ? 'N' : printfKind(target),
+    uid: st.uid,
+    gid: st.gid,
+  }
+}
+
+/** Render one row through a `-printf` format; `st` is null when the
+ * format names no stat directive. */
+function printfRow(
+  action: PrintfAction,
+  path: string,
+  base: string,
+  st: PrintfStatFacts | null,
+  warnings: string[],
+  identity: Identity | null,
+): Uint8Array {
+  return enc.encode(expandPrintf(action.format, path, base, st, warnings, identity))
+}
+
+/** Whether an action reads the row's stat: `-ls`, and a `-printf` whose
+ * format names a stat directive (%s %y %m %T ...). */
+function readsStat(action: FindAction): boolean {
+  return action.kind === 'ls' || (action.kind === 'printf' && printfNeedsStat(action.format))
+}
+
+/** The spelling a start point's rows are measured from (%P, %d); with no
+ * operand, the working directory find walked, which prints as `.`. */
+function startBase(start: PathSpec | undefined): string {
+  return start === undefined ? '.' : start.rawPath || start.virtual
+}
+
+/**
  * GNU's `-depth` order over sorted siblings: a directory's contents, each
  * sorted, then the directory. The final component is flagged so a path
  * sorts after its descendants, whose entry at that depth carries the same
@@ -443,22 +500,23 @@ function hasActions(expr: FindExpr): boolean {
 }
 
 /**
- * Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
+ * Apply find's actions (-exec / -delete / -print0 / -ls / -printf) to its
+ * rows.
  *
  * Per-VFS find handlers only emit matched paths. This dispatcher
  * layer re-reads the actions off the expression and applies them per
  * match, in the order they were written, the way GNU's implicit `-a`
  * chain runs: each per-match `-exec` runs in turn and the first that
  * fails ends the chain for that match, so a later `-print` (or `-ls`,
- * `-print0`, `-delete`) sees only the matches every earlier `-exec`
- * accepted (`-exec grep -q x {} ";" -print`), and `-exec echo {} ";"
- * -print -exec echo again {} ";"` alternates the three per match. A
+ * `-print0`, `-printf`, `-delete`) sees only the matches every earlier
+ * `-exec` accepted (`-exec grep -q x {} ";" -print`), and `-exec echo {}
+ * ";" -print -exec echo again {} ";"` alternates the three per match. A
  * batched `-exec ... {} +` collects the match at its position and runs
  * once after the walk; a failing batch is find's exit 1, as is a row it
- * could not delete or list, and either ends that row's chain; a failing
- * per-match run is not, and neither
- * is a command that cannot be found, which GNU reports per match and
- * carries on from with exit 0. An action other than `-print` suppresses
+ * could not delete, list or stat for a `-printf`, and either ends that
+ * row's chain; a failing per-match run is not, and neither is a command
+ * that cannot be found, which GNU reports per match and carries on from
+ * with exit 0. An action other than `-print` suppresses
  * the implicit print. `-delete` runs at its position, so a later `-exec`
  * sees the row gone, and a row it cannot delete ends the chain with GNU's
  * line and find's exit 1. It also turns on `-depth`, which orders every
@@ -468,7 +526,8 @@ function hasActions(expr: FindExpr): boolean {
  * completion before the next, so `find b a -depth` prints `b/x b a/y a`
  * and `find d d/sub -depth` finishes `d` before it begins `d/sub` again,
  * which is why the rows arrive as one run per start point rather than
- * one list. Returns the rows to print, the stderr to append, and the
+ * one list; `-printf`'s %P and %d measure a row from its run's start
+ * point. Returns the rows to print, the stderr to append, and the
  * exit status the actions impose (0 when they impose none, even with
  * stderr).
  */
@@ -481,7 +540,7 @@ export async function applyFindActions(
   doors: FindActionDoors = {},
 ): Promise<[ByteSource | null, Uint8Array, number]> {
   const expr = parseFindExpression([...texts])
-  const reorders = expr.depthFirst && expr.printf === null
+  const reorders = expr.depthFirst
   if (stdout === null || !(hasActions(expr) || reorders)) return [stdout, new Uint8Array(), 0]
   const executeFn = doors.executeFn
   const execs = execActions(expr.actions)
@@ -500,29 +559,34 @@ export async function applyFindActions(
     doors.stdin === undefined || doors.stdin === null ? null : new SharedStdin(doors.stdin)
   if (matchedRuns === null)
     return [null, enc.encode('find: actions require structured matches\n'), 1]
-  const matches = matchedRuns.flatMap((run) =>
-    reorders
+  // The runs arrive one per start point, in operand order, so each row
+  // carries the spelling of the start point it was found under.
+  const matches = matchedRuns.flatMap((run, i) =>
+    (reorders
       ? [...run].sort((a, b) => compareDepthFirst(a.rawPath || a.virtual, b.rawPath || b.virtual))
-      : [...run],
+      : run
+    ).map((match): [PathSpec, string] => [match, startBase(starts[i])]),
   )
   // An expression with no action of its own prints, which is the one
   // implicit action -depth reorders.
   const actions: FindAction[] = expr.actions.length > 0 ? expr.actions : [{ kind: 'print' }]
   const errors: Uint8Array[] = []
+  const warnings: string[] = []
   const out: Uint8Array[] = []
   const batches = new Map<number, string[]>()
   let exitCode = 0
-  const lists = actions.some((a) => a.kind === 'ls')
+  const stats = actions.some(readsStat)
   const statted = testsStat(expr)
   const startVirtuals = new Set(starts.length > 0 ? starts.map((s) => s.virtual) : [cwd])
-  for (const match of matches) {
+  for (const [match, base] of matches) {
     signal?.throwIfAborted()
     const path = match.rawPath || match.virtual
-    // The stat -ls renders is the one find already holds, taken before
-    // any action of the chain can remove the row; a row it never statted
-    // is looked up by the -ls that reaches it.
-    const held =
-      lists && (statted || startVirtuals.has(match.virtual))
+    // The stat -ls and -printf render is the one find already holds,
+    // taken before any action of the chain can remove the row; a row it
+    // never statted is looked up by the first action that reads it, and
+    // held from there, as GNU stats a row once.
+    let held =
+      stats && (statted || startVirtuals.has(match.virtual))
         ? await rowStat(match, ns, statPath, [])
         : null
     for (const [position, action] of actions.entries()) {
@@ -549,15 +613,21 @@ export async function applyFindActions(
           ))
         )
           break
-      } else if (action.kind === 'ls') {
-        const st = held ?? (await rowStat(match, ns, statPath, errors))
-        if (st === null) {
-          // A row -ls cannot list is false, so the chain ends for it, as
-          // GNU's does.
+      } else if (readsStat(action)) {
+        held = held ?? (await rowStat(match, ns, statPath, errors))
+        if (held === null) {
+          // A row -ls or -printf cannot stat is false, so the chain ends
+          // for it, as GNU's does.
           exitCode = 1
           break
         }
-        out.push(lsRow(match, st, identity))
+        out.push(
+          action.kind === 'printf'
+            ? printfRow(action, path, base, await printfFacts(match, held, ns), warnings, identity)
+            : lsRow(match, held, identity),
+        )
+      } else if (action.kind === 'printf') {
+        out.push(printfRow(action, path, base, null, warnings, identity))
       } else if (action.kind === 'delete') {
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.
@@ -592,7 +662,10 @@ export async function applyFindActions(
       exitCode = 1
   }
   const body = concat(out)
-  return [body.byteLength > 0 ? body : null, concat(errors), exitCode]
+  // GNU warns about a directive it cannot render once, ahead of anything
+  // the actions report.
+  const warned = warnings.map((line) => enc.encode(`${line}\n`))
+  return [body.byteLength > 0 ? body : null, concat([...warned, ...errors]), exitCode]
 }
 
 function concat(chunks: Uint8Array[]): Uint8Array {

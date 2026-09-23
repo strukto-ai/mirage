@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stdinStream } from '../commands/builtin/utils/stream.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../accessor/base.ts'
@@ -143,4 +144,19 @@ describe('cacheAwareStreamEager', () => {
     expect(DEC.decode(out)).toBe('payload')
     expect(backend.streamCalls).toBe(0)
   })
+})
+
+it('stdin wrapper preserves file cache context', async () => {
+  const backend = new CountingBackend(ENC.encode('changed'))
+  const manager = await warmManager(ENC.encode('cached'))
+  const cachedRead = cacheAwareReadStream(backend.readStream.bind(backend))
+  const reader = stdinStream(
+    (path) => cachedRead(null as unknown as Accessor, path),
+    ENC.encode('pipe'),
+  )
+  const source = await runWithCacheManager(manager, () => Promise.resolve(reader(spec())))
+  expect(DEC.decode(await drain(source))).toBe('cached')
+  expect(DEC.decode(await drain(reader(PathSpec.fromStrPath('-'))))).toBe('pipe')
+  expect(DEC.decode(await drain(reader(PathSpec.fromStrPath('-'))))).toBe('')
+  expect(backend.streamCalls).toBe(0)
 })

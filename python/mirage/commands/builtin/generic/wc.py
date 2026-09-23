@@ -7,7 +7,8 @@ from typing import Any, Callable
 from mirage.cache.read_through import cache_aware_read
 from mirage.commands.builtin.utils.operands import operands_io
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.builtin.utils.stream import resolve_source
+from mirage.commands.builtin.utils.stream import (is_stdin, resolve_source,
+                                                  stdin_stream)
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -306,13 +307,13 @@ async def format_multi(
                     chars=chars,
                     max_line_length=max_line_length,
                     total=total)
-    read = cache_aware_read(read)
+    cached = cache_aware_read(read)
     rows: list[tuple[WCCounts, str | None]] = []
     totals = WCCounts()
     err = b""
     for path in paths:
         try:
-            source = read(path)
+            source = read(path) if is_stdin(path) else cached(path)
             if inspect.isawaitable(source):
                 source = await source
             counts = await wc(source, flags=flags)
@@ -353,6 +354,7 @@ async def wc_generic(
                               stderr=(str(exc) + "\n").encode())
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
+    stream = stdin_stream(stream, opts.stdin)
     if paths:
         body, err = await format_multi(paths,
                                        read=stream,

@@ -16,6 +16,7 @@ import type { Accessor } from '../../../accessor/base.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 import { withPathGuards, withPolicyGuard } from '../generic_bind/adapter.ts'
+import { withSlashGuard } from '../generic_bind/factory.ts'
 import { makeMkdir } from './mkdir.ts'
 import { makeRm } from './rm.ts'
 import { makeStat } from './stat.ts'
@@ -43,7 +44,7 @@ export function makeObjectStoreCommands<A extends Accessor>(
   vfs: string,
   rawIo: CommandIO<A>,
 ): RegisteredCommand[] {
-  const io = withPolicyGuard(withPathGuards(rawIo))
+  const io = withPolicyGuard(withSlashGuard(withPathGuards(rawIo)))
   return [
     ...makeMkdir(vfs, io),
     ...makeRm(vfs, io),

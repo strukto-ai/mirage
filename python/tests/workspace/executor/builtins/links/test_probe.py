@@ -19,6 +19,7 @@ import pytest
 from mirage.io import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.executor.builtins.links import resolve_path_stat
+from mirage.workspace.executor.builtins.links.probe import stat_or_none
 
 
 class _Dispatch:
@@ -102,3 +103,17 @@ async def test_a_permission_error_is_not_absence():
     dispatch = _Dispatch(PermissionError("/data/locked"), [])
     with pytest.raises(PermissionError):
         await resolve_path_stat(dispatch, _spec("/data/locked"))
+
+
+@pytest.mark.asyncio
+async def test_stat_or_none_reads_a_chain_through_a_file_as_missing():
+    # A folder-id backend answers `f.txt/x` with ENOTDIR from the stat
+    # itself, naming the file in the chain; the path is as absent as one
+    # a keyed store answers ENOENT for, and mv's own probe words it.
+    dispatch = _Dispatch(NotADirectoryError("/data/f.txt"), [])
+    assert await stat_or_none(dispatch, _spec("/data/f.txt/x")) is None
+    dispatch = _Dispatch(FileNotFoundError("/data/x"), [])
+    assert await stat_or_none(dispatch, _spec("/data/x")) is None
+    dispatch = _Dispatch(PermissionError("/data/x"), [])
+    with pytest.raises(PermissionError):
+        await stat_or_none(dispatch, _spec("/data/x"))

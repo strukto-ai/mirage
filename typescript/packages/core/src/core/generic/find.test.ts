@@ -23,6 +23,7 @@ import {
   type WalkFindDeps,
 } from './find.ts'
 import { isEnoent } from '../../utils/errors.ts'
+import { parseFindExpression } from '../../commands/builtin/find_parse.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
@@ -112,6 +113,28 @@ describe('walkFind', () => {
     }
     expect(await walkFind(ROOT, deps, { maxDepth: 0 })).toEqual(['/'])
     expect(readdirCalls).toBe(0)
+  })
+
+  it('a time test before -prune gates it, one after does not', async () => {
+    const now = { modified: '2026-01-01T00:00:00Z' }
+    const deps = makeDeps(
+      { '/': ['/old/', '/new/'], '/old': ['/old/f.txt'], '/new': ['/new/g.txt'] },
+      {
+        '/': now,
+        '/old': { modified: '2000-01-01T00:00:00Z' },
+        '/new': now,
+        '/old/f.txt': { size: 1, ...now },
+        '/new/g.txt': { size: 1, ...now },
+      },
+    )
+    const gated = parseFindExpression(['-mindepth', '1', '-newermt', '2010-01-01', '-prune'])
+    expect(
+      await walkFind(ROOT, deps, { tree: gated.tree, minDepth: 1, mtimeMin: gated.mtimeMin }),
+    ).toEqual(['/new', '/old/f.txt'])
+    const firm = parseFindExpression(['-mindepth', '1', '-prune', '-newermt', '2010-01-01'])
+    expect(
+      await walkFind(ROOT, deps, { tree: firm.tree, minDepth: 1, mtimeMin: firm.mtimeMin }),
+    ).toEqual(['/new'])
   })
 
   it('emits the start path at depth 0 when it exists', async () => {

@@ -4,6 +4,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -12,6 +13,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -20,6 +22,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -28,6 +31,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -36,6 +40,7 @@
       "caches_reads": false,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -44,6 +49,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -52,6 +58,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -60,6 +67,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -68,6 +76,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -77,6 +86,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 300,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -85,6 +95,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -93,6 +104,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -101,6 +113,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": true
@@ -109,6 +122,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": true
@@ -117,6 +131,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -125,6 +140,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -133,6 +149,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -142,6 +159,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -150,6 +168,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -158,6 +177,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -166,6 +186,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -174,6 +195,7 @@
       "caches_reads": false,
       "capacity": false,
       "index_ttl": 0,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -182,6 +204,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -190,6 +213,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -198,6 +222,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": true
@@ -206,6 +231,7 @@
       "caches_reads": false,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -214,6 +240,7 @@
       "caches_reads": false,
       "capacity": false,
       "index_ttl": 0,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -222,6 +249,7 @@
       "caches_reads": false,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -230,6 +258,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -238,6 +267,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -246,6 +276,7 @@
       "caches_reads": false,
       "capacity": false,
       "index_ttl": 0,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -254,6 +285,7 @@
       "caches_reads": false,
       "capacity": false,
       "index_ttl": 0,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": false
@@ -262,6 +294,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -270,6 +303,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -278,6 +312,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -286,6 +321,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 86400,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": true
@@ -294,6 +330,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": true,
       "storage_location": false,
       "supports_snapshot": false
@@ -302,6 +339,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -310,6 +348,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true
@@ -318,6 +357,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -326,6 +366,7 @@
       "caches_reads": false,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": false,
       "sizes_always_known": false,
       "storage_location": false,
       "supports_snapshot": false
@@ -334,6 +375,7 @@
       "caches_reads": true,
       "capacity": false,
       "index_ttl": 600,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "storage_location": true,
       "supports_snapshot": true

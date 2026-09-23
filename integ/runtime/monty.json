@@ -1036,6 +1036,39 @@
           }
         }
       ]
+    },
+    {
+      "id": "no_extended_attribute_calls",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import os; print([n for n in ('getxattr', 'listxattr', 'removexattr', 'setxattr') if hasattr(os, n)])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[]\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import os; os.listxattr('/data/t.txt')\"",
+          "expect": {
+            "exit": 1,
+            "stderr_contains": "module 'os' has no attribute 'listxattr'"
+          }
+        }
+      ]
     }
   ]
 }

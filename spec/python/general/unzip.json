@@ -131,6 +131,35 @@
     {
       "short": "-t",
       "type": "bool"
+    },
+    {
+      "multiple": true,
+      "short": "-x",
+      "type": "str"
+    },
+    {
+      "short": "-Z",
+      "type": "bool"
+    },
+    {
+      "short": "-1",
+      "type": "bool"
+    },
+    {
+      "short": "-2",
+      "type": "bool"
+    },
+    {
+      "short": "-s",
+      "type": "bool"
+    },
+    {
+      "short": "-m",
+      "type": "bool"
+    },
+    {
+      "short": "-h",
+      "type": "bool"
     }
   ],
   "positional": [

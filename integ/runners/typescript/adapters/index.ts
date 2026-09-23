@@ -25,7 +25,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 import { OPFSVFS, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
-import type { ConsistencyPolicy } from '@struktoai/mirage-node'
+import type { ReadSpec } from '@struktoai/mirage-node'
 import {
   AliyunVFS,
   BackblazeVFS,
@@ -128,7 +128,7 @@ export interface OpenConsistency extends Open {
 }
 
 export interface OpenOptions {
-  consistency?: ConsistencyPolicy
+  read?: ReadSpec
 }
 
 type MountMap = ConstructorParameters<typeof Workspace>[0]
@@ -149,16 +149,16 @@ interface OpenedWorkspaces {
  */
 function openWorkspaces(build: () => MountMap, options?: OpenOptions): OpenedWorkspaces {
   const opened: Workspace[] = []
-  const make = (consistency?: ConsistencyPolicy): ExecWorkspace => {
+  const make = (read?: ReadSpec): ExecWorkspace => {
     const ws = new Workspace(build(), {
       mode: MountMode.WRITE,
-      ...(consistency !== undefined ? { consistency } : {}),
+      ...(read !== undefined ? { read } : {}),
     })
     opened.push(ws)
     return ws as unknown as ExecWorkspace
   }
   return {
-    ws: make(options?.consistency),
+    ws: make(options?.read),
     shadow: () => make(),
     closeAll: async (): Promise<void> => {
       for (const ws of opened) await ws.close()
@@ -2022,11 +2022,11 @@ export const ADAPTERS: Record<string, (target: Target, options?: OpenOptions) =>
  */
 export async function openConsistency(
   target: Target,
-  consistency: ConsistencyPolicy,
+  read: ReadSpec,
 ): Promise<OpenConsistency | null> {
   const adapter = ADAPTERS[target.mounts[0].vfs]
   if (adapter === undefined) return null
-  const opened = await adapter(target, { consistency })
+  const opened = await adapter(target, { read })
   if (opened.shadow === undefined) {
     await opened.cleanup()
     return null

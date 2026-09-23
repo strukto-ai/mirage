@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../../utils/key_prefix.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
 import type { CommandFn, CommandOpts } from '../../config.ts'
+import * as helpers from '../../../shell/helpers.ts'
 import { rgGeneric } from './rg.ts'
 
 const ENC = new TextEncoder()
@@ -211,4 +212,56 @@ describe('rgGeneric --files-without-match on stdin', () => {
       ])
     }
   })
+})
+
+it.each([
+  [[], false],
+  [['/top1.txt'], false],
+  [['/top1.txt'], true],
+  [['/top1.txt', '/top2.txt'], false],
+] as const)('cancels streaming matches for paths=%j, -H=%s', async (paths, withFilename) => {
+  const controller = new AbortController()
+  const data = ENC.encode('hello '.repeat(100000) + '\n')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let closed = false
+  async function* source(): AsyncIterable<Uint8Array> {
+    try {
+      yield await Promise.resolve(data)
+      throw new Error('read beyond the matching line')
+    } finally {
+      closed = true
+    }
+  }
+  const original = helpers.byteOffset
+  const offset = vi.spyOn(helpers, 'byteOffset').mockImplementation((text, index) => {
+    timer ??= setTimeout(() => {
+      controller.abort()
+    }, 0)
+    return original(text, index)
+  })
+  async function scan(): Promise<void> {
+    const result = await rgGeneric(
+      paths.map(spec),
+      ['hello'],
+      {
+        ...opts({ o: true, byte_offset: true, H: withFilename }),
+        stdin: paths.length === 0 ? source() : null,
+        signal: controller.signal,
+      },
+      stat,
+      readdir,
+      source,
+    )
+    if (result === null) throw new Error('rg returned no result')
+    await materialize(result[0])
+  }
+  try {
+    await expect(scan()).rejects.toMatchObject({ name: 'AbortError' })
+    expect(offset.mock.calls.length).toBeGreaterThan(0)
+    expect(offset.mock.calls.length).toBeLessThan(100000)
+    expect(closed).toBe(true)
+  } finally {
+    clearTimeout(timer)
+    offset.mockRestore()
+  }
 })

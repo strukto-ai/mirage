@@ -394,13 +394,21 @@ describe('MountCore', () => {
     expect(code).toBe('ENOTEMPTY')
   })
 
-  it('round-trips advisory xattrs', async () => {
+  it('round-trips xattrs through the door', async () => {
     const core = await mkCore()
-    core.setxattr('/data/greeting.txt', 'user.tag', Buffer.from('v1'))
-    expect(core.getxattr('/data/greeting.txt', 'user.tag')?.toString()).toBe('v1')
-    expect(core.listxattr('/data/greeting.txt')).toContain('user.tag')
-    core.removexattr('/data/greeting.txt', 'user.tag')
-    expect(core.listxattr('/data/greeting.txt')).toEqual([])
+    await core.setxattr('/data/greeting.txt', 'user.tag', new TextEncoder().encode('v1'))
+    const value = await core.getxattr('/data/greeting.txt', 'user.tag')
+    expect(new TextDecoder().decode(value)).toBe('v1')
+    expect(await core.listxattr('/data/greeting.txt')).toContain('user.tag')
+    await core.removexattr('/data/greeting.txt', 'user.tag')
+    expect(await core.listxattr('/data/greeting.txt')).toEqual([])
+  })
+
+  it('refuses a missing attribute with ENODATA', async () => {
+    const core = await mkCore()
+    await expect(core.getxattr('/data/greeting.txt', 'user.absent')).rejects.toMatchObject({
+      code: 'ENODATA',
+    })
   })
 
   it('honors the root prefix when resolving', () => {

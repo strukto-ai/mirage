@@ -376,6 +376,66 @@ async def test_depth_walks_a_nested_or_repeated_start_point_on_its_own():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("line,stdout", [
+    (r"find d -type f -printf '%p\n' -exec cat {} \;",
+     "d/a.txt\na\nd/b.txt\nbb\nd/sub/c.txt\nx"),
+    (r"find d -type f -exec cat {} \; -printf '%f\n'",
+     "a\na.txt\nbb\nb.txt\nxc.txt\n"),
+    ("find d -type f -printf '%p ' -print",
+     "d/a.txt d/a.txt\nd/b.txt d/b.txt\nd/sub/c.txt d/sub/c.txt\n"),
+    ("find d -type f -printf '%f ' -printf '%s\\n'",
+     "a.txt 2\nb.txt 3\nc.txt 1\n"),
+    (r"find d -type f -exec grep -q x {} \; -printf 'hit %p\n'",
+     "hit d/sub/c.txt\n"),
+    (r"find d -type f -exec false \; -printf 'never %p\n'", ""),
+    ("find d -type f -printf '%f\\n' -exec echo batch {} +",
+     "a.txt\nb.txt\nc.txt\nbatch d/a.txt d/b.txt d/sub/c.txt\n"),
+    ("find d -type f -printf '<%f>' -print0",
+     "<a.txt>d/a.txt\0<b.txt>d/b.txt\0<c.txt>d/sub/c.txt\0"),
+])
+async def test_printf_runs_per_row_beside_other_actions(line, stdout):
+    # GNU findutils 4.10 runs the -a chain per row, in the order written:
+    # a failing `-exec ;` ends it before a later -printf, and a batched
+    # `-exec +` runs once after every row.
+    ws = await _exec_ws()
+    assert await _run_line(ws, line) == (stdout, "", 0)
+
+
+@pytest.mark.asyncio
+async def test_printf_measures_from_the_start_point_a_row_came_from():
+    # GNU: `find d d/sub` walks d/sub twice, once under each start point.
+    ws = await _exec_ws()
+    assert await _run_line(
+        ws, "find d d/sub -name c.txt -printf '%P %d|' -print") == (
+            "sub/c.txt 2|d/sub/c.txt\nc.txt 1|d/sub/c.txt\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_depth_orders_printf_rows():
+    ws = await _exec_ws()
+    assert await _run_line(ws, "find d -depth -printf '%p\\n'") == (
+        "d/a.txt\nd/b.txt\nd/sub/c.txt\nd/sub\nd\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_printf_renders_the_stat_find_already_holds():
+    # GNU stats a row once: -printf reads a row an earlier -delete removed
+    # only when a test or an earlier -printf statted it first, and
+    # otherwise reports it gone and exits 1. A format with no stat
+    # directive never looks.
+    ws = await _exec_ws()
+    out, err, _ = await _run_line(
+        ws, "echo 1 > d/f; find d -name f -delete -printf '%s %p\\n'; "
+        "echo rc=$?; echo 1 > d/f; find d -name f -delete -printf '%p\\n'; "
+        "echo rc=$?; echo 1 > d/f; "
+        "find d -name f -printf '%s|' -delete -printf '%s\\n'; echo rc=$?; "
+        "echo 1 > d/f; find d -name f -size -2k -delete -printf '%s\\n'; "
+        "echo rc=$?")
+    assert out == "rc=1\nd/f\nrc=0\n2|2\nrc=0\n2\nrc=0\n"
+    assert err == "find: 'd/f': No such file or directory\n"
+
+
+@pytest.mark.asyncio
 async def test_ls_escapes_the_name_as_findutils_does():
     # GNU findutils 4.10 `-ls` keeps one row on one line: a space, a
     # backslash and a double quote take a backslash, a newline is `\n`,
@@ -542,13 +602,16 @@ async def test_print0_preserves_newlines_through_mount_fanout():
 
 
 @pytest.mark.asyncio
-async def test_delete_under_or_is_refused_before_any_file_is_removed():
+async def test_delete_under_or_removes_only_the_other_arm():
+    # GNU findutils 4.10.0: `keep` short-circuits the -o, everything else
+    # reaches -delete, and the directory holding `keep` cannot go.
     ws = _ws()
     await ws.shell('mkdir d; touch d/keep d/remove')
     io = await ws.shell('find d -name keep -o -delete')
     assert io.exit_code == 1
-    assert "supported only in a top-level" in await io.stderr_str()
-    io = await ws.shell('test -f d/keep && test -f d/remove')
+    assert await io.stderr_str(
+    ) == "find: cannot delete 'd': Directory not empty\n"
+    io = await ws.shell('test -f d/keep && test ! -e d/remove')
     assert io.exit_code == 0
 
 

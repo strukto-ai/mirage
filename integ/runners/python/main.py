@@ -25,7 +25,8 @@ import adapters  # noqa: E402
 import harness  # noqa: E402
 
 from mirage.concurrency import ConcurrencyLimiter  # noqa: E402
-from mirage.types import ConsistencyPolicy  # noqa: E402
+from mirage.types import ReadPolicy  # noqa: E402
+from mirage.types import DEFAULT_READ_TTL, ReadSpec
 
 HOST = "python"
 
@@ -56,11 +57,27 @@ def _emit_or_record(emit: list[dict] | None,
                             notes))
 
 
+def read_spec_of(case: dict) -> ReadSpec:
+    """The read policy a scenario case selects.
+
+    The value is a scenario selector, not a config value: a case names
+    the policy its two workspaces run under. `ttl` rides beside it
+    because `bounded` takes a bound.
+
+    Args:
+        case (dict): the integ case.
+    """
+    policy = ReadPolicy(case["read"])
+    ttl = case.get("ttl")
+    return ReadSpec(policy=policy,
+                    ttl=DEFAULT_READ_TTL if ttl is None else int(ttl))
+
+
 async def run_consistency_case(target: dict, case: dict,
                                report: harness.Report | None,
                                emit: list[dict] | None) -> None:
-    policy = ConsistencyPolicy(case["consistency"])
-    read_ws, mutate, cleanup = await adapters.open_consistency(target, policy)
+    spec = read_spec_of(case)
+    read_ws, mutate, cleanup = await adapters.open_consistency(target, spec)
     try:
         exit_code, out = await harness.run_scenario(read_ws, mutate,
                                                     case["scenario"])
@@ -109,7 +126,7 @@ async def run_target(target: dict, cases: list[dict], root: Path,
             "sessions": target.get("sessions"),
         })
         for case in selected:
-            if "consistency" in case:
+            if "read" in case:
                 continue
             bound = harness.bind_mount(case, primary)
             ran = await harness.run_case(ws, bound, reasons)
@@ -119,7 +136,7 @@ async def run_target(target: dict, cases: list[dict], root: Path,
     finally:
         await cleanup()
     for case in selected:
-        if "consistency" in case:
+        if "read" in case:
             await run_consistency_case(target, case, report, emit)
 
 

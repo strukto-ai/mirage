@@ -191,12 +191,79 @@ export function parseMountMode(value: string): MountMode {
   throw new Error(`invalid mount mode: '${value}'`)
 }
 
-export const ConsistencyPolicy = Object.freeze({
-  LAZY: 'lazy',
-  ALWAYS: 'always',
+/**
+ * How a mount decides whether cached bytes may be served.
+ *
+ * FRESH revalidates against the backend's content token before serving a
+ * cached copy; BOUNDED serves without revalidating, within the staleness
+ * bound the mount declares.
+ *
+ * PINNED names the content a commit's fingerprint records. There is no
+ * version layer to pin to, so a mount declaring it is refused at mount time
+ * rather than quietly degraded to head: the vocabulary is published, so
+ * someone will type it, and an informative refusal costs one branch over a
+ * generic invalid-value error.
+ */
+export const ReadPolicy = Object.freeze({
+  FRESH: 'fresh',
+  BOUNDED: 'bounded',
+  PINNED: 'pinned',
 } as const)
 
-export type ConsistencyPolicy = (typeof ConsistencyPolicy)[keyof typeof ConsistencyPolicy]
+export type ReadPolicy = (typeof ReadPolicy)[keyof typeof ReadPolicy]
+
+/**
+ * Seconds. Matches IndexConfig.ttl (cache/index/config.ts) so bodies and
+ * listings expire together out of the box.
+ */
+export const DEFAULT_READ_TTL = 600
+
+/**
+ * One mount's read policy and the bound that goes with it.
+ *
+ * The bound is set under FRESH too, so every cache entry carries one. Two
+ * workspaces sharing one Redis cache under different policies would otherwise
+ * write entries the other refuses to serve, and bounce them between cold reads
+ * indefinitely.
+ *
+ * It is stamped when the entry is written and enforced by the store, so the
+ * bound that applies is the writing mount's, not the reading mount's. Those are
+ * the same mount inside one workspace; they differ across a shared cache, a
+ * lowered `ttl` and a restored snapshot, and there the older bound stands until
+ * the entry expires. Making the reader authoritative needs a write timestamp
+ * every store can read back, which redis does not keep.
+ */
+export interface ReadSpec {
+  readonly policy: ReadPolicy
+  readonly ttl: number
+}
+
+/**
+ * The policy a mount takes when it declares none, and the one pinned onto the
+ * three synthetic anchors (`/dev`, the history view, the implicit `/` root).
+ *
+ * Those three are installed outside `normalizeMounts`, so they never meet the
+ * capability verdict; none of them caches reads, so inheriting a workspace-level
+ * `fresh` would stamp on them exactly the combination the verdict refuses.
+ */
+export const DEFAULT_READ_SPEC: ReadSpec = Object.freeze({
+  policy: ReadPolicy.BOUNDED,
+  ttl: DEFAULT_READ_TTL,
+})
+
+/**
+ * What the cache write path needs to know about a path's mount.
+ *
+ * Answered per path against the mount table pinned at command start, so a
+ * fill that lands after the command is stamped with the bound of the mount
+ * that produced the bytes rather than whatever holds the prefix by then.
+ * `cacheable` is read first and short-circuits, so `ttl` is never consulted
+ * for a path that is not being cached.
+ */
+export interface CacheFacts {
+  readonly cacheable: boolean
+  readonly ttl: number
+}
 
 /**
  * Behaviour when a remote VFS's live fingerprint differs from the

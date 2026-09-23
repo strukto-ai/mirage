@@ -30,17 +30,21 @@ function childPath(parent: PathSpec, name: string): PathSpec {
 }
 
 // Multiple sources require the directory form, and GNU distinguishes why it
-// is unusable: an absent target is "No such file or directory", an existing
-// non-directory is "Not a directory" (identical wording in cp and mv).
+// is unusable: an absent target is "No such file or directory"; an existing
+// non-directory is "Not a directory", and so is a target that can never
+// exist because a plain file stands in its chain or behind its slash
+// (`cp a b reg/x`, `cp a b reg/`), which the destination probe reports as
+// its strerror (identical wording in cp and mv).
 export function copyTargets(
   sources: PathSpec[],
   dst: PathSpec,
   dstIsDir: boolean,
   dstExists = true,
+  dstErr: string | null = null,
 ): [PathSpec, PathSpec][] {
   if (sources.length > 1 && !dstIsDir) {
-    if (!dstExists) throw enoent(`target '${dst.virtual}'`)
-    throw enotdir(`target '${dst.virtual}'`)
+    if (!dstExists && dstErr !== 'Not a directory') throw enoent(`target '${dst.rawPath}'`)
+    throw enotdir(`target '${dst.rawPath}'`)
   }
   if (!dstIsDir) {
     const first = sources[0]

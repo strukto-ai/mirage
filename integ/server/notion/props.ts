@@ -16,7 +16,7 @@ import type { C } from './config.ts'
 import { plainTextOf } from './text.ts'
 import { normalizeRichText } from './text.ts'
 import type { JsonValue } from '../kit/typescript/index.ts'
-import type { DatabaseRow, Json } from './types.ts'
+import type { DatabaseRow, Json, MetaRow } from './types.ts'
 import { asObject } from './wire.ts'
 
 export function titleProp(title: string, column = 'title'): Json {
@@ -155,6 +155,44 @@ export function normalizeProperties(properties: Json, schema: Json): Json {
     copy.type = kind
     copy[kind] = normalizeValue(column, kind, prop[kind] ?? null)
     out[key] = copy
+  }
+  return out
+}
+
+// The value an unset column answers with. A computed column (formula, rollup,
+// unique_id, ...) and status have none here: their value is Notion's to derive,
+// and the fake leaves them out rather than invent one.
+function emptyValue(type: string, meta: MetaRow): JsonValue | undefined {
+  if (['title', 'rich_text', 'multi_select', 'people', 'files'].includes(type)) return []
+  if (['number', 'select', 'date', 'url', 'email', 'phone_number'].includes(type)) return null
+  if (type === 'checkbox') return false
+  if (type === 'created_time') return meta.createdTime
+  if (type === 'last_edited_time') return meta.lastEditedTime
+  if (type === 'created_by') return { object: 'user', id: meta.createdBy }
+  if (type === 'last_edited_by') return { object: 'user', id: meta.lastEditedBy }
+  return undefined
+}
+
+// A database row carries every column of its schema, an unset one empty, in
+// the schema's order: that is what live Notion answers a create with (API
+// reference), and it is what every row in the MCP-Atlas recordings carries. A
+// written property the schema does not name is kept, after the columns.
+export function fillSchema(properties: Json, schema: Json, meta: MetaRow): Json {
+  const out: Json = {}
+  for (const [name, spec] of Object.entries(schema)) {
+    const written = properties[name]
+    if (written !== undefined) {
+      out[name] = written
+      continue
+    }
+    const column = asObject(spec)
+    const type = typeof column.type === 'string' ? column.type : ''
+    const value = emptyValue(type, meta)
+    if (value === undefined) continue
+    out[name] = { id: column.id ?? null, type, [type]: value }
+  }
+  for (const [name, value] of Object.entries(properties)) {
+    if (!(name in out)) out[name] = value
   }
   return out
 }

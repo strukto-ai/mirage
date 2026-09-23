@@ -98,6 +98,28 @@ export function matchOffset(lineStart: number, line: string, index: number): num
   return lineStart + byteOffset(line, index)
 }
 
+/** Incremental byte offsets for monotonically increasing match indices on one line. */
+export class MatchOffsets {
+  private index = 0
+
+  constructor(
+    private position: number,
+    private readonly line: string,
+  ) {}
+
+  at(index: number): number {
+    // A non-Unicode regex can stop between a surrogate pair. Keep that pair
+    // for the next step, while matching the old prefix encoder's replacement.
+    const before = this.line.charCodeAt(index - 1)
+    const after = this.line.charCodeAt(index)
+    const split = before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff
+    const end = split ? index - 1 : index
+    this.position += byteOffset(this.line.slice(this.index, end), end - this.index)
+    this.index = end
+    return this.position + (split ? 3 : 0)
+  }
+}
+
 /**
  * grep's line-number and byte-offset fields, in GNU's fixed order.
  *

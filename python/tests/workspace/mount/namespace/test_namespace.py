@@ -454,3 +454,32 @@ async def test_link_stats_below_does_not_match_a_sibling_name_prefix(
     await namespace.symlink("/database/b", "/t2", 1.0)
     found = [path for path, _ in namespace.link_stats_below("/data")]
     assert found == ["/data/a"]
+
+
+@pytest.mark.asyncio
+async def test_xattrs_live_on_the_node_and_leave_with_the_last_one(namespace):
+    await namespace.set_xattr("/data/f.txt", "user.a", b"one")
+    await namespace.set_attrs("/data/g.txt", mode=0o600)
+    await namespace.set_xattr("/data/g.txt", "user.b", b"two")
+    assert namespace.xattrs("/data/f.txt") == {"user.a": b"one"}
+    await namespace.remove_xattr("/data/f.txt", "user.a")
+    assert namespace.meta_for("/data/f.txt") is None
+    await namespace.remove_xattr("/data/g.txt", "user.b")
+    assert namespace.meta_for("/data/g.txt").mode == 0o600
+
+
+def test_xattrs_ride_the_flat_fields_as_base64():
+    meta = NodeMeta(mode=0o644, xattrs={"user.bin": b"\x00\xff"})
+    fields = meta.to_fields()
+    assert fields["xattr:user.bin"] == "AP8="
+    assert NodeMeta.from_fields(fields) == meta
+
+
+@pytest.mark.asyncio
+async def test_xattrs_survive_a_store_round_trip(registry):
+    store = RAMNamespaceStore()
+    first = Namespace(registry, store=store)
+    await first.set_xattr("/data/f.txt", "user.a", b"one")
+    second = Namespace(registry, store=store)
+    await second.ensure_loaded()
+    assert second.xattrs("/data/f.txt") == {"user.a": b"one"}

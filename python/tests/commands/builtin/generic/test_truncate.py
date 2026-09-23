@@ -14,8 +14,9 @@
 
 import pytest
 
-from mirage.commands.builtin.generic.truncate import parse_size
+from mirage.commands.builtin.generic.truncate import parse_size, truncate
 from mirage.commands.errors import UsageError
+from mirage.types import PathSpec
 
 
 def test_plain_and_operation_sizes():
@@ -133,3 +134,36 @@ def test_division_by_zero():
     with pytest.raises(UsageError) as exc:
         parse_size("/0", 10)
     assert str(exc.value) == "truncate: division by zero"
+
+
+def _operand(path: str, raw: str) -> PathSpec:
+    return PathSpec(virtual=path,
+                    directory="/",
+                    vfs_path=path.strip("/"),
+                    raw_path=raw)
+
+
+@pytest.mark.asyncio
+async def test_a_slashed_operand_is_settled_by_the_truncate_op():
+    # GNU opens with O_CREAT before it stats, so `missing/` and `reg/` are
+    # the open's EISDIR, not the stat's miss; a bare operand keeps its
+    # own ENOENT.
+    lengths: list[tuple[str, int]] = []
+
+    async def stat(path):
+        raise FileNotFoundError(path.virtual)
+
+    async def truncate_fn(path, length) -> None:
+        lengths.append((path.raw_path, length))
+
+    await truncate([_operand("/missing", "/missing/")],
+                   size="4",
+                   stat=stat,
+                   truncate_fn=truncate_fn)
+    assert lengths == [("/missing/", 4)]
+    with pytest.raises(FileNotFoundError):
+        await truncate([_operand("/missing", "/missing")],
+                       size="4",
+                       stat=stat,
+                       truncate_fn=truncate_fn)
+    assert lengths == [("/missing/", 4)]

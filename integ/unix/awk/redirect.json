@@ -1,0 +1,314 @@
+{
+  "cases": [
+    {
+      "id": "awk_split_dynamic",
+      "seq": 987200,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a 1\\nb 2\\na 3\\n' | awk '{ print $2 > (\"/data/awk-split-\" $1 \".txt\") }'; cat /data/awk-split-a.txt /data/awk-split-b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n3\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_open_once",
+      "seq": 987201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo old > /data/out; awk 'BEGIN { print \"a\" > \"/data/out\"; print \"b\" > \"/data/out\" }'; cat /data/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_append",
+      "seq": 987202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo old > /data/out; awk 'BEGIN { print \"a\" >> \"/data/out\"; print \"b\" >> \"/data/out\" }'; cat /data/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "old\na\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_reopen",
+      "seq": 987203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk 'BEGIN { print \"a\" > \"/data/out\"; print close(\"/data/out\"); print \"b\" > \"/data/out\"; print close(\"missing\") }'; cat /data/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n-1\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_printf_relative",
+      "seq": 987204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cd /data; awk 'BEGIN { printf \"%s:%d\", \"hi\", 7 > \"out\"; printf \"!\" > \"out\" }'; cat out",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi:7!",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_empty_write",
+      "seq": 987205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo old > /data/out; awk 'BEGIN { printf \"\" > \"/data/out\" }'; wc -c < /data/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_begin_main_end",
+      "seq": 987206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'x\\ny\\n' | awk 'BEGIN { print \"start\" > \"/data/out\" } { print > \"/data/out\" } END { print \"end\" > \"/data/out\" }'; cat /data/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "start\nx\ny\nend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_exit_end",
+      "seq": 987207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk 'BEGIN { print \"start\" > \"/data/out\"; exit 3 } END { print \"end\" > \"/data/out\" }'; echo $?; cat /data/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\nstart\nend\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_mixed_modes",
+      "seq": 987208,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo old > /data/out; awk 'BEGIN { print \"a\" >> \"/data/out\"; print \"b\" > \"/data/out\"; close(\"/data/out\"); print \"c\" >> \"/data/out\" }'; cat /data/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "old\na\nb\nc\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_fatal_preserves_writes",
+      "seq": 987209,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk 'BEGIN { print \"before\" > \"/data/out\"; print 1/0 } END { print \"end\" > \"/data/out\" }'; echo $?; cat /data/out",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\nbefore\n",
+        "stderr": "awk: division by zero\n"
+      }
+    }
+  ]
+}

@@ -73,6 +73,13 @@ export interface BlockRow {
   createdBy: string
   lastEditedBy: string
 }
+export interface UserRow {
+  id: string
+  name: string
+  avatarUrl: string | null
+  type: string
+  detailJson: string
+}
 export interface CommentRow {
   id: string
   parentType: string
@@ -82,4 +89,10 @@ export interface CommentRow {
   createdTime: string
   lastEditedTime: string
   createdBy: string
+}
+
+export interface BlockSpec {
+  type: string
+  payload: Json
+  children: BlockSpec[]
 }

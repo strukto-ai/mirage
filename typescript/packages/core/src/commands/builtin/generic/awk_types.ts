@@ -12,42 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const AwkCmpOp = {
-  EQ: '==',
-  NE: '!=',
-  GT: '>',
-  LT: '<',
-  GE: '>=',
-  LE: '<=',
-  MATCH: '~',
-  NOT_MATCH: '!~',
-} as const
-export type AwkCmpOp = (typeof AwkCmpOp)[keyof typeof AwkCmpOp]
-
-export const AwkBoolOp = {
-  AND: '&&',
-  OR: '||',
-} as const
-export type AwkBoolOp = (typeof AwkBoolOp)[keyof typeof AwkBoolOp]
-
-export const AwkBlock = {
-  BEGIN: 'BEGIN',
-  END: 'END',
-} as const
-export type AwkBlock = (typeof AwkBlock)[keyof typeof AwkBlock]
-
-export const AwkBuiltin = {
-  NR: 'NR',
-  NF: 'NF',
-  REC: '$0',
-} as const
-export type AwkBuiltin = (typeof AwkBuiltin)[keyof typeof AwkBuiltin]
-
-export const FIELD_PREFIX = '$'
-export const PRINT_STMT = 'print'
-export const CMP_OP_PATTERN = /==|!=|>=|<=|!~|~|>|</
-
 export const USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
+
+export const FS_ESCAPES: Readonly<Record<string, string>> = { t: '\t', n: '\n', '\\': '\\' }
 
 export interface AwkFlags {
   readonly fieldSeparator: string | null

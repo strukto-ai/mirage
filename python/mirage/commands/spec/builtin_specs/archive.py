@@ -102,6 +102,23 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-q"),
             Option(short="-p"),
             Option(short="-t"),
+            # Info-ZIP reads -x as a variadic list of patterns; mirage
+            # takes one per occurrence, since its spec has no variadic
+            # option value and `-x a -x b` says the same thing (zip's -x
+            # has the same shape).
+            Option(short="-x", type="str", multiple=True),
+            # -Z is ZipInfo mode: the archive is listed from its central
+            # directory instead of extracted, and the other letters are
+            # read as zipinfo's (-1/-2 names only, -s short, -m medium and
+            # -l long rows, -h header, -t totals). Info-ZIP demands -Z
+            # first; the flag bag has no order, so mirage takes it
+            # anywhere in the cluster.
+            Option(short="-Z"),
+            Option(short="-1"),
+            Option(short="-2"),
+            Option(short="-s"),
+            Option(short="-m"),
+            Option(short="-h"),
         ),
         # The archive is the only path operand; everything after it is an
         # Info-ZIP member pattern matched against archive entry names,

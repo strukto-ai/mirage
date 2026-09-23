@@ -139,6 +139,11 @@ export function treeInputsFromState(state: WorkspaceStateDict): TreeInputs {
       index: mount.index,
       prefix,
       mode: mount.mode,
+      // Carried from v4 on. Omitting it made a commit round trip reset
+      // every mount's read policy, which was invisible only because
+      // nothing read the key.
+      read: mount.read,
+      ttl: mount.ttl,
       vfsClass: mount.vfs_class,
       vfsRef: (mount.vfs_ref as string | null | undefined) ?? null,
       vfsState,
@@ -179,6 +184,8 @@ export function toState(
       index: mount.index,
       prefix,
       mode: mount.mode,
+      read: mount.read,
+      ttl: mount.ttl,
       vfs_class: mount.vfsClass,
       // A meta committed before the ref was recorded reads as null, the
       // answer for a VFS constructed in code.

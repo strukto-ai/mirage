@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.types import PathSpec
-from mirage.utils.errors import eexist, enoent, enotdir
+from mirage.utils.errors import eexist, eisdir, enoent, enotdir
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
 from mirage.vfs.ram.store import RAMStore
@@ -48,6 +48,28 @@ def check_dest_parents(store: RAMStore, dst_spec: PathSpec, d: str) -> None:
         if ancestor in store.files:
             raise enotdir(dst_spec)
         raise enoent(dst_spec)
+
+
+def check_write_target(store: RAMStore, spec: PathSpec, key: str) -> None:
+    """Reject a byte write whose target is a directory.
+
+    ``open(2)`` for writing answers a directory with EISDIR whatever the
+    caller meant to do next, so bash prints ``d: Is a directory`` for
+    ``> d`` and ``>> d`` alike and tee and truncate say the same. The
+    real-filesystem backends get this from the kernel; a keyed store has
+    to ask its own directory table, or the bytes land on a key the
+    directory shadows and are unreachable from then on.
+
+    Args:
+        store (RAMStore): The backing store.
+        spec (PathSpec): The operand, reported in the error.
+        key (str): Normalized target key.
+
+    Raises:
+        IsADirectoryError: The target is a directory.
+    """
+    if key in store.dirs:
+        raise eisdir(spec)
 
 
 def check_mkdir_target(store: RAMStore, spec: PathSpec, key: str,

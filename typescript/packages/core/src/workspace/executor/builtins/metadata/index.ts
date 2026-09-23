@@ -15,5 +15,7 @@
 export { handleChgrp } from './chgrp.ts'
 export { handleChmod } from './chmod.ts'
 export { handleChown } from './chown.ts'
+export { handleGetfattr } from './getfattr.ts'
 export { parseGroup, parseOwner, parseTouchStamp } from './metadata.ts'
+export { handleSetfattr } from './setfattr.ts'
 export { handleTouch } from './touch.ts'

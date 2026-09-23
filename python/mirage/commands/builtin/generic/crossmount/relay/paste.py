@@ -20,12 +20,15 @@ from mirage.commands.builtin.generic.paste import paste as generic_paste
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
 
-async def run_paste(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
-                    dispatch: DispatchFn) -> CrossResult:
+async def run_paste(scopes: list[PathSpec],
+                    flag_kwargs: dict[str, FlagValue],
+                    dispatch: DispatchFn,
+                    stdin: ByteSource | None = None) -> CrossResult:
     """Paste files on different mounts via the shared generic paste.
 
     Pure wiring: every operand is read through dispatch-relayed
@@ -39,6 +42,7 @@ async def run_paste(scopes: list[PathSpec], flag_kwargs: dict[str, FlagValue],
     fl = FlagView(flag_kwargs, spec=SPECS["paste"])
     d = fl.as_str("delimiters")
     return await generic_paste(flat_scopes(scopes),
+                               stdin=stdin,
                                read_bytes=functools.partial(
                                    relay, dispatch, "read"),
                                delimiters=d if d else "\t",

@@ -34,11 +34,12 @@ import {
   backupRaw,
   copyEntries,
   cpWalk,
-  entryKind,
+  destKind,
   sourceKind,
   makeBackup,
   overwriteGate,
   overwriteTypeError,
+  slashRefusesFile,
   splitOperands,
   suffixFlag,
   targetDirError,
@@ -306,6 +307,7 @@ export async function mvGeneric(
   let dst: PathSpec
   let dstIsDir: boolean
   let dstExists: boolean
+  let dstErr: string | null = null
   if (dstOperand === null) {
     const firstSource = sources[0]
     if (firstSource === undefined) return [null, new IOResult()]
@@ -325,9 +327,10 @@ export async function mvGeneric(
     dstExists = true
   } else {
     dst = dstOperand
-    const probe = await entryKind(stat, dst)
+    const probe = await destKind(stat, dst)
     dstExists = probe.exists
     dstIsDir = probe.isDir
+    dstErr = probe.strerror
   }
   let versionReaddir = readdir
   if (versionReaddir === undefined && isPrimitiveMove(strategy)) {
@@ -343,10 +346,10 @@ export async function mvGeneric(
   const writes: Record<string, ByteSource> = {}
   const lines: string[] = []
   const errors: string[] = []
-  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists)) {
+  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr)) {
     const { exists: srcExists, isDir: srcIsDir, strerror: srcErr } = await sourceKind(stat, src)
     if (!srcExists) {
-      errors.push(`mv: cannot stat '${src.virtual}': ${String(srcErr)}`)
+      errors.push(`mv: cannot stat '${src.rawPath}': ${String(srcErr)}`)
       continue
     }
     if (keyOf(src) === keyOf(target)) {
@@ -371,10 +374,26 @@ export async function mvGeneric(
       )
       continue
     }
-    const { exists: targetExists, isDir: targetIsDir } =
+    const probe =
       !flags.noTargetDir && target.virtual === dst.virtual
-        ? { exists: dstExists, isDir: dstIsDir }
-        : await entryKind(stat, target)
+        ? { exists: dstExists, isDir: dstIsDir, strerror: dstErr }
+        : await destKind(stat, target)
+    const { exists: targetExists, isDir: targetIsDir, strerror: targetErr } = probe
+    // mv's own order: the destination's stat refuses before the rename
+    // does. A chain that is merely absent is left to the backend rename
+    // below, which answers ENOENT in the same words (and on a dirless
+    // store may well succeed), unless a slash asked for a directory a
+    // file source can never be.
+    if (targetErr === 'Not a directory') {
+      errors.push(`mv: cannot stat '${target.rawPath}': Not a directory`)
+      continue
+    }
+    if (slashRefusesFile(target, targetExists, srcIsDir)) {
+      errors.push(
+        `mv: cannot move '${src.virtual}' to '${target.rawPath}': ${targetErr ?? 'Not a directory'}`,
+      )
+      continue
+    }
     const mismatch = overwriteTypeError('mv', src, srcIsDir, target, targetExists, targetIsDir)
     if (mismatch !== null) {
       errors.push(mismatch)

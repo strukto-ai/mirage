@@ -593,5 +593,27 @@
       "lastEditedBy": "user-2"
     }
   ],
-  "comments": []
+  "comments": [],
+  "users": [
+    {
+      "id": "user-1",
+      "name": "Integ Author",
+      "avatarUrl": null,
+      "type": "person",
+      "detailJson": {
+        "email": "author@notion.example",
+        "email_verified": true
+      }
+    },
+    {
+      "id": "user-2",
+      "name": "Integ Editor",
+      "avatarUrl": null,
+      "type": "person",
+      "detailJson": {
+        "email": "editor@notion.example",
+        "email_verified": true
+      }
+    }
+  ]
 }

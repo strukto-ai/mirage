@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stdinStream } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
@@ -35,6 +36,7 @@ export async function sedGeneric(
   write: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('sed'))
+  if (!fl.asBool('i')) stream = stdinStream(stream, opts.stdin)
   // The script comes from -e expressions and -f script files (joined with
   // newlines, -e then -f as grep does) when any were given, otherwise from the
   // first positional operand.

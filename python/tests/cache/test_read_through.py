@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
+
 import pytest
 
 from mirage.cache.context import push_cache_manager
@@ -19,6 +21,7 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.cache.read_through import (cache_aware_read_bytes,
                                        cache_aware_read_stream)
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -155,4 +158,21 @@ async def test_read_stream_captures_manager_before_drain():
     push_cache_manager(prev)
     out = await _drain(source)
     assert out == b"payload"
+    assert backend.stream_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_stdin_wrapper_preserves_file_cache_context():
+    backend = _CountingBackend(b"changed")
+    manager = await _warm_manager(b"cached")
+    reader = stdin_stream(
+        partial(cache_aware_read_stream(backend.read_stream), None), b"pipe")
+    prev = push_cache_manager(manager)
+    try:
+        source = reader(_spec())
+    finally:
+        push_cache_manager(prev)
+    assert await _drain(source) == b"cached"
+    assert await _drain(reader(PathSpec.from_str_path("-"))) == b"pipe"
+    assert await _drain(reader(PathSpec.from_str_path("-"))) == b""
     assert backend.stream_calls == 0

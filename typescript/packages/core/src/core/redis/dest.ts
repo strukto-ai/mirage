@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../types.ts'
-import { eexist, enoent, enotdir } from '../../utils/errors.ts'
+import { eexist, eisdir, enoent, enotdir } from '../../utils/errors.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { ancestors } from '../../utils/path.ts'
 import type { RedisStoreLike } from '../../vfs/redis/store.ts'
@@ -62,6 +62,19 @@ export async function checkDestParents(
 // with a file key: -p added it anyway, the directory shadowed the file, and
 // reading it started reporting EISDIR while the bytes stayed orphaned in the
 // store. Pinned against GNU coreutils in docker.
+// open(2) for writing answers a directory with EISDIR whatever the caller
+// meant to do next, so bash prints `d: Is a directory` for `> d` and `>> d`
+// alike and tee and truncate say the same. A real filesystem gets this from
+// the kernel; a keyed store has to ask its own directory table, or the bytes
+// land on a key the directory shadows and are unreachable from then on.
+export async function checkWriteTarget(
+  store: RedisStoreLike,
+  spec: PathSpec,
+  key: string,
+): Promise<void> {
+  if (await store.hasDir(key)) throw eisdir(spec)
+}
+
 export async function checkMkdirTarget(
   store: RedisStoreLike,
   spec: PathSpec,

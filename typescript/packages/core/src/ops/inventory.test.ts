@@ -79,6 +79,7 @@ const TABLES = {
 
 const OPS_INVENTORY: Record<string, Row[]> = {
   box: [
+    ['append', 'box', '', true],
     ['create', 'box', '', true],
     ['mkdir', 'box', '', true],
     ['read', 'box', '', false],
@@ -98,6 +99,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'chroma', '', false],
   ],
   databricks_volume: [
+    ['append', 'databricks_volume', '', true],
     ['create', 'databricks_volume', '', true],
     ['mkdir', 'databricks_volume', '', true],
     ['read', 'databricks_volume', '', false],
@@ -116,6 +118,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'discord', '', false],
   ],
   dropbox: [
+    ['append', 'dropbox', '', true],
     ['create', 'dropbox', '', true],
     ['mkdir', 'dropbox', '', true],
     ['read', 'dropbox', '', false],
@@ -135,6 +138,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'gdocs', '', false],
   ],
   gdrive: [
+    ['append', 'gdrive', '', true],
     ['create', 'gdrive', '', true],
     ['mkdir', 'gdrive', '', true],
     ['read', 'gdrive', '', false],
@@ -214,6 +218,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'notion', '', false],
   ],
   onedrive: [
+    ['append', 'onedrive', '', true],
     ['create', 'onedrive', '', true],
     ['mkdir', 'onedrive', '', true],
     ['read', 'onedrive', '', false],
@@ -275,6 +280,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'slack', '', false],
   ],
   sharepoint: [
+    ['append', 'sharepoint', '', true],
     ['create', 'sharepoint', '', true],
     ['mkdir', 'sharepoint', '', true],
     ['read', 'sharepoint', '', false],

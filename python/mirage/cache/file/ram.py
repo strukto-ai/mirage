@@ -20,7 +20,7 @@ from typing import Any
 
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
-from mirage.cache.file.utils import default_fingerprint_async, parse_limit
+from mirage.cache.file.utils import parse_limit
 from mirage.cache.invalidation import Invalidation
 from mirage.cache.lock import KeyLockMixin
 from mirage.vfs.ram import RAMVFS
@@ -73,8 +73,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         stamp = self._invalidation.enter(key)
         try:
             async with self._lock_for(key):
-                if fingerprint is None:
-                    fingerprint = await default_fingerprint_async(data)
                 if self._invalidation.stale(key, stamp):
                     return
                 if key in self._entries:
@@ -83,7 +81,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 entry = CacheEntry(
                     size=len(data),
                     cached_at=int(time.time()),
-                    fingerprint=fingerprint,
+                    fingerprint=fingerprint or None,
                     ttl=ttl,
                 )
                 self._entries[key] = entry
@@ -104,8 +102,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 existing = self._entries.get(key)
                 if existing is not None and not existing.expired:
                     return False
-                if fingerprint is None:
-                    fingerprint = await default_fingerprint_async(data)
                 if self._invalidation.stale(key, stamp):
                     return False
                 if key in self._entries:
@@ -114,7 +110,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 entry = CacheEntry(
                     size=len(data),
                     cached_at=int(time.time()),
-                    fingerprint=fingerprint,
+                    fingerprint=fingerprint or None,
                     ttl=ttl,
                 )
                 self._entries[key] = entry
@@ -150,7 +146,18 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         entry = self._entries.get(key)
         if entry is None:
             return False
-        return entry.fingerprint == remote_fingerprint
+        # An entry that carries no token verifies against nothing, and
+        # says so here rather than relying on the caller to ask only when
+        # it holds one. Without the first clause a caller arriving with
+        # no remote token compares None to None and is told the copy is
+        # fresh; the redis store, whose meta key is simply absent, would
+        # answer False for the same pair.
+        return (entry.fingerprint is not None
+                and entry.fingerprint == remote_fingerprint)
+
+    async def is_unbounded(self, key: str) -> bool:
+        entry = self._entries.get(key)
+        return entry is not None and entry.ttl is None
 
     async def clear(self) -> None:
         self._invalidation.invalidate_all()

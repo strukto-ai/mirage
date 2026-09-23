@@ -26,7 +26,9 @@ const DEC = new TextDecoder()
 
 // Grammar, shared with `bc.py` so the two hosts parse one language
 // (precedence low to high):
-//   statement := 'halt' | assign | expr
+//   statement := 'halt' | string | 'print' print_list | assign | expr
+//   print_list:= element { ',' element }
+//   element   := string | expr
 //   expr      := assign | additive
 //   assign    := target ('='|'+='|'-='|'*='|'/='|'%='|'^=') expr
 //   additive  := term   { (+|-) term }
@@ -38,6 +40,16 @@ const DEC = new TextDecoder()
 //   target    := name | 'scale' | 'ibase' | 'obase' | 'last' | '.'
 //   builtin   := sqrt | length | scale
 //   func      := s | c | a | l | e   (all need -l)
+//   string    := '"' [^"]* '"'
+// A statement's output is rendered as it is reached rather than at the
+// end, because `obase`, `scale` and `last` can all change partway down a
+// `print` list: `print 255, obase=16` writes `255` and then `10`.
+// A string is a statement and never an expression, so `1+"a"` is a syntax
+// error, and its token runs to the next `"` anywhere in the input --
+// across newlines, and past a `;`, a `#` or a `/*` -- because a backslash
+// never escapes the closing quote. A `"` the input never closes is not a
+// token at all: GNU's lexer has no rule it matches, so the quote is
+// reported as an illegal character and scanning resumes right after it.
 // There is no unary `+`: GNU's lexer has no such operator, so `+5` and
 // `1+ +2` are both syntax errors, and `++`/`--` are single tokens, which
 // is what makes `1++2` one too rather than `1 + (+2)`.
@@ -453,6 +465,7 @@ const SQRT_NAME = 'sqrt'
 const LENGTH_NAME = 'length'
 const HALT_NAME = 'halt'
 const QUIT_NAME = 'quit'
+const PRINT_NAME = 'print'
 const SCALE_NAME = 'scale'
 const IBASE_NAME = 'ibase'
 const OBASE_NAME = 'obase'
@@ -518,6 +531,24 @@ const LINE_COMMENT = '#'
 const BLOCK_OPEN = '/*'
 const BLOCK_CLOSE = '*/'
 const STRING_QUOTE = '"'
+// What `print` expands in a string. GNU writes nothing at all for an
+// escape it has no rule for, dropping both characters, so `\z`, `\0`,
+// `\e` and a backslash before the closing quote all vanish. A bare
+// string statement is written raw and reaches none of this, which is why
+// `"a\nb"` writes a backslash and an `n` where `print "a\nb"` breaks the
+// line. The expansion is what reaches the output column, so a tab moves
+// the fold one place rather than to the next tab stop, and the two
+// source characters never count as two.
+const PRINT_ESCAPES = new Map([
+  ['a', '\x07'],
+  ['b', '\b'],
+  ['f', '\f'],
+  ['n', '\n'],
+  ['q', '"'],
+  ['r', '\r'],
+  ['t', '\t'],
+  ['\\', '\\'],
+])
 // What a statement is trimmed of at both ends. Spelled out rather than
 // left to `String.trim` / `str.strip`, whose sets differ between the two
 // hosts; GNU's own whitespace is just space and tab, and it reports the
@@ -558,6 +589,34 @@ function truncateToScale(value: number, scale: number): number {
 // The value of one input digit. GNU clamps every digit of a multi-digit
 // literal to `ibase-1`, so `FF` is 99 at base 10, but leaves a
 // single-digit literal alone, so `X` is 33.
+// Where the string literal opening at `pos` ends: the offset just past
+// the closing quote, or -1 when the input holds no second quote. A
+// backslash never escapes the closing quote, so a literal ending in one
+// closes there and the text after it is ordinary tokens again.
+function stringEnd(text: string, pos: number): number {
+  const close = text.indexOf(STRING_QUOTE, pos + 1)
+  return close < 0 ? -1 : close + 1
+}
+
+// Expand the escapes `print` honours in a string literal's body, which
+// arrives without its quotes. An escape GNU has no rule for writes
+// nothing, and so does a trailing backslash.
+function unescape(text: string): string {
+  const out: string[] = []
+  let pos = 0
+  while (pos < text.length) {
+    const char = text.charAt(pos)
+    if (char !== '\\') {
+      out.push(char)
+      pos += 1
+      continue
+    }
+    out.push(PRINT_ESCAPES.get(text.charAt(pos + 1)) ?? '')
+    pos += 2
+  }
+  return out.join('')
+}
+
 function digitValue(char: string, ibase: number, clamp: boolean): number {
   const value = BASE_DIGITS.indexOf(char)
   if (clamp && value >= ibase) return ibase - 1
@@ -766,19 +825,63 @@ function outputLineSize(env: Record<string, string> | undefined): number {
   return size
 }
 
-// Break one printed value across output lines the way GNU does. A folded
-// line carries `line_size - 2` characters of the value and then a
-// backslash, so the default 70 puts 68 characters on a line and makes it
-// 69 bytes wide. The last chunk carries no backslash even when it fills
-// the width exactly, and the column is counted per value, so a short
-// value printed after a long one starts at the left margin again. Only a
-// printed value folds: GNU's diagnostics do not, however long they are.
-function foldValue(text: string, lineSize: number): string {
-  const width = lineSize - 2
-  if (lineSize === 0 || text.length <= width) return text
-  const chunks: string[] = []
-  for (let at = 0; at < text.length; at += width) chunks.push(text.slice(at, at + width))
-  return chunks.join('\\\n')
+// Where the UTF-8 encoding of a code point changes width. GNU counts the
+// bytes it writes, not the characters, so a two-byte `é` moves the fold
+// twice as far as an `x`; derived from the code point rather than by
+// encoding each character, so the two hosts count one number.
+const UTF8_TWO_BYTES = 0x80
+const UTF8_THREE_BYTES = 0x800
+const UTF8_FOUR_BYTES = 0x10000
+
+// How far one written character moves GNU's output column: its UTF-8
+// byte length, 1 to 4.
+function columnWidth(char: string): number {
+  const point = char.codePointAt(0) ?? 0
+  if (point < UTF8_TWO_BYTES) return 1
+  if (point < UTF8_THREE_BYTES) return 2
+  if (point < UTF8_FOUR_BYTES) return 3
+  return 4
+}
+
+// GNU's `out_col`: how full the current output line is. One counter for
+// the whole run, not one per value: `print` ends in no newline, so a
+// string it wrote moves the column a later value folds at. Only written
+// output folds; a diagnostic never does. A `lineSize` of 0 folds
+// nothing, however long the output is.
+class OutputColumn {
+  col = 0
+  constructor(private readonly lineSize: number) {}
+
+  // Fold `text` into the output and advance the column, answering the
+  // characters with a backslash and a newline at every break. A newline
+  // in `text` starts the line over, so an expression statement's own
+  // newline is what makes the next value begin at the left margin.
+  write(text: string): string {
+    const out: string[] = []
+    for (const char of text) {
+      if (char === '\n') {
+        this.col = 0
+        out.push(char)
+        continue
+      }
+      const width = columnWidth(char)
+      // A folded line carries `lineSize - 2` bytes and then a backslash,
+      // so the default 70 puts 68 of them on a line and makes it 69
+      // wide. A character that would cross that boundary moves whole to
+      // the next line; GNU, writing one byte at a time, splits it there
+      // instead and emits bytes that are no longer UTF-8. The fold lands
+      // in the same place whenever a character does not straddle it,
+      // which is every ASCII one. The `col !== 0` guard keeps a
+      // character wider than the whole line from folding forever.
+      if (this.lineSize !== 0 && this.col !== 0 && this.col + width > this.lineSize - 2) {
+        out.push('\\\n')
+        this.col = 0
+      }
+      out.push(char)
+      this.col += width
+    }
+    return out.join('')
+  }
 }
 
 // GNU's stderr line for a non-fatal runtime error or warning.
@@ -913,9 +1016,14 @@ function callBuiltin(name: string, arg: BcNumber, scale: number): BcNumber {
 // lines.
 class Parser {
   private pos = 0
+  // `writes` holds already-rendered text and is owned by the caller, so
+  // what a statement produced before a runtime error survives it:
+  // `print "x", 1/0` writes the `x` GNU had already written when the
+  // division refused.
   constructor(
     private readonly src: string,
     private readonly state: BcState,
+    private readonly writes: string[],
   ) {}
 
   private skipBlanks(): void {
@@ -947,6 +1055,12 @@ class Parser {
   // syntax error, marked incomplete when the input simply ran out.
   unexpected(): BcParseError {
     const c = this.peek()
+    // A `"` the input never closes matches no lexer rule either, so it is
+    // an illegal character where a closed one is an ordinary token in the
+    // wrong place: `1+"a` reports the quote and `1+"a"` a syntax error.
+    if (c === STRING_QUOTE && stringEnd(this.src, this.pos) < 0) {
+      return new BcParseError(`${ILLEGAL_CHARACTER}: ${c}`, false, this.pos)
+    }
     if (c !== '' && !LEGAL_CHARS.has(c)) {
       return new BcParseError(`${ILLEGAL_CHARACTER}: ${c}`, false, this.pos)
     }
@@ -972,6 +1086,26 @@ class Parser {
     return this.src.slice(start, this.pos)
   }
 
+  // Render one value the moment the statement reaches it. GNU writes a
+  // value where its own instruction runs, not at the end of the
+  // statement, so everything an element changes before it is already in
+  // force and everything a later element changes is not:
+  // `print 255, obase=16` writes `255` and then `10`, and
+  // `print 5, last` writes the 5 twice.
+  private emit(num: BcNumber): string {
+    this.state.last = reduceNumber(num)
+    return renderNumber(num, this.state.obase)
+  }
+
+  private readString(): string {
+    this.skipBlanks()
+    const start = this.pos
+    const end = stringEnd(this.src, start)
+    if (end < 0) throw this.unexpected()
+    this.pos = end
+    return this.src.slice(start + 1, end - 1)
+  }
+
   private readTarget(): string {
     this.skipBlanks()
     const name = this.readIdentifier()
@@ -986,16 +1120,56 @@ class Parser {
     return ''
   }
 
-  // Parse one statement, answering null for an assignment, which bc
-  // prints nothing for. An increment is not one: `x=5` prints nothing
-  // where `x++` prints 5.
-  parseStatement(): BcNumber | null {
+  // Parse one statement, appending whatever it writes. An assignment
+  // writes nothing, which is why `x=5` prints where `(x=5)` does not; an
+  // increment is not an assignment, so `x++` prints 5. Only an expression
+  // statement writes a trailing newline, which is what leaves `print` and
+  // a bare string mid-line.
+  parseStatement(): void {
     if (this.isHalt()) throw new BcHalt()
+    if (this.peek() === STRING_QUOTE) {
+      // A bare string is written exactly as it was typed: GNU expands
+      // escapes for `print` alone, so `"a\n"` writes a backslash and an
+      // `n`. It does not touch `last` either.
+      this.writes.push(this.readString())
+      return
+    }
+    if (this.isPrint()) {
+      this.parsePrint()
+      return
+    }
     const probe = this.tryAssignment()
-    if (probe === null) return this.parseExpr()
+    if (probe === null) {
+      this.writes.push(this.emit(this.parseExpr()))
+      this.writes.push('\n')
+      return
+    }
     const [name, op] = probe
     this.assign(name, op, this.parseExpr())
-    return null
+  }
+
+  // A whole identifier, so `printx` stays an ordinary variable, and a
+  // keyword rather than a name, so `print=1` and `1+print` are still
+  // syntax errors on the reserved word.
+  private isPrint(): boolean {
+    const mark = this.pos
+    this.skipBlanks()
+    if (this.readIdentifier() === PRINT_NAME) return true
+    this.pos = mark
+    return false
+  }
+
+  // Each element is written as it is reached, so a refusal partway down
+  // the list keeps what came before it. A string element is unescaped
+  // where the same string alone is not, and an expression element prints
+  // even when it is an assignment: `print x=5` writes 5 where the
+  // statement `x=5` writes nothing.
+  private parsePrint(): void {
+    for (;;) {
+      if (this.peek() === STRING_QUOTE) this.writes.push(unescape(this.readString()))
+      else this.writes.push(this.emit(this.parseExpr()))
+      if (!this.match(',')) return
+    }
   }
 
   // `halt` is a statement, never part of an expression, so it only counts
@@ -1223,11 +1397,12 @@ class Parser {
 
 // Evaluate one bc statement against the run's state, answering null for
 // an assignment.
-function evalStatement(text: string, state: BcState): BcNumber | null {
-  const parser = new Parser(text, state)
-  const value = parser.parseStatement()
+// Evaluate one statement, appending its output to `writes`. A refusal
+// leaves behind whatever was written before it.
+function evalStatement(text: string, state: BcState, writes: string[]): void {
+  const parser = new Parser(text, state, writes)
+  parser.parseStatement()
   if (!parser.done()) throw parser.unexpected()
-  return value
 }
 
 // Whether `text` holds nothing but blanks a statement is trimmed of.
@@ -1266,9 +1441,10 @@ function quitOffset(text: string): number {
     } else if (NUMBER_CHARS.has(char)) {
       while (pos < text.length && NUMBER_CHARS.has(text.charAt(pos))) pos++
     } else if (char === STRING_QUOTE) {
-      pos++
-      while (pos < text.length && text.charAt(pos) !== STRING_QUOTE) pos++
-      pos++
+      // An unterminated quote is one illegal character and scanning
+      // resumes right after it, so a `quit` behind one still ends the run.
+      const end = stringEnd(text, pos)
+      pos = end < 0 ? pos + 1 : end
     } else {
       pos++
     }
@@ -1301,8 +1477,22 @@ function lineStatements(
   const [text, lines, quits] = cutAtQuit(raw, rawLines)
   const out: BcStatement[] = []
   let start = 0
-  for (let index = 0; index <= text.length; index++) {
-    if (index < text.length && text.charAt(index) !== STATEMENT_SEPARATOR) continue
+  let index = 0
+  while (index <= text.length) {
+    if (index < text.length) {
+      const char = text.charAt(index)
+      // A `;` inside a string is content, not a separator, so the whole
+      // token is stepped over before the next one is looked for.
+      if (char === STRING_QUOTE) {
+        const end = stringEnd(text, index)
+        index = end < 0 ? index + 1 : end
+        continue
+      }
+      if (char !== STATEMENT_SEPARATOR) {
+        index++
+        continue
+      }
+    }
     const [piece, pieceLines] = trimPiece(text.slice(start, index), lines.slice(start, index))
     if (piece !== '') {
       // The token that follows decides where an incomplete construct is
@@ -1312,6 +1502,7 @@ function lineStatements(
       out.push({ text: piece, lines: pieceLines, incompleteLine, execute: !quits })
     }
     start = index + 1
+    index++
   }
   return [out, quits]
 }
@@ -1328,7 +1519,9 @@ function lineStatements(
 // advances, which is what keeps a later diagnostic on the right line. A
 // `/* */` comment becomes one space, so it separates tokens rather than
 // vanishing (`1/*c*/2` is `1 2`), and the newlines inside one advance the
-// counter without ending the statement.
+// counter without ending the statement. A string is neither: it is copied
+// verbatim, so `"a#b"` keeps its hash and a string carrying a newline
+// keeps the statement open across the line break.
 function parseInput(text: string): [BcStatement[][], boolean] {
   const lines: BcStatement[][] = []
   let chars: string[] = []
@@ -1337,6 +1530,26 @@ function parseInput(text: string): [BcStatement[][], boolean] {
   let line = 1
   while (pos < text.length) {
     const char = text.charAt(pos)
+    if (char === STRING_QUOTE) {
+      const end = stringEnd(text, pos)
+      if (end > 0) {
+        // The token is copied as it stands: a `#` or a `/*` in it is
+        // content, and a newline in it advances the counter without
+        // ending the logical line, so a diagnostic after a string that
+        // spans lines still names its own line.
+        for (let index = pos; index < end; index++) {
+          const inner = text.charAt(index)
+          chars.push(inner)
+          charLines.push(line)
+          if (inner === '\n') line++
+        }
+        pos = end
+        continue
+      }
+      // No closing quote anywhere: the parser reports this one as an
+      // illegal character, and the rest of the input lexes as usual,
+      // comments included.
+    }
     if (char === LINE_COMMENT) {
       while (pos < text.length && text.charAt(pos) !== '\n') pos++
       continue
@@ -1428,7 +1641,7 @@ async function bcCommand(
     variables: new Map<string, BcNumber>(),
     warnings: [],
   }
-  const lineSize = outputLineSize(opts.env)
+  const folder = new OutputColumn(outputLineSize(opts.env))
   const results: string[] = []
   const errors: string[] = []
   const [lines, eofInComment] = parseInput(DEC.decode(raw))
@@ -1441,6 +1654,7 @@ async function bcCommand(
     // diagnostics themselves are not buffered -- GNU reports one per bad
     // statement even on a line it discards.
     const saved = snapshotState(state)
+    const savedCol = folder.col
     const lineResults: string[] = []
     const lineErrors: string[] = []
     const parseErrors: string[] = []
@@ -1459,9 +1673,12 @@ async function bcCommand(
       // cannot write: GNU never executes it, and `x=5;1/0;y=7` has to
       // leave `y` unset while leaving `x` at 5.
       const target = runs ? state : snapshotState(state)
-      let value: BcNumber | null = null
+      // Owned here rather than inside the parser, so that a runtime error
+      // partway down a `print` list keeps the text already written:
+      // `print "x", 1/0` writes the `x`.
+      const writes: string[] = []
       try {
-        value = evalStatement(statement.text, target)
+        evalStatement(statement.text, target, writes)
       } catch (err) {
         if (err instanceof BcParseError) {
           parseErrors.push(parseErrorLine(errorLine(statement, err), err.text))
@@ -1488,18 +1705,20 @@ async function bcCommand(
       }
       if (runs) lineErrors.push(...state.warnings)
       state.warnings.length = 0
-      if (runs && value !== null) {
-        state.last = reduceNumber(value)
-        // The one place a value reaches the output, so the one place
-        // it is folded: `renderNumber` answers a value and `foldValue`
-        // answers the lines it prints as.
-        lineResults.push(foldValue(renderNumber(value, state.obase), lineSize))
-      }
+      if (!runs) continue
+      // The one place output is folded. Rendering happened as each element
+      // was reached, in `Parser.emit`, because GNU's `obase` and `last`
+      // can both change partway down a `print` list.
+      for (const piece of writes) lineResults.push(folder.write(piece))
     }
     if (parseErrors.length > 0) {
-      // None of the line ran, so a `halt` on it did not run either.
+      // None of the line ran, so a `halt` on it did not run either, and
+      // the column never moved: GNU compiles the line before it writes
+      // anything, so a later statement's syntax error undoes an earlier
+      // one's `print`.
       errors.push(...parseErrors)
       restoreState(state, saved)
+      folder.col = savedCol
       halted = false
       continue
     }
@@ -1508,7 +1727,7 @@ async function bcCommand(
     if (halted) break
   }
   if (eofInComment) errors.push(EOF_IN_COMMENT)
-  const stdout = results.length > 0 ? ENC.encode(results.join('\n') + '\n') : new Uint8Array(0)
+  const stdout = ENC.encode(results.join(''))
   const stderr = errors.length > 0 ? ENC.encode(errors.join('\n') + '\n') : null
   return [stdout, new IOResult({ stderr })]
 }

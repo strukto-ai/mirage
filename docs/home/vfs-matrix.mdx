@@ -12,6 +12,8 @@ The **Access** column separates filesystem access from API actions. `read`, `wri
 
 Sections below mirror the **Setup** sidebar so you can pick a category and follow the same path through credentials → VFS docs.
 
+Every VFS accepts `read: bounded`. `read: fresh`, which revalidates cached bytes against the backend before serving them, is accepted today only by the S3-compatible family and GridFS — the backends whose `stat` and read stamp the same kind of content token. Any other mount declaring it is refused at mount time rather than downgraded. This list is maintained by hand for now and grows one backend at a time as each learns to stamp a read fingerprint.
+
 ## Infrastructure
 
 No external setup, these run locally or against a connection string you already have.

@@ -9,17 +9,22 @@ import { Workspace } from '../workspace.ts'
 
 interface StreamCase {
   id: string
-  world: { mounts: { '/ram': { files: Record<string, string> } } }
+  world: { mounts: { '/ram': { files?: Record<string, string> } } }
   steps: { command: string; expect: { exit: number; stdout: string; stderr: string } }[]
 }
 
 describe('Pyodide captured streams', { timeout: 120_000 }, () => {
-  it.each(['ram', 'disk'])('runs the json.tool integration on a %s mount', async (kind) => {
+  it.each([
+    ['ram', 'json_tool_closes_output'],
+    ['disk', 'json_tool_closes_output'],
+    ['ram', 'memory_growth_output'],
+    ['disk', 'memory_growth_output'],
+  ])('runs %s mount stream integration: %s', async (kind, id) => {
     const suite = JSON.parse(
       await readFile(new URL('../../../../../integ/runtime/pyodide.json', import.meta.url), 'utf8'),
     ) as { cases: StreamCase[] }
-    const fixture = suite.cases.find((testCase) => testCase.id === 'json_tool_closes_output')
-    if (fixture === undefined) throw new Error('Missing json.tool integration fixture')
+    const fixture = suite.cases.find((testCase) => testCase.id === id)
+    if (fixture === undefined) throw new Error(`Missing stream integration fixture: ${id}`)
     const root = await mkdtemp(join(tmpdir(), 'mirage-streams-'))
     const vfs = kind === 'disk' ? new DiskVFS({ root }) : new RAMVFS()
     const ws = new Workspace(
@@ -27,7 +32,7 @@ describe('Pyodide captured streams', { timeout: 120_000 }, () => {
       { mode: MountMode.EXEC, runtimes: ['pyodide', 'workspace'] },
     )
     try {
-      for (const [name, content] of Object.entries(fixture.world.mounts['/ram'].files)) {
+      for (const [name, content] of Object.entries(fixture.world.mounts['/ram'].files ?? {})) {
         await ws.dispatch('write', `/ram/${name}`, [new TextEncoder().encode(content)])
       }
       for (const step of fixture.steps) {

@@ -18,7 +18,6 @@ from typing import Any
 from mirage.workspace.snapshot.keys import (CacheKey, MountKey, StateKey,
                                             VFSStateKey)
 from mirage.workspace.snapshot.tar_io import _json_default
-from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
 # The control-plane subtree: everything about the workspace that is
 # not file content lives under one reserved directory, so a commit is
@@ -108,19 +107,33 @@ def tree_inputs_from_state(
             MountKey.INDEX: mount[MountKey.INDEX],
             MountKey.PREFIX: prefix,
             MountKey.MODE: mount[MountKey.MODE],
-            MountKey.CONSISTENCY: mount[MountKey.CONSISTENCY],
+            MountKey.READ: mount[MountKey.READ],
+            MountKey.TTL: mount[MountKey.TTL],
             MountKey.VFS_CLASS: mount[MountKey.VFS_CLASS],
             MountKey.VFS_REF: mount.get(MountKey.VFS_REF),
             MountKey.VFS_STATE: vfs_state,
         })
     cache = state[StateKey.CACHE]
     config = {
-        StateKey.MIRAGE_VERSION: state[StateKey.MIRAGE_VERSION],
-        StateKey.DEFAULT_SESSION_ID: state[StateKey.DEFAULT_SESSION_ID],
-        StateKey.DEFAULT_AGENT_ID: state[StateKey.DEFAULT_AGENT_ID],
-        StateKey.CURRENT_AGENT_ID: state[StateKey.CURRENT_AGENT_ID],
-        CacheKey.LIMIT: cache[CacheKey.LIMIT],
-        CacheKey.MAX_DRAIN_BYTES: cache[CacheKey.MAX_DRAIN_BYTES],
+        # The snapshot *format* version, distinct from MIRAGE_VERSION,
+        # which is the package's. Without it a commit written under an
+        # older format reads back as whatever the loader currently is,
+        # and the version check below can never fire. TypeScript's twin
+        # carries it on the meta (`stateTree.ts`).
+        StateKey.VERSION:
+        state[StateKey.VERSION],
+        StateKey.MIRAGE_VERSION:
+        state[StateKey.MIRAGE_VERSION],
+        StateKey.DEFAULT_SESSION_ID:
+        state[StateKey.DEFAULT_SESSION_ID],
+        StateKey.DEFAULT_AGENT_ID:
+        state[StateKey.DEFAULT_AGENT_ID],
+        StateKey.CURRENT_AGENT_ID:
+        state[StateKey.CURRENT_AGENT_ID],
+        CacheKey.LIMIT:
+        cache[CacheKey.LIMIT],
+        CacheKey.MAX_DRAIN_BYTES:
+        cache[CacheKey.MAX_DRAIN_BYTES],
     }
     entries[SESSIONS_PATH] = meta_to_blob({
         "sessions":
@@ -159,8 +172,15 @@ def to_state(entries: dict[str, bytes], meta: dict[str,
             prefix,
             MountKey.MODE:
             mount[MountKey.MODE],
-            MountKey.CONSISTENCY:
-            mount[MountKey.CONSISTENCY],
+            # Read defensively. A commit written before v4 carries
+            # neither key, and subscripting here would raise a bare
+            # KeyError on every checkout, diff and restore -- one frame
+            # before `build_mount_args` could answer with the version
+            # refusal this echo exists to reach.
+            MountKey.READ:
+            mount.get(MountKey.READ),
+            MountKey.TTL:
+            mount.get(MountKey.TTL),
             MountKey.VFS_CLASS:
             mount[MountKey.VFS_CLASS],
             # ``get``: a meta committed before the ref was recorded reads
@@ -179,22 +199,36 @@ def to_state(entries: dict[str, bytes], meta: dict[str,
              if namespace_blob is not None else {})
     history = _history_from_entries(entries)
     return {
-        StateKey.VERSION: FORMAT_VERSION,
-        StateKey.MIRAGE_VERSION: config.get(StateKey.MIRAGE_VERSION,
-                                            "unknown"),
-        StateKey.MOUNTS: mounts,
-        StateKey.SESSIONS: sessions,
-        StateKey.DEFAULT_SESSION_ID: config.get(StateKey.DEFAULT_SESSION_ID),
-        StateKey.DEFAULT_AGENT_ID: config.get(StateKey.DEFAULT_AGENT_ID),
-        StateKey.CURRENT_AGENT_ID: config.get(StateKey.CURRENT_AGENT_ID),
+        # Echoed, not stamped. Stamping FORMAT_VERSION here relabelled
+        # every old commit as current, so `build_mount_args`' refusal
+        # could never fire and a v3 commit landed on a missing required
+        # key instead of the regenerate message. A commit written before
+        # this field existed reads as v3, which is what it is.
+        StateKey.VERSION:
+        config.get(StateKey.VERSION, 3),
+        StateKey.MIRAGE_VERSION:
+        config.get(StateKey.MIRAGE_VERSION, "unknown"),
+        StateKey.MOUNTS:
+        mounts,
+        StateKey.SESSIONS:
+        sessions,
+        StateKey.DEFAULT_SESSION_ID:
+        config.get(StateKey.DEFAULT_SESSION_ID),
+        StateKey.DEFAULT_AGENT_ID:
+        config.get(StateKey.DEFAULT_AGENT_ID),
+        StateKey.CURRENT_AGENT_ID:
+        config.get(StateKey.CURRENT_AGENT_ID),
         StateKey.CACHE: {
             CacheKey.LIMIT: config.get(CacheKey.LIMIT, "512MB"),
             CacheKey.MAX_DRAIN_BYTES: config.get(CacheKey.MAX_DRAIN_BYTES),
             CacheKey.ENTRIES: [],
         },
-        StateKey.HISTORY: history,
+        StateKey.HISTORY:
+        history,
         StateKey.JOBS: [],
-        StateKey.FINGERPRINTS: meta.get("fingerprints", []),
-        StateKey.NODES: nodes,
+        StateKey.FINGERPRINTS:
+        meta.get("fingerprints", []),
+        StateKey.NODES:
+        nodes,
         StateKey.LIVE_ONLY_MOUNTS: [],
     }

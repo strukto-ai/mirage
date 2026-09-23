@@ -12,7 +12,8 @@ from mirage.commands.builtin.grep_scan import exit_code_for
 from mirage.commands.builtin.grep_select import (WalkFilters, dir_admitted,
                                                  file_admitted,
                                                  parse_file_globs)
-from mirage.commands.builtin.utils.stream import resolve_source
+from mirage.commands.builtin.utils.stream import (is_stdin, resolve_source,
+                                                  stdin_stream)
 from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
                                                 call_stat,
                                                 mount_parent_readdir,
@@ -177,6 +178,8 @@ async def grep(
     read_bytes = cache_aware_bound_bytes(read_bytes)
     if read_stream is not None:
         read_stream = cache_aware_bound_stream(read_stream)
+    operand_stream = stdin_stream(
+        read_stream if read_stream is not None else read_bytes, stdin)
     fl = FlagView(opts.flags, spec=SPECS["grep"])
     pattern, never_match = await resolve_pattern(texts, fl, read_bytes,
                                                  GREP_NO_PATTERN)
@@ -199,7 +202,9 @@ async def grep(
                                                     or f.files_without_match):
         p = paths[0]
         try:
-            info = await st(p.virtual)
+            info = FileStat(name="-",
+                            type=FileType.FIFO) if is_stdin(p) else await st(
+                                p.virtual)
             if info.type == FileType.DIRECTORY:
                 return b"", IOResult(
                     exit_code=2,
@@ -207,16 +212,17 @@ async def grep(
             if not file_admitted(p.virtual, f.filters):
                 return b"", io
             # Start the reader while the mount's cache context is still active.
-            source = read_stream(p) if read_stream is not None else wrap_bytes(
-                await rb(p.virtual))
+            source = (operand_stream(p) if is_stdin(p) or read_stream
+                      is not None else wrap_bytes(await rb(p.virtual)))
         except WALK_ERRORS as exc:
             return b"", IOResult(
                 exit_code=2,
                 stderr=f"grep: {p.raw_path}: {fs_strerror(exc) or exc}\n".
                 encode())
         io = IOResult()
-        return grep_input(source, pat, f, p.raw_path, f.with_filename
-                          and not f.no_filename, io), io
+        return grep_input(source, pat, f,
+                          "(standard input)" if is_stdin(p) else p.raw_path,
+                          f.with_filename and not f.no_filename, io), io
     warnings: list[str] = []
     diagnostics: list[bytes] = []
     matched = False
@@ -229,7 +235,9 @@ async def grep(
     async def scan(p: PathSpec, walked: bool = False) -> AsyncIterator[bytes]:
         nonlocal matched, printed
         try:
-            info = await st(p.virtual)
+            info = FileStat(name="-",
+                            type=FileType.FIFO) if is_stdin(p) else await st(
+                                p.virtual)
             if info.type == FileType.DIRECTORY:
                 if not f.recursive:
                     warn(f"grep: {p.raw_path}: Is a directory")
@@ -263,13 +271,15 @@ async def grep(
                 return
             if not file_admitted(p.virtual, f.filters):
                 return
-            source = read_stream(p) if read_stream is not None else wrap_bytes(
-                await rb(p.virtual))
+            source = (operand_stream(p) if is_stdin(p) or read_stream
+                      is not None else wrap_bytes(await rb(p.virtual)))
             file_io = IOResult(exit_code=1)
             show = not f.no_filename and (f.with_filename or walked
                                           or len(paths) > 1)
-            async for chunk in grep_input(source, pat, f, p.raw_path, show,
-                                          file_io, printed):
+            async for chunk in grep_input(
+                    source, pat, f,
+                    "(standard input)" if is_stdin(p) else p.raw_path, show,
+                    file_io, printed):
                 printed = True
                 yield chunk
             matched = matched or file_io.exit_code == 0

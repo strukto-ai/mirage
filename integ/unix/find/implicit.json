@@ -9,7 +9,7 @@
         "gridfs",
         "gridfs-prefix"
       ],
-      "consistency": "always",
+      "read": "fresh",
       "scenario": [
         {
           "mutate": {
@@ -43,7 +43,7 @@
         "gridfs",
         "gridfs-prefix"
       ],
-      "consistency": "always",
+      "read": "fresh",
       "scenario": [
         {
           "mutate": {

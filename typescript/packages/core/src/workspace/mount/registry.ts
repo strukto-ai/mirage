@@ -22,7 +22,14 @@ import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { Decisions, MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.ts'
-import { type Limit, ConsistencyPolicy, MountMode, PathSpec } from '../../types.ts'
+import {
+  type Limit,
+  type ReadSpec,
+  DEFAULT_READ_SPEC,
+  MountMode,
+  PathSpec,
+  ReadPolicy,
+} from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
 import { effectivePathMode, strongestModeUnder } from '../../context/session_context.ts'
 import { MountEntry, type MountInit } from './mount.ts'
@@ -32,12 +39,13 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
-// The one thing the registry needs from a reconciler. Depending on this local
+// What the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
 // `reconcile` imports the mount layer, not the other way round. The Reconciler
 // satisfies it structurally.
 interface ReadReconciler {
   reconcileRead(mount: MountEntry, path: string): Promise<void>
+  mayServeCached(mount: MountEntry, path: string): Promise<boolean>
 }
 
 export const DEV_PREFIX = '/dev/'
@@ -85,7 +93,7 @@ export class MountRegistry {
   readonly retiringMounts = new Map<BaseVFS, Promise<void>>()
   readonly retiredMounts = new WeakSet<BaseVFS>()
   private rootRef: MountEntry | null = null
-  private consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
+  private defaultRead: ReadSpec = DEFAULT_READ_SPEC
   private cacheStore: FileCache | null = null
   private reconciler: ReadReconciler | null = null
   // The world's workspace runtime, set by Workspace after construction.
@@ -142,6 +150,28 @@ export class MountRegistry {
     for (const m of this.mountList) this.attachManager(m)
   }
 
+  /**
+   * Run the shared read verdict for one mount's cached entry.
+   *
+   * The file cache's door and the dispatcher's door ask the same question,
+   * so they ask the same function; a second verdict rule here is what let
+   * the two drift apart in the first place. The reconciler is read at call
+   * time because `attachFileCache` runs before `setReconciler`, and a
+   * manager with none trusts its cache.
+   *
+   * A retiring mount answers false rather than probing, sending the caller
+   * to a cold read — where `ownsPath` already sends it today. Unlike
+   * python there is no EBUSY to catch: this side's probe calls the ops
+   * registry directly and never enters `mount.use()`, so the synchronous
+   * `retiring` check is the whole guard.
+   */
+  private async mayServeCached(m: MountEntry, key: string): Promise<boolean> {
+    const reconciler = this.reconciler
+    if (reconciler === null) return true
+    if (m.retiring) return false
+    return reconciler.mayServeCached(m, key)
+  }
+
   private attachManager(m: MountEntry): void {
     m.cacheManager = new CacheManager(
       this.cacheStore,
@@ -149,6 +179,7 @@ export class MountRegistry {
       m.prefix,
       m.vfs.cachesReads,
       (path) => !m.retiring && this.tryMountFor(path) === m,
+      (key) => this.mayServeCached(m, key),
     )
   }
 
@@ -156,6 +187,8 @@ export class MountRegistry {
     mounts: Record<string, BaseVFS>,
     defaultMode: MountMode,
     modeOverrides: Record<string, MountMode> = {},
+    defaultRead: ReadSpec = DEFAULT_READ_SPEC,
+    readOverrides: Record<string, ReadSpec> = {},
     placements: RegistryPlacements = {},
   ) {
     this.indexConfig = placements.index
@@ -165,8 +198,18 @@ export class MountRegistry {
     for (const [k, v] of Object.entries(modeOverrides)) {
       overrides[normalizePrefix(k)] = v
     }
+    const readByPrefix: Record<string, ReadSpec> = {}
+    for (const [k, v] of Object.entries(readOverrides)) {
+      readByPrefix[normalizePrefix(k)] = v
+    }
+    this.defaultRead = defaultRead
+    // Explicit at the construction site: /dev does not cache reads, so
+    // its policy can only ever be bounded.
     list.push(
-      MountRegistry.place({ prefix: DEV_PREFIX, vfs: new DevVFS(), mode: MountMode.WRITE }, list),
+      MountRegistry.place(
+        { prefix: DEV_PREFIX, vfs: new DevVFS(), mode: MountMode.WRITE, read: DEFAULT_READ_SPEC },
+        list,
+      ),
     )
     seen.add(DEV_PREFIX)
     for (const [rawPrefix, vfs] of Object.entries(mounts)) {
@@ -177,9 +220,10 @@ export class MountRegistry {
       if (vfs.isClosed) throw new Error('VFS is closed; create a new VFS instance')
       seen.add(prefix)
       const mode = overrides[prefix] ?? defaultMode
+      const read = readByPrefix[prefix] ?? defaultRead
       const index = this.indexFor(vfs, placements.indexes?.[rawPrefix], list)
       const vfsRef = placements.refs?.[rawPrefix] ?? null
-      list.push(MountRegistry.place({ prefix, vfs, mode, index, vfsRef }, list))
+      list.push(MountRegistry.place({ prefix, vfs, mode, read, index, vfsRef }, list))
     }
     list.sort((a, b) => b.prefix.length - a.prefix.length)
     this.mountList = list
@@ -226,14 +270,6 @@ export class MountRegistry {
     return buildIndex(config ?? this.indexConfig, vfs.indexTtl)
   }
 
-  setConsistency(consistency: ConsistencyPolicy): void {
-    this.consistency = consistency
-  }
-
-  getConsistency(): ConsistencyPolicy {
-    return this.consistency
-  }
-
   /** A removed VFS instance cannot start a second lifecycle. */
   checkVfsAvailable(vfs: BaseVFS): void {
     if (this.retiringMounts.has(vfs) || this.mountList.some((m) => m.vfs === vfs && m.retiring)) {
@@ -253,7 +289,7 @@ export class MountRegistry {
     prefix: string,
     vfs: BaseVFS,
     mode: MountMode = MountMode.READ,
-    consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+    read?: ReadSpec,
     placement: MountPlacementInit = {},
   ): MountEntry {
     this.checkVfsAvailable(vfs)
@@ -266,7 +302,7 @@ export class MountRegistry {
     const index = this.indexFor(vfs, placement.index, this.mountList)
     const vfsRef = placement.vfsRef ?? null
     const m = MountRegistry.place(
-      { prefix: norm, vfs, mode, consistency, index, vfsRef },
+      { prefix: norm, vfs, mode, read: read ?? this.defaultRead, index, vfsRef },
       this.mountList,
     )
     if (this.cacheStore !== null) this.attachManager(m)
@@ -528,7 +564,7 @@ export class MountRegistry {
       pathScopes.length > 0 &&
       mount.vfs.cachesReads &&
       baseCmd?.write !== true &&
-      this.consistency === ConsistencyPolicy.ALWAYS
+      mount.read.policy === ReadPolicy.FRESH
     ) {
       for (const scope of pathScopes) {
         await this.reconciler.reconcileRead(mount, scope.virtual)

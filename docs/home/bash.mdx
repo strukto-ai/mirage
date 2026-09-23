@@ -108,6 +108,8 @@ Both bindings support cooperative cancellation. TypeScript observes the signal a
 | Many isolated commands sharing scoped state | `session_id=...` (Py) / `sessionId` (TS) | a separate terminal |
 | Persistent shell mutations | run without options | `cd /data; cmd` |
 
+A session runs one line at a time, the way one bash process does. Two `execute()` calls on the same session share its env, cwd and `$?`, so the second waits for the first to finish rather than interleaving with it; a `for f` loop never reads a value another loop on that session just set. A call with `cwd` / `env` overrides still runs on a clone, so nothing it does leaks back, but it takes its turn on the session like any other line. For independent streams of commands that should run at the same time, give each its own session.
+
 ## JSON with `jq`
 
 `jq` reads a **stream of JSON values** and runs the program once per
@@ -228,10 +230,20 @@ reported gone.
 Predicates must precede actions: `find d -name '*.txt' -exec echo {} \;`
 works, while a test following `-exec`, `-print`, `-delete`, or another action
 is refused because backend filtering cannot preserve that evaluation order.
-All actions (`-exec`, `-print`, `-print0`, `-printf`, `-ls`, and `-delete`)
-refuse placement under `-o`, negation, or parentheses. Tests may be grouped
-before a trailing action. Action operands retain whole filenames, including
-embedded newlines, across mount boundaries. `-printf` must be the only action;
+Under `-o` or parentheses an action ends its `-a` chain and the whole
+expression holds one action, so `find . -path ./skip -prune -o -type f -print`
+and `-name a -print -o -name b -print` run as GNU runs them, while `-print`
+on one arm and `-print0` or a different `-exec` on the other, an action that
+is not last in its chain, or an action under `!` is refused. `-exec ... \;`
+is true only when its command exits 0, which is learned after the walk, so
+under `-o` it may stand only where nothing follows it (`-type d -exec false
+\; -o -prune` is refused), while `-exec ... {} +` is true regardless, as in
+GNU, and sits anywhere an action may. `-prune` skips a
+directory's contents, a mount nested under that directory included (and a
+file it reaches skips nothing); it does nothing under `-depth`, and GNU's
+refusal of `-prune` with `-delete` is kept unless `-depth` is spelled out. `-path` matches the row as it prints, under the
+operand as typed. Action operands retain whole filenames, including embedded
+newlines, across mount boundaries. `-printf` must be the only action;
 combining it with other actions or repeating it is refused.
 `-delete` runs where it is written, so a later `-exec` sees the row gone, and
 it turns on `-depth`, which lists a directory after its contents. `-newer FILE`
@@ -243,8 +255,12 @@ dates are refused. `-newer` and `-newermt` must be in a top-level AND chain;
 placing them under OR, negation, or parentheses is refused. Repeated time
 tests in that chain intersect, so `-newer old -newer new` keeps only what is
 newer than both; `-mtime` tests under `-o` widen to the union of their
-windows, which can match more than GNU. A repeated `-print` prints each row
-once per occurrence, as in GNU.
+windows, which can match more than GNU, while a `-prune` on the other arm
+still fires exactly where GNU's does. A time test keeps its place before
+or after `-prune`: `find d -newermt X -prune` skips the contents of the
+directories newer than X alone, and `-prune -newermt X` skips every
+directory's contents and prints the newer ones, as GNU orders them. A
+repeated `-print` prints each row once per occurrence, as in GNU.
 
 ## Supported bash syntax
 

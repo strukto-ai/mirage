@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isStdin } from '../utils/stream.ts'
+import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { cacheAwareStreamEager } from '../../../cache/read_through.ts'
@@ -238,7 +240,9 @@ async function* follow(
       continue
     }
     if (showHeaders) {
-      yield ENC.encode(`${last === null ? '' : '\n'}==> ${p.rawPath} <==\n`)
+      yield ENC.encode(
+        `${last === null ? '' : '\n'}==> ${isStdin(p) ? '(standard input)' : p.rawPath} <==\n`,
+      )
     }
     last = slot
     yield tailBytes(raw, counts)
@@ -304,7 +308,8 @@ async function* follow(
       }
       const [data, pos] = grown
       if (data.byteLength > 0) {
-        if (showHeaders && last !== slot) yield ENC.encode(`\n==> ${p.rawPath} <==\n`)
+        if (showHeaders && last !== slot)
+          yield ENC.encode(`\n==> ${isStdin(p) ? '(standard input)' : p.rawPath} <==\n`)
         last = slot
         yield data
       }
@@ -391,12 +396,13 @@ export async function tailGeneric(
   stat: Stat,
   readRange: ReadRange | null = null,
 ): Promise<CommandFnResult> {
+  stat = stdinStat(stat)
   const fl = new FlagView(opts.flags, specOf('tail'))
   // A follow reads the backend itself, never the read-through cache:
   // what it is polling for is exactly the change the cached body does
   // not have yet.
   const backend = stream
-  stream = cacheAwareStreamEager(stream)
+  stream = stdinStream(cacheAwareStreamEager(stream), opts.stdin)
   const nRaw = fl.asStr('n') ?? null
   const cRaw = fl.asStr('c') ?? null
   const numErr = numberFlagError('tail', nRaw, cRaw)
@@ -481,12 +487,15 @@ export async function tailGeneric(
       if (showHeaders) {
         // Separator keyed on printed blocks, not operand index: a good file
         // after a failed operand starts without a leading blank line (GNU).
-        const header = printed > 0 ? `\n==> ${p.rawPath} <==\n` : `==> ${p.rawPath} <==\n`
+        const header =
+          printed > 0
+            ? `\n==> ${isStdin(p) ? '(standard input)' : p.rawPath} <==\n`
+            : `==> ${isStdin(p) ? '(standard input)' : p.rawPath} <==\n`
         chunks.push(ENC.encode(header))
       }
       printed += 1
       chunks.push(tailBytes(raw, counts))
-      if (readsEverything(counts, raw)) cache.push(p.virtual)
+      if (!isStdin(p) && readsEverything(counts, raw)) cache.push(p.virtual)
     }
     const io = new IOResult({
       cache,

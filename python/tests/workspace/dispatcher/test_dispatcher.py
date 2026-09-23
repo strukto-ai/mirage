@@ -18,11 +18,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
+from mirage.errors import FsCondition, posix_errno
 from mirage.policy import (Action, CommandRule, Deny, OpsContext, Policies,
                            Policy, PolicyDenied)
 from mirage.policy.rule import RulePolicy
-from mirage.types import (ConsistencyPolicy, FileType, HiddenPaths, MountMode,
-                          PathSpec)
+from mirage.types import FileStat, FileType, HiddenPaths, MountMode, PathSpec
 from mirage.utils.errors import ReadOnlyError
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -79,7 +79,7 @@ def _dispatcher(policies: Policies) -> tuple[Dispatcher, MagicMock]:
     namespace.registry.policies = policies
     cache = MagicMock()
     cache.get = AsyncMock(return_value=b"warm")
-    dispatcher = Dispatcher(namespace, cache, ConsistencyPolicy.LAZY)
+    dispatcher = Dispatcher(namespace, cache)
     reconciler = MagicMock()
     reconciler.may_serve_cached = AsyncMock(return_value=True)
     dispatcher._reconciler = reconciler
@@ -738,3 +738,98 @@ async def test_a_rename_replaces_the_node_at_the_landing(tmp_path):
                           PathSpec.from_str_path("/disk/a.txt"),
                           dst=PathSpec.from_str_path("/disk/b.txt"))
         assert ws.namespace.meta_for("/disk/b.txt") is None
+
+
+@pytest.mark.asyncio
+async def test_xattrs_are_stored_on_the_node_and_listed_sorted():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f")
+        await ws.vfs.setxattr("/r/f", "user.b", b"two")
+        await ws.vfs.setxattr("/r/f", "user.a", b"one")
+        assert await ws.vfs.listxattr("/r/f") == ["user.a", "user.b"]
+        assert await ws.vfs.getxattr("/r/f", "user.b") == b"two"
+        await ws.vfs.removexattr("/r/f", "user.b")
+        assert await ws.vfs.listxattr("/r/f") == ["user.a"]
+        with pytest.raises(OSError) as missing:
+            await ws.vfs.getxattr("/r/f", "user.b")
+        assert missing.value.errno == posix_errno(FsCondition.NO_XATTR)
+
+
+@pytest.mark.asyncio
+async def test_xattr_flags_refuse_the_way_setxattr_2_does():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f")
+        await ws.vfs.setxattr("/r/f", "user.a", b"one")
+        with pytest.raises(FileExistsError):
+            await ws.vfs.setxattr("/r/f", "user.a", b"two", create=True)
+        with pytest.raises(OSError) as absent:
+            await ws.vfs.setxattr("/r/f", "user.q", b"x", replace=True)
+        assert absent.value.errno == posix_errno(FsCondition.NO_XATTR)
+        await ws.vfs.setxattr("/r/f", "user.a", b"two", replace=True)
+        assert await ws.vfs.getxattr("/r/f", "user.a") == b"two"
+
+
+@pytest.mark.asyncio
+async def test_a_backend_stat_extra_is_not_an_attribute():
+    dispatcher, _ = _dispatcher(Policies())
+    dispatcher._namespace.is_link = MagicMock(return_value=False)
+    dispatcher._namespace.xattrs = MagicMock(return_value={"user.tag": b"t"})
+    dispatcher._namespace.try_mount_for.return_value.execute_op = AsyncMock(
+        return_value=FileStat(
+            name="d", type=FileType.DIRECTORY, extra={"file_id": "1AbC"}))
+    listed, _ = await dispatcher.dispatch("listxattr", _path("/data/d"))
+    assert listed == ["user.tag"]
+
+
+@pytest.mark.asyncio
+async def test_setxattr_and_removexattr_classify_as_writes():
+    policies = Policies()
+    policies.add(DenyWrites())
+    dispatcher, _ = _dispatcher(policies)
+    for op in ("setxattr", "removexattr"):
+        with pytest.raises(PolicyDenied):
+            await dispatcher.dispatch(op, _path("/data/a.txt"), name="user.a")
+
+
+@pytest.mark.asyncio
+async def test_an_xattr_op_on_a_missing_path_is_enoent():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.listxattr("/r/nope")
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.setxattr("/r/nope", "user.a", b"x")
+        assert ws.namespace.meta_for("/r/nope") is None
+
+
+@pytest.mark.asyncio
+async def test_a_removed_file_takes_its_xattrs_with_it():
+    # Removed through the door rather than the shell's rm, the node
+    # stayed, and a file created at the name next read back the old
+    # file's attributes.
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f")
+        await ws.vfs.setxattr("/r/f", "user.a", b"one")
+        await ws.vfs.unlink("/r/f")
+        await ws.shell("echo y > /r/f")
+        assert await ws.vfs.listxattr("/r/f") == []
+
+
+@pytest.mark.asyncio
+async def test_a_rename_carries_xattrs():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f")
+        await ws.vfs.setxattr("/r/f", "user.a", b"one")
+        await ws.vfs.rename("/r/f", "/r/g")
+        assert await ws.vfs.getxattr("/r/g", "user.a") == b"one"
+        assert ws.namespace.meta_for("/r/f") is None
+
+
+@pytest.mark.asyncio
+async def test_nofollow_reads_the_links_own_xattrs():
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo x > /r/f && ln -s f /r/lk")
+        await ws.vfs.setxattr("/r/lk", "user.target", b"t")
+        await ws.vfs.setxattr("/r/lk", "user.own", b"o", nofollow=True)
+        assert await ws.vfs.listxattr("/r/lk") == ["user.target"]
+        assert await ws.vfs.listxattr("/r/lk", nofollow=True) == ["user.own"]
+        assert ws.namespace.readlink("/r/lk") == "f"

@@ -28,7 +28,9 @@ from mirage.types import PathSpec
 
 # Grammar, ported from `bc.ts` so the two hosts parse one language
 # (precedence low to high):
-#   statement := 'halt' | assign | expr
+#   statement := 'halt' | string | 'print' print_list | assign | expr
+#   print_list:= element { ',' element }
+#   element   := string | expr
 #   expr      := assign | additive
 #   assign    := target ('='|'+='|'-='|'*='|'/='|'%='|'^=') expr
 #   additive  := term   { (+|-) term }
@@ -40,6 +42,16 @@ from mirage.types import PathSpec
 #   target    := name | 'scale' | 'ibase' | 'obase' | 'last' | '.'
 #   builtin   := sqrt | length | scale
 #   func      := s | c | a | l | e   (all need -l)
+#   string    := '"' [^"]* '"'
+# A statement's output is rendered as it is reached rather than at the
+# end, because `obase`, `scale` and `last` can all change partway down a
+# `print` list: `print 255, obase=16` writes `255` and then `10`.
+# A string is a statement and never an expression, so `1+"a"` is a syntax
+# error, and its token runs to the next `"` anywhere in the input --
+# across newlines, and past a `;`, a `#` or a `/*` -- because a backslash
+# never escapes the closing quote. A `"` the input never closes is not a
+# token at all: GNU's lexer has no rule it matches, so the quote is
+# reported as an illegal character and scanning resumes right after it.
 # There is no unary `+`: GNU's lexer has no such operator, so `+5` and
 # `1+ +2` are both syntax errors, and `++`/`--` are single tokens, which
 # is what makes `1++2` one too rather than `1 + (+2)`.
@@ -654,6 +666,7 @@ SQRT_NAME = "sqrt"
 LENGTH_NAME = "length"
 HALT_NAME = "halt"
 QUIT_NAME = "quit"
+PRINT_NAME = "print"
 SCALE_NAME = "scale"
 IBASE_NAME = "ibase"
 OBASE_NAME = "obase"
@@ -720,11 +733,69 @@ LINE_COMMENT = "#"
 BLOCK_OPEN = "/*"
 BLOCK_CLOSE = "*/"
 STRING_QUOTE = '"'
+# What `print` expands in a string. GNU writes nothing at all for an
+# escape it has no rule for, dropping both characters, so `\z`, `\0`,
+# `\e` and a backslash before the closing quote all vanish. A bare
+# string statement is written raw and reaches none of this, which is why
+# `"a\nb"` writes a backslash and an `n` where `print "a\nb"` breaks
+# the line. The expansion is what reaches the output column, so a tab
+# moves the fold one place rather than to the next tab stop, and the
+# two source characters never count as two.
+PRINT_ESCAPES = {
+    "a": "\a",
+    "b": "\b",
+    "f": "\f",
+    "n": "\n",
+    "q": '"',
+    "r": "\r",
+    "t": "\t",
+    "\\": "\\",
+}
 # What a statement is trimmed of at both ends. Spelled out rather than
 # left to `str.strip` / `String.trim`, whose sets differ between the two
 # hosts; GNU's own whitespace is just space and tab, and it reports the
 # other three as illegal characters, which is a separate divergence.
 TRIM_CHARS = " \t\r\v\f"
+
+
+def string_end(text: str, pos: int) -> int:
+    """Where the string literal opening at `pos` ends.
+
+    Args:
+        text (str): the input the literal sits in.
+        pos (int): the offset of the opening quote.
+
+    Returns:
+        int: the offset just past the closing quote, or -1 when the input
+            holds no second quote. A backslash never escapes the closing
+            quote, so a literal ending in one closes there and the text
+            after it is ordinary tokens again.
+    """
+    close = text.find(STRING_QUOTE, pos + 1)
+    return -1 if close < 0 else close + 1
+
+
+def unescape(text: str) -> str:
+    """Expand the escapes `print` honours in a string literal's body.
+
+    Args:
+        text (str): the body, without its quotes.
+
+    Returns:
+        str: the characters `print` writes. An escape GNU has no rule for
+            writes nothing, and so does a trailing backslash.
+    """
+    out: list[str] = []
+    pos = 0
+    while pos < len(text):
+        char = text[pos]
+        if char != "\\":
+            out.append(char)
+            pos += 1
+            continue
+        out.append(PRINT_ESCAPES.get(text[pos + 1:pos + 2], ""))
+        pos += 2
+    return "".join(out)
 
 
 def digit_value(char: str, ibase: int, clamp: bool) -> int:
@@ -1046,30 +1117,86 @@ def output_line_size(env: Mapping[str, str] | None) -> int:
     return size
 
 
-def fold_value(text: str, line_size: int) -> str:
-    """Break one printed value across output lines the way GNU does.
+# Where the UTF-8 encoding of a code point changes width. GNU counts the
+# bytes it writes, not the characters, so a two-byte `é` moves the fold
+# twice as far as an `x`; derived from the code point rather than by
+# encoding each character, so the two hosts count one number.
+UTF8_TWO_BYTES = 0x80
+UTF8_THREE_BYTES = 0x800
+UTF8_FOUR_BYTES = 0x10000
 
-    A folded line carries `line_size - 2` characters of the value and
-    then a backslash, so the default 70 puts 68 characters on a line and
-    makes it 69 bytes wide. The last chunk carries no backslash even
-    when it fills the width exactly, and the column is counted per
-    value, so a short value printed after a long one starts at the left
-    margin again. Only a printed value folds: GNU's diagnostics do not,
-    however long they are.
+
+def column_width(char: str) -> int:
+    """How far one written character moves GNU's output column.
 
     Args:
-        text (str): one rendered value, carrying no newline.
-        line_size (int): the width from `output_line_size`; 0 means the
-            value is written on one line whatever its length.
+        char (str): one character.
 
     Returns:
-        str: the value with a backslash and a newline at every break.
+        int: its UTF-8 byte length, 1 to 4.
     """
-    width = line_size - 2
-    if line_size == 0 or len(text) <= width:
-        return text
-    return "\\\n".join(text[at:at + width]
-                       for at in range(0, len(text), width))
+    point = ord(char)
+    if point < UTF8_TWO_BYTES:
+        return 1
+    if point < UTF8_THREE_BYTES:
+        return 2
+    if point < UTF8_FOUR_BYTES:
+        return 3
+    return 4
+
+
+@dataclass(slots=True)
+class OutputColumn:
+    """GNU's `out_col`: how full the current output line is.
+
+    One counter for the whole run, not one per value: `print` ends in no
+    newline, so a string it wrote moves the column a later value folds
+    at. Only written output folds; a diagnostic never does.
+
+    Args:
+        line_size (int): the width from `output_line_size`; 0 folds
+            nothing, however long the output is.
+        col (int): bytes already written on the current line.
+    """
+
+    line_size: int
+    col: int = 0
+
+    def write(self, text: str) -> str:
+        """Fold `text` into the output and advance the column.
+
+        Args:
+            text (str): the characters to write.
+
+        Returns:
+            str: the characters with a backslash and a newline at every
+                break. A newline in `text` starts the line over, so an
+                expression statement's own newline is what makes the next
+                value begin at the left margin.
+        """
+        out: list[str] = []
+        for char in text:
+            if char == "\n":
+                self.col = 0
+                out.append(char)
+                continue
+            width = column_width(char)
+            # A folded line carries `line_size - 2` bytes and then a
+            # backslash, so the default 70 puts 68 of them on a line and
+            # makes it 69 wide. A character that would cross that
+            # boundary moves whole to the next line; GNU, writing one
+            # byte at a time, splits it there instead and emits bytes
+            # that are no longer UTF-8. The fold lands in the same place
+            # whenever a character does not straddle it, which is every
+            # ASCII one. The `col != 0` guard keeps a character wider
+            # than the whole line from folding forever.
+            if (self.line_size != 0 and self.col != 0
+                    and self.col + width > self.line_size - 2):
+                out.append("\\\n")
+                self.col = 0
+            out.append(char)
+            self.col += width
+        return "".join(out)
 
 
 def runtime_line(kind: str, reason: str) -> str:
@@ -1344,14 +1471,20 @@ class Parser:
         src (str): the statement text.
         state (BcState): the run's registers, symbol table and
             math-library flag.
+        writes (list[str]): where the statement's output is appended,
+            already rendered. Owned by the caller so that the text a
+            statement produced before a runtime error survives it:
+            `print "x", 1/0` writes the `x` GNU had already written when
+            the division refused.
     """
 
-    __slots__ = ("_src", "_pos", "_state")
+    __slots__ = ("_src", "_pos", "_state", "_writes")
 
-    def __init__(self, src: str, state: BcState) -> None:
+    def __init__(self, src: str, state: BcState, writes: list[str]) -> None:
         self._src = src
         self._pos = 0
         self._state = state
+        self._writes = writes
 
     def _skip_blanks(self) -> None:
         while self._pos < len(self._src) and self._src[self._pos] in " \t":
@@ -1384,6 +1517,12 @@ class Parser:
                 marked incomplete when the input simply ran out.
         """
         char = self._peek()
+        # A `"` the input never closes matches no lexer rule either, so it
+        # is an illegal character where a closed one is an ordinary token
+        # in the wrong place: `1+"a` reports the quote and `1+"a"` a
+        # syntax error.
+        if char == STRING_QUOTE and string_end(self._src, self._pos) < 0:
+            return BcParseError(f"{ILLEGAL_CHARACTER}: {char}", pos=self._pos)
         if char != "" and char not in LEGAL_CHARS:
             return BcParseError(f"{ILLEGAL_CHARACTER}: {char}", pos=self._pos)
         return BcParseError(SYNTAX_ERROR, incomplete=char == "", pos=self._pos)
@@ -1410,6 +1549,33 @@ class Parser:
             self._pos += 1
         return self._src[start:self._pos]
 
+    def _emit(self, num: BcNumber) -> str:
+        """Render one value the moment the statement reaches it.
+
+        GNU writes a value where its own instruction runs, not at the end
+        of the statement, so everything an element changes before it is
+        already in force and everything a later element changes is not:
+        `print 255, obase=16` writes `255` and then `10`, and
+        `print 5, last` writes the 5 twice.
+
+        Args:
+            num (BcNumber): the value the element evaluated to.
+
+        Returns:
+            str: the value in the output base as it stands now.
+        """
+        self._state.last = reduce_number(num)
+        return render_number(num, self._state.obase)
+
+    def _read_string(self) -> str:
+        self._skip_blanks()
+        start = self._pos
+        end = string_end(self._src, start)
+        if end < 0:
+            raise self.unexpected()
+        self._pos = end
+        return self._src[start + 1:end - 1]
+
     def _read_target(self) -> str:
         self._skip_blanks()
         name = self._read_identifier()
@@ -1421,22 +1587,57 @@ class Parser:
             return LAST_ALIAS
         return ""
 
-    def parse_statement(self) -> BcNumber | None:
-        """Parse one statement, printing nothing for an assignment.
+    def parse_statement(self) -> None:
+        """Parse one statement, appending whatever it writes.
 
-        Returns:
-            BcNumber | None: the value to print, or None when the
-                statement was an assignment. An increment is not one:
-                `x=5` prints nothing where `x++` prints 5.
+        An assignment writes nothing, which is why `x=5` prints where
+        `(x=5)` does not; an increment is not an assignment, so `x++`
+        prints 5. Only an expression statement writes a trailing newline,
+        which is what leaves `print` and a bare string mid-line.
         """
         if self._is_halt():
             raise BcHalt()
+        if self._peek() == STRING_QUOTE:
+            # A bare string is written exactly as it was typed: GNU
+            # expands escapes for `print` alone, so `"a\n"` writes a
+            # backslash and an `n`. It does not touch `last` either.
+            self._writes.append(self._read_string())
+            return
+        if self._is_print():
+            self._parse_print()
+            return
         probe = self._try_assignment()
         if probe is None:
-            return self.parse_expr()
+            self._writes.append(self._emit(self.parse_expr()))
+            self._writes.append("\n")
+            return
         name, op = probe
         self._assign(name, op, self.parse_expr())
-        return None
+
+    def _is_print(self) -> bool:
+        # A whole identifier, so `printx` stays an ordinary variable, and
+        # a keyword rather than a name, so `print=1` and `1+print` are
+        # still syntax errors on the reserved word.
+        mark = self._pos
+        self._skip_blanks()
+        if self._read_identifier() == PRINT_NAME:
+            return True
+        self._pos = mark
+        return False
+
+    def _parse_print(self) -> None:
+        # Each element is written as it is reached, so a refusal partway
+        # down the list keeps what came before it. A string element is
+        # unescaped where the same string alone is not, and an expression
+        # element prints even when it is an assignment: `print x=5`
+        # writes 5 where the statement `x=5` writes nothing.
+        while True:
+            if self._peek() == STRING_QUOTE:
+                self._writes.append(unescape(self._read_string()))
+            else:
+                self._writes.append(self._emit(self.parse_expr()))
+            if not self._match(","):
+                return
 
     def _is_halt(self) -> bool:
         # `halt` is a statement, never part of an expression, so it only
@@ -1664,25 +1865,24 @@ class Parser:
         return self._pos >= len(self._src)
 
 
-def eval_statement(text: str, state: BcState) -> BcNumber | None:
+def eval_statement(text: str, state: BcState, writes: list[str]) -> None:
     """Evaluate one bc statement against the run's state.
 
     Args:
         text (str): the statement, already split off and stripped.
         state (BcState): the run's registers and symbol table.
-
-    Returns:
-        BcNumber | None: the value to print, or None for an assignment.
+        writes (list[str]): where the statement's output is appended,
+            already rendered. A refusal leaves behind whatever was
+            written before it.
 
     Raises:
         BcParseError: the statement cannot be parsed.
         BcRuntimeError: a non-fatal runtime error such as a zero divisor.
     """
-    parser = Parser(text, state)
-    value = parser.parse_statement()
+    parser = Parser(text, state, writes)
+    parser.parse_statement()
     if not parser.done():
         raise parser.unexpected()
-    return value
 
 
 def all_blank(text: str) -> bool:
@@ -1747,10 +1947,11 @@ def quit_offset(text: str) -> int:
             while pos < len(text) and text[pos] in NUMBER_CHARS:
                 pos += 1
         elif char == STRING_QUOTE:
-            pos += 1
-            while pos < len(text) and text[pos] != STRING_QUOTE:
-                pos += 1
-            pos += 1
+            # An unterminated quote is one illegal character and scanning
+            # resumes right after it, so a `quit` behind one still ends
+            # the run.
+            end = string_end(text, pos)
+            pos = pos + 1 if end < 0 else end
         else:
             pos += 1
     return -1
@@ -1796,9 +1997,20 @@ def line_statements(text: str, lines: list[int],
     text, lines, quits = cut_at_quit(text, lines)
     out: list[BcStatement] = []
     start = 0
-    for index in range(len(text) + 1):
-        if index < len(text) and text[index] != STATEMENT_SEPARATOR:
-            continue
+    index = 0
+    while index <= len(text):
+        if index < len(text):
+            char = text[index]
+            # A `;` inside a string is content, not a separator, so the
+            # whole token is stepped over before the next one is looked
+            # for.
+            if char == STRING_QUOTE:
+                end = string_end(text, index)
+                index = index + 1 if end < 0 else end
+                continue
+            if char != STATEMENT_SEPARATOR:
+                index += 1
+                continue
         piece, piece_lines = trim_piece(text[start:index], lines[start:index])
         if piece != "":
             # The token that follows decides where an incomplete
@@ -1808,6 +2020,7 @@ def line_statements(text: str, lines: list[int],
             out.append(
                 BcStatement(piece, tuple(piece_lines), incomplete, not quits))
         start = index + 1
+        index += 1
     return out, quits
 
 
@@ -1819,7 +2032,9 @@ def parse_input(text: str) -> tuple[list[list[BcStatement]], bool]:
     advances -- which is what keeps a later diagnostic on the right line.
     A `/* */` comment becomes one space, so it separates tokens rather
     than vanishing (`1/*c*/2` is `1 2`), and the newlines inside one
-    advance the counter without ending the statement.
+    advance the counter without ending the statement. A string is neither:
+    it is copied verbatim, so `"a#b"` keeps its hash and a string carrying
+    a newline keeps the statement open across the line break.
 
     Args:
         text (str): the decoded stdin.
@@ -1840,6 +2055,23 @@ def parse_input(text: str) -> tuple[list[list[BcStatement]], bool]:
     line = 1
     while pos < len(text):
         char = text[pos]
+        if char == STRING_QUOTE:
+            end = string_end(text, pos)
+            if end > 0:
+                # The token is copied as it stands: a `#` or a `/*` in it
+                # is content, and a newline in it advances the counter
+                # without ending the logical line, so a diagnostic after
+                # a string that spans lines still names its own line.
+                for index in range(pos, end):
+                    chars.append(text[index])
+                    char_lines.append(line)
+                    if text[index] == "\n":
+                        line += 1
+                pos = end
+                continue
+            # No closing quote anywhere: the parser reports this one as an
+            # illegal character, and the rest of the input lexes as
+            # usual, comments included.
         if char == LINE_COMMENT:
             while pos < len(text) and text[pos] != "\n":
                 pos += 1
@@ -1947,7 +2179,7 @@ async def bc(
         raw = b""
     state = BcState(scale=MATH_LIBRARY_SCALE if use_math else 0,
                     math_mode=use_math)
-    line_size = output_line_size(opts.env)
+    folder = OutputColumn(output_line_size(opts.env))
     results: list[str] = []
     errors: list[str] = []
     lines, eof_in_comment = parse_input(raw.decode(errors="replace"))
@@ -1960,6 +2192,7 @@ async def bc(
         # parse. The parse diagnostics themselves are not buffered --
         # GNU reports one per bad statement even on a line it discards.
         saved = snapshot_state(state)
+        saved_col = folder.col
         line_results: list[str] = []
         line_errors: list[str] = []
         parse_errors: list[str] = []
@@ -1978,9 +2211,12 @@ async def bc(
             # copy, so it cannot write: GNU never executes it, and
             # `x=5;1/0;y=7` has to leave `y` unset while leaving `x` at 5.
             target = state if runs else snapshot_state(state)
-            value: BcNumber | None = None
+            # Owned here rather than inside the parser, so that a runtime
+            # error partway down a `print` list keeps the text already
+            # written: `print "x", 1/0` writes the `x`.
+            writes: list[str] = []
             try:
-                value = eval_statement(statement.text, target)
+                eval_statement(statement.text, target, writes)
             except BcParseError as exc:
                 parse_errors.append(
                     parse_error_line(error_line(statement, exc), exc.text))
@@ -2003,17 +2239,21 @@ async def bc(
             if runs:
                 line_errors.extend(state.warnings)
             state.warnings.clear()
-            if runs and value is not None:
-                state.last = reduce_number(value)
-                # The one place a value reaches the output, so the one
-                # place it is folded: `render_number` answers a value
-                # and `fold_value` answers the lines it prints as.
-                line_results.append(
-                    fold_value(render_number(value, state.obase), line_size))
+            if not runs:
+                continue
+            # The one place output is folded. Rendering happened as each
+            # element was reached, in `Parser._emit`, because GNU's `obase`
+            # and `last` can both change partway down a `print` list.
+            for piece in writes:
+                line_results.append(folder.write(piece))
         if parse_errors:
-            # None of the line ran, so a `halt` on it did not run either.
+            # None of the line ran, so a `halt` on it did not run either,
+            # and the column never moved: GNU compiles the line before it
+            # writes anything, so a later statement's syntax error undoes
+            # an earlier one's `print`.
             errors.extend(parse_errors)
             restore_state(state, saved)
+            folder.col = saved_col
             halted = False
             continue
         errors.extend(line_errors)
@@ -2022,6 +2262,6 @@ async def bc(
             break
     if eof_in_comment:
         errors.append(EOF_IN_COMMENT)
-    stdout = ("\n".join(results) + "\n").encode() if results else b""
+    stdout = "".join(results).encode()
     stderr = ("\n".join(errors) + "\n").encode() if errors else None
     return stdout, IOResult(stderr=stderr)

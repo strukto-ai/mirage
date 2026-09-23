@@ -15,7 +15,7 @@
 from dataclasses import dataclass, field
 
 from mirage.cache.index import IndexConfig
-from mirage.types import Limit, MountBackend, MountMode
+from mirage.types import Limit, MountBackend, MountMode, ReadSpec
 from mirage.vfs.base import BaseVFS
 
 
@@ -39,3 +39,6 @@ class Mount:
     # workspace's index config, or a RAM store at the driver's
     # ``index_ttl`` when there is none.
     index: IndexConfig | None = None
+    # How cached bytes for this mount are revalidated. None takes the
+    # workspace default, as ``mode`` does.
+    read: ReadSpec | None = None

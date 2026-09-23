@@ -13,11 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { classify } from '@struktoai/mirage-core/errors/index'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type { Ops } from '@struktoai/mirage-core/ops/ops'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { type FuseAttr, MountCore } from './core.ts'
 import { classifyError } from './errors.ts'
+
+// setxattr(2)'s flags as the kernel hands them over: linux numbers
+// XATTR_CREATE 1 and XATTR_REPLACE 2, macOS 2 and 4 (its 1 is
+// XATTR_NOFOLLOW, which the kernel has already applied). Mirrors the
+// python adapter.
+const DARWIN = process.platform === 'darwin'
+export const XATTR_CREATE = DARWIN ? 0x2 : 0x1
+export const XATTR_REPLACE = DARWIN ? 0x4 : 0x2
 
 export type { FuseAttr }
 
@@ -302,17 +311,21 @@ export class MirageFS {
     name: string,
     value: Buffer,
     _position: number,
-    _flags: number,
+    flags: number,
     cb: (code: number) => void,
   ): void {
-    this.validate(path, (code) => {
-      if (code !== 0) {
-        cb(code)
-        return
-      }
-      this.core.setxattr(path, name, value)
-      cb(0)
-    })
+    const opts = {
+      create: (flags & XATTR_CREATE) !== 0,
+      replace: (flags & XATTR_REPLACE) !== 0,
+    }
+    void this.core.setxattr(path, name, value, opts).then(
+      () => {
+        cb(0)
+      },
+      (err: unknown) => {
+        cb(classifyError(err))
+      },
+    )
   }
 
   private getxattr(
@@ -321,35 +334,39 @@ export class MirageFS {
     _position: number,
     cb: (code: number, value?: Buffer) => void,
   ): void {
-    this.validate(path, (code) => {
-      if (code !== 0) {
-        cb(code)
-        return
-      }
-      // A missing value tells fuse-native to report ENOATTR/ENODATA.
-      cb(0, this.core.getxattr(path, name))
-    })
+    void this.core.getxattr(path, name).then(
+      (value) => {
+        cb(0, Buffer.from(value))
+      },
+      (err: unknown) => {
+        // No value is how fuse-native is told to report ENOATTR (macOS)
+        // or ENODATA (linux) for an attribute that is not set.
+        if (classify(err) === 'NO_XATTR') cb(0)
+        else cb(classifyError(err))
+      },
+    )
   }
 
   private listxattr(path: string, cb: (code: number, list?: string[]) => void): void {
-    this.validate(path, (code) => {
-      if (code !== 0) {
-        cb(code)
-        return
-      }
-      cb(0, this.core.listxattr(path))
-    })
+    void this.core.listxattr(path).then(
+      (names) => {
+        cb(0, names)
+      },
+      (err: unknown) => {
+        cb(classifyError(err))
+      },
+    )
   }
 
   private removexattr(path: string, name: string, cb: (code: number) => void): void {
-    this.validate(path, (code) => {
-      if (code !== 0) {
-        cb(code)
-        return
-      }
-      this.core.removexattr(path, name)
-      cb(0)
-    })
+    void this.core.removexattr(path, name).then(
+      () => {
+        cb(0)
+      },
+      (err: unknown) => {
+        cb(classifyError(err))
+      },
+    )
   }
 
   private validate(path: string, cb: (code: number) => void): void {

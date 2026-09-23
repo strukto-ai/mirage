@@ -50,7 +50,8 @@ def test_nextcloud_write_commands_tagged():
 def test_nextcloud_write_ops_tagged():
     from mirage.ops.nextcloud import OPS
     write_op_names = {
-        "write", "unlink", "rmdir", "mkdir", "create", "truncate", "rename"
+        "write", "append", "unlink", "rmdir", "mkdir", "create", "truncate",
+        "rename"
     }
     for ro in OPS:
         if ro.name in write_op_names:

@@ -114,63 +114,169 @@
       "id": "C1",
       "name": "general",
       "kind": "channel",
-      "created": 1762128000
+      "created": 1762128000,
+      "purpose": "Share announcements and updates about company news, upcoming events, or teammates who deserve some kudos. ⭐",
+      "membersJson": [
+        "U1",
+        "U2",
+        "U3",
+        "U4",
+        "U6",
+        "U7",
+        "U8",
+        "U9",
+        "U10",
+        "U11",
+        "U12",
+        "U13",
+        "U14",
+        "U15",
+        "U16",
+        "U17"
+      ]
     },
     {
       "id": "C2",
       "name": "random",
       "kind": "channel",
-      "created": 1762128000
+      "created": 1762128000,
+      "purpose": "Other channels are for work. This one’s just for fun. Get to know your teammates and show your lighter side. 🎈",
+      "membersJson": [
+        "U1",
+        "U2",
+        "U3",
+        "U4",
+        "U6",
+        "U7",
+        "U8",
+        "U9",
+        "U10",
+        "U11",
+        "U12",
+        "U13",
+        "U14",
+        "U15",
+        "U16",
+        "U17"
+      ]
     },
     {
       "id": "C3",
       "name": "engineering",
       "kind": "channel",
-      "created": 1762128000
+      "created": 1762128000,
+      "topic": "search hotfix rollout",
+      "purpose": "Builds, deploys and incidents.",
+      "membersJson": [
+        "U2",
+        "U4",
+        "U5",
+        "U8",
+        "U11",
+        "U14",
+        "U15"
+      ]
     },
     {
       "id": "C4",
       "name": "design",
       "kind": "channel",
-      "created": 1762128000
+      "created": 1762128000,
+      "purpose": "Design reviews and critique.",
+      "membersJson": [
+        "U1",
+        "U3",
+        "U13",
+        "U17"
+      ]
     },
     {
       "id": "C5",
       "name": "leadership",
       "kind": "channel",
       "created": 1762128000,
-      "isPrivate": true
+      "isPrivate": true,
+      "purpose": "Leadership team only.",
+      "membersJson": [
+        "U1",
+        "U7",
+        "U8",
+        "U16"
+      ]
     },
     {
       "id": "C6",
       "name": "product-reply",
       "kind": "channel",
       "created": 1762128000,
-      "isArchived": true
+      "isArchived": true,
+      "purpose": "Reply product workstream.",
+      "membersJson": [
+        "U1",
+        "U2",
+        "U3",
+        "U4",
+        "U5",
+        "U10",
+        "U12"
+      ]
     },
     {
       "id": "C7",
       "name": "product-runtime",
       "kind": "channel",
-      "created": 1767830400
+      "created": 1767830400,
+      "purpose": "Runtime product workstream.",
+      "membersJson": [
+        "U1",
+        "U7",
+        "U8",
+        "U11",
+        "U13",
+        "U17"
+      ]
     },
     {
       "id": "C8",
       "name": "eng-agents",
       "kind": "channel",
-      "created": 1769990400
+      "created": 1769990400,
+      "purpose": "Agent engineering.",
+      "membersJson": [
+        "U2",
+        "U4",
+        "U11",
+        "U14",
+        "U15",
+        "U17"
+      ]
     },
     {
       "id": "C9",
       "name": "sales",
       "kind": "channel",
-      "created": 1762128000
+      "created": 1762128000,
+      "purpose": "Pipeline, deals and renewals.",
+      "membersJson": [
+        "U6",
+        "U9",
+        "U10",
+        "U16",
+        "U17"
+      ]
     },
     {
       "id": "C10",
       "name": "design-partners",
       "kind": "channel",
-      "created": 1770595200
+      "created": 1770595200,
+      "purpose": "Our design partner program.",
+      "membersJson": [
+        "U3",
+        "U11",
+        "U13",
+        "U17"
+      ]
     }
   ],
   "dms": [

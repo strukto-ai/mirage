@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import base64
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from mirage.core.timeutil import epoch_to_iso
@@ -35,6 +36,12 @@ class NodeMetaKey(StrEnum):
     GID = "gid"
     ATIME = "atime"
     OBSERVED_MTIME = "observed_mtime"
+
+
+# An extended attribute rides a node's flat field set as one field per
+# name, ``xattr:<name>``, its value base64 so every store (a JSON file, a
+# Redis hash, a snapshot) holds the bytes as a string.
+XATTR_FIELD_PREFIX = "xattr:"
 
 
 @dataclass(slots=True)
@@ -60,15 +67,23 @@ class NodeMeta:
     # modified time at all, so `find -mtime` works on mtime-less
     # backends for files written through mirage.
     observed_mtime: float | None = None
+    # Extended attributes a caller set, by name. What a backend reports
+    # about the path is not stored here; the door derives it from stat.
+    xattrs: dict[str, bytes] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
-        return all(getattr(self, key) is None for key in NodeMetaKey)
+        return (all(getattr(self, key) is None for key in NodeMetaKey)
+                and not self.xattrs)
 
     def to_fields(self) -> NodeFields:
-        return {
+        fields: NodeFields = {
             str(key): value
             for key in NodeMetaKey if (value := getattr(self, key)) is not None
         }
+        for name, value in self.xattrs.items():
+            fields[XATTR_FIELD_PREFIX +
+                   name] = base64.b64encode(value).decode("ascii")
+        return fields
 
     @classmethod
     def from_fields(cls, entry: NodeFields) -> "NodeMeta":
@@ -88,6 +103,11 @@ class NodeMeta:
             atime=atime if isinstance(atime, str) else None,
             observed_mtime=(float(observed) if isinstance(
                 observed, (int, float)) else None),
+            xattrs={
+                key[len(XATTR_FIELD_PREFIX):]: base64.b64decode(value)
+                for key, value in entry.items() if
+                key.startswith(XATTR_FIELD_PREFIX) and isinstance(value, str)
+            },
         )
 
 
@@ -285,6 +305,43 @@ class Namespace:
             meta.mtime = mtime
         await self._store.set(path, meta.to_fields())
 
+    def xattrs(self, path: str) -> dict[str, bytes]:
+        """The extended attributes a caller set on a path, by name.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        meta = self._nodes.get(path)
+        return dict(meta.xattrs) if meta is not None else {}
+
+    async def set_xattr(self, path: str, name: str, value: bytes) -> None:
+        """Store one extended attribute on a path's node.
+
+        Args:
+            path (str): absolute virtual path.
+            name (str): attribute name.
+            value (bytes): attribute value.
+        """
+        meta = self._nodes.setdefault(path, NodeMeta())
+        meta.xattrs[name] = bytes(value)
+        await self._store.set(path, meta.to_fields())
+
+    async def remove_xattr(self, path: str, name: str) -> None:
+        """Drop one extended attribute, and the node once it holds nothing.
+
+        Args:
+            path (str): absolute virtual path.
+            name (str): attribute name.
+        """
+        meta = self._nodes.get(path)
+        if meta is None or meta.xattrs.pop(name, None) is None:
+            return
+        if meta.is_empty():
+            del self._nodes[path]
+            await self._store.delete([path])
+            return
+        await self._store.set(path, meta.to_fields())
+
     async def drop_attrs(self, path: str, fields: Iterable[str]) -> None:
         """Drop overlay fields that a backend has applied natively.
 
@@ -300,9 +357,9 @@ class Namespace:
         meta = self._nodes.get(path)
         if meta is None:
             return
-        for field in fields:
-            if field != str(NodeMetaKey.TARGET):
-                setattr(meta, field, None)
+        for key in fields:
+            if key != str(NodeMetaKey.TARGET):
+                setattr(meta, key, None)
         if meta.is_empty():
             del self._nodes[path]
             await self._store.delete([path])

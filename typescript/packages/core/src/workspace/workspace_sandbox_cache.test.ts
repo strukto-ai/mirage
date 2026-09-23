@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { ConsistencyPolicy, MountMode, PathSpec } from '../types.ts'
+import { MountMode, PathSpec } from '../types.ts'
 import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -35,7 +35,6 @@ async function makeCachingWorkspace(): Promise<{ ws: Workspace; ram: RAMVFS }> {
     { '/r': ram },
     {
       mode: MountMode.EXEC,
-      consistency: ConsistencyPolicy.LAZY,
       shellParserFactory: () => Promise.resolve(parser),
     },
   )
@@ -49,7 +48,7 @@ describe('sandbox bridge shares the shell file cache', () => {
       await ws.shell('echo v1 > /r/f.txt')
       const first = DEC.decode((await ws.shell('cat /r/f.txt')).stdout)
       expect(first).toContain('v1')
-      // Out-of-band mutation: under LAZY the cache is not revalidated,
+      // Out-of-band mutation: under `bounded` the cache is not revalidated,
       // so the warm read must keep serving v1 — from the sandbox too.
       ram.store.files.set('/f.txt', ENC.encode('v2-out-of-band\n'))
       const io = await ws.shell(

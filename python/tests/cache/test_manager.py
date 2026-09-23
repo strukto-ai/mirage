@@ -14,6 +14,8 @@
 
 import asyncio
 
+import pytest
+
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexEntry
@@ -21,6 +23,10 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _owns_all(_key: str) -> bool:
+    return True
 
 
 def _run(coro):
@@ -143,6 +149,140 @@ async def _cached_local_case() -> bytes | None:
 
 def test_cached_bytes_local_mount_returns_none():
     assert _run(_cached_local_case()) is None
+
+
+def _spec(path: str = "/data/x.txt") -> PathSpec:
+    return PathSpec(vfs_path=mount_key(path, "/data/"),
+                    virtual=path,
+                    directory="/data/")
+
+
+async def _gate_refuses_case() -> tuple[bytes | None, list[str]]:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+    asked: list[str] = []
+
+    async def gate(key: str) -> bool:
+        asked.append(key)
+        return False
+
+    manager = CacheManager(cache, index, "/data/", True, _owns_all, gate)
+    return await manager.cached_bytes(_spec()), asked
+
+
+def test_gate_refusal_withholds_the_cached_bytes():
+    served, asked = _run(_gate_refuses_case())
+    assert served is None
+    assert asked == ["/data/x.txt"]
+
+
+async def _gate_skipped_on_miss_case() -> list[str]:
+    cache, index = _stores()
+    asked: list[str] = []
+
+    async def gate(key: str) -> bool:
+        asked.append(key)
+        return True
+
+    manager = CacheManager(cache, index, "/data/", True, _owns_all, gate)
+    await manager.cached_bytes(_spec())
+    return asked
+
+
+def test_gate_is_not_asked_for_a_path_the_cache_does_not_hold():
+    assert _run(_gate_skipped_on_miss_case()) == [], (
+        "a cold read must cost no revalidation")
+
+
+async def _gate_skipped_on_local_case() -> list[str]:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+    asked: list[str] = []
+
+    async def gate(key: str) -> bool:
+        asked.append(key)
+        return True
+
+    manager = CacheManager(cache, index, "/data/", False, _owns_all, gate)
+    await manager.cached_bytes(_spec())
+    return asked
+
+
+def test_gate_is_not_asked_for_a_non_caching_mount():
+    assert _run(_gate_skipped_on_local_case()) == []
+
+
+async def _gate_skipped_when_unowned_case() -> list[str]:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+    asked: list[str] = []
+
+    async def gate(key: str) -> bool:
+        asked.append(key)
+        return True
+
+    manager = CacheManager(cache, index, "/data/", True, lambda _: False, gate)
+    await manager.cached_bytes(_spec())
+    return asked
+
+
+def test_gate_is_not_asked_for_a_key_the_mount_no_longer_owns():
+    assert _run(_gate_skipped_when_unowned_case()) == [], (
+        "ownership is checked first, so a retiring mount is never probed")
+
+
+async def _gate_raises_case() -> bytes | None:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+
+    async def gate(_key: str) -> bool:
+        raise FileNotFoundError("/data/x.txt")
+
+    manager = CacheManager(cache, index, "/data/", True, _owns_all, gate)
+    return await manager.cached_bytes(_spec())
+
+
+def test_gate_reporting_the_object_gone_propagates():
+    with pytest.raises(FileNotFoundError):
+        _run(_gate_raises_case())
+
+
+async def _cached_size_case(data: bytes) -> tuple[int | None, list[str]]:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", data)
+    asked: list[str] = []
+
+    async def gate(key: str) -> bool:
+        asked.append(key)
+        return False
+
+    manager = CacheManager(cache, index, "/data/", True, _owns_all, gate)
+    return await manager.cached_size(_spec()), asked
+
+
+def test_cached_size_reports_the_length_without_revalidating():
+    size, asked = _run(_cached_size_case(b"cached"))
+    assert size == 6
+    assert asked == [], (
+        "the stat size backfill runs on the backends that report no size, "
+        "so gating it would turn a stat into a backend stat")
+
+
+def test_cached_size_of_an_empty_render_is_zero_not_none():
+    size, _ = _run(_cached_size_case(b""))
+    assert size == 0, (
+        "an empty cached render has a known size; None would read as "
+        "unknown and reach ls -l and stat as a missing size")
+
+
+async def _cached_size_miss_case() -> int | None:
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    return await manager.cached_size(_spec())
+
+
+def test_cached_size_miss_returns_none():
+    assert _run(_cached_size_miss_case()) is None
 
 
 async def _no_index_case() -> bool:

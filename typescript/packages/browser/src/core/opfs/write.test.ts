@@ -50,4 +50,11 @@ describe('opfs/write.writeBytes', () => {
       writeBytes(accessor, spec('/plain/c'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
+
+  it('a target that is a directory is EISDIR', async () => {
+    await mkdir(accessor, spec('/a'), true)
+    await expect(
+      writeBytes(accessor, spec('/a'), new TextEncoder().encode('x')),
+    ).rejects.toMatchObject({ code: 'EISDIR' })
+  })
 })

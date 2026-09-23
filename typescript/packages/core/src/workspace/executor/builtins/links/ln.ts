@@ -45,7 +45,7 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { absPath, fail, readOnlyError, result } from '../shared.ts'
 import { posixRelative } from './links.ts'
-import { pathReaddir, resolvePathStat } from './probe.ts'
+import { linkTargetStat, pathReaddir, resolvePathStat } from './probe.ts'
 import type { Result } from '../types.ts'
 
 const TARGET_DIR_LONG = '--target-directory'
@@ -424,6 +424,36 @@ export async function makeLink(
   let backupNote = ''
   const control = flags.backup
   const backs = control !== null && control !== 'none'
+  if (typed.endsWith('/')) {
+    // A link name typed with a slash asks for a directory the link can
+    // never be, and GNU settles it before -f or -b touch anything there:
+    // those two lstat the name first, and `reg/` over a file (or a link
+    // to one) is ENOTDIR, `failed to access`, with the file kept and
+    // nothing renamed aside. Without them symlink(2) and link(2) answer
+    // `missing/` with ENOENT and anything standing behind the slash with
+    // EEXIST, so GNU creates nothing where the normalized name would have
+    // made a link called `missing`. A directory there took the link
+    // inside it in planLinks, so only a non-directory and the absent name
+    // are settled here, and a plain file without a flag falls to the
+    // door's "File exists" below.
+    const linked = visibleLink(namespace, plan.linkAbs)
+    const behind = linked
+      ? await linkTargetStat(namespace, dispatch, plan.linkAbs, null)
+      : await pathStat(dispatch, plan.linkAbs)
+    if (behind !== null && behind.type !== FileType.DIRECTORY && (flags.force || backs)) {
+      errors.push(`ln: failed to access '${typed}': Not a directory\n`)
+      return
+    }
+    if (!linked && behind === null) {
+      const arrow = flags.symbolic ? '' : ` => '${targetTyped}'`
+      errors.push(`ln: failed to create ${kind} '${typed}'${arrow}: No such file or directory\n`)
+      return
+    }
+    if (linked && behind?.type !== FileType.DIRECTORY) {
+      errors.push(`ln: failed to create ${kind} '${typed}': File exists\n`)
+      return
+    }
+  }
   // GNU's same-name check, before any backup or removal: -f would
   // otherwise unlink the source it is about to link, leaving `ln -sf a a`
   // a self-loop where a file was. GNU waives it when a backup keeps the

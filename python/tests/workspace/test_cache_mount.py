@@ -20,7 +20,7 @@ from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.read import read_bytes
 from mirage.core.disk.readdir import readdir
 from mirage.io.types import IOResult
-from mirage.types import ConsistencyPolicy, MountMode, PathSpec
+from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -81,7 +81,8 @@ async def test_warm_read_stays_on_real_mount(tmp_path):
 @pytest.mark.asyncio
 async def test_cross_mount_read_serves_cache(tmp_path):
     """A cross-mount read relays each operand through ``execute_op``, and the
-    op-layer read-through serves a warm operand from cache. Proven under LAZY
+    op-layer read-through serves a warm operand from cache. Proven under
+    `bounded`
     by mutating the file out-of-band: the cross-mount read still returns the
     cached v1."""
     (tmp_path / "a.txt").write_bytes(b"v1\n")
@@ -92,7 +93,7 @@ async def test_cross_mount_read_serves_cache(tmp_path):
         "/r/": RAMVFS()
     },
                    mode=MountMode.WRITE,
-                   consistency=ConsistencyPolicy.LAZY)
+                   read=ReadSpec(policy=ReadPolicy.BOUNDED))
     await ws.shell("echo hi > /r/b.txt")
     await (await ws.shell("cat /d/a.txt")).stdout_str()
     (tmp_path / "a.txt").write_bytes(b"v2\n")
@@ -106,12 +107,20 @@ def _stat_scope(path):
 
 
 @pytest.mark.asyncio
-async def test_stat_gcs_orphaned_overlay_under_always():
+async def test_stat_gcs_orphaned_overlay_under_fresh():
     """A remotely-deleted path leaves an orphaned attribute overlay. Under
-    ALWAYS, a stat that the backend reports gone GCs the overlay node."""
-    ws = Workspace({"/data/": RAMVFS()},
+    ``read: fresh``, a stat the backend reports gone GCs the overlay node.
+
+    The subject is the reaction, not RAM: the instance declares the two
+    capabilities the verdict asks for so a RAM mount can legally carry
+    the policy.
+    """
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ram.read_revalidatable = True
+    ws = Workspace({"/data/": ram},
                    mode=MountMode.WRITE,
-                   consistency=ConsistencyPolicy.ALWAYS)
+                   read=ReadSpec(policy=ReadPolicy.FRESH))
     await ws.namespace.ensure_loaded()
     await ws.namespace.set_attrs("/data/gone.txt", mode=0o600)
     assert ws.namespace.meta_for("/data/gone.txt") is not None
@@ -123,14 +132,16 @@ async def test_stat_gcs_orphaned_overlay_under_always():
 
 
 @pytest.mark.asyncio
-async def test_shell_stat_gcs_orphan_under_always():
+async def test_shell_stat_gcs_orphan_under_fresh():
     """A single-mount shell read (not the dispatcher) reconciles via the
-    registry: under ALWAYS, a stat the backend reports gone GCs the overlay."""
+    registry: under ``read: fresh``, a stat the backend reports gone GCs
+    the overlay."""
     ram = RAMVFS()
     ram.caches_reads = True
+    ram.read_revalidatable = True
     ws = Workspace({"/r/": ram},
                    mode=MountMode.WRITE,
-                   consistency=ConsistencyPolicy.ALWAYS)
+                   read=ReadSpec(policy=ReadPolicy.FRESH))
     await ws.namespace.ensure_loaded()
     await ws.namespace.set_attrs("/r/gone.txt", mode=0o600)
     assert ws.namespace.meta_for("/r/gone.txt") is not None
@@ -141,11 +152,11 @@ async def test_shell_stat_gcs_orphan_under_always():
 
 
 @pytest.mark.asyncio
-async def test_stat_keeps_overlay_under_lazy():
-    """Under LAZY the overlay is left in place (no reconcile)."""
+async def test_stat_keeps_overlay_under_bounded():
+    """Under ``read: bounded`` the overlay is left in place."""
     ws = Workspace({"/data/": RAMVFS()},
                    mode=MountMode.WRITE,
-                   consistency=ConsistencyPolicy.LAZY)
+                   read=ReadSpec(policy=ReadPolicy.BOUNDED))
     await ws.namespace.ensure_loaded()
     await ws.namespace.set_attrs("/data/gone.txt", mode=0o600)
 
@@ -153,3 +164,40 @@ async def test_stat_keeps_overlay_under_lazy():
         await ws.dispatch("stat", _stat_scope("/data/gone.txt"))
 
     assert ws.namespace.meta_for("/data/gone.txt") is not None
+
+
+@pytest.mark.asyncio
+async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
+    """Under ``bounded`` the guarded walk leaves the entry it read past.
+
+    Every condition here is load-bearing and fails silently if changed.
+    The hide forces `cp` onto the primitive walk, whose per-file read
+    carries no backend token; the native strategy fills no cache at all.
+    The mount is the root because `cp` keys its reads on ``src.virtual``
+    while the runner re-prefixes, so on ``/r`` the fill lands at
+    ``/r/r/dir/a.txt`` and this asserts nothing (#441, #629).
+    """
+    (tmp_path / "dir").mkdir()
+    (tmp_path / "dir" / "a.txt").write_bytes(b"v1\n")
+    disk = DiskVFS(root=str(tmp_path))
+    disk.caches_reads = True
+    ws = Workspace({"/": disk},
+                   mode=MountMode.WRITE,
+                   read=ReadSpec(policy=ReadPolicy.BOUNDED))
+    ws.create_session("agent", profile={"paths": {"hide": ["/dir/.secret"]}})
+
+    cold = await (await ws.shell("cat /dir/a.txt",
+                                 session_id="agent")).stdout_str()
+    assert cold == "v1\n"
+
+    (tmp_path / "dir" / "a.txt").write_bytes(b"v2\n")
+    copied = await ws.shell("cp -r /dir /copy", session_id="agent")
+    assert copied.exit_code == 0
+
+    made = await (await ws.shell("cat /copy/a.txt",
+                                 session_id="agent")).stdout_str()
+    assert made == "v2\n", "the copy has to hold the bytes the walk read"
+    served = await (await ws.shell("cat /dir/a.txt",
+                                   session_id="agent")).stdout_str()
+    assert served == "v1\n", ("the guarded walk overwrote the entry it read "
+                              "past")

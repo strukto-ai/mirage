@@ -20,6 +20,7 @@ describe('DATABRICKS_VOLUME_OPS', () => {
   it('exposes the same ten ops as Python', () => {
     const names = DATABRICKS_VOLUME_OPS.map((op) => op.name).sort()
     expect(names).toEqual([
+      'append',
       'create',
       'glob',
       'mkdir',
@@ -39,7 +40,9 @@ describe('DATABRICKS_VOLUME_OPS', () => {
         (op) => op.name,
       ),
     )
-    expect(writes).toEqual(new Set(['create', 'mkdir', 'rename', 'rmdir', 'unlink', 'write']))
+    expect(writes).toEqual(
+      new Set(['append', 'create', 'mkdir', 'rename', 'rmdir', 'unlink', 'write']),
+    )
   })
 
   it('targets the databricks_volume VFS', () => {

@@ -64,9 +64,9 @@ def _capture_io(ws: Workspace) -> list:
     captured: list = []
     orig = ws._dispatcher.apply_io
 
-    async def recording(result, records=None, is_cacheable=None):
+    async def recording(result, records=None, cache_facts=None):
         captured.append(result)
-        return await orig(result, records=records, is_cacheable=is_cacheable)
+        return await orig(result, records=records, cache_facts=cache_facts)
 
     ws._dispatcher.apply_io = recording
     return captured

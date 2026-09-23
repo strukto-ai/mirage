@@ -29,20 +29,24 @@ ROUTED_VERBS: Mapping[str, tuple[str, ...]] = {
     "access": ("stat", ),
     "chmod": ("setattr", ),
     "chown": ("setattr", ),
+    "getxattr": ("getxattr", ),
     "lchmod": ("setattr", ),
     "lchown": ("setattr", ),
     "listdir": ("readdir", ),
+    "listxattr": ("listxattr", ),
     "lstat": ("readlink", "stat"),
     "makedirs": ("mkdir", ),
     "mkdir": ("mkdir", ),
     "readlink": ("readlink", ),
     "remove": ("unlink", ),
     "removedirs": ("rmdir", ),
+    "removexattr": ("removexattr", ),
     "rename": ("rename", ),
     "renames": ("rename", ),
     "replace": ("rename", ),
     "rmdir": ("rmdir", ),
     "scandir": ("readdir", "stat"),
+    "setxattr": ("setxattr", ),
     "stat": ("stat", ),
     "symlink": ("symlink", ),
     "truncate": ("truncate", ),
@@ -63,12 +67,6 @@ ROUTED_VERBS: Mapping[str, tuple[str, ...]] = {
 # because a host process cwd cannot be a virtual path; a runtime whose
 # guest has its own cwd (Emscripten does) serves it inside that guest
 # and never reaches this table.
-# The extended-attribute family is refused rather than faked, which is
-# a deliberate divergence from `fuse/core.py`: a real mountpoint has to
-# keep Finder and `cp -p` working, so it holds advisory xattrs in memory
-# for the mount's lifetime. There is no op behind that, so nothing above
-# the FUSE adapter can reach it, and ENOTSUP is what a filesystem
-# without xattr support answers.
 # `link`, `mkfifo` and `mknod` refuse with EPERM instead, because that
 # is what link(2) and mknod(2) document for a filesystem that does not
 # support the requested node (vfat answers link() exactly this way), so
@@ -78,15 +76,11 @@ REFUSED_VERBS: Mapping[str, FsCondition] = {
     "chflags": FsCondition.ENOTSUP,
     "chroot": FsCondition.ENOTSUP,
     "fwalk": FsCondition.ENOTSUP,
-    "getxattr": FsCondition.ENOTSUP,
     "lchflags": FsCondition.ENOTSUP,
     "link": FsCondition.EPERM,
-    "listxattr": FsCondition.ENOTSUP,
     "mkfifo": FsCondition.EPERM,
     "mknod": FsCondition.EPERM,
     "open": FsCondition.ENOTSUP,
-    "removexattr": FsCondition.ENOTSUP,
-    "setxattr": FsCondition.ENOTSUP,
     "statvfs": FsCondition.ENOTSUP,
 }
 

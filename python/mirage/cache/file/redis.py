@@ -18,8 +18,7 @@ from importlib.resources import files
 from typing import Any
 
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
-from mirage.cache.file.utils import (default_fingerprint_async, glob_escape,
-                                     parse_limit)
+from mirage.cache.file.utils import glob_escape, parse_limit
 from mirage.cache.invalidation import Invalidation
 from mirage.vfs.redis.redis import RedisVFS
 
@@ -48,7 +47,11 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         self._data_prefix = f"{key_prefix}data:"
         self._meta_prefix = f"{key_prefix}meta:"
         self.max_drain_bytes: int | None = max_drain_bytes
-        # Local invalidation discards fills paused in cooperative hashing.
+        # Local invalidation discards a fill whose key was dropped while
+        # it was in flight. Dormant on this host: nothing suspends between
+        # the stamp and the check here (see `set`), so it is the shared
+        # cross-language contract and a guard against a future await
+        # rather than a window that can currently open.
         self._invalidation = Invalidation()
         self._drain_tasks: dict[str, asyncio.Task[Any]] = {}
         self._add = self._cache_client.register_script(ADD_LUA)
@@ -71,18 +74,24 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
     ) -> None:
         stamp = self._invalidation.enter(key)
         try:
-            if fingerprint is None:
-                fingerprint = await default_fingerprint_async(data)
             if self._invalidation.stale(key, stamp):
                 return
             pipe = self._cache_client.pipeline()
             dk = self._data_key(key)
             mk = self._meta_key(key)
             pipe.set(dk, data)
-            pipe.set(mk, fingerprint)
+            # Deleted, not left alone: redis expires the two keys
+            # independently and a re-set of an entry that carried a token
+            # would otherwise leave the old meta key describing the new
+            # bytes, which `is_fresh` would read as fresh.
+            if fingerprint:
+                pipe.set(mk, fingerprint)
+            else:
+                pipe.delete(mk)
             if ttl is not None:
                 pipe.expire(dk, ttl)
-                pipe.expire(mk, ttl)
+                if fingerprint:
+                    pipe.expire(mk, ttl)
             await pipe.execute()
         finally:
             self._invalidation.leave(key)
@@ -96,8 +105,6 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
     ) -> bool:
         stamp = self._invalidation.enter(key)
         try:
-            if fingerprint is None:
-                fingerprint = await default_fingerprint_async(data)
             if self._invalidation.stale(key, stamp):
                 return False
             # The background drain deliberately uses insert-only
@@ -108,7 +115,9 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
             inserted = await self._add(
                 keys=[self._data_key(key),
                       self._meta_key(key)],
-                args=[data, fingerprint, "" if ttl is None else str(ttl)],
+                args=[
+                    data, fingerprint or "", "" if ttl is None else str(ttl)
+                ],
             )
             return bool(inserted)
         finally:
@@ -134,6 +143,11 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         if isinstance(fp, bytes):
             fp = fp.decode()
         return fp == remote_fingerprint
+
+    async def is_unbounded(self, key: str) -> bool:
+        # Redis answers this natively and distinguishes the two cases
+        # that matter: -1 is present with no expiry, -2 is absent.
+        return await self._cache_client.ttl(self._data_key(key)) == -1
 
     async def clear(self) -> None:
         self._invalidation.invalidate_all()

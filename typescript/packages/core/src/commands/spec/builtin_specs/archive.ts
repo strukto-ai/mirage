@@ -82,6 +82,21 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-q' }),
       new Option({ short: '-p' }),
       new Option({ short: '-t' }),
+      // Info-ZIP reads -x as a variadic list of patterns; mirage takes
+      // one per occurrence, since its spec has no variadic option value
+      // and `-x a -x b` says the same thing (zip's -x has the same shape).
+      new Option({ short: '-x', type: 'str', multiple: true }),
+      // -Z is ZipInfo mode: the archive is listed from its central
+      // directory instead of extracted, and the other letters are read as
+      // zipinfo's (-1/-2 names only, -s short, -m medium and -l long rows,
+      // -h header, -t totals). Info-ZIP demands -Z first; the flag bag has
+      // no order, so mirage takes it anywhere in the cluster.
+      new Option({ short: '-Z' }),
+      new Option({ short: '-1' }),
+      new Option({ short: '-2' }),
+      new Option({ short: '-s' }),
+      new Option({ short: '-m' }),
+      new Option({ short: '-h' }),
     ],
     // The archive is the only path operand; everything after it is an
     // Info-ZIP member pattern matched against archive entry names, never

@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { Workspace } from '../../workspace/workspace.ts'
+import { metaFromFields, metaToFields } from './namespace.ts'
 import { RAMNamespaceStore } from './ram.ts'
 
 describe('Namespace facade (addressing)', () => {
@@ -373,5 +374,42 @@ describe('Namespace + NamespaceStore', () => {
     expect(ws.namespace.user).toBe('alice')
     expect(await store.loadUser()).toBe('alice')
     await ws.close()
+  })
+})
+
+describe('Namespace extended attributes', () => {
+  const ENC = new TextEncoder()
+
+  it('live on the node and leave with the last one', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    await ws.namespace.setXattr('/data/f.txt', 'user.a', ENC.encode('one'))
+    await ws.namespace.setAttrs('/data/g.txt', { mode: 0o600 })
+    await ws.namespace.setXattr('/data/g.txt', 'user.b', ENC.encode('two'))
+    expect([...ws.namespace.xattrs('/data/f.txt').keys()]).toEqual(['user.a'])
+    await ws.namespace.removeXattr('/data/f.txt', 'user.a')
+    expect(ws.namespace.metaFor('/data/f.txt')).toBeNull()
+    await ws.namespace.removeXattr('/data/g.txt', 'user.b')
+    expect(ws.namespace.metaFor('/data/g.txt')).toEqual({ mode: 0o600 })
+    await ws.close()
+  })
+
+  it('ride the flat fields as base64', () => {
+    const meta = { mode: 0o644, xattrs: new Map([['user.bin', new Uint8Array([0, 255])]]) }
+    const fields = metaToFields(meta)
+    expect(fields['xattr:user.bin']).toBe('AP8=')
+    expect(metaFromFields(fields)).toEqual(meta)
+  })
+
+  it('survive a store round trip', async () => {
+    const store = new RAMNamespaceStore()
+    const first = new Workspace({ '/data': new RAMVFS() }, { namespaceStore: store })
+    await first.namespace.setXattr('/data/f.txt', 'user.a', ENC.encode('one'))
+    const second = new Workspace({ '/data': new RAMVFS() }, { namespaceStore: store })
+    await second.namespace.ensureLoaded()
+    expect(new TextDecoder().decode(second.namespace.xattrs('/data/f.txt').get('user.a'))).toBe(
+      'one',
+    )
+    await first.close()
+    await second.close()
   })
 })

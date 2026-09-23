@@ -37,8 +37,8 @@ describe('pasteGeneric', () => {
     expect(io.exitCode).toBe(0)
   })
 
-  it.each([false, true])('produces no output for an empty file with serial=%s', async (serial) => {
-    const flags = serial ? { s: true } : {}
+  it.each([false, true])('renders an empty file with serial=%s', async (serial) => {
+    const flags = serial ? { serial: true } : {}
     const result = await pasteGeneric(
       [PathSpec.fromStrPath('/empty.txt')],
       opts(flags),
@@ -47,7 +47,7 @@ describe('pasteGeneric', () => {
     expect(result).not.toBeNull()
     if (result === null) throw new Error('expected paste result')
     const [stdout, io] = result
-    expect(await materialize(stdout)).toEqual(new Uint8Array(0))
+    expect(await materialize(stdout)).toEqual(new TextEncoder().encode(serial ? '\n' : ''))
     expect(io.exitCode).toBe(0)
   })
 })

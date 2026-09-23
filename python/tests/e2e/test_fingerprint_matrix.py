@@ -15,13 +15,13 @@
 import asyncio
 from contextlib import ExitStack
 
-from mirage.types import ConsistencyPolicy, MountMode
+from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.e2e.s3_mock import patch_s3_multi
 
 
-def _make_ws(consistency: ConsistencyPolicy) -> Workspace:
+def _make_ws(policy: ReadPolicy) -> Workspace:
     config = S3Config(
         bucket="test-bucket",
         region="us-east-1",
@@ -32,7 +32,7 @@ def _make_ws(consistency: ConsistencyPolicy) -> Workspace:
     return Workspace(
         {"/data": (vfs, MountMode.WRITE)},
         mode=MountMode.WRITE,
-        consistency=consistency,
+        read=ReadSpec(policy=policy),
     )
 
 
@@ -41,7 +41,7 @@ def test_s3_always_refetches_after_external_mutation():
     stack = ExitStack()
     stack.enter_context(patch_s3_multi({"test-bucket": store}))
     try:
-        ws = _make_ws(ConsistencyPolicy.ALWAYS)
+        ws = _make_ws(ReadPolicy.FRESH)
 
         async def run() -> tuple[bytes, bytes]:
             io1 = await ws.shell("cat /data/file.txt")
@@ -64,7 +64,7 @@ def test_s3_lazy_serves_cache():
     stack = ExitStack()
     stack.enter_context(patch_s3_multi({"test-bucket": store}))
     try:
-        ws = _make_ws(ConsistencyPolicy.LAZY)
+        ws = _make_ws(ReadPolicy.BOUNDED)
 
         async def run() -> tuple[bytes, bytes]:
             io1 = await ws.shell("cat /data/file.txt")

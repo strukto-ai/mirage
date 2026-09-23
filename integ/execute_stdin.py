@@ -102,7 +102,9 @@ def execute(client: httpx.Client,
             command: str,
             stdin: bytes | None = None,
             background: bool = False,
-            legacy: bool = False) -> dict:
+            legacy: bool = False,
+            expected_exit: int = 0,
+            expected_error: str = "") -> dict:
     body = {'command': command, 'record': False}
     kwargs = {'json': body}
     if stdin is not None:
@@ -129,9 +131,93 @@ def execute(client: httpx.Client,
         job = response.json()
         assert job['status'] == 'done', job
         result = job['result']
-    assert result.get('exit_code', result.get('exitCode')) == 0, result
-    assert not result['stderr'], result['stderr']
+    assert result.get('exit_code',
+                      result.get('exitCode')) == expected_exit, result
+    if expected_error:
+        assert expected_error in result['stderr'], result['stderr']
+        assert result['stdout'] == '', result
+    else:
+        assert not result['stderr'], result['stderr']
     return result
+
+
+def check_large_json(client: httpx.Client, wid: str, host: str) -> None:
+    count = 16000
+    row = json.dumps({
+        'formattedValue': 'é😀' + 'a' * 100
+    },
+                     ensure_ascii=False,
+                     separators=(',', ':')).encode()
+    source = b'[' + b','.join([row] * count) + b']'
+    execute(client, wid, 'cat > /work/matches.json', source)
+    for command in ('grep', 'rg'):
+        for flags in ('-o', '-bo'):
+            expected = ''.join(
+                (f'{3 + i * (len(row) + 1)}:' if flags == '-bo' else '') +
+                'formattedValue\n' for i in range(count))
+            for operand, stdin in (('/work/matches.json', None), ('', source)):
+                started = time.monotonic()
+                result = execute(
+                    client, wid,
+                    f'{command} {flags} formattedValue {operand} | sha256sum',
+                    stdin)
+                elapsed = time.monotonic() - started
+                assert result['stdout'].split()[0] == hashlib.sha256(
+                    expected.encode()).hexdigest()
+                assert elapsed < 10, (host, flags, operand, elapsed)
+    head = execute(client, wid,
+                   'grep -o formattedValue /work/matches.json | head -n 2')
+    assert head['stdout'] == 'formattedValue\n' * 2
+    print(f'{host}: 16,000 Unicode grep/rg matches, file/stdin -o/-bo OK',
+          flush=True)
+
+    # Generate the nested document without retaining 350,000 Python dicts.
+    row = (
+        b'{"values":[{"userEnteredValue":{"stringValue":"hello"},'
+        b'"effectiveValue":{"stringValue":"hello"},"formattedValue":"hello"}]}'
+    )
+    prefix = (
+        b'{"spreadsheetId":"synthetic","properties":{"title":"Synthetic"},'
+        b'"sheets":[{"properties":{"title":"1940"},"data":[{"rowData":[')
+    suffix = b']}]}]}'
+    expression = ('{spreadsheetId, properties, sheets: [.sheets[] | '
+                  '{properties, data_rows:(.data|length)}]}')
+    expected = {
+        'spreadsheetId': 'synthetic',
+        'properties': {
+            'title': 'Synthetic'
+        },
+        'sheets': [{
+            'properties': {
+                'title': '1940'
+            },
+            'data_rows': 1
+        }]
+    }
+    for rows in (100000, 350000):
+        source = prefix + b','.join([row] * rows) + suffix
+        execute(client, wid, 'cat > /work/sheet.json', source)
+        if host == 'typescript' and rows == 350000:
+            result = execute(client,
+                             wid,
+                             f"jq '{expression}' /work/sheet.json",
+                             expected_exit=1,
+                             expected_error='256 MiB heap limit')
+            assert f'{len(source)} bytes of JSON input' in result['stderr']
+            assert 'reset for the next call' in result['stderr']
+        else:
+            result = execute(client, wid,
+                             f"jq '{expression}' /work/sheet.json")
+            assert json.loads(result['stdout']) == expected
+        recovered = execute(client, wid, "printf '{\"ok\":42}' | jq .ok")
+        assert recovered['stdout'] == '42\n'
+    # Byte size alone is not a memory limit: a flat document this large fits.
+    source = b'{"title":"large","padding":"' + b'x' * 43000000 + b'"}'
+    execute(client, wid, 'cat > /work/sheet.json', source)
+    result = execute(client, wid, 'jq -r .title /work/sheet.json')
+    assert result['stdout'] == 'large\n'
+    execute(client, wid, 'rm /work/sheet.json /work/matches.json')
+    print(f'{host}: large jq projections and follow-up queries OK', flush=True)
 
 
 def check_workspace(client: httpx.Client, host: str, vfs: str,
@@ -151,6 +237,8 @@ def check_workspace(client: httpx.Client, host: str, vfs: str,
     created.raise_for_status()
     wid = created.json()['id']
     try:
+        if vfs == 'ram':
+            check_large_json(client, wid, host)
         if host == 'typescript':
             for legacy in (False, True):
                 for stdin in (b'', b'\x00\xff\r\n' + 'α'.encode()):

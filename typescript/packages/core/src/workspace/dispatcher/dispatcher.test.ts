@@ -17,7 +17,7 @@ import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { Limit, MountMode, PathSpec } from '../../types.ts'
+import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -586,4 +586,110 @@ describe('a failed backend probe is not evidence of absence', () => {
       await ws.close()
     }
   }, 30_000)
+})
+
+describe('the door answers extended attributes from the node table', () => {
+  const open = async (): Promise<Workspace> => {
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/r': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+    )
+    await ws.shell('printf x > /r/f && ln -s f /r/lk')
+    return ws
+  }
+
+  it('stores them on the node and lists them sorted', async () => {
+    const ws = await open()
+    try {
+      await ws.vfs.setxattr('/r/f', 'user.b', ENC.encode('two'))
+      await ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('one'))
+      expect(await ws.vfs.listxattr('/r/f')).toEqual(['user.a', 'user.b'])
+      expect(DEC.decode(await ws.vfs.getxattr('/r/f', 'user.b'))).toBe('two')
+      await ws.vfs.removexattr('/r/f', 'user.b')
+      expect(await ws.vfs.listxattr('/r/f')).toEqual(['user.a'])
+      await expect(ws.vfs.getxattr('/r/f', 'user.b')).rejects.toMatchObject({ code: 'ENODATA' })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses the way setxattr(2) does for its flags', async () => {
+    const ws = await open()
+    try {
+      await ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('one'))
+      await expect(
+        ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('two'), { create: true }),
+      ).rejects.toMatchObject({ code: 'EEXIST' })
+      await expect(
+        ws.vfs.setxattr('/r/f', 'user.q', ENC.encode('x'), { replace: true }),
+      ).rejects.toMatchObject({ code: 'ENODATA' })
+      await ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('two'), { replace: true })
+      expect(DEC.decode(await ws.vfs.getxattr('/r/f', 'user.a'))).toBe('two')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('answers ENOENT for a missing path and stores nothing there', async () => {
+    const ws = await open()
+    try {
+      await expect(ws.vfs.listxattr('/r/nope')).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(ws.vfs.setxattr('/r/nope', 'user.a', ENC.encode('x'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+      expect(ws.namespace.metaFor('/r/nope')).toBeNull()
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('drops them with the file and carries them through a rename', async () => {
+    // Removed through the door rather than the shell's rm, the node
+    // stayed, and a file created at the name next read back the old
+    // file's attributes.
+    const ws = await open()
+    try {
+      await ws.vfs.setxattr('/r/f', 'user.a', ENC.encode('one'))
+      await ws.vfs.rename('/r/f', '/r/g')
+      expect(DEC.decode(await ws.vfs.getxattr('/r/g', 'user.a'))).toBe('one')
+      expect(ws.namespace.metaFor('/r/f')).toBeNull()
+      await ws.vfs.unlink('/r/g')
+      await ws.shell('printf y > /r/g')
+      expect(await ws.vfs.listxattr('/r/g')).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('reads a link node itself under nofollow', async () => {
+    const ws = await open()
+    try {
+      await ws.vfs.setxattr('/r/lk', 'user.target', ENC.encode('t'))
+      await ws.vfs.setxattr('/r/lk', 'user.own', ENC.encode('o'), { nofollow: true })
+      expect(await ws.vfs.listxattr('/r/lk')).toEqual(['user.target'])
+      expect(await ws.vfs.listxattr('/r/lk', { nofollow: true })).toEqual(['user.own'])
+      expect(ws.namespace.readlink('/r/lk')).toBe('f')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("keeps a backend stat's extra out of the attributes", async () => {
+    const ws = await open()
+    const stat = vi.spyOn(ws.opsRegistry, 'call')
+    stat.mockImplementation(async (op, ...rest) => {
+      if (op === 'stat') {
+        return new FileStat({ name: 'd', type: FileType.DIRECTORY, extra: { file_id: '1AbC' } })
+      }
+      return OpsRegistry.prototype.call.call(ws.opsRegistry, op, ...rest)
+    })
+    try {
+      await ws.vfs.setxattr('/r/f', 'user.tag', ENC.encode('t'))
+      expect(await ws.vfs.listxattr('/r/f')).toEqual(['user.tag'])
+    } finally {
+      stat.mockRestore()
+      await ws.close()
+    }
+  })
 })

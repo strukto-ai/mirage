@@ -41,13 +41,14 @@ from mirage.observe.context import (push_mount_context, push_revisions,
 from mirage.ops.host_io import host_io, with_host_io
 from mirage.ops.registry import RegisteredOp
 from mirage.policy import resolve_limit
-from mirage.types import (ConsistencyPolicy, FileType, Limit, MountMode,
-                          PathSpec, Producer)
+from mirage.types import (FileType, Limit, MountMode, PathSpec, Producer,
+                          ReadSpec)
 from mirage.utils.errors import ReadOnlyError, ebusy, enotsup
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.mount.activity import VFSActivity
+from mirage.workspace.mount.read_policy import coerce_read_policy
 
 # Ops that mutate everything under their endpoints in one backend call
 # (a directory rename relocates its whole subtree), so the door also
@@ -153,7 +154,7 @@ class MountEntry:
         prefix: str,
         vfs: BaseVFS,
         mode: MountMode = MountMode.READ,
-        consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+        read: ReadSpec | None = None,
         index: IndexCacheStore | None = None,
         vfs_ref: str | None = None,
     ) -> None:
@@ -167,7 +168,23 @@ class MountEntry:
         self.prefix = prefix
         self.vfs = vfs
         self.mode = mode
-        self.consistency = consistency
+        # How this mount's cached bytes are revalidated. Read by the
+        # gate (Reconciler.may_serve_cached) and by the cache write path
+        # for its bound.
+        #
+        # Normalized here, where a spec becomes live mount state, because
+        # `ReadPolicy` is a (str, Enum) and `ReadSpec` coerces nothing:
+        # an embedder writing `ReadSpec(policy="fresh")` against the
+        # public API would otherwise store the bare string, and every
+        # reader compares with `is` -- the verdict, the gate, the routing
+        # reconcile -- so the mount would pass its capability check and
+        # then behave as `bounded` everywhere. That is the silent
+        # downgrade the policy exists to remove, so it is refused rather
+        # than kept. The TypeScript twin freezes its copy at the same
+        # point for the mirror-image reason.
+        spec = read if read is not None else ReadSpec()
+        self.read = dataclasses.replace(spec,
+                                        policy=coerce_read_policy(spec.policy))
         # The store this mount runs its driver under, built by the
         # registry when the driver is placed and shared with any alias
         # of the same instance; a bare entry gets a RAM store at the

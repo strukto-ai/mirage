@@ -139,6 +139,23 @@ def test_member_name_strips_the_leading_slash_and_marks_directories():
     assert member_name("link", "link", False) == "link"
 
 
+def test_member_name_strips_only_the_leading_dot_slash_run():
+    # Pinned against Info-ZIP 3.0 on debian:stable-slim.
+    assert member_name("./a.txt", "file", False) == "a.txt"
+    assert member_name("././sub", "dir", False) == "sub/"
+    assert member_name("/./w/d", "dir", False) == "w/d/"
+    assert member_name(".", "dir", False) == ""
+    assert member_name("./", "dir", False) == ""
+    assert member_name(".//sub", "dir", False) == "/sub/"
+    assert member_name("sub/./b.txt", "file", False) == "sub/./b.txt"
+    assert member_name("../e", "dir", False) == "../e/"
+
+
+def test_junk_paths_names_no_directory():
+    assert member_name("./sub", "dir", True) == ""
+    assert member_name("./sub/b.txt", "file", True) == "b.txt"
+
+
 def test_excluded_is_anchored_unlike_tars_exclude():
     assert excluded("d/sub/b.txt", ["d/sub/*"])
     assert excluded("d/sub/", ["d/sub/*"])
@@ -147,6 +164,12 @@ def test_excluded_is_anchored_unlike_tars_exclude():
     # Info-ZIP matches the whole stored name, so a bare component misses.
     assert not excluded("d/sub/b.txt", ["b.txt"])
     assert not excluded("d/sub/b.txt", ["sub/*"])
+
+
+def test_excluded_strips_a_pattern_the_way_it_strips_a_name():
+    assert excluded("sub/b.txt", ["./sub/*"])
+    assert excluded("w/d/sub/", ["/w/d/sub/*"])
+    assert excluded("a.txt", ["./a.txt"])
 
 
 @pytest.mark.asyncio
@@ -334,3 +357,84 @@ async def test_a_directory_the_walk_could_not_open_is_stored_in_silence():
     assert _entries(
         io_res.writes["/out.zip"]) == ["d/", "d/a.txt", "d/sealed/"]
     assert "sealed" not in out.decode().replace("  adding: d/sealed/\n", "")
+
+
+@pytest.mark.asyncio
+async def test_dot_stores_its_contents_at_the_archive_root():
+    tree = _Tree({
+        "/d/[Content_Types].xml": b"x",
+        "/d/sub/b.txt": b"beta"
+    },
+                 dirs=("/d", "/d/sub"))
+    _, io_res = await _zip(tree, [_spec("/out.zip"), _raw("/d", ".")], r=True)
+    assert _entries(io_res.writes["/out.zip"]) == [
+        "[Content_Types].xml", "sub/", "sub/b.txt"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dot_without_r_is_nothing_to_do():
+    tree = _Tree({"/d/a.txt": b"alpha"}, dirs=("/d", ))
+    _, io_res = await _zip(tree,
+                           [_raw("/out.zip", "out.zip"),
+                            _raw("/d", ".")])
+    assert io_res.exit_code == 12
+    assert io_res.stderr == b"\nzip error: Nothing to do! (out.zip)\n"
+
+
+@pytest.mark.asyncio
+async def test_one_path_named_twice_is_stored_once():
+    tree = _Tree({"/d/a.txt": b"alpha"}, dirs=("/d", ))
+    _, io_res = await _zip(tree, [
+        _spec("/out.zip"),
+        _raw("/d", "."),
+        _raw("/d/a.txt", "a.txt"),
+        _raw("/d/a.txt", "a.txt")
+    ],
+                           r=True)
+    assert io_res.exit_code == 0
+    assert _entries(io_res.writes["/out.zip"]) == ["a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_two_paths_under_one_name_refuse_the_run():
+    tree = _Tree({"/d/a.txt": b"alpha"}, dirs=("/d", ))
+    out, io_res = await _zip(tree, [
+        _spec("/out.zip"),
+        _raw("/d/a.txt", "./a.txt"),
+        _raw("/d/a.txt", "a.txt")
+    ])
+    assert out is None
+    assert io_res.exit_code == 16
+    assert not io_res.writes
+    assert io_res.stderr == (
+        b"\tzip warning:   first full name: ./a.txt\n"
+        b"                      second full name: a.txt\n"
+        b"                     name in zip file repeated: a.txt\n"
+        b"\nzip error: Invalid command arguments"
+        b" (cannot repeat names in zip file)\n")
+
+
+@pytest.mark.asyncio
+async def test_repeated_name_under_j_names_the_cause_and_q_keeps_the_error():
+    tree = _Tree({
+        "/d/a.txt": b"alpha",
+        "/d/sub/a.txt": b"again"
+    },
+                 dirs=("/d", "/d/sub"))
+    paths = [
+        _spec("/out.zip"),
+        _raw("/d/sub/a.txt", "sub/a.txt"),
+        _raw("/d/a.txt", "a.txt")
+    ]
+    _, io_res = await _zip(tree, paths, j=True)
+    assert io_res.exit_code == 16
+    assert io_res.stderr.decode().startswith(
+        "\tzip warning:   first full name: a.txt\n"
+        "                      second full name: sub/a.txt\n"
+        "                     name in zip file repeated: a.txt\n"
+        "                     this may be a result of using -j\n")
+    _, quiet = await _zip(tree, paths, j=True, q=True)
+    assert quiet.exit_code == 16
+    assert quiet.stderr == (b"\nzip error: Invalid command arguments"
+                            b" (cannot repeat names in zip file)\n")

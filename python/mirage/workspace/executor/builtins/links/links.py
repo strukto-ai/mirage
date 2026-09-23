@@ -14,14 +14,17 @@
 
 import dataclasses
 import posixpath
+from functools import partial
 
+from mirage.commands.builtin.generic.cp import dest_kind
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import FS_ERRORS, ReadOnlyError, fs_strerror
 from mirage.utils.path import CycleError
-from mirage.workspace.executor.builtins.links.probe import stat_or_none
+from mirage.workspace.executor.builtins.links.probe import (dispatch_stat,
+                                                            stat_or_none)
 from mirage.workspace.executor.builtins.shared import (fail, ok,
                                                        read_only_error,
                                                        split_flags)
@@ -349,6 +352,23 @@ async def prepare_mv(
         if src.raw_path.endswith("/"):
             return items, None, None, await _slashed_link_refusal(
                 namespace, dispatch, src, dst, stat)
+        if not into_dir and dst.raw_path.endswith("/"):
+            # rename(2) never follows the source, so a link is not a
+            # directory whatever it points at, and a slashed destination
+            # asks for one: GNU 9.7 refuses `mv dlnk missing/` at the
+            # rename and `mv dlnk reg/` at the destination's stat, the
+            # same two wordings a regular source gets from the generic,
+            # whose chain walk also keeps an absent parent's ENOENT
+            # (`mv dlnk nodir/name/`) ahead of the slash.
+            _, _, verdict = await dest_kind(partial(dispatch_stat, dispatch),
+                                            dst)
+            if verdict == "Not a directory":
+                return items, None, None, fail(
+                    "mv", f"mv: cannot stat '{dst.raw_path}': "
+                    "Not a directory\n")
+            return items, None, None, fail(
+                "mv", f"mv: cannot move '{src.raw_path}' to "
+                f"'{dst.raw_path}': {verdict or 'Not a directory'}\n")
         # The move is a node-table rename, which the door answers: a
         # link has no backend entry for the generic mv to move. Reaching
         # the table directly from here would skip the admission gates

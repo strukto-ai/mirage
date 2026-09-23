@@ -52,14 +52,18 @@ export interface SheetTab {
   sheetId: number
   title: string
   cells: Map<string, string>
+  props: Map<string, JsonObj>
   // The declared grid, which insertDimension and appendDimension grow and
   // deleteDimension shrinks. Kept beside the sparse cell map because the
   // grid is independent of what has been written: a new tab reports 1000
   // rows with nothing in it.
   rows: number
   cols: number
-  rowPixels?: Record<string, number>
-  columnPixels?: Record<string, number>
+  rowMeta: Record<string, JsonObj>
+  columnMeta: Record<string, JsonObj>
+  bandedRanges: JsonObj[]
+  basicFilter: JsonObj | null
+  conditionalFormats: JsonObj[]
 }
 
 export interface Spreadsheet {

@@ -14,7 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import invalidate_after_write
-from mirage.core.ram.dest import check_dest_parents
+from mirage.core.ram.dest import check_dest_parents, check_write_target
 from mirage.core.timeutil import now_iso
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -28,6 +28,7 @@ async def append_bytes(accessor: RAMAccessor, path_spec: PathSpec,
     timer = start_op()
     p = norm(path)
     check_dest_parents(store, path_spec, p)
+    check_write_target(store, path_spec, p)
     if p in store.files:
         store.files[p] += data
     else:

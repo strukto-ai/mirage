@@ -1,0 +1,73 @@
+{
+  "_meta": {
+    "by_vfs": {},
+    "filetypes": [],
+    "has_aggregate": false,
+    "has_provision": false,
+    "has_write": false,
+    "vfs_names": []
+  },
+  "options": [
+    {
+      "description": "get the named extended attribute value",
+      "long": "--name",
+      "short": "-n",
+      "type": "str"
+    },
+    {
+      "description": "get all extended attribute values",
+      "long": "--dump",
+      "short": "-d",
+      "type": "bool"
+    },
+    {
+      "description": "encode values (as 'text', 'hex' or 'base64')",
+      "long": "--encoding",
+      "short": "-e",
+      "type": "str"
+    },
+    {
+      "description": "only get attributes with names matching pattern",
+      "long": "--match",
+      "short": "-m",
+      "type": "str"
+    },
+    {
+      "description": "print the bare values only",
+      "long": "--only-values",
+      "type": "bool"
+    },
+    {
+      "description": "do not dereference symbolic links",
+      "long": "--no-dereference",
+      "short": "-h",
+      "type": "bool"
+    },
+    {
+      "description": "don't strip leading '/' in pathnames",
+      "long": "--absolute-names",
+      "type": "bool"
+    },
+    {
+      "description": "recurse into subdirectories",
+      "long": "--recursive",
+      "short": "-R",
+      "type": "bool"
+    },
+    {
+      "description": "logical walk, follow symbolic links",
+      "long": "--logical",
+      "short": "-L",
+      "type": "bool"
+    },
+    {
+      "description": "physical walk, do not follow symbolic links",
+      "long": "--physical",
+      "short": "-P",
+      "type": "bool"
+    }
+  ],
+  "rest": {
+    "type": "path"
+  }
+}

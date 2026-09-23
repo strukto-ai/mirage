@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isStdin } from '../utils/stream.ts'
+import { stdinStream } from '../utils/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
@@ -244,6 +246,7 @@ export async function uniqGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   write?: (p: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  stream = stdinStream(stream, opts.stdin)
   if (paths.length > 2) throw extraOperandError(CommandName.UNIQ, paths[2]?.rawPath ?? '')
   let parsed: UniqFlags
   try {
@@ -258,7 +261,7 @@ export async function uniqGeneric(
     const input = paths[0]
     if (input === undefined) return [null, new IOResult()]
     source = stream(input)
-    cache.push(input.mountPath)
+    if (!isStdin(input)) cache.push(input.mountPath)
   } else {
     try {
       source = resolveSource(opts.stdin)
@@ -269,7 +272,7 @@ export async function uniqGeneric(
   }
   const output = uniqStream(source, parsed)
   const outputPath = paths[1]
-  if (outputPath !== undefined) {
+  if (outputPath !== undefined && outputPath.rawPath !== '-') {
     if (write === undefined) {
       return [
         null,

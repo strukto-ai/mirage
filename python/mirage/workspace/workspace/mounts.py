@@ -22,12 +22,13 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.store import IndexCacheStore
 from mirage.ops import Ops
-from mirage.types import KERNEL_BACKENDS, MountBackend, MountMode
+from mirage.types import KERNEL_BACKENDS, MountBackend, MountMode, ReadSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
+from mirage.workspace.mount.read_policy import check_read_capability
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.workspace.types import MountSpec, VFSMount
 
@@ -63,18 +64,25 @@ def check_vfs(prefix: str, vfs: BaseVFS) -> None:
                         f"{type(vfs).__name__}")
 
 
-def normalize_mounts(mounts: dict[str, VFSMount],
-                     default_mode: MountMode) -> list[MountSpec]:
+def normalize_mounts(mounts: dict[str, VFSMount], default_mode: MountMode,
+                     default_read: ReadSpec) -> list[MountSpec]:
     """Narrow every accepted ``mounts`` spelling to one shape.
+
+    Every spelling converges here, which is why this is where a mount's
+    read policy is checked against what its backend can honour: one
+    verdict per mount, whatever door declared it.
 
     Args:
         mounts (dict[str, VFSMount]): the constructor mapping.
         default_mode (MountMode): mode for entries that name none.
+        default_read (ReadSpec): read policy for entries that name none.
 
     Raises:
         TypeError: a tuple entry is not (VFS, mode) or
             (VFS, mode, command_limits), or an entry's VFS is
             not a :class:`BaseVFS`.
+        ValueError: a mount declares a read policy its backend cannot
+            honour.
     """
     specs: list[MountSpec] = []
     for prefix, value in mounts.items():
@@ -90,6 +98,8 @@ def normalize_mounts(mounts: dict[str, VFSMount],
                     command_limits=dict(value.command_limits or {}),
                     vfs_ref=value.vfs_ref,
                     index=value.index,
+                    read=value.read
+                    if value.read is not None else default_read,
                 ))
         elif isinstance(value, tuple):
             if len(value) not in (2, 3):
@@ -101,12 +111,17 @@ def normalize_mounts(mounts: dict[str, VFSMount],
                 MountSpec(prefix=prefix,
                           vfs=value[0],
                           mode=value[1],
-                          command_limits=command_limits))
+                          command_limits=command_limits,
+                          read=default_read))
         else:
-            specs.append(MountSpec(prefix=prefix, vfs=value,
-                                   mode=default_mode))
+            specs.append(
+                MountSpec(prefix=prefix,
+                          vfs=value,
+                          mode=default_mode,
+                          read=default_read))
     for spec in specs:
         check_vfs(spec.prefix, spec.vfs)
+        check_read_capability(spec.prefix, spec.vfs, spec.read)
     return specs
 
 
@@ -122,7 +137,8 @@ def kernel_targets(
 
 
 def install_mounts(registry: MountRegistry, specs: list[MountSpec],
-                   index: IndexConfig | None, default_mode: MountMode) -> bool:
+                   index: IndexConfig | None, default_mode: MountMode,
+                   default_read: ReadSpec) -> bool:
     """Mount every spec, adding an implicit scratch root if none claims /.
 
     A workspace-level ``index`` builds every mount's store, its TTL
@@ -139,6 +155,7 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
         index (IndexConfig | None): the workspace's index config, or
             None for a per-mount RAM store.
         default_mode (MountMode): mode for the implicit root.
+        default_read (ReadSpec): read policy for the implicit root.
 
     Returns:
         bool: whether the root mount was synthesized.
@@ -149,13 +166,20 @@ def install_mounts(registry: MountRegistry, specs: list[MountSpec],
             spec.prefix,
             spec.vfs,
             spec.mode,
+            spec.read,
             index=spec.index if spec.index is not None else index,
             vfs_ref=spec.vfs_ref)
         if spec.command_limits:
             entry.command_limits.update(spec.command_limits)
     implicit_root = registry.root_mount is None
     if implicit_root:
-        registry.mount("/", RAMVFS(), default_mode)
+        # Pinned bounded, not inherited. This anchor is synthesized after
+        # `normalize_mounts` has run, so it never meets the capability
+        # verdict -- and RAM does not cache reads, so a workspace-level
+        # `fresh` would stamp on it exactly the combination the verdict
+        # exists to refuse. It is snapshotted like any other mount, so
+        # that stray policy came back as a refusal on restore.
+        registry.mount("/", RAMVFS(), default_mode, ReadSpec())
     return implicit_root
 
 

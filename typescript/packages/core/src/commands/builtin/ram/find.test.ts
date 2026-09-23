@@ -27,7 +27,7 @@ async function runFind(
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
   texts: string[] = [],
-): Promise<{ lines: string[]; exitCode: number }> {
+): Promise<{ lines: string[]; exitCode: number; runs: PathSpec[][] | null }> {
   const cmd = RAM_FIND[0]
   if (cmd === undefined) throw new Error('find not registered')
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, texts, {
@@ -36,7 +36,7 @@ async function runFind(
     filetypeFns: null,
     cwd: '/',
   })
-  if (result === null) return { lines: [], exitCode: -1 }
+  if (result === null) return { lines: [], exitCode: -1, runs: null }
   const [out, ioResult] = result
   const buf =
     out === null
@@ -46,7 +46,7 @@ async function runFind(
         : await materialize(out as AsyncIterable<Uint8Array>)
   const text = DEC.decode(buf)
   const lines = text === '' ? [] : text.replace(/\n$/, '').split('\n')
-  return { lines, exitCode: ioResult.exitCode }
+  return { lines, exitCode: ioResult.exitCode, runs: ioResult.matchedRuns }
 }
 
 describe('find', () => {
@@ -198,30 +198,31 @@ describe('find', () => {
 })
 
 describe('find -printf', () => {
-  it('renders rows through the format with stats', async () => {
+  // The action layer renders -printf per row, beside the other actions,
+  // so the handler hands back the rows as selected: one run per start
+  // point, empty for one that is missing, the run a row's %P and %d are
+  // measured from.
+  it('hands the rows back unrendered, one run per start point', async () => {
     const vfs = new RAMVFS()
     vfs.store.dirs.add('/data')
     vfs.store.dirs.add('/data/sub')
     vfs.store.files.set('/data/a.txt', ENC.encode('hello\n'))
     vfs.store.files.set('/data/sub/b.txt', ENC.encode('hi\n'))
-    const { lines, exitCode } = await runFind(vfs, [PathSpec.fromStrPath('/data')], {}, [
-      '-printf',
-      '%p %y %d\\n',
+    const { lines, runs } = await runFind(
+      vfs,
+      [
+        PathSpec.fromStrPath('/data'),
+        PathSpec.fromStrPath('/nope'),
+        PathSpec.fromStrPath('/data/sub'),
+      ],
+      {},
+      ['-type', 'f', '-printf', '%f %s\\n'],
+    )
+    expect(lines).toEqual(['/data/a.txt', '/data/sub/b.txt', '/data/sub/b.txt'])
+    expect(runs?.map((run) => run.map((p) => p.virtual))).toEqual([
+      ['/data/a.txt', '/data/sub/b.txt'],
+      [],
+      ['/data/sub/b.txt'],
     ])
-    expect(exitCode).toBe(0)
-    expect(lines).toEqual(['/data d 0', '/data/a.txt f 1', '/data/sub d 1', '/data/sub/b.txt f 2'])
-  })
-
-  it('renders %f %s for one match', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.dirs.add('/data')
-    vfs.store.files.set('/data/a.txt', ENC.encode('hello\n'))
-    const { lines } = await runFind(vfs, [PathSpec.fromStrPath('/data')], {}, [
-      '-name',
-      'a.txt',
-      '-printf',
-      '%f %s\\n',
-    ])
-    expect(lines).toEqual(['a.txt 6'])
   })
 })

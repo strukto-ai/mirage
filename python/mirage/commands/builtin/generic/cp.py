@@ -26,9 +26,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import argmatch_error, extra_operand_error
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import (CopyStrategy, FileType, NativeCopy, NativeMove,
-                          PathSpec, PrimitiveCopy, PrimitiveMove, ReaddirFn,
-                          StatFn)
+from mirage.types import (CopyStrategy, FileStat, FileType, NativeCopy,
+                          NativeMove, PathSpec, PrimitiveCopy, PrimitiveMove,
+                          ReaddirFn, StatFn)
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.key_prefix import mounted_path, rekey
@@ -254,62 +254,115 @@ async def target_dir_error(cmd_name: str, stat: StatFn,
     return None
 
 
-async def dest_parent_error(cmd_name: str, stat: StatFn, target: PathSpec,
-                            src_is_dir: bool) -> str | None:
-    """GNU error line when a destination's parent chain is unusable.
+def _slash_aware_kind(path: PathSpec,
+                      info: FileStat) -> tuple[bool, bool, str | None]:
+    """``(exists, is_dir, strerror)`` for an operand whose stat answered.
 
-    ``cp`` is not ``mkdir -p``: it never creates the destination's parent,
-    so a missing or non-directory component is a per-operand failure. GNU
-    surfaces the two cases at different phases, and the wording follows:
-    a component that is a plain file fails the destination stat
-    (``cannot stat 'DST': Not a directory``, at any depth), while a merely
-    absent parent fails the create (``cannot create regular file`` for a
-    file source, ``cannot create directory`` for a recursive one).
-
-    Only walks upward until it finds something that exists, so the common
-    case (the parent is there) costs a single stat.
+    POSIX reads ``x/`` as ``x/.``, so a slashed operand over anything
+    but a directory is ENOTDIR (``cp reg/ d`` and ``cp f reg/`` are both
+    ``cannot stat 'reg/': Not a directory``). The single-mount stat is
+    already wrapped to say so; the cross-mount relay's is not, and the
+    verdict belongs to the operand either way.
 
     Args:
-        cmd_name (str): Command name for the error prefix.
+        path (PathSpec): The operand, spelled as typed in ``raw_path``.
+        info (FileStat): What the stat answered.
+    """
+    is_dir = info.type == FileType.DIRECTORY
+    if path.raw_path.endswith("/") and not is_dir:
+        return False, False, "Not a directory"
+    return True, is_dir, None
+
+
+async def dest_kind(stat: StatFn,
+                    target: PathSpec) -> tuple[bool, bool, str | None]:
+    """Probe a destination for ``(exists, is_dir, strerror)``.
+
+    ``cp`` and ``mv`` are not ``mkdir -p``: neither creates the
+    destination's parent, so a missing or non-directory component is a
+    per-operand failure, and GNU surfaces the two at different phases.
+    A non-directory fails the destination stat itself: ``reg/x`` at any
+    depth, and ``reg/`` typed with a slash over a plain file, are both
+    ``cannot stat 'DST': Not a directory``. A merely absent parent fails
+    the create or the rename (``cannot create regular file`` for cp,
+    ``cannot move`` for mv), so the strerror comes back bare and each
+    caller words it in its own voice. None means the destination exists
+    or its parent is a usable directory.
+
+    The backends answer ENOENT for a path under a plain file just as
+    they do for a genuinely absent one (only a slashed operand makes the
+    stat itself say ENOTDIR), so the chain is walked upward until
+    something exists; the common case (the parent is there) costs a
+    single stat.
+
+    Args:
         stat (StatFn): Stats a path; raises when missing.
         target (PathSpec): The destination operand.
-        src_is_dir (bool): Whether the source is a directory, which picks
-            between GNU's "regular file" and "directory" create wording.
 
     Returns:
-        str | None: The GNU stderr line, or None when the parent chain is
-        a usable directory path.
+        tuple[bool, bool, str | None]: Whether it exists, whether it is
+        a directory, and the GNU strerror when it can be neither found
+        nor created there.
     """
-    noun = "directory" if src_is_dir else "regular file"
-    enoent_line = (f"{cmd_name}: cannot create {noun} '{target.virtual}': "
-                   "No such file or directory")
-    enotdir_line = (f"{cmd_name}: cannot stat '{target.virtual}': "
-                    "Not a directory")
+    try:
+        info = await stat(target)
+    except NotADirectoryError:
+        return False, False, "Not a directory"
+    except (FileNotFoundError, ValueError):
+        pass
+    else:
+        return _slash_aware_kind(target, info)
     immediate = parent(norm(target.virtual))
     node = immediate
     while node != "/":
         exists, is_dir = await entry_kind(stat, descendant_path(target, node))
         if exists:
             if not is_dir:
-                return enotdir_line
+                return False, False, "Not a directory"
             # An existing directory higher up means the intermediate
             # components are simply absent.
-            return None if node == immediate else enoent_line
+            return False, False, (None if node == immediate else
+                                  "No such file or directory")
         node = parent(node)
     # The mount root always exists as a directory and is never stat-ed:
     # a backend that cannot stat "/" must not fail every copy into it.
-    return None if immediate == "/" else enoent_line
+    return False, False, (None
+                          if immediate == "/" else "No such file or directory")
+
+
+def slash_refuses_file(target: PathSpec, target_exists: bool,
+                       src_is_dir: bool) -> bool:
+    """Whether a slash-terminated destination refuses a non-directory.
+
+    POSIX resolves ``missing/`` as ``missing/.``, so the name may only
+    ever be a directory: rename(2) and open(2) refuse to put a file
+    there with ENOTDIR where a bare ``missing`` would take it. GNU 9.7
+    words it at the create (``mv: cannot move 'f' to 'missing/': Not a
+    directory``, ``cp: cannot create regular file 'missing/': Not a
+    directory``); a directory source passes, since the slash asked for
+    exactly what it is. An existing destination never reaches this:
+    a directory receives the move inside it, and a non-directory has
+    already failed the stat.
+
+    Args:
+        target (PathSpec): The destination as typed.
+        target_exists (bool): Whether the destination exists.
+        src_is_dir (bool): Whether the source is a directory.
+    """
+    return (not target_exists and target.raw_path.endswith("/")
+            and not src_is_dir)
 
 
 async def entry_kind(stat: StatFn, path: PathSpec) -> tuple[bool, bool]:
     """Probe a path once for ``(exists, is_dir)``.
 
     ENOTDIR counts as "does not exist": a path whose parent chain runs
-    through a plain file cannot exist, and the callers (cp/mv) turn that
-    into GNU's own wording via :func:`dest_parent_error`. Only this probe
-    absorbs it, so read-family commands keep reporting "Not a directory"
-    verbatim. ``NotADirectoryError`` is not a ``FileNotFoundError``
-    subclass, so it has to be named explicitly.
+    through a plain file cannot exist. This is the probe for a path
+    that is not an operand (an ancestor in a chain walk, an overwrite
+    target already paired); an operand itself goes through
+    :func:`source_kind` or :func:`dest_kind`, which keep the ENOTDIR a
+    slashed spelling earns. ``NotADirectoryError`` is not a
+    ``FileNotFoundError`` subclass, so it has to be named explicitly.
 
     Args:
         stat (StatFn): Stats a path; raises when missing.
@@ -327,13 +380,15 @@ async def source_kind(stat: StatFn,
     """Probe a source operand for ``(exists, is_dir, strerror)``.
 
     A source keeps the errno GNU reports: ``cp /plain/child /dst`` is
-    ``cannot stat 'X': Not a directory``, not "No such file or directory".
-    The backends cannot supply that distinction, because ``stat`` answers
-    ENOENT for a path under a plain file just as it does for a genuinely
-    absent one (only ``readdir`` splits the two). So the chain is walked
-    the way :func:`dest_parent_error` walks a destination's: the first
-    component that does exist decides, and a plain file there means
-    ENOTDIR. Walking happens only on the failure path.
+    ``cannot stat 'X': Not a directory``, not "No such file or directory",
+    and so is ``cp reg/ /dst``, where the stat itself says ENOTDIR
+    because the operand carries a slash. The backends cannot otherwise
+    supply that distinction, because ``stat`` answers ENOENT for a path
+    under a plain file just as it does for a genuinely absent one (only
+    ``readdir`` splits the two). So the chain is walked the way
+    :func:`dest_kind` walks a destination's: the first component that
+    does exist decides, and a plain file there means ENOTDIR. Walking
+    happens only on the failure path.
 
     Args:
         stat (StatFn): Stats a path; raises when missing.
@@ -343,9 +398,14 @@ async def source_kind(stat: StatFn,
         tuple[bool, bool, str | None]: Whether it exists, whether it is a
         directory, and the GNU strerror when it does not exist.
     """
-    exists, is_dir = await entry_kind(stat, path)
-    if exists:
-        return True, is_dir, None
+    try:
+        info = await stat(path)
+    except NotADirectoryError:
+        return False, False, "Not a directory"
+    except (FileNotFoundError, ValueError):
+        pass
+    else:
+        return _slash_aware_kind(path, info)
     node = parent(norm(path.virtual))
     while node != "/":
         node_exists, node_is_dir = await entry_kind(
@@ -860,11 +920,13 @@ async def cp(
             return None, IOResult(stderr=f"{err}\n".encode(), exit_code=1)
         dst_is_dir = True
         dst_exists = True
+        dst_err = None
     elif flags.no_target_dir:
         dst_is_dir = False
         dst_exists = True
+        dst_err = None
     else:
-        dst_exists, dst_is_dir = await entry_kind(stat, dst)
+        dst_exists, dst_is_dir, dst_err = await dest_kind(stat, dst)
     if readdir is None and isinstance(strategy, PrimitiveCopy):
         readdir = strategy.readdir
     policy = TransferPolicy(cmd_name="cp",
@@ -878,10 +940,11 @@ async def cp(
     reads: dict[str, ByteSource] = {}
     lines: list[str] = []
     errors: list[str] = []
-    for src, target in copy_targets(sources, dst, dst_is_dir, dst_exists):
+    for src, target in copy_targets(sources, dst, dst_is_dir, dst_exists,
+                                    dst_err):
         src_exists, src_is_dir, src_err = await source_kind(stat, src)
         if not src_exists:
-            errors.append(f"cp: cannot stat '{src.virtual}': {src_err}")
+            errors.append(f"cp: cannot stat '{src.raw_path}': {src_err}")
             continue
         if key_of(src) == key_of(target):
             errors.append(f"cp: '{src.virtual}' and '{target.virtual}' "
@@ -896,15 +959,24 @@ async def cp(
                           f"'{src.virtual}'")
             continue
         if not flags.no_target_dir and target.virtual == dst.virtual:
-            target_exists, target_is_dir = dst_exists, dst_is_dir
+            target_exists, target_is_dir, target_err = (dst_exists, dst_is_dir,
+                                                        dst_err)
         else:
-            target_exists, target_is_dir = await entry_kind(stat, target)
-        if not target_exists:
-            parent_err = await dest_parent_error("cp", stat, target,
-                                                 src_is_dir)
-            if parent_err is not None:
-                errors.append(parent_err)
-                continue
+            target_exists, target_is_dir, target_err = await dest_kind(
+                stat, target)
+        if target_err == "Not a directory":
+            errors.append(f"cp: cannot stat '{target.raw_path}': "
+                          "Not a directory")
+            continue
+        # The create fails on the absent parent before the slash matters,
+        # so a chain verdict keeps its ENOENT (`cp f deep/missing/`).
+        if slash_refuses_file(target, target_exists, src_is_dir):
+            target_err = target_err or "Not a directory"
+        if target_err is not None:
+            noun = "directory" if src_is_dir else "regular file"
+            errors.append(f"cp: cannot create {noun} '{target.raw_path}': "
+                          f"{target_err}")
+            continue
         mismatch = overwrite_type_error("cp", src, src_is_dir, target,
                                         target_exists, target_is_dir)
         if mismatch is not None:

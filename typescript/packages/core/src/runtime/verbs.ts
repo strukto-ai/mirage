@@ -33,20 +33,24 @@ export const ROUTED_VERBS: Readonly<Record<string, readonly string[]>> = {
   access: ['stat'],
   chmod: ['setattr'],
   chown: ['setattr'],
+  getxattr: ['getxattr'],
   lchmod: ['setattr'],
   lchown: ['setattr'],
   listdir: ['readdir'],
+  listxattr: ['listxattr'],
   lstat: ['readlink', 'stat'],
   makedirs: ['mkdir'],
   mkdir: ['mkdir'],
   readlink: ['readlink'],
   remove: ['unlink'],
   removedirs: ['rmdir'],
+  removexattr: ['removexattr'],
   rename: ['rename'],
   renames: ['rename'],
   replace: ['rename'],
   rmdir: ['rmdir'],
   scandir: ['readdir', 'stat'],
+  setxattr: ['setxattr'],
   stat: ['stat'],
   symlink: ['symlink'],
   truncate: ['truncate'],
@@ -67,12 +71,6 @@ export const ROUTED_VERBS: Readonly<Record<string, readonly string[]>> = {
 // refused because a host process cwd cannot be a virtual path; a runtime
 // whose guest has its own cwd (Emscripten does) serves it inside that
 // guest and never reaches this table.
-// The extended-attribute family is refused rather than faked, which is
-// a deliberate divergence from `fuse/core.ts`: a real mountpoint has to
-// keep Finder and `cp -p` working, so it holds advisory xattrs in memory
-// for the mount's lifetime. There is no op behind that, so nothing above
-// the FUSE adapter can reach it, and ENOTSUP is what a filesystem
-// without xattr support answers.
 // `link`, `mkfifo` and `mknod` refuse with EPERM instead, because that
 // is what link(2) and mknod(2) document for a filesystem that does not
 // support the requested node (vfat answers link() exactly this way), so
@@ -82,15 +80,11 @@ export const REFUSED_VERBS: Readonly<Record<string, FsCondition>> = {
   chflags: 'ENOTSUP',
   chroot: 'ENOTSUP',
   fwalk: 'ENOTSUP',
-  getxattr: 'ENOTSUP',
   lchflags: 'ENOTSUP',
   link: 'EPERM',
-  listxattr: 'ENOTSUP',
   mkfifo: 'EPERM',
   mknod: 'EPERM',
   open: 'ENOTSUP',
-  removexattr: 'ENOTSUP',
-  setxattr: 'ENOTSUP',
   statvfs: 'ENOTSUP',
 }
 

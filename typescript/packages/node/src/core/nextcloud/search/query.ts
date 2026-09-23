@@ -144,6 +144,9 @@ function compilePredicate(node: PredNode): CompiledPredicate | null {
     }
     case 'path':
     case 'empty':
+    case 'action':
+    case 'prune':
+    case 'mtime':
       return null
   }
 }

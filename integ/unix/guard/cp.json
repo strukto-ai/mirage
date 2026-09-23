@@ -175,6 +175,70 @@
         "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "guard_cp_slashed_under_missing_parent",
+      "seq": 637,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp /data/guard/g.txt /data/guard/nodir/missing/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot create regular file '/data/guard/nodir/missing/': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_cp_dir_to_slashed_missing",
+      "seq": 638,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cp -r /data/guard/sub /data/guard/copied/ && test -f /data/guard/copied/s.txt && rm -r /data/guard/copied",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -40,6 +40,16 @@ async def test_truncate_extends_with_nul_bytes():
 
 
 @pytest.mark.asyncio
+async def test_truncate_onto_a_directory_is_a_directory():
+    s = RAMStore()
+    a = RAMAccessor(s)
+    s.dirs.add("/d")
+    with pytest.raises(IsADirectoryError):
+        await truncate(a, PathSpec.from_str_path("/d"), 0)
+    assert "/d" not in s.files
+
+
+@pytest.mark.asyncio
 async def test_truncate_records_its_own_op():
     # The op used to leave no record at all, so a guest's 'w' open on
     # an existing file was invisible to the ledger while the same open

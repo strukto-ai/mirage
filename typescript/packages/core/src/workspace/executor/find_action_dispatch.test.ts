@@ -180,6 +180,104 @@ describe('find actions', () => {
     }
   })
 
+  it('renders -printf rows through the format with stats', async () => {
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/pf/sub; printf 'hello\\n' > /data/pf/a.txt; printf 'hi\\n' > /data/pf/sub/b.txt; find /data/pf -printf '%p %y %d\\n'; find /data/pf -name a.txt -printf '%f %s\\n'",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe(
+        '/data/pf d 0\n/data/pf/a.txt f 1\n/data/pf/sub d 1\n/data/pf/sub/b.txt f 2\na.txt 6\n',
+      )
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs -printf per row, in order, beside the other actions', async () => {
+    // GNU findutils 4.10: each row runs the -a chain in the order written,
+    // a failing `-exec ;` ends it before a later -printf, and a batched
+    // `-exec +` runs once after every row.
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/pa; echo hi > /data/pa/a; echo yo > /data/pa/b; cd /data; find pa -type f -printf '%p\\n' -exec cat {} \\; ; find pa -type f -exec cat {} \\; -printf '%f\\n'; find pa -type f -printf '%p ' -print; find pa -type f -printf '%f ' -printf '%s\\n'; find pa -type f -exec grep -q hi {} \\; -printf 'hit %p\\n'; find pa -type f -printf '%f\\n' -exec echo batch {} +",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe(
+        [
+          'pa/a',
+          'hi',
+          'pa/b',
+          'yo',
+          'hi',
+          'a',
+          'yo',
+          'b',
+          'pa/a pa/a',
+          'pa/b pa/b',
+          'a 3',
+          'b 3',
+          'hit pa/a',
+          'a',
+          'b',
+          'batch pa/a pa/b',
+          '',
+        ].join('\n'),
+      )
+      expect(r.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('measures -printf %P and %d from the start point a row came from', async () => {
+    // GNU: `find d d/sub` walks d/sub twice, once under each start point.
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/pp/sub; echo g > /data/pp/sub/g; cd /data; find pp pp/sub -type f -printf '%P %d|' -print",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('sub/g 2|pp/sub/g\ng 1|pp/sub/g\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('orders -printf rows under -depth', async () => {
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/pd/s; touch /data/pd/f /data/pd/s/g; cd /data; find pd -depth -printf '%p\\n'",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('pd/f\npd/s/g\npd/s\npd\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('renders the stat find already holds for -printf', async () => {
+    // GNU stats a row once: -printf reads a row an earlier -delete removed
+    // only when a test or an earlier -printf statted it first, and
+    // otherwise reports it gone and exits 1. A format with no stat
+    // directive never looks.
+    const ws = await shellWs()
+    try {
+      const r = await ws.shell(
+        "mkdir -p /data/ps; cd /data; echo 1 > ps/f; find ps -type f -delete -printf '%s %p\\n'; echo rc=$?; echo 1 > ps/f; find ps -type f -delete -printf '%p\\n'; echo rc=$?; echo 1 > ps/f; find ps -type f -printf '%s|' -delete -printf '%s\\n'; echo rc=$?; echo 1 > ps/f; find ps -size -2k -type f -delete -printf '%s\\n'; echo rc=$?",
+        { sessionId: 's' },
+      )
+      expect(r.stdoutText).toBe('rc=1\nps/f\nrc=0\n2|2\nrc=0\n2\nrc=0\n')
+      expect(r.stderrText).toBe("find: 'ps/f': No such file or directory\n")
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('runs the -exec head as a program', async () => {
     // execvp answers `printf` with coreutils printf, which has no -v: the
     // word is the format (GNU adds a warning about the excess arguments,

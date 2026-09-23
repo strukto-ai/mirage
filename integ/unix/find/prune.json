@@ -1,0 +1,886 @@
+{
+  "cases": [
+    {
+      "id": "find_prune_provision",
+      "seq": 789,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "mkdir -p /data/prune/skip/inner /data/prune/keep && printf 'c\\n' > /data/prune/skip/cache.txt && printf 'd\\n' > /data/prune/skip/inner/deep.txt && printf 'f\\n' > /data/prune/keep/file.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_prune_path_or_type_print",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -path /data/prune/skip -prune -o -type f -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "type",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_relative_operand",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "(cd /data/prune && find . -path ./skip -prune -o -type f -print)",
+      "expect": {
+        "exit": 0,
+        "stdout": "./keep/file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "type",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_implicit_print_names_the_pruned_dir",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -path /data/prune/skip -prune -o -type f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\n/data/prune/skip\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "type"
+      ]
+    },
+    {
+      "id": "find_prune_nested_directory",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -name inner -prune -o -type f -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\n/data/prune/skip/cache.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "prune",
+        "o",
+        "type",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_or_print",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -name skip -prune -o -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune\n/data/prune/keep\n/data/prune/keep/file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "prune",
+        "o",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_print0",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -path /data/prune/skip -prune -o -name '*.txt' -print0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\u0000",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "name",
+        "print0"
+      ]
+    },
+    {
+      "id": "find_prune_grouped",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune \\( -path /data/prune/skip -prune \\) -o -type f -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "type",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_start_point",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -type d -prune",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune\n",
+        "stderr": ""
+      },
+      "flags": [
+        "type",
+        "prune"
+      ]
+    },
+    {
+      "id": "find_prune_file_drops_nothing",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -name cache.txt -prune -o -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune\n/data/prune/keep\n/data/prune/keep/file.txt\n/data/prune/skip\n/data/prune/skip/inner\n/data/prune/skip/inner/deep.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "prune",
+        "o",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_maxdepth",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -maxdepth 1 -path /data/prune/skip -prune -o -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune\n/data/prune/keep\n",
+        "stderr": ""
+      },
+      "flags": [
+        "maxdepth",
+        "path",
+        "prune",
+        "o",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_mindepth_skips_shallow_prune",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -mindepth 2 -path /data/prune/skip -prune -o -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\n/data/prune/skip/cache.txt\n/data/prune/skip/inner\n/data/prune/skip/inner/deep.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "mindepth",
+        "path",
+        "prune",
+        "o",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_depth_makes_it_inert",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -depth -path /data/prune/skip -prune -o -type f -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\n/data/prune/skip/cache.txt\n/data/prune/skip/inner/deep.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "depth",
+        "path",
+        "prune",
+        "o",
+        "type",
+        "print"
+      ]
+    },
+    {
+      "id": "find_prune_exec",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -path /data/prune/skip -prune -o -type f -exec echo X {} \\;",
+      "expect": {
+        "exit": 0,
+        "stdout": "X /data/prune/keep/file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "type",
+        "exec"
+      ]
+    },
+    {
+      "id": "find_prune_exec_batched",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -path /data/prune/skip -prune -o -type f -exec echo X {} +",
+      "expect": {
+        "exit": 0,
+        "stdout": "X /data/prune/keep/file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "type",
+        "exec"
+      ]
+    },
+    {
+      "id": "find_prune_printf",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -path /data/prune/skip -prune -o -type f -printf '%f\\n'",
+      "expect": {
+        "exit": 0,
+        "stdout": "file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "type",
+        "printf"
+      ]
+    },
+    {
+      "id": "find_prune_second_root_walks_in_full",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune/skip/inner /data/prune -path /data/prune/skip -prune -o -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/skip/inner\n/data/prune/skip/inner/deep.txt\n/data/prune\n/data/prune/keep\n/data/prune/keep/file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "print"
+      ]
+    },
+    {
+      "id": "find_print_on_both_arms",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -name file.txt -print -o -name deep.txt -print",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep/file.txt\n/data/prune/skip/inner/deep.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "name",
+        "print",
+        "o"
+      ]
+    },
+    {
+      "id": "find_print_before_or_prints_everything",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune/keep -print -o -name file.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/prune/keep\n/data/prune/keep/file.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "print",
+        "o",
+        "name"
+      ]
+    },
+    {
+      "id": "find_prune_delete_refused",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -path /data/prune/skip -prune -o -name '*.txt' -delete",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: The -delete action automatically turns on -depth, but -prune does nothing when -depth is in effect.  If you want to carry on anyway, just explicitly use the -depth option.\n"
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o",
+        "name",
+        "delete"
+      ]
+    },
+    {
+      "id": "find_mixed_actions_under_or_refused",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -name file.txt -print -o -name cache.txt -print0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: -print and -print0 cannot be combined under -o, ! or parentheses\n"
+      },
+      "flags": [
+        "name",
+        "print",
+        "o",
+        "print0"
+      ]
+    },
+    {
+      "id": "find_prune_unknown_predicate_still_refused",
+      "seq": 790,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "find /data/prune -path /data/prune/skip -prune -o -perm 644 -print",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: unknown predicate '-perm'\n"
+      },
+      "flags": [
+        "path",
+        "prune",
+        "o"
+      ]
+    }
+  ]
+}

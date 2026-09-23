@@ -84,10 +84,10 @@ async def test_mv_dir_into_missing_parent_reports_cannot_move(workspace):
 async def test_mv_under_a_file_reports_not_a_directory(workspace):
     await workspace.vfs.write("/a.txt", b"hi")
     await workspace.vfs.write("/plain", b"y")
+    # GNU 9.7 fails the destination's stat, before any rename.
     io = await workspace.shell("mv /a.txt /plain/c.txt")
     assert io.exit_code == 1
-    assert io.stderr == (b"mv: cannot move '/a.txt' to '/plain/c.txt': "
-                         b"Not a directory\n")
+    assert io.stderr == b"mv: cannot stat '/plain/c.txt': Not a directory\n"
     assert await workspace.vfs.read("/a.txt") == b"hi"
 
 

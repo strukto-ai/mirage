@@ -61,6 +61,10 @@ function fakeManager(log: string[], name: string): CacheInvalidator {
     cachedBytes() {
       return Promise.resolve(null)
     },
+
+    cachedSize(): Promise<number | null> {
+      return Promise.resolve(null)
+    },
   }
 }
 

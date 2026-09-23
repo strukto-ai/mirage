@@ -21,6 +21,48 @@ import { PrefixResolver } from '../../resolver.ts'
 import { loadPyodideRuntime } from './loader.ts'
 import { PyodideExecution } from './execution.ts'
 describe('Python guest module', { timeout: 120_000 }, () => {
+  it('preserves output bytes across calls with buffers above the signed wasm32 boundary', async () => {
+    const pyodide = await loadPyodideRuntime()
+    const guest = new PyodideExecution(pyodide)
+    const output = `hello world — 世界 🌍\n${'x'.repeat(2048)}\n`
+    const error = 'stderr — café 🌍\n'
+    const code = `import sys; sys.stdout.write(${JSON.stringify(output)}); sys.stderr.write(${JSON.stringify(error)}); sys.stdout.buffer.write(bytes([0, 255, 128])); None`
+    const expected = new Uint8Array([...new TextEncoder().encode(output), 0, 255, 128])
+    const results: Uint8Array[] = []
+    try {
+      pyodide.runPython(`
+pressure = [bytearray(700 * 1024 * 1024) for _ in range(3)]
+small = [str(i).encode() for i in range(100000)]
+`)
+      for (let call = 0; call < 3; call++) {
+        const run = guest.run(
+          { code, argv: [], cwd: '', flags: {}, script_cli: false, env: {}, stdin: null },
+          () => undefined,
+          () => undefined,
+        )
+        const evaluated = guest.evaluate(code, {})
+        const repl = guest.repl(`exec(${JSON.stringify(code)})`, 'large-heap', {})
+        expect(run[2]).toBe(0)
+        expect(evaluated[3]).toBe(true)
+        expect(repl[2]).toBe(0)
+        for (const [stdout, stderr] of [
+          [run[0], run[1]],
+          [evaluated[1], evaluated[2]],
+          [repl[0], repl[1]],
+        ] as const) {
+          expect(stdout).toEqual(expected)
+          expect(stderr).toEqual(new TextEncoder().encode(error))
+          results.push(stdout)
+        }
+        pyodide.runPython('pressure.append(bytearray(64 * 1024 * 1024))')
+      }
+      for (const stdout of results) expect(stdout).toEqual(expected)
+    } finally {
+      pyodide.runPython('del pressure, small')
+      guest.close()
+    }
+  })
+
   it('executes main guards with fresh globals on every run', async () => {
     const guest = new PyodideExecution(await loadPyodideRuntime())
     try {

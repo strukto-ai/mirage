@@ -29,7 +29,7 @@ from mirage.policy.types import SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
-from mirage.types import ContentType, FileType
+from mirage.types import ContentType, FileType, ReadPolicy, ReadSpec
 from mirage.vfs import registry as vfs_registry
 from mirage.vfs.loader import SCRIPT_MODULE_NAME, load_backend_class
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
@@ -593,3 +593,202 @@ async def test_to_state_dict_carries_no_entries_for_a_redis_cache():
         assert state[StateKey.CACHE][CacheKey.ENTRIES] == []
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_read_policy_survives_a_snapshot_round_trip():
+    """Restored off the reloaded registry, not off the serialized dict.
+
+    The write side and the read side land independently, so asserting
+    that the state dict contains the policy would pass while the loader
+    still discarded it. Reloaded without ``mounts=``, so the loader
+    reconstructs the saved backend itself -- the one case where the
+    saved policy still describes what is being mounted.
+    """
+    vfs = RAMVFS()
+    ws = Workspace({"/d/": vfs},
+                   mode=MountMode.WRITE,
+                   read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=45))
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+
+    restored = await Workspace.from_state(state)
+    try:
+        mount = restored._registry.mount_for_prefix("/d/")
+        assert mount.read == ReadSpec(policy=ReadPolicy.BOUNDED, ttl=45)
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_a_v3_snapshot_is_refused_with_the_regenerate_message():
+    ws = Workspace({"/d/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    state[StateKey.VERSION] = 3
+    with pytest.raises(ValueError) as exc:
+        build_mount_args(state)
+    assert "v3 not supported" in str(exc.value)
+    assert "regenerate" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_an_unversioned_state_dict_is_refused_not_keyerrored():
+    """The absent-version hole, newly reachable.
+
+    Every key the loader read used to have a default, so a dict with no
+    version was merely odd. v4 makes the read policy required, so an
+    unversioned dict would land on a bare KeyError instead of a message
+    naming the fix.
+    """
+    ws = Workspace({"/d/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    del state[StateKey.VERSION]
+    with pytest.raises(ValueError) as exc:
+        build_mount_args(state)
+    assert "unversioned" in str(exc.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", [MountKey.READ, MountKey.TTL])
+async def test_a_v4_entry_missing_the_read_key_raises_rather_than_defaulting(
+        key):
+    """Required, never `.get(default)`, and named rather than subscripted.
+
+    A dict labelled v4 with the key missing would otherwise install a
+    default on a mount that was saved carrying something else -- the
+    silent-downgrade failure the whole policy exists to remove. The bare
+    subscript said so as `KeyError: 'read'`, which names neither the
+    mount nor the fix, where TypeScript's loader named both; a snapshot
+    written by a foreign writer is the one that arrives without the key,
+    so the two hosts have to refuse it the same way.
+    """
+    ws = Workspace({"/d/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    del state[StateKey.MOUNTS][0][key]
+    with pytest.raises(ValueError) as exc:
+        build_mount_args(state)
+    assert "/d/" in str(exc.value)
+    assert "missing its read policy" in str(exc.value)
+    assert "regenerate the snapshot" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_apply_state_dict_runs_the_version_check_too():
+    """Both doors, or the same bytes get two answers.
+
+    ``build_mount_args`` builds a workspace from the state;
+    ``apply_state_dict`` restores into one that already exists and is
+    what ``version checkout`` and the agent sandbox's hydrate call.
+    Checking one door only meant a v3 commit was refused through
+    ``Workspace.load`` and half-restored through a checkout.
+    """
+    ws = Workspace({"/d/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    state[StateKey.VERSION] = 3
+
+    target = Workspace({}, mode=MountMode.WRITE)
+    try:
+        with pytest.raises(ValueError) as exc:
+            await apply_state_dict(target, state)
+        assert "v3 not supported" in str(exc.value)
+        assert target._registry.try_mount_for_prefix("/d/") is None
+    finally:
+        await target.close()
+
+
+@pytest.mark.asyncio
+async def test_an_overridden_mount_takes_the_default_read_spec():
+    """The saved policy belongs to the backend that was saved.
+
+    An override hands back a different instance -- typically a stand-in
+    with different capabilities -- so replaying the saved verdict onto
+    it can refuse a restore that has nothing wrong with it. A `fresh`
+    S3 mount overridden with a RAMVFS is exactly that case.
+    """
+    minio = MinIOVFS(
+        MinIOConfig(bucket="b",
+                    endpoint_url="http://localhost:9000",
+                    access_key_id="k",
+                    secret_access_key="s"))
+    ws = Workspace({"/s3/": minio},
+                   mode=MountMode.WRITE,
+                   read=ReadSpec(policy=ReadPolicy.FRESH))
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    assert state[StateKey.MOUNTS][0][MountKey.READ] == ReadPolicy.FRESH.value
+
+    restored = await Workspace.from_state(state, mounts={"/s3/": RAMVFS()})
+    try:
+        mount = restored._registry.mount_for_prefix("/s3/")
+        assert mount.read == ReadSpec()
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("key", "value", "message"), [
+    (MountKey.READ, "banana", "fresh, bounded, pinned"),
+    (MountKey.TTL, 0, "at least 1 second"),
+])
+async def test_a_saved_spec_is_coerced_even_on_an_overridden_mount(
+        key, value, message):
+    """The coercion runs before the override resets the spec.
+
+    ``docs/home/yaml.mdx`` states this ("a snapshot naming an unknown
+    one is refused whether or not the mount is overridden"), so swapping
+    the two statements would break documented behaviour in silence: the
+    junk would be discarded along with the spec rather than reported.
+    """
+    ws = Workspace({"/d/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    state[StateKey.MOUNTS][0][key] = value
+    with pytest.raises(ValueError, match=message):
+        build_mount_args(state, {"/d/": RAMVFS()})
+
+
+@pytest.mark.asyncio
+async def test_a_restore_into_a_live_workspace_keeps_the_live_read_policy():
+    """``apply_state_dict`` restores content, not mount configuration.
+
+    It loads state into mounts that already exist and never re-reads
+    their `read`/`ttl`, exactly as it never re-reads `mode`. A
+    ``version checkout`` therefore keeps the running workspace's policy.
+    Written down here because the saved keys are right there in the
+    state dict and the omission otherwise reads as an oversight.
+    """
+    source = Workspace({"/d/": RAMVFS()},
+                       mode=MountMode.WRITE,
+                       read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=45))
+    try:
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    assert state[StateKey.MOUNTS][0][MountKey.TTL] == 45
+
+    target = Workspace({"/d/": RAMVFS()},
+                       mode=MountMode.WRITE,
+                       read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=90))
+    try:
+        await apply_state_dict(target, state)
+        assert target._registry.mount_for_prefix("/d/").read.ttl == 90
+    finally:
+        await target.close()

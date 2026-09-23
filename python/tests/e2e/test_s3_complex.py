@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
@@ -110,8 +111,9 @@ class AsyncMockS3Client:
         assert name == "list_objects_v2"
         return AsyncMockPaginator(self.objects)
 
-    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> None:
+    async def put_object(self, Bucket: str, Key: str, Body: bytes) -> dict:
         self.objects[Key] = Body
+        return {"ETag": f'"{hashlib.md5(Body).hexdigest()}"'}
 
     async def delete_object(self, Bucket: str, Key: str) -> None:
         self.objects.pop(Key, None)

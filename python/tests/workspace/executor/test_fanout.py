@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mirage.commands.builtin.find_eval import pruned_keys
 from mirage.commands.config import ExecContext
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import spec_flag_names
@@ -18,10 +19,10 @@ from mirage.workspace.executor.fanout import (_adjust_depth_texts,
 
 
 def _shown_mount_entries(target, descendants, texts, raw, stat_path=None):
-    return "\n".join(p.raw_path
-                     for p in asyncio.run(
-                         _synthesize_find_mount_entries(
-                             target, descendants, texts, raw, stat_path)))
+    entries, _ = asyncio.run(
+        _synthesize_find_mount_entries(target, descendants, texts, raw,
+                                       stat_path))
+    return "\n".join(p.raw_path for p in entries)
 
 
 class TraversalMount:
@@ -123,6 +124,80 @@ def test_synthesize_shared_ancestor_once():
     assert _shown_mount_entries("/", desc, [], "/") == "/a\n/a/b\n/a/c"
 
 
+def test_synthesize_prune_drops_the_mounts_under_a_pruned_ancestor():
+    desc = _mounts("/skip/deep/", "/keep/")
+    texts = ["-path", "/skip", "-prune", "-o", "-print"]
+    assert _shown_mount_entries("/", desc, texts, "/") == "/keep"
+    assert _shown_mount_entries("/", desc, ["-path", "/skip", "-prune"],
+                                "/") == "/skip"
+
+
+def test_synthesize_prune_at_the_start_point_hides_every_mount():
+    desc = _mounts("/a/", "/b/deep/")
+    assert _shown_mount_entries("/", desc, ["-type", "d", "-prune"], "/") == ""
+    assert _shown_mount_entries("/", desc,
+                                ["-mindepth", "1", "-type", "d", "-prune"],
+                                "/") == "/a\n/b"
+
+
+def test_synthesize_returns_the_evaluated_tree():
+    _, tree = asyncio.run(
+        _synthesize_find_mount_entries("/", _mounts("/skip/deep/"),
+                                       ["-path", "/skip", "-prune"], "/"))
+    assert tree is not None
+    assert pruned_keys(tree) == ["/skip"]
+    _, tree = asyncio.run(
+        _synthesize_find_mount_entries("/", _mounts("/a/"), ["-bogus"], "/"))
+    assert tree is None
+
+
+def test_synthesize_time_test_before_prune_gates_the_mounts():
+    stamps = {
+        "/": "2026-01-01T00:00:00Z",
+        "/old": "2000-01-01T00:00:00Z",
+        "/new": "2026-01-01T00:00:00Z",
+        "/old/deep": "2026-01-01T00:00:00Z",
+        "/new/deep": "2026-01-01T00:00:00Z",
+    }
+
+    async def stat_path(path):
+        return FileStat(name=path.rsplit("/", 1)[-1],
+                        type=FileType.DIRECTORY,
+                        modified=stamps[path])
+
+    desc = _mounts("/old/deep/", "/new/deep/")
+    gated = ["-mindepth", "1", "-newermt", "2010-01-01", "-prune"]
+    assert _shown_mount_entries("/", desc, gated, "/",
+                                stat_path) == "/old/deep\n/new"
+    _, tree = asyncio.run(
+        _synthesize_find_mount_entries("/", desc, gated, "/", stat_path))
+    # `/old` failed the test, so it alone is open; `/new/deep` sits under
+    # a pruned directory and is never judged.
+    assert pruned_keys(tree) == ["/old/deep", "/new"]
+    firm = ["-mindepth", "1", "-prune", "-newermt", "2010-01-01"]
+    assert _shown_mount_entries("/", desc, firm, "/", stat_path) == "/new"
+
+
+def test_synthesize_never_stats_a_mount_under_a_pruned_directory():
+    # `find / -path /skip -prune -newermt X`: GNU never visits `/skip/deep`,
+    # so the fan-out asks nothing about it, and a backend refusing the
+    # probe cannot fail the line.
+    statted: list[str] = []
+
+    async def stat_path(path):
+        statted.append(path)
+        if path.startswith("/skip/"):
+            raise PermissionError(path)
+        return FileStat(name=path.rsplit("/", 1)[-1],
+                        type=FileType.DIRECTORY,
+                        modified="2026-01-01T00:00:00Z")
+
+    desc = _mounts("/skip/deep/", "/keep/deep/")
+    texts = ["-path", "/skip", "-prune", "-newermt", "2010-01-01"]
+    assert _shown_mount_entries("/", desc, texts, "/", stat_path) == "/skip"
+    assert statted == ["/", "/skip", "/keep", "/keep/deep"]
+
+
 def test_adjust_depth_texts_reduces_maxdepth_by_delta():
     out = _adjust_depth_texts(["-maxdepth", "3", "-name", "x"], "/",
                               "/data/sub")
@@ -142,6 +217,34 @@ def test_adjust_depth_texts_no_depth_tokens_unchanged():
 def test_adjust_depth_texts_same_mount_unchanged():
     assert _adjust_depth_texts(["-maxdepth", "3"], "/data",
                                "/data") == ["-maxdepth", "3"]
+
+
+def test_prune_above_a_nested_mount_skips_its_walk():
+    parent = RAMVFS()
+    parent._store.files["/top.txt"] = b"top\n"
+    parent._store.dirs.add("/skip")
+    parent._store.files["/skip/x.txt"] = b"x\n"
+    child = RAMVFS()
+    child._store.files["/leaf.txt"] = b"deep\n"
+    ws = Workspace(mounts={
+        "/": (parent, MountMode.EXEC),
+        "/skip/deep/": (child, MountMode.EXEC),
+    })
+
+    async def scenario():
+        return [
+            await
+            ws.shell("find / -path /skip -prune -o -name '*.txt' -print"),
+            await ws.shell("find / -type d -prune"),
+            await ws.shell("find / -path /skip/deep -prune -o -print"),
+        ]
+
+    pruned, start, root = asyncio.run(scenario())
+    assert pruned.stdout == b"/top.txt\n"
+    assert start.stdout == b"/\n"
+    out = root.stdout.decode()
+    assert "/skip/x.txt" in out
+    assert "/skip/deep" not in out
 
 
 def test_maxdepth_applies_to_child_mount_depth_end_to_end():

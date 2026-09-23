@@ -38,6 +38,9 @@ class CacheInvalidator(Protocol):
     async def cached_bytes(self, path: PathSpec) -> bytes | None:
         ...
 
+    async def cached_size(self, path: PathSpec) -> int | None:
+        ...
+
 
 _active: ContextVar[CacheInvalidator | None] = ContextVar(
     "_active_cache_manager", default=None)

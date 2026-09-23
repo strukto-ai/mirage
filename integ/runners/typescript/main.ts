@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { writeFileSync } from 'node:fs'
-import { ConsistencyPolicy } from '@struktoai/mirage-node'
+import { type ReadSpec } from '@struktoai/mirage-node'
+import { resolveReadSpec } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { ConcurrencyLimiter } from '@struktoai/mirage-core/concurrency/limiter'
 import { ADAPTERS, openConsistency } from './adapters/index.ts'
@@ -259,7 +260,7 @@ export async function runTarget(
     const reasons = ruleReasons({ profiles: target.profiles, sessions: target.sessions })
     for (const c of cases) {
       if (!c.targets.includes(target.id)) continue
-      if (c.consistency !== undefined) continue
+      if (c.read !== undefined) continue
       const bound = bindMount(c, target.mounts[0].path)
       const { exitCode, out, err, elapsed, checkOut, notes } = await runCase(ws, bound, reasons)
       if (emit !== null) {
@@ -283,11 +284,14 @@ export async function runTarget(
     await cleanup()
   }
   const scenarios = cases.filter(
-    (c) => c.targets.includes(target.id) && c.consistency !== undefined && c.scenario !== undefined,
+    (c) => c.targets.includes(target.id) && c.read !== undefined && c.scenario !== undefined,
   )
   for (const c of scenarios) {
-    const policy = c.consistency === 'always' ? ConsistencyPolicy.ALWAYS : ConsistencyPolicy.LAZY
-    const opened = await openConsistency(target, policy)
+    // Through the coercer, not a ternary: a typo'd or future policy name
+    // would otherwise run the bounded scenario and report it green, which
+    // is the silent downgrade this suite exists to catch.
+    const spec: ReadSpec = resolveReadSpec(c.read, c.ttl)
+    const opened = await openConsistency(target, spec)
     if (opened === null) {
       // Loud on purpose: an adapter that cannot build a shadow workspace used
       // to drop every scenario case for its target without a word.

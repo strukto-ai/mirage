@@ -13,30 +13,57 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../../io/types.ts'
-import { tarGeneric } from '../../tar.ts'
-import { crossOpts, statOp, streamOp } from '../utils.ts'
-import type { CrossResult, DispatchFn } from '../types.ts'
+import type { NamespaceView } from '../../../../../ops/types.ts'
+import type { PathSpec } from '../../../../../types.ts'
+import { specOf } from '../../../../spec/builtins.ts'
+import { FlagView } from '../../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
+import { rstripSlash } from '../../../../../utils/slash.ts'
+import { relayIsDirOf, relayWalkOf } from '../../../generic_bind/archive_io.ts'
+import { tarGeneric } from '../../tar.ts'
+import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
+import type { CrossResult, DispatchFn } from '../types.ts'
+
+// The positional operands among a line's path words. The scopes are every
+// path word in line order, an option's value among them. The parser gives
+// each option its word first (POSIX order, and the order -C needs), so the
+// same words go here and what is left are the operands, each with its own
+// spelling.
+function operands(scopes: readonly PathSpec[], taken: readonly string[]): PathSpec[] {
+  const rest = [...scopes]
+  for (const value of taken) {
+    const key = rstripSlash(value) || '/'
+    const index = rest.findIndex((scope) => (rstripSlash(scope.virtual) || '/') === key)
+    if (index >= 0) rest.splice(index, 1)
+  }
+  return rest
+}
 
 /**
- * Run a -t/-x tar whose archive and -C destination span mounts.
+ * Run a tar whose archive, operands and -C destination span mounts.
  *
- * Pure wiring: the shared generic runs on dispatch-relayed doors, so
- * the archive is read from its mount and every extracted path lands on
- * whichever mount owns it. Create mode never reaches here: the executor
- * keeps a create-mode span on the plain refusal, because its planner
- * walks one backend's tree and relay doors would cross nested mount
- * boundaries the planner is required to refuse.
+ * Pure wiring: the shared generic runs on dispatch-relayed doors, so the
+ * archive is read from or written to its mount, every extracted path lands
+ * on whichever mount owns it, and each -c operand is walked on the mount
+ * that owns it. The create scan still stops at a mount nested under an
+ * operand, exactly as it does on one mount.
  */
 export async function runTar(
+  scopes: PathSpec[],
   textArgs: string[],
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
+  // The symlinks and mount boundaries the create scan merges into each walk.
+  ns?: NamespaceView,
 ): Promise<CrossResult> {
+  const fl = new FlagView(flagKwargs, specOf('tar'))
+  const archive = fl.asStr('f') ?? null
+  const created =
+    archive !== null && fl.asBool('c') ? operands(scopes, [archive, ...fl.asList('C')]) : []
   const result = await tarGeneric(
-    [],
+    flatten(created),
     textArgs,
-    crossOpts(flagKwargs),
+    { ...crossOpts(flagKwargs), ...(ns !== undefined ? { ns } : {}) },
     {
       stream: streamOp(dispatch),
       write: async (p, data) => {
@@ -46,8 +73,8 @@ export async function runTar(
         await dispatch('mkdir', p)
       },
       stat: statOp(dispatch),
-      walk: () => Promise.resolve({ paths: [] }),
-      isDir: () => Promise.resolve(false),
+      walk: relayWalkOf(dispatch, ns?.childMounts),
+      isDir: relayIsDirOf(dispatch),
     },
     true,
   )

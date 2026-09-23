@@ -31,7 +31,7 @@ from mirage.commands.builtin.generic_bind.provision import default_provision
 from mirage.commands.config import CommandOpts, command
 from mirage.commands.spec import SPECS
 from mirage.types import FileType, PathSpec
-from mirage.utils.errors import MISS_ERRORS, enotdir
+from mirage.utils.errors import MISS_ERRORS, eisdir, enotdir
 
 
 def _cached_stat(stat: Callable[..., Any], accessor: Accessor, path: PathSpec,
@@ -46,9 +46,12 @@ async def _cached_stat_result(manager, stat: Callable[...,
     result = await stat(accessor, path, *args, **kwargs)
     if (result is not None and getattr(result, "size", None) is None
             and manager is not None):
-        cached = await manager.cached_bytes(path)
-        if cached is not None:
-            result = result.model_copy(update={"size": len(cached)})
+        # cached_size, not cached_bytes: this runs only where the backend
+        # named no size -- the API mounts -- so gating it would turn a
+        # stat into a backend stat.
+        size = await manager.cached_size(path)
+        if size is not None:
+            result = result.model_copy(update={"size": size})
     return result
 
 
@@ -118,6 +121,21 @@ async def _slash_checked_readdir(readdir: Callable[..., Any],
     return await readdir(accessor, path, index)
 
 
+async def _slash_checked_write(write: Callable[..., Any], accessor: Accessor,
+                               path: PathSpec, *args, **kwargs):
+    # open(2) with O_CREAT refuses a slash-terminated name outright,
+    # before looking anything up: `x/` can only ever be a directory, so
+    # there is nothing to create and nothing to truncate. GNU tee and
+    # truncate both answer `missing/` with "Is a directory" and touch
+    # nothing, and a plain file behind the slash gets the same answer.
+    # Deliberate divergence: under a parent that is itself absent GNU
+    # reports the parent first (ENOENT); the spelling is refused here
+    # without a round trip, so that corner reads EISDIR too.
+    if path.raw_path.endswith("/"):
+        raise eisdir(path)
+    return await write(accessor, path, *args, **kwargs)
+
+
 def with_slash_guard(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose ``stat`` honors a trailing slash on an operand.
 
@@ -132,19 +150,36 @@ def with_slash_guard(ops: CommandIO) -> CommandIO:
     store answers a non-directory prefix with an empty list rather than
     an error.
 
-    A missing path is left alone: its own ENOENT is already GNU's answer
-    (``cat dangle/`` is "No such file or directory"). The link half is
-    the router's, not this wrapper's: by the time an operand arrives
-    here a trailing slash has already resolved the final symlink, so
-    ``dlink/`` stats the directory it points at and passes.
+    A missing path is left alone on the read side: its own ENOENT is
+    already GNU's answer (``cat dangle/`` is "No such file or
+    directory"). On the write side it is not: ``write``, ``append`` and
+    ``truncate`` refuse a slashed operand with EISDIR whether or not
+    anything is there, as open(2) does with O_CREAT, so ``tee missing/``
+    cannot leave a regular file named ``missing`` behind. The link half is the
+    router's, not this wrapper's: by the time an operand arrives here a
+    trailing slash has already resolved the final symlink, so ``dlink/``
+    stats the directory it points at and passes.
 
     Args:
         ops (CommandIO): the backend's IO adapter.
     """
-    return replace(ops,
-                   stat=functools.partial(_slash_checked_stat, ops.stat),
-                   readdir=functools.partial(_slash_checked_readdir,
-                                             ops.readdir, ops.stat))
+    guarded = replace(ops,
+                      stat=functools.partial(_slash_checked_stat, ops.stat),
+                      readdir=functools.partial(_slash_checked_readdir,
+                                                ops.readdir, ops.stat))
+    if ops.write is not None:
+        guarded = replace(guarded,
+                          write=functools.partial(_slash_checked_write,
+                                                  ops.write))
+    if ops.append is not None:
+        guarded = replace(guarded,
+                          append=functools.partial(_slash_checked_write,
+                                                   ops.append))
+    if ops.truncate is not None:
+        guarded = replace(guarded,
+                          truncate=functools.partial(_slash_checked_write,
+                                                     ops.truncate))
+    return guarded
 
 
 def with_stat_cache(ops: CommandIO) -> CommandIO:

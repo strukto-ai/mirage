@@ -33,7 +33,8 @@ from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec, word_text
 from mirage.utils.errors import FS_ERRORS, ReadOnlyError, fs_strerror
 from mirage.utils.path import CycleError
-from mirage.workspace.executor.builtins.links.probe import (path_readdir,
+from mirage.workspace.executor.builtins.links.probe import (link_target_stat,
+                                                            path_readdir,
                                                             path_stat)
 from mirage.workspace.executor.builtins.shared import (abs_path, fail,
                                                        read_only_error, result)
@@ -481,6 +482,36 @@ async def make_link(
         return
     link_spec = PathSpec.from_str_path(plan.link_abs)
     backs = flags.backup not in (None, "none")
+    if typed.endswith("/"):
+        # A link name typed with a slash asks for a directory the link
+        # can never be, and GNU settles it before -f or -b touch
+        # anything there: those two lstat the name first, and `reg/`
+        # over a file (or a link to one) is ENOTDIR, `failed to access`,
+        # with the file kept and nothing renamed aside. Without them
+        # symlink(2) and link(2) answer `missing/` with ENOENT and
+        # anything standing behind the slash with EEXIST, so GNU creates
+        # nothing where the normalized name would have made a link
+        # called `missing`. A directory there took the link inside it in
+        # plan_links, so only a non-directory and the absent name are
+        # settled here, and a plain file without a flag falls to the
+        # door's "File exists" below.
+        linked = _visible_link(namespace, plan.link_abs)
+        behind = (await link_target_stat(namespace, dispatch, plan.link_abs)
+                  if linked else await path_stat(dispatch, plan.link_abs))
+        if (behind is not None and behind.type is not FileType.DIRECTORY
+                and (flags.force or backs)):
+            errors.append(f"ln: failed to access '{typed}': Not a directory\n")
+            return
+        if not linked and behind is None:
+            arrow = "" if flags.symbolic else f" => '{target_typed}'"
+            errors.append(f"ln: failed to create {kind} '{typed}'{arrow}: "
+                          "No such file or directory\n")
+            return
+        if linked and (behind is None
+                       or behind.type is not FileType.DIRECTORY):
+            errors.append(
+                f"ln: failed to create {kind} '{typed}': File exists\n")
+            return
     if (flags.force and not backs
             and abs_path(plan.source, cwd) == plan.link_abs
             and (_visible_link(namespace, plan.link_abs)

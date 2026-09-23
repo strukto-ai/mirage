@@ -16,8 +16,13 @@ import type { Reply } from '../../kit/typescript/index.ts'
 import type { SheetTab, Spreadsheet } from '../store/types.ts'
 import { asArr, asNum, asObj, asStr } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
-import { googleError } from '../wire/reply.ts'
+import { googleError, isReply } from '../wire/reply.ts'
+import { CELL_DATA, DIMENSION_PROPERTIES, canonical, ordered } from './fields.ts'
+import { writeCell } from './format.ts'
 import { ROW_PIXELS, COLUMN_PIXELS, tabGrid } from './grid.ts'
+import { applyMask } from './mask.ts'
+import { boundsOf, gridOf, invalid, maskOf } from './request.ts'
+import type { At } from './request.ts'
 
 export type Dimension = 'ROWS' | 'COLUMNS'
 
@@ -30,9 +35,13 @@ export interface DimensionRange {
 
 // A DimensionRange with no endIndex is unbounded to the end of the grid,
 // and no startIndex means index 0, matching the real API's optional fields.
-export function resolveDimensionRange(sheet: Spreadsheet, raw: JsonObj): DimensionRange | null {
-  const tab = sheet.tabs.find((t) => t.sheetId === (asNum(raw.sheetId) ?? 0))
-  if (tab === undefined) return null
+export function resolveDimensionRange(
+  sheet: Spreadsheet,
+  raw: JsonObj,
+  at: At,
+): DimensionRange | Reply {
+  const tab = gridOf(sheet, asNum(raw.sheetId) ?? 0, at)
+  if (isReply(tab)) return tab
   const dimension: Dimension = asStr(raw.dimension) === 'COLUMNS' ? 'COLUMNS' : 'ROWS'
   const limit = dimension === 'ROWS' ? tab.rows : tab.cols
   const startIndex = Math.max(0, asNum(raw.startIndex) ?? 0)
@@ -40,98 +49,113 @@ export function resolveDimensionRange(sheet: Spreadsheet, raw: JsonObj): Dimensi
   return { tab, dimension, startIndex, endIndex }
 }
 
-// Re-key the sparse cell map along one dimension. `mapIndex` returns the
-// index a row/column moves to, or null to drop it; every dimension request
-// is expressed as one such mapping so insert, delete and move cannot drift
-// apart.
+// Re-key everything a tab holds by row or column along one dimension: cell
+// values, the rest of each cell, and the row or column properties.
+// `mapIndex` returns the index a row/column moves to, or null to drop it;
+// every dimension request is expressed as one such mapping so insert,
+// delete and move cannot drift apart. Banded ranges, the basic filter and
+// conditional rules keep the ranges they were given: live Sheets moves them
+// with the rows, which is not modeled here.
 export function remapCells(
   tab: SheetTab,
   dimension: Dimension,
   mapIndex: (index: number) => number | null,
 ): void {
-  const next = new Map<string, string>()
-  for (const [key, value] of tab.cells) {
-    const [row, col] = key.split(',').map(Number) as [number, number]
-    const moved = mapIndex(dimension === 'ROWS' ? row : col)
-    if (moved === null) continue
-    next.set(
-      dimension === 'ROWS' ? `${String(moved)},${String(col)}` : `${String(row)},${String(moved)}`,
-      value,
+  const moved = <T>(cells: Map<string, T>): Map<string, T> => {
+    const next = new Map<string, T>()
+    for (const [key, value] of cells) {
+      const [row = 0, col = 0] = key.split(',').map(Number)
+      const to = mapIndex(dimension === 'ROWS' ? row : col)
+      if (to === null) continue
+      next.set(
+        dimension === 'ROWS' ? `${String(to)},${String(col)}` : `${String(row)},${String(to)}`,
+        value,
+      )
+    }
+    return next
+  }
+  tab.cells = moved(tab.cells)
+  tab.props = moved(tab.props)
+  const meta: Record<string, JsonObj> = {}
+  for (const [key, value] of Object.entries(dimension === 'ROWS' ? tab.rowMeta : tab.columnMeta)) {
+    const to = mapIndex(Number(key))
+    if (to !== null) meta[String(to)] = value
+  }
+  if (dimension === 'ROWS') tab.rowMeta = meta
+  else tab.columnMeta = meta
+}
+
+// updateCells writes a rectangle by grid index rather than by A1 range,
+// through its field mask the way repeatCell does. With a `range`, a cell the
+// rows leave out has the masked fields cleared, which is how a caller
+// shortens a sheet it previously wrote longer; with only a `start`, the
+// rows' own cells are all it touches.
+export function updateCells(sheet: Spreadsheet, body: JsonObj, at: At): JsonObj | Reply {
+  const hasRange = body.range !== undefined
+  const range = asObj(body.range)
+  const start = asObj(body.start)
+  const tab = gridOf(sheet, asNum((hasRange ? range : start).sheetId) ?? 0, at)
+  if (isReply(tab)) return tab
+  const paths = maskOf(body.fields, CELL_DATA, at)
+  if (isReply(paths)) return paths
+  const rows = asArr(body.rows).map((row) => asArr(asObj(row).values).map(asObj))
+  const cellOf = (i: number, j: number): JsonObj => canonical(rows[i]?.[j] ?? {}, CELL_DATA)
+  if (hasRange) {
+    const b = boundsOf(range, tabGrid(tab))
+    for (let row = b.top; row < b.bottom; row += 1) {
+      for (let col = b.left; col < b.right; col += 1) {
+        writeCell(tab, `${String(row)},${String(col)}`, cellOf(row - b.top, col - b.left), paths)
+      }
+    }
+    return {}
+  }
+  const top = asNum(start.rowIndex) ?? 0
+  const left = asNum(start.columnIndex) ?? 0
+  rows.forEach((values, i) => {
+    values.forEach((_, j) => {
+      writeCell(tab, `${String(top + i)},${String(left + j)}`, cellOf(i, j), paths)
+    })
+  })
+  return {}
+}
+
+// A mask over the DimensionProperties of every row or column in the range.
+// What the API derives (hiddenByFilter, developer metadata, a data source
+// column) is accepted and left alone, and hiddenByUser false is the
+// default, so it is not kept. Probed live on 2026-09-21: an endIndex past
+// the grid is clipped to it, and a startIndex at or past it is refused
+// whatever the end.
+export function updateDimensionProperties(
+  sheet: Spreadsheet,
+  body: JsonObj,
+  at: At,
+): JsonObj | Reply {
+  const range = resolveDimensionRange(sheet, asObj(body.range), at)
+  if (isReply(range)) return range
+  const grid = tabGrid(range.tab)
+  const [limit, noun] = range.dimension === 'ROWS' ? [grid.rows, 'row'] : [grid.cols, 'column']
+  if (range.startIndex >= limit) {
+    return invalid(
+      at,
+      `Cannot update a ${noun} that doesn't exist. Tried to update ${noun} index ` +
+        `${String(range.startIndex)} but there are only ${String(limit)} ${noun}s.`,
     )
   }
-  tab.cells = next
-  const sizes = dimension === 'ROWS' ? tab.rowPixels : tab.columnPixels
-  if (sizes !== undefined) {
-    const movedSizes: Record<string, number> = {}
-    for (const [key, value] of Object.entries(sizes)) {
-      const moved = mapIndex(Number(key))
-      if (moved !== null) movedSizes[moved] = value
-    }
-    if (dimension === 'ROWS') tab.rowPixels = movedSizes
-    else tab.columnPixels = movedSizes
+  const paths = maskOf(body.fields, DIMENSION_PROPERTIES, at)
+  if (isReply(paths)) return paths
+  const source = canonical(asObj(body.properties), DIMENSION_PROPERTIES)
+  const meta = range.dimension === 'ROWS' ? range.tab.rowMeta : range.tab.columnMeta
+  const end = Math.min(range.endIndex, limit)
+  for (let i = range.startIndex; i < end; i += 1) {
+    const next = applyMask(meta[String(i)] ?? {}, source, paths, DIMENSION_PROPERTIES)
+    delete next.hiddenByFilter
+    delete next.developerMetadata
+    delete next.dataSourceColumnReference
+    if (next.hiddenByUser !== true) delete next.hiddenByUser
+    if (Object.keys(next).length === 0) delete meta[String(i)]
+    else meta[String(i)] = ordered(next, DIMENSION_PROPERTIES)
   }
-}
-
-// One cell of an UpdateCellsRequest, rendered the way values.update would
-// have stored it. Only userEnteredValue is kept: the fake stores strings,
-// so formatting has nowhere to go.
-export function cellText(cell: JsonObj): string | null {
-  const value = cell.userEnteredValue
-  if (value === undefined) return null
-  const v = asObj(value)
-  if (typeof v.stringValue === 'string') return v.stringValue
-  if (typeof v.numberValue === 'number') return String(v.numberValue)
-  if (typeof v.boolValue === 'boolean') return v.boolValue ? 'TRUE' : 'FALSE'
-  if (typeof v.formulaValue === 'string') return v.formulaValue
-  return null
-}
-
-// The field mask scopes an updateCells request on both sides: the real API
-// writes and clears only the fields it names, so a request masking a format
-// (`userEnteredFormat.numberFormat`) must leave cell contents alone rather
-// than blanking the range. A mask entry may be dotted or use the parenthesised
-// sub-selector form, so only its head segment decides. An absent mask is read
-// as "*", the way every other request here ignores `fields`, even though the
-// real API rejects it.
-export function fieldsTouchValue(fields: string | undefined): boolean {
-  if (fields === undefined || fields.trim() === '') return true
-  return fields.split(',').some((entry) => {
-    const head = entry.trim().split(/[.(]/)[0]
-    return head === '*' || head === 'userEnteredValue'
-  })
-}
-
-// updateCells writes a rectangle by grid index rather than by A1 range, and
-// clears whatever the supplied rows do not cover -- which is how a caller
-// shortens a sheet it previously wrote longer.
-export function updateCells(sheet: Spreadsheet, request: JsonObj): Reply | null {
-  const hasRange = request.range !== undefined
-  const range = asObj(request.range)
-  const start = asObj(request.start)
-  const grid = hasRange ? range : start
-  const tab = sheet.tabs.find((t) => t.sheetId === (asNum(grid.sheetId) ?? 0))
-  if (tab === undefined) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
-  if (!fieldsTouchValue(asStr(request.fields))) return null
-  const rows = asArr(request.rows)
-  const startRow = asNum(range.startRowIndex) ?? asNum(start.rowIndex) ?? 0
-  const startCol = asNum(range.startColumnIndex) ?? asNum(start.columnIndex) ?? 0
-  if (hasRange) {
-    const endRow = Math.min(asNum(range.endRowIndex) ?? tab.rows, tab.rows)
-    const endCol = Math.min(asNum(range.endColumnIndex) ?? tab.cols, tab.cols)
-    for (let r = startRow; r < endRow; r += 1) {
-      for (let c = startCol; c < endCol; c += 1) tab.cells.delete(`${String(r)},${String(c)}`)
-    }
-  }
-  for (let i = 0; i < rows.length; i += 1) {
-    const values = asArr(asObj(rows[i]).values)
-    for (let j = 0; j < values.length; j += 1) {
-      const text = cellText(asObj(values[j]))
-      const key = `${String(startRow + i)},${String(startCol + j)}`
-      if (text === null) tab.cells.delete(key)
-      else tab.cells.set(key, text)
-    }
-  }
-  return null
+  return {}
 }
 
 export function growGrid(tab: SheetTab, dimension: Dimension, by: number): void {
@@ -175,10 +199,14 @@ export function moveDimension(range: DimensionRange, destinationIndex: number): 
 const TEXT_PIXEL_WIDTH = 7
 const CELL_PADDING = 6
 
-export function autoResizeDimensions(sheet: Spreadsheet, request: JsonObj): Reply | null {
+export function autoResizeDimensions(
+  sheet: Spreadsheet,
+  request: JsonObj,
+  at: At,
+): JsonObj | Reply {
   const raw = asObj(request.dimensions)
-  const tab = sheet.tabs.find((t) => t.sheetId === (asNum(raw.sheetId) ?? 0))
-  if (tab === undefined) return googleError(400, 'Invalid sheetId.', 'INVALID_ARGUMENT')
+  const tab = gridOf(sheet, asNum(raw.sheetId) ?? 0, at)
+  if (isReply(tab)) return tab
   const dimension = asStr(raw.dimension)
   if (dimension !== 'ROWS' && dimension !== 'COLUMNS') {
     return googleError(400, 'Invalid dimension.', 'INVALID_ARGUMENT')
@@ -208,9 +236,10 @@ export function autoResizeDimensions(sheet: Spreadsheet, request: JsonObj): Repl
         : Math.max(...lines.map((line) => [...line].length)) * TEXT_PIXEL_WIDTH + CELL_PADDING
     measured.set(index, Math.max(measured.get(index) ?? 0, pixels))
   }
-  const sizes = dimension === 'ROWS' ? (tab.rowPixels ??= {}) : (tab.columnPixels ??= {})
+  const meta = dimension === 'ROWS' ? tab.rowMeta : tab.columnMeta
   for (let i = start; i < end; i += 1) {
-    sizes[i] = measured.get(i) ?? (dimension === 'ROWS' ? ROW_PIXELS : COLUMN_PIXELS)
+    const pixelSize = measured.get(i) ?? (dimension === 'ROWS' ? ROW_PIXELS : COLUMN_PIXELS)
+    meta[String(i)] = ordered({ ...meta[String(i)], pixelSize }, DIMENSION_PROPERTIES)
   }
-  return null
+  return {}
 }

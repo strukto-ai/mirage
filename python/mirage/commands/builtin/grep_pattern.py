@@ -21,6 +21,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
+from mirage.utils.posix import translate_classes
 
 NEVER_MATCH = r"(?!)"
 
@@ -150,7 +151,12 @@ def _source_of(part: str, fixed_string: bool, basic: bool) -> str:
     """
     if fixed_string:
         return re.escape(part)
-    return bre_source(part) if basic else part
+    if basic:
+        return bre_source(part)
+    try:
+        return translate_classes(part)
+    except re.error as exc:
+        raise UsageError(f"grep: {exc}") from exc
 
 
 def build_pattern_str(

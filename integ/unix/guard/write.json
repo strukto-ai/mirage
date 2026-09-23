@@ -3,7 +3,12 @@
     {
       "id": "guard_touch_into_missing_parent",
       "seq": 625,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "touch /data/guard/nodir/f.txt",
       "expect": {
         "exit": 1,
@@ -14,7 +19,12 @@
     {
       "id": "guard_touch_under_a_file",
       "seq": 626,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "touch /data/guard/g.txt/f.txt",
       "expect": {
         "exit": 1,
@@ -25,7 +35,12 @@
     {
       "id": "guard_touch_keeps_going",
       "seq": 627,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "touch /data/guard/t1.txt /data/guard/nodir/f.txt /data/guard/t2.txt; echo code=$?",
       "expect": {
         "exit": 0,
@@ -36,7 +51,12 @@
     {
       "id": "guard_mkdir_into_missing_parent",
       "seq": 628,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "mkdir /data/guard/nodir/sub",
       "expect": {
         "exit": 1,
@@ -47,7 +67,12 @@
     {
       "id": "guard_mkdir_under_a_file",
       "seq": 629,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "mkdir /data/guard/g.txt/sub",
       "expect": {
         "exit": 1,
@@ -58,7 +83,12 @@
     {
       "id": "guard_redirect_into_missing_parent",
       "seq": 630,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "echo hi > /data/guard/nodir/f.txt",
       "expect": {
         "exit": 1,
@@ -69,7 +99,12 @@
     {
       "id": "guard_append_into_missing_parent",
       "seq": 631,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "echo hi >> /data/guard/nodir/f.txt",
       "expect": {
         "exit": 1,
@@ -80,7 +115,12 @@
     {
       "id": "guard_tee_into_missing_parent",
       "seq": 632,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "echo hi | tee /data/guard/nodir/f.txt",
       "expect": {
         "exit": 1,
@@ -91,12 +131,145 @@
     {
       "id": "guard_write_refusals_left_no_orphans",
       "seq": 633,
-      "targets": ["ram", "disk", "redis", "opfs"],
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
       "command": "find /data/guard -type f; ls /data/guard/nodir; echo code=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/guard/g.txt\n/data/guard/sub/g.txt\n/data/guard/sub/s.txt\n/data/guard/t1.txt\n/data/guard/t2.txt\ncode=2\n",
         "stderr": "ls: cannot access '/data/guard/nodir': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_redirect_onto_a_directory",
+      "seq": 639,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo x > /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/guard/sub: Is a directory\n"
+      }
+    },
+    {
+      "id": "guard_append_onto_a_directory",
+      "seq": 640,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo y >> /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/guard/sub: Is a directory\n"
+      }
+    },
+    {
+      "id": "guard_tee_onto_a_directory",
+      "seq": 641,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo z | tee /data/guard/sub",
+      "expect": {
+        "exit": 1,
+        "stdout": "z\n",
+        "stderr": "tee: /data/guard/sub: Is a directory\n"
+      }
+    },
+    {
+      "id": "guard_directory_survives_write_refusals",
+      "seq": 642,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "ls /data/guard/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "g.txt\ns.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "guard_redirect_chain_reports_the_first_open",
+      "seq": 643,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "echo x > /data/guard/nodir/f > /data/guard/sub/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "/data/guard/nodir/f: No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_truncate_slashed_missing",
+      "seq": 644,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "truncate -s 0 /data/guard/missing/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "truncate: /data/guard/missing/: Is a directory\n"
+      }
+    },
+    {
+      "id": "guard_truncate_slashed_file",
+      "seq": 645,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "truncate -s 0 /data/guard/g.txt/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "truncate: /data/guard/g.txt/: Is a directory\n"
+      }
+    },
+    {
+      "id": "guard_slashed_refusals_left_nothing",
+      "seq": 646,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "test ! -e /data/guard/missing && test ! -e /data/guard/nodir && cat /data/guard/g.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "guard\n",
+        "stderr": ""
       }
     }
   ]

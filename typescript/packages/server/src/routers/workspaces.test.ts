@@ -85,6 +85,59 @@ describe('workspaces router', () => {
     }
   }, 60_000)
 
+  describe.each(['initModule', 'init_module'])('request runtime %s', (key) => {
+    it.each(['local', 'token'] as const)('rejects host initializers with %s auth', async (mode) => {
+      const app = buildApp({ authConfig: { mode, bearerToken: 'test-token' } })
+      const headers = mode === 'token' ? { authorization: 'Bearer test-token' } : {}
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers,
+          payload: {
+            config: {
+              mounts: { '/': { vfs: 'ram', mode: 'write' } },
+              runtimes: [
+                'workspace',
+                {
+                  name: 'pyodide',
+                  config: { [key]: 'data:text/javascript,export default () => {}' },
+                },
+              ],
+            },
+          },
+        })
+        expect(res.statusCode).toBe(400)
+        expect(res.json()).toEqual({
+          detail: 'runtime initModule is only allowed in operator-owned configuration',
+        })
+        const list = await app.inject({ method: 'GET', url: '/v1/workspaces', headers })
+        expect(list.json()).toEqual([])
+      } finally {
+        await app.close()
+      }
+    })
+  })
+
+  it('POST /v1/workspaces accepts Pyodide config without a host initializer', async () => {
+    const app = buildApp()
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: {
+          config: {
+            mounts: { '/': { vfs: 'ram', mode: 'write' } },
+            runtimes: [{ name: 'pyodide', config: { auto_load_from_imports: false } }, 'workspace'],
+          },
+        },
+      })
+      expect(res.statusCode).toBe(201)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('GET /v1/workspaces lists active workspaces', async () => {
     const app = buildApp()
     await app.inject({

@@ -254,6 +254,7 @@ def _capabilities() -> dict[str, dict[str, Any]]:
         out[name] = {
             "index_ttl": cls.index_ttl,
             "caches_reads": cls.caches_reads,
+            "read_revalidatable": cls.read_revalidatable,
             "supports_snapshot": cls.supports_snapshot,
             "sizes_always_known": cls.sizes_always_known,
             "storage_location": cls.storage_location

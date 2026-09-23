@@ -644,6 +644,107 @@ class Ops:
                                 mtime=mtime,
                                 nofollow=nofollow)
 
+    async def getxattr(self,
+                       path: str,
+                       name: str,
+                       *,
+                       nofollow: bool = False,
+                       session_id: str | None = None) -> bytes:
+        """One extended attribute's value.
+
+        The node table answers with what a caller set.
+
+        Args:
+            path (str): Virtual path.
+            name (str): Attribute name.
+            nofollow (bool): read a link entry's own attributes rather
+                than its target's.
+            session_id (str | None): Session to run as outside a line.
+
+        Raises:
+            OSError: the attribute-not-set errno (ENODATA on Linux,
+                ENOATTR on macOS) when the path has no such attribute.
+        """
+        return await self._call("getxattr",
+                                path,
+                                session_id,
+                                name=name,
+                                nofollow=nofollow)
+
+    async def listxattr(self,
+                        path: str,
+                        *,
+                        nofollow: bool = False,
+                        session_id: str | None = None) -> list[str]:
+        """Every extended attribute name a path carries, sorted.
+
+        Args:
+            path (str): Virtual path.
+            nofollow (bool): list a link entry's own attributes.
+            session_id (str | None): Session to run as outside a line.
+        """
+        return await self._call("listxattr",
+                                path,
+                                session_id,
+                                nofollow=nofollow)
+
+    async def setxattr(self,
+                       path: str,
+                       name: str,
+                       value: bytes,
+                       *,
+                       create: bool = False,
+                       replace: bool = False,
+                       nofollow: bool = False,
+                       session_id: str | None = None) -> None:
+        """Store an extended attribute on a path.
+
+        Stored on the path's namespace node, so it works on every
+        backend and moves with a rename.
+
+        Args:
+            path (str): Virtual path.
+            name (str): Attribute name.
+            value (bytes): Attribute value.
+            create (bool): fail with EEXIST when the attribute is set
+                (XATTR_CREATE).
+            replace (bool): fail with the attribute-not-set errno when
+                it is not (XATTR_REPLACE).
+            nofollow (bool): write a link entry's own attributes.
+            session_id (str | None): Session to run as outside a line.
+        """
+        await self._call("setxattr",
+                         path,
+                         session_id,
+                         name=name,
+                         value=value,
+                         create=create,
+                         replace=replace,
+                         nofollow=nofollow)
+
+    async def removexattr(self,
+                          path: str,
+                          name: str,
+                          *,
+                          nofollow: bool = False,
+                          session_id: str | None = None) -> None:
+        """Drop an extended attribute from a path.
+
+        Args:
+            path (str): Virtual path.
+            name (str): Attribute name.
+            nofollow (bool): drop from a link entry itself.
+            session_id (str | None): Session to run as outside a line.
+
+        Raises:
+            OSError: the attribute-not-set errno when it is not set.
+        """
+        await self._call("removexattr",
+                         path,
+                         session_id,
+                         name=name,
+                         nofollow=nofollow)
+
     async def truncate(self,
                        path: str,
                        length: int,

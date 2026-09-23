@@ -43,14 +43,6 @@ class TestGetSet:
         assert await cache.get("/a") == b"second"
 
     @pytest.mark.asyncio
-    async def test_default_fingerprint(self):
-        cache = RAMFileCacheStore(cache_limit="1MB")
-        await cache.set("/a", b"data")
-        entry = cache._entries.get("/a")
-        assert entry is not None
-        assert entry.fingerprint is not None
-
-    @pytest.mark.asyncio
     async def test_explicit_fingerprint(self):
         cache = RAMFileCacheStore(cache_limit="1MB")
         await cache.set("/a", b"data", fingerprint="etag-123")

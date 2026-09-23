@@ -26,18 +26,20 @@ import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { respellRaw } from '../../../utils/path.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import {
+  bindTree,
+  displayPath,
+  dropPruned,
   emitStartPath,
   hasLinkChildren,
   keep,
   optionsTree,
-  prefixPathNodes,
+  settlePendingPrunes,
   startBasename,
   unrespellRaw,
   type FindEntry,
   type PredNode,
 } from '../find_eval.ts'
-import { expandPrintf, printfKind, printfNeedsStat, type PrintfStatFacts } from '../find_printf.ts'
-import { identityOf } from '../utils/identity.ts'
+import { printfKind } from '../find_printf.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import { pathAllowed } from '../../../context/session_context.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
@@ -54,6 +56,29 @@ function invalidFindArg(message: string): CommandFnResult {
   ]
 }
 
+// The stat probe's path for one display row of a mount.
+function rowSpec(row: string, mountPrefix: string): PathSpec {
+  return new PathSpec({
+    virtual: row,
+    directory: row,
+    resolved: false,
+    vfsPath: mountKey(row, mountPrefix),
+  })
+}
+
+// The structured row the action layer acts on: the resolved path, spelled
+// as it prints.
+function matchedPath(row: string, root: PathSpec): PathSpec {
+  const virtual = unrespellRaw(row, root.virtual, root.rawPath || root.virtual)
+  return new PathSpec({
+    virtual,
+    directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
+    vfsPath: mountKey(virtual, mountPrefixOf(root.virtual, root.vfsPath)),
+    rawPath: row,
+    resolved: true,
+  })
+}
+
 async function applyMtimeFilter(
   results: string[],
   mtimeMin: number | null,
@@ -64,15 +89,9 @@ async function applyMtimeFilter(
   if (mtimeMin === null && mtimeMax === null) return results
   const filtered: string[] = []
   for (const r of results) {
-    const spec = new PathSpec({
-      virtual: r,
-      directory: r,
-      resolved: false,
-      vfsPath: mountKey(r, mountPrefix),
-    })
     let st: FileStat
     try {
-      st = await stat(spec)
+      st = await stat(rowSpec(r, mountPrefix))
     } catch (err) {
       if (isEnoent(err)) continue
       throw err
@@ -84,6 +103,21 @@ async function applyMtimeFilter(
     filtered.push(r)
   }
   return filtered
+}
+
+// Epoch-second mtime of one mount-relative row through the overlay-aware
+// stat, null when it has none or is gone.
+async function rowMtime(
+  stat: (spec: PathSpec) => Promise<FileStat>,
+  mountPrefix: string,
+  row: string,
+): Promise<number | null> {
+  try {
+    return modifiedTs((await stat(rowSpec(displayPath(mountPrefix, row), mountPrefix))).modified)
+  } catch (err) {
+    if (!isEnoent(err)) throw err
+    return null
+  }
 }
 
 function extractNotName(texts: readonly string[]): string | null {
@@ -172,7 +206,13 @@ export async function linkResults(
           ? 0
           : rel.split('/').length
     if (maxDepth !== null && depth > maxDepth) continue
-    const entry: FindEntry = { key, name: path.split('/').pop() ?? path, kind, depth }
+    const entry: FindEntry = {
+      key,
+      name: path.split('/').pop() ?? path,
+      kind,
+      depth,
+      mtime: modifiedTs(st.modified),
+    }
     if (!keep(entry, tree, minDepth)) continue
     const size = st.size ?? 0
     if (minSize !== null && size < minSize) continue
@@ -372,17 +412,20 @@ export async function findGeneric(
         }
   const matches: string[] = []
   const missing: string[] = []
-  const printfFmt = expr !== null ? expr.printf : null
-  const printfPairs: [string, PathSpec][] = []
+  // One run per start point, in operand order, empty for one that matched
+  // nothing or is missing: the action layer acts on each traversal on its
+  // own and reads a row's start point off its run (-printf's %P and %d).
+  const matchedRuns: PathSpec[][] = []
   for (const root of targets) {
-    // `-path` matches the display path as printed; stamp the mount
-    // prefix onto path nodes before the backend walks mount-relative
-    // keys (#396).
+    const run: PathSpec[] = []
+    matchedRuns.push(run)
+    // `-path` matches the row as printed; stamp the mount prefix and the
+    // operand's spelling onto path nodes before the backend walks
+    // mount-relative keys (#396). Bound per start point: options is
+    // shared by every one of them and must stay unbound.
     const prefix = mountPrefixOf(root.virtual, root.vfsPath)
-    const rootOptions: FindOptions = {
-      ...options,
-      tree: prefixPathNodes(optionsTree(options), prefix),
-    }
+    const tree = bindTree(optionsTree(options), prefix, root.virtual, root.rawPath)
+    const rootOptions: FindOptions = { ...options, tree }
     const rootIsLink = (opts.ns?.links ?? null)?.statAt(root.virtual) != null
     // What the start point is decides which walk is even possible, so it
     // is resolved once, ahead of all of them: a symlink has no backend
@@ -430,7 +473,7 @@ export async function findGeneric(
           const display = root.virtual === '/' ? '/' : rstripSlash(root.virtual)
           const added = respellRaw([display], root.virtual, root.rawPath)
           matches.push(...added)
-          for (const r of added) printfPairs.push([r, root])
+          for (const r of added) run.push(matchedPath(r, root))
         }
         continue
       }
@@ -510,39 +553,23 @@ export async function findGeneric(
       ),
     )
     withLinks.sort(compareCodePoints)
+    // What -prune reached is known only once every row has been judged: a
+    // flat listing meets a child before its parent, so the ledger the tree
+    // kept is applied here, after the backend and the link merge.
+    if (stat !== undefined) {
+      await settlePendingPrunes(tree, (key) => rowMtime(stat, prefix, key))
+    }
+    const unpruned = dropPruned(withLinks, tree, prefix)
     // Hidden rows drop here, above the native-op/walk fork and after
     // the link merge, so a mount's visibility behavior cannot depend
     // on whether its backend ships a native find op.
-    const visibleRows = withLinks.filter((row) => pathAllowed(row))
+    const visibleRows = unpruned.filter((row) => pathAllowed(row))
     const added = respellRaw(visibleRows, root.virtual, root.rawPath)
     matches.push(...added)
-    for (const r of added) printfPairs.push([r, root])
-  }
-  if (printfFmt !== null) {
-    return renderPrintfRows(printfPairs, printfFmt, stat, opts, missing)
+    for (const r of added) run.push(matchedPath(r, root))
   }
   // Start points print in operand order (GNU); each root's rows were
-  // sorted above, and a global sort here would interleave them. The
-  // rows ride out as one run per root, so the action layer can order
-  // and act on each traversal on its own.
-  const matchedRuns: PathSpec[][] = []
-  let lastRoot: PathSpec | null = null
-  for (const [row, root] of printfPairs) {
-    if (root !== lastRoot) {
-      matchedRuns.push([])
-      lastRoot = root
-    }
-    const virtual = unrespellRaw(row, root.virtual, root.rawPath || root.virtual)
-    matchedRuns[matchedRuns.length - 1]?.push(
-      new PathSpec({
-        virtual,
-        directory: virtual.slice(0, virtual.lastIndexOf('/')) || '/',
-        vfsPath: mountKey(virtual, mountPrefixOf(root.virtual, root.vfsPath)),
-        rawPath: row,
-        resolved: true,
-      }),
-    )
-  }
+  // sorted above, and a global sort here would interleave them.
   const out: ByteSource = ENC.encode(matches.length ? matches.join('\n') + '\n' : '')
   if (missing.length > 0) {
     return [
@@ -551,89 +578,4 @@ export async function findGeneric(
     ]
   }
   return [out, new IOResult({ matchedRuns })]
-}
-
-async function printfStat(
-  row: string,
-  root: PathSpec,
-  stat: ((spec: PathSpec) => Promise<FileStat>) | undefined,
-  opts: CommandOpts,
-): Promise<PrintfStatFacts | null> {
-  const virtual = unrespellRaw(row, root.virtual, root.rawPath !== '' ? root.rawPath : root.virtual)
-  const links = opts.ns?.links ?? null
-  const linkRow = links?.statAt(virtual)
-  if (links !== null && linkRow !== undefined && linkRow !== null) {
-    // %Y reads the target through the workspace, so a link into another
-    // mount classifies correctly and a dangling one reads N.
-    const target = await links.targetStat(virtual)
-    return {
-      size: linkRow.size ?? 0,
-      kind: 'l',
-      mtimeEpoch: modifiedTs(linkRow.modified ?? null) ?? 0,
-      mode: linkRow.mode,
-      targetKind: target === null ? 'N' : printfKind(target),
-      uid: linkRow.uid,
-      gid: linkRow.gid,
-    }
-  }
-  let st: FileStat | null = null
-  if (stat !== undefined) {
-    const prefix = mountPrefixOf(root.virtual, root.vfsPath)
-    const spec = new PathSpec({
-      virtual,
-      directory: virtual,
-      resolved: false,
-      vfsPath: mountKey(virtual, prefix),
-    })
-    try {
-      st = await stat(spec)
-    } catch {
-      st = null
-    }
-  } else if (opts.statPath !== undefined) {
-    // The dispatcher probe answers for every backend, including the ones
-    // that wire no cheap local stat (an object store); it is the same
-    // channel the start-point classifier uses.
-    st = await opts.statPath(virtual)
-  }
-  if (st === null) return null
-  return {
-    size: st.size ?? 0,
-    kind: printfKind(st),
-    mtimeEpoch: modifiedTs(st.modified ?? null) ?? 0,
-    mode: st.mode,
-    targetKind: null,
-    uid: st.uid,
-    gid: st.gid,
-  }
-}
-
-// Render matched rows through a -printf format. Stats are fetched per row
-// only when the format reads one (%s %y %m %M %T), through the same
-// overlay-aware channel the -mtime filter uses, with namespace links
-// answered first since a link row has no backend inode. Warning lines
-// (unrecognized directives) ride stderr without touching the exit code,
-// GNU's behavior; missing start points keep forcing exit 1. Mirrors the
-// Python render_printf_rows.
-async function renderPrintfRows(
-  pairs: [string, PathSpec][],
-  fmt: string,
-  stat: ((spec: PathSpec) => Promise<FileStat>) | undefined,
-  opts: CommandOpts,
-  missing: string[],
-): Promise<CommandFnResult> {
-  const warnings: string[] = []
-  const needs = printfNeedsStat(fmt)
-  const parts: string[] = []
-  for (const [row, root] of pairs) {
-    const st = needs ? await printfStat(row, root, stat, opts) : null
-    const base = root.rawPath !== '' ? root.rawPath : root.virtual
-    parts.push(expandPrintf(fmt, row, base, st, warnings, identityOf(opts)))
-  }
-  const err = [...missing, ...warnings]
-  const io = new IOResult({
-    stderr: err.length > 0 ? ENC.encode(err.join('\n') + '\n') : null,
-    exitCode: missing.length > 0 ? 1 : 0,
-  })
-  return [ENC.encode(parts.join('')), io]
 }

@@ -1,5 +1,4 @@
 mode: WRITE
-consistency: LAZY
 
 mounts:
   /s3:

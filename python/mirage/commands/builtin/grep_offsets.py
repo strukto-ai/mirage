@@ -80,6 +80,21 @@ def match_offset(line_start: int, line: str, index: int) -> int:
     return line_start + byte_offset(line, index)
 
 
+class MatchOffsets:
+    """Incremental byte offsets for increasing match indices on one line."""
+
+    def __init__(self, line_start: int, line: str) -> None:
+        self._position = line_start
+        self._line = line
+        self._index = 0
+
+    def at(self, index: int) -> int:
+        self._position += byte_offset(self._line[self._index:index],
+                                      index - self._index)
+        self._index = index
+        return self._position
+
+
 def prefix_of(number: int | None,
               offset: int | None,
               selected: bool = True) -> str:

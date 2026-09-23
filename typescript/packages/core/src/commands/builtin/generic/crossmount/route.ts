@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isStdin, resolveSource } from '../../utils/stream.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { NamespaceView, SessionView } from '../../../../ops/types.ts'
@@ -48,6 +49,13 @@ export async function handleCrossMount(
   // session's profile (ls).
   sessionView?: SessionView,
 ): Promise<CrossResult> {
+  const native = runSingle
+  const input = resolveSource(stdin)
+  runSingle = (name, paths, texts, flags, options) =>
+    native(name, paths, texts, flags, {
+      ...options,
+      stdin: paths.some(isStdin) ? input : (options?.stdin ?? null),
+    })
   try {
     // isCrossMount gated on CROSS_MOUNT_COMMANDS membership, so the name is
     // one of the Cmd values by the time it reaches the strategy layer.
@@ -63,6 +71,7 @@ export async function handleCrossMount(
         storageKey,
         ns,
         sessionView,
+        stdin,
       )
     }
     if (strategy === Strategy.STREAM) {

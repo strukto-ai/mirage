@@ -18,7 +18,8 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { MirageFS, type FuseAttr } from './fs.ts'
+import { EEXIST } from './errors.ts'
+import { MirageFS, XATTR_CREATE, XATTR_REPLACE, type FuseAttr } from './fs.ts'
 
 const ENOENT = -2
 const ENOTEMPTY = -66
@@ -567,6 +568,36 @@ describe('MirageFS — xattr', () => {
     await ws.shell("echo 'new' > /data/renamed.txt")
     const [, list] = await callOp<[number, string[]]>(mfs, 'listxattr', '/data/renamed.txt')
     expect(list).toEqual([])
+  })
+
+  it('is the same attribute every surface reads', async () => {
+    // The kernel's attribute is the door's, not an advisory copy held for
+    // the mount's lifetime: the shell and a guest read what the mountpoint
+    // wrote, and the mountpoint reads what they wrote.
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws.vfs)
+    await callOp(mfs, 'setxattr', '/data/greeting.txt', 'user.kernel', Buffer.from('k'), 0, 0)
+    const fromDoor = await ws.vfs.getxattr('/data/greeting.txt', 'user.kernel')
+    expect(new TextDecoder().decode(fromDoor)).toBe('k')
+    await ws.vfs.setxattr('/data/greeting.txt', 'user.door', new TextEncoder().encode('d'))
+    const [, value] = await callOp<[number, Buffer?]>(
+      mfs,
+      'getxattr',
+      '/data/greeting.txt',
+      'user.door',
+      0,
+    )
+    expect(value?.toString()).toBe('d')
+  })
+
+  it('hands the create and replace flags to the door', async () => {
+    const ws = await mkWs()
+    const mfs = new MirageFS(ws.vfs)
+    const set = (name: string, flags: number) =>
+      callOp<[number]>(mfs, 'setxattr', '/data/greeting.txt', name, Buffer.from('1'), 0, flags)
+    expect((await set('user.once', XATTR_CREATE))[0]).toBe(0)
+    expect((await set('user.once', XATTR_CREATE))[0]).toBe(-EEXIST)
+    expect((await set('user.none', XATTR_REPLACE))[0]).toBeLessThan(0)
   })
 })
 

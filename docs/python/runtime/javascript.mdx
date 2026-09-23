@@ -62,7 +62,9 @@ filesystem calls and bridges them through the workspace dispatch, so
 a virtual backend — and writes are immediately visible to every command,
 with the same cache, write modes, and per-session mount narrowing as
 `cat`. A read-only mount (or a session narrowed to read) fails the open,
-so `std.open` returns `null` instead of writing.
+so `std.open` returns `null` instead of writing. The engine's `os` module
+has no extended-attribute calls; run `getfattr` or `setfattr` in the shell
+instead.
 
 This is capability isolation, not a VFS sandbox: the sandboxed code
 cannot reach your files or the network, but its CPU and memory are bounded

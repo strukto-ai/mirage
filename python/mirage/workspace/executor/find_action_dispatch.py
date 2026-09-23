@@ -17,7 +17,10 @@ from collections.abc import AsyncIterator
 
 from mirage.commands.builtin.constants import EXEC_PLACEHOLDER
 from mirage.commands.builtin.find_parse import FindExpr, parse_find_expression
-from mirage.commands.builtin.types import ExecAction, RowAction
+from mirage.commands.builtin.find_printf import (expand_printf,
+                                                 printf_needs_stat)
+from mirage.commands.builtin.types import (ExecAction, FindAction,
+                                           PrintfAction, RowAction)
 from mirage.commands.builtin.utils.formatting import format_find_ls
 from mirage.commands.builtin.utils.identity import Identity
 from mirage.commands.config import ExecContext
@@ -379,6 +382,48 @@ def _ls_row(ps: PathSpec, st: FileStat, identity: Identity | None) -> bytes:
     return (row + "\n").encode()
 
 
+async def _printf_row(action: PrintfAction, ps: PathSpec, start: PathSpec,
+                      st: FileStat | None, ns: NamespaceView | None,
+                      warnings: list[str], identity: Identity | None) -> bytes:
+    """Render one accepted row through a ``-printf`` format.
+
+    A symlink row is the link itself, and ``%Y`` reads what it points at
+    through the workspace, so a link into another mount classifies and a
+    dangling one reads ``N``.
+
+    Args:
+        action (PrintfAction): the action.
+        ps (PathSpec): the selected row, with its display spelling.
+        start (PathSpec): the start point the row was found under, which
+            ``%P`` and ``%d`` measure from.
+        st (FileStat | None): the stat find holds for the row; None when
+            the format names no stat directive.
+        ns (NamespaceView | None): the name plane's facts, for a symlink
+            row's target.
+        warnings (list[str]): sink for GNU's warning lines.
+        identity (Identity | None): who the session is, for the owner
+            directives on an entry that reports no owner of its own.
+    """
+    links = ns.links if ns is not None else None
+    target = (await links.target_stat(ps.virtual)
+              if st is not None and links is not None
+              and links.stat_at(ps.virtual) is not None else None)
+    return expand_printf(action.format, ps.raw_path or ps.virtual, start, st,
+                         warnings, target, identity).encode()
+
+
+def _reads_stat(action: FindAction) -> bool:
+    """Whether an action reads the row's stat: ``-ls``, and a
+    ``-printf`` whose format names a stat directive (%s %y %m %T ...).
+
+    Args:
+        action (FindAction): the action.
+    """
+    if isinstance(action, PrintfAction):
+        return printf_needs_stat(action.format)
+    return isinstance(action, RowAction) and action.kind == "ls"
+
+
 def _tests_stat(expr: FindExpr) -> bool:
     """Whether the expression's tests made find stat every row it kept.
 
@@ -459,22 +504,24 @@ async def _apply_find_actions(
     stdin: ByteSource | None = None,
     starts: list[PathSpec] | None = None,
 ) -> tuple[ByteSource | None, bytes, int]:
-    """Apply find's actions (-exec / -delete / -print0 / -ls) to its rows.
+    """Apply find's actions (-exec / -delete / -print0 / -ls / -printf)
+    to its rows.
 
     Per-VFS find handlers only emit matched paths. This dispatcher
     layer re-reads the actions off the expression and applies them per
     match, in the order they were written, the way GNU's implicit ``-a``
     chain runs: each per-match ``-exec`` runs in turn and the first that
     fails ends the chain for that match, so a later ``-print`` (or
-    ``-ls``, ``-print0``, ``-delete``) sees only the matches every
-    earlier ``-exec`` accepted (``-exec grep -q x {} ";" -print``), and
-    ``-exec echo {} ";" -print -exec echo again {} ";"`` alternates the
-    three per match. A batched ``-exec ... {} +`` collects the match at
-    its position and runs once after the walk; a failing batch is
-    find's exit 1, as is a row it could not delete or list, and
-    either ends that row's chain; a failing per-match run is not, and
-    neither is a command that cannot be found, which GNU reports per
-    match and carries on from with exit 0.
+    ``-ls``, ``-print0``, ``-printf``, ``-delete``) sees only the
+    matches every earlier ``-exec`` accepted (``-exec grep -q x {} ";"
+    -print``), and ``-exec echo {} ";" -print -exec echo again {} ";"``
+    alternates the three per match. A batched ``-exec ... {} +``
+    collects the match at its position and runs once after the walk; a
+    failing batch is find's exit 1, as is a row it could not delete,
+    list or stat for a ``-printf``, and either ends that row's chain; a
+    failing per-match run is not, and neither is a command that cannot
+    be found, which GNU reports per match and carries on from with exit
+    0.
     An action other than ``-print`` suppresses the implicit print.
     ``-delete`` runs at its position, so a later ``-exec`` sees the row
     gone, and a row it cannot delete ends the chain with GNU's line and
@@ -484,15 +531,18 @@ async def _apply_find_actions(
     ``-empty``; ``-name`` and ``-type`` read the directory entry), so
     ``find d/f -delete -ls`` and ``find d -size -1k -delete -ls`` list
     the row they removed and exit 0, while ``find d -type f -delete
-    -ls`` reports it gone and exits 1. ``starts`` names the operands
-    that rule reads. It also turns on ``-depth``, which orders every
-    directory after its contents, the only order a tree can be removed
-    in; ``-depth`` alone reorders the implicit print the same way, and
+    -ls`` reports it gone and exits 1; ``-printf`` reads the same stat
+    when its format names a stat directive. ``starts`` names the
+    operands that rule reads. ``-delete`` also turns on ``-depth``,
+    which orders every directory after its contents, the only order a
+    tree can be removed in; ``-depth`` alone reorders the implicit print
+    the same way, and
     both order one start point's walk at a time: GNU walks each start
     point to completion before the next, so ``find b a -depth`` prints
     ``b/x b a/y a`` and ``find d d/sub -depth`` finishes ``d`` before
     it begins ``d/sub`` again, which is why the rows arrive as one run
-    per start point rather than one list.
+    per start point rather than one list; ``-printf``'s ``%P`` and
+    ``%d`` measure a row from its run's start point.
 
     Args:
         stdout (ByteSource | None): display output from find.
@@ -529,15 +579,20 @@ async def _apply_find_actions(
     """
     once = _SharedStdin(stdin) if stdin is not None else None
     expr = parse_find_expression(list(texts))
-    reorders = expr.depth_first and expr.printf is None
+    reorders = expr.depth_first
     if stdout is None or not (_has_actions(expr) or reorders):
         return stdout, b"", 0
     if expr.execs and execute_fn is None:
         return None, b"find: -exec: no shell to run the command\n", 1
     if matched_runs is None:
         return None, b"find: actions require structured matches\n", 1
+    # The runs arrive one per start point, in operand order, so each row
+    # carries the start point it was found under; with no operand that is
+    # the working directory, which prints as `.`.
+    cwd_start = PathSpec(virtual=cwd, directory=cwd, vfs_path="", raw_path=".")
     matches = [
-        match for run in matched_runs for match in (
+        (match, starts[i] if starts and i < len(starts) else cwd_start)
+        for i, run in enumerate(matched_runs) for match in (
             sorted(run, key=lambda p: depth_first_key(p.raw_path or p.virtual)
                    ) if reorders else run)
     ]
@@ -545,18 +600,20 @@ async def _apply_find_actions(
     # implicit action -depth reorders.
     actions = expr.actions or [RowAction("print")]
     errors: list[bytes] = []
+    warnings: list[str] = []
     out: list[bytes] = []
     batches: dict[int, list[str]] = {}
     exit_code = 0
-    lists = any(isinstance(a, RowAction) and a.kind == "ls" for a in actions)
+    stats = any(_reads_stat(a) for a in actions)
     statted = _tests_stat(expr)
     start_virtuals = {s.virtual for s in starts} if starts else {cwd}
-    for match in matches:
+    for match, start in matches:
         path = match.raw_path or match.virtual
-        # The stat -ls renders is the one find already holds, taken
-        # before any action of the chain can remove the row; a row it
-        # never statted is looked up by the -ls that reaches it.
-        held = (await _row_stat(match, ns, stat_path, []) if lists and
+        # The stat -ls and -printf render is the one find already holds,
+        # taken before any action of the chain can remove the row; a row
+        # it never statted is looked up by the first action that reads
+        # it, and held from there, as GNU stats a row once.
+        held = (await _row_stat(match, ns, stat_path, []) if stats and
                 (statted or match.virtual in start_virtuals) else None)
         for position, action in enumerate(actions):
             if isinstance(action, ExecAction):
@@ -568,15 +625,21 @@ async def _apply_find_actions(
                                        stat_path, action, [path], out, errors,
                                        once):
                     break
-            elif action.kind == "ls":
-                st = held if held is not None else await _row_stat(
-                    match, ns, stat_path, errors)
-                if st is None:
-                    # A row -ls cannot list is false, so the chain ends
-                    # for it, as GNU's does.
+            elif _reads_stat(action):
+                if held is None:
+                    held = await _row_stat(match, ns, stat_path, errors)
+                if held is None:
+                    # A row -ls or -printf cannot stat is false, so the
+                    # chain ends for it, as GNU's does.
                     exit_code = 1
                     break
-                out.append(_ls_row(match, st, identity))
+                out.append(await _printf_row(action, match, start, held, ns,
+                                             warnings, identity)
+                           if isinstance(action, PrintfAction
+                                         ) else _ls_row(match, held, identity))
+            elif isinstance(action, PrintfAction):
+                out.append(await _printf_row(action, match, start, None, ns,
+                                             warnings, identity))
             elif action.kind == "delete":
                 # A structural row is skipped, not refused, the way Unix
                 # leaves a mount point in place.
@@ -599,4 +662,7 @@ async def _apply_find_actions(
                                stat_path, action, paths, out, errors, once):
             exit_code = 1
     body = b"".join(out)
-    return (body if body else None), b"".join(errors), exit_code
+    # GNU warns about a directive it cannot render once, ahead of anything
+    # the actions report.
+    warned = [f"{line}\n".encode() for line in warnings]
+    return (body if body else None), b"".join(warned + errors), exit_code

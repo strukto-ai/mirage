@@ -207,10 +207,15 @@ async function get(conn: GridFSAccessor, key: string): Promise<Uint8Array | null
   return out
 }
 
-async function put(conn: GridFSAccessor, key: string, data: Uint8Array): Promise<void> {
+async function put(
+  conn: GridFSAccessor,
+  key: string,
+  data: Uint8Array,
+): Promise<ObjectMeta | null> {
   // Uploads a new revision; older revisions stay in fs.files, so reads
   // pinned to an old revision _id keep working (GridFS-native
-  // versioning).
+  // versioning). The new _id wins both keys of the latest-first sort, so
+  // it is what `head` answers next, spelled the same way.
   const b = await bucket(conn)
   const upload = b.openUploadStream(key)
   await new Promise<void>((resolve, reject) => {
@@ -220,6 +225,8 @@ async function put(conn: GridFSAccessor, key: string, data: Uint8Array): Promise
     })
     upload.end(data)
   })
+  const revision = upload.id.toString()
+  return { size: data.byteLength, fingerprint: revision, revision }
 }
 
 async function deleteFile(conn: GridFSAccessor, key: string): Promise<void> {

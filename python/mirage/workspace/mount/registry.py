@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 from typing import Protocol
 from weakref import WeakValueDictionary
 
@@ -26,7 +27,7 @@ from mirage.ops.config import OpsMount
 from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import WorkspaceRuntime
-from mirage.types import ConsistencyPolicy, Limit, MountMode, PathSpec
+from mirage.types import Limit, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.errors import NoMountError, no_mount
 from mirage.utils.path import owner_prefix
 from mirage.vfs.base import BaseVFS
@@ -38,7 +39,7 @@ DEV_PREFIX = "/dev/"
 
 
 class ReadReconciler(Protocol):
-    """The one thing the registry needs from a reconciler.
+    """What the registry needs from a reconciler.
 
     Depending on this local interface (not the concrete ``Reconciler``)
     keeps the dependency pointing down: ``reconcile`` imports the mount
@@ -46,6 +47,9 @@ class ReadReconciler(Protocol):
     """
 
     async def reconcile_read(self, mount: MountEntry, path: str) -> None:
+        ...
+
+    async def may_serve_cached(self, mount: MountEntry, path: str) -> bool:
         ...
 
 
@@ -121,10 +125,15 @@ class MountRegistry:
         # that already reaches every dispatch site, same as the
         # runtime fields above.
         self.clis = CLIRegistry()
-        self._consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY
+        # The workspace-level default a mount overrides, kept so the
+        # runtime door (`Workspace.add_mount`) has something to resolve
+        # an unset policy against.
+        self._default_read: ReadSpec = ReadSpec()
         self._file_cache: FileCacheMixin | None = None
         self._reconciler: ReadReconciler | None = None
-        self.mount(DEV_PREFIX, DevVFS(), MountMode.WRITE)
+        # Explicit at the construction site: /dev does not cache reads,
+        # so its policy can only ever be bounded.
+        self.mount(DEV_PREFIX, DevVFS(), MountMode.WRITE, ReadSpec())
 
     async def invalidate_after_external(self) -> None:
         """Refetch cached data after native code may have changed files."""
@@ -137,8 +146,13 @@ class MountRegistry:
                 async with mount.use():
                     await mount.index_store.clear()
 
-    def set_consistency(self, consistency: ConsistencyPolicy) -> None:
-        self._consistency = consistency
+    def set_default_read(self, read: ReadSpec) -> None:
+        """Install the workspace-level read policy a mount overrides.
+
+        Args:
+            read (ReadSpec): the default for mounts that declare none.
+        """
+        self._default_read = read
 
     def set_reconciler(self, reconciler: ReadReconciler) -> None:
         self._reconciler = reconciler
@@ -157,10 +171,46 @@ class MountRegistry:
         for m in self._mounts:
             self._attach_manager(m)
 
+    async def _may_serve_cached(self, m: MountEntry, key: str) -> bool:
+        """Run the shared read verdict for one mount's cached entry.
+
+        The file cache's door and the dispatcher's door ask the same
+        question, so they ask the same function; a second verdict rule here
+        is what let the two drift apart in the first place. The reconciler
+        is read at call time because ``attach_file_cache`` runs before
+        ``set_reconciler``, and a manager with none trusts its cache.
+
+        A retiring mount answers False rather than probing: ``execute_op``
+        raises EBUSY once teardown has started, and ``owns_path`` cannot
+        catch that on its own because it is read before several awaits.
+        False sends the caller to a cold read, which is exactly where
+        ``owns_path`` already sends it today.
+
+        Args:
+            m (MountEntry): the mount whose cache entry is in question.
+            key (str): mount-absolute cache key.
+        """
+        reconciler = self._reconciler
+        if reconciler is None:
+            return True
+        if m.retiring:
+            return False
+        try:
+            return await reconciler.may_serve_cached(m, key)
+        except OSError as exc:
+            if exc.errno != errno.EBUSY:
+                raise
+            return False
+
     def _attach_manager(self, m: MountEntry) -> None:
+
+        async def gate(key: str) -> bool:
+            return await self._may_serve_cached(m, key)
+
         m.cache_manager = CacheManager(
             self._file_cache, m.index_store, m.prefix, m.vfs.caches_reads,
-            lambda path: not m.retiring and self.try_mount_for(path) is m)
+            lambda path: not m.retiring and self.try_mount_for(path) is m,
+            gate)
 
     def check_vfs_available(self, vfs: BaseVFS) -> None:
         """A removed VFS instance cannot start a second lifecycle."""
@@ -175,7 +225,7 @@ class MountRegistry:
         prefix: str,
         vfs: BaseVFS,
         mode: MountMode = MountMode.READ,
-        consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+        read: ReadSpec | None = None,
         *,
         index: IndexConfig | None = None,
         vfs_ref: str | None = None,
@@ -192,7 +242,8 @@ class MountRegistry:
             prefix (str): the virtual prefix.
             vfs (BaseVFS): the driver.
             mode (MountMode): the mount's ceiling.
-            consistency (ConsistencyPolicy): the mount's consistency.
+            read (ReadSpec | None): the mount's read policy; None takes
+                the workspace default.
             index (IndexConfig | None): the index store to build; None
                 takes a RAM store at the driver's ``index_ttl``.
             vfs_ref (str | None): the ``vfs:`` value the driver was
@@ -208,7 +259,9 @@ class MountRegistry:
         alias = next((e for e in self._mounts if e.vfs is vfs), None)
         store = (alias.index_store if alias is not None else build_index(
             index, vfs.index_ttl))
-        m = MountEntry(norm_prefix, vfs, mode, consistency, store, vfs_ref)
+        m = MountEntry(norm_prefix, vfs, mode,
+                       read if read is not None else self._default_read, store,
+                       vfs_ref)
         if alias is not None:
             m.activity = alias.activity
         m.register_fns(vfs.commands())
@@ -425,7 +478,7 @@ class MountRegistry:
         Resolution order:
         1. First PathSpec path (or cwd) → mount_for(path)
         2. If mount lacks the command → mount_for_command(cmd_name)
-        3. For a read-only command on a caching backend under ALWAYS
+        3. For a read-only command on a caching backend under `fresh`
            consistency, evict stale entries from the hidden file cache so
            the in-place read-through serves fresh bytes. The command always
            stays on its real mount; the cache is never a mount.
@@ -464,7 +517,7 @@ class MountRegistry:
         if (self._reconciler is not None and path_scopes
                 and resolved is not None and not resolved.write
                 and mount.vfs.caches_reads
-                and self._consistency == ConsistencyPolicy.ALWAYS):
+                and mount.read.policy is ReadPolicy.FRESH):
             for scope in path_scopes:
                 await self._reconciler.reconcile_read(mount, scope.virtual)
 

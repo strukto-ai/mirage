@@ -1,0 +1,206 @@
+{
+  "cases": [
+    {
+      "id": "unzip_l_plain_text_is_not_an_archive",
+      "seq": 601335,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punzi && printf 'plain text' > /data/punzi/plain.zip && unzip -l /data/punzi/plain.zip",
+      "expect": {
+        "exit": 9,
+        "stdout": "",
+        "stderr": "  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\nunzip:  cannot find zipfile directory in one of /data/punzi/plain.zip or\n        /data/punzi/plain.zip.zip, and cannot find /data/punzi/plain.zip.ZIP, period.\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "unzip_extract_empty_file_is_not_an_archive",
+      "seq": 601336,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '' > /data/punzi/empty.zip && unzip /data/punzi/empty.zip",
+      "expect": {
+        "exit": 9,
+        "stdout": "",
+        "stderr": "  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\nunzip:  cannot find zipfile directory in one of /data/punzi/empty.zip or\n        /data/punzi/empty.zip.zip, and cannot find /data/punzi/empty.zip.ZIP, period.\n"
+      }
+    },
+    {
+      "id": "unzip_p_plain_text_names_the_archive",
+      "seq": 601337,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -p /data/punzi/plain.zip",
+      "expect": {
+        "exit": 9,
+        "stdout": "",
+        "stderr": "[/data/punzi/plain.zip]\n  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\n"
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "unzip_Z1_plain_text_signs_as_zipinfo",
+      "seq": 601338,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -Z1 /data/punzi/plain.zip",
+      "expect": {
+        "exit": 9,
+        "stdout": "",
+        "stderr": "[/data/punzi/plain.zip]\n  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\nzipinfo:  cannot find zipfile directory in one of /data/punzi/plain.zip or\n          /data/punzi/plain.zip.zip, and cannot find /data/punzi/plain.zip.ZIP, period.\n"
+      },
+      "flags": [
+        "Z",
+        "1"
+      ]
+    },
+    {
+      "id": "unzip_l_corrupt_central_directory_exits_3",
+      "seq": 601339,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 'UEsDBBQAAAAAAC48NF2GphA2BQAAAAUAAAAMAAAAZG9jdW1lbnQudHh0aGVsbG9YWFhYFAMUAAAAAAAuPDRdhqYQNgUAAAAFAAAADAAAAAAAAAAAAAAAgAEAAAAAZG9jdW1lbnQudHh0UEsFBgAAAAABAAEAOgAAAC8AAAAAAA==' | base64 -d > /data/punzi/badcd.zip && unzip -l /data/punzi/badcd.zip",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "error [/data/punzi/badcd.zip]:  start of central directory not found;\n  zipfile corrupt.\n  (please check that you have transferred or created the zipfile in the\n  appropriate BINARY mode and that you have compiled UnZip properly)\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "unzip_l_entry_count_short_of_the_directory_exits_3",
+      "seq": 601496,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAgCcAAAAdwAAAAAA' | base64 -d > /data/punzi/short.zip && unzip -l /data/punzi/short.zip",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "error [/data/punzi/short.zip]:  start of central directory not found;\n  zipfile corrupt.\n  (please check that you have transferred or created the zipfile in the\n  appropriate BINARY mode and that you have compiled UnZip properly)\n"
+      },
+      "flags": [
+        "l"
+      ]
+    }
+  ]
+}

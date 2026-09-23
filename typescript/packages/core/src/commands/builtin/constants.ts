@@ -163,6 +163,7 @@ export const FIND_BARE_PREDICATES = new Set([
   '-delete',
   '-ls',
   '-depth',
+  '-prune',
 ])
 
 export const FIND_OPERATORS = new Set(['-not', '!', '-o', '-or', '-a', '-and', '(', ')'])

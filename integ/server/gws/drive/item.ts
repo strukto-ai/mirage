@@ -20,6 +20,7 @@ import type { GwsState } from '../store/state.ts'
 import type { DriveItem, Revision } from '../store/types.ts'
 import type { JsonObj } from '../wire/json.ts'
 import { DOC_MIME, FOLDER_MIME, OWNER, SHEET_MIME, SLIDE_MIME, isNativeMime } from '../wire/mime.ts'
+import { ROOT } from './parents.ts'
 
 export function md5(data: Buffer): string {
   return createHash('md5').update(data).digest('hex')
@@ -89,7 +90,7 @@ export function createDriveItem(
     id: id ?? st.nextId('f'),
     name,
     mimeType,
-    parents: parents.length > 0 ? parents : ['root'],
+    parents: parents.length > 0 ? parents : [ROOT],
     trashed: false,
     createdTime: st.now(),
     modifiedTime: '',

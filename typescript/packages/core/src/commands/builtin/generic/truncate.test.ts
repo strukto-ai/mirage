@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
+import { enoent } from '../../../utils/errors.ts'
 import { UsageError } from '../../errors.ts'
 import { truncateGeneric } from './truncate.ts'
 
@@ -170,5 +171,31 @@ describe('truncate sizes', () => {
 
   it('rejects division by zero', async () => {
     await expect(runTruncate('/0')).rejects.toThrow(new UsageError('truncate: division by zero', 1))
+  })
+})
+
+describe('truncate operands', () => {
+  function operand(rawPath: string): PathSpec {
+    return new PathSpec({ virtual: '/missing', directory: '/', vfsPath: 'missing', rawPath })
+  }
+
+  it('settles a slashed operand by the truncate op', async () => {
+    // GNU opens with O_CREAT before it stats, so `missing/` and `reg/` are
+    // the open's EISDIR, not the stat's miss; a bare operand keeps its own
+    // ENOENT.
+    const lengths: [string, number][] = []
+    const stat = (path: PathSpec): Promise<FileStat> => Promise.reject(enoent(path))
+    const truncate = (path: PathSpec, length: number): Promise<void> => {
+      lengths.push([path.rawPath, length])
+      return Promise.resolve()
+    }
+    await truncateGeneric([operand('/missing/')], '4', stat, truncate)
+    expect(lengths).toEqual([['/missing/', 4]])
+    await expect(truncateGeneric([operand('/missing')], '4', stat, truncate)).rejects.toMatchObject(
+      {
+        code: 'ENOENT',
+      },
+    )
+    expect(lengths).toEqual([['/missing/', 4]])
   })
 })

@@ -51,9 +51,9 @@ from mirage.secrets.sources import resolve_sources
 from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
 from mirage.shell.job_table import ConsoleFactory, JobTable
-from mirage.types import (ConsistencyPolicy, DriftPolicy, FileEvent, FileStat,
+from mirage.types import (CacheFacts, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
-                          parse_mount_mode)
+                          ReadSpec, parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
@@ -65,6 +65,7 @@ from mirage.workspace.file_prompt import build_file_prompt
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.store import NamespaceStore
+from mirage.workspace.mount.read_policy import check_read_capability
 from mirage.workspace.node.explain import explain_line
 from mirage.workspace.session import SessionManager, SessionState, SessionStore
 from mirage.workspace.session.constants import DEFAULT_PROFILE
@@ -118,7 +119,7 @@ class Workspace:
         cache: CacheConfig | None = None,
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
-        consistency: ConsistencyPolicy = ConsistencyPolicy.LAZY,
+        read: ReadSpec | None = None,
         session_id: str | None = None,
         agent_id: str | None = None,
         workspace_id: str | None = None,
@@ -254,8 +255,9 @@ class Workspace:
         self._meta = WorkspaceMeta(self._workspace_id, self._state_store,
                                    self._session_mgr, session_id,
                                    session_id_explicit)
-        self._consistency = consistency
-        self._registry.set_consistency(consistency)
+        # The workspace-level default a mount overrides, as `mode` is.
+        self._read_default = read if read is not None else ReadSpec()
+        self._registry.set_default_read(self._read_default)
         self._registry.attach_file_cache(self._cache)
         # Only an explicit agent_id claims the workspace user; a bare
         # launch adopts whatever identity the namespace store holds.
@@ -264,14 +266,13 @@ class Workspace:
                                     user=agent_id)
         self._dispatcher = Dispatcher(self._namespace,
                                       self._cache,
-                                      consistency,
                                       drift=self._drift)
         self._registry.set_reconciler(self._dispatcher.reconciler)
         self._watch = WatchManager(self._registry)
 
-        specs = normalize_mounts(mounts, mode)
+        specs = normalize_mounts(mounts, mode, self._read_default)
         self._implicit_root = install_mounts(self._registry, specs, index,
-                                             mode)
+                                             mode, self._read_default)
         # What the workspace and its mounts hide from every session,
         # stamped onto the default session now and onto every session
         # created or hydrated later.
@@ -284,8 +285,10 @@ class Workspace:
                                              else None)
 
         self.observer = Observer(store=stores.observe)
+        # Explicit at the construction site: the history view does not
+        # cache reads, so its policy can only ever be bounded.
         self._registry.mount(HISTORY_PREFIX, HistoryViewVFS(self.observer),
-                             MountMode.READ)
+                             MountMode.READ, ReadSpec())
         # The facade delegates every op to the dispatcher, so FUSE and
         # programmatic ws.vfs walk the same pipeline as a shell command
         # and the policy gates fire exactly once, at that door. It runs
@@ -503,27 +506,40 @@ class Workspace:
                   prefix: str,
                   vfs: BaseVFS,
                   mode: MountMode = MountMode.READ,
+                  read: ReadSpec | None = None,
                   vfs_ref: str | None = None) -> MountEntry:
         """Add a VFS to a running workspace, mirroring TS ``addMount``.
+
+        The runtime door runs the same read-policy verdict the
+        constructor does: a mount added here is no more able to declare
+        a policy its backend cannot honour than one declared in YAML.
 
         Args:
             prefix (str): virtual mount point; duplicates are refused.
             vfs (BaseVFS): VFS providing commands and ops.
             mode (MountMode): access mode, read-only unless explicitly raised.
+            read (ReadSpec | None): the mount's read policy; None takes
+                the workspace default.
             vfs_ref (str | None): the ``vfs:`` value the driver was built
                 from, recorded for snapshots; None for one built in code.
 
         Returns:
             MountEntry: the installed mount, with its normalized prefix.
+
+        Raises:
+            ValueError: the backend cannot honour the declared policy.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
         check_vfs(prefix, vfs)
+        resolved_read = read if read is not None else self._read_default
+        check_read_capability(prefix, vfs, resolved_read)
         self._registry.check_vfs_available(vfs)
         previous = self._registry.mounts()
         entry = self._registry.mount(prefix,
                                      vfs,
                                      mode,
+                                     resolved_read,
                                      index=self._index_config,
                                      vfs_ref=vfs_ref)
         prepare_added_mount(self._registry, entry, previous)
@@ -948,8 +964,9 @@ class Workspace:
         | None = None
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
+        # No read= here: each restored Mount carries its own spec, and
+        # the state dict has no workspace-level default to pass.
         ws = cls(args.mount_args,
-                 consistency=args.consistency,
                  session_id=args.default_session_id,
                  agent_id=args.default_agent_id,
                  clis=args.clis,
@@ -1267,10 +1284,52 @@ class Workspace:
             self,
             io: IOResult,
             records: list[OpRecord] | None = None,
-            is_cacheable: Callable[[str], bool] | None = None) -> None:
+            cache_facts: Callable[[str], CacheFacts] | None = None) -> None:
         await self._dispatcher.apply_io(io,
                                         records=records,
-                                        is_cacheable=is_cacheable)
+                                        cache_facts=cache_facts)
+
+    async def _serialize_line(
+        self,
+        session_id: str | None,
+        run: Callable[[], Awaitable[IOResult | ProvisionResult]],
+    ) -> IOResult | ProvisionResult:
+        """Run one line of a session at a time, as one bash process does.
+
+        Two top-level lines on one session share its env, cwd and ``$?``,
+        so letting them interleave hands one line the loop variable the
+        other just set: two ``for f`` loops both exit 0 and both print
+        the other's values. A nested line (``eval``, ``source``, ``$()``,
+        ``xargs``, a host callback fired mid-line) is the same shell
+        continuing and runs inline: it already holds the session, and
+        waiting on itself would deadlock. The ambient binding decides,
+        by the same rule ``execute_line`` uses to pick the session a
+        line runs as, so the lock key and the executed session never
+        disagree; a background job's fork keeps its parent's id and
+        continues inline too.
+
+        Args:
+            session_id (str | None): the session the caller named, or
+                None for the default.
+            run (Callable[[], Awaitable[IOResult | ProvisionResult]]):
+                the line, started only once the session is held.
+        """
+        ambient = get_current_session_for(self._session_mgr)
+        if ambient is not None and session_id in (None, ambient.session_id):
+            return await run()
+        # Hydrate first: a workspace on a shared store adopts the
+        # persisted default id there, and a key taken before that names
+        # a session no later line would wait on.
+        await self.ensure_sessions_loaded()
+        if session_id is None:
+            session_id = self._session_mgr.default_id
+        async with self._session_mgr.line_lock_for(session_id):
+            # A line queued behind a running one wakes after close may
+            # have started; it runs nothing, like a line that arrived
+            # after.
+            if self._shutting_down:
+                raise RuntimeError("Workspace is closed")
+            return await run()
 
     @overload
     async def shell(self,
@@ -1372,9 +1431,11 @@ class Workspace:
         frame = LineFrame()
         try:
             return await run_cancellable(
-                execute_line(self, command, session_id, stdin, provision,
-                             agent_id, cwd, env, cancel, record, runtime,
-                             routing_decision, handed, frame), cancel)
+                self._serialize_line(
+                    session_id,
+                    partial(execute_line, self, command, session_id, stdin,
+                            provision, agent_id, cwd, env, cancel, record,
+                            runtime, routing_decision, handed, frame)), cancel)
         except (MirageAbortError, asyncio.CancelledError):
             # An abandoned invocation is the caller's outcome, not the
             # shell's, whether it arrived on the event or as a cancel

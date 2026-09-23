@@ -155,10 +155,15 @@ async def _get(op: AsyncOperator, key: str) -> bytes | None:
         return None
 
 
-async def _put(op: AsyncOperator, key: str, data: bytes) -> None:
+async def _put(op: AsyncOperator, key: str, data: bytes) -> ObjectMeta | None:
     # A missing repo or revision answers NotFound; it propagates so the
     # write factory can name the path the user typed, not this key.
+    # No token: the python opendal binding's write returns nothing where
+    # node's answers Metadata, and node's is discarded to match, so an hf
+    # write stamps the same absence in both languages. Closing it needs a
+    # stat per write.
     await op.write(key, data)
+    return None
 
 
 async def _delete_file(op: AsyncOperator, key: str) -> None:

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isStdin } from '../utils/stream.ts'
+import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { CachableAsyncIterator } from '../../../io/cachable_iterator.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -139,6 +141,8 @@ export async function catGeneric(
   stat: Stat,
   stream: Stream,
 ): Promise<CommandFnResult> {
+  stat = stdinStat(stat)
+  stream = stdinStream(stream, opts.stdin)
   const display = parseFlags(opts.flags)
   if (display.numberNonblank) display.numberLines = false
   const wantsDisplay = Object.values(display).some(Boolean)
@@ -169,8 +173,10 @@ export async function catGeneric(
         source = truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
       }
       const cachable = new CachableAsyncIterator(source)
-      reads[p.mountPath] = cachable
-      cacheKeys.push(p.mountPath)
+      if (!isStdin(p)) {
+        reads[p.mountPath] = cachable
+        cacheKeys.push(p.mountPath)
+      }
       outputs.push(cachable)
     }
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(...outputs)

@@ -1,5 +1,4 @@
 mode: WRITE
-consistency: LAZY
 
 # Same /s3 mount as workspace.yaml, plus per-mount command_limits so the
 # guards can be observed firing from the CLI. Python-only: the TS config

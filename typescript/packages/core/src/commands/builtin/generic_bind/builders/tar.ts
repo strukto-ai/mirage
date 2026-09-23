@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type FileStat, FileType, type PathSpec } from '../../../../types.ts'
+import type { FileStat, PathSpec } from '../../../../types.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
 import { tarGeneric } from '../../generic/tar.ts'
 import { type Builder, resolveGlobOf } from '../adapter.ts'
-import { walkOf } from '../archive_io.ts'
+import { isDirOf, walkOf } from '../archive_io.ts'
 
 export const TAR_BUILDER: Builder = {
   name: 'tar',
@@ -68,22 +68,7 @@ export const TAR_BUILDER: Builder = {
       mkdir: (p, parents) => mkdir(accessor, p, parents),
       stat,
       walk: walkOf(ops, accessor, idx),
-      // Two channels, because a stat miss alone is not absence: on a
-      // prefix store a directory is the set of keys under it and
-      // nothing answers stat for it, so a readdir that returns anything
-      // is the second and deciding opinion.
-      isDir: async (p) => {
-        try {
-          return (await stat(p)).type === FileType.DIRECTORY
-        } catch {
-          // Not an object of its own; ask the listing instead.
-        }
-        try {
-          return (await ops.readdir(accessor, p, idx)).length > 0
-        } catch {
-          return false
-        }
-      },
+      isDir: isDirOf(ops, accessor, idx),
     })
   },
 }

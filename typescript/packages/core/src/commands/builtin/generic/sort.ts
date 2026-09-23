@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stdinStream } from '../utils/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
@@ -113,6 +114,7 @@ export async function sortGeneric(
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
   write?: (path: PathSpec, data: Uint8Array) => Promise<void>,
 ): Promise<CommandFnResult> {
+  stream = stdinStream(stream, opts.stdin)
   const parsed = parseFlags(opts.flags)
   if (typeof parsed === 'string') {
     // gnulib's argmatch dies with EXIT_FAILURE, so `--check=x` is 1 where

@@ -8,7 +8,8 @@ from mirage.commands.builtin.constants import (SED_MISSING_SCRIPT,
 from mirage.commands.builtin.sed_script import (SedCommand, execute_program,
                                                 parse_one_command,
                                                 parse_program)
-from mirage.commands.builtin.utils.stream import read_stdin_async
+from mirage.commands.builtin.utils.stream import (is_stdin, read_stdin_async,
+                                                  stdin_bytes)
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -36,6 +37,8 @@ async def sed(
     suppress: bool = False,
     extended: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
+    if not in_place:
+        read_bytes = stdin_bytes(read_bytes, stdin)
     if ";" in expression or "{" in expression or "\n" in expression:
         commands = parse_program(expression)
     else:
@@ -108,7 +111,7 @@ async def sed(
             outputs.append(new_text)
             read_ok.append(p)
         return "".join(outputs).encode(), IOResult(
-            cache=[p.mount_path for p in read_ok],
+            cache=[p.mount_path for p in read_ok if not is_stdin(p)],
             exit_code=code,
             stderr=err or None)
 

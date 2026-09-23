@@ -1300,3 +1300,103 @@ describe('ln operand grammar and backups', () => {
     await ws.close()
   })
 })
+
+describe('trailing slash on a link name', () => {
+  it('ln refuses a slashed link name that is not there', async () => {
+    // Pinned on coreutils 9.7: symlink(2) and link(2) answer `missing/`
+    // with ENOENT and create nothing, the hard-link line naming its
+    // source; a directory takes the link inside it as before, and a file
+    // behind the slash is still the door's "File exists".
+    const ws = buildWorkspace()
+    await ws.shell('printf hi > /data/a.txt; printf y > /data/reg; mkdir -p /data/d')
+    for (const [line, wording] of [
+      [
+        'ln -s /data/a.txt /data/missing/',
+        "ln: failed to create symbolic link '/data/missing/': No such file or directory\n",
+      ],
+      [
+        'ln -sT /data/a.txt /data/missing/',
+        "ln: failed to create symbolic link '/data/missing/': No such file or directory\n",
+      ],
+      [
+        'ln /data/a.txt /data/missing/',
+        "ln: failed to create hard link '/data/missing/' => '/data/a.txt': No such file or directory\n",
+      ],
+      [
+        'ln -s /data/a.txt /data/d/missing/',
+        "ln: failed to create symbolic link '/data/d/missing/': No such file or directory\n",
+      ],
+      [
+        'ln -s /data/a.txt /data/reg/',
+        "ln: failed to create symbolic link '/data/reg/': File exists\n",
+      ],
+    ] as const) {
+      const r = await ws.shell(line)
+      expect([r.exitCode, dec(r.stderr)], line).toEqual([1, wording])
+    }
+    expect((await ws.shell('test -e /data/missing')).exitCode).toBe(1)
+    expect((await ws.shell('test -e /data/d/missing')).exitCode).toBe(1)
+    expect(ws.namespace.isLink('/data/missing')).toBe(false)
+    const r = await ws.shell('ln -s /data/a.txt /data/d/ && readlink /data/d/a.txt')
+    expect([r.exitCode, dec(r.stdout)]).toEqual([0, '/data/a.txt\n'])
+  })
+
+  it('ln settles a slashed name before -f or -b touch it', async () => {
+    // Pinned on coreutils 9.7: -f and -b lstat the link name first, and
+    // `reg/` over a file (or a link to one) is `failed to access 'reg/':
+    // Not a directory`, so the file is neither unlinked nor renamed aside.
+    const ws = buildWorkspace()
+    await ws.shell('printf hi > /data/a.txt; printf y > /data/reg; ln -s /data/reg /data/flink')
+    for (const line of [
+      'ln -sf /data/a.txt /data/reg/',
+      'ln -sb /data/a.txt /data/reg/',
+      'ln -f /data/a.txt /data/reg/',
+      'ln -b /data/a.txt /data/reg/',
+      'ln -sf /data/a.txt /data/flink/',
+    ]) {
+      const r = await ws.shell(line)
+      const target = line.split(' ').pop() ?? ''
+      expect([r.exitCode, dec(r.stderr)], line).toEqual([
+        1,
+        `ln: failed to access '${target}': Not a directory\n`,
+      ])
+    }
+    expect(dec((await ws.shell('cat /data/reg')).stdout)).toBe('y')
+    expect((await ws.shell('test -e /data/reg~')).exitCode).toBe(1)
+    expect(ws.namespace.readlink('/data/flink')).toBe('/data/reg')
+    const r = await ws.shell('ln -sf /data/a.txt /data/missing/')
+    expect(dec(r.stderr)).toBe(
+      "ln: failed to create symbolic link '/data/missing/': No such file or directory\n",
+    )
+    expect((await ws.shell('test -e /data/missing')).exitCode).toBe(1)
+  })
+
+  it('mv of a link refuses a slashed destination', async () => {
+    // Pinned on coreutils 9.7: rename(2) never follows the source, so a
+    // link is not a directory whatever it points at; `mv dlnk missing/`
+    // refuses at the rename and `mv dlnk reg/` at the destination's stat,
+    // and the link stays where it was either way.
+    const ws = buildWorkspace()
+    await ws.shell('mkdir -p /data/sd /data/e; printf y > /data/reg; ln -s /data/sd /data/dlnk')
+    let r = await ws.shell('mv /data/dlnk /data/missing/')
+    expect([r.exitCode, dec(r.stderr)]).toEqual([
+      1,
+      "mv: cannot move '/data/dlnk' to '/data/missing/': Not a directory\n",
+    ])
+    r = await ws.shell('mv /data/dlnk /data/reg/')
+    expect([r.exitCode, dec(r.stderr)]).toEqual([
+      1,
+      "mv: cannot stat '/data/reg/': Not a directory\n",
+    ])
+    r = await ws.shell('mv /data/dlnk /data/nodir/name/')
+    expect([r.exitCode, dec(r.stderr)]).toEqual([
+      1,
+      "mv: cannot move '/data/dlnk' to '/data/nodir/name/': No such file or directory\n",
+    ])
+    expect(ws.namespace.readlink('/data/dlnk')).toBe('/data/sd')
+    expect((await ws.shell('test -e /data/missing')).exitCode).toBe(1)
+    expect(dec((await ws.shell('cat /data/reg')).stdout)).toBe('y')
+    r = await ws.shell('mv /data/dlnk /data/e/ && readlink /data/e/dlnk')
+    expect([r.exitCode, dec(r.stdout)]).toEqual([0, '/data/sd\n'])
+  })
+})

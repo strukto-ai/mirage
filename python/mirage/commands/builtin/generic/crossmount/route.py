@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Callable
+from typing import Any, Callable
 
 from mirage.commands.builtin.generic.crossmount.detect import strategy_for
 from mirage.commands.builtin.generic.crossmount.fanout import run_fanout
@@ -21,6 +21,7 @@ from mirage.commands.builtin.generic.crossmount.stream import run_stream
 from mirage.commands.builtin.generic.crossmount.types import (CrossResult,
                                                               RunSingle,
                                                               Strategy)
+from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import read_fail_exit
 from mirage.io import IOResult
@@ -71,11 +72,23 @@ async def handle_cross_mount(
         session_view (SessionView | None): The session plane's door, for
             the RELAY generic that renders the session's profile (ls).
     """
+    native = run_single
+    input_source = resolve_source(stdin)
+
+    async def run_input(name: str, paths: list[PathSpec], texts: list[str],
+                        flags: dict[str,
+                                    FlagValue], **options: Any) -> CrossResult:
+        if any(is_stdin(path) for path in paths):
+            options["stdin"] = input_source
+        return await native(name, paths, texts, flags, **options)
+
+    run_single = run_input
     try:
         strategy = strategy_for(cmd_name, flag_kwargs)
         if strategy is Strategy.RELAY:
             return await run_relay(cmd_name, scopes, text_args, flag_kwargs,
-                                   dispatch, storage_key, ns, session_view)
+                                   dispatch, storage_key, ns, session_view,
+                                   stdin)
         if strategy is Strategy.STREAM:
             return await run_stream(cmd_name, scopes, text_args, flag_kwargs,
                                     run_single)

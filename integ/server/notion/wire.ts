@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DATA_SOURCE_VERSION, DEFAULT_API_VERSION, MAX_PAGE_SIZE } from './config.ts'
-import type { BlockRow, CommentRow, DatabaseRow, Json, MetaRow, PageRow } from './types.ts'
+import type { BlockRow, CommentRow, DatabaseRow, Json, MetaRow, PageRow, UserRow } from './types.ts'
 import type { JsonValue, Minter, Reply } from '../kit/typescript/index.ts'
 
 export function asObject(value: unknown): Json {
@@ -38,23 +38,33 @@ function parentJson(parentType: string, parentId: string | null): Json {
   return { type: parentType, [parentType]: parentId ?? '' }
 }
 
-export function pageJson(row: PageRow): Json {
-  const out: Json = {
+function jsonOrNull(raw: string | null): JsonValue {
+  return raw === null ? null : (JSON.parse(raw) as JsonValue)
+}
+
+// Every key is always present, unset ones as null, in the order live Notion
+// sends them on both API versions (probed 2026-09-22). `is_archived` and
+// `is_locked` are newer than the 2025 MCP-Atlas recordings; the fake has
+// neither state, so both are false.
+export function pageJson(row: PageRow, version: string = DEFAULT_API_VERSION): Json {
+  return {
     object: 'page',
     id: row.id,
     created_time: row.createdTime,
     last_edited_time: row.lastEditedTime,
     created_by: { object: 'user', id: row.createdBy },
     last_edited_by: { object: 'user', id: row.lastEditedBy },
-    parent: pageParentJson(row.parentType, row.parentId),
-    archived: row.inTrash,
+    cover: jsonOrNull(row.coverJson),
+    icon: jsonOrNull(row.iconJson),
+    parent: pageParentJson(row.parentType, row.parentId, version),
     in_trash: row.inTrash,
-    url: row.url,
+    is_archived: false,
+    is_locked: false,
     properties: JSON.parse(row.propertiesJson) as Json,
+    url: row.url,
+    public_url: null,
+    archived: row.inTrash,
   }
-  if (row.iconJson !== null) out.icon = JSON.parse(row.iconJson) as Json
-  if (row.coverJson !== null) out.cover = JSON.parse(row.coverJson) as Json
-  return out
 }
 
 // Since 2025-09-03 a database holds data sources and the rows live under one
@@ -68,16 +78,11 @@ export function dataSourceIdOf(databaseId: string): string {
 // A row's parent is its data source, not its database (2025-09-03). The
 // database id rides along because Notion kept emitting it through the
 // migration; storage still keys rows by database id, which is the same fact
-// one derivation away.
-//
-// Deliberately not versioned, unlike `databaseJson`: 2022-06-28 answers
-// `{type: "database_id", database_id}` with no data source, so a legacy caller
-// reads a parent shape its generation never had. Left as one shape on purpose,
-// because no in-repo or MCP caller reads `parent` off a row, and the divergence
-// is drawn from Notion's upgrade guide rather than probed against the real API
-// the way the schema behaviour was. Probe it before rendering both.
-function pageParentJson(parentType: string, parentId: string | null): Json {
-  if (parentType !== 'database_id' || parentId === null) {
+// one derivation away. A 2022-06-28 caller gets `{type: "database_id",
+// database_id}` with no data source, which is what every row in the MCP-Atlas
+// recordings of live Notion carries at that version.
+function pageParentJson(parentType: string, parentId: string | null, version: string): Json {
+  if (parentType !== 'database_id' || parentId === null || version < DATA_SOURCE_VERSION) {
     return parentJson(parentType, parentId)
   }
   return {
@@ -125,26 +130,61 @@ export function dataSourceJson(row: DatabaseRow): Json {
 // nothing told it. `data_sources` is absent from that answer for the same
 // reason `properties` is absent from the modern one: the field did not exist
 // at that version.
+//
+// Keys and their order are the MCP-Atlas recordings' (2022-06-28), and
+// `data_sources` takes the slot `properties` held. The fake stores no database
+// icon, cover or public link, so those are always null.
 export function databaseJson(row: DatabaseRow, version: string = DEFAULT_API_VERSION): Json {
-  const out: Json = {
+  return {
     object: 'database',
+    id: row.id,
+    cover: null,
+    icon: null,
+    created_time: row.createdTime,
+    created_by: { object: 'user', id: row.createdBy },
+    last_edited_by: { object: 'user', id: row.lastEditedBy },
+    last_edited_time: row.lastEditedTime,
+    title: JSON.parse(row.titleJson) as JsonValue[],
+    description: row.descriptionJson === null ? [] : (JSON.parse(row.descriptionJson) as JsonValue),
+    is_inline: row.isInline,
     ...(version < DATA_SOURCE_VERSION
       ? { properties: JSON.parse(row.propertiesJson) as Json }
       : { data_sources: [{ id: dataSourceIdOf(row.id), name: row.titleText }] }),
-    id: row.id,
-    created_time: row.createdTime,
-    last_edited_time: row.lastEditedTime,
     parent: parentJson(row.parentType, row.parentId),
+    url: row.url,
+    public_url: null,
     archived: row.inTrash,
     in_trash: row.inTrash,
-    is_inline: row.isInline,
-    url: row.url,
-    title: JSON.parse(row.titleJson) as JsonValue[],
   }
-  if (row.descriptionJson !== null) {
-    out.description = JSON.parse(row.descriptionJson) as JsonValue[]
+}
+
+// A person or a bot. The integration's own bot is rendered from the meta row by
+// `botJson`, so the list and `/v1/users/me` are one object.
+export function userJson(row: UserRow): Json {
+  return {
+    object: 'user',
+    id: row.id,
+    name: row.name,
+    avatar_url: row.avatarUrl,
+    type: row.type,
+    [row.type]: JSON.parse(row.detailJson) as Json,
   }
-  return out
+}
+
+export function botJson(meta: MetaRow): Json {
+  return {
+    object: 'user',
+    id: meta.botId,
+    name: meta.botName,
+    avatar_url: null,
+    type: 'bot',
+    bot: {
+      owner: { type: 'workspace', workspace: true },
+      workspace_name: meta.workspaceName,
+      workspace_id: meta.workspaceId,
+      workspace_limits: { max_file_upload_size_in_bytes: meta.maxUploadSize },
+    },
+  }
 }
 
 // Key order is load-bearing: mirage embeds the block verbatim in page.json, so
@@ -176,21 +216,51 @@ export function commentJson(row: CommentRow): Json {
   }
 }
 
-// Notion's cursor is opaque, so an offset is a legal implementation and keeps
-// the page boundary stable under the deterministic orderings used below.
-export function pageOf(items: Json[], startCursor: string | null, pageSize: number): Json {
-  const offset = startCursor === null ? 0 : Number.parseInt(startCursor, 10)
-  const start = Number.isNaN(offset) ? 0 : offset
-  const size = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE)
-  const slice = items.slice(start, start + size)
-  const next = start + size
-  const more = next < items.length
+// What a list holds, which live Notion names in every list envelope next to an
+// empty object of the same name. Search and a query changed theirs when
+// databases split into data sources.
+export function listTypeOf(version: string): string {
+  return version < DATA_SOURCE_VERSION ? 'page_or_database' : 'page_or_data_source'
+}
+
+export function listJson(results: Json[], nextCursor: string | null, type: string): Json {
   return {
     object: 'list',
-    results: slice,
-    has_more: more,
-    next_cursor: more ? String(next) : null,
+    results,
+    next_cursor: nextCursor,
+    has_more: nextCursor !== null,
+    type,
+    [type]: {},
   }
+}
+
+// A cursor is the id of the first item on the page it opens, which is what live
+// Notion hands out (a row, a block, a user) and what a client resumes from, so
+// an offset could not resume a cursor a live recording carries. One Notion does
+// not recognize is refused in its own words (probed 2026-09-22 on users, block
+// children and search), never read as the first page.
+export function pageOf(
+  items: Json[],
+  startCursor: string | null,
+  pageSize: number,
+  type: string,
+): Reply {
+  const start = startCursor === null ? 0 : items.findIndex((item) => item.id === startCursor)
+  if (start === -1) {
+    return apiError(
+      400,
+      'validation_error',
+      `The start_cursor provided is invalid: ${String(startCursor)}`,
+    )
+  }
+  const size = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE)
+  const next = items[start + size]
+  const body = listJson(
+    items.slice(start, start + size),
+    next === undefined ? null : String(next.id),
+    type,
+  )
+  return { status: 200, body }
 }
 
 export function apiError(status: number, code: string, message: string): Reply {

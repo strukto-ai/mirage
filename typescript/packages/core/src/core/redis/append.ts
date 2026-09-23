@@ -17,7 +17,7 @@ import { record, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { checkDestParents } from './dest.ts'
+import { checkDestParents, checkWriteTarget } from './dest.ts'
 import { norm, nowIso } from './utils.ts'
 
 export async function appendBytes(
@@ -29,6 +29,7 @@ export async function appendBytes(
   const p = norm(path.mountPath)
   const store = accessor.store
   await checkDestParents(store, path, p)
+  await checkWriteTarget(store, path, p)
   const existing = await store.getFile(p)
   if (existing !== null) {
     const merged = new Uint8Array(existing.byteLength + data.byteLength)

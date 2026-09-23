@@ -73,6 +73,7 @@
               "home/bash",
               "home/vfs-matrix",
               "home/cache",
+              "home/yaml",
               "home/snapshot",
               "home/observer",
               "home/permissions",

@@ -210,3 +210,7 @@ enforced by Mirage mount modes, not by the kernel. For that reason, never
 mount with the `default_permissions` FUSE option. It would make the kernel
 enforce the displayed bits, and a `chmod 000` could lock Mirage out of its
 own files.
+
+Extended attributes over FUSE are the ones the Mirage shell's `getfattr`
+and `setfattr` read and write. Mirage stores them in its namespace beside
+the symlinks, so every backend takes them.

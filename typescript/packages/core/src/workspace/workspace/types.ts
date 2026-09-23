@@ -25,7 +25,7 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
-import type { Limit, ConsistencyPolicy, DriftPolicy, MountMode, Refusal } from '../../types.ts'
+import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { RouteDecision, RoutePolicy } from '../../runtime/routing/index.ts'
 import type { RuntimeEntry } from '../../runtime/base.ts'
@@ -48,7 +48,12 @@ export type MountSpec =
 
 export interface WorkspaceOptions {
   mode?: MountMode
-  consistency?: ConsistencyPolicy
+  /**
+   * The read policy a mount inherits when it declares none. There is
+   * deliberately no workspace-level bound: `ttl:` exists only inside a
+   * mount block, where it cannot be confused with `index: {ttl:}`.
+   */
+  read?: ReadSpec
   commandLimits?: Record<string, Record<string, Limit>>
   /**
    * Behaviour for the post-load drift check on fingerprinted reads. Only

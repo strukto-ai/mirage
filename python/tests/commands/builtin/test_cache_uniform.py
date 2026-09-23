@@ -151,3 +151,17 @@ async def test_generic_rg_serves_cache_without_backend():
         push_cache_manager(prev)
     assert b"alpha" in await materialize(out)
     assert reader.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_generic_grep_awaits_byte_reader_before_returning():
+    reader = _CountingReader(_PAYLOAD)
+    out, io = await generic_grep([_spec()], ("alpha", ),
+                                 CommandOpts(),
+                                 readdir=_readdir,
+                                 stat=_stat,
+                                 read_bytes=reader,
+                                 read_stream=None)
+    assert reader.calls == 1
+    assert await materialize(out) == b"alpha\n"
+    assert io.exit_code == 0

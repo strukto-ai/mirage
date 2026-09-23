@@ -27,12 +27,14 @@ function enc(s: string): Uint8Array {
 
 function makeState(): WorkspaceStateDict {
   return {
-    version: 1,
+    version: 4,
     mounts: [
       {
         index: 0,
         prefix: '/m',
         mode: 'write',
+        read: 'bounded',
+        ttl: 45,
         vfs_class: 'ram',
         vfs_ref: './wiki.mjs:WikiVFS',
         vfs_state: {
@@ -112,6 +114,51 @@ describe('stateTree', () => {
     expect(back.default_session_id).toBe('agent_a')
     expect(back.cache.entries).toEqual([])
     expect(back.mounts[0]?.vfs_ref).toBe('./wiki.mjs:WikiVFS')
+  })
+
+  it("carries the mount's read policy and bound through the version meta", () => {
+    // Asserted on values the fixture actually sets: with `read` and `ttl`
+    // absent from it, the carry-through lines would compare undefined to
+    // undefined and pass however they were written.
+    const { entries, meta } = treeInputsFromState(makeState())
+    expect(meta.mounts[0]?.read).toBe('bounded')
+    expect(meta.mounts[0]?.ttl).toBe(45)
+    const back = toState(entries, blobToMeta(metaToBlob(meta)))
+    expect(back.mounts[0]?.read).toBe('bounded')
+    expect(back.mounts[0]?.ttl).toBe(45)
+    expect(back.version).toBe(4)
+  })
+
+  it('echoes the committed format version rather than stamping the current one', () => {
+    // Stamping would relabel every old commit as current, so the
+    // loader's version refusal could never fire and a v3 commit would
+    // land on a missing required key instead of the regenerate message.
+    const state = makeState()
+    state.version = 3
+    const { entries, meta } = treeInputsFromState(state)
+    expect(toState(entries, blobToMeta(metaToBlob(meta))).version).toBe(3)
+  })
+
+  it('reads a meta with no version key back as unversioned, not as current', () => {
+    // Python's twin answers 3 here and TypeScript answers undefined;
+    // both then refuse at the loader, with different wording. What must
+    // not happen either side is reading it as the current format, which
+    // would let a pre-v4 commit past the version check.
+    const { entries, meta } = treeInputsFromState(makeState())
+    delete (meta as { version?: number }).version
+    const back = toState(entries, blobToMeta(metaToBlob(meta)))
+    expect(back.version).not.toBe(4)
+  })
+
+  it('reads a pre-v4 mount meta back without the read keys rather than inventing them', () => {
+    const { entries, meta } = treeInputsFromState(makeState())
+    for (const mount of meta.mounts) {
+      delete mount.read
+      delete mount.ttl
+    }
+    const back = toState(entries, blobToMeta(metaToBlob(meta)))
+    expect(back.mounts[0]?.read).toBeUndefined()
+    expect(back.mounts[0]?.ttl).toBeUndefined()
   })
 
   it('a meta committed before the ref was recorded reads as constructed in code', () => {

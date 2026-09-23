@@ -23,7 +23,14 @@ export {
   stripLinkOperands,
 } from './links/index.ts'
 export { handleDf } from './df/index.ts'
-export { handleChgrp, handleChmod, handleChown, handleTouch } from './metadata/index.ts'
+export {
+  handleChgrp,
+  handleChmod,
+  handleChown,
+  handleGetfattr,
+  handleSetfattr,
+  handleTouch,
+} from './metadata/index.ts'
 export {
   handleDeclareFunctions,
   handleDeclarePrint,

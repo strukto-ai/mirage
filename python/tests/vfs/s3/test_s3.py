@@ -93,6 +93,7 @@ def test_s3_write_ops_tagged():
     from mirage.ops.s3 import OPS
     write_op_names = {
         "write",
+        "append",
         "unlink",
         "rmdir",
         "mkdir",

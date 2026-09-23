@@ -497,3 +497,51 @@ async def test_heredoc_operator_line_terminators(line, expected):
         assert await io.stderr_str() == ""
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_slashed_redirect_target_is_refused_before_the_command():
+    # GNU bash 5.2: open(2) with O_CREAT answers `missing/` with EISDIR
+    # before looking anything up, so the line prints `missing/: Is a
+    # directory`, exits 1, and the command never runs; a plain file
+    # behind the slash gets the same answer and keeps its bytes.
+    ws = await _workspace()
+    await ws.shell("printf y > /data/reg")
+    for line in ("echo hi > /data/missing/", "echo hi >> /data/missing/",
+                 "echo hi > /data/reg/", "echo hi >> /data/reg/",
+                 "touch /data/marker > /data/missing/"):
+        io = await ws.shell(line)
+        assert io.exit_code == 1, line
+        target = line.split()[-1]
+        assert io.stderr == f"{target}: Is a directory\n".encode(), line
+    assert (await ws.shell("test -e /data/missing")).exit_code == 1
+    assert (await ws.shell("test -e /data/marker")).exit_code == 1
+    assert await _out(ws, "cat /data/reg") == "y"
+
+
+@pytest.mark.asyncio
+async def test_slashed_redirect_refusal_keeps_the_opens_before_it():
+    # bash opens left to right, so `> a > missing/` has created `a`
+    # (empty) by the time the second open refuses.
+    ws = await _workspace()
+    io = await ws.shell("echo hi > /data/a > /data/missing/")
+    assert io.exit_code == 1
+    assert io.stderr == b"/data/missing/: Is a directory\n"
+    assert await _out(ws, "cat /data/a") == ""
+
+
+@pytest.mark.asyncio
+async def test_an_earlier_failed_open_wins_over_a_later_refusal():
+    # bash stops at the first open it cannot perform, so a redirect under
+    # an absent parent is reported ahead of a slashed or noclobbered
+    # target written after it, and nothing is created.
+    ws = await _workspace()
+    await ws.shell("printf y > /data/reg")
+    for line in ("echo hi > /data/nodir/f > /data/missing/",
+                 "set -C; echo hi > /data/nodir/f > /data/reg"):
+        io = await ws.shell(line)
+        assert io.exit_code == 1, line
+        assert io.stderr == b"/data/nodir/f: No such file or directory\n", line
+    assert (await ws.shell("test -e /data/nodir")).exit_code == 1
+    assert (await ws.shell("test -e /data/missing")).exit_code == 1
+    assert await _out(ws, "cat /data/reg") == "y"

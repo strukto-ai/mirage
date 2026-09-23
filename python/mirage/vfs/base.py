@@ -103,6 +103,30 @@ class BaseVFS:
     # docs/python/setup/fuse.mdx.
     sizes_always_known: bool = False
 
+    # Whether a `read: fresh` mount can actually be revalidated against
+    # this backend: stat() and read must stamp FileStat.fingerprint /
+    # the read record with the *same kind* of content token, so the gate
+    # can compare them with ==. False (the default) is refused at mount
+    # time rather than degraded, because a mount that declares fresh and
+    # silently serves bounded is the bug the policy exists to prevent.
+    #
+    # Distinct from supports_snapshot, which asks whether a token exists
+    # at all: gdrive stamps one on both sides and still cannot honour
+    # fresh, because stat returns a timestamp where read returns an md5.
+    # Distinct from caches_reads, which asks whether the gate can fire.
+    #
+    # onedrive and sharepoint look like they qualify and do not: both
+    # stamp a cTag on stat and on read, so on token kind alone the
+    # refusal reads as unnecessary. It is correct for a second reason
+    # the flag does not name -- both label the read record with
+    # `path.vfs_path`, which carries no leading slash, so `record()`
+    # builds a malformed key ("/oda/b.txt" rather than "/od/a/b.txt")
+    # and the cTag can never be matched against the cache entry. The
+    # backends that do qualify pass `path_spec.mount_path` instead.
+    # gdrive carries the same slashless label on top of its token-kind
+    # mismatch. Fix the label before reconsidering the flag.
+    read_revalidatable: bool = False
+
     _closed: bool = False
 
     # Whether this driver was built from a table, and the two tables
@@ -127,6 +151,7 @@ class BaseVFS:
         caches_reads: bool | None = None,
         sizes_always_known: bool | None = None,
         supports_snapshot: bool | None = None,
+        read_revalidatable: bool | None = None,
     ) -> None:
         """Build a driver from a table, or nothing at all.
 
@@ -165,6 +190,11 @@ class BaseVFS:
             supports_snapshot (bool | None): whether ``io.stat`` fills
                 ``FileStat.fingerprint`` with a stable per-path marker.
                 Setting it without that is not drift detection.
+            read_revalidatable (bool | None): whether ``io.stat`` and the
+                read record stamp the same kind of content token, so a
+                ``read: fresh`` mount can compare them. Setting it without
+                that makes every read verdict stale; a mount declaring
+                ``fresh`` on a backend that leaves it False is refused.
         """
         # Cooperative, so a mixin beside this class in a subclass's bases
         # (the RAM cache store's key locks) still initializes.
@@ -185,6 +215,8 @@ class BaseVFS:
             self.sizes_always_known = sizes_always_known
         if supports_snapshot is not None:
             self.supports_snapshot = supports_snapshot
+        if read_revalidatable is not None:
+            self.read_revalidatable = read_revalidatable
         if io is None:
             if any(x is not None
                    for x in (overrides, commands, ops, provision_overrides)):

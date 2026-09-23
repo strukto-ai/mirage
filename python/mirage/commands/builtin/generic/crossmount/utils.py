@@ -35,6 +35,21 @@ async def relay(dispatch: DispatchFn, name: str, path: PathSpec,
     return data
 
 
+async def _relay_write(dispatch: DispatchFn, path: PathSpec,
+                       data: bytes) -> None:
+    """Write one whole file on the mount that owns it.
+
+    The door every generic writes through, which the transfer
+    commands call with ``data=`` and the archivers call positionally.
+
+    Args:
+        dispatch (DispatchFn): Workspace operation dispatcher.
+        path (PathSpec): The file to write.
+        data (bytes): Its entire content.
+    """
+    await dispatch("write", path, data=data)
+
+
 async def run_operands(run_single: RunSingle,
                        cmd_name: str,
                        scopes: list[PathSpec],
@@ -121,7 +136,7 @@ def transfer_primitives(dispatch: DispatchFn) -> dict[str, Any]:
     return dict(
         stat=p(relay, dispatch, "stat"),
         read_bytes=p(relay, dispatch, "read"),
-        write=p(relay, dispatch, "write"),
+        write=p(_relay_write, dispatch),
         mkdir=p(relay, dispatch, "mkdir"),
         readdir=p(relay, dispatch, "readdir"),
     )

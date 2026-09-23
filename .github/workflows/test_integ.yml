@@ -2,6 +2,7 @@ name: Integ
 
 permissions:
   contents: read
+  actions: read
 
 "on":
   push:
@@ -284,6 +285,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -371,6 +373,14 @@ jobs:
       - name: Run notion MCP/REST parity check (TS)
         working-directory: integ
         run: pnpm exec tsx notion_mcp_parity.ts
+
+      # Every Notion call MCP-Atlas recorded against live Notion, replayed
+      # against the fake seeded with the workspace those replies show. A reply
+      # the fake answers differently is a divergence from live Notion, not a
+      # golden to refresh; scripts/gen_notion_atlas.py rebuilds the recordings.
+      - name: Replay live Notion recordings (MCP-Atlas) against the fake
+        working-directory: integ
+        run: pnpm run notion:atlas
 
       # Runs every cli-ntn case through the REAL Notion CLI against the same
       # fake, so the goldens the battery asserts are by construction what the
@@ -565,6 +575,17 @@ jobs:
         working-directory: integ
         run: pnpm run gws:selftest
 
+      - name: Assert the notion fake (block writes and validation)
+        working-directory: integ
+        run: pnpm run notion:selftest
+
+      # slack-mcp-server's own calls, which the battery never makes because
+      # mirage does not: auth.test, client.userBoot, conversations.replies, a
+      # paged conversations.list, and arguments sent as a form body.
+      - name: Assert the slack fake (auth.test, threads, paged channels)
+        working-directory: integ
+        run: pnpm run slack:selftest
+
       # github's corpus coverage is the `gh` porcelain, which never builds
       # history: a client that does calls POST /git/trees then /git/commits, and
       # that is the only path on which a commit can state its own author and
@@ -699,6 +720,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -1038,6 +1060,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -1366,6 +1389,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -1497,6 +1521,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 
@@ -1591,6 +1616,7 @@ jobs:
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
         with:
+          github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
 

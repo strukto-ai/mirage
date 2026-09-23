@@ -339,6 +339,32 @@ describe('find action layer', () => {
   })
 })
 
+describe('a time test gates the -prune after it', () => {
+  it('prunes only the directories the test holds for', async () => {
+    const ws = await singleMountWs()
+    ws.createSession('s')
+    await ws.shell(
+      'mkdir -p /d/old/x /d/new/y && touch /d/old/x/f /d/new/y/g /d/old/o.txt && touch -d 2000-01-01 /d/old',
+      { sessionId: 's' },
+    )
+    const gated = await ws.shell('find /d -mindepth 1 -newermt 2010-01-01 -prune', {
+      sessionId: 's',
+    })
+    expect(gated.stdoutText).toBe('/d/new\n/d/old/o.txt\n/d/old/x\n')
+    const firm = await ws.shell('find /d -mindepth 1 -prune -newermt 2010-01-01', {
+      sessionId: 's',
+    })
+    expect(firm.stdoutText).toBe('/d/new\n')
+    const old = await ws.shell('find /d -mindepth 1 -mtime +3650 -prune', { sessionId: 's' })
+    expect(old.stdoutText).toBe('/d/old\n')
+    const both = await ws.shell(
+      'find /d -mindepth 1 -newermt 1990-01-01 -prune -newermt 2010-01-01',
+      { sessionId: 's' },
+    )
+    expect(both.stdoutText).toBe('/d/new\n')
+  })
+})
+
 describe('find -exec isolation', () => {
   for (const terminator of ['\\;', '{} +']) {
     const actions =
@@ -637,14 +663,16 @@ for (const nested of [false, true]) {
   )
 }
 
-it('refuses deletion under OR before removing any file', async () => {
+// GNU findutils 4.10.0: `keep` short-circuits the -o, everything else
+// reaches -delete, and the directory holding `keep` cannot go.
+it('deletes only the other arm under OR', async () => {
   const ws = await singleMountWs()
   try {
     await ws.shell('mkdir d; touch d/keep d/remove')
     const io = await ws.shell('find d -name keep -o -delete')
     expect(io.exitCode).toBe(1)
-    expect(io.stderrText).toContain('supported only in a top-level')
-    expect((await ws.shell('test -f d/keep && test -f d/remove')).exitCode).toBe(0)
+    expect(io.stderrText).toBe("find: cannot delete 'd': Directory not empty\n")
+    expect((await ws.shell('test -f d/keep && test ! -e d/remove')).exitCode).toBe(0)
   } finally {
     await ws.close()
   }

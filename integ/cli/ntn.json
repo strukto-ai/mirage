@@ -179,7 +179,7 @@
       "expect": {
         "exit": 0,
         "stdout": "Write spec\n",
-        "stderr": "\nMore results available. Use --start-cursor 1 to continue.\n"
+        "stderr": "\nMore results available. Use --start-cursor ffff2222-3333-4444-5555-666677778888 to continue.\n"
       }
     },
     {
@@ -188,7 +188,7 @@
       "targets": [
         "cli-ntn"
       ],
-      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 --limit 1 --start-cursor 1 | cut -f5",
+      "command": "ntn datasources query d5000000-2222-3333-4444-555566667777 --limit 1 --start-cursor ffff2222-3333-4444-5555-666677778888 | cut -f5",
       "expect": {
         "exit": 0,
         "stdout": "Ship beta\n",
@@ -282,7 +282,7 @@
       "command": "ntn api v1/blocks/aaaa1111-2222-3333-4444-555566667777/children page_size==1 | jq -r '.has_more, .next_cursor'",
       "expect": {
         "exit": 0,
-        "stdout": "true\n1\n",
+        "stdout": "true\nb-a2\n",
         "stderr": ""
       }
     },
@@ -542,7 +542,7 @@
       "command": "ntn api v1/search -d '[]' | jq -r '.results | length'",
       "expect": {
         "exit": 0,
-        "stdout": "7\n",
+        "stdout": "8\n",
         "stderr": ""
       }
     },
@@ -724,7 +724,7 @@
       "command": "ntn datasources query d5000000-2222-3333-4444-555566667777",
       "expect": {
         "exit": 0,
-        "stdout": "a0000000-0000-4000-8000-000000000002\tRow page\n",
+        "stdout": "a0000000-0000-4000-8000-000000000002\t\t\t\tRow page\t\t\t\t\n",
         "stderr": ""
       }
     },
@@ -789,7 +789,7 @@
       "command": "ntn api v1/comments block_id==aaaa1111-2222-3333-4444-555566667777 page_size==1 | jq -r '(.results|length), .has_more, .next_cursor'",
       "expect": {
         "exit": 0,
-        "stdout": "1\ntrue\n1\n",
+        "stdout": "1\ntrue\nc0000000-0000-4000-8000-000000000007\n",
         "stderr": ""
       }
     },
@@ -799,7 +799,7 @@
       "targets": [
         "cli-ntn"
       ],
-      "command": "ntn api v1/comments block_id==aaaa1111-2222-3333-4444-555566667777 page_size==1 start_cursor==1 | jq -r '.results[0].rich_text[0].text.content, .has_more'",
+      "command": "ntn api v1/comments block_id==aaaa1111-2222-3333-4444-555566667777 page_size==1 start_cursor==c0000000-0000-4000-8000-000000000007 | jq -r '.results[0].rich_text[0].text.content, .has_more'",
       "expect": {
         "exit": 0,
         "stdout": "second note\nfalse\n",

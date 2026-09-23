@@ -168,10 +168,14 @@ async function get(op: Operator, key: string): Promise<Uint8Array | null> {
   }
 }
 
-async function put(op: Operator, key: string, data: Uint8Array): Promise<void> {
+async function put(op: Operator, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
   // A missing repo or revision answers NotFound; it propagates so the
   // write factory can name the path the user typed, not this key.
+  // No token: opendal's write does return Metadata here, but the python
+  // binding's returns nothing, so it is discarded to keep an hf write
+  // stamping the same absence in both languages.
   await op.write(key, Buffer.from(data))
+  return null
 }
 
 async function deleteFile(op: Operator, key: string): Promise<void> {

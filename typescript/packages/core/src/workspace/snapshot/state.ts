@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { tokenOrNull } from '../../cache/file/utils.ts'
 import { CacheEntry } from '../../cache/file/entry.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -54,12 +55,13 @@ import {
   RAMConsoleStore,
   exitOutcome,
 } from '../../shell/console/index.ts'
-import { ConsistencyPolicy, MountMode } from '../../types.ts'
+import { type ReadSpec, DEFAULT_READ_SPEC, MountMode } from '../../types.ts'
+import { resolveReadSpec } from '../mount/read_policy.ts'
+import { Mount } from '../mount/spec.ts'
 import { VERSION } from '../../version.ts'
-import type { NodeMeta } from '../mount/namespace/namespace.ts'
+import { metaFromFields, metaToFields, type NodeMeta } from '../mount/namespace/namespace.ts'
 import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
 import type { Workspace } from '../workspace/workspace.ts'
-import { Mount } from '../mount/spec.ts'
 import type { MountArgs } from './config.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
 import type {
@@ -95,7 +97,8 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
       index: i,
       prefix: m.prefix,
       mode: m.mode,
-      consistency: ConsistencyPolicy.LAZY,
+      read: m.read.policy,
+      ttl: m.read.ttl,
       vfs_class: m.vfs.name,
       vfs_ref: m.vfsRef,
       vfs_state: state,
@@ -168,16 +171,7 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
   const fingerprints: FingerprintEntrySnapshot[] = captureFingerprints(ws.records, ws.registry)
   const liveOnly = liveOnlyMountPrefixes(ws.registry)
   const nodes: Record<string, NodeMetaSnapshot> = {}
-  for (const [path, meta] of ws.namespace.nodes) {
-    const entry: NodeMetaSnapshot = {}
-    if (meta.target !== undefined) entry.target = meta.target
-    if (meta.mtime !== undefined) entry.mtime = meta.mtime
-    if (meta.mode !== undefined) entry.mode = meta.mode
-    if (meta.uid !== undefined) entry.uid = meta.uid
-    if (meta.gid !== undefined) entry.gid = meta.gid
-    if (meta.atime !== undefined) entry.atime = meta.atime
-    nodes[path] = entry
-  }
+  for (const [path, meta] of ws.namespace.nodes) nodes[path] = metaToFields(meta)
   return {
     version: FORMAT_VERSION,
     mirage_version: VERSION,
@@ -237,20 +231,45 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
   return null
 }
 
+/**
+ * Refuse a snapshot this loader's format has moved past.
+ *
+ * An absent version is v3 or older, not "current". It used to be
+ * harmless because every key the loader read had a default; v4 makes the
+ * read policy required, so an unversioned dict would land on a bad
+ * ReadSpec instead of this message.
+ *
+ * Both doors run it, mirroring Python's `check_format_version`.
+ * `buildMountArgs` builds a workspace from the state; `applyStateDict`
+ * restores into one that already exists, and is what `version checkout`,
+ * `version restore` and the agent sandbox's hydrate call. Checking in one
+ * door only meant the same bytes were refused through `Workspace.load`
+ * and half-restored through a checkout.
+ */
+export function checkFormatVersion(state: WorkspaceStateDict): void {
+  // Widened deliberately: the type says `version` is always present, but a
+  // dict written before the field existed comes back from JSON without it.
+  const saved = (state as { version?: number }).version
+  if (saved === undefined || saved < FORMAT_VERSION) {
+    const shown = saved === undefined ? 'unversioned' : `v${String(saved)}`
+    throw new Error(
+      `snapshot format ${shown} not supported (loader expects v${String(FORMAT_VERSION)})`,
+    )
+  }
+}
+
 export function buildMountArgs(
   state: WorkspaceStateDict,
   overrides: Record<string, BaseVFS | Mount> = {},
   cliOverrides: CLIOverrides = {},
+  userOverrides?: ReadonlySet<string>,
 ): MountArgs {
-  if (state.version < FORMAT_VERSION) {
-    throw new Error(
-      `snapshot format v${String(state.version)} not supported ` +
-        `(loader expects v${String(FORMAT_VERSION)})`,
-    )
-  }
+  checkFormatVersion(state)
   const normalized: Record<string, BaseVFS | Mount> = {}
+  const overridePrefixes = new Set<string>()
   for (const [prefix, vfs] of Object.entries(overrides)) {
     normalized[normMountPrefix(prefix)] = vfs
+    overridePrefixes.add(normMountPrefix(prefix))
   }
   // A mount with no override by now is one nobody can build: it asked to
   // be handed back live or was saved with a redacted secret, or the
@@ -284,10 +303,44 @@ export function buildMountArgs(
     // reference so a second round trip rebuilds through the same door.
     const override = normalized[normMountPrefix(m.prefix)]
     const placed = override instanceof Mount ? override : null
+    // Required, never defaulted: a dict labelled v4 with the key missing
+    // would install a default on a mount saved carrying something else,
+    // and a junk policy or a null bound would restore a mount whose cache
+    // can never serve. `mode` three lines up is validated the same way.
+    // Widened deliberately: the type says both keys are present, but a
+    // dict written by a foreign or older writer comes back from JSON
+    // without them.
+    const entry = m as { read?: string; ttl?: number }
+    if (entry.read === undefined || entry.ttl === undefined) {
+      throw new Error(
+        `Workspace.fromState: mount '${m.prefix}' is missing its read policy; ` +
+          `regenerate the snapshot`,
+      )
+    }
+    // Coerced whatever happens, so a junk policy or a non-positive bound
+    // is refused here rather than restoring a mount whose cache can
+    // never serve -- even on a prefix whose spec is then discarded.
+    const savedSpec = resolveReadSpec(entry.read, entry.ttl)
+    // The saved policy belongs to the backend that was saved, so it
+    // applies only where that backend is what is being mounted. A mount
+    // handed back through the caller's `mounts=` -- which a
+    // redacted-credential mount *must* be -- may be a different backend
+    // entirely, and carrying `fresh` onto one that cannot revalidate
+    // would refuse a restore that used to succeed. The override keeps its
+    // own policy, else the default. Everything else here the loader
+    // reconstructs from the saved state itself, which is the same
+    // backend. Python reads the line straight off the branch it took
+    // (`mounts=` vs `_construct_vfs`); here `fromState` merges its
+    // rebuilds into the same map first, so it names its callers' set.
+    const foreign = userOverrides ?? overridePrefixes
+    const read: ReadSpec = foreign.has(normMountPrefix(m.prefix))
+      ? (placed?.options.read ?? DEFAULT_READ_SPEC)
+      : savedSpec
     mountArgs[m.prefix] = new Mount(
       placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
       {
         mode: m.mode as MountMode,
+        read,
         vfsRef: placed !== null ? (placed.options.vfsRef ?? null) : savedRef(m),
       },
     )
@@ -317,7 +370,6 @@ export function buildMountArgs(
 
   return {
     mountArgs,
-    consistency: ConsistencyPolicy.LAZY,
     defaultSessionId: state.default_session_id,
     defaultAgentId: state.default_agent_id,
     ...(cliEntries.length > 0 ? { clis: cliArgs } : {}),
@@ -429,6 +481,7 @@ export async function applyStateDict(
   state: WorkspaceStateDict,
   options: { replaceCache?: boolean } = {},
 ): Promise<void> {
+  checkFormatVersion(state)
   const [sessions, seed] = await gateRestoredState(ws, state)
   if (options.replaceCache === true) await ws.cache.clear()
   for (const m of state.mounts) {
@@ -467,14 +520,7 @@ export async function applyStateDict(
 async function restoreNodes(ws: Workspace, state: WorkspaceStateDict): Promise<void> {
   const entries = new Map<string, NodeMeta>()
   for (const [path, e] of Object.entries(state.nodes ?? {})) {
-    const meta: NodeMeta = {}
-    if (e.target !== undefined) meta.target = e.target
-    if (e.mtime !== undefined) meta.mtime = e.mtime
-    if (e.mode !== undefined) meta.mode = e.mode
-    if (e.uid !== undefined) meta.uid = e.uid
-    if (e.gid !== undefined) meta.gid = e.gid
-    if (e.atime !== undefined) meta.atime = e.atime
-    entries.set(path, meta)
+    entries.set(path, metaFromFields(e))
   }
   await ws.namespace.replaceNodes(entries)
 }
@@ -555,6 +601,9 @@ async function restoreSessions(
 
 function restoreCache(ws: Workspace, state: WorkspaceStateDict): void {
   if (!(ws.cache instanceof RAMFileCacheStore)) return
+  // A snapshot is a third door into the entry table, and a document is not
+  // obliged to spell "no token" the way this version does, so each token is
+  // folded the way the live write doors fold it.
   for (const e of state.cache.entries) {
     ws.cache.loadEntry(
       e.key,
@@ -562,7 +611,7 @@ function restoreCache(ws: Workspace, state: WorkspaceStateDict): void {
       new CacheEntry({
         size: e.size,
         cachedAt: e.cached_at,
-        fingerprint: e.fingerprint,
+        fingerprint: tokenOrNull(e.fingerprint),
         ttl: e.ttl,
       }),
     )

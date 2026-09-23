@@ -14,7 +14,7 @@
 
 import type { IndexConfig } from '../../cache/index/config.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
-import type { Limit, MountBackend, MountMode } from '../../types.ts'
+import type { Limit, MountBackend, MountMode, ReadSpec } from '../../types.ts'
 
 export interface MountSpecOptions {
   /** Per-mount mode override; falls back to the workspace default when unset. */
@@ -43,6 +43,11 @@ export interface MountSpecOptions {
    * when there is none.
    */
   index?: IndexConfig
+  /**
+   * How cached bytes for this mount are revalidated. Omitted takes the
+   * workspace default, as `mode` does.
+   */
+  read?: ReadSpec
 }
 
 export class Mount {

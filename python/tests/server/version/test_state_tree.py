@@ -18,7 +18,7 @@ import pytest
 
 from mirage.server.version.state_tree import (blob_to_meta, meta_to_blob,
                                               to_state, tree_inputs_from_state)
-from mirage.types import MountMode
+from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot.keys import (CacheKey, FingerprintKey, MountKey,
@@ -26,6 +26,7 @@ from mirage.workspace.snapshot.keys import (CacheKey, FingerprintKey, MountKey,
 from mirage.workspace.snapshot.manifest import split_manifest_and_blobs
 from mirage.workspace.snapshot.state import to_state_dict
 from mirage.workspace.snapshot.tar_io import read_tar, write_tar
+from mirage.workspace.snapshot.utils import FORMAT_VERSION
 
 
 def _mount_files(state: dict, prefix: str) -> dict:
@@ -216,3 +217,54 @@ async def test_a_meta_without_a_ref_reads_as_constructed_in_code():
     restored = to_state(entries, meta)
 
     assert restored[StateKey.MOUNTS][0][MountKey.VFS_REF] is None
+
+
+@pytest.mark.asyncio
+async def test_the_format_version_rides_the_config_blob_and_is_echoed():
+    """A commit has to remember which format wrote it.
+
+    ``to_state`` echoes the committed version rather than stamping the
+    current one; stamping relabelled every old commit as current, so the
+    loader's version refusal could never fire.
+    """
+    ws = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    state = await to_state_dict(ws)
+    assert state[StateKey.VERSION] == FORMAT_VERSION
+
+    entries, meta = tree_inputs_from_state(state)
+    assert meta["config"][StateKey.VERSION] == FORMAT_VERSION
+    restored = to_state(entries, blob_to_meta(meta_to_blob(meta)))
+
+    assert restored[StateKey.VERSION] == FORMAT_VERSION
+
+
+@pytest.mark.asyncio
+async def test_a_pre_v4_commit_reads_back_as_v3_rather_than_raising():
+    """A commit written before the read keys existed carries neither
+    the version nor the mount's ``read``/``ttl``. Reading those keys
+    defensively is what lets the loader answer with its regenerate
+    message instead of a bare ``KeyError`` one frame earlier."""
+    ws = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    entries, meta = tree_inputs_from_state(await to_state_dict(ws))
+    del meta["config"][StateKey.VERSION]
+    del meta["mounts"][0][MountKey.READ]
+    del meta["mounts"][0][MountKey.TTL]
+
+    restored = to_state(entries, meta)
+
+    assert restored[StateKey.VERSION] == 3
+    assert restored[StateKey.MOUNTS][0][MountKey.READ] is None
+    assert restored[StateKey.MOUNTS][0][MountKey.TTL] is None
+
+
+@pytest.mark.asyncio
+async def test_the_mounts_read_spec_survives_the_version_meta():
+    ws = Workspace({"/m": (RAMVFS(), MountMode.WRITE)},
+                   mode=MountMode.WRITE,
+                   read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=45))
+    entries, meta = tree_inputs_from_state(await to_state_dict(ws))
+    restored = to_state(entries, blob_to_meta(meta_to_blob(meta)))
+
+    mount = restored[StateKey.MOUNTS][0]
+    assert mount[MountKey.READ] == ReadPolicy.BOUNDED.value
+    assert mount[MountKey.TTL] == 45

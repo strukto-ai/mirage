@@ -19,7 +19,7 @@ from mirage.core.github.config import GitHubConfig
 from mirage.core.github.readdir import readdir
 from mirage.core.github.tree import ensure_tree
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.types import ConsistencyPolicy, PathSpec
+from mirage.types import PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.github.github import GitHubVFS
 from mirage.workspace import Workspace
 from mirage.workspace.reconcile import Reconciler
@@ -123,8 +123,12 @@ async def test_an_unpinned_mount_is_on_the_default_branch_before_any_fetch(
 
 @pytest.mark.asyncio
 async def test_reconcile_private_index_can_resolve_github_ids(tree_calls):
+    # The subject is the reconciler's github-id resolution, not github's
+    # place on the revalidatable roster: the instance declares the
+    # capability so the mount can legally carry `read: fresh`.
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    ws = Workspace({"/gh": vfs})
+    vfs.read_revalidatable = True
+    ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     try:
         path = "/gh/src/main.py"
         await ws.namespace.ensure_loaded()
@@ -132,7 +136,7 @@ async def test_reconcile_private_index_can_resolve_github_ids(tree_calls):
         await mount.execute_op("stat", path)
         await ws.cache.set(path, b"cached", fingerprint="b")
         await ws.namespace.set_attrs(path, mode=0o600)
-        rec = Reconciler(ws.cache, ws.namespace, ConsistencyPolicy.ALWAYS)
+        rec = Reconciler(ws.cache, ws.namespace)
         await rec.reconcile_read(mount, path)
         assert await ws.cache.exists(path)
         assert ws.namespace.meta_for(path) is not None
@@ -158,7 +162,8 @@ async def test_always_reads_current_github_blob_after_probe(
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
     monkeypatch.setattr("mirage.core.github.read.read_bytes", read_bytes)
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    ws = Workspace({"/gh": vfs}, consistency=ConsistencyPolicy.ALWAYS)
+    vfs.read_revalidatable = True
+    ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     try:
         assert (await ws.shell("cat /gh/f.txt")).stdout == b"v1"
         index = ws.mount("/gh").index_store

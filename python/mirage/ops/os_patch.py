@@ -60,6 +60,12 @@ def _ident(text: str) -> int:
         blake2b(text.encode(), digest_size=7).digest(), "big")
 
 
+# setxattr(2)'s flags as linux numbers them, the one platform whose os
+# module has the xattr family for this router to install.
+_XATTR_CREATE = 1
+_XATTR_REPLACE = 2
+
+
 def _leaf(entry: str) -> str:
     """The basename of a readdir entry, directory slash dropped.
 
@@ -613,6 +619,76 @@ class _OsRouter:
                               uid=None if uid == -1 else uid,
                               gid=None if gid == -1 else gid,
                               nofollow=not follow_symlinks))
+
+    def getxattr(self,
+                 path: Any,
+                 attribute: str | bytes,
+                 *,
+                 follow_symlinks: bool = True) -> bytes:
+        virtual = self._virtual(path)
+        if virtual is None:
+            return cast(
+                bytes,
+                self._host.getxattr(path,
+                                    attribute,
+                                    follow_symlinks=follow_symlinks))
+        return bytes(
+            self._run(
+                self._ops.getxattr(virtual,
+                                   _real_os.fsdecode(attribute),
+                                   nofollow=not follow_symlinks)))
+
+    def listxattr(self,
+                  path: Any = None,
+                  *,
+                  follow_symlinks: bool = True) -> list[str]:
+        virtual = self._virtual(path)
+        if virtual is None:
+            return cast(
+                list[str],
+                self._host.listxattr(path, follow_symlinks=follow_symlinks))
+        return list(
+            self._run(
+                self._ops.listxattr(virtual, nofollow=not follow_symlinks)))
+
+    def setxattr(self,
+                 path: Any,
+                 attribute: str | bytes,
+                 value: bytes,
+                 flags: int = 0,
+                 *,
+                 follow_symlinks: bool = True) -> None:
+        virtual = self._virtual(path)
+        if virtual is None:
+            self._host.setxattr(path,
+                                attribute,
+                                value,
+                                flags,
+                                follow_symlinks=follow_symlinks)
+            return
+        self._run(
+            self._ops.setxattr(virtual,
+                               _real_os.fsdecode(attribute),
+                               bytes(value),
+                               create=bool(flags & _XATTR_CREATE),
+                               replace=bool(flags & _XATTR_REPLACE),
+                               nofollow=not follow_symlinks))
+
+    def removexattr(self,
+                    path: Any,
+                    attribute: str | bytes,
+                    *,
+                    follow_symlinks: bool = True) -> None:
+        virtual = self._virtual(path)
+        if virtual is None:
+            self._host.removexattr(path,
+                                   attribute,
+                                   follow_symlinks=follow_symlinks)
+            return
+        self._run(
+            self._ops.removexattr(virtual,
+                                  _real_os.fsdecode(attribute),
+                                  nofollow=not follow_symlinks))
 
     def lchmod(self, path: Any, mode: int) -> None:
         virtual = self._virtual(path)

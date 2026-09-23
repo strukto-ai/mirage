@@ -18,12 +18,12 @@ from mirage.vfs.ram import RAMVFS
 from mirage.commands.registry import command
 from mirage.commands.cli import CLIInvocation, CLISpec, register_cli_spec
 from mirage.commands.spec import Operand, Option
-from mirage.types import FileStat, MountBackend, MountMode
+from mirage.types import (FileStat, MountBackend, MountMode, ReadPolicy,
+                          ReadSpec)
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.workspace import (ExecutionNode, Workspace, WorkspaceRunner)
 from mirage.workspace.fuse import FuseManager
 from mirage.workspace.mount.spec import Mount
-from mirage.types import ConsistencyPolicy
 from mirage.utils.ids import new_session_id, new_workspace_id, uuid7
 from mirage.version import __version__ as __version__
 
@@ -81,7 +81,6 @@ __all__ = [
     "DiskVFS",
     "Action",
     "CommandContext",
-    "ConsistencyPolicy",
     "Deny",
     "ExecutionNode",
     "FileStat",
@@ -90,6 +89,8 @@ __all__ = [
     "Mount",
     "MountBackend",
     "MountMode",
+    "ReadPolicy",
+    "ReadSpec",
     "CLIInvocation",
     "CLISpec",
     "Operand",

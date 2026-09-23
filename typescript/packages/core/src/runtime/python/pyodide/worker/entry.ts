@@ -47,6 +47,8 @@ const sync: SyncVFS = {
     if (mutations.length > 0)
       return call({ op: 'flush', path: '', mutations }) as FlushFailure | undefined
   },
+  xattr: (op, path, name, value, attrs) =>
+    call({ op: 'dispatch', path, args: [op, path, value, name, attrs] }),
 }
 const dispatch: BridgeDispatchFn = (...args) =>
   Promise.resolve(call({ op: 'dispatch', path: args[1], args }))

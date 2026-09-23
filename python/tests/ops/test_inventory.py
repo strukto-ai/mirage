@@ -36,6 +36,7 @@ OPS_INVENTORY = {
         ("stat", "chroma", "", False),
     ],
     "databricks_volume": [
+        ("append", "databricks_volume", "", True),
         ("create", "databricks_volume", "", True),
         ("glob", "databricks_volume", "", False),
         ("mkdir", "databricks_volume", "", True),
@@ -77,6 +78,7 @@ OPS_INVENTORY = {
         ("write", "disk", "", True),
     ],
     "dropbox": [
+        ("append", "dropbox", "", True),
         ("create", "dropbox", "", True),
         ("glob", "dropbox", "", False),
         ("mkdir", "dropbox", "", True),
@@ -103,6 +105,7 @@ OPS_INVENTORY = {
         ("stat", "gdocs", "", False),
     ],
     "gdrive": [
+        ("append", "gdrive", "", True),
         ("create", "gdrive", "", True),
         ("glob", "gdrive", "", False),
         ("mkdir", "gdrive", "", True),
@@ -142,6 +145,10 @@ OPS_INVENTORY = {
         ("stat", "gslides", "", False),
     ],
     "hf_buckets": [
+        ("append", "hf_buckets", "", True),
+        ("append", "hf_datasets", "", True),
+        ("append", "hf_models", "", True),
+        ("append", "hf_spaces", "", True),
         ("create", "hf_buckets", "", True),
         ("create", "hf_datasets", "", True),
         ("create", "hf_models", "", True),
@@ -206,6 +213,7 @@ OPS_INVENTORY = {
         ("stat", "mongodb", "", False),
     ],
     "nextcloud": [
+        ("append", "nextcloud", "", True),
         ("create", "nextcloud", "", True),
         ("glob", "nextcloud", "", False),
         ("mkdir", "nextcloud", "", True),
@@ -225,6 +233,7 @@ OPS_INVENTORY = {
         ("stat", "notion", "", False),
     ],
     "onedrive": [
+        ("append", "onedrive", "", True),
         ("create", "onedrive", "", True),
         ("glob", "onedrive", "", False),
         ("mkdir", "onedrive", "", True),
@@ -280,6 +289,7 @@ OPS_INVENTORY = {
         ("write", "redis", "", True),
     ],
     "s3": [
+        ("append", "s3", "", True),
         ("create", "s3", "", True),
         ("glob", "s3", "", False),
         ("mkdir", "s3", "", True),
@@ -293,6 +303,7 @@ OPS_INVENTORY = {
         ("write", "s3", "", True),
     ],
     "sharepoint": [
+        ("append", "sharepoint", "", True),
         ("create", "sharepoint", "", True),
         ("glob", "sharepoint", "", False),
         ("mkdir", "sharepoint", "", True),

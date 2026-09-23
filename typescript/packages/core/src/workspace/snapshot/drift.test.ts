@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpRecord } from '../../observe/record.ts'
+import {
+  CONTENT_CHANGING_OPS,
+  OpRecord,
+  RETRACT_FINGERPRINT_OPS,
+  STAMP_FINGERPRINT_OPS,
+  SUBTREE_RETRACT_OPS,
+} from '../../observe/record.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -65,14 +71,40 @@ function makeStatFn(stats?: Record<string, FileStat>): (path: string) => Promise
 
 function makeRegistry(mounts: MountEntry[]): RegistryLike {
   return {
+    // Longest prefix wins, as the real registry resolves: a first-match
+    // walk hands `/s3/a` to a `/` mount whenever both are mounted, and
+    // the mount-scoped subtree sweep is exactly what that hides.
     tryMountFor: (path: string): MountEntry | null => {
+      const base = `${path.replace(/\/+$/, '')}/`
+      let best: MountEntry | null = null
       for (const m of mounts) {
-        if (path.startsWith(m.prefix.replace(/\/$/, ''))) return m
+        if (base.startsWith(m.prefix) && (best === null || m.prefix.length > best.prefix.length)) {
+          best = m
+        }
       }
-      return null
+      return best
     },
     allMounts: () => mounts,
   }
+}
+
+function opRecord(
+  op: string,
+  path: string,
+  fingerprint: string | null = null,
+  revision: string | null = null,
+  timestamp = 0,
+): OpRecord {
+  return new OpRecord({
+    op,
+    path,
+    source: 's3',
+    bytes: 0,
+    timestamp,
+    durationMs: 0,
+    fingerprint,
+    revision,
+  })
 }
 
 function makeRecord(
@@ -104,7 +136,7 @@ describe('captureFingerprints', () => {
     ])
   })
 
-  it('deduplicates by path; first read wins', () => {
+  it('deduplicates by path; the last record wins', () => {
     const mount = makeMount('/s3/', true)
     const registry = makeRegistry([mount])
     const entries = captureFingerprints(
@@ -112,7 +144,7 @@ describe('captureFingerprints', () => {
       registry,
     )
     expect(entries.length).toBe(1)
-    expect(entries[0]?.fingerprint).toBe('fp-old')
+    expect(entries[0]?.fingerprint).toBe('fp-new')
   })
 
   it('skips reads with neither fingerprint nor revision', () => {
@@ -122,19 +154,121 @@ describe('captureFingerprints', () => {
     expect(entries.length).toBe(0)
   })
 
-  it('skips non-read ops', () => {
+  it('captures a write that carries a token', () => {
     const mount = makeMount('/s3/', true)
     const registry = makeRegistry([mount])
-    const writeRec = new OpRecord({
-      op: 'write',
-      path: '/s3/a',
-      source: 's3',
-      bytes: 1,
-      timestamp: 0,
-      durationMs: 0,
-      fingerprint: 'fp-a',
-    })
-    expect(captureFingerprints([writeRec], registry).length).toBe(0)
+    const entries = captureFingerprints([opRecord('write', '/s3/a', 'fp-a')], registry)
+    expect(entries).toEqual([{ path: '/s3/a', mount_prefix: '/s3/', fingerprint: 'fp-a' }])
+  })
+
+  it('skips an op that stamps no token at all', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    expect(captureFingerprints([opRecord('readdir', '/s3/a', 'fp-a')], registry).length).toBe(0)
+  })
+
+  it('retracts a pin when the object is removed', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    const entries = captureFingerprints(
+      [opRecord('write', '/s3/a', 'fp-a'), opRecord('unlink', '/s3/a')],
+      registry,
+    )
+    expect(entries).toEqual([])
+  })
+
+  it('a retraction takes the whole subtree with it', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    const entries = captureFingerprints(
+      [
+        opRecord('write', '/s3/d/f', 'fp-f'),
+        opRecord('write', '/s3/ab.txt', 'fp-ab'),
+        opRecord('rm_r', '/s3/d'),
+      ],
+      registry,
+    )
+    // `/s3/ab.txt` is not under `/s3/d`, and a bare startswith would have
+    // taken `/s3/d`'s sibling too.
+    expect(entries.map((e) => e.path)).toEqual(['/s3/ab.txt'])
+  })
+
+  it('a sibling sharing a name prefix is not retracted', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    const entries = captureFingerprints(
+      [opRecord('write', '/s3/ab.txt', 'fp-ab'), opRecord('unlink', '/s3/a')],
+      registry,
+    )
+    expect(entries.map((e) => e.path)).toEqual(['/s3/ab.txt'])
+  })
+
+  it('a mount-root retraction drops the mount, whichever way it is spelled', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    for (const rootPath of ['/s3', '/s3/']) {
+      const entries = captureFingerprints(
+        [opRecord('write', '/s3/a', 'fp-a'), opRecord('rm_r', rootPath)],
+        registry,
+      )
+      expect(entries, rootPath).toEqual([])
+    }
+  })
+
+  it('a re-write after a retraction pins the new token', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    const entries = captureFingerprints(
+      [
+        opRecord('write', '/s3/a', 'fp-1'),
+        opRecord('unlink', '/s3/a'),
+        opRecord('write', '/s3/a', 'fp-2'),
+      ],
+      registry,
+    )
+    expect(entries).toEqual([{ path: '/s3/a', mount_prefix: '/s3/', fingerprint: 'fp-2' }])
+  })
+
+  it('a write that carries no token retracts the pin it cannot describe', () => {
+    // gdrive's shape: it stamps a read fingerprint but records a tokenless
+    // write, so the pre-write token must not survive the write.
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    const entries = captureFingerprints(
+      [makeRecord('/s3/a', 'fp-read'), opRecord('write', '/s3/a')],
+      registry,
+    )
+    expect(entries).toEqual([])
+  })
+
+  it('an append retracts, since it never carries a token', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    const entries = captureFingerprints(
+      [makeRecord('/s3/a', 'fp-read'), opRecord('append', '/s3/a')],
+      registry,
+    )
+    expect(entries).toEqual([])
+  })
+
+  it('a read reporting no token leaves the pin alone', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    const entries = captureFingerprints(
+      [opRecord('write', '/s3/a', 'fp-a'), makeRecord('/s3/a')],
+      registry,
+    )
+    expect(entries).toEqual([{ path: '/s3/a', mount_prefix: '/s3/', fingerprint: 'fp-a' }])
+  })
+
+  it('replaces the entry whole, so a read revision cannot outlive it', () => {
+    const mount = makeMount('/s3/', true)
+    const registry = makeRegistry([mount])
+    const entries = captureFingerprints(
+      [makeRecord('/s3/a', 'fp-read', 'rev-read'), opRecord('write', '/s3/a', 'fp-write')],
+      registry,
+    )
+    expect(entries).toEqual([{ path: '/s3/a', mount_prefix: '/s3/', fingerprint: 'fp-write' }])
   })
 
   it('skips mounts that opt out of snapshot replay', () => {
@@ -142,6 +276,149 @@ describe('captureFingerprints', () => {
     const registry = makeRegistry([mount])
     const entries = captureFingerprints([makeRecord('/gmail/inbox/1', 'fp-1')], registry)
     expect(entries.length).toBe(0)
+  })
+})
+
+describe('captureFingerprints op sets', () => {
+  const mount = makeMount('/s3/', true)
+  const registry = makeRegistry([mount])
+
+  it('a move retracts the destination pin too', () => {
+    // `mv a b` replaces b's bytes with a's, so b's own token stops
+    // describing its object. The src record alone would leave it pinned.
+    const entries = captureFingerprints(
+      [
+        opRecord('write', '/s3/a', 'fp-a'),
+        opRecord('write', '/s3/b', 'fp-b'),
+        opRecord('rename', '/s3/a'),
+        opRecord('rename', '/s3/b'),
+      ],
+      registry,
+    )
+    expect(entries).toEqual([])
+  })
+
+  it('a copy retracts the destination pin', () => {
+    const entries = captureFingerprints(
+      [
+        opRecord('write', '/s3/a', 'fp-a'),
+        opRecord('write', '/s3/b', 'fp-b'),
+        opRecord('copy', '/s3/b'),
+      ],
+      registry,
+    )
+    expect(entries.map((e) => e.path)).toEqual(['/s3/a'])
+  })
+
+  it('holds exactly what the ladder needs', () => {
+    // Each member is load-bearing: dropping one silently changes which
+    // arm an op takes, and every behaviour test would still pass.
+    expect([...STAMP_FINGERPRINT_OPS].sort()).toEqual(['create', 'read', 'truncate', 'write'])
+    expect([...CONTENT_CHANGING_OPS].sort()).toEqual(['append', 'create', 'truncate', 'write'])
+    expect([...RETRACT_FINGERPRINT_OPS].sort()).toEqual([
+      'copy',
+      'rename',
+      'rename_prefix',
+      'rm_r',
+      'rmdir',
+      'unlink',
+    ])
+    expect([...SUBTREE_RETRACT_OPS].sort()).toEqual(['rename_prefix', 'rm_r'])
+  })
+
+  it.each([...SUBTREE_RETRACT_OPS])('%s takes a descendant pin with it', (op) => {
+    const entries = captureFingerprints(
+      [opRecord('write', '/s3/a/b', 'fp-b'), opRecord(op, '/s3/a')],
+      registry,
+    )
+    expect(entries).toEqual([])
+  })
+
+  it.each([...RETRACT_FINGERPRINT_OPS].filter((op) => !SUBTREE_RETRACT_OPS.has(op)))(
+    '%s leaves a descendant pin alone',
+    (op) => {
+      // On a keyed store `a` and `a/b` are both objects, and `rm a`
+      // leaves `a/b` alone; only an op that can move a whole prefix
+      // takes one.
+      const entries = captureFingerprints(
+        [opRecord('write', '/s3/a/b', 'fp-b'), opRecord(op, '/s3/a')],
+        registry,
+      )
+      expect(entries.map((e) => e.path)).toEqual(['/s3/a/b'])
+    },
+  )
+
+  it('a mount-root retraction leaves a nested mount alone', () => {
+    // A nested mount's keys live in a different backend, so an op on the
+    // parent never touched them. Worst at '/', where every virtual path
+    // reads as being under the retracted root.
+    const nested = makeRegistry([makeMount('/', true), makeMount('/s3/', true)])
+    const entries = captureFingerprints(
+      [opRecord('write', '/x', 'fp-x'), opRecord('write', '/s3/a', 'fp-a'), opRecord('rm_r', '/')],
+      nested,
+    )
+    expect(entries.map((e) => e.path)).toEqual(['/s3/a'])
+  })
+
+  it('orders records by timestamp, not by position', () => {
+    // A backend record reaches the list when its line ends, while an
+    // `Ops` facade record appends as it happens, so a retraction can sit
+    // ahead of the write it precedes in time.
+    const entries = captureFingerprints(
+      [opRecord('write', '/s3/a', 'fp-a', null, 2), opRecord('unlink', '/s3/a', null, null, 1)],
+      registry,
+    )
+    expect(entries.map((e) => e.path)).toEqual(['/s3/a'])
+  })
+
+  it('keeps the order of records sharing one millisecond', () => {
+    // The sort is stable, so an unlink and the rewrite that followed it
+    // inside one millisecond do not swap.
+    const entries = captureFingerprints(
+      [opRecord('unlink', '/s3/a'), opRecord('write', '/s3/a', 'fp-new')],
+      registry,
+    )
+    expect(entries.map((e) => e.path)).toEqual(['/s3/a'])
+  })
+
+  it('drops a pin for a content-changing op carrying a token it cannot use', () => {
+    // `append` is in CONTENT_CHANGING but not in STAMP, so it never
+    // reaches the stamping arm; a token on its record must not buy the
+    // pre-append pin a reprieve it cannot use.
+    const entries = captureFingerprints(
+      [makeRecord('/s3/a', 'fp-read'), opRecord('append', '/s3/a', 'fp-append')],
+      registry,
+    )
+    expect(entries).toEqual([])
+  })
+
+  it('pins an empty fingerprint that carries a revision beside it', () => {
+    // The token test is truthiness, not null-ness: an empty string is no
+    // token, but the revision beside it is one. `??` would read the
+    // empty string as the answer and drop the pin.
+    const entries = captureFingerprints([opRecord('write', '/s3/a', '', 'rev-1')], registry)
+    expect(entries.map((e) => e.path)).toEqual(['/s3/a'])
+  })
+
+  it.each([...RETRACT_FINGERPRINT_OPS])('%s drops a pin', (op) => {
+    const entries = captureFingerprints(
+      [opRecord('write', '/s3/a', 'fp-a'), opRecord(op, '/s3/a')],
+      registry,
+    )
+    expect(entries).toEqual([])
+  })
+
+  it.each([...STAMP_FINGERPRINT_OPS])('%s can set a pin', (op) => {
+    const entries = captureFingerprints([opRecord(op, '/s3/a', 'fp-a')], registry)
+    expect(entries.map((e) => e.path)).toEqual(['/s3/a'])
+  })
+
+  it.each([...CONTENT_CHANGING_OPS])('%s drops a pin it cannot describe', (op) => {
+    const entries = captureFingerprints(
+      [makeRecord('/s3/a', 'fp-read'), opRecord(op, '/s3/a')],
+      registry,
+    )
+    expect(entries).toEqual([])
   })
 })
 

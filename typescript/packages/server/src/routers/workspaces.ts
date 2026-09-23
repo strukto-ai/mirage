@@ -15,7 +15,6 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import type { Limit } from '@struktoai/mirage-core/types'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
@@ -86,6 +85,17 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       let cfg: WorkspaceConfigRaw
       try {
         cfg = loadWorkspaceConfig(config as Record<string, unknown>)
+        for (const entry of cfg.runtimes ?? []) {
+          if (typeof entry === 'string') continue
+          const runtimeConfig = entry.config
+          if (
+            runtimeConfig !== null &&
+            typeof runtimeConfig === 'object' &&
+            Object.hasOwn(runtimeConfig, 'initModule')
+          ) {
+            throw new Error('runtime initModule is only allowed in operator-owned configuration')
+          }
+        }
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })
       }
@@ -102,13 +112,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         }
         return reply.status(502).send({ detail: `VFS build failed: ${(e as Error).message}` })
       }
-      const vfsMap: Record<string, MountSpec> = {}
-      const commandLimits: Record<string, Record<string, Limit>> = {}
-      for (const [prefix, placement] of Object.entries(args.mounts)) {
-        vfsMap[prefix] = placement
-        const limits = placement.options.commandLimits ?? {}
-        if (Object.keys(limits).length > 0) commandLimits[prefix] = limits
-      }
+      // The Mounts ride through whole; see workspace_config.ts.
+      const vfsMap: Record<string, MountSpec> = { ...args.mounts }
       // The registry id and the state-store scope must be the same identity,
       // so resolve it before construction: explicit REST id, then the
       // config's workspaceId, then a fresh mint.
@@ -130,7 +135,6 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           // Whichever of the two built it, no sibling workspace shares
           // it, so this workspace is the one that closes it.
           ownsStore: true,
-          ...(Object.keys(commandLimits).length > 0 ? { commandLimits } : {}),
         })
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })

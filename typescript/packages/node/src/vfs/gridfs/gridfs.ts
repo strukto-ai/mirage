@@ -35,6 +35,9 @@ export class GridFSVFS extends BaseVFS {
   override readonly supportsSnapshot: boolean = true
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
+  // stat and read both stamp str(file_id), so the gate compares like
+  // with like.
+  override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 600
   override readonly prompt: string = GRIDFS_PROMPT
   readonly config: GridFSConfig

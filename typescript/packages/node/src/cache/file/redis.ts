@@ -12,18 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import './utils.ts'
-
 import { readFileSync } from 'node:fs'
 import { CacheType } from '@struktoai/mirage-core/cache/file/config'
 import { Invalidation } from '@struktoai/mirage-core/cache/invalidation'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
 import type { FileCache } from '@struktoai/mirage-core/cache/file/mixin'
-import {
-  defaultFingerprintAsync,
-  globEscape,
-  parseLimit,
-} from '@struktoai/mirage-core/cache/file/utils'
+import { globEscape, parseLimit, tokenOrNull } from '@struktoai/mirage-core/cache/file/utils'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { registerFileCacheStore } from '@struktoai/mirage-core/workspace/workspace/cache'
 import type { RedisClientType } from 'redis'
@@ -124,17 +118,22 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
   ): Promise<void> {
     const stamp = this.invalidation.enter(key)
     try {
-      const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
+      const fp = tokenOrNull(options.fingerprint)
       const c = await this.cacheClient()
       if (this.invalidation.stale(key, stamp)) return
       const dk = this.dataKey(key)
       const mk = this.metaKey(key)
       const pipe = c.multi()
       pipe.set(dk, toBuffer(data))
-      pipe.set(mk, fp)
+      // Deleted, not left alone: redis expires the two keys independently
+      // and a re-set of an entry that carried a token would otherwise
+      // leave the old meta key describing the new bytes, which isFresh
+      // would read as fresh.
+      if (fp !== null) pipe.set(mk, fp)
+      else pipe.del(mk)
       if (options.ttl !== null && options.ttl !== undefined) {
         pipe.expire(dk, options.ttl)
-        pipe.expire(mk, options.ttl)
+        if (fp !== null) pipe.expire(mk, options.ttl)
       }
       await pipe.exec()
     } finally {
@@ -150,7 +149,6 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     const stamp = this.invalidation.enter(key)
     try {
       const c = await this.cacheClient()
-      const fp = options.fingerprint ?? (await defaultFingerprintAsync(data))
       if (this.invalidation.stale(key, stamp)) return false
       // A background drain is insert-only: an older drain finishing late must
       // not overwrite a newer cache fill. add.lua keeps the check, bytes,
@@ -159,7 +157,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
         keys: [this.dataKey(key), this.metaKey(key)],
         arguments: [
           toBuffer(data),
-          fp,
+          tokenOrNull(options.fingerprint) ?? '',
           options.ttl === null || options.ttl === undefined ? '' : String(options.ttl),
         ],
       })
@@ -186,6 +184,13 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     const fp = await c.get(this.metaKey(key))
     if (fp === null) return false
     return fp === remoteFingerprint
+  }
+
+  async isUnbounded(key: string): Promise<boolean> {
+    // Redis answers this natively and distinguishes the two cases that
+    // matter: -1 is present with no expiry, -2 is absent.
+    const c = await this.cacheClient()
+    return (await c.ttl(this.dataKey(key))) === -1
   }
 
   async evictPrefix(prefix: string): Promise<void> {

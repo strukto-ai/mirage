@@ -28,4 +28,11 @@ export interface RowAction {
   readonly kind: RowActionKind
 }
 
-export type FindAction = ExecAction | RowAction
+/** One `-printf` action: each row it reaches, rendered through `format`,
+ * the format as typed, escapes and directives unexpanded. */
+export interface PrintfAction {
+  readonly kind: 'printf'
+  readonly format: string
+}
+
+export type FindAction = ExecAction | RowAction | PrintfAction

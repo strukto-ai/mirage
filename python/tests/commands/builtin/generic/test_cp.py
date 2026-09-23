@@ -805,3 +805,92 @@ def test_update_refuses_a_prefix_spanning_two_values(command, value):
     assert str(exc.value).startswith(
         f"{command}: ambiguous argument '{value}' for '--update'\n")
     assert exc.value.exit_code == 1
+
+
+def _slashed(path: str) -> PathSpec:
+    # The operand as the shell classifies `path/`: a normalized virtual
+    # path with the typed spelling, slash included, kept in raw_path.
+    return PathSpec(virtual=path,
+                    directory=path.rsplit("/", 1)[0] or "/",
+                    vfs_path=path.strip("/"),
+                    raw_path=path + "/")
+
+
+@pytest.mark.asyncio
+async def test_slashed_missing_destination_refuses_a_file_source():
+    # GNU 9.7: `cp a.txt missing/` is `cannot create regular file
+    # 'missing/': Not a directory`, and nothing named `missing` appears.
+    files = {"/a.txt": b"AAA"}
+    stat, copy, find = _make_backend(files, set())
+    _, io = await cp([_spec("/a.txt"), _slashed("/missing")],
+                     strategy=NativeCopy(copy=copy, find=find),
+                     stat=stat,
+                     flags=CpFlags())
+    assert io.exit_code == 1
+    assert io.stderr == (b"cp: cannot create regular file '/missing/': "
+                         b"Not a directory\n")
+    assert files == {"/a.txt": b"AAA"}
+
+
+@pytest.mark.asyncio
+async def test_many_sources_to_a_slashed_file_report_not_a_directory():
+    # GNU 9.7: `cp a b reg/` is `target 'reg/': Not a directory`, the
+    # destination probe's verdict, where only a genuinely absent target
+    # is `No such file or directory`.
+    files = {"/a.txt": b"AAA", "/b.txt": b"BBB", "/reg": b"R"}
+    stat, copy, find = _make_backend(files, set())
+    with pytest.raises(NotADirectoryError, match="target '/reg/'"):
+        await cp([_spec("/a.txt"),
+                  _spec("/b.txt"),
+                  _slashed("/reg")],
+                 strategy=NativeCopy(copy=copy, find=find),
+                 stat=stat,
+                 flags=CpFlags())
+    with pytest.raises(FileNotFoundError, match="target '/missing/'"):
+        await cp([_spec("/a.txt"),
+                  _spec("/b.txt"),
+                  _slashed("/missing")],
+                 strategy=NativeCopy(copy=copy, find=find),
+                 stat=stat,
+                 flags=CpFlags())
+    assert files == {"/a.txt": b"AAA", "/b.txt": b"BBB", "/reg": b"R"}
+
+
+@pytest.mark.asyncio
+async def test_slashed_missing_destination_takes_a_directory_source():
+    files = {"/d/f": b"F"}
+    stat, copy, find = _make_backend(files, {"/d"})
+    _, io = await cp([_spec("/d"), _slashed("/missing")],
+                     strategy=NativeCopy(copy=copy, find=find),
+                     stat=stat,
+                     flags=CpFlags(recursive=True))
+    assert io.exit_code == 0
+    assert files["/missing/f"] == b"F"
+
+
+@pytest.mark.asyncio
+async def test_slashed_file_destination_reports_cannot_stat():
+    # `cp a.txt reg/` fails the destination's stat in GNU, and the stat
+    # itself decides here whether or not the backend's is slash-aware.
+    files = {"/a.txt": b"AAA", "/reg": b"R"}
+    stat, copy, find = _make_backend(files, set())
+    _, io = await cp([_spec("/a.txt"), _slashed("/reg")],
+                     strategy=NativeCopy(copy=copy, find=find),
+                     stat=stat,
+                     flags=CpFlags())
+    assert io.exit_code == 1
+    assert io.stderr == b"cp: cannot stat '/reg/': Not a directory\n"
+    assert files == {"/a.txt": b"AAA", "/reg": b"R"}
+
+
+@pytest.mark.asyncio
+async def test_slashed_file_source_reports_cannot_stat():
+    files = {"/reg": b"R"}
+    stat, copy, find = _make_backend(files, set())
+    _, io = await cp([_slashed("/reg"), _spec("/x")],
+                     strategy=NativeCopy(copy=copy, find=find),
+                     stat=stat,
+                     flags=CpFlags())
+    assert io.exit_code == 1
+    assert io.stderr == b"cp: cannot stat '/reg/': Not a directory\n"
+    assert files == {"/reg": b"R"}

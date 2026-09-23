@@ -168,25 +168,44 @@ describe('execute({ env }): bash subshell semantics', () => {
 })
 
 describe('execute({ signal }): concurrent lines on one session', () => {
-  // A snapshots `$?` and blocks, B finishes and stamps its own, then A
-  // aborts. A's snapshot is older than B's result, so putting it back
-  // would resurrect a status the shell had already moved past.
-  it('does not restore over a status another line stamped', async () => {
+  // One session runs one line at a time (#1144): B waits for A, so A's
+  // abort restores the `$?` it found before B ever stamps its own, and
+  // the shell ends on B's status, never on a resurrected older one.
+  it('a queued line runs after the aborted one and keeps its status', async () => {
     const ws = await makeWs()
     await ws.shell('true')
 
     const ac = new AbortController()
     const blocked = ws.shell('sleep 5', { signal: ac.signal })
     const settled = blocked.catch(() => undefined)
-    // Let the blocked line reach its snapshot before the other runs.
+    // Let the blocked line reach its snapshot before the other queues.
     await new Promise((r) => setTimeout(r, 50))
 
-    await ws.shell('false')
+    const queued = ws.shell('false')
 
     ac.abort()
     await settled
+    await queued
 
     expect(stdoutStr(await ws.shell('echo $?')).trim()).toBe('1')
+  })
+
+  it('releases a caller that aborts while queued and never runs its line', async () => {
+    const ws = await makeWs()
+    const ac = new AbortController()
+    const blocked = ws.shell('sleep 5', { signal: ac.signal })
+    const settled = blocked.catch(() => undefined)
+    await new Promise((r) => setTimeout(r, 50))
+
+    const t0 = Date.now()
+    await expect(
+      ws.shell('echo ran > /ram/mark', { signal: AbortSignal.timeout(50) }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(Date.now() - t0).toBeLessThan(1000)
+
+    ac.abort()
+    await settled
+    expect(stdoutStr(await ws.shell('ls /ram')).includes('mark')).toBe(false)
   })
 })
 

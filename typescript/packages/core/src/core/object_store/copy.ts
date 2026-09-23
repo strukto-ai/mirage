@@ -14,6 +14,7 @@
 
 import type { Accessor } from '../../accessor/base.ts'
 import { invalidateAfterWrite, invalidateAncestors } from '../../cache/context.ts'
+import { record, startOp } from '../../observe/context.ts'
 import { enoent } from '../../utils/errors.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { ExistsFn, ObjectStoreDriver, PairFn } from './driver.ts'
@@ -45,14 +46,35 @@ export function makeCopy<A extends Accessor, C>(
       if (!(await exists(accessor, src))) throw enoent(src)
       return
     }
+    const timer = startOp()
     const { conn, close } = await driver.connect(accessor)
+    // null until the store answers: false means it told us cleanly that
+    // nothing was copied, and only a clean "nothing" is safe to skip -- a
+    // throw may have left a partial object behind.
+    let copied: boolean | null = null
     try {
-      if (!(await copyFile(conn, srcKey, dstKey))) throw enoent(src)
+      try {
+        copied = await copyFile(conn, srcKey, dstKey)
+      } finally {
+        if (copied !== false) {
+          // The destination, not the source: a copy replaces dst's bytes
+          // and leaves src untouched, so only dst's token stops
+          // describing its object. (dropbox records a copy against src;
+          // that is inert there only because dropbox emits no read record
+          // at all, so no dropbox path is ever pinned.)
+          record('copy', dst.virtual, driver.vfs, 0, timer)
+        }
+        await close()
+      }
     } finally {
-      await close()
+      if (copied !== false) {
+        // The eviction rides with the record, on the same condition, as
+        // in unlink.
+        await invalidateAfterWrite(dst)
+        // The copy can materialize the destination's missing ancestors.
+        await invalidateAncestors(dst)
+      }
     }
-    await invalidateAfterWrite(dst)
-    // The copy can materialize the destination's missing ancestors.
-    await invalidateAncestors(dst)
+    if (!copied) throw enoent(src)
   }
 }

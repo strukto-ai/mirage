@@ -508,20 +508,135 @@ describe('configToWorkspaceArgs', () => {
     expect(buildFileCache(args.options.cache)).toBeInstanceOf(RedisFileCacheStore)
   })
 
-  it('coerces consistency (default lazy, accepts always, rejects junk)', async () => {
+  it('coerces the read policy and carries it onto the mount', async () => {
     const dflt = await configToWorkspaceArgs(
       loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } } }),
     )
-    expect(dflt.options.consistency).toBe('lazy')
-    const always = await configToWorkspaceArgs(
-      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, consistency: 'ALWAYS' }),
+    expect(dflt.options.read).toEqual({ policy: 'bounded', ttl: 600 })
+    // The spec reaches the mount, not just the workspace default: the
+    // carrier used to be a [vfs, mode] tuple, which dropped it.
+    expect(dflt.mounts['/']?.options.read).toEqual({ policy: 'bounded', ttl: 600 })
+    const perMount = await configToWorkspaceArgs(
+      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', read: 'bounded', ttl: 30 } } }),
     )
-    expect(always.options.consistency).toBe('always')
-    await expect(
-      configToWorkspaceArgs(
-        loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, consistency: 'soon' }),
-      ),
-    ).rejects.toThrow(/invalid consistency/)
+    expect(perMount.mounts['/']?.options.read).toEqual({ policy: 'bounded', ttl: 30 })
+    expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', read: 'soon' } } })).toThrow(
+      /unknown read policy/,
+    )
+  })
+
+  it('accepts a read policy in any case, at either level', async () => {
+    const perMount = await configToWorkspaceArgs(
+      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', read: 'BOUNDED', ttl: 30 } } }),
+    )
+    expect(perMount.mounts['/']?.options.read).toEqual({ policy: 'bounded', ttl: 30 })
+    const workspace = await configToWorkspaceArgs(
+      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, read: 'BOUNDED' }),
+    )
+    expect(workspace.options.read).toEqual({ policy: 'bounded', ttl: 600 })
+  })
+
+  // The bound rule must be applied to the COERCED policy. Comparing the
+  // raw one let `read: BOUNDED` -- a spelling both languages accept --
+  // skip a rule Python enforces, so the same document loaded on one host
+  // and was refused on the other.
+  it('applies the bound rule to an uppercase policy too', () => {
+    expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', read: 'BOUNDED' } } })).toThrow(
+      /needs a bound/,
+    )
+  })
+
+  // At the SYNC door. `loadWorkspaceConfig` is what the CLI runs before
+  // it POSTs the document to the daemon; validating only in the async
+  // builder means junk survives that hop.
+  it('refuses a junk top-level read policy at the sync door', () => {
+    expect(() => loadWorkspaceConfig({ read: 'banana', mounts: { '/': { vfs: 'ram' } } })).toThrow(
+      /fresh, bounded, pinned/,
+    )
+  })
+
+  it('a mount that declares no policy takes the workspace default', async () => {
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        read: 'bounded',
+        mounts: { '/a': { vfs: 'ram' }, '/b': { vfs: 'ram', read: 'bounded', ttl: 30 } },
+      }),
+    )
+    expect(args.mounts['/a']?.options.read).toEqual({ policy: 'bounded', ttl: 600 })
+    expect(args.mounts['/b']?.options.read).toEqual({ policy: 'bounded', ttl: 30 })
+  })
+
+  // Both ride the one options object the carrier now holds, so a build
+  // that filled it for one key and overwrote it for the other would
+  // silently drop a mount's limits the moment it declared a policy.
+  it('carries a read policy and command_limits on the same mount', async () => {
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({
+        mounts: {
+          '/': {
+            vfs: 'ram',
+            read: 'bounded',
+            ttl: 30,
+            command_limits: { cat: { max_lines: 10 } },
+          },
+        },
+      }),
+    )
+    expect(args.mounts['/']?.options.read).toEqual({ policy: 'bounded', ttl: 30 })
+    expect(args.mounts['/']?.options.commandLimits?.cat?.maxLines).toBe(10)
+  })
+
+  it('refuses a mount declaring fresh on a backend that cannot revalidate', async () => {
+    // The config door parses; the mount door judges. Keeping the verdict
+    // at mount time is what makes one rule cover YAML, addMount and a
+    // snapshot restore alike.
+    const args = await configToWorkspaceArgs(
+      loadWorkspaceConfig({ mounts: { '/a': { vfs: 'ram', read: 'fresh' } } }),
+    )
+    expect(() => new Workspace(args.mounts, args.options)).toThrow(
+      /needs a resource that caches reads/,
+    )
+  })
+
+  it('refuses a mount block whose bound and policy disagree', () => {
+    // Both rules live at the config door: once a ReadSpec exists its ttl
+    // has defaulted, so `bounded` without a bound is indistinguishable
+    // from `read:` left out entirely.
+    expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', ttl: 30 } } })).toThrow(
+      /ttl pins the read bound/,
+    )
+    expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', read: 'bounded' } } })).toThrow(
+      /needs a bound/,
+    )
+  })
+
+  it.each([['30'], [true], [1.5]])('refuses a bound of %o as not whole seconds', (junk) => {
+    // pydantic coerces where this key cannot afford it: `ttl: "30"`
+    // arrived as 30 there and `ttl: true` as 1 -- a mount silently
+    // bounded at one second -- while this loader refused both. Same
+    // bytes, two answers, which `integ/fixtures/config/rejected.json`
+    // now pins.
+    expect(() =>
+      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', read: 'bounded', ttl: junk } } }),
+    ).toThrow(/whole seconds/)
+  })
+
+  it.each([[0], [-1]])('refuses a bound of %s that can never expire', (bad) => {
+    expect(() =>
+      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', read: 'bounded', ttl: bad } } }),
+    ).toThrow(/at least 1 second/)
+  })
+
+  it('judges the bound whatever `read:` says, and names the missing policy first', () => {
+    // The type is wrong on its own terms, so it is judged before the
+    // dependent-key rules -- where Python's field validator judges it,
+    // ahead of the model validator carrying those rules.
+    expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', ttl: '30' } } })).toThrow(
+      /whole seconds/,
+    )
+    expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram', ttl: 0 } } })).toThrow(
+      /ttl pins the read bound/,
+    )
   })
 
   it('threads per-mount backend into top-level kernelMounts and yields {} otherwise', async () => {

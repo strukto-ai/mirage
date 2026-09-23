@@ -71,19 +71,26 @@ export type DispatchFn = (
 
 /**
  * Per-op modifiers riding the bridge's attrs slot: setattr's fields,
- * stat's `nofollow` (the caller's lstat), and mkdir's `parents`
+ * stat's `nofollow` (the caller's lstat), mkdir's `parents`
  * (pathlib's mkdir(parents=True), forwarded to the backend op the way
- * python forwards it as a dispatch kwarg).
+ * python forwards it as a dispatch kwarg), and setxattr's `create` and
+ * `replace` (XATTR_CREATE and XATTR_REPLACE).
  */
-export type BridgeOpAttrs = SetAttrFields & { parents?: boolean }
+export type BridgeOpAttrs = SetAttrFields & {
+  parents?: boolean
+  create?: boolean
+  replace?: boolean
+}
 
 /**
  * The narrow bridge a sandboxed guest's file I/O rides: fixed op names,
  * string paths, positional payloads (the guest cannot build PathSpecs).
  *
- * `dst` carries a rename's destination and a symlink's target: both are
- * the op's second string, and a link target is stored verbatim rather
- * than resolved, so there is nothing a second slot would say.
+ * `dst` carries a rename's destination, a symlink's target and an
+ * extended attribute's name: each is the op's second string, and a link
+ * target is stored verbatim rather than resolved, so there is nothing a
+ * second slot would say. `bytes` carries setxattr's value and `attrs`
+ * its create/replace flags beside every op's `nofollow`.
  */
 export type BridgeDispatchFn = (
   op:
@@ -100,7 +107,11 @@ export type BridgeDispatchFn = (
     | 'rename'
     | 'symlink'
     | 'readlink'
-    | 'setattr',
+    | 'setattr'
+    | 'getxattr'
+    | 'listxattr'
+    | 'setxattr'
+    | 'removexattr',
   path: string,
   bytes?: Uint8Array,
   dst?: string,

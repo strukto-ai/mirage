@@ -15,6 +15,7 @@
 import source from '../../../generated/pyodide.ts'
 import type { EvalStatus, EvalValue, RunArgs } from '../../types.ts'
 import type { PyodideInterface } from './loader.ts'
+import type { XattrOp } from './vfs/types.ts'
 
 interface PyProxy {
   destroy(): void
@@ -26,6 +27,24 @@ interface PyNamespace extends PyProxy {
   get(name: string): PyFunction
 }
 
+/**
+ * The guest's extended-attribute door, registered as `_mirage_xattr`:
+ * the op, the absolute path, the name and base64 value where the op has
+ * them, the create/replace flags and nofollow, answered as JSON (`{value}`,
+ * or `{code}` naming the condition).
+ */
+export type XattrCall = (
+  op: XattrOp,
+  path: string,
+  name: string | null | undefined,
+  value: string | null | undefined,
+  create: boolean,
+  replace: boolean,
+  nofollow: boolean,
+) => string
+
+const NO_XATTRS: XattrCall = () => JSON.stringify({ code: 'ENOTSUP' })
+
 type ExecutionRequest = Pick<RunArgs, 'code' | 'env' | 'stdin'> & {
   argv: string[]
   cwd: string
@@ -36,7 +55,11 @@ type ExecutionRequest = Pick<RunArgs, 'code' | 'env' | 'stdin'> & {
 export class PyodideExecution {
   private readonly namespace: PyNamespace
 
-  constructor(private readonly pyodide: PyodideInterface) {
+  constructor(
+    private readonly pyodide: PyodideInterface,
+    xattr: XattrCall = NO_XATTRS,
+  ) {
+    pyodide.registerJsModule('_mirage_xattr', { call: xattr })
     this.namespace = pyodide.toPy({ __name__: '_mirage_pyodide' }) as PyNamespace
     try {
       pyodide.runPython(source, { globals: this.namespace, filename: 'mirage/execution.py' })
@@ -51,18 +74,27 @@ export class PyodideExecution {
     arm: () => void,
     disarm: () => void,
   ): [Uint8Array, Uint8Array, number] {
-    return this.call('run', { ...request, stdin: request.stdin ?? undefined }, arm, disarm) as [
-      Uint8Array,
-      Uint8Array,
-      number,
-    ]
+    const [stdout, stderr, exitCode] = this.call(
+      'run',
+      { ...request, stdin: request.stdin ?? undefined },
+      arm,
+      disarm,
+    ) as [number[], number[], number]
+    return [new Uint8Array(stdout), new Uint8Array(stderr), exitCode]
   }
 
   evaluate(
     code: string,
     inputs: Record<string, EvalValue>,
   ): [string, Uint8Array, Uint8Array, boolean, boolean] {
-    return this.call('evaluate', code, inputs) as [string, Uint8Array, Uint8Array, boolean, boolean]
+    const [value, stdout, stderr, ok, syntax] = this.call('evaluate', code, inputs) as [
+      string,
+      number[],
+      number[],
+      boolean,
+      boolean,
+    ]
+    return [value, new Uint8Array(stdout), new Uint8Array(stderr), ok, syntax]
   }
 
   repl(
@@ -70,7 +102,13 @@ export class PyodideExecution {
     session: string,
     inputs: Record<string, EvalValue>,
   ): [Uint8Array, Uint8Array, number, EvalStatus] {
-    return this.call('repl', code, session, inputs) as [Uint8Array, Uint8Array, number, EvalStatus]
+    const [stdout, stderr, exitCode, status] = this.call('repl', code, session, inputs) as [
+      number[],
+      number[],
+      number,
+      EvalStatus,
+    ]
+    return [new Uint8Array(stdout), new Uint8Array(stderr), exitCode, status]
   }
 
   seedSysPath(paths: readonly string[]): string[] {

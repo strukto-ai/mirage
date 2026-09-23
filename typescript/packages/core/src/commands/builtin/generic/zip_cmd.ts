@@ -20,7 +20,7 @@ import { deflateRaw } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
-import { gnuBasename, respellOne } from '../../../utils/path.ts'
+import { respellOne } from '../../../utils/path.ts'
 import type { MemberKind } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
 
@@ -84,6 +84,9 @@ interface ZipPlan {
   members: ZipMember[]
   warnings: string[]
   write: boolean
+  // The warning for two paths that store under one name, empty when every
+  // name is unique.
+  repeated: string
 }
 
 function concat(chunks: readonly Uint8Array[]): Uint8Array {
@@ -98,6 +101,11 @@ function concat(chunks: readonly Uint8Array[]): Uint8Array {
   return out
 }
 
+// The stamp every member carries: 1980-01-01 00:00, the DOS epoch and
+// Python zipfile's default, which Info-ZIP lists as `80-Jan-01 00:00`.
+// A zero date has month 0 and day 0, which is no date at all.
+const DOS_EPOCH_DATE = (1 << 5) | 1
+
 function buildZip(items: ZipItem[]): Uint8Array {
   const parts: Uint8Array[] = []
   let offset = 0
@@ -110,7 +118,7 @@ function buildZip(items: ZipItem[]): Uint8Array {
     writeU16LE(header, 6, 0)
     writeU16LE(header, 8, item.method)
     writeU16LE(header, 10, 0)
-    writeU16LE(header, 12, 0)
+    writeU16LE(header, 12, DOS_EPOCH_DATE)
     writeU32LE(header, 14, item.crc)
     writeU32LE(header, 18, item.compressed.byteLength)
     writeU32LE(header, 22, item.data.byteLength)
@@ -132,7 +140,7 @@ function buildZip(items: ZipItem[]): Uint8Array {
     writeU16LE(central, 8, 0)
     writeU16LE(central, 10, item.method)
     writeU16LE(central, 12, 0)
-    writeU16LE(central, 14, 0)
+    writeU16LE(central, 14, DOS_EPOCH_DATE)
     writeU32LE(central, 16, item.crc)
     writeU32LE(central, 20, item.compressed.byteLength)
     writeU32LE(central, 24, item.data.byteLength)
@@ -170,6 +178,12 @@ const WARNING_PREFIX = '\tzip warning: '
 // follow prints exactly this too.
 const NOT_MATCHED = 'name not matched: '
 const NOTHING_TO_DO_EXIT = 12
+// Two operands that store under one name refuse the whole run (Info-ZIP's
+// check_dup, ZE_PARMS). -q silences the warning, not the error, and the
+// warning's later lines are indented with spaces under its first.
+const REPEATED_EXIT = 16
+const REPEATED_ERROR = '\nzip error: Invalid command arguments (cannot repeat names in zip file)\n'
+const REPEATED_INDENT = ' '.repeat(21)
 // Unix mode bits in the high half of external_attr.
 const DIR_MODE = ((0o40755 << 16) | 0x10) >>> 0
 const FILE_MODE = (0o100644 << 16) >>> 0
@@ -184,15 +198,30 @@ export interface ZipDeps {
   walk: WalkFn
 }
 
-// The entry name Info-ZIP stores for a path as the operand typed it. A
-// leading slash is stripped in silence (unlike tar, which warns), a
-// directory carries a trailing slash, and `-j` throws the directory part
-// away entirely.
+// The name Info-ZIP forms for a path before it stores it. A directory
+// carries the slash zip appends to it before descending, so `d` and `d/`
+// are one path.
+function fullName(spelled: string, kind: MemberKind): string {
+  if (kind === 'dir' && !spelled.endsWith('/')) return `${spelled}/`
+  return spelled
+}
+
+function relative(name: string): string {
+  let out = lstripSlash(name)
+  while (out.startsWith('./')) out = out.slice(2)
+  return out
+}
+
+// The entry name Info-ZIP stores for a path as the operand typed it.
+// Leading slashes go in silence (unlike tar, which warns), and so does
+// every `./` after them: `zip -r out.zip .` stores `a.txt`, not `./a.txt`,
+// and `.` itself, formed as `./`, names nothing and is not stored. Only
+// that leading run goes, so `d/./x` keeps its `./` and `.//x` stores `/x`.
+// `-j` keeps what follows the last slash, which for a directory is
+// nothing: `-j` stores no directory.
 function memberName(spelled: string, kind: MemberKind, junk: boolean): string {
-  let name = lstripSlash(spelled)
-  if (junk) name = gnuBasename(rstripSlash(name))
-  if (kind === 'dir' && name !== '' && !name.endsWith('/')) return `${name}/`
-  return name
+  const name = relative(fullName(spelled, kind))
+  return junk ? name.slice(name.lastIndexOf('/') + 1) : name
 }
 
 // Whether an Info-ZIP `-x` pattern matches this entry name. Info-ZIP
@@ -200,9 +229,34 @@ function memberName(spelled: string, kind: MemberKind, junk: boolean): string {
 // slashes: `d/sub/*` takes `d/sub/` and everything under it, `*.txt`
 // takes every `.txt` at any depth, and a bare `b.txt` matches nothing
 // below the top. That is the opposite of GNU tar's unanchored
-// `--exclude`, which is why the two have separate matchers.
+// `--exclude`, which is why the two have separate matchers. A pattern
+// loses its leading slashes and `./` the way a name does, so `./sub/*`
+// still takes `sub/`.
 function excluded(name: string, patterns: readonly string[]): boolean {
-  return patterns.some((pattern) => fnmatch(name, pattern))
+  return patterns.some((pattern) => fnmatch(name, relative(pattern)))
+}
+
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+// Info-ZIP's warning for the first name two paths would share: check_dup
+// sorts the stored names and reports the first one reached from two
+// different paths, those two in sorted order.
+function repeatedWarning(formed: ReadonlyMap<string, string[]>, junk: boolean): string {
+  const clashes = [...formed.entries()]
+    .filter(([, fulls]) => fulls.length > 1)
+    .map(([name]) => name)
+    .sort(byCodeUnit)
+  const name = clashes[0]
+  if (name === undefined) return ''
+  const [first, second] = [...(formed.get(name) ?? [])].sort(byCodeUnit)
+  let warning =
+    `  first full name: ${first ?? ''}\n` +
+    `${REPEATED_INDENT} second full name: ${second ?? ''}\n` +
+    `${REPEATED_INDENT}name in zip file repeated: ${name}`
+  if (junk) warning += `\n${REPEATED_INDENT}this may be a result of using -j`
+  return warning
 }
 
 /**
@@ -225,9 +279,13 @@ async function planZip(
   const exclude = fl.asList('x')
   const members: ZipMember[] = []
   const warnings: string[] = []
+  const formed = new Map<string, string[]>()
   for (const path of paths) {
     const raw = path.rawPath
     const base = rstripSlash(path.virtual) || '/'
+    // Info-ZIP walks a bare `.` with an empty prefix, so what it finds there
+    // is named bare: `zip -r out.zip . a.txt` names a.txt once.
+    const spelling = raw === '.' ? '' : raw
     const scan = await scanOperand(path, {
       stat: deps.stat,
       walk: deps.walk,
@@ -249,19 +307,30 @@ async function planZip(
       warnings.push(`${respellOne(crossing, base, raw)}: ${OTHER_FILESYSTEM}`)
     }
     for (const entry of scan.entries) {
-      const name = memberName(respellOne(entry.namePath, base, raw), entry.kind, junk)
+      const spelled = respellOne(entry.namePath, base, spelling)
+      const name = memberName(spelled, entry.kind, junk)
       if (name === '' || excluded(name, exclude)) continue
-      // -j has no directory to name, so Info-ZIP drops directory entries
-      // under it entirely rather than storing bare slashes.
-      if (junk && entry.kind === 'dir') continue
       const read = entry.read ?? null
       // Info-ZIP never stores the archive it is writing, and says
       // nothing about it.
       if (read !== null && read.virtual === archive.virtual) continue
+      // One path named twice is stored once; two paths under one name are
+      // the run's error, reported once everything is seen.
+      const fulls = formed.get(name) ?? []
+      formed.set(name, fulls)
+      const full = fullName(spelled, entry.kind)
+      if (fulls.includes(full)) continue
+      fulls.push(full)
+      if (fulls.length > 1) continue
       members.push({ name, kind: entry.kind, path: read, target: entry.target ?? '' })
     }
   }
-  return { members, warnings, write: members.length > 0 }
+  return {
+    members,
+    warnings,
+    write: members.length > 0,
+    repeated: repeatedWarning(formed, junk),
+  }
 }
 
 function warningText(warnings: readonly string[], quiet: boolean): string {
@@ -288,6 +357,10 @@ export async function zipGeneric(
   if (archivePath === undefined) return [null, new IOResult()]
   const quiet = fl.asBool('q')
   const plan = await planZip(paths.slice(1), archivePath, deps, opts)
+  if (plan.repeated !== '') {
+    const message = warningText([...plan.warnings, plan.repeated], quiet) + REPEATED_ERROR
+    return [null, new IOResult({ exitCode: REPEATED_EXIT, stderr: ENC.encode(message) })]
+  }
   if (!plan.write) {
     // Info-ZIP writes no archive when nothing matched, and the error is
     // not a warning: -q does not silence it.

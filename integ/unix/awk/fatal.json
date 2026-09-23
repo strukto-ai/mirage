@@ -1,0 +1,242 @@
+{
+  "cases": [
+    {
+      "id": "awk_fatal_div_zero",
+      "seq": 991300,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk 'BEGIN{print \"pre\"; print 1/0; print \"post\"}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "pre\n",
+        "stderr": "awk: division by zero\n"
+      }
+    },
+    {
+      "id": "awk_fatal_printf_short",
+      "seq": 991301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk 'BEGIN{printf \"%s %s\\n\", \"only\"}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: not enough arguments to satisfy format string '%s %s\n'\n"
+      }
+    },
+    {
+      "id": "awk_fatal_syntax_err",
+      "seq": 991302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | awk '{print $(}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: syntax error at '}': expected an expression\n"
+      }
+    },
+    {
+      "id": "awk_fatal_unterminated",
+      "seq": 991303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | awk '{print \"abc}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: syntax error: unterminated string\n"
+      }
+    },
+    {
+      "id": "awk_fatal_bad_regex",
+      "seq": 991304,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | awk '/[/'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: syntax error in regular expression [ at source line 1\n"
+      }
+    },
+    {
+      "id": "awk_fatal_neg_field",
+      "seq": 991305,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | awk '{print $(-1)}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: trying to access field -1\n"
+      }
+    },
+    {
+      "id": "awk_fatal_bad_rs_regex",
+      "seq": 991306,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab' | awk 'BEGIN{RS=\"[a\"} {print}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: syntax error in regular expression [a at source line 1\n"
+      }
+    }
+  ]
+}

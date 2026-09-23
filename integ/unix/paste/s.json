@@ -63,7 +63,7 @@
       "command": "paste -s /data/empty.txt",
       "expect": {
         "exit": 0,
-        "stdout": "",
+        "stdout": "\n",
         "stderr": ""
       },
       "flags": [

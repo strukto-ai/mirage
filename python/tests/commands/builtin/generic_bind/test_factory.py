@@ -21,7 +21,8 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.generic_bind.factory import (
-    _run_with_namespace_globs, make_generic_commands, with_read_cache)
+    _run_with_namespace_globs, make_generic_commands, with_read_cache,
+    with_slash_guard)
 from mirage.commands.config import CommandOpts
 from mirage.ops.types import LinkView, NamespaceView
 from mirage.types import PathSpec
@@ -201,3 +202,42 @@ async def test_namespace_globs_stamp_nothing_without_links():
                                     lambda ops: ops, capture, None, [], [],
                                     opts)
     assert seen[0].glob_target_stat is None
+
+
+@pytest.mark.asyncio
+async def test_slash_guard_refuses_a_slashed_write_before_the_backend():
+    # open(2) with O_CREAT answers `x/` with EISDIR before looking anything
+    # up, so `tee missing/` and `truncate -s0 missing/` must not leave a
+    # regular file called `missing` behind; a bare operand passes through.
+    backend = _CountingBackend(b"")
+    written: list[str] = []
+
+    async def write(accessor, path, data) -> None:
+        written.append(path.virtual)
+
+    async def truncate(accessor, path, length) -> None:
+        written.append(path.virtual)
+
+    guarded = with_slash_guard(
+        replace(_ops(backend), write=write, append=write, truncate=truncate))
+    slashed = PathSpec(vfs_path=mount_key("/s3/missing", "/s3/"),
+                       virtual="/s3/missing",
+                       directory="/s3/",
+                       raw_path="/s3/missing/")
+    with pytest.raises(IsADirectoryError):
+        await guarded.write(None, slashed, b"x")
+    with pytest.raises(IsADirectoryError):
+        await guarded.append(None, slashed, b"x")
+    with pytest.raises(IsADirectoryError):
+        await guarded.truncate(None, slashed, 0)
+    await guarded.write(None, _spec(), b"x")
+    await guarded.truncate(None, _spec(), 0)
+    assert written == ["/s3/a.txt", "/s3/a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_slash_guard_leaves_write_absent_when_the_backend_has_none():
+    guarded = with_slash_guard(_ops(_CountingBackend(b"")))
+    assert guarded.write is None
+    assert guarded.append is None
+    assert guarded.truncate is None

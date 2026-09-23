@@ -21,6 +21,14 @@ import { IndexView } from './index/view.ts'
 import { withCacheMutation } from './file/io.ts'
 
 /**
+ * Default read gate: trust the cache. A manager built outside a workspace
+ * has no reconciler to ask.
+ */
+function alwaysServe(_key: string): Promise<boolean> {
+  return Promise.resolve(true)
+}
+
+/**
  * Post-mutation cache coherence for one mount.
  *
  * A backend mutation has two cache consequences: the file-cache entry
@@ -37,6 +45,10 @@ export class CacheManager {
   private readonly prefix: string
   private readonly cachesReads: boolean
   private readonly ownsPath: (path: string) => boolean
+  // The read gate, injected because this class holds no mount and no
+  // dispatcher and `cache/context.ts` documents that dependency as one-way.
+  // Answers whether a warm entry may still be served.
+  private readonly mayServeCached: (key: string) => Promise<boolean>
 
   constructor(
     fileCache: FileCache | null,
@@ -44,12 +56,14 @@ export class CacheManager {
     prefix: string,
     cachesReads: boolean,
     ownsPath: (path: string) => boolean = () => true,
+    mayServeCached: (key: string) => Promise<boolean> = alwaysServe,
   ) {
     this.fileCache = fileCache
     this.index = index
     this.prefix = rstripSlash(prefix)
     this.cachesReads = cachesReads
     this.ownsPath = ownsPath
+    this.mayServeCached = mayServeCached
   }
 
   /** Drain raw backend index access before mount cache eviction. */
@@ -112,22 +126,52 @@ export class CacheManager {
     return `${this.prefix}/${relative}`
   }
 
+  /** The file cache this manager may read `key` from, if any. */
+  private readableCache(key: string): FileCache | null {
+    if (!this.cachesReads || !this.ownsPath(key)) return null
+    return this.fileCache
+  }
+
   /**
-   * Return cached bytes for `path` if present, else null.
+   * Return cached bytes for `path` if present and still valid.
    *
-   * Lookup only, never fetches from the backend. The single read-cache
-   * check the shared read-through wrappers (`cache/read_through.ts`) read
-   * through, so warm reads are served from the file cache without the
-   * command knowing about it. No-op for local or non-caching mounts.
+   * Never fetches content from the backend. The single read-cache check the
+   * shared read-through wrappers (`cache/read_through.ts`) read through, so
+   * warm reads are served from the file cache without the command knowing
+   * about it. No-op for local or non-caching mounts.
+   *
+   * This is the second of the two doors that serve cached bytes, and it is
+   * the one every shell read uses; the gate runs the same verdict function
+   * as the dispatcher's door, so the two cannot drift apart. Order is
+   * load-bearing: `exists` first, so a cold path costs no backend stat, and
+   * `get` only after the gate, so a STALE verdict's eviction is not raced by
+   * a fetch.
    */
   async cachedBytes(path: PathSpec): Promise<Uint8Array | null> {
     const key = this.cacheKey(path)
-    if (!this.cachesReads || this.fileCache === null || !this.ownsPath(key)) return null
-    if (await this.fileCache.exists(key)) {
-      const cached = await this.fileCache.get(key)
-      return this.ownsPath(key) ? cached : null
-    }
-    return null
+    const cache = this.readableCache(key)
+    if (cache === null) return null
+    if (!(await cache.exists(key))) return null
+    if (!(await this.mayServeCached(key))) return null
+    const cached = await cache.get(key)
+    return this.ownsPath(key) ? cached : null
+  }
+
+  /**
+   * Return the cached render's byte length, without revalidating.
+   *
+   * The size backfill a render-dependent backend cannot answer for itself
+   * (`generic_bind/factory.ts`) runs only where the backend reported no
+   * size, which is exactly the API mounts, so gating it would turn a stat
+   * into a backend stat. It answers a length rather than content, so nothing
+   * can serve unverified bytes through it.
+   */
+  async cachedSize(path: PathSpec): Promise<number | null> {
+    const key = this.cacheKey(path)
+    const cache = this.readableCache(key)
+    if (cache === null) return null
+    const cached = await cache.get(key)
+    return cached === null ? null : cached.length
   }
 
   /** Invalidate caches after a write to `path`; only `virtual` is read. */

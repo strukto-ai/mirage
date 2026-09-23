@@ -166,7 +166,11 @@ export interface Case {
   check?: StatCheck
   provision?: boolean
   clear_cache?: boolean
-  consistency?: 'always' | 'lazy'
+  // A scenario selector, not a config value: a case names the read policy
+  // its two workspaces run under. `ttl` rides beside it because `bounded`
+  // takes a bound.
+  read?: 'fresh' | 'bounded'
+  ttl?: number
   session?: string
   // The host's answer to every approval waiting on the workspace, given
   // before the command runs: `allow_once`, `allow_session` or `deny`.

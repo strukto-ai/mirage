@@ -2489,6 +2489,85 @@
           }
         }
       ]
+    },
+    {
+      "id": "same_session_lines_run_one_at_a_time",
+      "settings": {
+        "mode": "write",
+        "mounts": {}
+      },
+      "steps": [
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "for f in A1 A2 A3; do sleep 0.01; echo \"A:$f\"; done"
+            },
+            {
+              "op": "exec",
+              "command": "eval 'for f in B1 B2 B3; do sleep 0.01; echo \"B:$f\"; done'"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "A:A1\nA:A2\nA:A3\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "B:B1\nB:B2\nB:B3\n",
+                "stderr": ""
+              }
+            ]
+          }
+        },
+        {
+          "op": "exec",
+          "command": "echo $f",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "B3\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "session",
+          "id": "other"
+        },
+        {
+          "op": "concurrent",
+          "steps": [
+            {
+              "op": "exec",
+              "command": "f=default; sleep 0.05; echo $f"
+            },
+            {
+              "op": "exec",
+              "command": "f=other; echo $f",
+              "session": "other"
+            }
+          ],
+          "expect": {
+            "value": [
+              {
+                "exit_code": 0,
+                "stdout": "default\n",
+                "stderr": ""
+              },
+              {
+                "exit_code": 0,
+                "stdout": "other\n",
+                "stderr": ""
+              }
+            ]
+          }
+        }
+      ]
     }
   ]
 }

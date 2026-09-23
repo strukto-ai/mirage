@@ -1491,4 +1491,331 @@ describe('bc', () => {
       exitCode: 0,
     })
   })
+
+  // -- `print` and string statements ------------------------------------
+  //
+  // Measured against GNU bc 1.07.1 in docker (`debian:stable-slim`).
+
+  it('print writes no newline', async () => {
+    // The whole point of `print`: an expression statement ends its line
+    // and `print` does not, so the next write continues it.
+    expect((await runBc('print "hi"\n')).out).toBe('hi')
+    expect((await runBc('print 5\n6\n')).out).toBe('56\n')
+  })
+
+  it('print takes a comma-separated list', async () => {
+    expect((await runBc('print "a=", 1+1, "\\n"\n')).out).toBe('a=2\n')
+    expect((await runBc('print "a", "b"\n')).out).toBe('ab')
+    expect((await runBc('print (1+2)*3, "\\n"\n')).out).toBe('9\n')
+  })
+
+  it('each element is written where it is reached', async () => {
+    // GNU writes a value where its own instruction runs, not at the end
+    // of the statement, so an element sees everything the elements
+    // before it changed and nothing a later one will: `print 5, last`
+    // writes the 5 twice, and `print 255, obase=16` writes the 255 in
+    // base ten and then the 16 in the base it just set.
+    expect((await runBc('print 5, last\n')).out).toBe('55')
+    expect((await runBc('print last, 5\n')).out).toBe('05')
+    expect((await runBc('print 1, last, last\n')).out).toBe('111')
+    expect((await runBc('print 255, obase=16\n')).out).toBe('25510')
+    expect((await runBc('print obase=16, 255\n')).out).toBe('10FF')
+    expect((await runBc('print 255, obase=16, 255\n')).out).toBe('25510FF')
+    expect((await runBc('x=1\nprint x, x=9, x\n')).out).toBe('199')
+    expect((await runBc('scale=3\nprint 1/3, scale=1, 1/3\n')).out).toBe('.3331.3')
+  })
+
+  it('an expression statement renders where it is reached too', async () => {
+    // The same rule outside `print`: the 255 is written before the `;`
+    // changes the base, so only the second one comes out hexadecimal.
+    expect((await runBc('255; obase=16\n')).out).toBe('255\n')
+    expect((await runBc('obase=16; 255\n')).out).toBe('FF\n')
+    expect((await runBc('255; obase=16; 255\n')).out).toBe('255\nFF\n')
+  })
+
+  it('last follows its line being discarded', async () => {
+    // `last` is state, so a syntax error later on the line rolls it back
+    // with everything else the line wrote.
+    expect((await runBc('print 5\nlast\n')).out).toBe('55\n')
+    expect(await runBc('print 5; 1 2\nlast\n')).toEqual({
+      out: '0\n',
+      err: '(standard_in) 1: syntax error\n',
+      exitCode: 0,
+    })
+    // A runtime error does not roll it back: the element before it
+    // stands.
+    expect((await runBc('print 5, 1/0\nlast\n')).out).toBe('55\n')
+  })
+
+  it('print sets last where a string does not', async () => {
+    // A printed value reaches `last`, so `print 5; .` answers 5 twice; a
+    // string never does, so `last` still holds the 2.
+    expect((await runBc('print 5; .\n')).out).toBe('55\n')
+    expect((await runBc('print 5; last\n')).out).toBe('55\n')
+    expect((await runBc('1+1; print "x"; last\n')).out).toBe('2\nx2\n')
+    // The last value of a list wins.
+    expect((await runBc('print 5, 6; last\n')).out).toBe('566\n')
+  })
+
+  it('a print element is a whole expression', async () => {
+    // Assignment is part of the expression grammar, so it prints here
+    // where the statement `x=5` prints nothing.
+    expect((await runBc('print x=5\nx\n')).out).toBe('55\n')
+    expect((await runBc('print (x=5); x\n')).out).toBe('55\n')
+    expect((await runBc('x=1; print x++, x, "\\n"\n')).out).toBe('12\n')
+    expect((await runBc('print sqrt(4), "\\n"\n')).out).toBe('2\n')
+    expect((await runBc('obase=16\nprint 255, "\\n"\n')).out).toBe('FF\n')
+  })
+
+  it('print expands the escapes GNU has a rule for', async () => {
+    // `\a \b \f \n \q \r \t \\`, and `\q` is the double quote.
+    expect((await runBc('print "A\\aB\\bC\\fD\\nE\\qF\\rG\\tH\\\\I"\n')).out).toBe(
+      'A\x07B\bC\fD\nE"F\rG\tH\\I',
+    )
+  })
+
+  it('print writes nothing for an escape it has no rule for', async () => {
+    // Both characters vanish, digits and a trailing backslash included.
+    expect((await runBc('print "x\\zy"\n')).out).toBe('xy')
+    for (const text of ['print "a\\0b\\1c"\n', 'print "a\\eb\\vc"\n', 'print "a\\Nb\\Tc"\n']) {
+      expect((await runBc(text)).out).toBe('abc')
+    }
+    expect((await runBc('print "ab\\\\"\n')).out).toBe('ab\\')
+    // A lone backslash before the closing quote: the quote still closes
+    // the token, and the backslash writes nothing.
+    expect((await runBc('print "ab\\"\n')).out).toBe('ab')
+  })
+
+  it('a bare string is a statement written raw', async () => {
+    expect((await runBc('"raw"\n')).out).toBe('raw')
+    expect((await runBc('"a"; 1+1\n')).out).toBe('a2\n')
+    expect((await runBc('"a";"b"\n')).out).toBe('ab')
+    expect((await runBc('""\n')).out).toBe('')
+    // No escape expansion: `print` alone does that.
+    expect((await runBc('"A\\nB\\tC\\zD"\n')).out).toBe('A\\nB\\tC\\zD')
+  })
+
+  it('a string is never an expression', async () => {
+    for (const text of ['1+"a"\n', '"a"1\n', 'print "a" "b"\n', 'print "a" 1\n', 'print , "a"\n']) {
+      expect(await runBc(text)).toEqual({
+        out: '',
+        err: '(standard_in) 1: syntax error\n',
+        exitCode: 0,
+      })
+    }
+  })
+
+  it('print stays a reserved word', async () => {
+    for (const text of ['print=1\n', '1+print\n']) {
+      expect(await runBc(text)).toEqual({
+        out: '',
+        err: '(standard_in) 1: syntax error\n',
+        exitCode: 0,
+      })
+    }
+    // Only a whole identifier is the keyword.
+    expect((await runBc('printx=5\nprintx\n')).out).toBe('5\n')
+    // And no space is needed after it.
+    expect((await runBc('print"a"\n')).out).toBe('a')
+  })
+
+  it('print with no element is charged to the next line', async () => {
+    // A legal prefix that ran out of input, so GNU charges the newline's
+    // line rather than the keyword's, and the next line still runs.
+    expect(await runBc('print\n1+1\n')).toEqual({
+      out: '2\n',
+      err: '(standard_in) 2: syntax error\n',
+      exitCode: 0,
+    })
+    // A trailing comma is the same shape.
+    expect(await runBc('print "a",\n')).toEqual({
+      out: '',
+      err: '(standard_in) 2: syntax error\n',
+      exitCode: 0,
+    })
+    // A second element with nothing between them is not: `2` is the
+    // token that fails, and it sits on its own line.
+    expect(await runBc('print 1 2\n')).toEqual({
+      out: '',
+      err: '(standard_in) 1: syntax error\n',
+      exitCode: 0,
+    })
+  })
+
+  it('a string hides a separator and a comment', async () => {
+    // `;`, `#` and `/*` are content inside a string, not syntax.
+    expect((await runBc('print "a;b", "\\n"\n')).out).toBe('a;b\n')
+    expect((await runBc('print "a#b", "\\n"\n')).out).toBe('a#b\n')
+    expect((await runBc('print "a/*b*/c", "\\n"\n')).out).toBe('a/*b*/c\n')
+    // A `quit` in one does not end the run either.
+    expect((await runBc('print "quit"; print "after"\n')).out).toBe('quitafter')
+    // A comment outside one still eats the string behind it.
+    expect((await runBc('print "a" # "b"\nprint "c"\n')).out).toBe('ac')
+  })
+
+  it('a string runs to the next quote across lines', async () => {
+    // The token has no line limit, so the statement stays open and the
+    // line counter still advances: the `1 2` below is on line 3.
+    expect((await runBc('print "a\nb"\n')).out).toBe('a\nb')
+    expect(await runBc('print "a\nb"\n1 2\n')).toEqual({
+      out: 'a\nb',
+      err: '(standard_in) 3: syntax error\n',
+      exitCode: 0,
+    })
+    // A `#` or a `/*` on the string's later line is content too.
+    expect((await runBc('print "a\nb # c"\nprint "d"\n')).out).toBe('a\nb # cd')
+    expect((await runBc('print "a\n/*x*/b"\nprint "d"\n')).out).toBe('a\n/*x*/bd')
+    expect((await runBc('print "a\nquit b"\nprint "c"\n')).out).toBe('a\nquit bc')
+  })
+
+  it('an unclosed quote is an illegal character', async () => {
+    // GNU's lexer has no rule a lone `"` matches, so it is reported the
+    // way `@` is and scanning resumes right after it -- the next line
+    // runs, comments included.
+    for (const text of ['"abc\n', 'print "abc\n', '1+"abc\n']) {
+      expect(await runBc(text)).toEqual({
+        out: '',
+        err: '(standard_in) 1: illegal character: "\n',
+        exitCode: 0,
+      })
+    }
+    expect(await runBc('"abc\n1+1\n')).toEqual({
+      out: '2\n',
+      err: '(standard_in) 1: illegal character: "\n',
+      exitCode: 0,
+    })
+    // The `;` behind it still separates, so the `1 2` is its own bad
+    // statement and reports separately.
+    expect(await runBc('"abc; 1 2\n')).toEqual({
+      out: '',
+      err: '(standard_in) 1: illegal character: "\n(standard_in) 1: syntax error\n',
+      exitCode: 0,
+    })
+    // Two quotes on different lines are one token, so nothing is
+    // illegal: the `def` after it is simply a name in the wrong place.
+    expect(await runBc('"abc\n"def\n')).toEqual({
+      out: '',
+      err: '(standard_in) 2: syntax error\n',
+      exitCode: 0,
+    })
+  })
+
+  it('a syntax error discards what its line printed', async () => {
+    // GNU compiles a whole line before running any of it, so a later
+    // statement's refusal undoes an earlier one's `print`.
+    expect(await runBc('print "x"; 1 2\n')).toEqual({
+      out: '',
+      err: '(standard_in) 1: syntax error\n',
+      exitCode: 0,
+    })
+  })
+
+  it('a runtime error keeps what the statement already wrote', async () => {
+    // A runtime error is not a parse error: everything written before it
+    // stays, the rest of the line is abandoned, and the next line runs.
+    expect(await runBc('print "a", 1/0, "z"\n')).toEqual({
+      out: 'a',
+      err: 'Runtime error (func=(main), adr=3): Divide by zero\n',
+      exitCode: 0,
+    })
+    expect((await runBc('print "x", 1/0\n2+2\n')).out).toBe('x4\n')
+  })
+
+  it('halt and quit still bound a printing line', async () => {
+    // `halt` acts where it is reached, so the `print` before it stands.
+    expect((await runBc('print "a"; halt; print "b"\n')).out).toBe('a')
+    expect((await runBc('"a"; halt; "b"\n')).out).toBe('a')
+    // `quit` is read by the lexer, so its whole line never runs at all.
+    expect((await runBc('print "a"; quit\nprint "b"\n')).out).toBe('')
+  })
+
+  // -- The output column, once `print` can leave a line open ------------
+
+  it('the fold column carries across a print', async () => {
+    // The column is one counter for the whole run, so a `print` that
+    // left the line two characters in folds the value that follows two
+    // characters early: 66 digits here rather than 68.
+    const digits = UNFOLDED_300.replaceAll('\n', '')
+    expect((await runBc('print "ab"; 2^300\n')).out).toBe(
+      `ab${digits.slice(0, 66)}\\\n${digits.slice(66)}\n`,
+    )
+    // And a `print`ed value leaves the column where it ended, so the
+    // next statement's value continues the same line.
+    expect((await runBc('print 2^300; 1+1\n')).out).toBe(
+      `${digits.slice(0, 68)}\\\n${digits.slice(68)}2\n`,
+    )
+  })
+
+  it('a printed string folds and counts like a value', async () => {
+    expect((await runBc(`print "${'x'.repeat(100)}"\n`)).out).toBe(
+      `${'x'.repeat(68)}\\\n${'x'.repeat(32)}`,
+    )
+    // A bare string counts too.
+    expect((await runBc(`"${'x'.repeat(100)}"\n`)).out).toBe(
+      `${'x'.repeat(68)}\\\n${'x'.repeat(32)}`,
+    )
+    // Two statements share the counter: 60 then 20 folds inside the 20.
+    const folded = `${'x'.repeat(60)}${'y'.repeat(8)}\\\n${'y'.repeat(12)}`
+    expect((await runBc(`print "${'x'.repeat(60)}"; print "${'y'.repeat(20)}"\n`)).out).toBe(folded)
+    // Across input lines as well.
+    expect((await runBc(`print "${'x'.repeat(60)}"\nprint "${'y'.repeat(20)}"\n`)).out).toBe(folded)
+  })
+
+  it('a newline anywhere starts the column over', async () => {
+    expect((await runBc(`print "${'x'.repeat(60)}\\n"; print "${'y'.repeat(20)}"\n`)).out).toBe(
+      `${'x'.repeat(60)}\n${'y'.repeat(20)}`,
+    )
+    // An expanded escape is one column, not its source width: 66 x's, a
+    // tab and a `y` fill the line, so the second `y` folds.
+    expect((await runBc(`print "${'x'.repeat(66)}\\tyy"\n`)).out).toBe(`${'x'.repeat(66)}\ty\\\ny`)
+  })
+
+  it('a discarded line rolls the column back', async () => {
+    // The line never ran, so its `print` never moved the counter and the
+    // 20 characters after it do not fold.
+    expect(await runBc(`print "${'x'.repeat(60)}"; 1 2\nprint "${'y'.repeat(20)}"\n`)).toEqual({
+      out: 'y'.repeat(20),
+      err: '(standard_in) 1: syntax error\n',
+      exitCode: 0,
+    })
+    // A runtime error does not roll it back: the 60 characters stand.
+    expect((await runBc(`print "${'x'.repeat(60)}", 1/0\nprint "${'y'.repeat(20)}"\n`)).out).toBe(
+      `${'x'.repeat(60)}${'y'.repeat(8)}\\\n${'y'.repeat(12)}`,
+    )
+  })
+
+  it('BC_LINE_LENGTH bounds a printed string too', async () => {
+    expect((await runBc('print "abcdefghijklmno"\n', {}, { BC_LINE_LENGTH: '10' })).out).toBe(
+      'abcdefgh\\\nijklmno',
+    )
+    expect((await runBc('print "abcdef"\n', {}, { BC_LINE_LENGTH: '3' })).out).toBe(
+      'a\\\nb\\\nc\\\nd\\\ne\\\nf',
+    )
+    expect((await runBc(`print "${'x'.repeat(100)}"\n`, {}, { BC_LINE_LENGTH: '0' })).out).toBe(
+      'x'.repeat(100),
+    )
+  })
+
+  it('the fold column counts utf-8 bytes', async () => {
+    // GNU counts the bytes it writes, not the characters, so a four-byte
+    // character fills the 68-column line seventeen at a time.
+    const globe = '\u{1F30D}'
+    expect((await runBc(`print "${globe.repeat(80)}"\n`)).out).toBe(
+      `${globe.repeat(17)}\\\n`.repeat(4) + globe.repeat(12),
+    )
+    // A two-byte one moves it two: 66 x's and one `é` fill the line.
+    expect((await runBc(`print "${'x'.repeat(66)}éé"\n`)).out).toBe(`${'x'.repeat(66)}é\\\né`)
+    // Where GNU would split a character across the fold it is moved
+    // whole instead, so the output stays UTF-8: 67 x's leave one column
+    // and the `é` needs two.
+    expect((await runBc(`print "${'x'.repeat(67)}éé"\n`)).out).toBe(`${'x'.repeat(67)}\\\néé`)
+  })
+
+  it('the issue 1156 program', async () => {
+    // The report's own heredoc. GNU prints `a=50.204700469970704`; the
+    // last digits differ because bc's values are float64 here, which is
+    // the separate gap tracked in #1119.
+    const program = 'scale=15\na=7*7.172100067138672\nprint "a="; a; print "\\n"\n'
+    expect((await runBc(program, { args_l: true })).out).toBe('a=50.204700469970700\n\n')
+  })
 })

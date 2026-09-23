@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { translateClasses } from '../../utils/posix.ts'
 const SIMPLE_CMDS = new Set(['d', 'D', 'p', 'P', 'h', 'H', 'g', 'G', 'x', 'N', 'q'])
 
 type SedAddr = ['line', string] | ['last', ''] | ['regex', string]
@@ -343,7 +344,7 @@ export function breToEre(pat: string): string {
 }
 
 function compilePattern(pat: string, flags: string, extended: boolean): RegExp {
-  return new RegExp(extended ? pat : breToEre(pat), flags)
+  return new RegExp(translateClasses(extended ? pat : breToEre(pat)), flags)
 }
 
 function addrMatches(
@@ -426,7 +427,7 @@ function regexReplace(
   // is replaced; with `g` that occurrence and every later one are. Iterate all
   // matches and decide per match so `N` and `Ng` both work.
   const baseFlags = ignoreCase ? 'i' : ''
-  const erePat = extended ? pat : breToEre(pat)
+  const erePat = translateClasses(extended ? pat : breToEre(pat))
   const scan = new RegExp(erePat, baseFlags + 'g')
   const single = new RegExp(erePat, baseFlags)
   const jsRepl = translateReplacement(repl)

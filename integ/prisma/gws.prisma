@@ -20,16 +20,16 @@
 //     default on SQLite to INTEGER PRIMARY KEY AUTOINCREMENT, which ignores
 //     the default and hands out 1, 2, 3 -- so the "singleton" grows a second
 //     row. It is keyed by tenant alone instead.
-//  2. DriveParent must NOT cascade. deleteTree removes a folder and every
-//     child reachable from it, but a child with a second parent outside the
-//     doomed subtree SURVIVES with its other parent. A cascade from Drive
-//     would delete the edge and the row.
-//  3. addParents with an id no file has is accepted (the edge is stored and
-//     files.list simply never matches it). relationMode = "prisma" is what
-//     keeps that a stored edge rather than a foreign-key 500.
-//  4. Repeat addParents is NOT deduplicated: `parents.push(...)` can hold the
-//     same id twice and fmtFile echoes it twice. So DriveParent carries a
-//     surrogate pk and NO @@unique([childId, parentId]).
+//  2. DriveParent must NOT cascade. deleteTree decides in memory what a
+//     delete removes, and the flush rewrites the edges whole; a cascade from
+//     Drive would be a second opinion the world never asked for.
+//  3. A parent id need not be a row: `root` is My Drive's alias and never a
+//     DriveFile. relationMode = "prisma" is what keeps that a stored edge
+//     rather than a foreign-key 500. Every other parent names a folder,
+//     because drive/parents.ts refuses the rest before anything is stored.
+//  4. An item has exactly one parent, as live Drive enforces: a second one is
+//     refused and an added one replaces the old. DriveParent keeps its
+//     surrogate pk all the same, since `seq` alone orders the edges.
 //  5. A second messages.trash on one message appends TRASH again, so
 //     MessageLabel carries a surrogate pk and NO @@unique([messageId,
 //     labelId]) either.
@@ -121,8 +121,8 @@ model DriveFile {
   @@index([tenant, mimeType])
 }
 
-// A file has many parents and a parent has many files, and neither side owns
-// the other. See rules 2, 3 and 4: no cascade, no foreign key, no unique.
+// A folder has many files and a file has one parent, and neither side owns
+// the other. See rules 2, 3 and 4: no cascade, no foreign key, one parent.
 model DriveParent {
   pk       Int    @id @default(autoincrement())
   tenant   String
@@ -218,7 +218,10 @@ model Spreadsheet {
 // `rows`/`cols` are the DECLARED grid, which is independent of what has been
 // written: a new tab reports 1000 rows holding nothing. `seq` is the tab
 // order inside the spreadsheet, which duplicateSheet's insertSheetIndex
-// rewrites.
+// rewrites. The JSON columns hold what the Sheets API reports on a Sheet in
+// its own wire shape: the DimensionProperties set per row and column, keyed
+// by index, and the banded ranges, basic filter and conditional format rules,
+// each GridRange stored without the sheetId the tab already is.
 //
 // Keyed by its own (spreadsheet, sheetId) rather than by a surrogate pk so
 // that SheetCell can name its tab in columns the writer already holds. A
@@ -226,15 +229,18 @@ model Spreadsheet {
 // reference it, which is the one thing that stops the whole flush being
 // createMany.
 model SheetTab {
-  tenant        String
-  spreadsheetId String
-  sheetId       Int
-  title         String
-  rows          Int    @default(1000)
-  cols          Int    @default(26)
-  rowPixels     String @default("{}")
-  columnPixels  String @default("{}")
-  seq           Int    @default(0)
+  tenant             String
+  spreadsheetId      String
+  sheetId            Int
+  title              String
+  rows               Int     @default(1000)
+  cols               Int     @default(26)
+  rowMeta            String  @default("{}")
+  columnMeta         String  @default("{}")
+  bandedRanges       String  @default("[]")
+  basicFilter        String?
+  conditionalFormats String  @default("[]")
+  seq                Int     @default(0)
 
   spreadsheet Spreadsheet @relation(fields: [tenant, spreadsheetId], references: [tenant, id])
   cells       SheetCell[]
@@ -243,7 +249,9 @@ model SheetTab {
   @@index([tenant, spreadsheetId])
 }
 
-// The sparse cell map, one row per written cell. The coordinate IS the map
+// The sparse cell map, one row per cell holding a value or anything else a
+// caller wrote to it: `text` is the value (null when it has none) and `props`
+// the rest of its CellData, its format among them. The coordinate IS the map
 // key, so it is the id; a second write to one cell overwrites.
 model SheetCell {
   tenant        String
@@ -251,7 +259,8 @@ model SheetCell {
   sheetId       Int
   row           Int
   col           Int
-  text          String
+  text          String?
+  props         String  @default("{}")
 
   tab SheetTab @relation(fields: [tenant, spreadsheetId, sheetId], references: [tenant, spreadsheetId, sheetId])
 

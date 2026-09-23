@@ -30,7 +30,14 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FileStat } from '@struktoai/mirage-node'
-import { ConsistencyPolicy, MountMode, RAMVFS, S3VFS, Workspace } from '@struktoai/mirage-node'
+import {
+  DEFAULT_READ_TTL,
+  MountMode,
+  RAMVFS,
+  ReadPolicy,
+  S3VFS,
+  Workspace,
+} from '@struktoai/mirage-node'
 
 function s3VfsFromEnv(keyPrefix: string): S3VFS {
   const bucket = process.env.S3_BUCKET
@@ -90,11 +97,11 @@ async function runOverlaySnapshotRoundtrip(
 async function runOverlayOrphanGc(keyPrefix: string): Promise<Record<string, boolean>> {
   // A chmod on a slot-less backend (s3) creates an attribute overlay. When
   // the object is deleted out-of-band (raw op, another agent), the overlay
-  // is orphaned. Under ALWAYS, a single-mount shell stat the backend reports
+  // is orphaned. Under `read: fresh`, a single-mount shell stat the backend reports
   // gone must GC that orphaned node.
   const ws = new Workspace(
     { '/data': s3VfsFromEnv(keyPrefix) },
-    { mode: MountMode.WRITE, consistency: ConsistencyPolicy.ALWAYS },
+    { mode: MountMode.WRITE, read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL } },
   )
   try {
     await ws.shell('echo alpha > /data/g.txt && chmod 601 /data/g.txt')

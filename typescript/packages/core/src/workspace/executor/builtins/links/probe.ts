@@ -12,13 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { isMissError } from '../../../../utils/errors.ts'
+import { FileStat, FileType, PathSpec, type StatFn } from '../../../../types.ts'
+import { enoent, isMissError } from '../../../../utils/errors.ts'
 import { gnuBasename } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { StatOverlay } from '../../../../ops/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
+
+// Stat via dispatch in the shape the generics' probes take: destKind and
+// its kin are written against a backend stat that raises on a miss, so a
+// dispatcher answer of nothing becomes ENOENT.
+export function dispatchStat(dispatch: DispatchFn): StatFn {
+  return async (path: PathSpec) => {
+    const [stat] = await dispatch('stat', path)
+    if (!(stat instanceof FileStat)) throw enoent(path)
+    return stat
+  }
+}
 
 export async function statOrNull(dispatch: DispatchFn, path: PathSpec): Promise<FileStat | null> {
   // A missing destination is an expected mv case (plain rename), not an

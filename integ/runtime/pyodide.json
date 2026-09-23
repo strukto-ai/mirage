@@ -1207,6 +1207,153 @@
           }
         }
       ]
+    },
+    {
+      "id": "extended_attributes_round_trip_with_the_shell",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "setfattr -n user.tag -v shell /data/t.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "python3 -c \"import os; print(os.getxattr('/data/t.txt', 'user.tag')); os.setxattr('/data/t.txt', 'user.guest', b'g'); print(os.listxattr('/data/t.txt'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "b'shell'\n['user.guest', 'user.tag']\n"
+          }
+        },
+        {
+          "command": "getfattr -n user.guest --only-values /data/t.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "g"
+          }
+        },
+        {
+          "command": "python3 -c \"import errno, os\nfor call in (lambda: os.getxattr('/data/t.txt', 'user.none'),\n             lambda: os.setxattr('/data/t.txt', 'user.guest', b'x', os.XATTR_CREATE),\n             lambda: os.listxattr('/data/none.txt')):\n    try:\n        call()\n    except OSError as exc:\n        print(errno.errorcode[exc.errno])\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "ENODATA\nEEXIST\nENOENT\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import os; os.removexattr('/data/t.txt', 'user.tag'); print(os.listxattr('/data/t.txt'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "['user.guest']\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "memory_growth_output",
+      "hosts": [
+        "typescript"
+      ],
+      "world": {
+        "runtimes": [
+          "pyodide",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 -c \"import builtins, json; builtins._pressure = [bytearray(700 * 1024 * 1024) for _ in range(3)]; builtins._small = [str(i).encode() for i in range(100000)]; rows = json.loads(json.dumps([{'value': i, 'text': '世界'} for i in range(20000)])); assert len(rows) == 20000\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('hello world')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello world\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('hello')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('hello world'); sys.stderr.write('stderr — café 🌍\\n')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello world\n",
+            "stderr": "stderr — café 🌍\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('世界 🌍'); sys.stderr.write('café 🌍\\n')\" > /ram/stdout.txt 2> /ram/stderr.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /ram/stdout.txt; cat /ram/stderr.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "世界 🌍\ncafé 🌍\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"print('hello world')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello world\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import builtins; del builtins._pressure, builtins._small\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print('after cleanup'); sys.stderr.write('still readable\\n')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "after cleanup\n",
+            "stderr": "still readable\n"
+          }
+        }
+      ]
     }
   ]
 }

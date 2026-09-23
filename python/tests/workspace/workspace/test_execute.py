@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.types import CLISpec
 from mirage.commands.registry import command
 from mirage.commands.spec import CommandSpec
 from mirage.io.types import IOResult
@@ -457,3 +458,124 @@ async def test_abort_of_a_running_line_is_not_held_by_a_dead_session_store():
     finally:
         timer.cancel()
     assert session.last_exit_code == 1
+
+
+# One session is one shell: two top-level lines on it run one at a
+# time, so a loop never reads the variable another line's loop set
+# (#1144). A nested line is the same shell continuing and runs inline.
+_LOOP_A = 'for f in A1 A2 A3; do sleep 0.01; echo "A:$f"; done'
+_LOOP_B = 'for f in B1 B2 B3; do sleep 0.01; echo "B:$f"; done'
+
+
+@pytest.mark.asyncio
+async def test_two_loops_on_the_default_session_keep_their_own_values():
+    ws = _make_ws()
+    try:
+        a, b = await asyncio.gather(ws.shell(_LOOP_A), ws.shell(_LOOP_B))
+        assert a.stdout == b"A:A1\nA:A2\nA:A3\n"
+        assert b.stdout == b"B:B1\nB:B2\nB:B3\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_each_keep_their_own_loop_values():
+    ws = _make_ws()
+    ws.create_session("one")
+    ws.create_session("two")
+    try:
+        a, b = await asyncio.gather(ws.shell(_LOOP_A, session_id="one"),
+                                    ws.shell(_LOOP_B, session_id="two"))
+        assert a.stdout == b"A:A1\nA:A2\nA:A3\n"
+        assert b.stdout == b"B:B1\nB:B2\nB:B3\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_nested_lines_run_while_the_outer_line_holds_the_session():
+    ws = _make_ws()
+    try:
+        await ws.shell('echo "echo deep" > /ram/f.sh')
+        io = await ws.shell('eval "source /ram/f.sh"; echo $(echo sub)')
+        assert io.stdout == b"deep\nsub\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_host_callback_reentering_its_own_session_runs_inline():
+    ws = _make_ws()
+
+    async def again(inv):
+        inner = await ws.shell("echo inner")
+        return inner.stdout, IOResult()
+
+    ws.register_cli("again", CLISpec(name="again", fn=again))
+    try:
+        io = await ws.shell("again")
+        assert io.stdout == b"inner\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_line_queued_behind_a_running_one_is_refused_once_close_starts():
+    ws = _make_ws()
+    gate = asyncio.Event()
+
+    async def stall(inv):
+        await gate.wait()
+        return None, IOResult()
+
+    ws.register_cli("stall", CLISpec(name="stall", fn=stall))
+    first = asyncio.ensure_future(ws.shell("stall"))
+    queued = asyncio.ensure_future(ws.shell("echo queued"))
+    await asyncio.sleep(0.01)
+    closing = asyncio.ensure_future(ws.close())
+    gate.set()
+    await first
+    with pytest.raises(RuntimeError, match="Workspace is closed"):
+        await queued
+    await closing
+
+
+@pytest.mark.asyncio
+async def test_a_queued_line_runs_after_the_aborted_one_and_keeps_its_status():
+    ws = _make_ws()
+    try:
+        await ws.shell("true")
+        cancel = asyncio.Event()
+        blocked = asyncio.ensure_future(ws.shell("sleep 5", cancel=cancel))
+        await asyncio.sleep(0.05)
+        queued = asyncio.ensure_future(ws.shell("false"))
+        cancel.set()
+        with pytest.raises(MirageAbortError):
+            await blocked
+        await queued
+        assert (await ws.shell("echo $?")).stdout == b"1\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_caller_that_aborts_while_queued_never_runs_its_line():
+    ws = _make_ws()
+    try:
+        cancel = asyncio.Event()
+        blocked = asyncio.ensure_future(ws.shell("sleep 5", cancel=cancel))
+        await asyncio.sleep(0.05)
+        queued_cancel = asyncio.Event()
+        timer = asyncio.get_running_loop().call_later(0.05, queued_cancel.set)
+        try:
+            with pytest.raises(MirageAbortError):
+                await asyncio.wait_for(
+                    ws.shell("echo ran > /ram/mark", cancel=queued_cancel), 2)
+        finally:
+            timer.cancel()
+        cancel.set()
+        with pytest.raises(MirageAbortError):
+            await blocked
+        assert b"mark" not in (await ws.shell("ls /ram")).stdout
+    finally:
+        await ws.close()

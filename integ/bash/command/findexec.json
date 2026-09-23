@@ -307,7 +307,7 @@
       }
     },
     {
-      "id": "find_exec_under_or_refused",
+      "id": "find_exec_under_or_runs_on_the_other_arm",
       "seq": 980079,
       "targets": [
         "ram",
@@ -333,11 +333,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -name a -o -exec echo {} \\; ; echo rc=$?",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -o -exec echo {} \\; ; echo rc=$? ; cd / && rm -r /data/fe",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n",
-        "stderr": "find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses\n"
+        "stdout": "d\nd/b.txt\nd/sub\nd/sub/c.txt\nrc=0\n",
+        "stderr": ""
       }
     },
     {
@@ -511,7 +511,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "find: -exec is supported only in a top-level -a chain, not under -o, ! or parentheses\n"
+        "stderr": "find: -exec and -print cannot be combined under -o, ! or parentheses\n"
       }
     },
     {
@@ -842,13 +842,13 @@
       "note": "box, hf, hf-prefix, s3, s3-prefix and nextcloud are excused in integ/target_exceptions.json: python cannot create the newline-bearing name on the first five, and Nextcloud's WebDAV refuses it for both hosts."
     },
     {
-      "id": "find_delete_or_refused_before_mutation",
+      "id": "find_delete_under_or_removes_the_other_arm",
       "seq": 981503,
       "command": "mkdir -p /data/reviewor; touch /data/reviewor/keep /data/reviewor/remove; find /data/reviewor -name keep -o -delete; echo find:$?; test -f /data/reviewor/keep && test -f /data/reviewor/remove; echo kept:$?; rm -r /data/reviewor",
       "expect": {
         "exit": 0,
-        "stdout": "find:1\nkept:0\n",
-        "stderr": "find: -delete is supported only in a top-level -a chain, not under -o, ! or parentheses\n"
+        "stdout": "find:1\nkept:1\n",
+        "stderr": "find: cannot delete '/data/reviewor': Directory not empty\n"
       },
       "targets": [
         "ram",
@@ -861,8 +861,6 @@
         "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "hf",
-        "hf-prefix",
         "dropbox",
         "dropbox-root",
         "onedrive",
@@ -1211,7 +1209,7 @@
       }
     },
     {
-      "id": "find_newer_printf_refusal_9",
+      "id": "find_printf_then_exec_runs_per_row",
       "seq": 981514,
       "targets": [
         "ram",
@@ -1237,15 +1235,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -printf '%p\\n' -exec true '{}' ';'",
+      "command": "mkdir -p /data/fq1/d && printf 'hi\\n' > /data/fq1/d/a && printf 'yo\\n' > /data/fq1/d/b && cd /data/fq1 && find d -type f -printf '%p\\n' -exec cat {} ';' ; cd / && rm -r /data/fq1",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -exec cannot be combined with -printf\n"
-      }
+        "exit": 0,
+        "stdout": "d/a\nhi\nd/b\nyo\n",
+        "stderr": ""
+      },
+      "note": "GNU findutils 4.10.0 on debian:stable-slim runs every action of the -a chain per row, in the order written; each row here is GNU's, siblings sorted where GNU prints them in readdir order."
     },
     {
-      "id": "find_newer_printf_refusal_10",
+      "id": "find_exec_then_printf_runs_per_row",
       "seq": 981515,
       "targets": [
         "ram",
@@ -1271,15 +1270,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -exec true '{}' ';' -printf '%p\\n'",
+      "command": "mkdir -p /data/fq2/d && printf 'hi\\n' > /data/fq2/d/a && printf 'yo\\n' > /data/fq2/d/b && cd /data/fq2 && find d -type f -exec cat {} ';' -printf '%f\\n' ; cd / && rm -r /data/fq2",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -exec cannot be combined with -printf\n"
+        "exit": 0,
+        "stdout": "hi\na\nyo\nb\n",
+        "stderr": ""
       }
     },
     {
-      "id": "find_newer_printf_refusal_11",
+      "id": "find_failing_exec_skips_a_later_printf",
       "seq": 981516,
       "targets": [
         "ram",
@@ -1305,15 +1304,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -printf '%p\\n' -print",
+      "command": "mkdir -p /data/fq3/d && printf 'hi\\n' > /data/fq3/d/a && printf 'yo\\n' > /data/fq3/d/b && cd /data/fq3 && find d -type f -exec grep -q hi {} ';' -printf 'hit %p\\n' ; cd / && rm -r /data/fq3",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -printf cannot be combined with other actions\n"
+        "exit": 0,
+        "stdout": "hit d/a\n",
+        "stderr": ""
       }
     },
     {
-      "id": "find_newer_printf_refusal_12",
+      "id": "find_printf_before_a_batched_exec",
       "seq": 981517,
       "targets": [
         "ram",
@@ -1339,15 +1338,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -print -printf '%p\\n'",
+      "command": "mkdir -p /data/fq4/d && printf 'hi\\n' > /data/fq4/d/a && printf 'yo\\n' > /data/fq4/d/b && cd /data/fq4 && find d -type f -printf '%f\\n' -exec echo batch {} + ; cd / && rm -r /data/fq4",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -printf cannot be combined with other actions\n"
+        "exit": 0,
+        "stdout": "a\nb\nbatch d/a d/b\n",
+        "stderr": ""
       }
     },
     {
-      "id": "find_newer_printf_refusal_13",
+      "id": "find_printf_beside_print",
       "seq": 981518,
       "targets": [
         "ram",
@@ -1373,15 +1372,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -printf '%p\\n' -print0",
+      "command": "mkdir -p /data/fq5/d && printf 'hi\\n' > /data/fq5/d/a && printf 'yo\\n' > /data/fq5/d/b && cd /data/fq5 && find d -type f -printf '%f ' -print; find d -type f -print -printf '%s\\n'; cd / && rm -r /data/fq5",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -printf cannot be combined with other actions\n"
+        "exit": 0,
+        "stdout": "a d/a\nb d/b\nd/a\n3\nd/b\n3\n",
+        "stderr": ""
       }
     },
     {
-      "id": "find_newer_printf_refusal_14",
+      "id": "find_printf_beside_print0",
       "seq": 981519,
       "targets": [
         "ram",
@@ -1407,15 +1406,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -print0 -printf '%p\\n'",
+      "command": "mkdir -p /data/fq6/d && printf 'hi\\n' > /data/fq6/d/a && printf 'yo\\n' > /data/fq6/d/b && cd /data/fq6 && find d -type f -printf '%f=' -print0 | tr '\\0' '\\n'; find d -type f -print0 -printf '|%s\\n' | tr '\\0' ' '; cd / && rm -r /data/fq6",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -printf cannot be combined with other actions\n"
+        "exit": 0,
+        "stdout": "a=d/a\nb=d/b\nd/a |3\nd/b |3\n",
+        "stderr": ""
       }
     },
     {
-      "id": "find_newer_printf_refusal_15",
+      "id": "find_printf_beside_ls",
       "seq": 981520,
       "targets": [
         "ram",
@@ -1441,15 +1440,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -printf '%p\\n' -ls",
+      "command": "mkdir -p /data/fq7/d && printf 'hi\\n' > /data/fq7/d/a && printf 'yo\\n' > /data/fq7/d/b && cd /data/fq7 && find d -type f -printf '%f ' -ls | awk '{print $1, $NF}'; find d -type f -ls -printf '%f\\n' | awk '{print $NF}'; cd / && rm -r /data/fq7",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -printf cannot be combined with other actions\n"
+        "exit": 0,
+        "stdout": "a d/a\nb d/b\nd/a\na\nd/b\nb\n",
+        "stderr": ""
       }
     },
     {
-      "id": "find_newer_printf_refusal_16",
+      "id": "find_printf_beside_delete",
       "seq": 981521,
       "targets": [
         "ram",
@@ -1475,15 +1474,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -ls -printf '%p\\n'",
+      "command": "mkdir -p /data/fq8/d && printf 'hi\\n' > /data/fq8/d/a.txt && printf 'yo\\n' > /data/fq8/d/b.txt && printf 'zz\\n' > /data/fq8/d/c.txt && printf 'k' > /data/fq8/d/keep && cd /data/fq8 && find d -name a.txt -printf 'rm %f\\n' -delete; find d -name b.txt -delete -printf 'gone %p\\n'; find d -name c.txt -printf '%s|' -delete -printf '%s\\n'; ls d; cd / && rm -r /data/fq8",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -printf cannot be combined with other actions\n"
-      }
+        "exit": 0,
+        "stdout": "rm a.txt\ngone d/b.txt\n3|3\nkeep\n",
+        "stderr": ""
+      },
+      "note": "GNU stats a row once: the second -printf renders the stat the first one took, before -delete removed the row."
     },
     {
-      "id": "find_newer_printf_refusal_17",
+      "id": "find_printf_twice_in_one_chain",
       "seq": 981522,
       "targets": [
         "ram",
@@ -1509,15 +1509,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -printf '%p\\n' -delete",
+      "command": "mkdir -p /data/fq9/d && printf 'hi\\n' > /data/fq9/d/a && printf 'yo\\n' > /data/fq9/d/b && cd /data/fq9 && find d -type f -printf '%f ' -printf '%s\\n'; cd / && rm -r /data/fq9",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -printf cannot be combined with other actions\n"
+        "exit": 0,
+        "stdout": "a 3\nb 3\n",
+        "stderr": ""
       }
     },
     {
-      "id": "find_newer_printf_refusal_18",
+      "id": "find_depth_orders_printf_rows",
       "seq": 981523,
       "targets": [
         "ram",
@@ -1543,15 +1543,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -delete -printf '%p\\n'",
+      "command": "mkdir -p /data/fq10/d/sub && printf 'A' > /data/fq10/d/a && printf 'B' > /data/fq10/d/sub/b && cd /data/fq10 && find d -depth -printf '%p\\n'; cd / && rm -r /data/fq10",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: -printf cannot be combined with other actions\n"
-      }
+        "exit": 0,
+        "stdout": "d/a\nd/sub/b\nd/sub\nd\n",
+        "stderr": ""
+      },
+      "note": "-depth reorders -printf rows as it does the implicit print."
     },
     {
-      "id": "find_newer_printf_refusal_19",
+      "id": "find_printf_measures_from_each_start_point",
       "seq": 981524,
       "targets": [
         "ram",
@@ -1577,12 +1578,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -printf %p -printf %f",
+      "command": "mkdir -p /data/fq11/d/sub && printf 'A' > /data/fq11/d/a && printf 'B' > /data/fq11/d/sub/b && cd /data/fq11 && find d d/sub -type f -printf '%P %d|' -print; cd / && rm -r /data/fq11",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "find: multiple -printf actions are not supported\n"
-      }
+        "exit": 0,
+        "stdout": "a 1|d/a\nsub/b 2|d/sub/b\nb 1|d/sub/b\n",
+        "stderr": ""
+      },
+      "note": "GNU walks d/sub twice, once under each start point, and %P and %d measure a row from the one it was found under."
     },
     {
       "id": "find_print_twice_prints_every_row_twice",
@@ -2165,6 +2167,40 @@
         "stderr": ""
       },
       "note": "GNU findutils 4.9 on debian:stable-slim: -ls renders the stat find already holds. GNU stats a start point when it opens the walk and any other row only for a test that needs the inode (-size, -mtime, -newer, -empty), so both list the row -delete removed (a start-point directory lists too, in the unit tests; hf keeps no marker for an emptied directory, so that step stays out of the shared battery), while `find d -type f -delete -ls` reports it gone (pinned in the unit tests). rc is sed's, since the pipe hides find's."
+    },
+    {
+      "id": "find_exec_result_before_another_arm_refused",
+      "seq": 981542,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -type d -exec false {} \\; -o -prune; echo rc=$?; find /data -type d -exec true {} + -o -prune; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=0\n",
+        "stderr": "find: -exec must end the expression under -o, ! or parentheses\n"
+      }
     }
   ]
 }

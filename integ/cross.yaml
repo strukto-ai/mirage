@@ -1,5 +1,4 @@
 mode: WRITE
-consistency: LAZY
 
 # Snake_case top-level keys must parse + apply identically in both CLIs.
 default_session_id: crosssess

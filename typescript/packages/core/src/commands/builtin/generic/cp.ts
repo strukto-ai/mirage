@@ -230,46 +230,100 @@ export async function targetDirError(
   return null
 }
 
-// GNU error line when a destination's parent chain is unusable, or null when
-// it is a usable directory path. cp is not `mkdir -p`: it never creates the
-// destination's parent, so a missing or non-directory component is a
-// per-operand failure. GNU surfaces the two cases at different phases and the
-// wording follows: a component that is a plain file fails the destination stat
-// ("cannot stat 'DST': Not a directory", at any depth), while a merely absent
-// parent fails the create ("cannot create regular file", or "cannot create
-// directory" for a recursive source). Only walks upward until it finds
-// something that exists, so the common case costs a single stat.
-async function destParentError(
-  cmdName: string,
+// {exists, isDir, strerror} for an operand whose stat answered. POSIX reads
+// `x/` as `x/.`, so a slashed operand over anything but a directory is
+// ENOTDIR (`cp reg/ d` and `cp f reg/` are both "cannot stat 'reg/': Not a
+// directory"). The single-mount stat is already wrapped to say so; the
+// cross-mount relay's is not, and the verdict belongs to the operand either
+// way.
+function slashAwareKind(
+  path: PathSpec,
+  info: FileStat,
+): { exists: boolean; isDir: boolean; strerror: string | null } {
+  const isDir = info.type === FileType.DIRECTORY
+  if (path.rawPath.endsWith('/') && !isDir) {
+    return { exists: false, isDir: false, strerror: 'Not a directory' }
+  }
+  return { exists: true, isDir, strerror: null }
+}
+
+// Probe a destination for {exists, isDir, strerror}. cp and mv are not
+// `mkdir -p`: neither creates the destination's parent, so a missing or
+// non-directory component is a per-operand failure, and GNU surfaces the two
+// at different phases. A non-directory fails the destination stat itself:
+// `reg/x` at any depth, and `reg/` typed with a slash over a plain file, are
+// both "cannot stat 'DST': Not a directory". A merely absent parent fails the
+// create or the rename ("cannot create regular file" for cp, "cannot move"
+// for mv), so the strerror comes back bare and each caller words it in its
+// own voice. null means the destination exists or its parent is a usable
+// directory.
+//
+// The backends answer ENOENT for a path under a plain file just as they do
+// for a genuinely absent one (only a slashed operand makes the stat itself
+// say ENOTDIR), so the chain is walked upward until something exists; the
+// common case (the parent is there) costs a single stat.
+export async function destKind(
   stat: StatFn,
   target: PathSpec,
-  srcIsDir: boolean,
-): Promise<string | null> {
-  const noun = srcIsDir ? 'directory' : 'regular file'
-  const enoentLine = `${cmdName}: cannot create ${noun} '${target.virtual}': No such file or directory`
-  const enotdirLine = `${cmdName}: cannot stat '${target.virtual}': Not a directory`
+): Promise<{ exists: boolean; isDir: boolean; strerror: string | null }> {
+  let info: FileStat | null = null
+  try {
+    info = await stat(target)
+  } catch (err) {
+    const code = (err as { code?: unknown }).code
+    if (code === 'ENOTDIR') return { exists: false, isDir: false, strerror: 'Not a directory' }
+    if (!isMissingPath(err)) throw err
+  }
+  if (info !== null) return slashAwareKind(target, info)
   const immediate = parent(norm(target.virtual))
   let node = immediate
   while (node !== '/') {
     const { exists, isDir } = await entryKind(stat, descendantPath(target, node))
     if (exists) {
-      if (!isDir) return enotdirLine
+      if (!isDir) return { exists: false, isDir: false, strerror: 'Not a directory' }
       // An existing directory higher up means the intermediate components
       // are simply absent.
-      return node === immediate ? null : enoentLine
+      return {
+        exists: false,
+        isDir: false,
+        strerror: node === immediate ? null : 'No such file or directory',
+      }
     }
     node = parent(node)
   }
   // The mount root always exists as a directory and is never stat-ed: a
   // backend that cannot stat "/" must not fail every copy into it.
-  return immediate === '/' ? null : enoentLine
+  return {
+    exists: false,
+    isDir: false,
+    strerror: immediate === '/' ? null : 'No such file or directory',
+  }
+}
+
+// Whether a slash-terminated destination refuses a non-directory. POSIX
+// resolves `missing/` as `missing/.`, so the name may only ever be a
+// directory: rename(2) and open(2) refuse to put a file there with ENOTDIR
+// where a bare `missing` would take it. GNU 9.7 words it at the create
+// ("mv: cannot move 'f' to 'missing/': Not a directory", "cp: cannot create
+// regular file 'missing/': Not a directory"); a directory source passes,
+// since the slash asked for exactly what it is. An existing destination
+// never reaches this: a directory receives the move inside it, and a
+// non-directory has already failed the stat.
+export function slashRefusesFile(
+  target: PathSpec,
+  targetExists: boolean,
+  srcIsDir: boolean,
+): boolean {
+  return !targetExists && target.rawPath.endsWith('/') && !srcIsDir
 }
 
 // Probe a path once for {exists, isDir}. ENOTDIR counts as "does not exist":
-// a path whose parent chain runs through a plain file cannot exist, and the
-// callers (cp/mv) turn that into GNU's own wording via destParentError. Only
-// this probe absorbs it; isMissingPath stays ENOENT-only so read-family
-// commands keep reporting "Not a directory" verbatim.
+// a path whose parent chain runs through a plain file cannot exist. This is
+// the probe for a path that is not an operand (an ancestor in a chain walk,
+// an overwrite target already paired); an operand itself goes through
+// sourceKind or destKind, which keep the ENOTDIR a slashed spelling earns.
+// isMissingPath stays ENOENT-only so read-family commands keep reporting
+// "Not a directory" verbatim.
 export async function entryKind(
   stat: StatFn,
   path: PathSpec,
@@ -289,15 +343,22 @@ export async function entryKind(
 // is `cannot stat 'X': Not a directory`, not "No such file or directory". The
 // backends cannot supply that distinction, because stat answers ENOENT for a
 // path under a plain file just as it does for a genuinely absent one (only
-// readdir splits the two). So the chain is walked the way destParentError walks
+// readdir splits the two). So the chain is walked the way destKind walks
 // a destination's: the first component that does exist decides, and a plain
 // file there means ENOTDIR. Walking happens only on the failure path.
 export async function sourceKind(
   stat: StatFn,
   path: PathSpec,
 ): Promise<{ exists: boolean; isDir: boolean; strerror: string | null }> {
-  const probe = await entryKind(stat, path)
-  if (probe.exists) return { exists: true, isDir: probe.isDir, strerror: null }
+  let info: FileStat | null = null
+  try {
+    info = await stat(path)
+  } catch (err) {
+    const code = (err as { code?: unknown }).code
+    if (code === 'ENOTDIR') return { exists: false, isDir: false, strerror: 'Not a directory' }
+    if (!isMissingPath(err)) throw err
+  }
+  if (info !== null) return slashAwareKind(path, info)
   let node = parent(norm(path.virtual))
   while (node !== '/') {
     const up = await entryKind(stat, descendantPath(path, node))
@@ -717,6 +778,7 @@ export async function cpGeneric(
   let dst: PathSpec
   let dstIsDir: boolean
   let dstExists: boolean
+  let dstErr: string | null = null
   if (dstOperand === null) {
     const firstSource = sources[0]
     if (firstSource === undefined) return [null, new IOResult()]
@@ -736,9 +798,10 @@ export async function cpGeneric(
     dstExists = true
   } else {
     dst = dstOperand
-    const probe = await entryKind(stat, dst)
+    const probe = await destKind(stat, dst)
     dstExists = probe.exists
     dstIsDir = probe.isDir
+    dstErr = probe.strerror
   }
   let versionReaddir = readdir
   if (versionReaddir === undefined && isPrimitiveCopy(strategy)) {
@@ -756,10 +819,10 @@ export async function cpGeneric(
   const reads: Record<string, Uint8Array> = {}
   const lines: string[] = []
   const errors: string[] = []
-  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists)) {
+  for (const [src, target] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr)) {
     const { exists: srcExists, isDir: srcIsDir, strerror: srcErr } = await sourceKind(stat, src)
     if (!srcExists) {
-      errors.push(`cp: cannot stat '${src.virtual}': ${String(srcErr)}`)
+      errors.push(`cp: cannot stat '${src.rawPath}': ${String(srcErr)}`)
       continue
     }
     if (keyOf(src) === keyOf(target)) {
@@ -774,16 +837,23 @@ export async function cpGeneric(
       errors.push(`cp: -r not specified; omitting directory '${src.virtual}'`)
       continue
     }
-    const { exists: targetExists, isDir: targetIsDir } =
+    const probe =
       !flags.noTargetDir && target.virtual === dst.virtual
-        ? { exists: dstExists, isDir: dstIsDir }
-        : await entryKind(stat, target)
-    if (!targetExists) {
-      const parentErr = await destParentError('cp', stat, target, srcIsDir)
-      if (parentErr !== null) {
-        errors.push(parentErr)
-        continue
-      }
+        ? { exists: dstExists, isDir: dstIsDir, strerror: dstErr }
+        : await destKind(stat, target)
+    const { exists: targetExists, isDir: targetIsDir } = probe
+    let targetErr = probe.strerror
+    if (targetErr === 'Not a directory') {
+      errors.push(`cp: cannot stat '${target.rawPath}': Not a directory`)
+      continue
+    }
+    // The create fails on the absent parent before the slash matters, so a
+    // chain verdict keeps its ENOENT (`cp f deep/missing/`).
+    if (slashRefusesFile(target, targetExists, srcIsDir)) targetErr ??= 'Not a directory'
+    if (targetErr !== null) {
+      const noun = srcIsDir ? 'directory' : 'regular file'
+      errors.push(`cp: cannot create ${noun} '${target.rawPath}': ${targetErr}`)
+      continue
     }
     const mismatch = overwriteTypeError('cp', src, srcIsDir, target, targetExists, targetIsDir)
     if (mismatch !== null) {

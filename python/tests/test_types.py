@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 from pydantic import ValidationError
 
-from mirage.types import (Aggr, FileStat, FileType, Limit, MountMode, OnExceed,
-                          PathSpec, parse_mount_mode, word_text)
+from mirage.types import (DEFAULT_READ_TTL, Aggr, CacheFacts, FileStat,
+                          FileType, Limit, MountMode, OnExceed, PathSpec,
+                          ReadPolicy, ReadSpec, parse_mount_mode, word_text)
 
 
 def test_filestat_defaults():
@@ -157,3 +160,33 @@ def test_parse_mount_mode_rejects_bit_style_forms():
     for bad in ("w", "x", "wx", "rx", "admin"):
         with pytest.raises(ValueError):
             parse_mount_mode(bad)
+
+
+def test_read_policy_values():
+    assert ReadPolicy.FRESH == "fresh"
+    assert ReadPolicy.BOUNDED == "bounded"
+    assert ReadPolicy.PINNED == "pinned"
+
+
+def test_read_spec_defaults_to_bounded_at_the_index_ttl():
+    spec = ReadSpec()
+    assert spec.policy is ReadPolicy.BOUNDED
+    assert spec.ttl == DEFAULT_READ_TTL == 600
+
+
+def test_read_spec_carries_a_bound_under_fresh_too():
+    # Every entry is self-describing, so two workspaces sharing one cache
+    # under different policies cannot write entries the other cannot date.
+    assert ReadSpec(policy=ReadPolicy.FRESH).ttl == DEFAULT_READ_TTL
+
+
+def test_read_spec_is_frozen():
+    with pytest.raises(FrozenInstanceError):
+        ReadSpec().policy = ReadPolicy.FRESH
+
+
+def test_cache_facts_is_frozen():
+    facts = CacheFacts(cacheable=True, ttl=30)
+    assert (facts.cacheable, facts.ttl) == (True, 30)
+    with pytest.raises(FrozenInstanceError):
+        facts.ttl = 1

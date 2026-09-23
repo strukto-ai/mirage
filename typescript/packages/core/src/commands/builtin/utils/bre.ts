@@ -19,6 +19,7 @@
 // They are glibc-specific -- POSIX does not word these, and BSD libc words
 // them differently -- so they look unusual on purpose: `expr abc : '\('`
 // really does say `Unmatched ( or \(`.
+import { POSIX_CLASSES } from '../../../utils/posix.ts'
 const UNMATCHED_OPEN = 'Unmatched ( or \\('
 const UNMATCHED_CLOSE = 'Unmatched ) or \\)'
 const UNMATCHED_BRACE = 'Unmatched \\{'
@@ -44,20 +45,6 @@ const SPACE_CHARS = ' \\t\\n\\v\\f\\r'
 // locale, so every class is the ASCII set and can be inlined into a host
 // bracket expression, which is the only form python `re` and JavaScript
 // `RegExp` both understand.
-const POSIX_CLASSES: Record<string, string> = {
-  alnum: '0-9A-Za-z',
-  alpha: 'A-Za-z',
-  blank: ' \\t',
-  cntrl: '\\x00-\\x1f\\x7f',
-  digit: '0-9',
-  graph: '!-~',
-  lower: 'a-z',
-  print: ' -~',
-  punct: '!-/:-@\\[-`{-~',
-  space: SPACE_CHARS,
-  upper: 'A-Z',
-  xdigit: '0-9A-Fa-f',
-}
 
 // GNU's `\w`/`\W`/`\s`/`\S` are expanded rather than passed through
 // because python's own `\w` is Unicode-aware by default while GNU's is
@@ -170,7 +157,7 @@ function bracketItem(src: string, i: number): [number, string, string] {
     if (close < 0) throw new BreError(UNMATCHED_BRACKET)
     const name = src.slice(i + 2, close)
     if (after === ':') {
-      const expansion = POSIX_CLASSES[name]
+      const expansion = Object.hasOwn(POSIX_CLASSES, name) ? POSIX_CLASSES[name] : undefined
       if (expansion === undefined) throw new BreError(BAD_CLASS_NAME)
       return [close + 2, after, expansion]
     }

@@ -19,11 +19,11 @@ import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js'
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { DEFAULT_RUN, Router, bindHost, start } from '../kit/typescript/index.ts'
-import type { JsonValue } from '../kit/typescript/index.ts'
+import type { JsonValue, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
-import { MAX_PAGE_SIZE } from './config.ts'
+import { DEFAULT_API_VERSION, MAX_PAGE_SIZE } from './config.ts'
 import { notionFake } from './fake.ts'
-import { databaseRows, searchResults } from './search.ts'
+import { databaseRows, filterRefusal, searchResults } from './search.ts'
 import { childrenOf } from './store.ts'
 import type { DatabaseRow, Json, PageRow } from './types.ts'
 import {
@@ -34,6 +34,7 @@ import {
   databaseIdOf,
   databaseJson,
   intOr,
+  listTypeOf,
   pageJson,
   pageOf,
 } from './wire.ts'
@@ -45,11 +46,21 @@ import { deleteBlock } from './writes.ts'
 // same six lines and cannot drift from it.
 const queue = new Router<C>([])
 
+// A tool answers with a payload or throws; a refusal the REST arm would send
+// as a 400 is thrown in its own words.
+function payloadOf(reply: Reply): JsonValue {
+  if (reply.status !== 200) throw new Error(`mock notion: ${JSON.stringify(reply.body)}`)
+  return reply.body as JsonValue
+}
+
 async function toolPayload(db: C, tenant: string, name: string, args: Json): Promise<JsonValue> {
   const ws = tenant
   if (name === 'API-post-search') {
     const results = await searchResults(db, ws, args)
-    return pageOf(results, cursorOf(args.start_cursor), intOr(args.page_size, MAX_PAGE_SIZE))
+    const size = intOr(args.page_size, MAX_PAGE_SIZE)
+    return payloadOf(
+      pageOf(results, cursorOf(args.start_cursor), size, listTypeOf(DEFAULT_API_VERSION)),
+    )
   }
   if (name === 'API-retrieve-a-page') {
     const id = String(args.page_id)
@@ -83,13 +94,18 @@ async function toolPayload(db: C, tenant: string, name: string, args: Json): Pro
     const all = (await db.notionDatabase.findMany({ where: { tenant: ws } })) as DatabaseRow[]
     const owner = databaseIdOf(String(args.data_source_id), all)
     if (owner === null) throw new Error(`mock notion: unknown data source`)
+    const refused = filterRefusal(args.filter)
+    if (refused !== null) return payloadOf(refused)
     const rows = await databaseRows(db, ws, owner, args)
-    return pageOf(rows, cursorOf(args.start_cursor), intOr(args.page_size, MAX_PAGE_SIZE))
+    const size = intOr(args.page_size, MAX_PAGE_SIZE)
+    return payloadOf(
+      pageOf(rows, cursorOf(args.start_cursor), size, listTypeOf(DEFAULT_API_VERSION)),
+    )
   }
   if (name === 'API-retrieve-block-children') {
     const rows = await childrenOf(db, ws, String(args.block_id))
     const size = intOr(args.page_size, MAX_PAGE_SIZE)
-    return pageOf(rows.map(blockJson), cursorOf(args.start_cursor), size)
+    return payloadOf(pageOf(rows.map(blockJson), cursorOf(args.start_cursor), size, 'block'))
   }
   // The one delete verb the tool surface has. It mutates, so it takes the same
   // per-workspace queue every REST mutation takes rather than a second rule.

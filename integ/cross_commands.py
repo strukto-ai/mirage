@@ -278,6 +278,9 @@ async def check_cross_mount_cache(ws: Workspace, s3_client,
     out, _, _ = await run(ws, f"cat {src} {x}")
     check(f"{label}: cross cat serves cached",
           out == "aaa\nkeepme\nmid\nlast\n")
+    out, _, _ = await run(ws, f"printf 'pipe\\n' | cat {src} - {x}")
+    check(f"{label}: cross cat mixes stdin and cached bytes",
+          out == "aaa\npipe\nkeepme\nmid\nlast\n")
     out, _, _ = await run(ws, f"head -n 1 {src} {x}")
     check(f"{label}: cross head serves cached", "keepme" in out
           and "nomatch" not in out)

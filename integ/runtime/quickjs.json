@@ -663,6 +663,32 @@
           }
         }
       ]
+    },
+    {
+      "id": "no_extended_attribute_calls",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(['getxattr', 'listxattr', 'removexattr', 'setxattr'].filter((n) => n in os).length)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        }
+      ]
     }
   ]
 }

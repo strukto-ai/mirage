@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
+import { CLISpec } from '../../commands/cli/types.ts'
 import { RegisteredCommand } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
@@ -291,5 +292,82 @@ describe('a negated command keeps its refusal', () => {
     const io = await ws.shell('V=secret; ! true | echo "$V"')
     expect(io.exitCode).toBe(0)
     expect(io.refusal?.reason).toBe('secrets stay put')
+  })
+})
+
+// One session is one shell: two top-level lines on it run one at a
+// time, so a loop never reads the variable another line's loop set
+// (#1144). A nested line is the same shell continuing and runs inline.
+describe('same-session lines run one at a time', () => {
+  const loopA = 'for f in A1 A2 A3; do sleep 0.01; echo "A:$f"; done'
+  const loopB = 'for f in B1 B2 B3; do sleep 0.01; echo "B:$f"; done'
+
+  it('two loops on the default session keep their own values', async () => {
+    const ws = await makeWs()
+    const [a, b] = await Promise.all([ws.shell(loopA), ws.shell(loopB)])
+    expect(stdoutStr(a)).toBe('A:A1\nA:A2\nA:A3\n')
+    expect(stdoutStr(b)).toBe('B:B1\nB:B2\nB:B3\n')
+  })
+
+  it('two sessions each keep their own loop values', async () => {
+    const ws = await makeWs()
+    ws.createSession('one')
+    ws.createSession('two')
+    const [a, b] = await Promise.all([
+      ws.shell(loopA, { sessionId: 'one' }),
+      ws.shell(loopB, { sessionId: 'two' }),
+    ])
+    expect(stdoutStr(a)).toBe('A:A1\nA:A2\nA:A3\n')
+    expect(stdoutStr(b)).toBe('B:B1\nB:B2\nB:B3\n')
+  })
+
+  it('nested lines keep running while the outer line holds the session', async () => {
+    const ws = await makeWs()
+    await ws.shell('echo "echo deep" > /ram/f.sh')
+    const io = await ws.shell('eval "source /ram/f.sh"; echo $(echo sub)')
+    expect(stdoutStr(io)).toBe('deep\nsub\n')
+  })
+
+  it('a host callback re-entering its own session runs inline', async () => {
+    const ws = await makeWs()
+    ws.registerCli(
+      'again',
+      new CLISpec({
+        name: 'again',
+        fn: async () => {
+          const inner = await ws.shell('echo inner')
+          return [inner.stdout, new IOResult({ exitCode: inner.exitCode })]
+        },
+      }),
+    )
+    const io = await ws.shell('again')
+    expect(stdoutStr(io)).toBe('inner\n')
+  })
+
+  it('a line queued behind a running one is refused once close starts', async () => {
+    const ws = await makeWs()
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    ws.registerCli(
+      'stall',
+      new CLISpec({
+        name: 'stall',
+        fn: async () => {
+          await gate
+          return null
+        },
+      }),
+    )
+    const first = ws.shell('stall')
+    const queued = ws.shell('echo queued')
+    const refused = expect(queued).rejects.toThrow('Workspace is closed')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const closing = ws.close()
+    release()
+    await first
+    await refused
+    await closing
   })
 })

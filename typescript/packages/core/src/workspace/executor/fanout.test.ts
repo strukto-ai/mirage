@@ -128,6 +128,127 @@ describe('fanOutTraversal mount-entry synthesis honors the expression tree', () 
     expect(text).not.toContain('/data/ram')
     expect(text).not.toContain('/data/disk')
   })
+
+  it('-prune of a mount root under -o hides it and names nothing beneath', async () => {
+    const text = await runFind(['find', '/data', '-path', '/data/ram', '-prune', '-o', '-print'])
+    expect(text).not.toContain('/data/ram')
+    expect(text).toContain('/data/disk')
+  })
+
+  it('a time test before -prune gates the mounts under it', async () => {
+    // Namespace-only ancestors `/w/old` and `/w/new` hold the mounts; only
+    // `/w/old` predates the cutoff, so only its contents stay in the walk.
+    const stamps: Record<string, string> = { '/w/old': '2000-01-01T00:00:00Z' }
+    const dispatch: DispatchFn = ((op: string, path: PathSpec) => {
+      if (op !== 'stat') throw new Error(`dispatch(${op}) should not have been called`)
+      return Promise.resolve([
+        new FileStat({
+          name: basename(path.virtual),
+          type: FileType.DIRECTORY,
+          modified: stamps[path.virtual] ?? '2026-01-01T00:00:00Z',
+        }),
+        new IOResult(),
+      ])
+    }) as unknown as DispatchFn
+    const reg = new MountRegistry(
+      { '/w/': new RAMVFS(), '/w/old/deep/': new RAMVFS(), '/w/new/deep/': new RAMVFS() },
+      MountMode.WRITE,
+    )
+    wireRegistry(reg)
+    const s = new SessionState({ sessionId: 'test', cwd: '/' })
+    const run = async (argv: string[]): Promise<string[]> => {
+      const [out] = await handleCommand(NEVER_EXECUTE, dispatch, reg, argv, s)
+      if (out === null) return []
+      return new TextDecoder()
+        .decode(await materialize(out))
+        .split('\n')
+        .filter((l) => l !== '')
+        .sort()
+    }
+    expect(await run(['find', '/w', '-mindepth', '1', '-newermt', '2010-01-01', '-prune'])).toEqual(
+      ['/w/new', '/w/old/deep'],
+    )
+    expect(await run(['find', '/w', '-mindepth', '1', '-prune', '-newermt', '2010-01-01'])).toEqual(
+      ['/w/new'],
+    )
+  })
+
+  it('a mount under a pruned directory is not statted', async () => {
+    // `find /w -path /w/skip -prune -newermt X`: GNU never visits `/w/skip/deep`,
+    // so the fan-out asks nothing about it, and a backend refusing the probe
+    // cannot fail the line.
+    const dispatch: DispatchFn = ((op: string, path: PathSpec) => {
+      if (op !== 'stat') throw new Error(`dispatch(${op}) should not have been called`)
+      if (path.virtual.startsWith('/w/skip/')) throw new Error(`statted ${path.virtual}`)
+      return Promise.resolve([
+        new FileStat({
+          name: basename(path.virtual),
+          type: FileType.DIRECTORY,
+          modified: '2026-01-01T00:00:00Z',
+        }),
+        new IOResult(),
+      ])
+    }) as unknown as DispatchFn
+    const reg = new MountRegistry(
+      { '/w/': new RAMVFS(), '/w/skip/deep/': new RAMVFS() },
+      MountMode.WRITE,
+    )
+    wireRegistry(reg)
+    const s = new SessionState({ sessionId: 'test', cwd: '/' })
+    const [out] = await handleCommand(
+      NEVER_EXECUTE,
+      dispatch,
+      reg,
+      ['find', '/w', '-path', '/w/skip', '-prune', '-newermt', '2010-01-01'],
+      s,
+    )
+    expect(out === null ? '' : new TextDecoder().decode(await materialize(out))).toBe('/w/skip\n')
+  })
+
+  it('-prune at the start point is one row', async () => {
+    expect(await runFind(['find', '/data', '-type', 'd', '-prune'])).toBe('/data\n')
+  })
+})
+
+describe('fanOutTraversal -prune above a nested mount', () => {
+  async function runFind(argv: string[]): Promise<string> {
+    const parent = new RAMVFS()
+    parent.store.files.set('/top.txt', new TextEncoder().encode('top\n'))
+    parent.store.dirs.add('/skip')
+    parent.store.files.set('/skip/x.txt', new TextEncoder().encode('x\n'))
+    const child = new RAMVFS()
+    child.store.files.set('/leaf.txt', new TextEncoder().encode('deep\n'))
+    const reg = new MountRegistry({ '/': parent, '/skip/deep/': child }, MountMode.WRITE)
+    wireRegistry(reg)
+    const s = new SessionState({ sessionId: 'test', cwd: '/' })
+    const [out] = await handleCommand(NEVER_EXECUTE, STAT_ONLY_DISPATCH, reg, argv, s)
+    return out === null ? '' : new TextDecoder().decode(await materialize(out))
+  }
+
+  it('skips the walk of a mount under the pruned directory', async () => {
+    const text = await runFind([
+      'find',
+      '/',
+      '-path',
+      '/skip',
+      '-prune',
+      '-o',
+      '-name',
+      '*.txt',
+      '-print',
+    ])
+    expect(text).toBe('/top.txt\n')
+  })
+
+  it('a pruned root is the only row', async () => {
+    expect(await runFind(['find', '/', '-type', 'd', '-prune'])).toBe('/\n')
+  })
+
+  it('a pruned mount root keeps its siblings', async () => {
+    const text = await runFind(['find', '/', '-path', '/skip/deep', '-prune', '-o', '-print'])
+    expect(text).toContain('/skip/x.txt')
+    expect(text).not.toContain('/skip/deep')
+  })
 })
 
 describe('find actions on structural rows', () => {

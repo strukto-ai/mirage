@@ -61,6 +61,8 @@ function pad(text: string, width: number): string {
 
 async function main(): Promise<void> {
   const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(CONFIG))
+  // The config door hands back `Mount` objects, which `new Workspace`
+  // takes as-is; this used to rebuild them from [vfs, mode] tuples.
   const ws = new Workspace(args.mounts, args.options)
   try {
     for (const line of SEED) await ws.shell(line)

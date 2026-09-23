@@ -48,8 +48,8 @@ _INTEG_ALIASES = {_INTEG_DIR, str(Path(__file__).parent), ""}
 _ON_PATH = any(p in _INTEG_ALIASES for p in sys.path)
 sys.path[:] = [p for p in sys.path if p not in _INTEG_ALIASES]
 
-from mirage import MountMode, Workspace  # noqa: E402
-from mirage.types import ConsistencyPolicy, FileStat, PathSpec  # noqa: E402
+from mirage import MountMode, ReadPolicy, ReadSpec, Workspace  # noqa: E402
+from mirage.types import FileStat, PathSpec  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
 from mirage.vfs.s3 import S3VFS, S3Config  # noqa: E402
 
@@ -113,11 +113,11 @@ async def run_overlay_snapshot_roundtrip(ws: Workspace,
 async def run_overlay_orphan_gc(config: S3Config) -> dict[str, MetaValue]:
     # A chmod on a slot-less backend (s3) creates an attribute overlay in
     # the namespace. When the object is deleted out-of-band (another agent,
-    # the raw API), the overlay is orphaned. Under ALWAYS, a stat that the
-    # backend reports gone must GC that orphaned node.
+    # the raw API), the overlay is orphaned. Under `read: fresh`, a stat
+    # the backend reports gone must GC that orphaned node.
     ws = Workspace({"/data": S3VFS(config)},
                    mode=MountMode.WRITE,
-                   consistency=ConsistencyPolicy.ALWAYS)
+                   read=ReadSpec(policy=ReadPolicy.FRESH))
     await ws.shell("echo alpha > /data/g.txt && chmod 601 /data/g.txt")
     before = ws.namespace.meta_for("/data/g.txt") is not None
     mount = ws.namespace.mount_for("/data/g.txt")

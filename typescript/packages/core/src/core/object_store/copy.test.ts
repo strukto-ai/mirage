@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
+import { runWithRecording } from '../../observe/context.ts'
 import { makeCopy } from './copy.ts'
 import { makeExists } from './exists.ts'
 import { codeOf, FakeAccessor, FakeManager, FakeStore, makeDriver, spec } from './fakes.ts'
@@ -67,3 +68,83 @@ describe('object_store copy', () => {
     expect(() => makeCopy(driver, makeExists(makeStat(driver)))).toThrow('no native copy')
   })
 })
+
+async function recorded(fn: () => Promise<void>): Promise<[string, string][]> {
+  const [, records] = await runWithRecording(async () => {
+    await managed(fn)
+  })
+  return records.map((r) => [r.op, r.path])
+}
+
+function alwaysExists(): Promise<boolean> {
+  return Promise.resolve(true)
+}
+
+describe('object_store copy retraction record', () => {
+  it('records a retraction for the destination', async () => {
+    // A copy replaces dst's bytes and leaves src untouched, so only
+    // dst's token stops describing its object.
+    const store = new FakeStore()
+    store.objects.set('a.txt', new Uint8Array(1))
+    const records = await recorded(() =>
+      makeCopy(makeDriver(store), alwaysExists)(accessor, spec('/a.txt'), spec('/b.txt')),
+    )
+    expect(records).toEqual([['copy', '/mnt/b.txt']])
+  })
+
+  it('a self-copy records nothing', async () => {
+    const store = new FakeStore()
+    store.objects.set('a.txt', new Uint8Array(1))
+    const records = await recorded(() =>
+      makeCopy(makeDriver(store), alwaysExists)(accessor, spec('/a.txt'), spec('/a.txt')),
+    )
+    expect(records).toEqual([])
+  })
+
+  it('records the retraction when the store throws', async () => {
+    // A rejection may have left a partial object on dst, so its token
+    // stops describing what is there.
+    const store = new FakeStore()
+    store.objects.set('a.txt', new Uint8Array(1))
+    const driver = makeDriver(store)
+    driver.copyFile = () => Promise.reject(Object.assign(new Error('boom'), { code: 'EIO' }))
+    const { code, records } = await recordedFailure(() =>
+      makeCopy(driver, alwaysExists)(accessor, spec('/a.txt'), spec('/b.txt')),
+    )
+    expect(code).toBe('EIO')
+    expect(records).toEqual([['copy', '/mnt/b.txt']])
+  })
+
+  it('evicts the destination when the store throws', async () => {
+    // The eviction rides with the record, on the same condition.
+    const store = new FakeStore()
+    store.objects.set('a.txt', new Uint8Array(1))
+    const driver = makeDriver(store)
+    driver.copyFile = () => Promise.reject(Object.assign(new Error('boom'), { code: 'EIO' }))
+    const manager = await managed(async () => {
+      expect(
+        await codeOf(makeCopy(driver, alwaysExists)(accessor, spec('/a.txt'), spec('/b.txt'))),
+      ).toBe('EIO')
+    })
+    expect(manager.writes).toEqual(['/b.txt'])
+  })
+
+  it('records nothing when the source is missing', async () => {
+    // A clean false is the store saying nothing was copied.
+    const { code, records } = await recordedFailure(() =>
+      makeCopy(makeDriver(new FakeStore()), alwaysExists)(accessor, spec('/a.txt'), spec('/b.txt')),
+    )
+    expect(code).toBe('ENOENT')
+    expect(records).toEqual([])
+  })
+})
+
+async function recordedFailure(
+  fn: () => Promise<void>,
+): Promise<{ code: string; records: [string, string][] }> {
+  let code = 'no-throw'
+  const [, records] = await runWithRecording(async () => {
+    code = await codeOf(managed(fn))
+  })
+  return { code, records: records.map((r) => [r.op, r.path]) }
+}

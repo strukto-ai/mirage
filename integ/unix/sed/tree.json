@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "sed_tree_dir_prefix_to_indent",
+      "seq": 991410,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'School/Courses_Materials/notes.md\\n' | sed 's#[^/]*/#    #g'",
+      "expect": {
+        "exit": 0,
+        "stdout": "        notes.md\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "sed_tree_dir_prefix_to_indent_ere",
+      "seq": 991411,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'School/Courses_Materials/notes.md\\n' | sed -E 's#[^/]*/#    #g'",
+      "expect": {
+        "exit": 0,
+        "stdout": "        notes.md\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

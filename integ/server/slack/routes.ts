@@ -16,8 +16,11 @@ import { route } from '../kit/typescript/index.ts'
 import type { KitRoute } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import {
+  authTest,
+  clientUserBoot,
   conversationsHistory,
   conversationsList,
+  conversationsReplies,
   download,
   emojiList,
   pinsList,
@@ -47,6 +50,11 @@ export function slackRoutes(): KitRoute<C>[] {
     route('POST', '/api/conversations.list', conversationsList),
     route('GET', '/api/conversations.history', conversationsHistory),
     route('POST', '/api/conversations.history', conversationsHistory),
+    route('GET', '/api/conversations.replies', conversationsReplies),
+    route('POST', '/api/conversations.replies', conversationsReplies),
+    route('GET', '/api/auth.test', authTest),
+    route('POST', '/api/auth.test', authTest),
+    route('POST', '/api/client.userBoot', clientUserBoot),
     route('GET', '/api/users.list', usersList),
     route('POST', '/api/users.list', usersList),
     route('GET', '/api/users.info', usersInfo),

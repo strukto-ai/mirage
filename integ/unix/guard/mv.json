@@ -145,6 +145,102 @@
         "stdout": "",
         "stderr": "mv: cannot move '/data/guard' to a subdirectory of itself, '/data/guard/sub/guard'\n"
       }
+    },
+    {
+      "id": "guard_mv_under_a_file",
+      "seq": 634,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/guard/g.txt /data/guard/sub/s.txt/x.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot stat '/data/guard/sub/s.txt/x.txt': Not a directory\n"
+      }
+    },
+    {
+      "id": "guard_mv_slashed_under_missing_parent",
+      "seq": 635,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/guard/g.txt /data/guard/nodir/missing/",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/data/guard/g.txt' to '/data/guard/nodir/missing/': No such file or directory\n"
+      }
+    },
+    {
+      "id": "guard_mv_dir_to_slashed_missing",
+      "seq": 636,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mv /data/guard/sub /data/guard/moved/ && test -f /data/guard/moved/s.txt && mv /data/guard/moved /data/guard/sub",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

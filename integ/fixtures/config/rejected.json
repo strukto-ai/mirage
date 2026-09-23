@@ -23,14 +23,96 @@
       }
     },
     {
-      "name": "top level: consistancy for consistency",
+      "name": "mount block: an unknown read policy",
       "config": {
         "mounts": {
           "/d": {
-            "vfs": "ram"
+            "vfs": "ram",
+            "read": "banana"
           }
-        },
-        "consistancy": "lazy"
+        }
+      }
+    },
+    {
+      "name": "mount block: ttl without read",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "ttl": 30
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: bounded without a bound",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded"
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: a quoted bound",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": "30"
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: a boolean bound",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": true
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: a fractional bound",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 1.5
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: a zero bound",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "mount block: a negative bound",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram",
+            "read": "bounded",
+            "ttl": -1
+          }
+        }
       }
     },
     {

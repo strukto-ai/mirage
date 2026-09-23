@@ -35,7 +35,7 @@
       }
     },
     {
-      "id": "awk_rejects_function_call",
+      "id": "awk_rejects_getline",
       "seq": 962341,
       "targets": [
         "ram",
@@ -61,15 +61,15 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'line\\n' | awk '{print toupper($1)}'",
+      "command": "printf 'a\\n' | awk '{getline line; print line}'",
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "awk: unsupported construct: 'print toupper($1)'\n"
+        "stderr": "awk: getline is not supported in mirage\n"
       }
     },
     {
-      "id": "awk_rejects_arithmetic_assignment",
+      "id": "awk_rejects_output_pipe",
       "seq": 962342,
       "targets": [
         "ram",
@@ -95,11 +95,45 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'line\\n' | awk '{x = y + 1; print x}'",
+      "command": "awk 'BEGIN{print \"hi\" | \"cat\"}'",
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "awk: unsupported construct: 'x = y + 1'\n"
+        "stderr": "awk: output pipes are not supported in mirage\n"
+      }
+    },
+    {
+      "id": "awk_rejects_system",
+      "seq": 962343,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk 'BEGIN{system(\"ls\")}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: system() is not supported in mirage\n"
       }
     }
   ]

@@ -27,7 +27,7 @@ from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar, SecretRef
 from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
-from mirage.types import ConsistencyPolicy
+from mirage.types import ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS
 from mirage.workspace.mount.namespace import RAMNamespaceStore
@@ -62,7 +62,7 @@ async def test_load_full_yaml_with_env_interpolation():
     }
     cfg = load_config(FIXTURES / "full.yaml", env=env)
     assert cfg.mode == MountMode.WRITE
-    assert cfg.consistency == ConsistencyPolicy.LAZY
+    assert cfg.read is None
     assert isinstance(cfg.cache, RamCacheBlock)
     assert cfg.cache.limit == "256MB"
     assert cfg.mounts["/s3"].config["bucket"] == "my-test-bucket"
@@ -1188,3 +1188,173 @@ def test_secrets_block_refusals_surface_as_config_errors():
         })
     with pytest.raises(ValueError):
         load_config({**base, "secrets": {"sm": {"kind": "aws-sm"}}})
+
+
+def test_a_mount_block_read_and_ttl_reach_the_mount():
+    """Asserted on the kwargs, not on the parsed block.
+
+    The block parses the keys and the loop builds the spec
+    independently, so reading ``cfg.mounts["/a"].ttl`` back would pass
+    while the `Mount` the Workspace is handed still carried the
+    default.
+    """
+    cfg = load_config({
+        "mounts": {
+            "/a": {
+                "vfs": "ram",
+                "read": "bounded",
+                "ttl": 45
+            },
+            "/b": {
+                "vfs": "ram"
+            },
+        }
+    })
+    mounts = cfg.to_workspace_kwargs()["mounts"]
+    assert mounts["/a"].read == ReadSpec(policy=ReadPolicy.BOUNDED, ttl=45)
+    assert mounts["/b"].read == ReadSpec()
+
+
+def test_the_workspace_read_default_is_what_an_undeclared_mount_takes():
+    """Declared with `fresh`, not `bounded`.
+
+    `read: bounded` resolves to exactly `ReadSpec()`, so asserting that
+    cannot tell "carried the declared default" from "dropped it and took
+    the dataclass default": gutting the key to `resolve_read_spec(None,
+    None)` leaves such a test green.
+    """
+    s3 = {"vfs": "s3", "config": {"bucket": "b"}}
+    cfg = load_config({
+        "read": "fresh",
+        "mounts": {
+            "/a": s3,
+            "/b": {
+                **s3, "read": "bounded",
+                "ttl": 30
+            }
+        },
+    })
+    kwargs = cfg.to_workspace_kwargs()
+    assert kwargs["read"].policy is ReadPolicy.FRESH
+    assert kwargs["mounts"]["/a"].read.policy is ReadPolicy.FRESH
+    assert kwargs["mounts"]["/b"].read == ReadSpec(policy=ReadPolicy.BOUNDED,
+                                                   ttl=30)
+
+
+def test_a_workspace_level_read_is_judged_at_every_mount_it_lands_on():
+    """The default is a real policy, so it faces the same verdict.
+
+    A top-level `read: fresh` that silently became `bounded` would mount
+    a RAM backend happily; the refusal is what proves the key arrived.
+    """
+    cfg = load_config({"read": "fresh", "mounts": {"/a": {"vfs": "ram"}}})
+    with pytest.raises(ValueError, match="needs a resource that caches reads"):
+        Workspace(**cfg.to_workspace_kwargs())
+
+
+def test_the_two_dependent_read_keys_are_refused_at_the_door():
+    """`bounded` and `ttl:` each imply the other.
+
+    By the time a ReadSpec exists the bound has already defaulted, so
+    `bounded` written without one is indistinguishable from `read:`
+    left out -- which is why the rule lives here and not in the
+    mount-time verdict.
+    """
+    with pytest.raises(ValueError, match="ttl pins the read bound"):
+        load_config({"mounts": {"/a": {"vfs": "ram", "ttl": 45}}})
+    with pytest.raises(ValueError, match="needs a bound"):
+        load_config({"mounts": {"/a": {"vfs": "ram", "read": "bounded"}}})
+
+
+def test_a_bound_that_is_not_whole_seconds_is_refused_at_the_door():
+    """pydantic coerces where this key cannot afford it.
+
+    `ttl: "30"` arrived as 30 and `ttl: true` as 1 -- a mount silently
+    bounded at one second -- while the TypeScript loader refused both
+    documents outright. Same bytes, two answers, which is exactly what
+    `integ/fixtures/config/rejected.json` exists to catch.
+    """
+    for junk in ("30", True, 1.5, 60.5):
+        with pytest.raises(ValueError, match="whole seconds"):
+            load_config({
+                "mounts": {
+                    "/a": {
+                        "vfs": "ram",
+                        "read": "bounded",
+                        "ttl": junk
+                    }
+                }
+            })
+
+
+def test_an_integral_float_bound_is_a_bound():
+    """JavaScript has one number type.
+
+    `ttl: 60.0` reaches the TypeScript loader as plain `60`, and no
+    predicate there can tell the two spellings apart, so refusing the
+    float here would load a document on one host and fail it on the
+    other. A fractional one is still a typo on both.
+    """
+    cfg = load_config(
+        {"mounts": {
+            "/a": {
+                "vfs": "ram",
+                "read": "bounded",
+                "ttl": 60.0
+            }
+        }})
+    assert cfg.mounts["/a"].ttl == 60
+    assert isinstance(cfg.mounts["/a"].ttl, int)
+
+
+def test_an_unusable_bound_is_refused_at_the_config_door_not_later():
+    """The same door TypeScript refuses it at.
+
+    `resolve_read_spec` catches this too, but only once
+    `to_workspace_kwargs` runs; the shared fixture loads the config and
+    nothing more, so a bound that can never expire has to be refused
+    here.
+    """
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match="at least 1 second"):
+            load_config({
+                "mounts": {
+                    "/a": {
+                        "vfs": "ram",
+                        "read": "bounded",
+                        "ttl": bad
+                    }
+                }
+            })
+
+
+def test_a_missing_policy_is_named_before_an_unusable_bound():
+    # TypeScript's `validateReadBlock` names the dependent key first and
+    # the bound second; one document wrong in both ways has to come back
+    # the same way on both hosts.
+    with pytest.raises(ValueError, match="ttl pins the read bound"):
+        load_config({"mounts": {"/a": {"vfs": "ram", "ttl": 0}}})
+
+
+def test_a_junk_read_policy_is_refused_at_the_door():
+    with pytest.raises(ValueError, match="fresh, bounded, pinned"):
+        load_config({"mounts": {"/a": {"vfs": "ram", "read": "banana"}}})
+    with pytest.raises(ValueError, match="fresh, bounded, pinned"):
+        load_config({"read": "banana", "mounts": {"/a": {"vfs": "ram"}}})
+
+
+def test_an_uppercase_read_policy_is_accepted():
+    cfg = load_config({"read": "FRESH", "mounts": {"/a": {"vfs": "ram"}}})
+    assert cfg.read is ReadPolicy.FRESH
+
+
+def test_a_mount_declaring_fresh_on_ram_is_refused_when_the_workspace_builds():
+    """The config door parses; the mount door judges.
+
+    Keeping the verdict at mount time is what makes one rule cover
+    YAML, ``add_mount`` and a snapshot restore alike.
+    """
+    cfg = load_config({"mounts": {"/a": {"vfs": "ram", "read": "fresh"}}})
+    kwargs = cfg.to_workspace_kwargs()
+    with pytest.raises(ValueError, match="needs a resource that caches reads"):
+        Workspace(**kwargs)

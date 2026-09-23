@@ -87,6 +87,9 @@ async def test_put_bytes(s3_accessor):
 
     with patch("mirage.core.s3.driver.async_session") as mock_session:
         mock_client = AsyncMock()
+        # A bare AsyncMock answers a MagicMock, which _put would read as
+        # the object's ETag; give it the shape a real PutObject returns.
+        mock_client.put_object.return_value = {"ETag": '"deadbeef"'}
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__.return_value = mock_client
         mock_session.return_value.client.return_value = mock_ctx

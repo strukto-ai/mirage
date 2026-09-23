@@ -419,6 +419,34 @@ class TestLinks:
         assert sorted(tops) == ["/data/dir", "/data/dir/sub", "/data/dir/subs"]
 
 
+@pytest.mark.skipif(not hasattr(os, "setxattr"),
+                    reason="the xattr family is linux only")
+class TestXattrs:
+
+    def test_the_family_routes_through_the_node_table(self):
+        _, patched = seeded()
+        patched.setxattr("/data/dir/a.txt", "user.b", b"two")
+        patched.setxattr("/data/dir/a.txt", b"user.a", b"one")
+        assert patched.listxattr("/data/dir/a.txt") == ["user.a", "user.b"]
+        assert patched.getxattr("/data/dir/a.txt", "user.a") == b"one"
+        patched.removexattr("/data/dir/a.txt", "user.b")
+        assert patched.listxattr("/data/dir/a.txt") == ["user.a"]
+
+    def test_flags_and_a_missing_name_answer_linux_errnos(self):
+        _, patched = seeded()
+        patched.setxattr("/data/dir/a.txt", "user.a", b"one")
+        with pytest.raises(FileExistsError):
+            patched.setxattr("/data/dir/a.txt", "user.a", b"x",
+                             os.XATTR_CREATE)
+        with pytest.raises(OSError) as caught:
+            patched.setxattr("/data/dir/a.txt", "user.q", b"x",
+                             os.XATTR_REPLACE)
+        assert caught.value.errno == errno.ENODATA
+        with pytest.raises(OSError) as missing:
+            patched.getxattr("/data/dir/a.txt", "user.q")
+        assert missing.value.errno == errno.ENODATA
+
+
 class TestRefusals:
 
     @pytest.mark.parametrize("verb", sorted(REFUSED_VERBS))
@@ -452,13 +480,10 @@ def _extra_args(verb):
     return {
         "chflags": (0, ),
         "lchflags": (0, ),
-        "getxattr": ("user.x", ),
         "link": ("/data/dir/hard", ),
         "mkfifo": (),
         "mknod": (),
         "open": (os.O_RDONLY, ),
-        "removexattr": ("user.x", ),
-        "setxattr": ("user.x", b"v"),
     }.get(verb, ())
 
 

@@ -89,6 +89,7 @@ class Cmd(StrEnum):
     JOIN = "join"
     TAR = "tar"
     UNZIP = "unzip"
+    ZIP = "zip"
 
 
 CrossResult = tuple[ByteSource | None, IOResult]

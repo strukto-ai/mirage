@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { specOf } from '../spec/builtins.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -6,6 +6,9 @@ import { parseFlags } from './generic/grep.ts'
 import { grepInput, PROBE_BLOCK_BYTES } from './grep_binary.ts'
 import { parseCommand, parseToKwargs } from '../spec/parser.ts'
 import { UsageError } from '../errors.ts'
+
+import * as helpers from '../../shell/helpers.ts'
+import { MatchOffsets } from './grep_offsets.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -489,4 +492,84 @@ describe('grep -L / --files-without-match', () => {
       await runB('hello\n', { files_without_match: true, args_l: true }, /hello/, false),
     ).toEqual(['f\n', 0])
   })
+})
+
+it.each([false, true])(
+  'only-matching encodes at most one prefix pass, -b=%s',
+  async (byteOffsets) => {
+    const count = 8000
+    const row = 'é😀' + 'x'.repeat(100) + 'needle'
+    const line = row.repeat(count)
+    const data = ENC.encode(line)
+    async function* source(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield data
+    }
+    const byteOffset = vi.spyOn(helpers, 'byteOffset')
+    const at = vi.spyOn(MatchOffsets.prototype, 'at')
+    try {
+      const f = parseFlags(new FlagView({ o: true, byte_offset: byteOffsets }, specOf('grep')))
+      const io = new IOResult()
+      const out = await materialize(grepInput(source(), /needle/, f, 'large.json', false, io))
+      const stride = ENC.encode(row).length
+      const expected = Array.from(
+        { length: count },
+        (_, i) => (byteOffsets ? String((i + 1) * stride - 6) + ':' : '') + 'needle\n',
+      ).join('')
+      expect(DEC.decode(out)).toBe(expected)
+      expect(io.exitCode).toBe(0)
+      expect(at).toHaveBeenCalledTimes(byteOffsets ? count : 0)
+      expect(
+        byteOffset.mock.calls.reduce((size, [text]) => size + text.length, 0),
+      ).toBeLessThanOrEqual(line.length)
+    } finally {
+      at.mockRestore()
+      byteOffset.mockRestore()
+    }
+  },
+)
+
+it('allows timer cancellation while collecting matches from one line', async () => {
+  const controller = new AbortController()
+  const data = ENC.encode('needle '.repeat(100000))
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let closed = false
+  async function* source(): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
+    try {
+      yield data
+    } finally {
+      closed = true
+    }
+  }
+  const original = helpers.byteOffset
+  const at = vi.spyOn(helpers, 'byteOffset')
+  at.mockImplementation((text, index) => {
+    timer ??= setTimeout(() => {
+      controller.abort()
+    }, 0)
+    return original(text, index)
+  })
+  try {
+    const f = parseFlags(new FlagView({ o: true, byte_offset: true }, specOf('grep')))
+    await expect(
+      materialize(
+        grepInput(
+          source(),
+          /needle/,
+          f,
+          'large.json',
+          false,
+          new IOResult(),
+          false,
+          controller.signal,
+        ),
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(closed).toBe(true)
+    expect(at.mock.calls.length).toBeLessThan(100000)
+  } finally {
+    clearTimeout(timer)
+    at.mockRestore()
+  }
 })

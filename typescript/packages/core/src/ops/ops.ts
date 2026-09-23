@@ -435,6 +435,72 @@ export class Ops {
     >
   }
 
+  /**
+   * One extended attribute's value. The node table answers with what a
+   * caller set. `nofollow` reads a link entry's own
+   * attributes. Throws ENODATA when the path has no such attribute.
+   * Mirrors Python's Ops.getxattr.
+   */
+  async getxattr(
+    path: string,
+    name: string,
+    opts: { nofollow?: boolean } = {},
+    sessionId?: string,
+  ): Promise<Uint8Array> {
+    const kwargs = { name, nofollow: opts.nofollow === true }
+    return (await this.through('getxattr', path, [], kwargs, sessionId)) as Uint8Array
+  }
+
+  /** Every extended attribute name a path carries, sorted. */
+  async listxattr(
+    path: string,
+    opts: { nofollow?: boolean } = {},
+    sessionId?: string,
+  ): Promise<string[]> {
+    const kwargs = { nofollow: opts.nofollow === true }
+    return (await this.through('listxattr', path, [], kwargs, sessionId)) as string[]
+  }
+
+  /**
+   * Store an extended attribute on a path's namespace node, so it works
+   * on every backend and moves with a rename. `create` refuses with
+   * EEXIST when it is set (XATTR_CREATE) and `replace` with ENODATA when
+   * it is not (XATTR_REPLACE).
+   * Mirrors Python's Ops.setxattr.
+   */
+  async setxattr(
+    path: string,
+    name: string,
+    value: Uint8Array,
+    opts: { create?: boolean; replace?: boolean; nofollow?: boolean } = {},
+    sessionId?: string,
+  ): Promise<void> {
+    const kwargs = {
+      name,
+      value,
+      create: opts.create === true,
+      replace: opts.replace === true,
+      nofollow: opts.nofollow === true,
+    }
+    await this.through('setxattr', path, [], kwargs, sessionId)
+  }
+
+  /** Drop an extended attribute; ENODATA when it is not set. */
+  async removexattr(
+    path: string,
+    name: string,
+    opts: { nofollow?: boolean } = {},
+    sessionId?: string,
+  ): Promise<void> {
+    await this.through(
+      'removexattr',
+      path,
+      [],
+      { name, nofollow: opts.nofollow === true },
+      sessionId,
+    )
+  }
+
   async truncate(path: string, length: number, sessionId?: string): Promise<void> {
     await this.through('truncate', path, [length], {}, sessionId)
   }

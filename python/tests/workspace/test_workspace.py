@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.runtime.python import LocalRuntime
-from mirage.types import FileType, MountMode
+from mirage.types import FileType, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -2743,6 +2743,41 @@ def test_add_mount_refuses_duplicates_invalid_mounts_and_closed_workspace():
     asyncio.run(ws.close())
     with pytest.raises(RuntimeError, match="Workspace is closed"):
         ws.add_mount("/late", RAMVFS())
+
+
+def test_add_mount_runs_the_same_read_verdict_as_the_constructor():
+    """The runtime door is a mount door too.
+
+    Without the verdict here a mount added at runtime could declare a
+    policy its backend cannot honour, which reads as enabled and does
+    nothing -- the exact silent downgrade the mount-time check exists
+    to refuse.
+    """
+    ws = Workspace({"/a": RAMVFS()}, mode=MountMode.WRITE)
+    before = ws.mounts()
+    with pytest.raises(ValueError, match="needs a resource that caches reads"):
+        ws.add_mount("/b", RAMVFS(), MountMode.WRITE,
+                     ReadSpec(policy=ReadPolicy.FRESH))
+    with pytest.raises(ValueError, match="pinned"):
+        ws.add_mount("/b", RAMVFS(), MountMode.WRITE,
+                     ReadSpec(policy=ReadPolicy.PINNED))
+    assert ws.mounts() == before
+    asyncio.run(ws.close())
+
+
+def test_add_mount_carries_the_read_spec_onto_the_entry():
+    # The workspace default is a non-default bound, so the last line can
+    # tell "took the workspace default" from "took the dataclass
+    # default" -- with a plain ReadSpec() workspace the two coincide and
+    # the assertion holds however the code is written.
+    ws = Workspace({"/a": RAMVFS()},
+                   mode=MountMode.WRITE,
+                   read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=90))
+    entry = ws.add_mount("/b", RAMVFS(), MountMode.WRITE,
+                         ReadSpec(policy=ReadPolicy.BOUNDED, ttl=45))
+    assert entry.read == ReadSpec(policy=ReadPolicy.BOUNDED, ttl=45)
+    assert ws.add_mount("/c", RAMVFS()).read.ttl == 90
+    asyncio.run(ws.close())
 
 
 def test_add_mount_keeps_a_shared_vfs_open_until_its_last_unmount():

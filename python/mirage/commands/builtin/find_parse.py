@@ -18,9 +18,13 @@ from dataclasses import dataclass, field
 from datetime import timezone
 
 from mirage.commands.builtin import constants
-from mirage.commands.builtin.find_eval import (And, Empty, Name, Not, Or, Path,
-                                               PredNode, TrueNode, Type)
-from mirage.commands.builtin.types import ExecAction, FindAction, RowAction
+from mirage.commands.builtin.find_eval import (Action, ActionKind, And, Empty,
+                                               Mtime, Name, Not, Or, Path,
+                                               PredNode, Prune, TrueNode, Type,
+                                               tree_has_action, tree_has_prune,
+                                               without_prune)
+from mirage.commands.builtin.types import (ExecAction, FindAction,
+                                           PrintfAction, RowAction)
 from mirage.commands.errors import FindParseError
 from mirage.utils.dates import parse_date_expr
 
@@ -100,7 +104,9 @@ class FindExpr:
     The tests that a backend can answer per entry stay in ``tree``; the
     windows (depth, size, mtime) and the actions are global to the
     expression, because a native find op evaluates the tree and the
-    executor applies the actions to what came back. ``newer`` holds
+    executor applies the actions to what came back. A time test also
+    sits in the tree as an ``Mtime`` node, for its position alone: a
+    ``-prune`` after it fires only where the test holds. ``newer`` holds
     ``-newer`` reference operands as typed, for the executor to resolve
     against the dispatcher into ``-newermt`` bounds before any backend
     sees the expression.
@@ -113,7 +119,6 @@ class FindExpr:
     mtime_min: float | None = None
     mtime_max: float | None = None
     uses_empty: bool = False
-    printf: str | None = None
     # In the order written: GNU runs actions per position, so
     # `-exec echo {} ";" -print -exec echo again {} ";"` alternates the
     # three per match.
@@ -135,11 +140,11 @@ class _State:
     tokens: list[str]
     pos: int = 0
     depth: int = 0
-    # How many parentheses and negations enclose the current token, and
-    # whether a top-level `-o` has been seen: an action under either
-    # would need per-position evaluation the flat window cannot do.
+    # Parentheses and negations enclosing the current token.
     nested: int = 0
     in_or: bool = False
+    positional: bool = False
+    depth_option: bool = False
     mtime_seen: bool = False
     newer_token: str | None = None
     expr: FindExpr = field(default_factory=lambda: FindExpr(tree=TrueNode()))
@@ -247,24 +252,168 @@ def _parse_exec(state: _State) -> ExecAction:
         if argv.count(constants.EXEC_PLACEHOLDER) > 1:
             raise FindParseError("find: Only one instance of {} is supported "
                                  "with -exec ... +")
-    if state.nested > 0 or state.in_or:
-        # The executor runs the action on the matches the tree produced,
-        # which is an AND with every test; under `-o`, `!` or parentheses
-        # GNU would run it per position, and silently running it on the
-        # wrong set is worse than refusing.
-        raise FindParseError(_EXEC_PLACEMENT)
     return ExecAction(argv=tuple(argv), batch=batch)
 
 
-_EXEC_PLACEMENT = ("find: -exec is supported only in a top-level -a chain, "
-                   "not under -o, ! or parentheses")
-
-
-def _check_action_placement(state: _State, token: str) -> None:
+def _check_window_placement(state: _State, token: str) -> None:
     if state.nested > 0 or state.in_or:
         raise FindParseError(
             f"find: {token} is supported only in a top-level -a chain, "
             "not under -o, ! or parentheses")
+
+
+def _action_node(state: _State,
+                 kind: ActionKind,
+                 batch: bool = False) -> Action:
+    """The tree node for an action just parsed.
+
+    An action inside parentheses or under ``!`` makes the expression
+    positional: the tree decides per entry which action is reached,
+    rather than the chain running them all in order.
+
+    Args:
+        state (_State): parser state.
+        kind (ActionKind): the action's word without the dash.
+        batch (bool): an ``-exec ... {} +``.
+    """
+    if state.nested > 0:
+        state.positional = True
+    return Action(kind, batch)
+
+
+_POSITIONAL = "under -o, ! or parentheses"
+
+
+def _check_positional(node: PredNode) -> None:
+    """Refuse a tree in which reaching an action does not end evaluation.
+
+    The executor runs the one action on every kept row, so the tree may
+    reach an action only where GNU would then evaluate nothing else: as
+    the last factor of its ``-a`` chain (a factor holding one counts),
+    with the chain's ``-o`` short-circuiting on the true it returns, and
+    never under ``!``, which would turn that true into a false the
+    enclosing ``-o`` carries on from. ``( -name a -print ) -print``
+    would print ``a`` twice and ``-print -name x -o -print`` prints
+    every row twice, and neither fits one action per row.
+
+    Args:
+        node (PredNode): the predicate tree.
+    """
+    if isinstance(node, Not):
+        if tree_has_action(node.kid):
+            raise FindParseError(
+                f"find: {_first_action(node.kid)} is not supported under !")
+        _check_positional(node.kid)
+    elif isinstance(node, And):
+        for kid in node.kids[:-1]:
+            if tree_has_action(kid):
+                raise FindParseError(
+                    f"find: {_first_action(kid)} must end its -a chain "
+                    f"{_POSITIONAL}")
+        for kid in node.kids:
+            _check_positional(kid)
+    elif isinstance(node, Or):
+        for kid in node.kids:
+            _check_positional(kid)
+
+
+def _holds_exec_result(node: PredNode) -> bool:
+    if isinstance(node, Action):
+        return node.kind == "exec" and not node.batch
+    if isinstance(node, Not):
+        return _holds_exec_result(node.kid)
+    if isinstance(node, (And, Or)):
+        return any(_holds_exec_result(kid) for kid in node.kids)
+    return False
+
+
+def _check_exec_result(node: PredNode) -> None:
+    """Refuse an ``-exec ... ;`` whose exit status picks the next arm.
+
+    GNU's ``-exec ... ;`` is false when its command fails, so an ``-o``
+    arm ending in one hands the failing rows to the next arm (``-type d
+    -exec false ; -o -prune`` prunes exactly the directories the
+    command rejects). The executor learns the status only after the
+    walk, once the tree has decided every row, so such an -exec may
+    stand only where nothing follows it. ``-exec ... +`` is true
+    whatever the command exits, as GNU's is, and sits anywhere an
+    action may.
+
+    Args:
+        node (PredNode): the predicate tree.
+    """
+    if isinstance(node, Or):
+        for kid in node.kids[:-1]:
+            if _holds_exec_result(kid):
+                raise FindParseError(
+                    f"find: -exec must end the expression {_POSITIONAL}")
+    if isinstance(node, Not):
+        _check_exec_result(node.kid)
+    elif isinstance(node, (And, Or)):
+        for kid in node.kids:
+            _check_exec_result(kid)
+
+
+def _first_action(node: PredNode) -> str:
+    if isinstance(node, Action):
+        return f"-{node.kind}"
+    if isinstance(node, Not):
+        return _first_action(node.kid)
+    if isinstance(node, (And, Or)):
+        for kid in node.kids:
+            if tree_has_action(kid):
+                return _first_action(kid)
+    raise AssertionError(f"no action under {node!r}")
+
+
+def _settle_actions(state: _State) -> None:
+    """Reduce a positional expression's actions to the one it may hold.
+
+    Every action written is in the tree, so the rows are exact; the
+    executor then runs ``actions`` on each row without knowing which
+    node reached it, which is only right when they are all the same
+    action (``-name a -print -o -name b -print``), never ``-print`` on
+    one arm and ``-print0``, a different ``-exec`` or a different
+    ``-printf`` format on the other.
+
+    Args:
+        state (_State): parser state, tree parsed.
+    """
+    if not state.positional:
+        return
+    _check_positional(state.expr.tree)
+    distinct: list[FindAction] = []
+    for action in state.expr.actions:
+        if action not in distinct:
+            distinct.append(action)
+    if len(distinct) > 1:
+        first, second = distinct[0], distinct[1]
+        if isinstance(first, ExecAction) and isinstance(second, ExecAction):
+            raise FindParseError(
+                f"find: -exec may run only one command {_POSITIONAL}")
+        if isinstance(first, PrintfAction) and isinstance(
+                second, PrintfAction):
+            raise FindParseError(
+                f"find: -printf may print only one format {_POSITIONAL}")
+        raise FindParseError(f"find: {_action_word(first)} and "
+                             f"{_action_word(second)} cannot be combined "
+                             f"{_POSITIONAL}")
+    _check_exec_result(state.expr.tree)
+    state.expr.actions = distinct
+
+
+def _action_word(action: FindAction) -> str:
+    if isinstance(action, ExecAction):
+        return "-exec"
+    if isinstance(action, PrintfAction):
+        return "-printf"
+    return f"-{action.kind}"
+
+
+_DELETE_PRUNE = ("find: The -delete action automatically turns on -depth, "
+                 "but -prune does nothing when -depth is in effect.  If you "
+                 "want to carry on anyway, just explicitly use the -depth "
+                 "option.")
 
 
 def _peek(state: _State) -> str | None:
@@ -328,9 +477,14 @@ def _parse_primary(state: _State) -> PredNode:
     tok = _advance(state)
     if tok is None:
         raise FindParseError("find: expected predicate")
-    if ((state.expr.actions or state.expr.printf is not None)
-            and (tok == "-empty" or tok in constants.FIND_VALUE_PREDICATES -
+    if (state.expr.actions and state.nested == 0 and not state.in_or
+            and (tok in ("-empty", "-prune")
+                 or tok in constants.FIND_VALUE_PREDICATES -
                  {"-printf", "-maxdepth", "-mindepth"})):
+        # Along a top-level -a chain the actions run in order on every
+        # row the tree kept, so a test after one would apply to the
+        # actions before it too. Elsewhere the tree itself decides
+        # (`_check_positional`).
         raise FindParseError(
             f"find: {tok}: tests after actions are not supported")
     if tok in constants.FIND_VALUE_PREDICATES:
@@ -346,17 +500,10 @@ def _parse_primary(state: _State) -> PredNode:
         if tok == "-type":
             return _type_node(value)
         if tok == "-printf":
-            if state.expr.printf is not None:
-                raise FindParseError(
-                    "find: multiple -printf actions are not supported")
-            _check_action_placement(state, tok)
-            # An action, not a test: it always matches, replaces the
-            # default -print rendering, and one format applies to every
-            # row (GNU evaluates actions per expression position, which
-            # the flat window cannot express; a single trailing -printf,
-            # the way agents write it, renders identically).
-            state.expr.printf = value
-            return TrueNode()
+            # An action, not a test: it always matches and replaces the
+            # default -print rendering, at its position in the chain.
+            state.expr.actions.append(PrintfAction(value))
+            return _action_node(state, "printf")
         if tok == "-maxdepth":
             state.expr.maxdepth = parse_depth(value, "-maxdepth")
             return TrueNode()
@@ -367,7 +514,7 @@ def _parse_primary(state: _State) -> PredNode:
             state.expr.min_size, state.expr.max_size = _size_arg(value)
             return TrueNode()
         if tok in ("-newer", "-newermt"):
-            _check_action_placement(state, tok)
+            _check_window_placement(state, tok)
             state.newer_token = tok
         if tok == "-newer":
             # Resolved by the executor (`find_refs.py`) into -newermt,
@@ -375,25 +522,32 @@ def _parse_primary(state: _State) -> PredNode:
             state.expr.newer.append(value)
             return TrueNode()
         if tok == "-newermt":
-            _merge_window(state, strictly_after(parse_newermt(value)), None)
-            return TrueNode()
+            lower = strictly_after(parse_newermt(value))
+            _merge_window(state, lower, None)
+            return Mtime(lower, None)
         mt_lo, mt_hi = _mtime_arg(value)
         _merge_window(state, mt_lo, mt_hi)
-        return TrueNode()
+        return Mtime(mt_lo, mt_hi)
     if tok in constants.FIND_EXEC_PREDICATES:
-        state.expr.actions.append(_parse_exec(state))
-        return TrueNode()
+        action = _parse_exec(state)
+        state.expr.actions.append(action)
+        return _action_node(state, "exec", action.batch)
     if tok == "-empty":
         state.expr.uses_empty = True
         return Empty()
     if tok in constants.FIND_ROW_ACTIONS:
-        _check_action_placement(state, tok)
-        state.expr.actions.append(RowAction(constants.FIND_ROW_ACTIONS[tok]))
+        kind = constants.FIND_ROW_ACTIONS[tok]
+        state.expr.actions.append(RowAction(kind))
         if tok == "-delete":
             state.expr.depth_first = True
-        return TrueNode()
+        return _action_node(state, kind)
+    if tok == "-prune":
+        return Prune()
     if tok == "-depth":
+        # Spelled out, unlike the -depth that -delete turns on: only this
+        # one lets a -prune ride beside -delete, as a knowing no-op.
         state.expr.depth_first = True
+        state.depth_option = True
         return TrueNode()
     if tok in constants.FIND_BARE_PREDICATES:
         return TrueNode()
@@ -453,22 +607,13 @@ def _parse_or(state: _State) -> PredNode:
             break
         _advance(state)
         _after_operator(state, tok)
+        # Each arm reaches its own actions, and a window under one cannot
+        # be exact.
+        state.positional = True
         if state.nested == 0:
             state.in_or = True
             if state.newer_token is not None:
-                _check_action_placement(state, state.newer_token)
-            # An action already parsed sits on the left of this `-o`,
-            # which is the same detachment from the tree seen from the
-            # other side: `-exec false {} ; -o -print` would run the
-            # action and then print nothing.
-            if state.expr.execs:
-                raise FindParseError(_EXEC_PLACEMENT)
-            if state.expr.actions:
-                action = state.expr.actions[0]
-                assert isinstance(action, RowAction)
-                _check_action_placement(state, f"-{action.kind}")
-            if state.expr.printf is not None:
-                _check_action_placement(state, "-printf")
+                _check_window_placement(state, state.newer_token)
         terms.append(_parse_and(state))
     return terms[0] if len(terms) == 1 else Or(terms)
 
@@ -531,11 +676,12 @@ def parse_find_expression(tokens: list[str]) -> FindExpr:
     if _peek(state) is not None:
         raise FindParseError(f"find: unexpected token '{_peek(state)}'")
     state.expr.tree = tree
-    if state.expr.execs and state.expr.printf is not None:
-        # -printf rows are rendered by the backend's generic before the
-        # executor sees them, so there is no path left to hand -exec.
-        raise FindParseError("find: -exec cannot be combined with -printf")
-    if state.expr.actions and state.expr.printf is not None:
-        raise FindParseError(
-            "find: -printf cannot be combined with other actions")
+    _settle_actions(state)
+    if tree_has_prune(tree) and state.expr.depth_first:
+        # GNU's words: -delete turns -depth on, and a -prune under -depth
+        # is a no-op the line surely did not mean; spelling -depth out
+        # takes the no-op knowingly.
+        if not state.depth_option:
+            raise FindParseError(_DELETE_PRUNE)
+        state.expr.tree = without_prune(tree)
     return state.expr

@@ -15,10 +15,12 @@
 import type { JsonValue, Reply } from '../../kit/typescript/index.ts'
 import { touchNative } from '../drive/item.ts'
 import type { GwsState } from '../store/state.ts'
-import type { SheetTab } from '../store/types.ts'
+import type { SheetTab, Spreadsheet } from '../store/types.ts'
 import { asNum, asObj, asObjArr, asStr } from '../wire/json.ts'
 import type { JsonObj } from '../wire/json.ts'
-import { NOT_FOUND, googleError, ok } from '../wire/reply.ts'
+import { NOT_FOUND, googleError, isReply, ok } from '../wire/reply.ts'
+import { addBanding, bandFloor } from './banding.ts'
+import { addConditionalFormatRule, deleteConditionalFormatRule } from './conditional.ts'
 import {
   autoResizeDimensions,
   deleteDimension,
@@ -27,10 +29,178 @@ import {
   moveDimension,
   resolveDimensionRange,
   updateCells,
+  updateDimensionProperties,
 } from './dimension.ts'
-import { GRID_COLUMNS, GRID_ROWS, newTab, tabProperties } from './grid.ts'
+import type { DimensionRange } from './dimension.ts'
+import { clearBasicFilter, setBasicFilter, sortRange } from './filter.ts'
+import { repeatCell, updateBorders } from './format.ts'
+import { GRID_COLUMNS, GRID_ROWS, copyTab, newTab, tabProperties } from './grid.ts'
+import { gridOf, invalid } from './request.ts'
+import type { At } from './request.ts'
 
-const BAD_SHEET_ID = 'Invalid sheetId.'
+type Handler = (sheet: Spreadsheet, body: JsonObj, at: At) => JsonObj | Reply
+
+function addSheet(sheet: Spreadsheet, body: JsonObj): JsonObj {
+  const props = asObj(body.properties)
+  const gridProps = asObj(props.gridProperties)
+  const tab = newTab(
+    sheet.nextSheetId,
+    asStr(props.title) ?? `Sheet${String(sheet.tabs.length + 1)}`,
+    asNum(gridProps.rowCount) ?? GRID_ROWS,
+    asNum(gridProps.columnCount) ?? GRID_COLUMNS,
+  )
+  sheet.nextSheetId += 1
+  sheet.tabs.push(tab)
+  // The live API replies with the whole SheetProperties, not just the id
+  // and title.
+  return { addSheet: { properties: tabProperties(tab, sheet.tabs.length - 1) } }
+}
+
+// The sheet requests name a missing tab as a sheet, where every request on
+// a tab's cells names it as a grid.
+function sheetOf(sheet: Spreadsheet, sheetId: number, at: At): SheetTab | Reply {
+  const tab = sheet.tabs.find((t) => t.sheetId === sheetId)
+  return tab ?? invalid(at, `No sheet with id: ${String(sheetId)}`)
+}
+
+function deleteSheet(sheet: Spreadsheet, body: JsonObj, at: At): JsonObj | Reply {
+  const tab = sheetOf(sheet, asNum(body.sheetId) ?? 0, at)
+  if (isReply(tab)) return tab
+  sheet.tabs = sheet.tabs.filter((t) => t !== tab)
+  return {}
+}
+
+function updateSheetProperties(sheet: Spreadsheet, body: JsonObj): JsonObj {
+  const props = asObj(body.properties)
+  const tab = sheet.tabs.find((t) => t.sheetId === asNum(props.sheetId))
+  const title = asStr(props.title)
+  if (tab !== undefined && title !== undefined) tab.title = title
+  return {}
+}
+
+// The copy carries everything the tab holds and lands at index 0 when the
+// request names no index, which is where the live API puts it.
+function duplicateSheet(sheet: Spreadsheet, body: JsonObj, at: At): JsonObj | Reply {
+  const src = sheetOf(sheet, asNum(body.sourceSheetId) ?? 0, at)
+  if (isReply(src)) return src
+  const newSheetId = asNum(body.newSheetId)
+  const copy = copyTab(
+    src,
+    newSheetId ?? sheet.nextSheetId,
+    asStr(body.newSheetName) ?? `Copy of ${src.title}`,
+    bandFloor(sheet),
+  )
+  if (newSheetId === undefined) sheet.nextSheetId += 1
+  sheet.tabs.splice(asNum(body.insertSheetIndex) ?? 0, 0, copy)
+  return { duplicateSheet: { properties: tabProperties(copy, sheet.tabs.indexOf(copy)) } }
+}
+
+function dimensionRequest(apply: (range: DimensionRange) => void): Handler {
+  return (sheet, body, at) => {
+    const range = resolveDimensionRange(sheet, asObj(body.range), at)
+    if (isReply(range)) return range
+    apply(range)
+    return {}
+  }
+}
+
+function appendDimension(sheet: Spreadsheet, body: JsonObj, at: At): JsonObj | Reply {
+  const tab = gridOf(sheet, asNum(body.sheetId) ?? 0, at)
+  if (isReply(tab)) return tab
+  growGrid(tab, asStr(body.dimension) === 'COLUMNS' ? 'COLUMNS' : 'ROWS', asNum(body.length) ?? 0)
+  return {}
+}
+
+function moveDimensionRequest(sheet: Spreadsheet, body: JsonObj, at: At): JsonObj | Reply {
+  const range = resolveDimensionRange(sheet, asObj(body.source), at)
+  if (isReply(range)) return range
+  moveDimension(range, asNum(body.destinationIndex) ?? 0)
+  return {}
+}
+
+function updateSpreadsheetProperties(sheet: Spreadsheet, body: JsonObj): JsonObj {
+  const title = asStr(asObj(body.properties).title)
+  if (title !== undefined) sheet.title = title
+  return {}
+}
+
+const HANDLERS: Record<string, Handler> = {
+  addSheet,
+  deleteSheet,
+  updateSheetProperties,
+  duplicateSheet,
+  insertDimension: dimensionRequest(insertDimension),
+  deleteDimension: dimensionRequest(deleteDimension),
+  appendDimension,
+  moveDimension: moveDimensionRequest,
+  autoResizeDimensions,
+  updateCells,
+  updateSpreadsheetProperties,
+  repeatCell,
+  updateBorders,
+  updateDimensionProperties,
+  addBanding,
+  setBasicFilter,
+  clearBasicFilter,
+  sortRange,
+  addConditionalFormatRule,
+  deleteConditionalFormatRule,
+}
+
+// The rest of the Request union the live API documents. The fake refuses
+// these in words of its own rather than accept them and change nothing;
+// a name outside the union gets the live API's own refusal.
+const UNMODELED = new Set([
+  'updateNamedRange',
+  'addNamedRange',
+  'deleteNamedRange',
+  'autoFill',
+  'cutPaste',
+  'copyPaste',
+  'mergeCells',
+  'unmergeCells',
+  'addFilterView',
+  'appendCells',
+  'deleteEmbeddedObject',
+  'deleteFilterView',
+  'duplicateFilterView',
+  'findReplace',
+  'insertRange',
+  'updateEmbeddedObjectPosition',
+  'pasteData',
+  'textToColumns',
+  'updateFilterView',
+  'deleteRange',
+  'updateConditionalFormatRule',
+  'setDataValidation',
+  'addProtectedRange',
+  'updateProtectedRange',
+  'deleteProtectedRange',
+  'addChart',
+  'updateChartSpec',
+  'updateBanding',
+  'deleteBanding',
+  'createDeveloperMetadata',
+  'updateDeveloperMetadata',
+  'deleteDeveloperMetadata',
+  'randomizeRange',
+  'addDimensionGroup',
+  'deleteDimensionGroup',
+  'updateDimensionGroup',
+  'trimWhitespace',
+  'deleteDuplicates',
+  'updateEmbeddedObjectBorder',
+  'addSlicer',
+  'updateSlicerSpec',
+  'addDataSource',
+  'updateDataSource',
+  'deleteDataSource',
+  'refreshDataSource',
+  'cancelDataSourceRefresh',
+  'addTable',
+  'updateTable',
+  'deleteTable',
+])
 
 export function sheetsBatchUpdate(st: GwsState, id: string, requests: JsonObj[]): Reply {
   const current = st.sheets.get(id)
@@ -38,102 +208,43 @@ export function sheetsBatchUpdate(st: GwsState, id: string, requests: JsonObj[])
   // Later requests may depend on earlier ones, but no change is published
   // until the entire batch succeeds, including the linked Drive metadata.
   const sheet = structuredClone(current)
-  let updatedTitle: string | undefined
   const replies: JsonValue[] = []
-  for (const request of requests) {
-    if ('addSheet' in request) {
-      const props = asObj(asObj(request.addSheet).properties)
-      const gridProps = asObj(props.gridProperties)
-      const tab = newTab(
-        sheet.nextSheetId,
-        asStr(props.title) ?? `Sheet${String(sheet.tabs.length + 1)}`,
-        asNum(gridProps.rowCount) ?? GRID_ROWS,
-        asNum(gridProps.columnCount) ?? GRID_COLUMNS,
-      )
-      sheet.nextSheetId += 1
-      sheet.tabs.push(tab)
-      // The live API replies with the whole SheetProperties, not just the
-      // id and title.
-      replies.push({ addSheet: { properties: tabProperties(tab, sheet.tabs.length - 1) } })
-    } else if ('deleteSheet' in request) {
-      const sheetId = asNum(asObj(request.deleteSheet).sheetId)
-      sheet.tabs = sheet.tabs.filter((t) => t.sheetId !== sheetId)
-      replies.push({})
-    } else if ('updateSheetProperties' in request) {
-      const props = asObj(asObj(request.updateSheetProperties).properties)
-      const tab = sheet.tabs.find((t) => t.sheetId === asNum(props.sheetId))
-      const title = asStr(props.title)
-      if (tab !== undefined && title !== undefined) tab.title = title
-      replies.push({})
-    } else if ('duplicateSheet' in request) {
-      const r = asObj(request.duplicateSheet)
-      const src = sheet.tabs.find((t) => t.sheetId === (asNum(r.sourceSheetId) ?? 0))
-      if (src === undefined) {
-        return googleError(400, 'Invalid sourceSheetId.', 'INVALID_ARGUMENT')
-      }
-      const newSheetId = asNum(r.newSheetId)
-      const copy: SheetTab = {
-        ...src,
-        sheetId: newSheetId ?? sheet.nextSheetId,
-        title: asStr(r.newSheetName) ?? `Copy of ${src.title}`,
-        cells: new Map(src.cells),
-        rowPixels: { ...src.rowPixels },
-        columnPixels: { ...src.columnPixels },
-      }
-      if (newSheetId === undefined) sheet.nextSheetId += 1
-      const at = asNum(r.insertSheetIndex) ?? sheet.tabs.length
-      sheet.tabs.splice(at, 0, copy)
-      replies.push({ duplicateSheet: { properties: tabProperties(copy, at) } })
-    } else if ('insertDimension' in request) {
-      const range = resolveDimensionRange(sheet, asObj(asObj(request.insertDimension).range))
-      if (range === null) return googleError(400, BAD_SHEET_ID, 'INVALID_ARGUMENT')
-      insertDimension(range)
-      replies.push({})
-    } else if ('deleteDimension' in request) {
-      const range = resolveDimensionRange(sheet, asObj(asObj(request.deleteDimension).range))
-      if (range === null) return googleError(400, BAD_SHEET_ID, 'INVALID_ARGUMENT')
-      deleteDimension(range)
-      replies.push({})
-    } else if ('appendDimension' in request) {
-      const r = asObj(request.appendDimension)
-      const tab = sheet.tabs.find((t) => t.sheetId === (asNum(r.sheetId) ?? 0))
-      if (tab === undefined) return googleError(400, BAD_SHEET_ID, 'INVALID_ARGUMENT')
-      growGrid(tab, asStr(r.dimension) === 'COLUMNS' ? 'COLUMNS' : 'ROWS', asNum(r.length) ?? 0)
-      replies.push({})
-    } else if ('moveDimension' in request) {
-      const r = asObj(request.moveDimension)
-      const range = resolveDimensionRange(sheet, asObj(r.source))
-      if (range === null) return googleError(400, BAD_SHEET_ID, 'INVALID_ARGUMENT')
-      moveDimension(range, asNum(r.destinationIndex) ?? 0)
-      replies.push({})
-    } else if ('autoResizeDimensions' in request) {
-      const failed = autoResizeDimensions(sheet, asObj(request.autoResizeDimensions))
-      if (failed !== null) return failed
-      replies.push({})
-    } else if ('updateCells' in request) {
-      const failed = updateCells(sheet, asObj(request.updateCells))
-      if (failed !== null) return failed
-      replies.push({})
-    } else if ('updateSpreadsheetProperties' in request) {
-      const title = asStr(asObj(asObj(request.updateSpreadsheetProperties).properties).title)
-      if (title !== undefined) {
-        sheet.title = title
-        updatedTitle = title
-      }
-      replies.push({})
-    } else {
+  for (const [index, request] of requests.entries()) {
+    const kind = Object.keys(request)[0]
+    if (kind === undefined) {
       return googleError(
         400,
-        `Unsupported request: ${Object.keys(request).join(',')}`,
+        `Invalid requests[${String(index)}]: No request set.`,
         'INVALID_ARGUMENT',
       )
     }
+    const handler = Object.hasOwn(HANDLERS, kind) ? HANDLERS[kind] : undefined
+    if (handler === undefined) return unsupported(kind, index)
+    const reply = handler(sheet, asObj(request[kind]), { index, kind })
+    if (isReply(reply)) return reply
+    replies.push(reply)
   }
   st.sheets.set(id, sheet)
   const file = st.files.get(id)
-  if (file !== undefined && updatedTitle !== undefined) file.name = updatedTitle
+  if (file !== undefined && sheet.title !== current.title) file.name = sheet.title
   touchNative(st, id)
   return ok({ spreadsheetId: id, replies })
+}
+
+function unsupported(kind: string, index: number): Reply {
+  if (UNMODELED.has(kind)) {
+    return googleError(400, `Unsupported request: ${kind}`, 'INVALID_ARGUMENT')
+  }
+  const field = `requests[${String(index)}]`
+  const message = `Invalid JSON payload received. Unknown name "${kind}" at '${field}': Cannot find field.`
+  const violation = { field, description: message }
+  const details = [
+    { '@type': 'type.googleapis.com/google.rpc.BadRequest', fieldViolations: [violation] },
+  ]
+  return {
+    status: 400,
+    body: { error: { code: 400, message, status: 'INVALID_ARGUMENT', details } },
+  }
 }
 
 // sheets.copyTo copies one tab into another spreadsheet (or back into the
@@ -151,14 +262,7 @@ export function copySheetTo(
   if (tab === undefined) {
     return googleError(400, `Invalid sheetId: ${String(sheetId)}`, 'INVALID_ARGUMENT')
   }
-  const copy: SheetTab = {
-    ...tab,
-    sheetId: destination.nextSheetId,
-    title: `Copy of ${tab.title}`,
-    cells: new Map(tab.cells),
-    rowPixels: { ...tab.rowPixels },
-    columnPixels: { ...tab.columnPixels },
-  }
+  const copy = copyTab(tab, destination.nextSheetId, `Copy of ${tab.title}`, bandFloor(destination))
   destination.nextSheetId += 1
   destination.tabs.push(copy)
   touchNative(st, destinationId)

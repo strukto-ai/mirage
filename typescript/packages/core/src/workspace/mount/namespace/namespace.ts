@@ -20,6 +20,7 @@ import {
   type MountMode,
   type PathSpec,
 } from '../../../types.ts'
+import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { epochToIso } from '../../../utils/dates.ts'
 import { globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -48,7 +49,16 @@ export interface NodeMeta {
   // time at all, so `find -mtime` works on mtime-less backends for
   // files written through mirage.
   observedMtime?: number
+  // Extended attributes a caller set, by name; absent rather than empty.
+  // What a backend reports about the path is not stored here: the door
+  // derives it from stat.
+  xattrs?: Map<string, Uint8Array>
 }
+
+// An extended attribute rides a node's flat field set as one field per
+// name, `xattr:<name>`, its value base64 so every store (a JSON file, a
+// Redis hash, a snapshot) holds the bytes as a string.
+const XATTR_FIELD_PREFIX = 'xattr:'
 
 // Render a symlink node as a stat row. Size is the target string's
 // byte length and mode is left unset so the formatter supplies 0777,
@@ -80,7 +90,7 @@ export interface SetAttrsFields {
   mtime?: number
 }
 
-function metaToFields(meta: NodeMeta): NodeFields {
+export function metaToFields(meta: NodeMeta): NodeFields {
   const out: NodeFields = {}
   if (meta.target !== undefined) out.target = meta.target
   if (meta.mtime !== undefined) out.mtime = meta.mtime
@@ -89,10 +99,13 @@ function metaToFields(meta: NodeMeta): NodeFields {
   if (meta.gid !== undefined) out.gid = meta.gid
   if (meta.atime !== undefined) out.atime = meta.atime
   if (meta.observedMtime !== undefined) out.observed_mtime = meta.observedMtime
+  for (const [name, value] of meta.xattrs ?? []) {
+    out[XATTR_FIELD_PREFIX + name] = encodeBase64(value)
+  }
   return out
 }
 
-function metaFromFields(fields: NodeFields): NodeMeta {
+export function metaFromFields(fields: NodeFields): NodeMeta {
   const meta: NodeMeta = {}
   if (typeof fields.target === 'string') meta.target = fields.target
   if (typeof fields.mtime === 'number') meta.mtime = fields.mtime
@@ -101,6 +114,13 @@ function metaFromFields(fields: NodeFields): NodeMeta {
   if (typeof fields.gid === 'number' || typeof fields.gid === 'string') meta.gid = fields.gid
   if (typeof fields.atime === 'string') meta.atime = fields.atime
   if (typeof fields.observed_mtime === 'number') meta.observedMtime = fields.observed_mtime
+  const xattrs = new Map<string, Uint8Array>()
+  for (const [key, value] of Object.entries(fields)) {
+    if (key.startsWith(XATTR_FIELD_PREFIX) && typeof value === 'string') {
+      xattrs.set(key.slice(XATTR_FIELD_PREFIX.length), decodeBase64(value))
+    }
+  }
+  if (xattrs.size > 0) meta.xattrs = xattrs
   return meta
 }
 
@@ -246,6 +266,33 @@ export class Namespace {
     if (fields.atime !== undefined) meta.atime = fields.atime
     if (fields.mtime !== undefined) meta.mtime = fields.mtime
     this.nodeTable.set(path, meta)
+    await this.store.set(path, metaToFields(meta))
+  }
+
+  // The extended attributes a caller set on a path, by name.
+  xattrs(path: string): Map<string, Uint8Array> {
+    return new Map(this.nodeTable.get(path)?.xattrs ?? [])
+  }
+
+  // Store one extended attribute on a path's node.
+  async setXattr(path: string, name: string, value: Uint8Array): Promise<void> {
+    const meta = this.nodeTable.get(path) ?? {}
+    meta.xattrs ??= new Map()
+    meta.xattrs.set(name, Uint8Array.from(value))
+    this.nodeTable.set(path, meta)
+    await this.store.set(path, metaToFields(meta))
+  }
+
+  // Drop one extended attribute, and the node once it holds nothing.
+  async removeXattr(path: string, name: string): Promise<void> {
+    const meta = this.nodeTable.get(path)
+    if (meta?.xattrs?.delete(name) !== true) return
+    if (meta.xattrs.size === 0) delete meta.xattrs
+    if (Object.keys(meta).length === 0) {
+      this.nodeTable.delete(path)
+      await this.store.delete([path])
+      return
+    }
     await this.store.set(path, metaToFields(meta))
   }
 

@@ -137,6 +137,14 @@ export interface VFSOptions<A extends Accessor = Accessor> {
    * detection, it is a snapshot that claims to have one.
    */
   supportsSnapshot?: boolean
+  /**
+   * Whether `io.stat` and the read record stamp the *same kind* of content
+   * token, so a `read: fresh` mount can compare them. Setting it without
+   * that makes every read verdict stale and refetch forever; a mount
+   * declaring `fresh` on a backend that leaves it false is refused at mount
+   * time instead.
+   */
+  readRevalidatable?: boolean
 }
 
 /**
@@ -212,6 +220,33 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * `BaseVFS.sizes_always_known`.
    */
   readonly sizesAlwaysKnown: boolean = false
+  /**
+   * Whether a `read: fresh` mount can actually be revalidated against this
+   * backend: {@link BaseVFS.stat} and the read record must stamp the *same
+   * kind* of content token, so the gate can compare them with `===`. False
+   * (the default) is refused at mount time rather than degraded, because a
+   * mount that declares fresh and silently serves bounded is the bug the
+   * policy exists to prevent.
+   *
+   * Distinct from {@link BaseVFS.supportsSnapshot}, which asks whether a
+   * token exists at all: gdrive stamps one on both sides and still cannot
+   * honour fresh, because stat returns a timestamp where read returns an
+   * md5. Distinct from {@link BaseVFS.cachesReads}, which asks whether the
+   * gate can fire.
+   *
+   * onedrive and sharepoint look like they qualify and do not: both stamp
+   * a cTag on stat and on read, so on token kind alone the refusal reads
+   * as unnecessary. It is correct for a second reason this flag does not
+   * name -- both label the read record with the slashless `vfsPath`, so
+   * the record key comes out malformed (`/oda/b.txt` rather than
+   * `/od/a/b.txt`) and the cTag can never be matched against the cache
+   * entry. The backends that do qualify pass the mount path instead.
+   * gdrive carries the same slashless label on top of its token-kind
+   * mismatch. Fix the label before reconsidering the flag.
+   *
+   * Mirrors Python's `BaseVFS.read_revalidatable`.
+   */
+  readonly readRevalidatable: boolean = false
   declare readonly accessor?: A
 
   // Whether this driver was built from a table, and the two tables
@@ -254,6 +289,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     this.cachesReads = options.cachesReads ?? false
     this.sizesAlwaysKnown = options.sizesAlwaysKnown ?? false
     this.supportsSnapshot = options.supportsSnapshot ?? false
+    this.readRevalidatable = options.readRevalidatable ?? false
     this.#commands = [
       ...makeGenericCommands<A>(options.name, options.io, {
         ...(options.overrides !== undefined ? { overrides: options.overrides } : {}),

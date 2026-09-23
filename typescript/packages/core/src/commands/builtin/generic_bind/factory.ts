@@ -18,7 +18,7 @@ import { activeCacheManager } from '../../../cache/context.ts'
 import { cacheAwareReadBytes, cacheAwareReadStream } from '../../../cache/read_through.ts'
 import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import { type FileStat, FileType, type PathSpec } from '../../../types.ts'
-import { enotdir, isMissingPath } from '../../../utils/errors.ts'
+import { eisdir, enotdir, isMissingPath } from '../../../utils/errors.ts'
 import type { ChildMounts, LinkView } from '../../../ops/types.ts'
 import { type CommandFn, type ProvisionFn, type RegisteredCommand, command } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -41,9 +41,13 @@ function cachedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
     if (result.size !== null) return result
     const manager = activeCacheManager()
     if (manager === null) return result
-    const cached = await manager.cachedBytes(path)
-    if (cached === null) return result
-    return result.with({ size: cached.length })
+    // cachedSize, not cachedBytes: this backfill runs only when the backend
+    // could not name a size, which is precisely the API mounts, so
+    // revalidating here would turn a stat into a backend stat. The length is
+    // read straight out of the cache, ungated.
+    const size = await manager.cachedSize(path)
+    if (size === null) return result
+    return result.with({ size })
   }
 }
 
@@ -59,11 +63,15 @@ function withStatCache<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
 // the backend through this slot, and each one already renders whatever
 // strerror it gets in its own GNU voice.
 //
-// A missing path is left alone: its own ENOENT is already GNU's answer
-// (`cat dangle/` is "No such file or directory"). The link half is the
-// router's, not this wrapper's: by the time an operand arrives here a
-// trailing slash has already resolved the final symlink, so `dlink/`
-// stats the directory it points at and passes.
+// A missing path is left alone on the read side: its own ENOENT is
+// already GNU's answer (`cat dangle/` is "No such file or directory").
+// On the write side it is not: `write` and `append` refuse a slashed
+// operand with EISDIR whether or not anything is there, as open(2) does
+// with O_CREAT, so `tee missing/` cannot leave a regular file named
+// `missing` behind. The link half is the router's, not this wrapper's:
+// by the time an operand arrives here a trailing slash has already
+// resolved the final symlink, so `dlink/` stats the directory it points
+// at and passes.
 function slashCheckedStat<A extends Accessor>(stat: StatOp<A>): StatOp<A> {
   return async (accessor: A, path: PathSpec, index?: IndexCacheStore) => {
     const result = await stat(accessor, path, index)
@@ -104,11 +112,31 @@ function slashCheckedReaddir<A extends Accessor>(
   }
 }
 
-function withSlashGuard<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
+// open(2) with O_CREAT refuses a slash-terminated name outright, before
+// looking anything up: `x/` can only ever be a directory, so there is
+// nothing to create and nothing to truncate. GNU tee and truncate both
+// answer `missing/` with "Is a directory" and touch nothing, and a plain
+// file behind the slash gets the same answer. Deliberate divergence: under
+// a parent that is itself absent GNU reports the parent first (ENOENT); the
+// spelling is refused here without a round trip, so that corner reads
+// EISDIR too.
+function slashCheckedWrite<A extends Accessor, T>(
+  write: (accessor: A, path: PathSpec, arg: T) => Promise<void>,
+): (accessor: A, path: PathSpec, arg: T) => Promise<void> {
+  return async (accessor: A, path: PathSpec, arg: T) => {
+    if (path.rawPath.endsWith('/')) throw eisdir(path)
+    return write(accessor, path, arg)
+  }
+}
+
+export function withSlashGuard<A extends Accessor>(ops: CommandIO<A>): CommandIO<A> {
   return {
     ...ops,
     stat: slashCheckedStat(ops.stat),
     readdir: slashCheckedReaddir(ops.readdir, ops.stat),
+    ...(ops.write === undefined ? {} : { write: slashCheckedWrite(ops.write) }),
+    ...(ops.append === undefined ? {} : { append: slashCheckedWrite(ops.append) }),
+    ...(ops.truncate === undefined ? {} : { truncate: slashCheckedWrite(ops.truncate) }),
   }
 }
 

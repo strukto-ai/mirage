@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { translateClasses } from '../../utils/posix.ts'
 import { BreError, translateBre } from './utils/bre.ts'
 import { UsageError } from '../errors.ts'
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
@@ -129,7 +130,13 @@ export function breSource(part: string): string {
 // One pattern's regex source, in the syntax it was written in.
 function sourceOf(part: string, fixedString: boolean, basic: boolean): string {
   if (fixedString) return escapeRegex(part)
-  return basic ? breSource(part) : part
+  if (basic) return breSource(part)
+  try {
+    return translateClasses(part)
+  } catch (err) {
+    if (err instanceof SyntaxError) throw new UsageError(`grep: ${err.message}`)
+    throw err
+  }
 }
 
 // Build a regex source string from a POSIX pattern list. `basic` says the

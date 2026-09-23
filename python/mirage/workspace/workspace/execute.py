@@ -240,7 +240,7 @@ async def execute_line(
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
-    cacheable = ws._dispatcher.capture_cacheable_paths()
+    cache_facts = ws._dispatcher.capture_cache_facts()
     await ws._namespace.ensure_loaded()
     await ws._meta.ensure()
     await ws._session_mgr.ensure_loaded()
@@ -514,7 +514,7 @@ async def execute_line(
         if warnings:
             io.stderr = warnings + await io.materialize_stderr()
         record_status(session, io.exit_code, transparent=True)
-        await ws.apply_io(io, records=scope.records, is_cacheable=cacheable)
+        await ws.apply_io(io, records=scope.records, cache_facts=cache_facts)
         return io
     except CommandTimeoutError as exc:
         # The caller's event is read, never written: a timeout is this

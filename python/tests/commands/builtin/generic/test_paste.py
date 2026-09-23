@@ -19,12 +19,12 @@ async def test_no_operand_uses_empty_standard_input():
 
 @pytest.mark.parametrize("serial", [False, True])
 @pytest.mark.asyncio
-async def test_empty_file_produces_no_output(serial: bool):
+async def test_empty_file_output(serial: bool):
     stdout, io = await paste(
         [PathSpec.from_str_path("/empty.txt")],
         read_bytes=_read_empty_file,
         serial=serial,
     )
 
-    assert await materialize(stdout) == b""
+    assert await materialize(stdout) == (b"\n" if serial else b"")
     assert io.exit_code == 0

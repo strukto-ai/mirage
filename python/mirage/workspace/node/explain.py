@@ -256,19 +256,22 @@ def _is_verdict(expl: Explanation) -> bool:
     """Whether an explanation refuses the line's intent, rather than
     just failing one command.
 
-    A rule that named itself is a verdict. So is a refusal the document
-    said nothing about: a coded policy answers on its own account, and
-    with no permissions document there is no rule for it to point at,
-    so reading "no rule" as "no verdict" made every coded policy invisible
-    to the pass. What stays out is the rule-less DENY: a head word the
-    session cannot see, a line no allow entry covers, and a word only
-    the runtime can expand, each of which the docstring above explains
-    is answered where it happens rather than against the whole line.
+    Explicit deny rules and command-scoped policy refusals hold the line.
+    Operand-scoped filesystem refusals wait for the per-command gate,
+    where earlier commands have established the live cwd and namespace.
+    Rule-less DENY results also wait: an unavailable head word, an
+    uncovered command, or words only the runtime can expand fail where
+    they occur rather than against the whole line.
 
     Args:
         expl (Explanation): one command's explanation.
     """
     if expl.exit_code == 0:
+        return False
+    if expl.rule is not None and expl.outcome is Outcome.DENY:
+        return True
+    # Filesystem refusals use the live cwd and fail only their command.
+    if expl.refusal is not None and expl.refusal.scope == "operand":
         return False
     return expl.rule is not None or expl.outcome is Outcome.ALLOW
 
@@ -568,10 +571,9 @@ async def prejudge_line(
     the limit stated above in another form.
 
     Every command is judged whether or not the session carries a
-    document. A coded policy refuses on its own account, and one is
-    always registered (``MountRootPolicy``), so returning early on a
-    session with no rules held the line for a document and let a policy
-    keep the half-line behavior the pass exists to remove.
+    document. Command-scoped coded policies can hold the line without
+    a named rule. Operand-scoped policies, including MountRootPolicy,
+    remain the per-command gate's responsibility.
 
     A line with one command to judge is left to the per-command gate,
     which is not an optimization but the more faithful answer: there is

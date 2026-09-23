@@ -195,6 +195,12 @@ describe('handleCrossMount — cp / mv', () => {
     >((op, p) => {
       if (op === 'stat') {
         if (p.virtual === '/disk/b') return Promise.reject(enoent(p))
+        // The destination's parent is a mount root, which every mount
+        // answers as a directory; mv walks the chain of a missing target
+        // and a file there would refuse the move as `Not a directory`.
+        if (p.virtual === '/disk') {
+          return Promise.resolve<[unknown, IOResult]>([dirStat('disk'), new IOResult()])
+        }
         return Promise.resolve<[unknown, IOResult]>([fileStat('a'), new IOResult()])
       }
       if (op === 'read')

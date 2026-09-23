@@ -475,6 +475,11 @@ async function checkCrossMountCache(ws: Workspace, client: S3Client, label: stri
   const x = '/s3/cache/x.txt'
   ;[out] = await run(ws, `cat ${src} ${x}`)
   check(`${label}: cross cat serves cached`, out === 'aaa\nkeepme\nmid\nlast\n')
+  ;[out] = await run(ws, `printf 'pipe\\n' | cat ${src} - ${x}`)
+  check(
+    `${label}: cross cat mixes stdin and cached bytes`,
+    out === 'aaa\npipe\nkeepme\nmid\nlast\n',
+  )
   ;[out] = await run(ws, `head -n 1 ${src} ${x}`)
   check(`${label}: cross head serves cached`, out.includes('keepme') && !out.includes('nomatch'))
   ;[out] = await run(ws, `tail -n 1 ${src} ${x}`)

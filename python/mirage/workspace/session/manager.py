@@ -81,6 +81,7 @@ class SessionManager:
         self._store = store if store is not None else RAMSessionStore()
         self._sessions: dict[str, SessionState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._line_locks: dict[str, asyncio.Lock] = {}
         # What the store last saw from us, per session id. Flush
         # compares against this to skip clean sessions without a
         # network read, and to avoid clobbering other writers.
@@ -283,11 +284,15 @@ class SessionManager:
         if session_id in self._sessions:
             del self._sessions[self._default_id]
             del self._locks[self._default_id]
+            self._line_locks.pop(self._default_id, None)
         else:
             session = self._sessions.pop(self._default_id)
             session.session_id = session_id
             self._sessions[session_id] = session
             self._locks[session_id] = self._locks.pop(self._default_id)
+            held = self._line_locks.pop(self._default_id, None)
+            if held is not None:
+                self._line_locks[session_id] = held
         self._default_id = session_id
 
     async def ensure_loaded(self) -> None:
@@ -486,6 +491,7 @@ class SessionManager:
         async with self._locks[session_id]:
             del self._sessions[session_id]
         del self._locks[session_id]
+        self._line_locks.pop(session_id, None)
         self._persisted.pop(session_id, None)
         await self._store.delete([session_id])
 
@@ -501,3 +507,17 @@ class SessionManager:
 
     def lock_for(self, session_id: str) -> asyncio.Lock:
         return self._locks[session_id]
+
+    def line_lock_for(self, session_id: str) -> asyncio.Lock:
+        """The lock a top-level line on ``session_id`` holds while it runs.
+
+        One line of a session at a time, as one bash process runs one line
+        at a time. Kept apart from ``lock_for``: a line holds this lock
+        for its whole run and flushes under that one at its end.
+
+        Args:
+            session_id (str): an existing session.
+        """
+        if session_id not in self._sessions:
+            raise KeyError(session_id)
+        return self._line_locks.setdefault(session_id, asyncio.Lock())

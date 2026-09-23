@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.core.ram.append import append_bytes
 from mirage.core.ram.write import write_bytes
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
@@ -100,6 +101,21 @@ async def test_write_bytes_deep_under_a_plain_file_is_not_a_directory():
             PathSpec(vfs_path="plain/sub/file.txt",
                      virtual="/plain/sub/file.txt",
                      directory="/plain/sub/file.txt"), b"data")
+
+
+@pytest.mark.asyncio
+async def test_write_bytes_onto_a_directory_is_a_directory(store):
+    with pytest.raises(IsADirectoryError):
+        await write_bytes(store, PathSpec.from_str_path("/sub"), b"data")
+    assert "/sub" not in store.store.files
+    assert "/sub" in store.store.dirs
+
+
+@pytest.mark.asyncio
+async def test_append_bytes_onto_a_directory_is_a_directory(store):
+    with pytest.raises(IsADirectoryError):
+        await append_bytes(store, PathSpec.from_str_path("/sub"), b"data")
+    assert "/sub" not in store.store.files
 
 
 @pytest.mark.asyncio

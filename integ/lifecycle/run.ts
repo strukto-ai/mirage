@@ -83,6 +83,7 @@ type Step = (
     }
   | { op: 'unregister_policy'; id: string }
   | { op: 'mounts' | 'clis' | 'close' | 'snapshot' | 'checkout' }
+  | { op: 'concurrent'; steps: Step[] }
 ) & { expect?: Record<string, unknown>; session?: string }
 
 interface ScriptDocument {
@@ -246,6 +247,8 @@ async function action(
         refusal: result.refusal?.reason ?? null,
       }
     }
+    case 'concurrent':
+      return Promise.all(step.steps.map((sub) => action(host, ws, sub, policies, held)))
     case 'snapshot':
       held.state = await toStateDict(ws)
       break
@@ -312,7 +315,14 @@ async function run(host: Host, testCase: Case): Promise<number> {
 }
 
 function matches(actual: unknown, expected: unknown): boolean {
-  if (expected === null || typeof expected !== 'object' || Array.isArray(expected)) {
+  if (Array.isArray(expected)) {
+    return (
+      Array.isArray(actual) &&
+      actual.length === expected.length &&
+      expected.every((want, at) => matches(actual[at], want))
+    )
+  }
+  if (expected === null || typeof expected !== 'object') {
     return isDeepStrictEqual(actual, expected)
   }
   if (actual === null || typeof actual !== 'object') return false

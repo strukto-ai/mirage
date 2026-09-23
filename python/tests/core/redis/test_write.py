@@ -119,6 +119,14 @@ async def test_write_bytes_deep_under_a_plain_file_is_not_a_directory():
 
 
 @pytest.mark.asyncio
+async def test_write_bytes_onto_a_directory_is_a_directory(accessor):
+    with pytest.raises(IsADirectoryError):
+        await write_bytes(accessor, PathSpec.from_str_path("/sub"), b"data")
+    assert not await accessor.store.has_file("/sub")
+    assert await accessor.store.has_dir("/sub")
+
+
+@pytest.mark.asyncio
 async def test_write_bytes_to_subdir(accessor):
     await write_bytes(
         accessor,

@@ -16,7 +16,9 @@ import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from mirage.commands.builtin.find_eval import FindEntry, keep
+from mirage.commands.builtin.find_eval import (FindEntry, PredNode, bind_tree,
+                                               drop_pruned, keep,
+                                               settle_prunes)
 from mirage.commands.builtin.find_parse import parse_find_expression
 from mirage.commands.builtin.generic.crossmount.fanout.du import \
     merge_du_blocks
@@ -30,7 +32,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, StatPath
 from mirage.types import FileType, PathSpec, Producer
-from mirage.utils.dates import matches_mtime
+from mirage.utils.dates import in_mtime_window, iso_timestamp
 from mirage.utils.path import respell_one
 from mirage.workspace.mount import (MountCommandUnsupported, MountEntry,
                                     MountRegistry)
@@ -250,14 +252,37 @@ def _adjust_depth_texts(
     return out
 
 
+def _dir_entry(path: str, depth: int, mtime: float | None = None) -> FindEntry:
+    return FindEntry(key=path,
+                     name=path.rsplit("/", 1)[-1] or path,
+                     kind="d",
+                     depth=depth,
+                     mtime=mtime)
+
+
+def _pruned_away(path: str, tree: PredNode | None) -> bool:
+    """Whether the fan-out's own evaluation pruned a directory above ``path``.
+
+    A descendant mount is walked by its own find, which never learns
+    what the walk above it skipped, so the fan-out asks the ledger
+    before walking it.
+
+    Args:
+        path (str): a descendant mount root.
+        tree (PredNode | None): the tree ``_synthesize_find_mount_entries``
+            evaluated; None when there was no expression to evaluate.
+    """
+    return tree is not None and not drop_pruned([path], tree)
+
+
 async def _synthesize_find_mount_entries(
     target_path: str,
     descendants: list[MountEntry],
     texts: list[str],
     raw: str,
     stat_path: StatPath | None = None,
-) -> list[PathSpec]:
-    """Return synthetic find paths for descendant mount roots.
+) -> tuple[list[PathSpec], PredNode | None]:
+    """Return synthetic find paths for descendant mount roots, and the tree.
 
     `find /` and friends should list mount prefixes as directory
     entries even though no per-mount find emits its own root. The
@@ -274,6 +299,14 @@ async def _synthesize_find_mount_entries(
     too. Entries print in the operand's typed spelling like every other
     line of the walk.
 
+    The start point is evaluated first, for its ledger alone: a
+    ``-prune`` reaching it or a namespace-only ancestor is recorded on
+    the tree, which skips the candidates beneath before they are
+    statted and comes back with the entries so the caller can hold the
+    descendant mounts to it, since each of those is walked on its own
+    and never learns what the walk above it skipped (``find /data -type
+    d -prune`` is one row).
+
     Args:
         target_path (str): the find start path the fan-out runs from.
         descendants (list): descendant mounts to inject as entries.
@@ -285,14 +318,28 @@ async def _synthesize_find_mount_entries(
     try:
         expr = parse_find_expression(list(texts))
     except FindParseError:
-        return []
-    tree = expr.tree
+        return [], None
+    tree = bind_tree(expr.tree, "", target_path, raw)
     max_depth = expr.maxdepth
     min_depth = expr.mindepth if expr.mindepth is not None else 0
     parent_depth = len(_path_segments(target_path))
     parent_base = target_path.rstrip("/")
+    windowed = expr.mtime_min is not None or expr.mtime_max is not None
+    learned: dict[str, float | None] = {}
+
+    async def mtime_of(path: str) -> float | None:
+        # Fetched ahead of the tree, so a time test answers on the entry
+        # itself and a -prune after it fires only where GNU's would.
+        if not windowed or stat_path is None:
+            return None
+        st = await stat_path(path)
+        learned[path] = iso_timestamp(st.modified) if st is not None else None
+        return learned[path]
+
+    start = parent_base or "/"
+    keep(_dir_entry(start, 0, await mtime_of(start)), tree, min_depth)
     seen: set[str] = set()
-    out: list[PathSpec] = []
+    kept: list[str] = []
     for m in descendants:
         prefix_no_slash = m.prefix.rstrip("/")
         ancestors: list[str] = []
@@ -307,23 +354,27 @@ async def _synthesize_find_mount_entries(
             depth = len(_path_segments(candidate)) - parent_depth
             if max_depth is not None and depth > max_depth:
                 continue
-            base = candidate.rsplit("/", 1)[-1] or candidate
-            entry = FindEntry(key=candidate, name=base, kind="d", depth=depth)
-            if not keep(entry, tree, min_depth):
+            if _pruned_away(candidate, tree):
+                # GNU never visits it, so it is neither statted nor
+                # judged: a backend that refuses the probe must not fail
+                # the line.
                 continue
-            if ((expr.mtime_min is not None or expr.mtime_max is not None)
-                    and stat_path is not None):
-                st = await stat_path(candidate)
-                if st is None or not matches_mtime(st.modified, expr.mtime_min,
-                                                   expr.mtime_max):
-                    continue
-            out.append(
-                PathSpec(virtual=candidate,
-                         directory=candidate,
-                         vfs_path="",
-                         resolved=True,
-                         raw_path=respell_one(candidate, target_path, raw)))
-    return out
+            mtime = await mtime_of(candidate)
+            if not keep(_dir_entry(candidate, depth, mtime), tree, min_depth):
+                continue
+            if windowed and stat_path is not None and not in_mtime_window(
+                    mtime, expr.mtime_min, expr.mtime_max):
+                continue
+            kept.append(candidate)
+    settle_prunes(tree, learned)
+    return [
+        PathSpec(virtual=candidate,
+                 directory=candidate,
+                 vfs_path="",
+                 resolved=True,
+                 raw_path=respell_one(candidate, target_path, raw))
+        for candidate in drop_pruned(kept, tree)
+    ], tree
 
 
 def _drop_shadowed_ls_groups(text: str,
@@ -429,7 +480,8 @@ async def _fan_out_traversal(
 
     For `find`, mount-prefix paths themselves are injected as synthetic
     directory entries (subject to depth and -type filters) because
-    mirage's per-mount find doesn't emit the path argument itself.
+    mirage's per-mount find doesn't emit the path argument itself. A
+    descendant under a directory the expression pruned is not walked.
 
     ``ns`` is offered to every sub-run whole. The boundary facts,
     because a rollup total cannot be repaired by line filtering: du must
@@ -476,6 +528,12 @@ async def _fan_out_traversal(
         }
         flag_kwargs.pop("max_depth", None)
 
+    synthetic: list[PathSpec] = []
+    tree: PredNode | None = None
+    if cmd_name == "find":
+        synthetic, tree = await _synthesize_find_mount_entries(
+            target_path, descendants, texts, paths[0].raw_path, stat_path)
+
     all_stdout: list[bytes] = []
     find_matches: list[list[PathSpec]] = []
     find_matches_complete = True
@@ -497,7 +555,7 @@ async def _fan_out_traversal(
             mount_root = mount.prefix.rstrip("/") or "/"
             adjusted = _adjust_depth_flags(flag_kwargs, target_path,
                                            mount.prefix)
-            if adjusted is None:
+            if adjusted is None or _pruned_away(mount_root, tree):
                 continue
             sub_flags = adjusted
             if cmd_name == "rg":
@@ -566,8 +624,6 @@ async def _fan_out_traversal(
 
     all_rows: list[PathSpec] = []
     if cmd_name == "find":
-        synthetic = await _synthesize_find_mount_entries(
-            target_path, descendants, texts, paths[0].raw_path, stat_path)
         # The mount points a walk cannot see belong to the first
         # operand's run, the one that holds them.
         if synthetic:

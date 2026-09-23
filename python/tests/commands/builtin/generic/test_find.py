@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.find_eval import Name, Not, Or
-from mirage.commands.builtin.generic.find import (FindArgs, apply_mount_prefix,
+from mirage.commands.builtin.find_eval import FindArgs, Name, Not, Or
+from mirage.commands.builtin.generic.find import (apply_mount_prefix,
                                                   apply_mtime_filter, find,
                                                   find_walk_generic,
                                                   parse_find_args, walk_find)
@@ -382,6 +382,46 @@ async def test_walk_find_empty_matches_empty_files_and_dirs():
 
 
 @pytest.mark.asyncio
+async def test_walk_find_time_test_before_prune_gates_it():
+    now = "2026-01-01T00:00:00Z"
+
+    async def readdir(spec: PathSpec, _index):
+        table = {
+            "/": ["/old", "/new"],
+            "/old": ["/old/f.txt"],
+            "/new": ["/new/g.txt"],
+        }
+        return table[spec.virtual]
+
+    async def stat(spec: PathSpec, _index):
+        stamps = {
+            "/": now,
+            "/old": "2000-01-01T00:00:00Z",
+            "/new": now,
+            "/old/f.txt": now,
+            "/new/g.txt": now,
+        }
+        name = spec.virtual.rsplit("/", 1)[-1] or "/"
+        kind = FileType.FILE if "." in name else FileType.DIRECTORY
+        return FileStat(name=name, type=kind, modified=stamps[spec.virtual])
+
+    gated = parse_find_args(
+        ("-mindepth", "1", "-newermt", "2010-01-01", "-prune"))
+    assert await walk_find(_root_spec(),
+                           readdir=readdir,
+                           stat=stat,
+                           index=None,
+                           args=gated) == ["/new", "/old/f.txt"]
+    firm = parse_find_args(
+        ("-mindepth", "1", "-prune", "-newermt", "2010-01-01"))
+    assert await walk_find(_root_spec(),
+                           readdir=readdir,
+                           stat=stat,
+                           index=None,
+                           args=firm) == ["/new"]
+
+
+@pytest.mark.asyncio
 async def test_walk_find_not_negates_predicate():
     readdir = AsyncMock(return_value=["/a.txt", "/b.md"])
 
@@ -483,6 +523,22 @@ def test_find_invalid_numeric_arg_exits_one_with_clean_stderr(expr):
 
 
 # ── Issue #312 parse-level regression tests ────────────────
+
+
+@pytest.mark.asyncio
+async def test_find_time_test_before_prune_gates_it():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /d/old/x /d/new/y && touch /d/old/x/f /d/new/y/g "
+                   "/d/old/o.txt && touch -d 2000-01-01 /d/old")
+    gated = await ws.shell("find /d -mindepth 1 -newermt 2010-01-01 -prune")
+    assert gated.stdout == b"/d/new\n/d/old/o.txt\n/d/old/x\n"
+    firm = await ws.shell("find /d -mindepth 1 -prune -newermt 2010-01-01")
+    assert firm.stdout == b"/d/new\n"
+    old = await ws.shell("find /d -mindepth 1 -mtime +3650 -prune")
+    assert old.stdout == b"/d/old\n"
+    both = await ws.shell(
+        "find /d -mindepth 1 -newermt 1990-01-01 -prune -newermt 2010-01-01")
+    assert both.stdout == b"/d/new\n"
 
 
 def test_parse_find_args_start_path_included():

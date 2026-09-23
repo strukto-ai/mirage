@@ -36,6 +36,9 @@ class S3VFS(BaseVFS):
     caches_reads: bool = True
     prompt: str = PROMPT
     supports_snapshot: bool = True
+    # stat and read both stamp the ETag, so the gate compares like with
+    # like. Inherited by every S3AliasVFS provider.
+    read_revalidatable: bool = True
 
     def __init__(self, config: S3Config) -> None:
         super().__init__()

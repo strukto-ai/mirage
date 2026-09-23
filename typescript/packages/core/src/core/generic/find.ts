@@ -17,10 +17,12 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FindOptions } from '../../vfs/base.ts'
 import {
+  bindTree,
   buildTree,
+  dropPruned,
   hasLinkChildren,
   optionsTree,
-  prefixPathNodes,
+  settlePrunes,
   startBasename,
   treeHasEmpty,
   treeHasType,
@@ -187,8 +189,11 @@ export async function walkFind(
     await walk(deps, path, index, options.maxDepth ?? null, 1, collected)
   }
   const results: string[] = []
-  const tree = prefixPathNodes(optionsTree(options), prefix)
+  const tree = bindTree(optionsTree(options), prefix, path.virtual, path.rawPath)
   const needEmpty = treeHasEmpty(tree)
+  const needSize = options.minSize != null || options.maxSize != null
+  const needMtime = options.mtimeMin != null || options.mtimeMax != null
+  const learned = new Map<string, number | null>()
   collected.sort((a, b) => compareCodePoints(a.path, b.path))
   for (const entry of collected) {
     const name = entry.path.split('/').pop() ?? ''
@@ -200,18 +205,26 @@ export async function walkFind(
     if (needEmpty) {
       isEmpty = await isEmptyEntry(deps, entry.path, !entry.file, prefix, index)
     }
+    // With a time test in the tree the stat comes first, so the entry
+    // answers the test itself and a -prune after it fires only where GNU's
+    // would; the stat that -size alone needs waits for the rows the tree
+    // kept.
+    let st: FileStat | null = null
+    if (needMtime) {
+      st = await statEntry(deps, entry.path, prefix, index)
+      if (st === null) continue
+      learned.set(key, modifiedTs(st.modified))
+    }
     const findEntry: FindEntry = {
       key,
       name,
       kind: entry.file ? 'f' : 'd',
       depth: entry.depth,
       isEmpty,
+      mtime: learned.get(key) ?? null,
     }
     if (!keep(findEntry, tree, options.minDepth)) continue
-    const needSize = options.minSize != null || options.maxSize != null
-    const needMtime = options.mtimeMin != null || options.mtimeMax != null
-    let st: FileStat | null = null
-    if ((needSize && entry.file) || needMtime) {
+    if (needSize && entry.file && st === null) {
       st = await statEntry(deps, entry.path, prefix, index)
       if (st === null) continue
     }
@@ -229,7 +242,8 @@ export async function walkFind(
     }
     results.push(key)
   }
-  return results
+  settlePrunes(tree, learned)
+  return dropPruned(results, tree)
 }
 
 export interface SearchFindDeps<A> {

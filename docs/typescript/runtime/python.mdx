@@ -36,6 +36,10 @@ that use file operations, such as PIL and NumPy. These operations reach
 the same workspace mounts used by shell commands. Symlinks and metadata
 overlays come from the workspace namespace.
 
+`os.getxattr`, `os.listxattr`, `os.setxattr` and `os.removexattr` reach
+the attributes the shell's `getfattr` and `setfattr` see. They need the
+worker; the fallback below answers them with `OSError` (`ENOTSUP`).
+
 With a worker, files are fetched on first access and cached for that run.
 The cache is discarded before the next execution; it does not track
 external edits to already fetched files during a run. Writes flush through
@@ -120,6 +124,8 @@ so a dependency update can revisit them.
 - Command-line arguments are the `argv` global; `sys.argv` does not exist.
 - No `sys.stdin` and no third-party imports.
 - `os.environ` reflects the session env only.
+- `os` has no extended-attribute calls (`os.getxattr` and its siblings);
+  run `getfattr` or `setfattr` in the shell instead.
 - `os.stat()` and `Path.stat()` answer with every attribute CPython's
   `stat_result` carries, but not its sequence half: `st[6]`, `len(st)`
   and iterating it raise `TypeError` here and work on the Python host,
@@ -167,6 +173,20 @@ const ws = new Workspace(mounts, {
   runtimes: [new PyodideRuntime({ config: { home: 'https://assets.example.com/pyodide/' } }), 'workspace'],
 })
 ```
+
+`pyodide.config.initModule` accepts a trusted host module URL or absolute
+Node path. Its default export receives the loaded Pyodide instance before
+`bootstrapCode` runs, and may return a cleanup function. This supports
+registering narrow JavaScript capabilities with `registerJsModule` without
+exposing host globals through `import js`. The initializer also runs inside
+the execution worker; it must not depend on caller-thread state. It has host
+privileges and belongs in deployment configuration, never agent input.
+`POST /v1/workspaces` rejects it in request-supplied runtime configuration.
+Configuring an initializer changes the runtime's declared reach from
+`workspace` to `process`, because registered host capabilities can bypass
+the workspace gate even while `import js` remains sealed.
+Worker termination destroys its isolate; only in-process shutdown invokes
+the returned cleanup function, so extensions must tolerate abrupt shutdown.
 
 ## Resource limits
 

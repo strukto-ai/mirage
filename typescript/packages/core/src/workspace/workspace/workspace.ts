@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
+import { KeyLock } from '../../cache/lock.ts'
 import { checkCliVerbs } from '../session/validate.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
@@ -47,9 +48,17 @@ import {
   withRebuiltMounts,
 } from '../snapshot/state.ts'
 import { readSnapshotTar } from '../snapshot/tar_io.ts'
+import { normMountPrefix } from '../snapshot/utils.ts'
 import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
 import type { FileEvent } from '../../types.ts'
-import { ConsistencyPolicy, DriftPolicy, MountMode, PathSpec, parseMountMode } from '../../types.ts'
+import {
+  type ReadSpec,
+  DEFAULT_READ_SPEC,
+  DriftPolicy,
+  MountMode,
+  PathSpec,
+  parseMountMode,
+} from '../../types.ts'
 import type { Explanation, Policies } from '../../policy/index.ts'
 import type { RoutePolicy } from '../../runtime/routing/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -57,6 +66,7 @@ import type { ExecuteFn } from '../expand/node.ts'
 import type { ProvisionResult } from '../../provision/types.ts'
 import { Ops } from '../../ops/ops.ts'
 import type { MountEntry } from '../mount/mount.ts'
+import { checkReadCapability } from '../mount/read_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
 import { WorkspaceBinding, captureBinding } from '../../runtime/binding.ts'
@@ -83,6 +93,7 @@ import { explainLine } from '../node/explain.ts'
 import { provisionNode } from '../node/provision_node.ts'
 import { buildFilePrompt } from '../file_prompt.ts'
 import { getCurrentSessionFor } from '../../context/session_context.ts'
+import { abortable, hasAborted, makeAbortError } from '../abort.ts'
 import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
 import { SecretsError } from '../../secrets/errors.ts'
 import { sourceFor } from '../../secrets/registry.ts'
@@ -134,6 +145,7 @@ export class Workspace {
    */
   readonly opsRegistry: OpsRegistry
   private readonly indexConfig: IndexConfig | undefined
+  private readonly readDefault: ReadSpec
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
   private shellParserPromise: Promise<ShellParser> | null = null
@@ -145,6 +157,7 @@ export class Workspace {
   readonly observer: Observer
   readonly vfs: Ops
   private closed = false
+  private readonly lineLock = new KeyLock()
   private readonly closers: (() => Promise<void>)[] = []
   private closing: Promise<void> | null = null
 
@@ -184,20 +197,22 @@ export class Workspace {
   // can't mount), so the core Workspace carries no FUSE state.
 
   constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
-    const normalized = normalizeMounts(mounts)
+    // The workspace-level default a mount overrides, as `mode` is.
+    this.readDefault = options.read ?? DEFAULT_READ_SPEC
+    const normalized = normalizeMounts(mounts, this.readDefault)
     this.indexConfig = options.index
     this.registry = new MountRegistry(
       normalized.bare,
       options.mode ?? MountMode.READ,
       normalized.modes,
+      this.readDefault,
+      normalized.read,
       {
         ...(options.index !== undefined ? { index: options.index } : {}),
         refs: normalized.refs,
         indexes: normalized.indexes,
       },
     )
-    const consistency = options.consistency ?? ConsistencyPolicy.LAZY
-    this.registry.setConsistency(consistency)
     this.wsId = options.workspaceId ?? newWorkspaceId()
     this.jobTable = new JobTable(options.consoleFactory ?? null)
     const stores = resolveControlStores(this.wsId, options)
@@ -324,7 +339,14 @@ export class Workspace {
       this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
     this.observer = new Observer(stores.observe)
-    this.registry.mount(HISTORY_PREFIX, new HistoryViewVFS(this.observer), MountMode.READ)
+    // Explicit at the construction site: the history view does not cache
+    // reads, so its policy can only ever be bounded.
+    this.registry.mount(
+      HISTORY_PREFIX,
+      new HistoryViewVFS(this.observer),
+      MountMode.READ,
+      DEFAULT_READ_SPEC,
+    )
     this.cache = buildFileCache(options.cache, options.cacheLimit)
     this.registry.attachFileCache(this.cache)
     // Only an explicit agentId claims the workspace user; a bare launch
@@ -339,7 +361,6 @@ export class Workspace {
       this.namespace,
       this.cache,
       this.opsRegistry,
-      consistency,
       this.registry.policies,
       this.drift,
     )
@@ -350,7 +371,13 @@ export class Workspace {
     // A synthetic anchor is internal to Mirage and must NOT be forwarded to Pyodide,
     // whose own `/` filesystem (holding the Python stdlib) would be hijacked.
     if (this.registry.rootMount === null) {
-      this.registry.mount('/', new RAMVFS(), options.mode ?? MountMode.READ)
+      // Pinned bounded, not inherited. This anchor is synthesized after
+      // normalizeMounts has run, so it never meets the capability verdict
+      // -- and RAM does not cache reads, so a workspace-level `fresh`
+      // would stamp on it exactly the combination the verdict refuses. It
+      // is snapshotted like any other mount, so that stray policy came
+      // back as a refusal on restore.
+      this.registry.mount('/', new RAMVFS(), options.mode ?? MountMode.READ, DEFAULT_READ_SPEC)
       this.syntheticRootAnchor = true
     }
     // The workspace's own session is a session created without a name,
@@ -362,15 +389,26 @@ export class Workspace {
     for (const vfs of [...this.registry.allMounts().map((m) => m.vfs), this.cache]) {
       this.opsRegistry.registerVfs(vfs)
     }
-    for (const [prefix, commandLimits] of Object.entries({
-      ...normalized.commandLimits,
-      ...(options.commandLimits ?? {}),
-    })) {
+    // A mount's own limits win, which is the order node's unwrap produced
+    // before it handed them to core: it spread options first and then
+    // overwrote per prefix from the Mount. Merged per command, not per
+    // prefix: spreading one whole record over the other dropped every
+    // command the losing side named, so a workspace-level `cat` limit
+    // disappeared the moment the mount itself named an `ls` one. Python
+    // reaches the same shape through `entry.command_limits.update()`.
+    const limitPrefixes = new Set([
+      ...Object.keys(options.commandLimits ?? {}),
+      ...Object.keys(normalized.commandLimits),
+    ])
+    for (const prefix of limitPrefixes) {
       const mount = this.registry.tryMountForPrefix(prefix)
       if (mount === null) {
         throw new Error(`commandLimits references unknown mount prefix: ${prefix}`)
       }
-      for (const [cmd, sg] of Object.entries(commandLimits)) {
+      for (const [cmd, sg] of Object.entries({
+        ...(options.commandLimits?.[prefix] ?? {}),
+        ...(normalized.commandLimits[prefix] ?? {}),
+      })) {
         mount.commandLimits.set(cmd, sg)
       }
     }
@@ -602,6 +640,28 @@ export class Workspace {
           // marks the links, so a row is built in one tier and in one
           // shape in both languages.
           return ((await dispatch('readdir', path)) as string[] | null) ?? []
+        case 'getxattr':
+          return await dispatch('getxattr', path, [], {
+            name: dst ?? '',
+            nofollow: attrs?.nofollow === true,
+          })
+        case 'listxattr':
+          return await dispatch('listxattr', path, [], { nofollow: attrs?.nofollow === true })
+        case 'setxattr':
+          await dispatch('setxattr', path, [], {
+            name: dst ?? '',
+            value: bytes ?? new Uint8Array(),
+            create: attrs?.create === true,
+            replace: attrs?.replace === true,
+            nofollow: attrs?.nofollow === true,
+          })
+          return undefined
+        case 'removexattr':
+          await dispatch('removexattr', path, [], {
+            name: dst ?? '',
+            nofollow: attrs?.nofollow === true,
+          })
+          return undefined
       }
     }
   }
@@ -896,17 +956,24 @@ export class Workspace {
   /**
    * Add a mount to a running workspace. Registers the VFS's ops globally
    * on this workspace's OpsRegistry so dispatch can find them.
+   *
+   * The runtime door runs the same read-policy verdict the constructor
+   * does: a mount added here is no more able to declare a policy its
+   * backend cannot honour than one declared in config.
    */
   addMount(
     prefix: string,
     vfs: BaseVFS,
     mode: MountMode = MountMode.READ,
+    read?: ReadSpec,
     vfsRef: string | null = null,
   ): MountEntry {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     this.registry.checkVfsAvailable(vfs)
+    const resolvedRead = read ?? this.readDefault
+    checkReadCapability(prefix, vfs, resolvedRead)
     const previous = this.registry.allMounts()
-    const m = this.registry.mount(prefix, vfs, mode, ConsistencyPolicy.LAZY, {
+    const m = this.registry.mount(prefix, vfs, mode, resolvedRead, {
       ...(this.indexConfig !== undefined ? { index: this.indexConfig } : {}),
       vfsRef,
     })
@@ -1293,7 +1360,65 @@ export class Workspace {
     // A line admitted before close may still recurse through eval/source/$(),
     // but no continuation can start after teardown has finished.
     if (this.closed) throw new Error('Workspace is closed')
-    return executeLine(this.executeEnv(), command, options)
+    return this.serializeLine(options.sessionId, options.signal, () =>
+      executeLine(this.executeEnv(), command, options),
+    )
+  }
+
+  /**
+   * Run one line of a session at a time, as one bash process does.
+   *
+   * Two top-level lines on one session share its env, cwd and `$?`, so
+   * letting them interleave hands one line the loop variable the other
+   * just set: two `for f` loops both exit 0 and both print the other's
+   * values. A nested line (`eval`, `source`, `$()`, `xargs`, a host
+   * callback fired mid-line) is the same shell continuing and runs
+   * inline: it already holds the session, and waiting on itself would
+   * deadlock. The ambient binding decides, by the same rule
+   * `executeLine` uses to pick the session a line runs as, so the lock
+   * key and the executed session never disagree; a background job's
+   * fork keeps its parent's id and continues inline too.
+   *
+   * @param sessionId the session named by the caller, or undefined for
+   *   the default.
+   * @param run the line, started only once the session is held.
+   */
+  private async serializeLine<T>(
+    sessionId: string | undefined,
+    signal: AbortSignal | undefined,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const ambient = getCurrentSessionFor(this.sessionManager)
+    if (ambient !== null && (sessionId === undefined || sessionId === ambient.sessionId)) {
+      return run()
+    }
+    // Hydrate first: a workspace on a shared store adopts the persisted
+    // default id there, and a key taken before that names a session no
+    // later line would wait on.
+    await abortable(this.ensureSessionsLoaded(), signal)
+    let started = false
+    const gate = this.lineLock.withLock(sessionId ?? this.sessionManager.defaultId, async () => {
+      // A line queued behind a running one wakes after close may have
+      // started, or after its caller was released; it runs nothing,
+      // like a line that arrived after.
+      if (this.isShuttingDown()) throw new Error('Workspace is closed')
+      if (hasAborted(signal)) throw makeAbortError(signal)
+      started = true
+      return run()
+    })
+    if (signal === undefined) return gate
+    // The wait is the caller's to abandon; the run is not. Once the line
+    // has started, its own abort handling joins the tree under the grace
+    // and restores `$?`, and releasing the caller here would skip that.
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = (): void => {
+        if (!started) reject(makeAbortError(signal))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      gate.then(resolve, reject).finally(() => {
+        signal.removeEventListener('abort', onAbort)
+      })
+    })
   }
 
   /**
@@ -1310,7 +1435,9 @@ export class Workspace {
       throw new Error('no evaluator runtime bound for the repl')
     }
     try {
-      return await bound.eval(code, { session: sessionId })
+      return await this.serializeLine(sessionId, undefined, () =>
+        bound.eval(code, { session: sessionId }),
+      )
     } catch (err) {
       const unavailable =
         err instanceof PyodideUnavailableError || err instanceof MontyUnavailableError
@@ -1373,7 +1500,17 @@ export class Workspace {
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const rebuilt = await withRebuiltMounts(state, overrides, (m) => this.buildSavedVfs(m))
-    const args = buildMountArgs(state, rebuilt, cliOverrides)
+    // The caller's own overrides, named before the rebuilds are merged
+    // in: past this point the two are one map, and only these are a
+    // backend other than the one the snapshot saved.
+    const args = buildMountArgs(
+      state,
+      rebuilt,
+      cliOverrides,
+      new Set(Object.keys(overrides).map(normMountPrefix)),
+    )
+    // The Mounts ride through whole; flattening them to [vfs, mode]
+    // here is what would drop the restored read policy.
     const mounts: Record<string, MountSpec> = { ...args.mountArgs }
     const mergedOptions: WorkspaceOptions = {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),

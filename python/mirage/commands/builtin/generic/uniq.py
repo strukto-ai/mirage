@@ -2,7 +2,8 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.stream import resolve_source
+from mirage.commands.builtin.utils.stream import (is_stdin, resolve_source,
+                                                  stdin_stream)
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
@@ -226,14 +227,15 @@ async def uniq(
                               stderr=(str(exc) + "\n").encode())
     except ValueError as exc:
         return None, IOResult(exit_code=1, stderr=(str(exc) + "\n").encode())
+    read_stream = stdin_stream(read_stream, stdin)
     cache: list[str] = []
     if paths:
         source = read_stream(paths[0])
-        cache = [paths[0].mount_path]
+        cache = [] if is_stdin(paths[0]) else [paths[0].mount_path]
     else:
         source = resolve_source(stdin)
     output: ByteSource = _uniq_stream(source, parsed)
-    if len(paths) == 2:
+    if len(paths) == 2 and paths[1].raw_path != "-":
         if write_bytes is None:
             return None, IOResult(exit_code=1,
                                   stderr=b"uniq: output is not writable\n")

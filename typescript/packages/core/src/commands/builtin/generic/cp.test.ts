@@ -199,6 +199,35 @@ describe('cpGeneric guards', () => {
     })
   })
 
+  it('multiple sources with a slashed plain-file target report Not a directory', async () => {
+    // GNU 9.7: `cp a b reg/` is `target 'reg/': Not a directory`, the
+    // destination probe's verdict, where only a genuinely absent target is
+    // `No such file or directory`.
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/b.txt', new Uint8Array([2])],
+      ['/reg', new Uint8Array([3])],
+    ])
+    const { stat, copy, find } = makeBackend(files, new Set())
+    await expect(
+      cpGeneric(
+        [spec('/a.txt'), spec('/b.txt'), slashed('/reg')],
+        stat,
+        { copy, find },
+        cpFlags({}),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
+    await expect(
+      cpGeneric(
+        [spec('/a.txt'), spec('/b.txt'), slashed('/missing')],
+        stat,
+        { copy, find },
+        cpFlags({}),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect([...files.keys()].sort()).toEqual(['/a.txt', '/b.txt', '/reg'])
+  })
+
   it('multiple sources with a plain-file target report Not a directory', async () => {
     const files = new Map([
       ['/a.txt', new Uint8Array([1])],
@@ -1004,5 +1033,78 @@ describe.each(['cp', 'mv'])('%s --update candidates', (command) => {
 
   it.each(['all', 'none', 'none-fail', 'older'])('accepts the advertised mode %s', (value) => {
     expect(updateMode(command, new FlagView({ update: value }, specOf(command)))).toBe(value)
+  })
+})
+
+// The operand as the shell classifies `path/`: a normalized virtual path
+// with the typed spelling, slash included, kept in rawPath.
+function slashed(path: string): PathSpec {
+  return new PathSpec({
+    virtual: path,
+    directory: path.slice(0, path.lastIndexOf('/')) || '/',
+    resolved: false,
+    vfsPath: mountKey(path, ''),
+    rawPath: `${path}/`,
+  })
+}
+
+describe('cpGeneric trailing slash', () => {
+  it('refuses a file source into a slashed missing destination', async () => {
+    // GNU 9.7: `cp a.txt missing/` is `cannot create regular file
+    // 'missing/': Not a directory`, and nothing named `missing` appears.
+    const files = new Map([['/a.txt', new Uint8Array([1])]])
+    const { stat, copy, find } = makeBackend(files, new Set())
+    const [, io] = await cpGeneric(
+      [spec('/a.txt'), slashed('/missing')],
+      stat,
+      { copy, find },
+      cpFlags({}),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe(
+      "cp: cannot create regular file '/missing/': Not a directory\n",
+    )
+    expect([...files.keys()]).toEqual(['/a.txt'])
+  })
+
+  it('takes a directory source into a slashed missing destination', async () => {
+    const files = new Map([['/d/f', new Uint8Array([1])]])
+    const { stat, copy, find } = makeBackend(files, new Set(['/d']))
+    const [, io] = await cpGeneric(
+      [spec('/d'), slashed('/missing')],
+      stat,
+      { copy, find },
+      cpFlags({ recursive: true }),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(files.has('/missing/f')).toBe(true)
+  })
+
+  it('reports cannot stat for a slashed file destination', async () => {
+    // `cp a.txt reg/` fails the destination's stat in GNU, and the stat
+    // itself decides here whether or not the backend's is slash-aware.
+    const files = new Map([
+      ['/a.txt', new Uint8Array([1])],
+      ['/reg', new Uint8Array([2])],
+    ])
+    const { stat, copy, find } = makeBackend(files, new Set())
+    const [, io] = await cpGeneric(
+      [spec('/a.txt'), slashed('/reg')],
+      stat,
+      { copy, find },
+      cpFlags({}),
+    )
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/reg/': Not a directory\n")
+    expect(files.get('/reg')).toEqual(new Uint8Array([2]))
+  })
+
+  it('reports cannot stat for a slashed file source', async () => {
+    const files = new Map([['/reg', new Uint8Array([2])]])
+    const { stat, copy, find } = makeBackend(files, new Set())
+    const [, io] = await cpGeneric([slashed('/reg'), spec('/x')], stat, { copy, find }, cpFlags({}))
+    expect(io.exitCode).toBe(1)
+    expect(await io.stderrStr()).toBe("cp: cannot stat '/reg/': Not a directory\n")
+    expect([...files.keys()]).toEqual(['/reg'])
   })
 })

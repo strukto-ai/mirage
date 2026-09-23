@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { runWithCacheManager } from '../../cache/context.ts'
+import { runWithRecording } from '../../observe/context.ts'
+import type { OpRecord } from '../../observe/record.ts'
 import { errorVirtualPath } from '../../utils/errors.ts'
 import type { ObjectStoreDriver } from './driver.ts'
 import type { FakeStore as Store } from './fakes.ts'
@@ -138,5 +140,62 @@ describe('object_store write', () => {
     expect(store.contents()).toEqual({})
     expect(store.connects).toBe(0)
     expect(manager.writes).toEqual([])
+  })
+})
+
+// ── the backend token the put answered reaches the op record ───────────
+
+async function recorded(fn: () => Promise<void>): Promise<OpRecord[]> {
+  const [, records] = await runWithRecording(async () => {
+    await managed(fn)
+  })
+  return records
+}
+
+describe('object store write records the put token', () => {
+  it('write carries the token the put returned', async () => {
+    const store = new FakeStore()
+    const records = await recorded(() =>
+      makeWriteBytes(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
+    )
+    expect(records.map((r) => [r.op, r.path, r.fingerprint])).toEqual([
+      ['write', '/mnt/a/b/c.txt', 'fp-a/b/c.txt'],
+    ])
+  })
+
+  it('create carries the token the put returned', async () => {
+    const store = new FakeStore()
+    const records = await recorded(() =>
+      makeCreate(makeDriver(store))(accessor, spec('/a/new.txt')),
+    )
+    expect(records.map((r) => [r.op, r.fingerprint])).toEqual([['create', 'fp-a/new.txt']])
+  })
+
+  it('truncate carries the token the put returned', async () => {
+    const store = new FakeStore()
+    store.objects.set('a/cut.txt', ENC.encode('hello'))
+    const records = await recorded(() =>
+      makeTruncate(makeDriver(store))(accessor, spec('/a/cut.txt'), 2),
+    )
+    expect(records.map((r) => [r.op, r.fingerprint])).toEqual([['truncate', 'fp-a/cut.txt']])
+  })
+
+  it('records no token when the store reports none', async () => {
+    // hf's opendal write reports nothing, so its driver answers null and
+    // the record carries the same absence it does today.
+    const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+      ...makeDriver(new FakeStore()),
+      put: () => Promise.resolve(null),
+    }
+    const records = await recorded(() =>
+      makeWriteBytes(driver)(accessor, spec('/a/c.txt'), ENC.encode('hi')),
+    )
+    expect(records.map((r) => r.fingerprint)).toEqual([null])
+  })
+
+  it('mkdir records nothing', async () => {
+    const store = new FakeStore()
+    const records = await recorded(() => makeMkdir(makeDriver(store))(accessor, spec('/a/b'), true))
+    expect(records).toEqual([])
   })
 })

@@ -56,6 +56,10 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['stat', 'email', '', false],
   ],
   hf: [
+    ['append', 'hf_buckets', '', true],
+    ['append', 'hf_datasets', '', true],
+    ['append', 'hf_models', '', true],
+    ['append', 'hf_spaces', '', true],
     ['create', 'hf_buckets', '', true],
     ['create', 'hf_datasets', '', true],
     ['create', 'hf_models', '', true],

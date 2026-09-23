@@ -65,7 +65,9 @@ closed, and a read-only mount (or a session narrowed to read) fails the
 open, so `std.open` returns `null` instead of writing. The engine runs on
 quickjs-emscripten's asyncify build, which lets `std.open` suspend the run
 while a mount read or write awaits the dispatch, matching the Python
-`quickjs` runtime's live file I/O.
+`quickjs` runtime's live file I/O. The engine's `os` module has no
+extended-attribute calls; run `getfattr` or `setfattr` in the shell
+instead.
 
 This is capability isolation, not a VFS sandbox: the sandboxed code
 cannot reach your files or the network, but CPU and memory are bounded only

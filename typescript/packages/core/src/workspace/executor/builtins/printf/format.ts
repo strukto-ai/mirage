@@ -158,7 +158,7 @@ function parseHexFloat(s: string): number | null {
 }
 
 /** Pad `prefix + body` to `width` per the justify/zero flags. */
-function applyPad(
+export function applyPad(
   prefix: string,
   body: string,
   flags: string,
@@ -352,7 +352,7 @@ function specialFloat(
   return null
 }
 
-function formatF(
+export function formatF(
   x: number,
   flags: string,
   width: number | null,
@@ -370,7 +370,7 @@ function formatF(
   return applyPad(sign, body, flags, width, flags.includes('0'))
 }
 
-function formatE(
+export function formatE(
   x: number,
   flags: string,
   width: number | null,
@@ -395,7 +395,7 @@ function formatE(
   return applyPad(sign, body, flags, width, flags.includes('0'))
 }
 
-function formatG(
+export function formatG(
   x: number,
   flags: string,
   width: number | null,
