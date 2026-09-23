@@ -26,8 +26,8 @@ import hashlib
 from copy import deepcopy
 from functools import partial
 
-from mirage import (NULL_INDEX, Accessor, CommandIO, ContentType, FileStat,
-                    FileType, GenericVFS, IndexCacheStore, PathSpec,
+from mirage import (NULL_INDEX, Accessor, BaseVFS, CommandIO, ContentType,
+                    FileStat, FileType, IndexCacheStore, PathSpec,
                     stream_from_bytes)
 
 PAGES = {"notes.md": "agents just speak bash\n"}
@@ -98,7 +98,7 @@ def make_io() -> CommandIO:
                      local=False)
 
 
-class WikiVFS(GenericVFS):
+class WikiVFS(BaseVFS):
     """Owned content: the pages ride the state and rebuild without help."""
 
     def __init__(self, pages: dict[str, str] | None = None) -> None:
@@ -115,7 +115,7 @@ class WikiVFS(GenericVFS):
         self.store.pages = deepcopy(state.get("pages", {}))
 
 
-class FeedVFS(GenericVFS):
+class FeedVFS(BaseVFS):
     """Observed content: the default state asks to be handed back live."""
 
     def __init__(self) -> None:

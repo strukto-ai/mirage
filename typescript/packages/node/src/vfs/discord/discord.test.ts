@@ -18,6 +18,7 @@ import {
   redactDiscordConfig,
 } from '@struktoai/mirage-core/core/discord/config'
 import { DISCORD_OPS } from '@struktoai/mirage-core/ops/discord/index'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -49,7 +50,7 @@ describe('DiscordVFS (node)', () => {
 
   it('constructs with token and exposes expected fields', () => {
     const r = new DiscordVFS({ token: 'bot-test' })
-    expect(r.kind).toBe(VFSName.DISCORD)
+    expect(r.name).toBe(VFSName.DISCORD)
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ token: 'bot-test' })
@@ -94,7 +95,7 @@ describe('DiscordVFS (node)', () => {
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
     const r = new DiscordVFS({ token: 'bot-test' })
-    const out = await r.readdir(
+    const out = await ops(r).readdir(
       new PathSpec({
         virtual: '/mnt/discord/My Server__G1/channels',
         directory: '/mnt/discord/My Server__G1/channels',
@@ -115,7 +116,7 @@ describe('DiscordVFS (node)', () => {
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse([])))
     globalThis.fetch = fetchMock as unknown as typeof fetch
     const r = new DiscordVFS({ token: 'sekret-token' })
-    await r.readdir(
+    await ops(r).readdir(
       new PathSpec({
         virtual: '/mnt/discord',
         directory: '/mnt/discord',
@@ -162,7 +163,7 @@ describe('normalizeDiscordConfig', () => {
 describe('node registry: discord', () => {
   it('builds discord VFS with token', async () => {
     const r = await buildVfs('discord', { token: 'bot-x' })
-    expect(r.kind).toBe(VFSName.DISCORD)
+    expect(r.name).toBe(VFSName.DISCORD)
     expect(r).toBeInstanceOf(DiscordVFS)
   })
 })

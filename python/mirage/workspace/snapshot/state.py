@@ -168,7 +168,7 @@ async def to_state_dict(ws) -> dict[str, Any]:
             MountKey.TTL: m.read.ttl,
             MountKey.VFS_CLASS:
             f"{type(m.vfs).__module__}.{type(m.vfs).__name__}",
-            MountKey.VFS_REF: m.vfs.vfs_ref,
+            MountKey.VFS_REF: m.vfs_ref,
             MountKey.VFS_STATE: vfs_state,
         })
 
@@ -308,8 +308,16 @@ def build_mount_args(state: dict[str, Any],
     mount_args: dict[str, Mount] = {}
     for m in state[StateKey.MOUNTS]:
         prefix = norm_mount_prefix(m[MountKey.PREFIX])
-        prov = (overrides[prefix]
-                if prefix in overrides else _construct_vfs(m))
+        override = overrides.get(prefix)
+        # A live override placed as a ``Mount`` names the door it came
+        # through; a bare VFS, or a rebuilt one, keeps the saved
+        # reference so a second round trip rebuilds through the same
+        # door.
+        if isinstance(override, Mount):
+            prov, ref = override.vfs, override.vfs_ref
+        else:
+            prov = override if override is not None else _construct_vfs(m)
+            ref = m.get(MountKey.VFS_REF)
         # Named, never `.get(default)` and never a bare subscript: a
         # dict labelled v4 with the key missing would silently install a
         # default on a mount that was saved otherwise, which is the
@@ -329,10 +337,12 @@ def build_mount_args(state: dict[str, Any],
         # handed back through `mounts=` -- which a redacted-credential
         # mount *must* be -- may be a different backend entirely, and
         # carrying `fresh` onto one that cannot revalidate would refuse a
-        # restore that used to succeed. The override keeps the default;
-        # TypeScript applies the same rule to its stand-in.
-        if prefix in overrides:
-            read = ReadSpec()
+        # restore that used to succeed. The override keeps its own
+        # policy, else the default; TypeScript applies the same rule to
+        # its stand-in.
+        if override is not None:
+            read = (override.read if isinstance(override, Mount)
+                    and override.read is not None else ReadSpec())
         # command_limits is deliberately absent: a mount entry has never
         # carried one, so there is nothing to restore. Emitting Mount
         # objects makes the slot exist, but filling it needs a new
@@ -341,6 +351,7 @@ def build_mount_args(state: dict[str, Any],
             vfs=prov,
             mode=MountMode(m[MountKey.MODE]),
             read=read,
+            vfs_ref=ref,
         )
 
     cli_args: dict[str, tuple[str | CLISpec, dict[str, Any] | None]] = {}
@@ -673,9 +684,6 @@ def _construct_vfs(mount_state: dict[str, Any]):
             built = cls(config_cls(**config))
         else:
             built = cls(**config)
-    # Carried forward so a second round trip rebuilds through the same
-    # reference; None when the original was constructed in code.
-    built.vfs_ref = mount_state.get(MountKey.VFS_REF)
     return built
 
 
@@ -684,10 +692,10 @@ def requires_vfs_override(mount_state: dict[str, Any]) -> bool:
 
     Three reasons, and TypeScript's ``vfsStateRequiresOverride``
     reads the first two the same way: the VFS said so
-    (``needs_override``, which ``GenericVFS`` writes by default
-    because the base cannot know a subclass's constructor), a config
-    secret was redacted, or the class is one this process cannot import
-    (a script file loaded under the loader's module name with no
+    (``needs_override``, which a driver built from a table writes by
+    default because the base cannot know a subclass's constructor), a
+    config secret was redacted, or the class is one this process cannot
+    import (a script file loaded under the loader's module name with no
     reference recorded, or a class from a package that is not
     installed). The redaction check scans every saved value rather than
     the secret fields of the class the mount resolves to: an alias

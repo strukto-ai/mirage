@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdirSync } from 'node:fs'
 import {
   chmod,
   mkdir,
@@ -22,41 +23,17 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import path from 'node:path'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { FindOptions, VFS } from '@struktoai/mirage-core/vfs/base'
-import { CapacityState, PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { CapacityResult, FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { CapacityState, VFSName } from '@struktoai/mirage-core/types'
+import type { CapacityResult } from '@struktoai/mirage-core/types'
 import { DISK_COMMANDS } from '../../commands/builtin/disk/index.ts'
-import { appendBytes as appendCore } from '../../core/disk/append.ts'
-import { SCOPE_ERROR } from '../../core/disk/constants.ts'
-import { copy as copyCore } from '../../core/disk/copy.ts'
-import { create as createCore } from '../../core/disk/create.ts'
-import { size as duSizeCore, entries as duEntriesCore } from '../../core/disk/du/index.ts'
-import { exists as existsCore } from '../../core/disk/exists.ts'
-import { find as findCore, type FindOptions as DiskFindOptions } from '../../core/disk/find.ts'
-import { mkdir as mkdirCore } from '../../core/disk/mkdir.ts'
-import { read as readCoreFn } from '../../core/disk/read.ts'
-import { readdir as readdirCore } from '../../core/disk/readdir.ts'
-import { rename as renameCore } from '../../core/disk/rename.ts'
-import { rmR as rmRCore } from '../../core/disk/rm.ts'
-import { rmdir as rmdirCore } from '../../core/disk/rmdir.ts'
-import { stat as statCore } from '../../core/disk/stat.ts'
-import { stream as streamCore } from '../../core/disk/stream.ts'
-import { truncate as truncateCore } from '../../core/disk/truncate.ts'
-import { unlink as unlinkCore } from '../../core/disk/unlink.ts'
-import { writeBytes as writeCore } from '../../core/disk/write.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
 import { DISK_OPS } from '../../ops/disk/index.ts'
 import { DISK_PROMPT } from './prompt.ts'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { buildDeltaHook } from '../../core/disk/watch/index.ts'
-
-const globCore = makeResolveGlob(readdirCore, SCOPE_ERROR)
-
 export interface DiskVFSOptions {
   root: string
 }
@@ -79,55 +56,30 @@ async function walkFiles(root: string, current: string, out: string[]): Promise<
   }
 }
 
-export class DiskVFS extends BaseVFS implements VFS {
-  readonly kind = VFSName.DISK
-  readonly cachesReads: boolean = false
+export class DiskVFS extends BaseVFS {
+  override readonly name = VFSName.DISK
+  override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
-  readonly sizesAlwaysKnown: boolean = true
+  override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 60
-  readonly prompt = DISK_PROMPT
+  override readonly prompt = DISK_PROMPT
   readonly root: string
-  readonly accessor: DiskAccessor
-  readonly opsMap: Record<string, unknown> = {
-    read_bytes: readCoreFn,
-    write: writeCore,
-    readdir: readdirCore,
-    stat: statCore,
-    unlink: unlinkCore,
-    rmdir: rmdirCore,
-    copy: copyCore,
-    rename: renameCore,
-    mkdir: mkdirCore,
-    read_stream: streamCore,
-    rm_recursive: rmRCore,
-    du_size: duSizeCore,
-    du_entries: duEntriesCore,
-    create: createCore,
-    truncate: truncateCore,
-    exists: existsCore,
-    find_flat: findCore,
-    append: appendCore,
-  }
-
+  override readonly accessor: DiskAccessor
   constructor(options: DiskVFSOptions) {
     super()
     this.root = path.resolve(options.root)
+    mkdirSync(this.root, { recursive: true })
     this.accessor = new DiskAccessor(this.root)
   }
 
   // The resolved root is the storage: two DiskVFS instances built on the same
   // directory are one store, however they were spelled.
-  override storageId(): string {
-    return `${this.kind}:${this.root}`
+  override storageLocation(): string {
+    return `${this.name}:${this.root}`
   }
-
-  async open(): Promise<void> {
-    await mkdir(this.root, { recursive: true })
-  }
-
   // A real filesystem reports real numbers (QUOTA). GNU df: used counts
   // reserved blocks (blocks - bfree), available excludes them (bavail).
-  override async statfs(): Promise<CapacityResult> {
+  override async capacity(): Promise<CapacityResult> {
     const st = await fsStatfs(this.root)
     const bsize = st.bsize
     return {
@@ -141,99 +93,16 @@ export class DiskVFS extends BaseVFS implements VFS {
     }
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return DISK_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return DISK_COMMANDS
   }
-
-  streamPath(p: PathSpec): AsyncIterable<Uint8Array> {
-    return streamCore(this.accessor, p)
-  }
-
-  readFile(p: PathSpec): Promise<Uint8Array> {
-    return readCoreFn(this.accessor, p)
-  }
-
-  writeFile(p: PathSpec, data: Uint8Array): Promise<void> {
-    return writeCore(this.accessor, p, data)
-  }
-
-  appendFile(p: PathSpec, data: Uint8Array): Promise<void> {
-    return appendCore(this.accessor, p, data)
-  }
-
-  readdir(p: PathSpec): Promise<string[]> {
-    return readdirCore(this.accessor, p, this.index)
-  }
-
-  stat(p: PathSpec): Promise<FileStat> {
-    return statCore(this.accessor, p)
-  }
-
-  exists(p: PathSpec): Promise<boolean> {
-    return existsCore(this.accessor, p)
-  }
-
-  mkdir(p: PathSpec, options?: { recursive?: boolean }): Promise<void> {
-    return mkdirCore(this.accessor, p, options?.recursive === true)
-  }
-
-  rmdir(p: PathSpec): Promise<void> {
-    return rmdirCore(this.accessor, p)
-  }
-
-  unlink(p: PathSpec): Promise<void> {
-    return unlinkCore(this.accessor, p)
-  }
-
-  rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    return renameCore(this.accessor, src, dst)
-  }
-
-  truncate(p: PathSpec, length: number): Promise<void> {
-    return truncateCore(this.accessor, p, length)
-  }
-
-  copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    return copyCore(this.accessor, src, dst)
-  }
-
-  rmR(p: PathSpec): Promise<void> {
-    return rmRCore(this.accessor, p)
-  }
-
-  du(p: PathSpec): Promise<number> {
-    return duSizeCore(this.accessor, p)
-  }
-
-  find(p: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    return findCore(this.accessor, p, options as DiskFindOptions)
-  }
-
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
-
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective = prefix
-      ? paths.map((p) =>
-          mountPrefixOf(p.virtual, p.vfsPath)
-            ? p
-            : new PathSpec({
-                virtual: p.virtual,
-                directory: p.directory,
-                ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                resolved: p.resolved,
-                vfsPath: mountKey(p.virtual, prefix),
-              }),
-        )
-      : paths
-    return globCore(this.accessor, effective, this.index)
-  }
-
   override async getState(): Promise<DiskVFSState> {
     await mkdir(this.root, { recursive: true })
     const files: Record<string, Uint8Array> = {}
@@ -250,7 +119,7 @@ export class DiskVFS extends BaseVFS implements VFS {
       modes[rel] = (await fsStat(full)).mode & 0o7777
     }
     return {
-      type: this.kind,
+      type: this.name,
       files,
       modes,
     }

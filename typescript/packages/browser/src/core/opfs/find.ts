@@ -149,7 +149,7 @@ export async function find(
   p: PathSpec,
   options: FindOptions = {},
 ): Promise<string[]> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const virtual = norm(p.mountPath)
   const startName = startBasename(p.virtual)
   const results: string[] = []

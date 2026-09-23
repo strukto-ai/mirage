@@ -374,11 +374,11 @@ class FailingRAMVFS(RAMVFS):
         super().__init__()
         self._failing = frozenset(failing)
 
-    def ops_list(self) -> list[RegisteredOp]:
+    def ops(self) -> list[RegisteredOp]:
         return [
             replace(ro, fn=self._guard(ro.fn)) if ro.name in ("stat",
                                                               "read") else ro
-            for ro in super().ops_list()
+            for ro in super().ops()
         ]
 
     def _guard(

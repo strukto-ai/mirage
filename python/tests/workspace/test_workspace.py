@@ -1974,10 +1974,10 @@ def test_grep_uses_cache():
 def test_readdir_populates_index():
     """readdir stores listing in index (verified via internal dict)."""
     ws = _ws()
-    vfs = ws._registry.mount_for("/s3/report.csv").vfs
-    assert len(vfs.index._entries) == 0
+    index = ws._registry.mount_for("/s3/report.csv").index_store
+    assert len(index._entries) == 0
     _exec(ws, "ls /s3")
-    assert len(vfs.index._entries) > 0
+    assert len(index._entries) > 0
 
 
 # ── grep -l / -m early termination ──────────────────────────────────────

@@ -15,37 +15,18 @@
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
+from mirage.commands.builtin.dropbox import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.dropbox.client import DropboxTokenManager
-from mirage.core.dropbox.copy import copy
-from mirage.core.dropbox.mkdir import mkdir
-from mirage.core.dropbox.read import read
-from mirage.core.dropbox.readdir import readdir
-from mirage.core.dropbox.rename import rename
-from mirage.core.dropbox.rmdir import rmdir
-from mirage.core.dropbox.stat import stat
-from mirage.core.dropbox.unlink import unlink
 from mirage.core.dropbox.watch import build_delta_hook
-from mirage.core.dropbox.write import write_bytes
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.dropbox import OPS as DROPBOX_VFS_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dropbox.config import DropboxConfig
 from mirage.vfs.dropbox.prompt import PROMPT
 from mirage.watch.base import DeltaHook
-
-_resolve_glob = make_resolve_glob(readdir)
-
-_DROPBOX_OPS = {
-    "read_bytes": read,
-    "write": write_bytes,
-    "readdir": readdir,
-    "stat": stat,
-    "mkdir": mkdir,
-    "unlink": unlink,
-    "rmdir": rmdir,
-    "copy": copy,
-    "rename": rename,
-}
 
 
 class DropboxVFS(BaseVFS):
@@ -57,22 +38,20 @@ class DropboxVFS(BaseVFS):
     # list_folder carries an exact byte `size` for every file (0 included).
     # Paper docs 409 on raw download, a loud error, never a silent empty
     # read.
-    SIZES_ALWAYS_KNOWN: bool = True
-    _ops: dict[str, Any] = _DROPBOX_OPS
-    PROMPT: str = PROMPT
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
 
     def __init__(self, config: DropboxConfig) -> None:
         super().__init__()
         self.config = config
         self._token_manager = DropboxTokenManager(config)
         self.accessor = DropboxAccessor(config, self._token_manager)
-        from mirage.commands.builtin.dropbox import COMMANDS
-        from mirage.ops.dropbox import OPS as DROPBOX_VFS_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for op in DROPBOX_VFS_OPS:
-            self.register_op(op)
+    def ops(self) -> list[RegisteredOp]:
+        return DROPBOX_VFS_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""
@@ -81,13 +60,6 @@ class DropboxVFS(BaseVFS):
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)
-
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, self._index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

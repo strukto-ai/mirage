@@ -233,7 +233,7 @@ def capture_fingerprints(ws: "Workspace", ) -> list[dict[str, Any]]:
         if mount is None or (rec.mount_id is not None
                              and rec.mount_id != mount.mount_id):
             continue
-        if not getattr(mount.vfs, "SUPPORTS_SNAPSHOT", False):
+        if not mount.vfs.supports_snapshot:
             continue
         entry: dict[str, Any] = {
             FingerprintKey.PATH: rec.path,
@@ -303,7 +303,7 @@ def live_only_mount_prefixes(ws: "Workspace", ) -> list[str]:
             continue
         if ws._implicit_root and m.prefix == "/":
             continue
-        if not getattr(m.vfs, "SUPPORTS_SNAPSHOT", False):
+        if not m.vfs.supports_snapshot:
             out.append(m.prefix)
     return out
 
@@ -331,7 +331,7 @@ async def check_drift(mount_for: TryMountFor,
     mount = mount_for(path)
     if mount is None or (mount_id is not None and mount.mount_id != mount_id):
         return
-    if not getattr(mount.vfs, "SUPPORTS_SNAPSHOT", False):
+    if not mount.vfs.supports_snapshot:
         return
     # Resolve backend IDs afresh without consulting the restored index.
     try:

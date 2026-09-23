@@ -1112,6 +1112,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       mode: m,
       read,
       commandLimits: parseLimits(block.command_limits),
+      vfsRef: block.vfs,
     })
     const backend = (block.backend ?? MountBackend.WORKSPACE) as MountBackend
     if (KERNEL_BACKENDS.includes(backend)) kernelMounts[prefix] = [backend, block.mountpoint]

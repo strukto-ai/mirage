@@ -172,7 +172,7 @@ async def _ls_for_index(ws: Workspace, state: "_MountState",
         # write path that would normally invalidate the parent listing, so a
         # previously warmed (now stale) index entry must be dropped before the
         # ls re-lists it.
-        await state.vfs.index.invalidate_dir(path)
+        await ws.mount(mount_path).index_store.invalidate_dir(path)
         await ws.shell(f"ls {path}")
 
 

@@ -81,7 +81,7 @@ import {
   RAMVFS,
   RedisConsoleStore,
   RedisVFS,
-  type VFS,
+  type BaseVFS,
   S3VFS,
   ScalewayVFS,
   SeaweedFSVFS,
@@ -1903,7 +1903,7 @@ async function openLangfuse(target: Target): Promise<Open> {
 // targets ever need. github, notion and hf_buckets are absent on purpose:
 // github needs a live repo at construct, notion an OAuth provider, and
 // hf_buckets validates the bucket id.
-const ARG_ERROR_VFS: Record<string, () => VFS> = {
+const ARG_ERROR_VFS: Record<string, () => BaseVFS> = {
   databricks: () =>
     new DatabricksVolumeVFS({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
   discord: () => new DiscordVFS({ token: 'x' }),
@@ -1958,7 +1958,7 @@ async function openHttp(target: Target): Promise<Open> {
 }
 
 async function openArgError(target: Target): Promise<Open> {
-  const mounts: Record<string, VFS | [VFS, MountMode]> = {}
+  const mounts: Record<string, BaseVFS | [BaseVFS, MountMode]> = {}
   for (const m of target.mounts) {
     const vfs = ARG_ERROR_VFS[m.backend]()
     mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs

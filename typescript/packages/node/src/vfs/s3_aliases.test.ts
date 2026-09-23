@@ -204,9 +204,9 @@ describe('region-derived S3 aliases', () => {
       expect(norm).not.toHaveProperty('access_key_id')
     })
 
-    it(`${c.name}: VFS remaps kind, ops, and commands`, () => {
+    it(`${c.name}: VFS remaps name, ops, and commands`, () => {
       const vfs = c.build(c.make(c.region) as never)
-      expect(vfs.kind).toBe(c.kind)
+      expect(vfs.name).toBe(c.kind)
       expect(vfs).toBeInstanceOf(S3VFS)
       expect(vfs.ops().length).toBeGreaterThan(0)
       for (const op of vfs.ops()) expect(op.vfs).toBe(c.kind)
@@ -263,9 +263,9 @@ describe('wasabi endpoint defaults', () => {
     expect(norm.proxy).toBe('p')
   })
 
-  it('VFS remaps kind and redacts state', async () => {
+  it('VFS remaps name and redacts state', async () => {
     const vfs = new WasabiVFS({ ...CREDS })
-    expect(vfs.kind).toBe(VFSName.WASABI)
+    expect(vfs.name).toBe(VFSName.WASABI)
     for (const op of vfs.ops()) expect(op.vfs).toBe(VFSName.WASABI)
     const blob = JSON.stringify(await vfs.getState())
     expect(blob.includes('SECRET-LEAK')).toBe(false)
@@ -333,9 +333,9 @@ describe('endpoint-required S3 aliases (minio/ceph/seaweedfs)', () => {
       expect(norm.proxy).toBe('p')
     })
 
-    it(`${c.name}: VFS remaps kind and redacts state`, async () => {
+    it(`${c.name}: VFS remaps name and redacts state`, async () => {
       const vfs = c.build(c.make() as never)
-      expect(vfs.kind).toBe(c.kind)
+      expect(vfs.name).toBe(c.kind)
       expect(vfs).toBeInstanceOf(S3VFS)
       for (const op of vfs.ops()) expect(op.vfs).toBe(c.kind)
       for (const cmd of vfs.commands()) expect(cmd.vfs).toBe(c.kind)

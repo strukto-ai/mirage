@@ -14,17 +14,18 @@
 
 import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
 import type { OpsRegistry } from '../../ops/registry.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import type { Limit, MountMode, ReadSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { MountSpec } from './types.ts'
+import { Mount } from '../mount/spec.ts'
+import type { IndexConfig } from '../../cache/index/config.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { withCacheMutation } from '../../cache/file/io.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
-import { Mount } from '../mount/spec.ts'
 
 /**
  * The `mounts` mapping in resolved form: every accepted spelling
@@ -33,9 +34,11 @@ import { Mount } from '../mount/spec.ts'
  * `normalize_mounts` in `workspace/mounts.py`.
  */
 export interface NormalizedMounts {
-  bare: Record<string, VFS>
+  bare: Record<string, BaseVFS>
   modes: Record<string, MountMode>
   commandLimits: Record<string, Record<string, Limit>>
+  refs: Record<string, string>
+  indexes: Record<string, IndexConfig>
   read: Record<string, ReadSpec>
 }
 
@@ -43,31 +46,34 @@ export function normalizeMounts(
   mounts: Record<string, MountSpec>,
   defaultRead: ReadSpec,
 ): NormalizedMounts {
-  const bare: Record<string, VFS> = {}
+  const bare: Record<string, BaseVFS> = {}
   const modes: Record<string, MountMode> = {}
   const commandLimits: Record<string, Record<string, Limit>> = {}
+  const refs: Record<string, string> = {}
+  const indexes: Record<string, IndexConfig> = {}
   const read: Record<string, ReadSpec> = {}
   for (const [prefix, spec] of Object.entries(mounts)) {
-    if (Array.isArray(spec)) {
+    if (spec instanceof Mount) {
+      bare[prefix] = spec.vfs
+      if (spec.options.mode !== undefined) modes[prefix] = spec.options.mode
+      if (spec.options.commandLimits !== undefined)
+        commandLimits[prefix] = spec.options.commandLimits
+      if (spec.options.vfsRef !== undefined && spec.options.vfsRef !== null) {
+        refs[prefix] = spec.options.vfsRef
+      }
+      if (spec.options.index !== undefined) indexes[prefix] = spec.options.index
+      if (spec.options.read !== undefined) read[prefix] = spec.options.read
+    } else if (Array.isArray(spec)) {
       const [vfs, mode, mountCommandLimits] = spec as readonly [
-        VFS,
+        BaseVFS,
         MountMode,
         Record<string, Limit>?,
       ]
       bare[prefix] = vfs
       modes[prefix] = mode
       if (mountCommandLimits !== undefined) commandLimits[prefix] = mountCommandLimits
-    } else if (spec instanceof Mount) {
-      bare[prefix] = spec.vfs
-      if (spec.options.mode !== undefined) modes[prefix] = spec.options.mode
-      // Node's own unwrap used to lift this; core owns it now that a
-      // Mount reaches here directly.
-      if (spec.options.commandLimits !== undefined) {
-        commandLimits[prefix] = spec.options.commandLimits
-      }
-      if (spec.options.read !== undefined) read[prefix] = spec.options.read
     } else {
-      bare[prefix] = spec as VFS
+      bare[prefix] = spec as BaseVFS
     }
   }
   // Every mount spelling converges here, which is why this is where a
@@ -76,7 +82,7 @@ export function normalizeMounts(
   for (const [prefix, vfs] of Object.entries(bare)) {
     checkReadCapability(prefix, vfs, read[prefix] ?? defaultRead)
   }
-  return { bare, modes, commandLimits, read }
+  return { bare, modes, commandLimits, refs, indexes, read }
 }
 
 /** Drop mount cache state atomically with deferred file-cache fills. */
@@ -103,18 +109,16 @@ export function prepareAddedMount(
   previous: readonly MountEntry[],
 ): void {
   const indices = [
-    entry.vfs.index,
-    ...previous.filter((m) => entry.prefix.startsWith(m.prefix)).map((m) => m.vfs.index),
-  ].filter((index): index is IndexCacheStore => index !== undefined)
+    entry.indexStore,
+    ...previous.filter((m) => entry.prefix.startsWith(m.prefix)).map((m) => m.indexStore),
+  ]
   entry.beforeUse = () => clearMountCache(registry.fileCache, entry.prefix, indices)
 }
 
 export interface UnmountDeps {
   registry: MountRegistry
   opsRegistry: OpsRegistry
-  opened: Set<VFS>
-  openOrder: VFS[]
-  sharedMounts: Set<VFS>
+  sharedMounts: Set<BaseVFS>
   isShuttingDown: () => boolean
 }
 
@@ -141,11 +145,7 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   if (entry.retiring) throw new Error(`mount is being unmounted: ${norm}`)
   entry.retiring = true
   try {
-    await clearMountCache(
-      deps.registry.fileCache,
-      norm,
-      entry.vfs.index === undefined ? [] : [entry.vfs.index],
-    )
+    await clearMountCache(deps.registry.fileCache, norm, [entry.indexStore])
     if (deps.isShuttingDown()) throw new Error('Workspace is closed')
     if (deps.registry.tryMountForPrefix(prefix) !== entry) {
       throw new Error(`mount changed while unmounting: ${prefix}`)
@@ -158,10 +158,13 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
   const vfs = entry.vfs
   const remaining = deps.registry.allMounts()
   const stillMounted = remaining.some((m) => m.vfs === vfs)
-  const kindStillMounted = remaining.some((m) => m.vfs.kind === vfs.kind)
-  deps.opsRegistry.unregisterVfs(kindStillMounted ? vfs : vfs.kind)
+  // The store was the mount's, shared only with aliases of the same
+  // instance, so it closes with the last of them whoever owns the VFS.
+  if (!stillMounted) await entry.indexStore.close()
+  const kindStillMounted = remaining.some((m) => m.vfs.name === vfs.name)
+  deps.opsRegistry.unregisterVfs(kindStillMounted ? vfs : vfs.name)
   for (const survivor of remaining) {
-    if (survivor.vfs.kind === vfs.kind) {
+    if (survivor.vfs.name === vfs.name) {
       deps.opsRegistry.registerVfs(survivor.vfs, false)
     }
   }
@@ -180,9 +183,6 @@ async function closeVfs(deps: UnmountDeps, entry: MountEntry): Promise<void> {
   const vfs = entry.vfs
   const shared = deps.sharedMounts.has(vfs)
   if (!shared) await entry.activity.wait()
-  const idx = deps.openOrder.indexOf(vfs)
-  if (idx !== -1) deps.openOrder.splice(idx, 1)
-  deps.opened.delete(vfs)
   if (shared) return
   deps.registry.retiredMounts.add(vfs)
   await vfs.close()

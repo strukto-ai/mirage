@@ -150,7 +150,7 @@ async def test_readdir_stores_sftp_attrs_in_index(index):
 
 @pytest.mark.asyncio
 async def test_stat_size_matches_read_for_every_file(index):
-    # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat reports
+    # The fskit invariant behind sizes_always_known: the size stat reports
     # must equal the byte length a read delivers, 0-byte files included.
     accessor = _accessor(
         {

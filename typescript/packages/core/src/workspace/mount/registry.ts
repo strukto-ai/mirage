@@ -19,7 +19,7 @@ import type { WorkspaceRuntime } from '../../runtime/table.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
-import { cachesReads, type VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import { Decisions, MountRootPolicy, OutputCapPolicy, Policies } from '../../policy/index.ts'
 import {
@@ -32,7 +32,10 @@ import {
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
 import { effectivePathMode, strongestModeUnder } from '../../context/session_context.ts'
-import { MountEntry } from './mount.ts'
+import { MountEntry, type MountInit } from './mount.ts'
+import type { IndexConfig } from '../../cache/index/config.ts'
+import { buildIndex } from '../../cache/index/factory.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -71,10 +74,24 @@ export interface OpsMountInfo {
   mode: MountMode
 }
 
+/** What a placement adds to a driver: the store config and the reference it came from. */
+export interface MountPlacementInit {
+  index?: IndexConfig
+  vfsRef?: string | null
+}
+
+/** The placements of the mounts a registry is constructed with, keyed by raw prefix. */
+export interface RegistryPlacements {
+  index?: IndexConfig
+  indexes?: Record<string, IndexConfig>
+  refs?: Record<string, string>
+}
+
 export class MountRegistry {
+  private readonly indexConfig: IndexConfig | undefined
   private readonly mountList: MountEntry[]
-  readonly retiringMounts = new Map<VFS, Promise<void>>()
-  readonly retiredMounts = new WeakSet<VFS>()
+  readonly retiringMounts = new Map<BaseVFS, Promise<void>>()
+  readonly retiredMounts = new WeakSet<BaseVFS>()
   private rootRef: MountEntry | null = null
   private defaultRead: ReadSpec = DEFAULT_READ_SPEC
   private cacheStore: FileCache | null = null
@@ -113,8 +130,8 @@ export class MountRegistry {
   async invalidateAfterExternal(): Promise<void> {
     await this.cacheStore?.clear()
     for (const mount of this.allMounts()) {
-      if (mount.cacheManager !== null) await mount.cacheManager.clearIndex(mount.vfs.index)
-      else await mount.use(() => mount.vfs.index?.clear() ?? Promise.resolve())
+      if (mount.cacheManager !== null) await mount.cacheManager.clearIndex(mount.indexStore)
+      else await mount.use(() => mount.indexStore.clear())
     }
   }
 
@@ -158,21 +175,23 @@ export class MountRegistry {
   private attachManager(m: MountEntry): void {
     m.cacheManager = new CacheManager(
       this.cacheStore,
-      m.vfs.index ?? null,
+      m.indexStore,
       m.prefix,
-      cachesReads(m.vfs),
+      m.vfs.cachesReads,
       (path) => !m.retiring && this.tryMountFor(path) === m,
       (key) => this.mayServeCached(m, key),
     )
   }
 
   constructor(
-    mounts: Record<string, VFS>,
+    mounts: Record<string, BaseVFS>,
     defaultMode: MountMode,
     modeOverrides: Record<string, MountMode> = {},
     defaultRead: ReadSpec = DEFAULT_READ_SPEC,
     readOverrides: Record<string, ReadSpec> = {},
+    placements: RegistryPlacements = {},
   ) {
+    this.indexConfig = placements.index
     const list: MountEntry[] = []
     const seen = new Set<string>()
     const overrides: Record<string, MountMode> = {}
@@ -187,12 +206,10 @@ export class MountRegistry {
     // Explicit at the construction site: /dev does not cache reads, so
     // its policy can only ever be bounded.
     list.push(
-      new MountEntry({
-        prefix: DEV_PREFIX,
-        vfs: new DevVFS(),
-        mode: MountMode.WRITE,
-        read: DEFAULT_READ_SPEC,
-      }),
+      MountRegistry.place(
+        { prefix: DEV_PREFIX, vfs: new DevVFS(), mode: MountMode.WRITE, read: DEFAULT_READ_SPEC },
+        list,
+      ),
     )
     seen.add(DEV_PREFIX)
     for (const [rawPrefix, vfs] of Object.entries(mounts)) {
@@ -200,26 +217,65 @@ export class MountRegistry {
       if (seen.has(prefix)) {
         throw new Error(`duplicate mount prefix: ${prefix}`)
       }
-      if (vfs.isClosed === true) throw new Error('VFS is closed; create a new VFS instance')
+      if (vfs.isClosed) throw new Error('VFS is closed; create a new VFS instance')
       seen.add(prefix)
       const mode = overrides[prefix] ?? defaultMode
       const read = readByPrefix[prefix] ?? defaultRead
-      const entry = new MountEntry({ prefix, vfs, mode, read })
-      const alias = list.find((existing) => existing.vfs === vfs)
-      if (alias !== undefined) entry.activity = alias.activity
-      list.push(entry)
+      const index = this.indexFor(vfs, placements.indexes?.[rawPrefix], list)
+      const vfsRef = placements.refs?.[rawPrefix] ?? null
+      list.push(MountRegistry.place({ prefix, vfs, mode, read, index, vfsRef }, list))
     }
     list.sort((a, b) => b.prefix.length - a.prefix.length)
     this.mountList = list
     this.rootRef = list.find((m) => m.prefix === '/') ?? null
   }
 
+  /**
+   * Build one mount with everything the tree needs to run its driver:
+   * the driver's command and op tables registered on the entry, the
+   * general commands beside them, and the activity gate shared with any
+   * earlier mount of the same instance. The constructor and `mount()`
+   * both place through here, so a mount is the same whichever door
+   * built it. Mirrors the Python registry, whose constructor mounts
+   * through `mount()` as well.
+   */
+  private static place(init: MountInit, siblings: readonly MountEntry[]): MountEntry {
+    const m = new MountEntry(init)
+    const alias = siblings.find((existing) => existing.vfs === init.vfs)
+    if (alias !== undefined) m.activity = alias.activity
+    // Through `registerFns`, as python's `registry.mount` does, so a
+    // family table that fans out over sibling VFS names (the HF four
+    // share one table) registers only this mount's entries instead of
+    // letting the last sibling win on a shared key.
+    m.registerFns(init.vfs.commands())
+    for (const cmd of GENERAL_COMMANDS) {
+      m.registerGeneral(cmd)
+    }
+    m.registerFns(init.vfs.ops())
+    return m
+  }
+
+  /**
+   * The store a driver runs under: the one its earlier mount already
+   * has, else a new one from the mount's or the workspace's index
+   * config, else a RAM store at the driver's own TTL.
+   */
+  private indexFor(
+    vfs: BaseVFS,
+    config: IndexConfig | undefined,
+    siblings: readonly MountEntry[],
+  ): IndexCacheStore {
+    const alias = siblings.find((existing) => existing.vfs === vfs)
+    if (alias !== undefined) return alias.indexStore
+    return buildIndex(config ?? this.indexConfig, vfs.indexTtl)
+  }
+
   /** A removed VFS instance cannot start a second lifecycle. */
-  checkVfsAvailable(vfs: VFS): void {
+  checkVfsAvailable(vfs: BaseVFS): void {
     if (this.retiringMounts.has(vfs) || this.mountList.some((m) => m.vfs === vfs && m.retiring)) {
       throw new Error('VFS is being unmounted')
     }
-    if (vfs.isClosed === true || this.retiredMounts.has(vfs)) {
+    if (vfs.isClosed || this.retiredMounts.has(vfs)) {
       throw new Error('VFS is closed; create a new VFS instance')
     }
   }
@@ -229,7 +285,13 @@ export class MountRegistry {
    * Registers the VFS's commands and ops on the new mount and
    * re-sorts mounts by prefix length (longest first).
    */
-  mount(prefix: string, vfs: VFS, mode: MountMode = MountMode.READ, read?: ReadSpec): MountEntry {
+  mount(
+    prefix: string,
+    vfs: BaseVFS,
+    mode: MountMode = MountMode.READ,
+    read?: ReadSpec,
+    placement: MountPlacementInit = {},
+  ): MountEntry {
     this.checkVfsAvailable(vfs)
     const norm = normalizePrefix(prefix)
     for (const existing of this.mountList) {
@@ -237,32 +299,12 @@ export class MountRegistry {
         throw new Error(`duplicate mount prefix: ${norm}`)
       }
     }
-    const m = new MountEntry({
-      prefix: norm,
-      vfs,
-      mode,
-      read: read ?? this.defaultRead,
-    })
-    const alias = this.mountList.find((existing) => existing.vfs === vfs)
-    if (alias !== undefined) m.activity = alias.activity
-    const cmds = vfs.commands?.()
-    if (cmds !== undefined) {
-      for (const cmd of cmds) {
-        if (cmd.filetype !== null) m.register(cmd)
-        else if (cmd.vfs === null) m.registerGeneral(cmd)
-        else m.register(cmd)
-      }
-    }
-    for (const cmd of GENERAL_COMMANDS) {
-      m.registerGeneral(cmd)
-    }
-    const ops = vfs.ops?.()
-    if (ops !== undefined) {
-      for (const op of ops) {
-        if (op.vfs === null) m.registerGeneralOp(op)
-        else m.registerOp(op)
-      }
-    }
+    const index = this.indexFor(vfs, placement.index, this.mountList)
+    const vfsRef = placement.vfsRef ?? null
+    const m = MountRegistry.place(
+      { prefix: norm, vfs, mode, read: read ?? this.defaultRead, index, vfsRef },
+      this.mountList,
+    )
     if (this.cacheStore !== null) this.attachManager(m)
     this.mountList.push(m)
     this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
@@ -347,15 +389,15 @@ export class MountRegistry {
   opsMounts(): OpsMountInfo[] {
     return this.mountList.map((m) => ({
       prefix: m.prefix,
-      resourceType: m.vfs.kind,
+      resourceType: m.vfs.name,
       mode: m.mode,
     }))
   }
 
-  findVfsByName(vfsName: string | null): VFS | null {
+  findVfsByName(vfsName: string | null): BaseVFS | null {
     if (vfsName === null) return null
     for (const m of this.mountList) {
-      if (m.vfs.kind === vfsName) return m.vfs
+      if (m.vfs.name === vfsName) return m.vfs
     }
     return null
   }
@@ -364,7 +406,7 @@ export class MountRegistry {
     if (path === null) return null
     try {
       const [vfs] = this.resolve(path)
-      return vfs.kind
+      return vfs.name
     } catch (err) {
       if (isNoMount(err)) return null
       throw err
@@ -394,7 +436,7 @@ export class MountRegistry {
     return this.cacheStore
   }
 
-  resolve(path: string): [VFS, PathSpec, MountMode] {
+  resolve(path: string): [BaseVFS, PathSpec, MountMode] {
     const m = this.mountFor(path)
     const hadTrailing = path.endsWith('/')
     const norm = `/${stripSlash(path)}`
@@ -504,7 +546,7 @@ export class MountRegistry {
     const mountPath = pathScopes.length > 0 ? (pathScopes[0]?.virtual ?? cwd) : cwd
     let mount = this.tryMountFor(mountPath)
     if (mount !== null && mount.resolveCommand(cmdName) == null && pathScopes.length > 0) {
-      throw new MountCommandUnsupported(cmdName, mount.vfs.kind, pathScopes[0]?.rawPath ?? cwd)
+      throw new MountCommandUnsupported(cmdName, mount.vfs.name, pathScopes[0]?.rawPath ?? cwd)
     }
     if (mount?.resolveCommand(cmdName) == null) {
       mount = this.mountForCommand(cmdName)
@@ -520,7 +562,7 @@ export class MountRegistry {
     if (
       this.reconciler !== null &&
       pathScopes.length > 0 &&
-      cachesReads(mount.vfs) &&
+      mount.vfs.cachesReads &&
       baseCmd?.write !== true &&
       mount.read.policy === ReadPolicy.FRESH
     ) {

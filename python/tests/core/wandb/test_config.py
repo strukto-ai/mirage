@@ -41,4 +41,4 @@ def test_registry_redacts_key_and_has_no_mutations() -> None:
     vfs = build_vfs("wandb", {"entities": ["lab"], "api_key": "private-key"})
     assert vfs.name == "wandb"
     assert "private-key" not in str(vfs.get_state())
-    assert not vfs.SIZES_ALWAYS_KNOWN
+    assert not vfs.sizes_always_known

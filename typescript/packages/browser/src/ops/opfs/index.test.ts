@@ -25,11 +25,12 @@ const byName = (name: string): (typeof OPFS_OPS)[number] => {
 }
 
 describe('OPFS_OPS', () => {
-  it('contains all 11 OPFS op names', () => {
+  it('contains all 12 OPFS op names', () => {
     expect(new Set(OPFS_OPS.map((o) => o.name))).toEqual(
       new Set([
         'append',
         'create',
+        'glob',
         'mkdir',
         'read',
         'readdir',

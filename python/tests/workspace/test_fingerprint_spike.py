@@ -257,16 +257,16 @@ def test_always_warm_read_costs_a_gate_probe():
 class _SnapshotFalseS3(S3VFS):
     """A caching, fingerprint-bearing mount that cannot be snapshotted.
 
-    Subclassed rather than patching ``S3VFS.SUPPORTS_SNAPSHOT``: that is a
+    Subclassed rather than patching ``S3VFS.supports_snapshot``: that is a
     class attribute, and mutating it leaks into every other test in the
     session.
     """
 
-    SUPPORTS_SNAPSHOT: bool = False
+    supports_snapshot: bool = False
 
 
 def test_snapshot_false_mount_still_serves_a_verified_cache():
-    """The ``SUPPORTS_SNAPSHOT`` short-circuit is gone, and must stay gone.
+    """The ``supports_snapshot`` short-circuit is gone, and must stay gone.
 
     It dropped every cached copy on a mount declaring the flag False,
     without probing -- a proxy for "the stat carries no content token" and
@@ -302,7 +302,7 @@ def test_snapshot_false_mount_still_serves_a_verified_cache():
     assert out == b"v1\n"
     assert client.calls["get_object"] == 0, (
         "a verified cache entry must be served, not refetched, however the "
-        "mount answers SUPPORTS_SNAPSHOT")
+        "mount answers supports_snapshot")
 
 
 def test_fanout_revalidates_a_descendant_mount():

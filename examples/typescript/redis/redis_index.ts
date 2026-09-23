@@ -37,11 +37,12 @@ async function main(): Promise<void> {
   // Workspace A: a RAM mount whose INDEX is backed by Redis (not RAM).
   const ramA = new RAMVFS()
   const wsA = new Workspace({ '/data': ramA }, { index: indexConfig })
-  console.log(`index store A is redis-backed: ${ramA.index instanceof RedisIndexCacheStore}`)
+  const indexA = wsA.registry.mountForPrefix('/data/').indexStore
+  console.log(`index store A is redis-backed: ${indexA instanceof RedisIndexCacheStore}`)
 
   // Populate the shared Redis index through workspace A.
-  await ramA.index.put('/data/hello.txt', file('hello.txt'))
-  await ramA.index.setDir('/data', [
+  await indexA.put('/data/hello.txt', file('hello.txt'))
+  await indexA.setDir('/data', [
     ['hello.txt', file('hello.txt')],
     ['notes.md', file('notes.md')],
   ])
@@ -50,16 +51,15 @@ async function main(): Promise<void> {
   // (same keyPrefix). It sees what A cached without re-listing anything.
   const ramB = new RAMVFS()
   const wsB = new Workspace({ '/data': ramB }, { index: indexConfig })
+  const indexB = wsB.registry.mountForPrefix('/data/').indexStore
 
-  const entry = await ramB.index.get('/data/hello.txt')
+  const entry = await indexB.get('/data/hello.txt')
   console.log(`shared index entry: ${entry.entry?.name ?? '(none)'}`)
 
-  const listing = await ramB.index.listDir('/data')
+  const listing = await indexB.listDir('/data')
   console.log(`shared index listing: ${(listing.entries ?? []).join(', ')}`)
 
-  await ramA.index.clear()
-  if (ramA.index instanceof RedisIndexCacheStore) await ramA.index.close()
-  if (ramB.index instanceof RedisIndexCacheStore) await ramB.index.close()
+  await indexA.clear()
   await wsA.close()
   await wsB.close()
   console.log('wiped test keys from Redis')

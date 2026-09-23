@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.core.ram.readdir import readdir as ram_readdir
+from mirage.ops.registry import RegisteredOp
 from mirage.types import MountMode, PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
@@ -29,19 +30,19 @@ from mirage.workspace.mount.mount import MountEntry
 
 def _mock_registry(resolve_result=None):
 
-    async def _resolve_glob(scopes, prefix=""):
+    async def _glob(accessor, path, **kwargs):
         if callable(resolve_result):
-            return resolve_result(scopes)
+            return resolve_result([path])
         if resolve_result is not None:
             return resolve_result
-        # A backend holding nothing the patterns match. Echoing the specs
+        # A backend holding nothing the patterns match. Echoing the spec
         # back would stand in for no backend: a real one never answers a
         # dir-shaped ask with the directory itself.
-        return [s for s in scopes if not s.pattern]
+        return [] if path.pattern else [path]
 
-    vfs = RAMVFS()
-    vfs.resolve_glob = _resolve_glob
-    mount = MountEntry("/data/", vfs, MountMode.READ)
+    mount = MountEntry("/data/", RAMVFS(), MountMode.READ)
+    mount.register_fns(
+        [RegisteredOp(name="glob", vfs="ram", filetype=None, fn=_glob)])
 
     reg = MagicMock()
     reg.file_cache = None

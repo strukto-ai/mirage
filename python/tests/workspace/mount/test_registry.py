@@ -419,9 +419,8 @@ async def _fallback_only(_store, paths, *texts, **kw):
 def _path_bound_registry_with_default():
     reg = MountRegistry()
     reg.mount("/limited/", _LimitedVFS(), MountMode.WRITE)
-    fallback = _FallbackVFS()
-    fallback.register(_fallback_only)
-    reg.mount("/", fallback, MountMode.WRITE)
+    reg.mount("/", _FallbackVFS(),
+              MountMode.WRITE).register_fns([_fallback_only])
     return reg
 
 

@@ -33,7 +33,6 @@ async function main(): Promise<void> {
     url: __UPSTASH_REDIS_URL__,
     keyPrefix: 'mirage:browser-demo:',
   })
-  await vfs.open()
   const ws = new Workspace({ '/redis': vfs }, { mode: MountMode.WRITE })
   try {
     await run(ws, 'mkdir -p /redis/notes')

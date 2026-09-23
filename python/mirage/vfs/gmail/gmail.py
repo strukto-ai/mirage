@@ -15,15 +15,16 @@
 from typing import Any
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.core.gmail.readdir import readdir
+from mirage.commands.builtin.gmail import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.google.client import TokenManager
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.gmail import OPS as GMAIL_VFS_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gmail.config import GmailConfig
 from mirage.vfs.gmail.prompt import PROMPT, WRITE_PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class GmailVFS(BaseVFS):
@@ -34,38 +35,30 @@ class GmailVFS(BaseVFS):
     # Every listed file carries an exact size: .gmail.json is rendered at
     # readdir from the full message the listing already fetched, and
     # attachments carry the decoded byte count.
-    SIZES_ALWAYS_KNOWN: bool = True
+    sizes_always_known: bool = True
     # An API-backed tree that changes rarely; a day-long index spares the
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: GmailConfig) -> None:
         super().__init__()
         self.config = config
         self._token_manager = TokenManager(config)
         self.accessor = GmailAccessor(self.config, self._token_manager)
-        from mirage.commands.builtin.gmail import COMMANDS
-        from mirage.ops.gmail import OPS as GMAIL_VFS_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in GMAIL_VFS_OPS:
-            self.register_op(fn)
+    def ops(self) -> list[RegisteredOp]:
+        return GMAIL_VFS_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     async def close(self) -> None:
         """Drain the token manager's connection pool with the VFS."""
         await self._token_manager.close()
         await super().close()
-
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

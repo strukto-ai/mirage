@@ -285,7 +285,7 @@ export {
 // that mounts and runs; these are the doors behind it, re-exported by
 // module so a consumer of this package needs no second dependency on
 // core to reach them (`@struktoai/mirage-core/<path>` works too).
-export { BaseVFS, recordVfsRef, vfsRefOf } from '@struktoai/mirage-core/vfs/base'
+export { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 export { op, type RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 export { makeGenericOps } from '@struktoai/mirage-core/ops/generic/factory'
 export { makeGenericCommands } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'

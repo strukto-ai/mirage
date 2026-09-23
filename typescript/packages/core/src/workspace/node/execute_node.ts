@@ -16,7 +16,6 @@ import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
-import type { VFS } from '../../vfs/base.ts'
 import { makeAbortError, mergeSignals } from '../abort.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
@@ -432,7 +431,6 @@ export interface ExecuteNodeDeps {
   agentId: string
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
-  ensureOpen?: (vfs: VFS) => Promise<void>
   runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision
   signal?: AbortSignal
@@ -629,7 +627,6 @@ async function executeNodeBody(
       stdin,
       callStack,
       jobTable,
-      deps.ensureOpen,
       deps.runtimeBindings,
       deps.routingDecision,
       deps.signal,

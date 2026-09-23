@@ -20,7 +20,7 @@ import {
   STAMP_FINGERPRINT_OPS,
   SUBTREE_RETRACT_OPS,
 } from '../../observe/record.ts'
-import type { VFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import { DriftPolicy } from '../../types.ts'
@@ -38,20 +38,18 @@ interface RegistryLike {
   allMounts(): readonly MountEntry[]
 }
 
-function makeMount(prefix: string, supportsSnapshot: boolean): MountEntry {
-  const vfs: VFS = {
-    kind: 's3',
-    supportsSnapshot,
-    open: () => Promise.resolve(),
-    close: () => Promise.resolve(),
-    getState: () => ({ type: 's3' }),
-    loadState: () => {
-      // Nothing to take back.
-    },
+class SnapshotVFS extends BaseVFS {
+  override readonly name = 's3'
+  constructor(override readonly supportsSnapshot: boolean) {
+    super()
   }
+}
+
+function makeMount(prefix: string, supportsSnapshot: boolean): MountEntry {
+  const vfs = new SnapshotVFS(supportsSnapshot)
   const m: Partial<MountEntry> & {
     prefix: string
-    vfs: VFS
+    vfs: BaseVFS
     revisions: Map<string, string>
   } = {
     prefix,

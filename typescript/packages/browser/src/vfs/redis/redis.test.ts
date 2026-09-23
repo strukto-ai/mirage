@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import * as browserPkg from '../../index.ts'
@@ -29,7 +30,7 @@ describe('RedisVFS over the Upstash REST api', () => {
   let vfs: RedisVFS
   let ws: Workspace
 
-  beforeEach(async () => {
+  beforeEach(() => {
     fake = createFakeUpstash()
     vfs = new RedisVFS({
       url: fake.url,
@@ -37,7 +38,6 @@ describe('RedisVFS over the Upstash REST api', () => {
       keyPrefix: 'mirage:fs:',
       fetchImpl: fake.fetch,
     })
-    await vfs.open()
     ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
   })
 
@@ -46,8 +46,8 @@ describe('RedisVFS over the Upstash REST api', () => {
   })
 
   it('is the redis kind, keyed by url and prefix', () => {
-    expect(vfs.kind).toBe('redis')
-    expect(vfs.storageId()).toBe(`redis:${fake.url}/mirage:fs:`)
+    expect(vfs.name).toBe('redis')
+    expect(vfs.storageLocation()).toBe(`redis:${fake.url}/mirage:fs:`)
     expect(vfs.store).toBeInstanceOf(UpstashRedisStore)
   })
 
@@ -90,8 +90,8 @@ describe('RedisVFS over the Upstash REST api', () => {
   })
 
   it('round-trips binary content', async () => {
-    await vfs.writeFile(spec('/a.bin'), ALL_BYTES)
-    expect(await vfs.readFile(spec('/a.bin'))).toEqual(ALL_BYTES)
+    await ops(vfs).write(spec('/a.bin'), ALL_BYTES)
+    expect(await ops(vfs).read(spec('/a.bin'))).toEqual(ALL_BYTES)
     const r = await ws.shell('wc -c < /data/a.bin')
     expect(DEC.decode(r.stdout).trim()).toBe('256')
   })

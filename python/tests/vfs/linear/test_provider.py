@@ -14,7 +14,6 @@
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.linear.config import LinearConfig
 from mirage.types import VFSName
 from mirage.vfs.linear.linear import LinearVFS
@@ -41,11 +40,6 @@ def test_vfs_accessor(config):
     assert vfs.accessor.config is config
 
 
-def test_vfs_has_index(config):
-    vfs = LinearVFS(config)
-    assert isinstance(vfs._index, RAMIndexCacheStore)
-
-
 def test_vfs_commands_registered(config):
     vfs = LinearVFS(config)
-    assert len(vfs._commands) >= 10
+    assert len(vfs.commands()) >= 10

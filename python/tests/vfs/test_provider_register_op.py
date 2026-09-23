@@ -13,35 +13,42 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.ops.registry import RegisteredOp, op
+from mirage.types import MountMode
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.mount import MountRegistry
 
 
-def test_vfs_register_op():
-
-    @op("read", vfs="test", filetype=".custom")
-    async def read_custom(store, path):
-        return b"custom"
-
+def test_base_vfs_serves_no_ops():
     vfs = BaseVFS()
-    vfs.register_op(read_custom)
-    ops = vfs.ops_list()
-    assert len(ops) == 1
-    assert isinstance(ops[0], RegisteredOp)
-    assert ops[0].name == "read"
-    assert ops[0].filetype == ".custom"
+    assert vfs.ops() == []
 
 
-def test_vfs_register_op_empty():
-    vfs = BaseVFS()
-    assert vfs.ops_list() == []
-
-
-def test_ram_vfs_registers_ops():
+def test_ram_vfs_serves_ops():
     vfs = RAMVFS()
-    ops = vfs.ops_list()
+    ops = vfs.ops()
     assert len(ops) > 0
+    assert all(isinstance(ro, RegisteredOp) for ro in ops)
     names = {ro.name for ro in ops}
     assert "read" in names
     assert "write" in names
     assert "stat" in names
+
+
+def test_mount_registers_the_driver_tables():
+
+    @op("read", vfs="probe")
+    async def read_custom(store, path, **kwargs):
+        return b"custom"
+
+    class ProbeVFS(BaseVFS):
+        name = "probe"
+
+        def ops(self) -> list[RegisteredOp]:
+            return list(read_custom._registered_ops)
+
+    registry = MountRegistry()
+    mount = registry.mount("/p/", ProbeVFS(), MountMode.READ)
+    assert mount.has_op("read")
+    assert not mount.has_op("write")
+    assert registry.mount("/r/", RAMVFS(), MountMode.READ).has_op("write")

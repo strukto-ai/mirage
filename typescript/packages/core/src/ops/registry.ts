@@ -14,7 +14,7 @@
 
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { VFS } from '../vfs/base.ts'
+import type { BaseVFS } from '../vfs/base.ts'
 import type { PathSpec } from '../types.ts'
 import { enotsup, type MissingOpError } from '../utils/errors.ts'
 
@@ -82,8 +82,8 @@ export function op(name: string, options: OpOptions) {
 
 export class OpsRegistry {
   private readonly registered = new Map<string, RegisteredOp>()
-  private readonly owners = new Map<string, VFS>()
-  private readonly scoped = new WeakMap<VFS, Map<string, RegisteredOp>>()
+  private readonly owners = new Map<string, BaseVFS>()
+  private readonly scoped = new WeakMap<BaseVFS, Map<string, RegisteredOp>>()
 
   register(ro: RegisteredOp): void {
     const key = keyFor(ro.name, ro.filetype, ro.vfs)
@@ -91,7 +91,7 @@ export class OpsRegistry {
     this.owners.delete(key)
   }
 
-  unregisterVfs(vfsKind: string | VFS): void {
+  unregisterVfs(vfsKind: string | BaseVFS): void {
     for (const [key, ro] of this.registered) {
       if (typeof vfsKind === 'string' ? ro.vfs === vfsKind : this.owners.get(key) === vfsKind) {
         this.registered.delete(key)
@@ -100,7 +100,7 @@ export class OpsRegistry {
     }
   }
 
-  registerVfs(vfs: VFS, overwrite = true): void {
+  registerVfs(vfs: BaseVFS, overwrite = true): void {
     const entries = this.collectVfs(vfs)
     this.scoped.set(vfs, entries)
     for (const [key, ro] of entries) {
@@ -110,7 +110,7 @@ export class OpsRegistry {
     }
   }
 
-  private collectVfs(vfs: VFS): Map<string, RegisteredOp> {
+  private collectVfs(vfs: BaseVFS): Map<string, RegisteredOp> {
     const entries = new Map<string, RegisteredOp>()
     const chain: object[] = []
     let proto = Object.getPrototypeOf(vfs) as object | null
@@ -134,13 +134,18 @@ export class OpsRegistry {
         }
       }
     }
-    for (const ro of vfs.ops?.() ?? []) {
-      entries.set(keyFor(ro.name, ro.filetype, ro.vfs), ro)
+    // A driver's ops come from its `ops()` table and/or `@op`-decorated
+    // methods (the prototype walk above). A decorator-only registration
+    // carries no table, so guard the call rather than require one.
+    if (typeof vfs.ops === 'function') {
+      for (const ro of vfs.ops()) {
+        entries.set(keyFor(ro.name, ro.filetype, ro.vfs), ro)
+      }
     }
     return entries
   }
 
-  private entry(key: string, vfs: VFS | null): RegisteredOp | null {
+  private entry(key: string, vfs: BaseVFS | null): RegisteredOp | null {
     const registered = this.registered.get(key)
     if (registered === undefined) return null
     // Explicit registry overrides and removals remain authoritative.
@@ -156,11 +161,11 @@ export class OpsRegistry {
 
   find(
     name: string,
-    vfs: string | VFS | null,
+    vfs: string | BaseVFS | null,
     filetype: string | null = null,
   ): RegisteredOp | null {
     const owner = typeof vfs === 'object' ? vfs : null
-    const kind = typeof vfs === 'object' ? (vfs?.kind ?? null) : vfs
+    const kind = typeof vfs === 'object' ? (vfs?.name ?? null) : vfs
     return this.entry(keyFor(name, filetype, kind), owner)
   }
 
@@ -183,7 +188,7 @@ export class OpsRegistry {
 
   async call(
     name: string,
-    vfsKind: string | VFS,
+    vfsKind: string | BaseVFS,
     accessor: Accessor,
     path: PathSpec,
     args: readonly unknown[] = [],
@@ -191,7 +196,7 @@ export class OpsRegistry {
   ): Promise<unknown> {
     const filetype = kwargs.filetype ?? null
     const owner = typeof vfsKind === 'string' ? null : vfsKind
-    const kind = typeof vfsKind === 'string' ? vfsKind : vfsKind.kind
+    const kind = typeof vfsKind === 'string' ? vfsKind : vfsKind.name
     const levels: OpFn[] = []
     if (filetype !== null) {
       const specific = this.entry(keyFor(name, filetype, kind), owner)

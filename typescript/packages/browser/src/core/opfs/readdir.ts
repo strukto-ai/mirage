@@ -20,7 +20,7 @@ import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, isTypeMismatch, iterEntries, norm, resolveDirHandle } from './utils.ts'
 
 export async function readdir(accessor: OPFSAccessor, path: PathSpec): Promise<string[]> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   // A pattern spec addresses the directory whose entries the glob filters,
   // and the rest of this function works in mount-relative space, so the
   // directory has to be read off `dir` rather than off the virtual

@@ -15,9 +15,9 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { cachesReads } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser } from '../shell/parse/index.ts'
+import { ops } from '../test-utils.ts'
 import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { IOResult } from '../io/types.ts'
@@ -48,7 +48,7 @@ describe('cache is a hidden store, not a mount', () => {
       const root = ws.registry.rootMount
       expect(root).not.toBeNull()
       expect(root?.vfs).not.toBe(ws.cache)
-      expect(cachesReads(root?.vfs ?? new RAMVFS())).toBe(false)
+      expect((root?.vfs ?? new RAMVFS()).cachesReads).toBe(false)
       expect(root?.prefix).toBe('/')
       expect(ws.registry.allMounts()).toContain(root)
     } finally {
@@ -85,10 +85,10 @@ describe('warm read serves from the hidden store, command stays on its mount', (
       },
     )
     try {
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+      await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
       const first = DEC.decode((await ws.shell('cat /r/a.txt')).stdout)
       expect(first).toContain('v1')
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
+      await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v2\n'))
       const second = DEC.decode((await ws.shell('cat /r/a.txt')).stdout)
       expect(second).toContain('v1')
       expect(second).not.toContain('v2')
@@ -111,7 +111,7 @@ describe('the mount bound reaches the cache through a shell read', () => {
       },
     )
     try {
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+      await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
       await ws.shell('cat /r/a.txt')
       const store = ws.cache as unknown as {
         snapshotEntries(): { key: string; entry: { ttl: number | null } }[]
@@ -153,8 +153,8 @@ describe('the mount bound reaches the cache through a shell read', () => {
       },
     )
     try {
-      await fast.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
-      await slow.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+      await ops(fast).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+      await ops(slow).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
       await ws.shell('cat /fast/a.txt')
       await ws.shell('cat /slow/a.txt')
       expect(boundOf(ws, '/fast/a.txt')).toBe(30)
@@ -208,7 +208,7 @@ describe('the mount bound reaches the cache through a shell read', () => {
       },
     )
     try {
-      await ram.writeFile(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
+      await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
       // The same bytes the backend holds: that is what an entry written
       // before bounds existed looks like, and it is the case where a
       // refusal alone cannot heal, because the refill short-circuits on
@@ -304,12 +304,12 @@ describe('a guarded cp reads past the cache without refilling it', () => {
     )
     try {
       ws.createSession('agent', { profile: { paths: { hide: ['/dir/.secret'] } } })
-      await ram.mkdir(PathSpec.fromStrPath('/dir'), { recursive: true })
-      await ram.writeFile(PathSpec.fromStrPath('/dir/a.txt'), ENC.encode('v1\n'))
+      await ops(ram).mkdir(PathSpec.fromStrPath('/dir'), true)
+      await ops(ram).write(PathSpec.fromStrPath('/dir/a.txt'), ENC.encode('v1\n'))
       const cold = await ws.shell('cat /dir/a.txt', { sessionId: 'agent' })
       expect(DEC.decode(cold.stdout)).toBe('v1\n')
 
-      await ram.writeFile(PathSpec.fromStrPath('/dir/a.txt'), ENC.encode('v2\n'))
+      await ops(ram).write(PathSpec.fromStrPath('/dir/a.txt'), ENC.encode('v2\n'))
       const copied = await ws.shell('cp -r /dir /copy', { sessionId: 'agent' })
       expect(copied.exitCode).toBe(0)
 

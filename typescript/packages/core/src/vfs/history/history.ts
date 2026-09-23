@@ -13,20 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { HistoryAccessor } from '../../accessor/history.ts'
-import { find as findCore } from '../../core/history/find.ts'
-import type { FindOptions } from '../../core/ram/find.ts'
-import { read as readCore } from '../../core/history/read.ts'
-import { readdir as readdirCore } from '../../core/history/readdir.ts'
-import { stat as statCore } from '../../core/history/stat.ts'
-import { stream as streamCore } from '../../core/history/stream.ts'
 import { HISTORY_COMMANDS } from '../../commands/builtin/history/index.ts'
 import type { RegisteredCommand } from '../../commands/config.ts'
 import type { Observer } from '../../observe/observer.ts'
 import { HISTORY_OPS } from '../../ops/history/index.ts'
 import type { RegisteredOp } from '../../ops/registry.ts'
-import type { FileStat } from '../../types.ts'
-import { type PathSpec, VFSName } from '../../types.ts'
-import { BaseVFS, type VFS } from '../base.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
 
 export const HISTORY_PREFIX = '/.bash_history'
 
@@ -35,48 +28,23 @@ export const HISTORY_PREFIX = '/.bash_history'
  * views from the workspace's hidden recorder on every read; holds no
  * storage of its own.
  */
-export class HistoryViewVFS extends BaseVFS implements VFS {
-  readonly kind = VFSName.HISTORY
-  readonly cachesReads = false
+export class HistoryViewVFS extends BaseVFS {
+  override readonly name = VFSName.HISTORY
+  override readonly cachesReads = false
   // The view renders from in-memory events, so stat() sizes it by
   // rendering: cheap, no network, and never null.
-  readonly sizesAlwaysKnown = true
-  readonly accessor: HistoryAccessor
+  override readonly sizesAlwaysKnown = true
+  override readonly accessor: HistoryAccessor
 
   constructor(observer: Observer) {
     super()
     this.accessor = new HistoryAccessor(observer)
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return HISTORY_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return HISTORY_COMMANDS
-  }
-
-  streamPath(path: PathSpec): AsyncIterable<Uint8Array> {
-    return streamCore(this.accessor, path)
-  }
-
-  readFile(path: PathSpec): Promise<Uint8Array> {
-    return readCore(this.accessor, path)
-  }
-
-  readdir(path: PathSpec): Promise<string[]> {
-    return readdirCore(this.accessor, path)
-  }
-
-  stat(path: PathSpec): Promise<FileStat> {
-    return statCore(this.accessor, path)
-  }
-
-  find(path: PathSpec, options: FindOptions = {}): Promise<string[]> {
-    return findCore(this.accessor, path, options)
   }
 }

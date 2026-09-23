@@ -81,18 +81,18 @@ describe('S3 cache consistency (mocked)', () => {
               keyPrefix: `consistency:${crypto.randomUUID()}:`,
             }
           : { type }
-      const vfs = new S3VFS(makeConfig())
       const ws = new Workspace(
-        { '/s3/': vfs },
+        { '/s3/': new S3VFS(makeConfig()) },
         {
           mode: MountMode.WRITE,
           read: FRESH,
           index,
         },
       )
+      const store = ws.mount('/s3/').indexStore
       try {
         expect((await ws.shell('ls /s3/')).exitCode).toBe(0)
-        expect((await vfs.index.get('/s3/c.txt')).entry).toBeDefined()
+        expect((await store.get('/s3/c.txt')).entry).toBeDefined()
         expect(DEC.decode((await ws.shell('cat /s3/c.txt')).stdout)).toBe('v1')
         expect(await ws.cache.exists('/s3/c.txt')).toBe(true)
         mock.store.set(BUCKET, 'c.txt', ENC.encode('v2'))
@@ -110,7 +110,7 @@ describe('S3 cache consistency (mocked)', () => {
           await expect(ws.vfs.readFile('/s3/c.txt')).rejects.toMatchObject({ code: 'ENOENT' })
         }
       } finally {
-        await vfs.index.clear()
+        await store.clear()
         await ws.close()
       }
     })

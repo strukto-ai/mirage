@@ -258,7 +258,7 @@ export function captureFingerprints(
     if (rec.fingerprint === null && rec.revision === null) continue
     const mount = registry.tryMountFor(rec.path)
     if (mount === null || (rec.mountId !== null && rec.mountId !== mount.mountId)) continue
-    if (mount.vfs.supportsSnapshot !== true) continue
+    if (!mount.vfs.supportsSnapshot) continue
     const entry: FingerprintEntry = { path: rec.path, mount_prefix: mount.prefix }
     if (rec.fingerprint !== null) entry.fingerprint = rec.fingerprint
     if (rec.revision !== null) entry.revision = rec.revision
@@ -278,7 +278,7 @@ export function liveOnlyMountPrefixes(registry: RegistryLike): string[] {
   const out: string[] = []
   for (const m of registry.allMounts()) {
     if (m.prefix === '/dev/' || m.prefix === '/.bash_history/') continue
-    if (m.vfs.supportsSnapshot !== true) out.push(m.prefix)
+    if (!m.vfs.supportsSnapshot) out.push(m.prefix)
   }
   return out
 }
@@ -301,7 +301,7 @@ export async function checkDrift(
 ): Promise<void> {
   const mount = registry.tryMountFor(path)
   if (mount === null || (mountId !== null && mount.mountId !== mountId)) return
-  if (mount.vfs.supportsSnapshot !== true) return
+  if (!mount.vfs.supportsSnapshot) return
   let stat: FileStat
   try {
     stat = (await statFn(path)) as FileStat

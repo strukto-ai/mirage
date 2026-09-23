@@ -48,7 +48,7 @@ async function copyDirRecursive(
 }
 
 export async function rename(accessor: OPFSAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const srcPath = src.mountPath
   const dstPath = dst.mountPath
   let srcParent: FileSystemDirectoryHandle

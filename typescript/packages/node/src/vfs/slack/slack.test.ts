@@ -15,6 +15,7 @@
 import { SLACK_COMMANDS } from '@struktoai/mirage-core/commands/builtin/slack/index'
 import { normalizeSlackConfig, redactSlackConfig } from '@struktoai/mirage-core/core/slack/config'
 import { SLACK_OPS } from '@struktoai/mirage-core/ops/slack/index'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -42,7 +43,7 @@ describe('SlackVFS (node)', () => {
 
   it('constructs with token and exposes expected fields', () => {
     const r = new SlackVFS({ token: 'xoxb-test' })
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ token: 'xoxb-test' })
@@ -95,7 +96,7 @@ describe('SlackVFS (node)', () => {
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
     const r = new SlackVFS({ token: 'xoxb-test' })
-    const out = await r.readdir(
+    const out = await ops(r).readdir(
       new PathSpec({
         virtual: '/mnt/slack/channels',
         directory: '/mnt/slack/channels',
@@ -149,7 +150,7 @@ describe('normalizeSlackConfig', () => {
 describe('node registry: slack', () => {
   it('builds slack VFS with token (camelCase)', async () => {
     const r = await buildVfs('slack', { token: 'xoxb-x' })
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r).toBeInstanceOf(SlackVFS)
   })
 
@@ -158,7 +159,7 @@ describe('node registry: slack', () => {
       token: 'xoxb-x',
       search_token: 'xoxp-y',
     })) as SlackVFS
-    expect(r.kind).toBe(VFSName.SLACK)
+    expect(r.name).toBe(VFSName.SLACK)
     expect(r.config).toEqual({ token: 'xoxb-x', searchToken: 'xoxp-y' })
   })
 })

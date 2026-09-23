@@ -161,6 +161,11 @@ async def close_async(ws: "Workspace", ) -> None:
             if id(mount.vfs) not in ws._shared_mounts
         }
         await asyncio.gather(*(vfs.close() for vfs in mounts.values()))
+        stores = {
+            id(mount.index_store): mount.index_store
+            for mount in ws._registry.mounts()
+        }
+        await asyncio.gather(*(store.close() for store in stores.values()))
         if ws._owns_state_store:
             await ws._state_store.close()
         close_sync_parts(ws)

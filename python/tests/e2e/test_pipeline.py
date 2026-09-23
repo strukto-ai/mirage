@@ -19,31 +19,34 @@ import pytest
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.driver_ops import ops
 
 
 @pytest.fixture
 def ws():
     mem = RAMVFS()
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/hello.txt"), data=b"hello world\n"))
+        ops(mem).write(PathSpec.from_str_path("/hello.txt"),
+                       data=b"hello world\n"))
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/numbers.txt"),
-                  data=b"3\n1\n2\n1\n3\n"))
+        ops(mem).write(PathSpec.from_str_path("/numbers.txt"),
+                       data=b"3\n1\n2\n1\n3\n"))
     asyncio.run(
-        mem.write(
+        ops(mem).write(
             PathSpec.from_str_path("/log.txt"),
             data=b"INFO start\nERROR fail\nINFO ok\nERROR bad\nINFO done\n"))
-    asyncio.run(mem.mkdir(PathSpec.from_str_path("/subdir")))
+    asyncio.run(ops(mem).mkdir(PathSpec.from_str_path("/subdir")))
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/subdir/a.txt"), data=b"aaa\n"))
+        ops(mem).write(PathSpec.from_str_path("/subdir/a.txt"), data=b"aaa\n"))
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/subdir/b.txt"), data=b"bbb\n"))
+        ops(mem).write(PathSpec.from_str_path("/subdir/b.txt"), data=b"bbb\n"))
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/config.json"),
-                  data=b'{"key": "value"}\n'))
+        ops(mem).write(PathSpec.from_str_path("/config.json"),
+                       data=b'{"key": "value"}\n'))
     lines = "\n".join(f"row {i}" for i in range(5000)) + "\n"
     asyncio.run(
-        mem.write(PathSpec.from_str_path("/big.txt"), data=lines.encode()))
+        ops(mem).write(PathSpec.from_str_path("/big.txt"),
+                       data=lines.encode()))
     ws = Workspace(
         {"/data": (mem, MountMode.WRITE)},
         mode=MountMode.WRITE,

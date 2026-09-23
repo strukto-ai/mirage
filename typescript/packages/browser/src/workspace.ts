@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { createShellParser } from '@struktoai/mirage-core/shell/parse'
 import type { ShellParser } from '@struktoai/mirage-core/shell/parse'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/types'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
@@ -54,12 +55,12 @@ function randomSessionId(): string {
 
 export class Workspace extends CoreWorkspace {
   /** A saved mount rebuilds through this package's VFS registry. */
-  protected static override async buildSavedVfs(entry: MountSnapshot): Promise<VFS | null> {
+  protected static override async buildSavedVfs(entry: MountSnapshot): Promise<BaseVFS | null> {
     const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
     return build === null ? null : buildVfs(build.name, build.config)
   }
 
-  constructor(mounts: Record<string, VFS>, options: WorkspaceOptions = {}) {
+  constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
     super(mounts, {
       ...options,
       sessionId: options.sessionId ?? randomSessionId(),

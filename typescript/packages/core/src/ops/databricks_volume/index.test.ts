@@ -22,6 +22,7 @@ describe('DATABRICKS_VOLUME_OPS', () => {
     expect(names).toEqual([
       'append',
       'create',
+      'glob',
       'mkdir',
       'read',
       'readdir',

@@ -18,8 +18,11 @@ from typing import Any
 from mirage.accessor.mem0 import Mem0Accessor
 from mirage.commands.builtin.mem0 import COMMANDS
 from mirage.commands.builtin.mem0.io import IO
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.ops.mem0 import OPS as MEM0_OPS
-from mirage.types import PathSpec, VFSName
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mem0.config import Mem0Config
 from mirage.vfs.mem0.prompt import PROMPT
@@ -39,26 +42,20 @@ class Mem0VFS(BaseVFS):
     caches_reads: bool = True
     # readdir and stat store the rendered JSON's byte length and read
     # serves those same bytes, so sizes are exact by construction.
-    SIZES_ALWAYS_KNOWN: bool = True
-    _ops = _MEM0_OPS
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = False
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = False
 
     def __init__(self, config: Mem0Config) -> None:
         super().__init__()
         self.config = config
         self.accessor = Mem0Accessor(self.config)
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in MEM0_OPS:
-            self.register_op(fn)
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = "",
-    ) -> list[PathSpec]:
-        return await IO.resolve_glob(self.accessor, paths, self._index)
+    def ops(self) -> list[RegisteredOp]:
+        return MEM0_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

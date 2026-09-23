@@ -45,7 +45,6 @@ async function runLabeled(ws: Workspace, label: string, cmd: string): Promise<vo
 
 async function main(): Promise<void> {
   // Clear any previous state so the demo is reproducible.
-  await vfs.open()
   await vfs.store.clear()
   await vfs.store.addDir('/')
 
@@ -150,7 +149,9 @@ async function main(): Promise<void> {
 
   const readCost = await fileReadProvision(vfs.accessor, paths, [], provisionOpts('cat'))
   console.log(`  fileReadProvision(VFS.accessor, [hello.txt, user.json]):`)
-  console.log(`    networkRead    = ${readCost.networkRead} bytes (${String(readCost.readOps)} reads)`)
+  console.log(
+    `    networkRead    = ${readCost.networkRead} bytes (${String(readCost.readOps)} reads)`,
+  )
   console.log(`    precision      = ${readCost.precision}`)
 
   const headCost = await headTailProvision(vfs.accessor, paths, [], provisionOpts('head -n 1'))
@@ -178,7 +179,12 @@ async function main(): Promise<void> {
     // ws.copy() — mirrors Python: remote mounts (needsOverride=true) are reused,
     // local ones are reconstructed. Both copies see the same Redis state.
     const cp = await ws.copy()
-    console.log(`  copy() mounts: [${cp.mounts().map((m) => m.prefix).join(', ')}]`)
+    console.log(
+      `  copy() mounts: [${cp
+        .mounts()
+        .map((m) => m.prefix)
+        .join(', ')}]`,
+    )
     const cpCat = await cp.shell('cat /data/hello.txt')
     console.log(`  copy() sees original's writes: ${cpCat.stdoutText.trim()}`)
     await cp.close()

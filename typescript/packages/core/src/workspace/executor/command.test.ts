@@ -17,7 +17,7 @@ import { command } from '../../commands/config.ts'
 import { CommandSpec, Operand, Option } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
-import { BaseVFS, type VFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { SessionState } from '../session/session.ts'
@@ -25,12 +25,9 @@ import type { ExecuteNodeFn } from './jobs.ts'
 import type { DispatchFn } from './cross_mount.ts'
 import { handleCommand } from './command.ts'
 
-class StubVFS extends BaseVFS implements VFS {
-  constructor(readonly kind: string) {
+class StubVFS extends BaseVFS {
+  constructor(override readonly name: string) {
     super()
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
   }
   override close(): Promise<void> {
     return Promise.resolve()

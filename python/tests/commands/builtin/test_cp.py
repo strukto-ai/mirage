@@ -16,6 +16,7 @@ import asyncio
 
 from mirage.commands import COMMANDS as _CMDS
 from mirage.commands.config import CommandOpts
+from mirage.core.ram.stream import read_stream
 from mirage.core.ram.write import write_bytes
 from mirage.types import PathSpec
 
@@ -25,7 +26,7 @@ cp_cmd = _CMDS["cp"]
 def _cat_sync(backend, path):
 
     async def _collect():
-        return b"".join([c async for c in backend.read_stream(path)])
+        return b"".join([c async for c in read_stream(backend.accessor, path)])
 
     return asyncio.run(_collect())
 

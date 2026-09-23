@@ -29,7 +29,7 @@ export interface MountSnapshot {
   ttl: number
   vfs_class: string
   // The `vfs:` value the registry built the VFS from, or null
-  // for one constructed in code. See `vfsRefOf`.
+  // for one constructed in code. See `BaseVFS.vfsRef`.
   vfs_ref: string | null
   vfs_state: VFSState
 }

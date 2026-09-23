@@ -15,11 +15,11 @@
 import { tokenOrNull } from '../../cache/file/utils.ts'
 import { CacheEntry } from '../../cache/file/entry.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
 import type { EventDict } from '../../observe/observer.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
-import { type VFSStateBase, vfsRefOf } from '../../vfs/base.ts'
+import type { VFSStateBase } from '../../vfs/base.ts'
 import { z } from 'zod'
 
 import { narrow } from '../session/resolve.ts'
@@ -99,8 +99,8 @@ export async function toStateDict(ws: Workspace): Promise<WorkspaceStateDict> {
       mode: m.mode,
       read: m.read.policy,
       ttl: m.read.ttl,
-      vfs_class: m.vfs.kind,
-      vfs_ref: vfsRefOf(m.vfs),
+      vfs_class: m.vfs.name,
+      vfs_ref: m.vfsRef,
       vfs_state: state,
     })
   }
@@ -260,12 +260,12 @@ export function checkFormatVersion(state: WorkspaceStateDict): void {
 
 export function buildMountArgs(
   state: WorkspaceStateDict,
-  overrides: Record<string, VFS> = {},
+  overrides: Record<string, BaseVFS | Mount> = {},
   cliOverrides: CLIOverrides = {},
   userOverrides?: ReadonlySet<string>,
 ): MountArgs {
   checkFormatVersion(state)
-  const normalized: Record<string, VFS> = {}
+  const normalized: Record<string, BaseVFS | Mount> = {}
   const overridePrefixes = new Set<string>()
   for (const [prefix, vfs] of Object.entries(overrides)) {
     normalized[normMountPrefix(prefix)] = vfs
@@ -298,7 +298,11 @@ export function buildMountArgs(
     if (!VALID_MODES.includes(m.mode)) {
       throw new Error(`Workspace.fromState: mount '${m.prefix}' has invalid mode '${m.mode}'`)
     }
-    const saved = normalized[normMountPrefix(m.prefix)]
+    // A live override placed as a `Mount` names the door it
+    // came through; a bare VFS, or a rebuilt one, keeps the saved
+    // reference so a second round trip rebuilds through the same door.
+    const override = normalized[normMountPrefix(m.prefix)]
+    const placed = override instanceof Mount ? override : null
     // Required, never defaulted: a dict labelled v4 with the key missing
     // would install a default on a mount saved carrying something else,
     // and a junk policy or a null bound would restore a mount whose cache
@@ -322,17 +326,24 @@ export function buildMountArgs(
     // handed back through the caller's `mounts=` -- which a
     // redacted-credential mount *must* be -- may be a different backend
     // entirely, and carrying `fresh` onto one that cannot revalidate
-    // would refuse a restore that used to succeed. Everything else here
-    // the loader reconstructs from the saved state itself, which is the
-    // same backend. Python reads the line straight off the branch it
-    // took (`mounts=` vs `_construct_vfs`); here `fromState` merges its
+    // would refuse a restore that used to succeed. The override keeps its
+    // own policy, else the default. Everything else here the loader
+    // reconstructs from the saved state itself, which is the same
+    // backend. Python reads the line straight off the branch it took
+    // (`mounts=` vs `_construct_vfs`); here `fromState` merges its
     // rebuilds into the same map first, so it names its callers' set.
     const foreign = userOverrides ?? overridePrefixes
-    const read: ReadSpec = foreign.has(normMountPrefix(m.prefix)) ? DEFAULT_READ_SPEC : savedSpec
-    mountArgs[m.prefix] = new Mount(saved ?? new RAMVFS(), {
-      mode: m.mode as MountMode,
-      read,
-    })
+    const read: ReadSpec = foreign.has(normMountPrefix(m.prefix))
+      ? (placed?.options.read ?? DEFAULT_READ_SPEC)
+      : savedSpec
+    mountArgs[m.prefix] = new Mount(
+      placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
+      {
+        mode: m.mode as MountMode,
+        read,
+        vfsRef: placed !== null ? (placed.options.vfsRef ?? null) : savedRef(m),
+      },
+    )
   }
   const cliEntries = state.clis ?? []
   const missingClis = cliEntries
@@ -366,7 +377,7 @@ export function buildMountArgs(
 }
 
 /** Builds the VFS a saved mount names, or null when it cannot. */
-export type SavedResourceBuilder = (entry: MountSnapshot) => Promise<VFS | null>
+export type SavedResourceBuilder = (entry: MountSnapshot) => Promise<BaseVFS | null>
 
 /**
  * The `vfs_ref` a saved mount was built from, or null: for one
@@ -401,7 +412,7 @@ export function restoresAsFreshRAM(entry: MountSnapshot): boolean {
  * or a code reference, which is how a mount declared as
  * `./wiki.mjs:WikiVFS` comes back), else the VFS's `type`, the
  * one locator a VFS constructed in code leaves. The ref comes first
- * because `type` is the class's `kind` and a subclass inherits it: an
+ * because `type` is the class's `name` and a subclass inherits it: an
  * alias registered over a builtin reports the builtin's type and rebuilt
  * as the builtin while the type was consulted first. A recorded ref this
  * registry cannot resolve is not a reason to fall back to that guess: the
@@ -435,10 +446,10 @@ export function savedVfsBuild(
  */
 export async function withRebuiltMounts(
   state: WorkspaceStateDict,
-  overrides: Record<string, VFS>,
+  overrides: Record<string, BaseVFS | Mount>,
   build: SavedResourceBuilder,
-): Promise<Record<string, VFS>> {
-  const merged: Record<string, VFS> = { ...overrides }
+): Promise<Record<string, BaseVFS | Mount>> {
+  const merged: Record<string, BaseVFS | Mount> = { ...overrides }
   const held = new Set(Object.keys(overrides).map(normMountPrefix))
   for (const m of state.mounts) {
     if (held.has(normMountPrefix(m.prefix))) continue

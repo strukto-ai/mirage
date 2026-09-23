@@ -15,14 +15,15 @@
 from typing import Any
 
 from mirage.accessor.qdrant import QdrantAccessor
-from mirage.core.qdrant.readdir import readdir
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.commands.builtin.qdrant import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
+from mirage.ops.qdrant import OPS as QDRANT_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.qdrant.config import QdrantConfig
 from mirage.vfs.qdrant.prompt import PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class QdrantVFS(BaseVFS):
@@ -31,28 +32,20 @@ class QdrantVFS(BaseVFS):
     name: str = VFSName.QDRANT
     # readdir seeds exact rendered sizes from the scroll payloads and stat
     # falls back to rendering the row itself, so sizes are exact either way.
-    SIZES_ALWAYS_KNOWN: bool = True
-    PROMPT: str = PROMPT
-    SUPPORTS_SNAPSHOT: bool = False
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    supports_snapshot: bool = False
 
     def __init__(self, config: QdrantConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = QdrantAccessor(self.config)
-        from mirage.commands.builtin.qdrant import COMMANDS
-        from mirage.ops.qdrant import OPS as QDRANT_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in QDRANT_OPS:
-            self.register_op(fn)
+    def ops(self) -> list[RegisteredOp]:
+        return QDRANT_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import type { VFS } from '../vfs/base.ts'
+import type { BaseVFS } from '../vfs/base.ts'
 import type { SlackTransport } from '../core/slack/client.ts'
 
 export class SlackAccessor extends Accessor {
@@ -22,6 +22,6 @@ export class SlackAccessor extends Accessor {
   }
 }
 
-export interface SlackResourceLike extends VFS {
+export interface SlackResourceLike extends BaseVFS {
   readonly accessor: SlackAccessor
 }

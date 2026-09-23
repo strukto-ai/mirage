@@ -1,5 +1,6 @@
 import { checkSchema } from './schema.ts'
 import { API_KEY } from '../server/wandb/store.ts'
+import { ops } from '../../typescript/packages/core/src/test-utils.ts'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -96,16 +97,16 @@ try {
   const p = (key: string) => PathSpec.fromStrPath('/wandb/' + key, key)
   const summary = 'lab/experiments/run-a/summary.json'
   const other = 'other/experiments/run-a/summary.json'
-  const values = await Promise.all([vfs.readFile(p(summary)), vfs.readFile(p(other))])
+  const values = await Promise.all([ops(vfs).read(p(summary)), ops(vfs).read(p(other))])
   assert.deepEqual(
     values.map((b) => JSON.parse(decoder.decode(b))),
     [{ score: 0.4 }, { score: 42 }],
   )
   assert.deepEqual(
-    JSON.parse(decoder.decode(await vfs.readFile(p('lab/experiments/run-a/config.json')))),
+    JSON.parse(decoder.decode(await ops(vfs).read(p('lab/experiments/run-a/config.json')))),
     { lr: 0.01, label: 'café' },
   )
-  assert.equal((await vfs.stat(p(summary))).size, null)
+  assert.equal((await ops(vfs).stat(p(summary))).size, null)
   for (const page_size of [1, 5]) {
     const narrow = new WandbVFS(
       normalizeWandbConfig({
@@ -116,7 +117,7 @@ try {
       }),
     )
     try {
-      const data = decoder.decode(await narrow.readFile(p('lab/experiments/run-a/history.jsonl')))
+      const data = decoder.decode(await ops(narrow).read(p('lab/experiments/run-a/history.jsonl')))
       const steps = data
         .trim()
         .split('\n')
@@ -130,9 +131,9 @@ try {
       await narrow.close()
     }
   }
-  assert.equal((await vfs.stat(p('lab/experiments/run-a/files/notes.txt'))).size, 6)
+  assert.equal((await ops(vfs).stat(p('lab/experiments/run-a/files/notes.txt'))).size, 6)
   assert.deepEqual(
-    [...(await vfs.readFile(p('lab/experiments/run-a/files/nested/model.bin')))],
+    [...(await ops(vfs).read(p('lab/experiments/run-a/files/nested/model.bin')))],
     [0, 1, 2, 255],
   )
   assert(!JSON.stringify(await vfs.getState()).includes(API_KEY))
@@ -145,7 +146,7 @@ try {
     'lab/experiments/run-long/history.jsonl',
   )
   const start = server.requests.length
-  const stream = readStream(vfs.accessor, path, vfs.index)
+  const stream = readStream(vfs.accessor, path, ops(vfs).index)
   assert.equal((await stream.next()).done, false)
   await stream.return(undefined)
   assert.equal(

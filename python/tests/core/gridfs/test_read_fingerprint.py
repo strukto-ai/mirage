@@ -39,7 +39,7 @@ class _Bucket:
 
 @pytest.mark.asyncio
 async def test_stat_and_read_stamp_the_same_token(monkeypatch):
-    """GridFS is one of two backends claiming READ_REVALIDATABLE.
+    """GridFS is one of two backends claiming read_revalidatable.
 
     The claim is that its stat and its read stamp a token that can be
     compared, and both use the file's ``_id`` today. Nothing failed if

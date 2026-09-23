@@ -12,6 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { copy as copyCore } from '@struktoai/mirage-core/core/s3/copy'
+import { size as duSize } from '@struktoai/mirage-core/core/s3/du/index'
+import { exists as existsCore } from '@struktoai/mirage-core/core/s3/exists'
+import { find as findCore } from '@struktoai/mirage-core/core/s3/find'
+import { rmR as rmRCore } from '@struktoai/mirage-core/core/s3/rm'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { HttpProxyAgent } from 'http-proxy-agent'
@@ -116,62 +122,47 @@ describe('S3VFS (mocked integration)', () => {
   })
 
   describe('writes', () => {
-    it('writeFile + readFile round-trips', async () => {
+    it('write + read round-trips', async () => {
       const p = mkPath('/hello.txt')
-      await vfs.writeFile(p, ENC.encode('hello world'))
-      const bytes = await vfs.readFile(p)
+      await ops(vfs).write(p, ENC.encode('hello world'))
+      const bytes = await ops(vfs).read(p)
       expect(DEC.decode(bytes)).toBe('hello world')
-    })
-
-    it('appendFile extends existing content', async () => {
-      const p = mkPath('/append.txt')
-      await vfs.writeFile(p, ENC.encode('one\n'))
-      await vfs.appendFile(p, ENC.encode('two\n'))
-      const bytes = await vfs.readFile(p)
-      expect(DEC.decode(bytes)).toBe('one\ntwo\n')
-    })
-
-    it('appendFile on missing key creates the object', async () => {
-      const p = mkPath('/append_new.txt')
-      await vfs.appendFile(p, ENC.encode('fresh'))
-      const bytes = await vfs.readFile(p)
-      expect(DEC.decode(bytes)).toBe('fresh')
     })
 
     it('copy duplicates the object under a new key', async () => {
       const src = mkPath('/copy_src.txt')
       const dst = mkPath('/copy_dst.txt')
-      await vfs.writeFile(src, ENC.encode('src data'))
-      await vfs.copy(src, dst)
-      expect(DEC.decode(await vfs.readFile(dst))).toBe('src data')
+      await ops(vfs).write(src, ENC.encode('src data'))
+      await copyCore(vfs.accessor, src, dst)
+      expect(DEC.decode(await ops(vfs).read(dst))).toBe('src data')
       // Source still there.
-      expect(DEC.decode(await vfs.readFile(src))).toBe('src data')
+      expect(DEC.decode(await ops(vfs).read(src))).toBe('src data')
     })
 
     it('rename moves the object', async () => {
       const src = mkPath('/rename_src.txt')
       const dst = mkPath('/rename_dst.txt')
-      await vfs.writeFile(src, ENC.encode('moving'))
-      await vfs.rename(src, dst)
-      expect(DEC.decode(await vfs.readFile(dst))).toBe('moving')
-      expect(await vfs.exists(src)).toBe(false)
+      await ops(vfs).write(src, ENC.encode('moving'))
+      await ops(vfs).rename(src, dst)
+      expect(DEC.decode(await ops(vfs).read(dst))).toBe('moving')
+      expect(await existsCore(vfs.accessor, src)).toBe(false)
     })
 
     it('unlink removes a single object', async () => {
       const p = mkPath('/unlink.txt')
-      await vfs.writeFile(p, ENC.encode('doomed'))
-      expect(await vfs.exists(p)).toBe(true)
-      await vfs.unlink(p)
-      expect(await vfs.exists(p)).toBe(false)
+      await ops(vfs).write(p, ENC.encode('doomed'))
+      expect(await existsCore(vfs.accessor, p)).toBe(true)
+      await ops(vfs).unlink(p)
+      expect(await existsCore(vfs.accessor, p)).toBe(false)
     })
 
     it('truncate zero-pads to the requested length', async () => {
       const p = mkPath('/truncate.txt')
-      await vfs.writeFile(p, ENC.encode('abcdef'))
-      await vfs.truncate(p, 3)
-      expect(DEC.decode(await vfs.readFile(p))).toBe('abc')
-      await vfs.truncate(p, 5)
-      const bytes = await vfs.readFile(p)
+      await ops(vfs).write(p, ENC.encode('abcdef'))
+      await ops(vfs).truncate(p, 3)
+      expect(DEC.decode(await ops(vfs).read(p))).toBe('abc')
+      await ops(vfs).truncate(p, 5)
+      const bytes = await ops(vfs).read(p)
       expect(bytes.byteLength).toBe(5)
       expect(DEC.decode(bytes.subarray(0, 3))).toBe('abc')
       expect(bytes[3]).toBe(0)
@@ -181,17 +172,17 @@ describe('S3VFS (mocked integration)', () => {
 
   describe('reads', () => {
     it('readdir returns full paths for immediate children', async () => {
-      await vfs.writeFile(mkPath('/rd/a.txt'), ENC.encode('a'))
-      await vfs.writeFile(mkPath('/rd/b.txt'), ENC.encode('b'))
-      await vfs.writeFile(mkPath('/rd/sub/c.txt'), ENC.encode('c'))
-      const entries = await vfs.readdir(mkPath('/rd/'))
+      await ops(vfs).write(mkPath('/rd/a.txt'), ENC.encode('a'))
+      await ops(vfs).write(mkPath('/rd/b.txt'), ENC.encode('b'))
+      await ops(vfs).write(mkPath('/rd/sub/c.txt'), ENC.encode('c'))
+      const entries = await ops(vfs).readdir(mkPath('/rd/'))
       expect(entries.sort()).toEqual(['/rd/a.txt', '/rd/b.txt', '/rd/sub'])
     })
 
     it('stat returns size + ETag fingerprint', async () => {
       const p = mkPath('/stat.txt')
-      await vfs.writeFile(p, ENC.encode('sized'))
-      const s = await vfs.stat(p)
+      await ops(vfs).write(p, ENC.encode('sized'))
+      const s = await ops(vfs).stat(p)
       expect(s.size).toBe(5)
       expect(typeof s.fingerprint).toBe('string')
       expect((s.fingerprint ?? '').length).toBeGreaterThan(0)
@@ -203,44 +194,44 @@ describe('S3VFS (mocked integration)', () => {
       // overwrites the namespace. Real AWS S3 does allow it. For portability
       // we exercise only the directory-probe branch here; the file branch is
       // covered by the other stat tests.
-      await vfs.writeFile(mkPath('/hintdir/child'), ENC.encode('inside'))
-      const dirStat = await vfs.stat(mkPath('/hintdir/'))
+      await ops(vfs).write(mkPath('/hintdir/child'), ENC.encode('inside'))
+      const dirStat = await ops(vfs).stat(mkPath('/hintdir/'))
       expect(dirStat.type).toBe('directory')
     })
 
     it('exists returns false for missing keys', async () => {
-      expect(await vfs.exists(mkPath('/does/not/exist.txt'))).toBe(false)
+      expect(await existsCore(vfs.accessor, mkPath('/does/not/exist.txt'))).toBe(false)
     })
   })
 
   describe('recursive', () => {
     it('du sums sizes under a prefix', async () => {
-      await vfs.writeFile(mkPath('/du/a'), ENC.encode('x'.repeat(10)))
-      await vfs.writeFile(mkPath('/du/b'), ENC.encode('y'.repeat(20)))
-      const total = await vfs.du(mkPath('/du/'))
+      await ops(vfs).write(mkPath('/du/a'), ENC.encode('x'.repeat(10)))
+      await ops(vfs).write(mkPath('/du/b'), ENC.encode('y'.repeat(20)))
+      const total = await duSize(vfs.accessor, mkPath('/du/'))
       expect(total).toBe(30)
     })
 
     it('rmR deletes every object under the prefix', async () => {
-      await vfs.writeFile(mkPath('/rmr/x.txt'), ENC.encode('x'))
-      await vfs.writeFile(mkPath('/rmr/sub/y.txt'), ENC.encode('y'))
-      await vfs.rmR(mkPath('/rmr/'))
-      expect(await vfs.exists(mkPath('/rmr/x.txt'))).toBe(false)
-      expect(await vfs.exists(mkPath('/rmr/sub/y.txt'))).toBe(false)
+      await ops(vfs).write(mkPath('/rmr/x.txt'), ENC.encode('x'))
+      await ops(vfs).write(mkPath('/rmr/sub/y.txt'), ENC.encode('y'))
+      await rmRCore(vfs.accessor, mkPath('/rmr/'))
+      expect(await existsCore(vfs.accessor, mkPath('/rmr/x.txt'))).toBe(false)
+      expect(await existsCore(vfs.accessor, mkPath('/rmr/sub/y.txt'))).toBe(false)
     })
 
     it('find with name glob matches expected entries', async () => {
-      await vfs.writeFile(mkPath('/find/a.txt'), ENC.encode('a'))
-      await vfs.writeFile(mkPath('/find/b.md'), ENC.encode('b'))
-      await vfs.writeFile(mkPath('/find/c.txt'), ENC.encode('c'))
-      const txts = await vfs.find(mkPath('/find/'), { name: '*.txt' })
+      await ops(vfs).write(mkPath('/find/a.txt'), ENC.encode('a'))
+      await ops(vfs).write(mkPath('/find/b.md'), ENC.encode('b'))
+      await ops(vfs).write(mkPath('/find/c.txt'), ENC.encode('c'))
+      const txts = await findCore(vfs.accessor, mkPath('/find/'), { name: '*.txt' })
       expect(txts.sort()).toEqual(['/find/a.txt', '/find/c.txt'])
     })
 
     it('find with minSize skips small files and directories (size 0)', async () => {
-      await vfs.writeFile(mkPath('/sz/small'), ENC.encode('x'))
-      await vfs.writeFile(mkPath('/sz/big'), ENC.encode('x'.repeat(100)))
-      const results = await vfs.find(mkPath('/sz/'), { minSize: 10 })
+      await ops(vfs).write(mkPath('/sz/small'), ENC.encode('x'))
+      await ops(vfs).write(mkPath('/sz/big'), ENC.encode('x'.repeat(100)))
+      const results = await findCore(vfs.accessor, mkPath('/sz/'), { minSize: 10 })
       expect(results).toEqual(['/sz/big'])
     })
   })

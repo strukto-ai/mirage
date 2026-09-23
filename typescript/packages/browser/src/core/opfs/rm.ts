@@ -17,7 +17,7 @@ import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, resolveParentDirHandle } from './utils.ts'
 
 export async function rmR(accessor: OPFSAccessor, path: PathSpec): Promise<void> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const virtual = path.mountPath
   let parentDir: FileSystemDirectoryHandle
   let name: string

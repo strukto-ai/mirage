@@ -14,7 +14,6 @@
 
 import pytest
 
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.types import VFSName
 from mirage.vfs.trello.config import TrelloConfig
 from mirage.vfs.trello.trello import TrelloVFS
@@ -41,11 +40,6 @@ def test_vfs_accessor(config):
     assert vfs.accessor.config is config
 
 
-def test_vfs_index(config):
-    vfs = TrelloVFS(config)
-    assert isinstance(vfs._index, RAMIndexCacheStore)
-
-
 def test_vfs_commands_registered(config):
     vfs = TrelloVFS(config)
-    assert len(vfs._commands) >= 10
+    assert len(vfs.commands()) >= 10

@@ -5,6 +5,7 @@ from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
+from tests.fixtures.driver_ops import ops
 
 
 class FakeClient:
@@ -39,7 +40,7 @@ async def test_ls_lists_memories():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
     source, _io = await _command(res, "ls")(res.accessor, [p], [],
-                                            CommandOpts(index=res.index,
+                                            CommandOpts(index=ops(res).index,
                                                         cwd=p))
     out = b"".join([chunk async for chunk in source]) if hasattr(
         source, "__aiter__") else source

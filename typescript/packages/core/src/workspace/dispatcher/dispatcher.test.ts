@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
-import { OpsRegistry } from '../../ops/registry.ts'
+import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
@@ -518,18 +518,28 @@ describe('a hide answers a create by what its parent answers', () => {
   })
 })
 
-describe('a failed backend open is not evidence of absence', () => {
-  it('symlink refuses a name whose backend could not be opened', async () => {
+describe('a failed backend probe is not evidence of absence', () => {
+  it('symlink refuses a name whose backend could not answer', async () => {
     const parser = await getTestParser()
-    const broken = new RAMVFS()
-    vi.spyOn(broken, 'open').mockRejectedValue(new Error('401 bad credentials'))
+    class BrokenVFS extends RAMVFS {
+      override ops(): readonly RegisteredOp[] {
+        return super
+          .ops()
+          .map((op) =>
+            op.name === 'stat'
+              ? { ...op, fn: () => Promise.reject(new Error('401 bad credentials')) }
+              : op,
+          )
+      }
+    }
+    const broken = new BrokenVFS()
     const ws = new Workspace(
       { '/r': new RAMVFS(), '/data': broken },
       { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
     )
     try {
       // The door probes the name before linking over it. A backend that
-      // cannot open has not reported the name free, so the link must not
+      // cannot answer has not reported the name free, so the link must not
       // be created on the strength of that failure.
       await expect(
         ws.dispatch('symlink', '/data/notes.txt', [], { target: '/r/t' }),

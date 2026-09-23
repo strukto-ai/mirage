@@ -19,7 +19,7 @@ from mirage.vfs.s3_alias import S3AliasVFS
 
 class CephVFS(S3AliasVFS):
 
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: CephConfig) -> None:
         super().__init__(config)

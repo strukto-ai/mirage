@@ -113,7 +113,7 @@ async def test_stat_invalid_enoent():
 
 @pytest.mark.asyncio
 async def test_stat_size_matches_read_for_every_file():
-    # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat reports
+    # The fskit invariant behind sizes_always_known: the size stat reports
     # from the listing must equal the byte length a read delivers.
     acc = _accessor()
     index = RAMIndexCacheStore()

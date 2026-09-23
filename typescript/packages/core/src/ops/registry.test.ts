@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../accessor/base.ts'
 import { NOOPAccessor } from '../accessor/base.ts'
-import type { VFS } from '../vfs/base.ts'
+import type { BaseVFS } from '../vfs/base.ts'
 import { PathSpec } from '../types.ts'
 import { op, OpsRegistry, registerOp } from './registry.ts'
 
@@ -31,7 +31,7 @@ describe('@op decorator', () => {
       }
     }
     const registry = new OpsRegistry()
-    registry.registerVfs(new R() as unknown as VFS)
+    registry.registerVfs(new R() as unknown as BaseVFS)
     const fn = registry.resolve('read', 'ram')
     expect(fn).toBeDefined()
   })
@@ -44,7 +44,7 @@ describe('@op decorator', () => {
       }
     }
     const registry = new OpsRegistry()
-    registry.registerVfs(new R() as unknown as VFS)
+    registry.registerVfs(new R() as unknown as BaseVFS)
     const ramFn = registry.resolve('read', 'ram')
     const diskFn = registry.resolve('read', 'disk')
     await expect(ramFn(stubAccessor, stubPath, [], {})).resolves.toBe('multi')
@@ -59,7 +59,7 @@ describe('@op decorator', () => {
       }
     }
     const registry = new OpsRegistry()
-    registry.registerVfs(new R() as unknown as VFS)
+    registry.registerVfs(new R() as unknown as BaseVFS)
     const ro = registry.find('stat', 'ram')
     expect(ro?.filetype).toBeNull()
     expect(ro?.write).toBe(false)
@@ -77,7 +77,7 @@ describe('@op decorator', () => {
       }
     }
     const registry = new OpsRegistry()
-    registry.registerVfs(new R() as unknown as VFS)
+    registry.registerVfs(new R() as unknown as BaseVFS)
     expect(registry.find('parse', 'ram', 'json')?.filetype).toBe('json')
     expect(registry.find('write', 'ram')?.write).toBe(true)
   })
@@ -93,7 +93,7 @@ describe('OpsRegistry.registerVfs', () => {
       }
     }
     const registry = new OpsRegistry()
-    registry.registerVfs(new R() as unknown as VFS)
+    registry.registerVfs(new R() as unknown as BaseVFS)
     const fn = registry.resolve('label', 'ram')
     await expect(fn(stubAccessor, stubPath, [], {})).resolves.toBe('ram-store')
   })
@@ -112,7 +112,7 @@ describe('OpsRegistry.registerVfs', () => {
       }
     }
     const registry = new OpsRegistry()
-    registry.registerVfs(new Child() as unknown as VFS)
+    registry.registerVfs(new Child() as unknown as BaseVFS)
     const fn = registry.resolve('greet', 'ram')
     await expect(fn(stubAccessor, stubPath, [], {})).resolves.toBe('child')
   })

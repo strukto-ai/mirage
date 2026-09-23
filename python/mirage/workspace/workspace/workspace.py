@@ -506,7 +506,8 @@ class Workspace:
                   prefix: str,
                   vfs: BaseVFS,
                   mode: MountMode = MountMode.READ,
-                  read: ReadSpec | None = None) -> MountEntry:
+                  read: ReadSpec | None = None,
+                  vfs_ref: str | None = None) -> MountEntry:
         """Add a VFS to a running workspace, mirroring TS ``addMount``.
 
         The runtime door runs the same read-policy verdict the
@@ -519,6 +520,8 @@ class Workspace:
             mode (MountMode): access mode, read-only unless explicitly raised.
             read (ReadSpec | None): the mount's read policy; None takes
                 the workspace default.
+            vfs_ref (str | None): the ``vfs:`` value the driver was built
+                from, recorded for snapshots; None for one built in code.
 
         Returns:
             MountEntry: the installed mount, with its normalized prefix.
@@ -533,13 +536,12 @@ class Workspace:
         check_read_capability(prefix, vfs, resolved_read)
         self._registry.check_vfs_available(vfs)
         previous = self._registry.mounts()
-        # Configure before mount() captures the index in its CacheManager.
-        # An alias must retain the index used by the VFS's other mounts.
-        if (self._index_config is not None
-                and self._registry.try_mount_for_prefix(prefix) is None
-                and not any(m.vfs is vfs for m in self._registry.mounts())):
-            vfs.set_index(self._index_config)
-        entry = self._registry.mount(prefix, vfs, mode, resolved_read)
+        entry = self._registry.mount(prefix,
+                                     vfs,
+                                     mode,
+                                     resolved_read,
+                                     index=self._index_config,
+                                     vfs_ref=vfs_ref)
         prepare_added_mount(self._registry, entry, previous)
         self._ops.set_mounts(self._registry.ops_mounts())
         return entry
@@ -812,7 +814,7 @@ class Workspace:
               exposes one — e.g. S3 ``VersionId``).
 
         NOT captured:
-            * Live state of mounts with ``SUPPORTS_SNAPSHOT=False``
+            * Live state of mounts with ``supports_snapshot=False``
               (Gmail, Slack, Linear, etc.). Load logs a warning naming
               them.
             * Files the agent never touched.
@@ -822,7 +824,7 @@ class Workspace:
               source.
 
         Async because fingerprint capture stats each touched path on a
-        ``SUPPORTS_SNAPSHOT`` mount.
+        ``supports_snapshot`` mount.
 
         Args:
             target: filesystem path OR a writable file-like object.

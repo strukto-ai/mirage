@@ -1,24 +1,24 @@
 ---
 title: Adding a New VFS
 icon: plus
-description: Ship your own backend with GenericVFS, or contribute a builtin VFS using Mirage's VFS, command, and snapshot conventions.
+description: Ship your own backend with BaseVFS, or contribute a builtin VFS using Mirage's VFS, command, and snapshot conventions.
 ---
 
 A VFS maps an external system to Mirage's filesystem operations and shell commands. There are two paths:
 
-- **Ship your own backend**: a single TypeScript file in your own project or package, built on `GenericVFS`. No Mirage fork, no edits to Mirage source.
+- **Ship your own backend**: a single TypeScript file in your own project or package, built on `BaseVFS`. No Mirage fork, no edits to Mirage source.
 - **Contribute a builtin**: the four-layer layout inside the Mirage repo, mirrored in Python.
 
 ## Ship Your Own Backend
 
-Write the core functions over your data source, put them on a `CommandIO` table, and `GenericVFS` wires the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution and the VFS/FUSE ops:
+Write the core functions over your data source, put them on a `CommandIO` table, and `BaseVFS` wires the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution and the VFS/FUSE ops:
 
 ```ts
 import {
   Accessor,
   type CommandIO,
   FileStat,
-  GenericVFS,
+  BaseVFS,
   MountMode,
   type PathSpec,
   streamFromBytes,
@@ -35,7 +35,7 @@ declare function readdir(accessor: JiraAccessor, path: PathSpec): Promise<string
 declare function readBytes(accessor: JiraAccessor, path: PathSpec): Promise<Uint8Array>
 declare function stat(accessor: JiraAccessor, path: PathSpec): Promise<FileStat>
 
-class JiraVFS extends GenericVFS<JiraAccessor> {
+class JiraVFS extends BaseVFS<JiraAccessor> {
   constructor(config: JiraConfig) {
     super({
       name: 'jira',
@@ -58,7 +58,7 @@ const ws = new Workspace({ '/jira/': new JiraVFS(cfg) }, { mode: MountMode.READ 
 
 The accessor is a type parameter, so the table is checked against the accessor your core functions actually take: wiring `readdir` where `stat` belongs, or an accessor from another backend, is a compile error rather than a runtime one.
 
-Only four table fields are required. The optional ones unlock more surface: `write` enables the byte-mutation family, `find` and `du` become native fast paths, and a command whose requirements the table cannot meet is never registered rather than registered and broken. The escape hatches are the ones the builtins use, because `GenericVFS` assembles exactly what they assemble by hand:
+Only four table fields are required. The optional ones unlock more surface: `write` enables the byte-mutation family, `find` and `du` become native fast paths, and a command whose requirements the table cannot meet is never registered rather than registered and broken. The escape hatches are the ones the builtins use, because `BaseVFS` assembles exactly what they assemble by hand:
 
 - `overrides` drops a generic command you replace, and `commands` supplies the replacement (or any bespoke verb) from `command({...})`.
 - `ops` layers an irregular VFS/FUSE handler over the derived set; one carrying no `filetype` shadows the derived op of the same name. `autoOps: false` opts out of deriving any.
@@ -137,7 +137,7 @@ Implement only the operations the backend supports. A read-only API-backed VFS u
 
 `FileStat.size` must be the rendered content's byte length or `null`, never a storage-side number: a confidently wrong size makes `wc -c` and `ls -l` lie over FUSE, while `null` rides the unknown-size machinery. Put the storage number in `extra` if it is worth reporting.
 
-Glob resolution is not a per-backend file: bind it from readdir with `makeResolveGlob(readdir, cap)`, or let `GenericVFS` derive it from the table.
+Glob resolution is not a per-backend file: `makeGenericOps` derives a `glob` op from the table's `readdir`, capped by its `maxGlobMatches`, and the mount expands patterns through it.
 
 ## 3. Ops Layer
 
@@ -170,11 +170,11 @@ For a VFS-specific command:
 Import the command and op arrays at module scope and return them from `commands()` and `ops()`:
 
 ```ts
-export class MyVFS extends BaseVFS implements VFS {
-  readonly kind: string = VFSName.MY_VFS
-  readonly cachesReads: boolean = true
-  readonly prompt: string = MY_PROMPT
-  readonly accessor: MyAccessor
+export class MyVFS extends BaseVFS {
+  override readonly name: string = VFSName.MY_VFS
+  override readonly cachesReads: boolean = true
+  override readonly prompt: string = MY_PROMPT
+  override readonly accessor: MyAccessor
 
   constructor(config: MyConfig) {
     super()
@@ -182,21 +182,17 @@ export class MyVFS extends BaseVFS implements VFS {
     this.accessor = new MyAccessor(this.config)
   }
 
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return MY_VFS_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return MY_VFS_COMMANDS
   }
 }
 ```
 
-Set `cachesReads` true only for stable, read-mostly content. Override `getState()` to carry the (redacted) config, and `close()` to release any client handles, calling `super.close()`, which closes the index store.
+Set `cachesReads` true only for stable, read-mostly content. Override `getState()` to carry the (redacted) config, and `close()` to release any client handles, calling `super.close()`. The index store is the mount's, built when the driver is placed, so a driver never sees or closes one.
 
 A config-backed backend also sets `needs_override: true` in that state. TypeScript's loader consults no registry, so a mount it was not handed comes back as an empty `RAMVFS`; the flag makes it refuse instead. Python does not need it, which is why the flag is written on only a handful of mounts there and read on none.
 

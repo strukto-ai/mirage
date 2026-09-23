@@ -16,6 +16,7 @@ import type { Accessor } from '../../accessor/base.ts'
 import type { OpKwargs, RegisteredOp } from '../registry.ts'
 import { extractWriteData } from '../write_args.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
+import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../utils/glob_walk.ts'
 import { isMissingPath } from '../../utils/errors.ts'
 import type { PathSpec } from '../../types.ts'
 
@@ -40,6 +41,7 @@ export interface OpsTable<A extends Accessor = Accessor> {
     size: number | null,
   ) => Promise<Uint8Array>
   stat: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => unknown
+  maxGlobMatches?: number
   write?: OpCoreFn
   mkdir?: OpCoreFn
   unlink?: OpCoreFn
@@ -155,6 +157,28 @@ export function makeGenericOps<A extends Accessor>(
   emit(
     'stat',
     (accessor, path, _args, kwargs) => table.stat(asA(accessor), path, kwargs.index),
+    false,
+  )
+
+  // Glob expansion is a walk over readdir, so it is derived here rather
+  // than written per driver: one walker, capped by the table's own limit.
+  // The mount hands it one pattern spec at a time and passes the rest
+  // through, which is what every driver's resolver did with the list.
+  const readdirOf = table.readdir as (
+    accessor: A,
+    path: PathSpec,
+    index?: OpKwargs['index'],
+  ) => Promise<string[]>
+  emit(
+    'glob',
+    (accessor, path, _args, kwargs) =>
+      resolveGlobWith(
+        readdirOf,
+        asA(accessor),
+        [path],
+        kwargs.index,
+        table.maxGlobMatches ?? DEFAULT_MAX_GLOB_MATCHES,
+      ),
     false,
   )
 

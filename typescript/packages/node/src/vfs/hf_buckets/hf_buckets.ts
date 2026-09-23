@@ -30,7 +30,7 @@ export interface HfBucketsVFSState {
 }
 
 export class HfBucketsVFS extends HfVFS {
-  readonly kind: string = VFSName.HF_BUCKETS
+  override readonly name: string = VFSName.HF_BUCKETS
   readonly prompt: string = HF_BUCKETS_PROMPT
   readonly config: HfBucketsConfig
   readonly accessor: HfBucketsAccessor
@@ -51,7 +51,7 @@ export class HfBucketsVFS extends HfVFS {
 
   getState(): Promise<HfBucketsVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactHfBucketsConfig(this.config),
     })
   }

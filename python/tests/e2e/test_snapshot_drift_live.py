@@ -24,6 +24,7 @@ from mirage.types import DriftPolicy, MountMode, PathSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from mirage.workspace.snapshot import ContentDriftError
+from tests.fixtures.driver_ops import ops
 
 
 def _spec(key: str, virtual: str) -> PathSpec:
@@ -300,7 +301,7 @@ def test_live_stat_populates_revision_when_versioned(tmp_path):
     try:
         vfs = S3VFS(_config())
         asyncio.run(write_bytes(vfs.accessor, _spec(key, probe), b"x\n"))
-        stat = asyncio.run(vfs._ops["stat"](vfs.accessor, probe))
+        stat = asyncio.run(ops(vfs).stat(_spec(key, probe)))
         assert stat.fingerprint is not None
         assert stat.revision is not None, (
             "versioned bucket head should carry a VersionId")

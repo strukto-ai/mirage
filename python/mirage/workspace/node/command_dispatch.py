@@ -602,7 +602,7 @@ async def _route_argv(
         return await handle_touch(namespace, dispatch, session, operands)
 
     # ── capacity (registry-routed: enumerates mounts, reports per-mount
-    #    statfs; never fabricates numbers) ──
+    #    capacity; never fabricates numbers) ──
     if name == "df":
         return await handle_df(registry, session, dispatch, operands)
 

@@ -150,8 +150,8 @@ export function makeBrowserS3Alias<
 }
 
 /**
- * The snapshot state of an S3-compatible alias: its own kind and its own
- * redacted config, not the `s3` kind and S3 config it delegates to.
+ * The snapshot state of an S3-compatible alias: its own name and its own
+ * redacted config, not the `s3` name and S3 config it delegates to.
  */
 export interface S3AliasVFSState<TRedacted> {
   type: string
@@ -161,8 +161,8 @@ export interface S3AliasVFSState<TRedacted> {
 /**
  * The shared body of every S3-compatible provider VFS (MinIO, Ceph,
  * R2, Wasabi, ...). Each is an {@link S3VFS} reached through a
- * provider-shaped config, so all it owns is its `kind`, that config, and
- * ops/commands retagged from `s3` onto the kind. A subclass supplies its
+ * provider-shaped config, so all it owns is its `name`, that config, and
+ * ops/commands retagged from `s3` onto the name. A subclass supplies its
  * prompt as a plain field and hands the varying pieces to `super`.
  *
  * `toS3Config` and `redact` arrive as functions rather than as an
@@ -173,24 +173,24 @@ export interface S3AliasVFSState<TRedacted> {
  * `mirage/vfs/s3_alias.py`.
  */
 export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> extends S3VFS {
-  override readonly kind: string
+  override readonly name: string
   readonly aliasConfig: TConfig
   private readonly aliasOps: readonly RegisteredOp[]
   private readonly aliasCommands: readonly RegisteredCommand[]
   private readonly redactAlias: (config: TConfig) => TRedacted
 
   protected constructor(
-    kind: string,
+    name: string,
     config: TConfig,
     s3Config: S3Config,
     redact: (config: TConfig) => TRedacted,
   ) {
     super(s3Config)
-    this.kind = kind
+    this.name = name
     this.aliasConfig = config
     this.redactAlias = redact
-    this.aliasOps = remapOpsVfs(super.ops(), kind)
-    this.aliasCommands = remapCommandsVfs(super.commands(), kind)
+    this.aliasOps = remapOpsVfs(super.ops(), name)
+    this.aliasCommands = remapCommandsVfs(super.commands(), name)
   }
 
   override ops(): readonly RegisteredOp[] {
@@ -203,7 +203,7 @@ export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> ex
 
   override getState(): Promise<S3AliasVFSState<TRedacted>> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: this.redactAlias(this.aliasConfig),
     })
   }

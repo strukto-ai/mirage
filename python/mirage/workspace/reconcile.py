@@ -151,7 +151,7 @@ class Reconciler:
         ``stat`` at all -- cannot be verified, so the copy is dropped and
         the caller re-reads.
 
-        ``SUPPORTS_SNAPSHOT`` deliberately does not appear here. It used
+        ``supports_snapshot`` deliberately does not appear here. It used
         to short-circuit this function, dropping every cached copy on a
         resource that declares it False. That is a proxy for "the stat
         carries no content token", and it is the wrong one: box, dropbox,

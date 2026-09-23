@@ -13,16 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PostgresAccessor } from '@struktoai/mirage-core/accessor/postgres'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { POSTGRES_COMMANDS } from '@struktoai/mirage-core/commands/builtin/postgres/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { read as postgresRead } from '@struktoai/mirage-core/core/postgres/read'
-import { readdir as postgresReaddir } from '@struktoai/mirage-core/core/postgres/readdir'
-import { stat as postgresStat } from '@struktoai/mirage-core/core/postgres/stat'
 import { POSTGRES_OPS } from '@struktoai/mirage-core/ops/postgres/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import {
   redactPostgresConfig,
   resolvePostgresConfig,
@@ -33,13 +28,8 @@ import type {
   PostgresConfigResolved,
 } from '@struktoai/mirage-core/vfs/postgres/config'
 import { POSTGRES_PROMPT } from '@struktoai/mirage-core/vfs/postgres/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { PostgresStore } from './store.ts'
-
-const resolvePostgresGlob = makeResolveGlob(postgresReaddir)
-
 export interface PostgresVFSOptions {
   config: PostgresConfig
   prefix?: string
@@ -51,14 +41,14 @@ export interface PostgresVFSState {
   needs_override: true
 }
 
-export class PostgresVFS extends BaseVFS implements VFS {
-  readonly kind: string = VFSName.POSTGRES
-  readonly cachesReads: boolean = false
+export class PostgresVFS extends BaseVFS {
+  override readonly name: string = VFSName.POSTGRES
+  override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
-  readonly prompt: string
+  override readonly prompt: string
   readonly config: PostgresConfigResolved
   readonly store: PostgresStore
-  readonly accessor: PostgresAccessor
+  override readonly accessor: PostgresAccessor
 
   constructor(options: PostgresVFSOptions | PostgresConfig) {
     super()
@@ -72,7 +62,7 @@ export class PostgresVFS extends BaseVFS implements VFS {
 
   override getState(): PostgresVFSState {
     return {
-      type: this.kind,
+      type: this.name,
       config: redactPostgresConfig(this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
@@ -88,51 +78,16 @@ export class PostgresVFS extends BaseVFS implements VFS {
   override loadState(_state: PostgresVFSState): Promise<void> {
     return Promise.resolve()
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
   override async close(): Promise<void> {
     await this.store.close()
     await super.close()
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return POSTGRES_OPS
   }
 
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return POSTGRES_COMMANDS
-  }
-
-  readFile(p: PathSpec): Promise<Uint8Array> {
-    return postgresRead(this.accessor, p, this.index)
-  }
-
-  readdir(p: PathSpec): Promise<string[]> {
-    return postgresReaddir(this.accessor, p, this.index)
-  }
-
-  stat(p: PathSpec): Promise<FileStat> {
-    return postgresStat(this.accessor, p, this.index)
-  }
-
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return resolvePostgresGlob(this.accessor, effective, this.index)
   }
 }

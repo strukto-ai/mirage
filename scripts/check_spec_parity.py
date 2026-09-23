@@ -87,7 +87,7 @@ def merge_variants(loaded: dict[str, dict[str, Any]], key: str,
     already failed on any name the two runtimes describe differently.
     Without it the preference silently hid a divergence rather than
     resolving one: the fifteen browser S3-family VFS declared
-    neither ``sizes_always_known`` nor ``storage_id`` while their node
+    neither ``sizes_always_known`` nor ``storage_location`` while their node
     twins declared both, and python matched node, so the whole
     python-versus-typescript comparison passed.
 

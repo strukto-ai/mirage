@@ -43,7 +43,7 @@ def _mount(prefix: str, supports_snapshot: bool = True):
     return SimpleNamespace(
         prefix=prefix,
         mount_id=None,
-        vfs=SimpleNamespace(SUPPORTS_SNAPSHOT=supports_snapshot))
+        vfs=SimpleNamespace(supports_snapshot=supports_snapshot))
 
 
 def _longest_prefix(mounts: list, path: str):

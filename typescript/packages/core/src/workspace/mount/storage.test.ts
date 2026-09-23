@@ -13,49 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { BaseVFS, type VFS } from '../../vfs/base.ts'
+import { BaseVFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { MountRegistry } from './registry.ts'
-import { makeStorageKey, vfsStorageId } from './storage.ts'
+import { makeStorageKey, vfsStorageLocation } from './storage.ts'
 
-class StoreVFS extends BaseVFS implements VFS {
-  readonly kind = 'ram'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
+class StoreVFS extends BaseVFS {
+  override readonly name = 'ram'
 }
 
 // A VFS pinned by config, the way disk/s3/redis are: two instances
 // naming one target must compare equal.
-class RootedVFS extends BaseVFS implements VFS {
-  readonly kind = 'disk'
+class RootedVFS extends BaseVFS {
+  override readonly name = 'disk'
   constructor(readonly root: string) {
     super()
   }
-  override storageId(): string {
-    return `${this.kind}:${this.root}`
-  }
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-}
-
-// Implements VFS without extending BaseVFS, so it has no
-// storageId at all — and has to spell the state pair the base would
-// otherwise supply.
-class BareVFS implements VFS {
-  readonly kind = 'bare'
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-  close(): Promise<void> {
-    return Promise.resolve()
-  }
-  getState(): { type: string } {
-    return { type: this.kind }
-  }
-  loadState(_state: { type: string }): void {
-    // Nothing to take back.
+  override storageLocation(): string {
+    return `${this.name}:${this.root}`
   }
 }
 
@@ -66,7 +41,7 @@ const spec = (virtual: string): PathSpec =>
     vfsPath: virtual.replace(/^\/+/, ''),
   })
 
-const keyFor = (mounts: Record<string, VFS>): ((p: PathSpec) => string) =>
+const keyFor = (mounts: Record<string, BaseVFS>): ((p: PathSpec) => string) =>
   makeStorageKey(new MountRegistry(mounts, MountMode.WRITE))
 
 describe('makeStorageKey', () => {
@@ -104,20 +79,6 @@ describe('makeStorageKey', () => {
     expect(key(spec('/m2/dirty')).startsWith(`${key(spec('/m1/dir'))}/`)).toBe(false)
   })
 
-  it('keeps distinct bare mounts distinct', () => {
-    const key = keyFor({ '/b1': new BareVFS(), '/b2': new BareVFS() })
-    expect(key(spec('/b1/x.txt'))).not.toBe(key(spec('/b2/x.txt')))
-  })
-
-  it('gives one storageId-less object one identity across two prefixes', () => {
-    // Browser VFS classes implement VFS directly and have no
-    // storageId. Keying on the mount prefix handed the same object two
-    // identities, so a self-move still relayed a write then an unlink.
-    const shared = new BareVFS()
-    const key = keyFor({ '/b1': shared, '/b2': shared })
-    expect(key(spec('/b1/x.txt'))).toBe(key(spec('/b2/x.txt')))
-  })
-
   it('resolves nested backings onto one key', () => {
     // /a rooted at /srv/data and /b at /srv/data/sub make /a/sub/x and
     // /b/x one file; separate key components kept them apart.
@@ -136,9 +97,9 @@ describe('makeStorageKey', () => {
     expect(key(spec('/a/y.txt'))).not.toBe(key(spec('/b/y.txt')))
   })
 
-  it('vfsStorageId is stable per object', () => {
-    const bare = new BareVFS()
-    expect(vfsStorageId(bare)).toBe(vfsStorageId(bare))
-    expect(vfsStorageId(bare)).not.toBe(vfsStorageId(new BareVFS()))
+  it('vfsStorageLocation is stable per object', () => {
+    const store = new StoreVFS()
+    expect(vfsStorageLocation(store)).toBe(vfsStorageLocation(store))
+    expect(vfsStorageLocation(store)).not.toBe(vfsStorageLocation(new StoreVFS()))
   })
 })

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_READ_SPEC, DEFAULT_READ_TTL, ReadPolicy, type ReadSpec } from '../../types.ts'
-import type { VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import { checkReadCapability, resolveReadSpec } from './read_policy.ts'
 
 const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
@@ -24,8 +24,8 @@ const FRESH: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
 // construction cost. The alias-inheritance sweep, which cannot live in core
 // because both S3VFS classes are in the runtime packages, is in
 // node/src/vfs/read_revalidatable.test.ts.
-function stub(kind: string, cachesReads: boolean, readRevalidatable: boolean): VFS {
-  return { kind, cachesReads, readRevalidatable } as unknown as VFS
+function stub(name: string, cachesReads: boolean, readRevalidatable: boolean): BaseVFS {
+  return { name, cachesReads, readRevalidatable } as unknown as BaseVFS
 }
 
 describe('resolveReadSpec', () => {

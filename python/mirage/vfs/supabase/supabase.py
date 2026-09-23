@@ -19,7 +19,7 @@ from mirage.vfs.supabase.prompt import PROMPT
 
 class SupabaseVFS(S3AliasVFS):
 
-    PROMPT: str = PROMPT
+    prompt: str = PROMPT
 
     def __init__(self, config: SupabaseConfig) -> None:
         super().__init__(config)

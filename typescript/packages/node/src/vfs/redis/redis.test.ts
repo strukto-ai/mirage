@@ -21,7 +21,6 @@ const skip = REDIS_URL === undefined
 describe.skipIf(skip)('RedisVFS', () => {
   it('connects and closes cleanly', async () => {
     const res = new RedisVFS(REDIS_URL !== undefined ? { url: REDIS_URL } : {})
-    await res.open()
     const client = await res.client()
     expect(client.isOpen).toBe(true)
     await res.close()
@@ -41,7 +40,6 @@ describe.skipIf(skip)('RedisVFS', () => {
 
   it('is idempotent on close()', async () => {
     const res = new RedisVFS(REDIS_URL !== undefined ? { url: REDIS_URL } : {})
-    await res.open()
     await res.close()
     await res.close()
   })

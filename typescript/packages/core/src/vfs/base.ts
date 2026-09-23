@@ -13,14 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../accessor/base.ts'
-import { IndexType, type IndexConfig, type RedisIndexConfig } from '../cache/index/config.ts'
-import { RAMIndexCacheStore } from '../cache/index/ram.ts'
-import { RedisIndexCacheStore } from '../cache/index/redis.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { PredNode } from '../commands/builtin/find_eval.ts'
-import type { RegisteredCommand } from '../commands/config.ts'
+import { type CommandIO, makeGenericCommands } from '../commands/builtin/generic_bind/index.ts'
+import type { ProvisionFn, RegisteredCommand } from '../commands/config.ts'
+import { makeGenericOps } from '../ops/generic/factory.ts'
 import type { RegisteredOp } from '../ops/registry.ts'
-import type { CapacityResult, FileStat, PathSpec } from '../types.ts'
+import type { CapacityResult } from '../types.ts'
 import { CapacityState } from '../types.ts'
 import type { DeltaHook } from '../watch/base.ts'
 
@@ -53,8 +51,8 @@ export interface FindOptions {
  *
  * This lived as a private interface in `workspace/snapshot/types.ts`,
  * where `VFSState` still widens it with each backend's own keys; it
- * moved here so the `VFS` contract and the snapshot format name one
- * shape rather than two identical ones. Python needs no such type —
+ * moved here so the `BaseVFS` contract and the snapshot format name
+ * one shape rather than two identical ones. Python needs no such type —
  * `get_state` is annotated `dict[str, Any]` — but a TS interface is not
  * assignable to `Record<string, unknown>` (no implicit index signature),
  * so the literal twin would reject every named `XVFSState`.
@@ -68,50 +66,147 @@ export interface VFSStateBase {
   needs_override?: boolean
 }
 
-// The `vfs:` value the registry built an instance from: a name
-// (`s3`, `wiki`) or a code reference (`./wiki.mjs:WikiVFS`). Python
-// keeps this on `BaseVFS.vfs_ref`; `VFS` is an interface
-// here, so the fact lives beside it. A snapshot records it so the loader
-// can rebuild the mount through the same door config used, which is the
-// only door that knows a class loaded from a script file.
-const VFS_REFS = new WeakMap<object, string>()
+/**
+ * The brand every driver carries, keyed through the symbol registry so a
+ * script file that loaded its own copy of this package still passes the
+ * loader's check: the class identity may differ, the brand does not.
+ */
+export const VFS_BRAND: unique symbol = Symbol.for('mirage.BaseVFS')
 
-export function recordVfsRef(vfs: VFS, ref: string): void {
-  VFS_REFS.set(vfs, ref)
+/**
+ * What a driver built from a table hands the constructor: the accessor,
+ * the table of core functions over it, and the facts and prompts it
+ * declares. A builtin declares the same things as class members instead
+ * and passes nothing. Mirrors the keyword arguments of Python's
+ * `BaseVFS.__init__`.
+ */
+export interface VFSOptions<A extends Accessor = Accessor> {
+  /**
+   * VFS name the commands and ops register under, and the `type` key
+   * `getState` writes into a snapshot. Also the registry key when the
+   * backend is exposed through `registerVfsFactory`.
+   */
+  name: string
+  /** Backend handle passed to every core function on the table. */
+  accessor: A
+  /** The backend's IO table. */
+  io: CommandIO<A>
+  /** LLM-facing description of the mounted layout. */
+  prompt?: string
+  /** Appended to `prompt` when the mount is writable. */
+  writePrompt?: string
+  /**
+   * Generic command names the backend replaces. Pass the replacements
+   * through `commands`.
+   */
+  overrides?: ReadonlySet<string>
+  /**
+   * Extra commands, from `command({...})`: bespoke verbs, or the
+   * replacements for whatever `overrides` suppressed.
+   */
+  commands?: readonly RegisteredCommand[]
+  /**
+   * Irregular VFS/FUSE handlers, layered over the derived set. One
+   * carrying no filetype shadows the derived op of the same name.
+   *
+   * Plain records rather than Python's decorated functions: TypeScript's
+   * `op` is a *method* decorator, so a standalone handler has no
+   * decorator form to carry its registration.
+   */
+  ops?: readonly RegisteredOp[]
+  /** Per-command cost estimators replacing the catalog default. */
+  provisionOverrides?: Record<string, ProvisionFn<A>>
+  /**
+   * Derive the VFS/FUSE op set from the table (read/readdir/stat plus
+   * whatever mutations the table carries). Set false to serve only the
+   * explicit `ops`.
+   */
+  autoOps?: boolean
+  /** Serve repeat reads from the file cache. Read-mostly content only. */
+  cachesReads?: boolean
+  /**
+   * Whether `io.stat` sizes every regular file without fetching it. A
+   * backend that renders its content on read leaves this false and rides
+   * the unknown-size machinery; a byte store sets it, which is also what
+   * makes the mount legal on FSKit.
+   */
+  sizesAlwaysKnown?: boolean
+  /**
+   * Whether `io.stat` fills `FileStat.fingerprint` with a stable
+   * per-path version marker. Setting it without that is not drift
+   * detection, it is a snapshot that claims to have one.
+   */
+  supportsSnapshot?: boolean
+  /**
+   * Whether `io.stat` and the read record stamp the *same kind* of content
+   * token, so a `read: fresh` mount can compare them. Setting it without
+   * that makes every read verdict stale and refetch forever; a mount
+   * declaring `fresh` on a backend that leaves it false is refused at mount
+   * time instead.
+   */
+  readRevalidatable?: boolean
 }
 
-export function vfsRefOf(vfs: VFS): string | null {
-  return VFS_REFS.get(vfs) ?? null
-}
-
-export interface VFS {
-  /** Closed VFS instances cannot be mounted again. */
-  readonly isClosed?: boolean
-  readonly kind: string
-  readonly prompt?: string
-  readonly writePrompt?: string
-  readonly indexTtl?: number
+/**
+ * What a driver supplies, and nothing a mount runs it with. A driver is
+ * an accessor and the tables it serves through: `ops()` for the
+ * VFS/FUSE verbs and `commands()` for the shell. Everything a tree needs
+ * to run one (the placement, the index store, the registered tables, the
+ * reference it was built from) lives on the mount, so an author never
+ * sees it.
+ *
+ * There are two ways to be one. A builtin declares its facts as members
+ * and returns from `ops()` and `commands()` the tables its `ops/<name>`
+ * and `commands/builtin/<name>` modules build, so it calls `super()`
+ * bare. A custom backend hands the constructor a {@link VFSOptions}: an
+ * accessor and a {@link CommandIO} table, from which the whole generic
+ * command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob
+ * resolution and the VFS/FUSE ops are derived. That is the one-file
+ * path, which `examples/typescript/other/custom_vfs.ts` walks end to
+ * end. Optional fields on the table unlock more surface (`write` enables
+ * the byte-mutation family, `find` and `du` become native fast paths),
+ * and a command whose requirements the table cannot meet is never
+ * registered rather than registered and broken. The accessor generic
+ * type-checks the table against the accessor the core functions
+ * actually take, which Python leaves as `Any`.
+ *
+ * Snapshots and versions see one of two things, and a subclass picks
+ * which by what it owns. Content the VFS holds itself (an in-memory
+ * store) is mirage-owned state: override `getState` and `loadState` to
+ * carry it, register the class under its name, and a snapshot or a
+ * version rebuilds the mount with that content and no override. Content
+ * that lives in a remote service is only observed: keep the default
+ * state, set `supportsSnapshot` and fill `FileStat.fingerprint`, and a
+ * snapshot pins what it read while `Workspace.load` asks for the live
+ * VFS back. Mirrors Python's `BaseVFS`.
+ */
+export class BaseVFS<A extends Accessor = Accessor> {
+  readonly [VFS_BRAND] = true as const
+  readonly name: string
+  declare readonly prompt?: string
+  declare readonly writePrompt?: string
+  readonly indexTtl: number = 600
   /**
    * Whether reads of this VFS may be served from / written to the
-   * local file cache. Defaults to false. A network-backed VFS whose
-   * content is read-mostly (e.g. object storage) sets this to true so
-   * reads can be cached; a VFS whose content is live (e.g. a
-   * database collection) leaves it false so reads always hit the backend
-   * and live follows (`tail -f`) are not masked by a cached snapshot.
+   * local file cache. A network-backed VFS whose content is read-mostly
+   * (e.g. object storage) sets this to true so reads can be cached; a
+   * VFS whose content is live (e.g. a database collection) leaves it
+   * false so reads always hit the backend and live follows (`tail -f`)
+   * are not masked by a cached snapshot.
    */
-  readonly cachesReads?: boolean
+  readonly cachesReads: boolean = false
   /**
    * Whether this VFS carries enough version information for
    * snapshot+replay drift detection. When true, the VFS's
-   * {@link VFS.stat} must populate {@link FileStat.fingerprint}
+   * {@link BaseVFS.stat} must populate {@link FileStat.fingerprint}
    * (and optionally {@link FileStat.revision}) with stable per-path
    * markers. When false (the default), reads are treated as live-only
    * at replay time: no fingerprint is captured at snapshot, no drift
    * check fires at load.
    */
-  readonly supportsSnapshot?: boolean
+  readonly supportsSnapshot: boolean = false
   /**
-   * Whether {@link VFS.stat} can size every regular file without
+   * Whether {@link BaseVFS.stat} can size every regular file without
    * fetching its content, i.e. {@link FileStat.size} is null only for
    * directories. True for byte stores that keep a length in their
    * metadata (ram, disk, redis, s3, gridfs); false for mounts that
@@ -122,22 +217,22 @@ export interface VFS {
    * make size-unknown files read correctly anyway. FSKit has no direct_io
    * equivalent, so a mount there is driven entirely by the reported size
    * and a false VFS would serve silent empty files. Mirrors Python's
-   * `BaseVFS.SIZES_ALWAYS_KNOWN`.
+   * `BaseVFS.sizes_always_known`.
    */
-  readonly sizesAlwaysKnown?: boolean
+  readonly sizesAlwaysKnown: boolean = false
   /**
    * Whether a `read: fresh` mount can actually be revalidated against this
-   * backend: {@link VFS.stat} and the read record must stamp the *same kind*
-   * of content token, so the gate can compare them with `===`. False (the
-   * default) is refused at mount time rather than degraded, because a mount
-   * that declares fresh and silently serves bounded is the bug the policy
-   * exists to prevent.
+   * backend: {@link BaseVFS.stat} and the read record must stamp the *same
+   * kind* of content token, so the gate can compare them with `===`. False
+   * (the default) is refused at mount time rather than degraded, because a
+   * mount that declares fresh and silently serves bounded is the bug the
+   * policy exists to prevent.
    *
-   * Distinct from {@link VFS.supportsSnapshot}, which asks whether a token
-   * exists at all: gdrive stamps one on both sides and still cannot honour
-   * fresh, because stat returns a timestamp where read returns an md5.
-   * Distinct from {@link VFS.cachesReads}, which asks whether the gate can
-   * fire.
+   * Distinct from {@link BaseVFS.supportsSnapshot}, which asks whether a
+   * token exists at all: gdrive stamps one on both sides and still cannot
+   * honour fresh, because stat returns a timestamp where read returns an
+   * md5. Distinct from {@link BaseVFS.cachesReads}, which asks whether the
+   * gate can fire.
    *
    * onedrive and sharepoint look like they qualify and do not: both stamp
    * a cTag on stat and on read, so on token kind alone the refusal reads
@@ -149,135 +244,133 @@ export interface VFS {
    * gdrive carries the same slashless label on top of its token-kind
    * mismatch. Fix the label before reconsidering the flag.
    *
-   * Mirrors Python's `BaseVFS.READ_REVALIDATABLE`.
+   * Mirrors Python's `BaseVFS.read_revalidatable`.
    */
-  readonly readRevalidatable?: boolean
-  readonly index?: IndexCacheStore
-  readonly accessor?: Accessor
-  readonly opsMap?: Record<string, unknown>
-  setIndex?(config?: IndexConfig): void
-  open(): Promise<void>
-  close(): Promise<void>
-  // Non-optional on purpose: `toStateDict` calls both on every mount, so an
-  // absent one is a `Workspace.save()` crash rather than a missing feature.
-  // BaseVFS supplies the bare `{type}` default, as Python's does; a
-  // VFS holding config overrides it to carry that config too.
-  getState(): VFSStateBase | Promise<VFSStateBase>
-  loadState(state: VFSStateBase): void | Promise<void>
-  ops?(): readonly RegisteredOp[]
-  commands?(): readonly RegisteredCommand[]
+  readonly readRevalidatable: boolean = false
+  declare readonly accessor?: A
 
-  streamPath?(path: PathSpec): AsyncIterable<Uint8Array>
-  readFile?(path: PathSpec): Promise<Uint8Array>
-  writeFile?(path: PathSpec, data: Uint8Array): Promise<void>
-  appendFile?(path: PathSpec, data: Uint8Array): Promise<void>
-  readdir?(path: PathSpec): Promise<string[]>
-  stat?(path: PathSpec): Promise<FileStat>
-  exists?(path: PathSpec): Promise<boolean>
-  mkdir?(path: PathSpec, options?: { recursive?: boolean }): Promise<void>
-  rmdir?(path: PathSpec): Promise<void>
-  unlink?(path: PathSpec): Promise<void>
-  rename?(src: PathSpec, dst: PathSpec): Promise<void>
-  truncate?(path: PathSpec, length: number): Promise<void>
-  copy?(src: PathSpec, dst: PathSpec): Promise<void>
-  rmR?(path: PathSpec): Promise<void>
-  du?(path: PathSpec): Promise<number>
-  find?(path: PathSpec, options?: FindOptions): Promise<string[]>
-  glob?(paths: readonly PathSpec[], prefix?: string): Promise<PathSpec[]>
-  // Capacity for df. Absent -> treated as UNKNOWN (rendered `-`). Implement
-  // only where a truthful number exists (a real filesystem, or a provider
-  // quota); never fabricate a total.
-  statfs?(): Promise<CapacityResult>
-  // Identity of the storage behind this VFS, so cp/mv can tell two
-  // prefixes over one store from two genuinely separate ones. Absent ->
-  // every mount is treated as its own storage, which only preserves the
-  // pre-existing behavior; see BaseVFS.storageId.
-  storageId?(): string
-  deltaHook?(): DeltaHook
-}
-
-export function cachesReads(vfs: VFS): boolean {
-  return vfs.cachesReads === true
-}
-
-export function sizesAlwaysKnown(vfs: VFS): boolean {
-  return vfs.sizesAlwaysKnown === true
-}
-
-export function readRevalidatable(vfs: VFS): boolean {
-  return vfs.readRevalidatable === true
-}
-
-export abstract class BaseVFS {
-  // Named here rather than only on the VFS interface so the state
-  // defaults below can spell themselves, mirroring Python's
-  // `BaseVFS.name`.
-  abstract readonly kind: string
-  readonly indexTtl: number = 600
-  protected _index?: IndexCacheStore
-  // JS has no object-identity primitive, so the default storageId hands
-  // each instance a serial number the first time it is asked.
-  static #storageCounter = 0
-  #storageSeq?: number
+  // Whether this driver was built from a table, and the two tables
+  // derived from it when it was.
+  readonly #fromTable: boolean
+  readonly #commands: readonly RegisteredCommand[]
+  readonly #ops: readonly RegisteredOp[]
   #closed = false
 
-  get index(): IndexCacheStore {
-    let store = this._index
-    if (store === undefined) {
-      store = this.makeIndex()
-      this._index = store
+  /**
+   * Build a driver from a table, or nothing at all. A builtin declares
+   * its facts as members and returns its tables from `ops()` and
+   * `commands()`, so it calls `super()` bare. Given options, the whole
+   * generic command set and the derived op set are wired from the
+   * table.
+   */
+  constructor(options?: VFSOptions<A>) {
+    // A builtin passes nothing and declares its facts as members. A
+    // bare subclass of a builtin (`class WikiVFS extends RAMVFS {}`)
+    // constructed from a config forwards that config here through the
+    // implicit constructor; it is not a table, so it builds nothing and
+    // the subclass's own members stand. Only a real options object,
+    // which always carries `io`, builds the generic tables. Python is
+    // immune to this by construction (its `__init__` is keyword-only, so
+    // a forwarded positional raises rather than being read as a table).
+    const io = (options as { io?: CommandIO<A> } | undefined)?.io
+    if (options === undefined || io === undefined) {
+      this.name = 'base'
+      this.#fromTable = false
+      this.#commands = []
+      this.#ops = []
+      return
     }
-    return store
+    if (options.name === '') throw new Error('a VFS needs a non-empty name')
+    this.name = options.name
+    this.accessor = options.accessor
+    this.#fromTable = true
+    this.prompt = options.prompt ?? ''
+    this.writePrompt = options.writePrompt ?? ''
+    this.cachesReads = options.cachesReads ?? false
+    this.sizesAlwaysKnown = options.sizesAlwaysKnown ?? false
+    this.supportsSnapshot = options.supportsSnapshot ?? false
+    this.readRevalidatable = options.readRevalidatable ?? false
+    this.#commands = [
+      ...makeGenericCommands<A>(options.name, options.io, {
+        ...(options.overrides !== undefined ? { overrides: options.overrides } : {}),
+        ...(options.provisionOverrides !== undefined
+          ? { provisionOverrides: options.provisionOverrides }
+          : {}),
+      }),
+      ...(options.commands ?? []),
+    ]
+    const userOps = options.ops ?? []
+    // A user op carrying no filetype replaces the derived op of the same
+    // name: the derived set is built with those names skipped, so
+    // registering both cannot leave two handlers competing for one key.
+    const shadowed = new Set(userOps.filter((ro) => ro.filetype === null).map((ro) => ro.name))
+    const derived =
+      options.autoOps === false
+        ? []
+        : makeGenericOps<A>(options.name, options.io, { overrides: shadowed })
+    this.#ops = [...derived, ...userOps]
   }
 
-  setIndex(config?: IndexConfig): void {
-    this._index = this.makeIndex(config)
+  /**
+   * The VFS/FUSE verbs this driver serves, as registered ops. A verb
+   * that is not in this list is not served: the mount answers
+   * `Operation not supported` for it. A driver built from a table serves
+   * the set derived from it; a builtin returns the list its `ops/<name>`
+   * module derives from the backend's table.
+   */
+  ops(): readonly RegisteredOp[] {
+    return this.#ops
   }
 
-  private makeIndex(config?: IndexConfig): IndexCacheStore {
-    if (config?.type === IndexType.REDIS) {
-      const redis = config as RedisIndexConfig
-      return new RedisIndexCacheStore({
-        ttl: redis.ttl ?? 600,
-        ...(redis.url !== undefined ? { url: redis.url } : {}),
-        ...(redis.keyPrefix !== undefined ? { keyPrefix: redis.keyPrefix } : {}),
-      })
-    }
-    const ttl = config === undefined ? this.indexTtl : (config.ttl ?? 600)
-    return new RAMIndexCacheStore({ ttl })
+  /** The shell commands this driver serves, as registered commands. */
+  commands(): readonly RegisteredCommand[] {
+    return this.#commands
   }
 
-  // Identity of the storage this VFS reads and writes. Two mounts
-  // whose mounts return the same value address the same bytes, so a
-  // move between them must refuse rather than copy the object onto itself
-  // and then unlink the source. The default treats every instance as its
-  // own storage, which is the safe direction to be wrong in: a false
-  // "different" only keeps the pre-existing behavior, while a false "same"
-  // would refuse a legitimate move. Backends whose config pins the storage
-  // (a disk root, a bucket and key prefix) override this so two separately
-  // constructed instances pointing at one target still compare equal.
-  storageId(): string {
-    this.#storageSeq ??= ++BaseVFS.#storageCounter
-    // The serial is what makes this unique; the class name only makes the
-    // value readable when it shows up while debugging.
-    return `${this.constructor.name}:${String(this.#storageSeq)}`
+  deltaHook?(): DeltaHook
+
+  /**
+   * Where this driver's bytes live, as one string a person can read:
+   * `disk:/srv/data`, `s3:aws:my-bucket/prefix`. Two mounts with the
+   * same location address the same bytes, which is how `cp` and `mv`
+   * across mounts refuse to copy a file onto itself. Null, the default,
+   * means unknown, and the mount then treats this instance as a location
+   * of its own, which is the safe direction to be wrong in: a false
+   * "different" only keeps the pre-existing behavior, while a false
+   * "same" would refuse a legitimate move. A driver whose config pins
+   * the storage (a disk root, a bucket and key prefix) overrides this so
+   * two instances pointing at one target compare equal.
+   */
+  storageLocation(): string | null {
+    return null
   }
 
-  // Default df capacity: UNKNOWN (rendered `-`). Backends that can report
-  // truthfully — a real filesystem, or a provider quota — override this.
-  statfs(): Promise<CapacityResult> {
+  /**
+   * How much space this backend has, for `df`. The default is UNKNOWN,
+   * which `df` renders as `-`. A driver that can answer truthfully (a
+   * real filesystem, a provider that exposes a storage quota) overrides
+   * this. Never fabricate a number.
+   */
+  capacity(): Promise<CapacityResult> {
     return Promise.resolve({ state: CapacityState.UNKNOWN })
   }
 
   /**
-   * The snapshot state of a VFS that holds nothing of its own: the
-   * class name, so `Workspace.load` can rebuild it. Storage-backed
-   * mounts override this to carry their bytes, config-backed ones to
-   * carry their (redacted) config. Mirrors Python
-   * `BaseVFS.get_state`.
+   * What a snapshot records for this driver. The default carries only
+   * the type, which is enough to rebuild a builtin that owns nothing. A
+   * driver built from a table adds `needs_override`: the base cannot
+   * know a subclass's constructor, so both loaders then require the
+   * mount to be handed back live (`load`'s overrides; `copy()` does this
+   * itself). A driver that owns its content (an in-memory store)
+   * overrides this and {@link BaseVFS.loadState} to carry it and drops
+   * the flag; a driver over a remote service keeps the default and pins
+   * what it read through `supportsSnapshot` fingerprints instead.
+   * `toStateDict` calls this and `loadState` on every mount, which is
+   * why neither is optional. Mirrors Python `BaseVFS.get_state`.
    */
   getState(): VFSStateBase | Promise<VFSStateBase> {
-    return { type: this.kind }
+    if (!this.#fromTable) return { type: this.name }
+    return { type: this.name, needs_override: true }
   }
 
   /**
@@ -294,23 +387,14 @@ export abstract class BaseVFS {
   }
 
   /**
-   * Release what this VFS owns, exactly once. The base teardown is
-   * the index store: a mount configured `index: {type: redis}` holds a
-   * client that nothing else closes, so without this a Node process
-   * stays alive after `closeWorkspace`.
-   *
-   * A backend with its own handles (a db pool, an ssh channel) overrides
-   * this and calls `super.close()` — its accessor is its own to close,
-   * since the Accessor seam carries no lifecycle of its own.
-   *
-   * Mirrors Python `BaseVFS.close` (`VFS/base.py`).
+   * Release what this driver owns, exactly once: its accessor's handles
+   * are its own to close, since the Accessor seam carries no lifecycle.
+   * A backend with handles of its own (a db pool, an ssh channel)
+   * overrides this and calls `super.close()`. Mirrors Python
+   * `BaseVFS.close`.
    */
-  async close(): Promise<void> {
-    if (this.#closed) return
+  close(): Promise<void> {
     this.#closed = true
-    // Deliberately `_index`, not the `index` getter: reading the getter
-    // would build a store for a VFS that never used one, only to
-    // close it.
-    await this._index?.close()
+    return Promise.resolve()
   }
 }

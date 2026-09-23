@@ -29,7 +29,7 @@ import { SupabaseVFS } from './supabase/supabase.ts'
 import { TencentVFS } from './tencent/tencent.ts'
 import { WasabiVFS } from './wasabi/wasabi.ts'
 
-// Python declares READ_REVALIDATABLE as a class attribute, so its twin asserts
+// Python declares read_revalidatable as a class attribute, so its twin asserts
 // it straight off each alias class. A TypeScript class field is per-instance,
 // so the equivalent proof is structural: the flag is declared once on S3VFS,
 // and every provider reaches it through the prototype chain without

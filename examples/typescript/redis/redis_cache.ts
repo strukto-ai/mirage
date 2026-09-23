@@ -24,7 +24,6 @@ async function main(): Promise<void> {
     keyPrefix: 'mirage:example:cache:',
     cacheLimit: '64MB',
   })
-  await cache.open()
   await cache.clear()
 
   console.log('=== RedisFileCacheStore: FileCache backed by Redis ===\n')

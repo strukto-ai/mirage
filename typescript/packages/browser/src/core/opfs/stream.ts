@@ -20,7 +20,7 @@ import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { isNotFound, resolveFileHandle } from './utils.ts'
 
 export async function* stream(accessor: OPFSAccessor, path: PathSpec): AsyncIterable<Uint8Array> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const virtual = path.mountPath
   let handle: FileSystemFileHandle
   try {

@@ -14,9 +14,10 @@
 
 import { IndexType } from '@struktoai/mirage-core/cache/index/config'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { BaseVFS, VFS_BRAND } from '@struktoai/mirage-core/vfs/base'
 import { describe, expect, it } from 'vitest'
 import * as browserPkg from '../index.ts'
+import { Workspace } from '../workspace.ts'
 import { TrelloVFS } from './trello/trello.ts'
 
 type Ctor = new (...args: never[]) => unknown
@@ -30,12 +31,15 @@ const VFS_CLASSES = Object.entries(browserPkg as Record<string, unknown>).filter
     /^[A-Z]\w*VFS$/.test(entry[0]) && typeof entry[1] === 'function' && !NOT_BACKENDS.has(entry[0]),
 )
 
-// Inheriting the contract is what makes it reachable, not a style choice.
-// `Workspace` hands the mount's index config to `VFS.setIndex?.()` --
-// an optional call, so a VFS that restates `implements VFS`
-// instead of extending the base silently ignores `index: {...}` rather
-// than failing, and its own `close()` leaves a Redis index client open.
-// Node and core VFS classes have always extended it; browser's did not.
+function trello(): TrelloVFS {
+  return new TrelloVFS({ apiKey: 'k', apiToken: 't' })
+}
+
+// The contract is the class, so extending it is the only way to satisfy
+// it, and the brand it stamps is what the loader checks: a class beside it
+// would be refused rather than run outside the mount's index and the base
+// `close()`. Node and core VFS classes have always extended it; browser's
+// did not.
 describe('every exported VFS inherits the BaseVFS contract', () => {
   it('finds the VFS classes to check', () => {
     expect(VFS_CLASSES.length).toBeGreaterThanOrEqual(19)
@@ -46,24 +50,27 @@ describe('every exported VFS inherits the BaseVFS contract', () => {
   })
 })
 
-describe('a browser VFS honors the mount index config', () => {
-  it('setIndex rebuilds the index with the ttl the mount asked for', () => {
-    const r = new TrelloVFS({ apiKey: 'k', apiToken: 't' })
-    r.setIndex({ type: IndexType.RAM, ttl: 5 })
-    expect(r.index).toBeInstanceOf(RAMIndexCacheStore)
-    expect((r.index as unknown as { ttl: number }).ttl).toBe(5)
+describe('a browser VFS honors the base contract', () => {
+  it('carries the brand', () => {
+    expect(trello()[VFS_BRAND]).toBe(true)
   })
 
-  it('close closes the index exactly once', async () => {
-    const r = new TrelloVFS({ apiKey: 'k', apiToken: 't' })
-    let closes = 0
-    const index = r.index
-    index.close = () => {
-      closes++
-      return Promise.resolve()
+  it('runs under the index the workspace asked for', async () => {
+    const ws = new Workspace({ '/t': trello() }, { index: { type: IndexType.RAM, ttl: 5 } })
+    try {
+      const index = ws.mount('/t').indexStore
+      expect(index).toBeInstanceOf(RAMIndexCacheStore)
+      expect((index as unknown as { ttl: number }).ttl).toBe(5)
+    } finally {
+      await ws.close()
     }
+  })
+
+  it('closes once and stays closed', async () => {
+    const r = trello()
+    expect(r.isClosed).toBe(false)
     await r.close()
     await r.close()
-    expect(closes).toBe(1)
+    expect(r.isClosed).toBe(true)
   })
 })

@@ -25,11 +25,10 @@ from mirage.vfs.gsheets import GSheetsConfig, GSheetsVFS
 
 
 def _make_gsheets_ops() -> tuple[Ops, IndexCacheStore]:
-    # Mounting re-derives the VFS's index from the workspace's
-    # config, so the store to seed is the one the mount ends up with.
+    # The store to seed is the one the mount runs the driver under.
     vfs = GSheetsVFS(config=GSheetsConfig(client_id="x", refresh_token="y"))
     ws = Workspace({"/gsheets/": vfs}, mode=MountMode.READ)
-    return ws.vfs, vfs.index
+    return ws.vfs, ws.mount("/gsheets/").index_store
 
 
 @pytest.mark.asyncio

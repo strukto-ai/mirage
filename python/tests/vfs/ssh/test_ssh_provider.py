@@ -32,7 +32,7 @@ def test_ssh_vfs_attributes():
     assert vfs.name == VFSName.SSH
     assert vfs.caches_reads is True
     assert len(vfs.commands()) > 0
-    assert len(vfs.ops_list()) > 0
+    assert len(vfs.ops()) > 0
 
 
 def test_ssh_vfs_command_count():
@@ -50,7 +50,7 @@ def test_ssh_vfs_command_count():
 def test_ssh_vfs_ops_count():
     cfg = SSHConfig(host="dev")
     vfs = SSHVFS(cfg)
-    op_names = {o.name for o in vfs.ops_list()}
+    op_names = {o.name for o in vfs.ops()}
     assert "read" in op_names
     assert "write" in op_names
     assert "stat" in op_names

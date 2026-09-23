@@ -24,13 +24,13 @@ import {
 } from '../cache/index/config.ts'
 import { RedisIndexCacheStore } from '../cache/index/redis.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import { mountKey } from '../utils/key_prefix.ts'
+import { mountKey, mountPrefixOf } from '../utils/key_prefix.ts'
 import { globNameMatches, globPattern } from '../utils/glob_walk.ts'
 import { CLISpec } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
-import { op, OpsRegistry } from '../ops/registry.ts'
+import { op, OpsRegistry, type RegisteredOp } from '../ops/registry.ts'
 import { DEFAULT_READ_TTL, FileType, MountMode, ReadPolicy, VFSName, PathSpec } from '../types.ts'
-import { BaseVFS, type VFS } from '../vfs/base.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import type { WorkspaceBinding } from '../runtime/binding.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
@@ -40,14 +40,9 @@ import { getTestParser } from './fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { expandOperands } from './executor/builtins/shared.ts'
 
-class MockVFS extends BaseVFS implements VFS {
-  readonly kind = 'mock'
-  opens = 0
+class MockVFS extends BaseVFS {
+  override readonly name = 'mock'
   closes = 0
-  open(): Promise<void> {
-    this.opens++
-    return Promise.resolve()
-  }
   override close(): Promise<void> {
     this.closes++
     return Promise.resolve()
@@ -59,26 +54,41 @@ describe('Workspace lifecycle', () => {
     'prepares the first %s access to a dynamic mount',
     async (action) => {
       class IndexedRAM extends RAMVFS {
-        constructor(index: IndexCacheStore) {
+        constructor(readonly shared: IndexCacheStore) {
           super()
-          this._index = index
         }
-        override async glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-          const parent = paths[0]?.directory.replace(/\/$/, '') ?? ''
-          const directory = parent === '' ? '/' : parent
-          const listing = await this.index.listDir(directory)
-          if (listing.entries != null)
-            return listing.entries
-              .filter((key) =>
-                globNameMatches(key.split('/').at(-1) ?? '', globPattern(paths[0]?.pattern ?? '*')),
-              )
-              .map((key) => PathSpec.fromStrPath(key, mountKey(key, prefix)))
-          return super.glob(paths, prefix)
+        override ops(): readonly RegisteredOp[] {
+          return super.ops().map(
+            (o): RegisteredOp =>
+              o.name === 'glob'
+                ? {
+                    ...o,
+                    fn: async (accessor, path, args, kwargs) => {
+                      const parent = path.directory.replace(/\/$/, '')
+                      const directory = parent === '' ? '/' : parent
+                      const listing = await this.shared.listDir(directory)
+                      if (listing.entries != null) {
+                        const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+                        return listing.entries
+                          .filter((key) =>
+                            globNameMatches(
+                              key.split('/').at(-1) ?? '',
+                              globPattern(path.pattern ?? '*'),
+                            ),
+                          )
+                          .map((key) => PathSpec.fromStrPath(key, mountKey(key, prefix)))
+                      }
+                      return o.fn(accessor, path, args, kwargs)
+                    },
+                  }
+                : o,
+          )
         }
       }
       const ancestor = new RAMVFS()
       const ws = new Workspace({ '/': ancestor }, { shellParser: await getTestParser() })
-      const replacement = new IndexedRAM(ancestor.index)
+      const shared = ws.mount('/').indexStore
+      const replacement = new IndexedRAM(shared)
       const bytes = new TextEncoder()
       replacement.loadState({
         type: 'ram',
@@ -90,7 +100,7 @@ describe('Workspace lifecycle', () => {
         },
       })
       const directory = action === 'midpath' ? '/data/dir' : '/data'
-      await ancestor.index.setDir(directory, [
+      await shared.setDir(directory, [
         ['stale.txt', new IndexEntry({ id: 'old', name: 'stale.txt', resourceType: 'file' })],
       ])
       await ws.cache.set('/data/file', bytes.encode('old'))
@@ -243,7 +253,7 @@ describe('Workspace lifecycle', () => {
         resume = resolve
       })
       const prefix = shadow ? '/' : '/data'
-      const mounts: Record<string, VFS> = { [prefix]: old }
+      const mounts: Record<string, BaseVFS> = { [prefix]: old }
       if (change === 'reveal') mounts['/'] = replacement
       const ws = new Workspace(mounts, { shellParser: await getTestParser() })
       ws.registerCli(
@@ -286,32 +296,7 @@ describe('Workspace lifecycle', () => {
     },
   )
 
-  it('does not open mounts at construction time', () => {
-    const ram = new MockVFS()
-    new Workspace({ '/data': ram })
-    expect(ram.opens).toBe(0)
-  })
-
-  it('opens a VFS lazily on first resolve', async () => {
-    const ram = new MockVFS()
-    const ws = new Workspace({ '/data': ram })
-    expect(ram.opens).toBe(0)
-    await ws.resolve('/data/x')
-    expect(ram.opens).toBe(1)
-    await ws.close()
-  })
-
-  it('opens each VFS exactly once across multiple resolves', async () => {
-    const ram = new MockVFS()
-    const ws = new Workspace({ '/data': ram })
-    await ws.resolve('/data/a')
-    await ws.resolve('/data/b')
-    await ws.resolve('/data/c')
-    expect(ram.opens).toBe(1)
-    await ws.close()
-  })
-
-  it('close() calls close() on every opened VFS', async () => {
+  it('close() calls close() on every mounted VFS', async () => {
     const a = new MockVFS()
     const b = new MockVFS()
     const ws = new Workspace({ '/a': a, '/b': b })
@@ -411,7 +396,7 @@ describe('Workspace dynamic mount index', () => {
           const vfs = new RAMVFS()
           const ws = new Workspace({ [shadow ? '/' : '/data']: vfs }, { index: config })
           ws.addMount('/alias', vfs)
-          const index = vfs.index
+          const index = ws.mount(shadow ? '/' : '/data').indexStore
           const entry = new IndexEntry({ id: 'old', name: 'private.txt', resourceType: 'file' })
           try {
             await index.put('/data', entry)
@@ -419,10 +404,9 @@ describe('Workspace dynamic mount index', () => {
               await index.setDir(path, [['private.txt', entry]])
             }
             if (!shadow) await ws.unmount('/data')
-            const replacement = new RAMVFS()
-            ws.addMount('/data', replacement)
+            const fresh = ws.addMount('/data', new RAMVFS()).indexStore
             if (shadow) expect(await ws.vfs.readdir('/data')).toEqual([])
-            for (const candidate of [index, replacement.index]) {
+            for (const candidate of [index, fresh]) {
               for (const path of ['/data', '/data/private.txt', '/data/nested/private.txt']) {
                 expect((await candidate.get(path)).status).toBe(LookupStatus.NOT_FOUND)
               }
@@ -444,24 +428,21 @@ describe('Workspace dynamic mount index', () => {
 
   it('applies the workspace Redis index to added mounts', async () => {
     const ws = new Workspace({}, { index: { type: IndexType.REDIS } })
-    const vfs = new RAMVFS()
-    ws.addMount('/late', vfs)
+    const late = ws.addMount('/late', new RAMVFS())
     try {
-      expect(vfs.index).toBeInstanceOf(RedisIndexCacheStore)
+      expect(late.indexStore).toBeInstanceOf(RedisIndexCacheStore)
     } finally {
       await ws.close()
     }
   })
 
   it('applies the same index TTL to initial and added mounts', async () => {
-    const initial = new RAMVFS()
-    const ws = new Workspace({ '/initial': initial }, { index: { ttl: -1 } })
-    const added = new RAMVFS()
-    ws.addMount('/late', added)
+    const ws = new Workspace({ '/initial': new RAMVFS() }, { index: { ttl: -1 } })
+    const late = ws.addMount('/late', new RAMVFS())
     try {
-      for (const vfs of [initial, added]) {
-        await vfs.index.setDir('/listing', [])
-        expect((await vfs.index.listDir('/listing')).status).toBe(LookupStatus.EXPIRED)
+      for (const index of [ws.mount('/initial').indexStore, late.indexStore]) {
+        await index.setDir('/listing', [])
+        expect((await index.listDir('/listing')).status).toBe(LookupStatus.EXPIRED)
       }
     } finally {
       await ws.close()
@@ -471,17 +452,14 @@ describe('Workspace dynamic mount index', () => {
   it('keeps the index coherent across aliases and duplicate attempts', async () => {
     const ws = new Workspace({}, { index: { ttl: 3600 } })
     const vfs = new RAMVFS()
-    ws.addMount('/late', vfs, MountMode.WRITE)
-    const index = vfs.index
+    const index = ws.addMount('/late', vfs, MountMode.WRITE).indexStore
     const rejected = new RAMVFS()
-    const rejectedIndex = rejected.index
     try {
       await index.setDir('/late', [])
-      ws.addMount('/alias', vfs)
-      expect(vfs.index).toBe(index)
+      expect(ws.addMount('/alias', vfs).indexStore).toBe(index)
       expect((await index.listDir('/late')).entries).toEqual([])
       expect(() => ws.addMount('late/', rejected)).toThrow('duplicate mount prefix')
-      expect(rejected.index).toBe(rejectedIndex)
+      expect(ws.mount('/late').indexStore).toBe(index)
       // Mutations must evict the configured store, including after aliasing.
       await ws.vfs.writeFile('/late/new.txt', 'new')
       expect((await index.listDir('/late')).status).toBe(LookupStatus.NOT_FOUND)
@@ -493,15 +471,12 @@ describe('Workspace dynamic mount index', () => {
 })
 
 describe('Workspace custom cache option', () => {
-  class StubCache extends BaseVFS implements VFS, FileCache {
-    readonly kind = VFSName.RAM
+  class StubCache extends BaseVFS implements FileCache {
+    override readonly name = VFSName.RAM
     readonly store = new Map<string, Uint8Array>()
     getCalls = 0
     setCalls = 0
     maxDrainBytes: number | null = null
-    open(): Promise<void> {
-      return Promise.resolve()
-    }
     override close(): Promise<void> {
       return Promise.resolve()
     }
@@ -639,6 +614,7 @@ describe('Workspace.unmount', () => {
       )
       const cache = ws.cache
       ws.addMount('/alias', vfs)
+      const index = ws.mount('/data').indexStore
       const aliasEntries = await ws.vfs.readdir('/alias')
       let enter = (): void => undefined
       let resume = (): void => undefined
@@ -649,11 +625,9 @@ describe('Workspace.unmount', () => {
         resume = resolve
       })
       const evict =
-        store === 'file'
-          ? cache.evictPrefix.bind(cache)
-          : vfs.index.invalidatePrefix.bind(vfs.index)
+        store === 'file' ? cache.evictPrefix.bind(cache) : index.invalidatePrefix.bind(index)
       const spy =
-        store === 'file' ? vi.spyOn(cache, 'evictPrefix') : vi.spyOn(vfs.index, 'invalidatePrefix')
+        store === 'file' ? vi.spyOn(cache, 'evictPrefix') : vi.spyOn(index, 'invalidatePrefix')
       spy.mockImplementationOnce(async (prefix) => {
         enter()
         await release
@@ -783,18 +757,17 @@ describe('Workspace.unmount', () => {
     await ws.close()
   })
 
-  it('closes the VFS exactly once when it was opened by the workspace', async () => {
+  it('closes the VFS exactly once when it was resolved through the workspace', async () => {
     const r = new MockVFS()
     const ws = new Workspace({ '/x': r })
     await ws.resolve('/x/y')
-    expect(r.opens).toBe(1)
     await ws.unmount('/x')
     expect(r.closes).toBe(1)
     await ws.close()
     expect(r.closes).toBe(1)
   })
 
-  it('closes an owned VFS even when it was never explicitly opened', async () => {
+  it('closes an owned VFS even when it was never resolved', async () => {
     const r = new MockVFS()
     const ws = new Workspace({ '/x': r })
     await ws.unmount('/x')
@@ -1164,9 +1137,6 @@ it('updates default-profile policy for unbound ops without replacing the session
 })
 
 it('unmount drains metadata globs and their index writes', async () => {
-  const vfs = new RAMVFS()
-  const ws = new Workspace({ '/data': vfs })
-  await ws.resolve('/data')
   let enter = (): void => undefined
   let resume = (): void => undefined
   const entered = new Promise<void>((resolve) => {
@@ -1176,20 +1146,36 @@ it('unmount drains metadata globs and their index writes', async () => {
     resume = resolve
   })
   let closed = false
-  const index = vfs.index
+  class GatedGlobRAM extends RAMVFS {
+    override ops(): readonly RegisteredOp[] {
+      return super.ops().map(
+        (o): RegisteredOp =>
+          o.name === 'glob'
+            ? {
+                ...o,
+                fn: async (_accessor, _path, _args, { index }) => {
+                  enter()
+                  await release
+                  expect(closed).toBe(false)
+                  if (index === undefined) throw new Error('missing index')
+                  await index.setDir('/data', [
+                    ['late', new IndexEntry({ id: 'late', name: 'late', resourceType: 'file' })],
+                  ])
+                  return []
+                },
+              }
+            : o,
+      )
+    }
+  }
+  const vfs = new GatedGlobRAM()
+  const ws = new Workspace({ '/data': vfs })
+  await ws.resolve('/data')
+  const index = ws.mount('/data').indexStore
   const closeVfs = vfs.close.bind(vfs)
   vi.spyOn(vfs, 'close').mockImplementation(async () => {
     closed = true
     await closeVfs()
-  })
-  vi.spyOn(vfs, 'glob').mockImplementation(async () => {
-    enter()
-    await release
-    expect(closed).toBe(false)
-    await index.setDir('/data', [
-      ['late', new IndexEntry({ id: 'late', name: 'late', resourceType: 'file' })],
-    ])
-    return []
   })
   const expanding = expandOperands(ws.namespace, [
     new PathSpec({

@@ -17,8 +17,8 @@ import { VFSName } from '../../types.ts'
 import { MONGODB_OPS } from './index.ts'
 
 describe('MONGODB_OPS', () => {
-  it('registers exactly read, readdir, and stat for the mongodb VFS', () => {
-    expect(MONGODB_OPS.map((o) => o.name).sort()).toEqual(['read', 'readdir', 'stat'])
+  it('registers glob, read, readdir, and stat for the mongodb VFS', () => {
+    expect(MONGODB_OPS.map((o) => o.name).sort()).toEqual(['glob', 'read', 'readdir', 'stat'])
   })
 
   it('all ops target VFSName.MONGODB and are read-only', () => {

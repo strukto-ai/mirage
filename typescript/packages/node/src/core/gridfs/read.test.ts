@@ -55,7 +55,7 @@ function accessor(): GridFSAccessor {
 
 describe('gridfs read token', () => {
   it('stamps the token stat stamps', async () => {
-    // GridFS is one of two backends claiming READ_REVALIDATABLE. The
+    // GridFS is one of two backends claiming readRevalidatable. The
     // claim is that its stat and its read stamp a token that can be
     // compared, and both use the file's `_id` today. Nothing failed if
     // one side moved to an md5 or an uploadDate -- which is exactly the

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DEFAULT_READ_TTL, ReadPolicy, type ReadSpec } from '../../types.ts'
-import { cachesReads, readRevalidatable, type VFS } from '../../vfs/base.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 
 /**
  * Coerce a declared read policy and bound into a ReadSpec.
@@ -90,7 +90,7 @@ export function resolveReadSpec(policy: unknown, ttl: unknown): ReadSpec {
  *
  * @throws if the backend cannot honour the declared policy.
  */
-export function checkReadCapability(prefix: string, vfs: VFS, spec: ReadSpec): void {
+export function checkReadCapability(prefix: string, vfs: BaseVFS, spec: ReadSpec): void {
   // Coerced, not compared raw. `ReadPolicy` is a string-const object, so a
   // runtime `ReadSpec` carrying `'FRESH'` or `'banana'` -- what an untyped
   // caller reaches the programmatic door with -- matches neither `===`
@@ -121,16 +121,16 @@ export function checkReadCapability(prefix: string, vfs: VFS, spec: ReadSpec): v
     )
   }
   if (policy !== ReadPolicy.FRESH) return
-  if (!cachesReads(vfs)) {
+  if (!vfs.cachesReads) {
     throw new Error(
       `mount '${prefix}': read: fresh needs a resource that caches reads; ` +
-        `${vfs.kind} does not, so the freshness check could never run`,
+        `${vfs.name} does not, so the freshness check could never run`,
     )
   }
-  if (!readRevalidatable(vfs)) {
+  if (!vfs.readRevalidatable) {
     throw new Error(
       `mount '${prefix}': read: fresh needs a resource that stamps a ` +
-        `comparable content token on reads; ${vfs.kind} does not`,
+        `comparable content token on reads; ${vfs.name} does not`,
     )
   }
 }

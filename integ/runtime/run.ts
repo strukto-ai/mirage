@@ -41,7 +41,7 @@ import {
   type OpsContext,
   type OpsResultContext,
   type Policy,
-  type VFS,
+  type BaseVFS,
   type RunResult,
   type RuntimeEntry,
   type FilesystemOperation,
@@ -433,7 +433,7 @@ class FailingRAMVFS extends RAMVFS {
     this.failing = new Set(failing)
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return super
       .ops()
       .map((op) =>
@@ -450,7 +450,7 @@ class FailingRAMVFS extends RAMVFS {
   }
 }
 
-async function buildVfs(spec: MountSpecJson, runId: string): Promise<VFS> {
+async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
   if (spec.vfs === 'ram') {
     const vfs = spec.failing !== undefined ? new FailingRAMVFS(spec.failing) : new RAMVFS()
     if (spec.generated_files !== undefined) {

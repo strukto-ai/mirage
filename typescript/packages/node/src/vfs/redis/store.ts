@@ -73,10 +73,6 @@ export class RedisStore implements RedisStoreLike {
     return this.clientPromise
   }
 
-  async open(): Promise<void> {
-    await this.client()
-  }
-
   async getFile(path: string): Promise<Uint8Array | null> {
     const c = await this.client()
     const typed = c as unknown as {

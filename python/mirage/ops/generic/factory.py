@@ -17,6 +17,7 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.ops.generic.table import OpFn, OpsTable
 from mirage.ops.registry import RegisteredOp
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 
 
@@ -79,6 +80,24 @@ def _make_ranged_read(table: OpsTable) -> OpFn:
         return slice_window(data, offset, size)
 
     return read
+
+
+def _make_glob(table: OpsTable) -> OpFn:
+    # Glob expansion is a walk over readdir, so it is derived here rather
+    # than written per driver: one walker, capped by the table's own
+    # limit. The mount hands it one pattern spec at a time and passes the
+    # rest through, which is what every driver's resolver did with the
+    # list.
+    resolve = make_resolve_glob(table.readdir, table.max_glob_matches)
+
+    async def glob(accessor: Accessor,
+                   path: PathSpec,
+                   *,
+                   index: IndexCacheStore = NULL_INDEX,
+                   **kwargs) -> list[PathSpec]:
+        return await resolve(accessor, [path], index)
+
+    return glob
 
 
 def _make_data_write(fn: OpFn) -> OpFn:
@@ -252,6 +271,7 @@ def make_generic_ops(
     _emit(ops, vfs_names, "readdir", _make_read(table.readdir), False, None,
           skip)
     _emit(ops, vfs_names, "stat", _make_read(table.stat), False, None, skip)
+    _emit(ops, vfs_names, "glob", _make_glob(table), False, None, skip)
 
     if table.write is not None:
         _emit(ops, vfs_names, "write", _make_data_write(table.write), True,

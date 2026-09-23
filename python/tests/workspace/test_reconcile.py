@@ -105,7 +105,7 @@ async def test_may_serve_cached_no_fingerprint_forces_reread():
 
     The path exists and is cached, so the only reason to refuse is the
     verdict: RAM stats without a fingerprint, which is UNKNOWN, which
-    evicts. This used to be answered by a ``SUPPORTS_SNAPSHOT``
+    evicts. This used to be answered by a ``supports_snapshot``
     short-circuit that never probed at all.
     """
     resource = RAMVFS()
@@ -129,7 +129,7 @@ async def test_may_serve_cached_no_fingerprint_forces_reread():
 async def test_may_serve_cached_serves_a_fingerprinted_live_only_backend():
     """A live-only backend that DOES stamp a fingerprint keeps its cache.
 
-    ``SUPPORTS_SNAPSHOT`` is about whether a mount can be snapshotted, not
+    ``supports_snapshot`` is about whether a mount can be snapshotted, not
     about whether its stat carries a content token; box, dropbox, github,
     ssh and dify stamp one without setting the flag. Reading the flag here
     threw their verified entries away.
@@ -141,7 +141,7 @@ async def test_may_serve_cached_serves_a_fingerprinted_live_only_backend():
         await ws.namespace.ensure_loaded()
         mount = ws.namespace.mount_for("/data/f.txt")
         mount.read = ReadSpec(policy=ReadPolicy.FRESH)
-        assert mount.vfs.SUPPORTS_SNAPSHOT is False
+        assert mount.vfs.supports_snapshot is False
         real = mount.execute_op
 
         async def fingerprinted(op, path, **kwargs):
@@ -254,9 +254,10 @@ async def test_always_probes_live_s3_with_warm_index(index_type, surface,
         ws = Workspace({"/s3": vfs},
                        index=index,
                        read=ReadSpec(policy=ReadPolicy.FRESH))
+        store = ws.mount("/s3").index_store
         try:
             assert (await ws.shell("ls /s3/")).exit_code == 0
-            assert (await vfs.index.get("/s3/f.txt")).entry is not None
+            assert (await store.get("/s3/f.txt")).entry is not None
             assert (await ws.shell("cat /s3/f.txt")).stdout == b"v1"
             assert await ws.cache.exists("/s3/f.txt")
             if change == "overwrite":
@@ -274,7 +275,7 @@ async def test_always_probes_live_s3_with_warm_index(index_type, surface,
                 with pytest.raises(FileNotFoundError):
                     await ws.vfs.read("/s3/f.txt")
         finally:
-            await vfs.index.clear()
+            await store.clear()
             await ws.close()
 
 
@@ -287,7 +288,7 @@ async def test_unverified_probe_cannot_serve_cached_bytes(
     try:
         mount = ws.namespace.mount_for("/data/f.txt")
         mount.read = ReadSpec(policy=ReadPolicy.FRESH)
-        monkeypatch.setattr(mount.vfs, "SUPPORTS_SNAPSHOT", True)
+        monkeypatch.setattr(mount.vfs, "supports_snapshot", True)
         await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
 
         async def stat(*args, **kwargs):

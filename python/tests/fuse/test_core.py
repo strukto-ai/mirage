@@ -322,9 +322,8 @@ class _Sizeless:
 async def test_o_trunc_open_hydrates_through_the_renderer():
     # An O_TRUNC open of a size-unknown file whose extension renders must
     # serve the rendered body of the now-empty file, not raw emptiness.
-    vfs = RAMVFS()
-    vfs.register_op(_read_tally)
-    ws = Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.mount("/data/").register_fns([_read_tally])
     await ws.shell("tee /data/books.tally", stdin=b"0123456789")
     core = MountCore(_Sizeless(ws.vfs))
     fh = core.open("/data/books.tally", os.O_WRONLY | os.O_TRUNC)
@@ -336,9 +335,8 @@ async def test_o_trunc_open_hydrates_through_the_renderer():
 
 
 def _tally_core() -> MountCore:
-    vfs = RAMVFS()
-    vfs.register_op(_read_tally)
-    ws = Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.mount("/data/").register_fns([_read_tally])
     return MountCore(ws.vfs)
 
 

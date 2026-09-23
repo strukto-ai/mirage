@@ -50,7 +50,6 @@ from mirage.policy import (Ask, Decision, Decisions, Explanation, Outcome,
                            SessionProfile)
 from mirage.policy.types import OpsContext
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.generic import GenericVFS
 from mirage.vfs.registry import (build_vfs, known_vfs_names, register_vfs)
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
@@ -118,7 +117,6 @@ __all__ = [
     "Explanation",
     "FileType",
     "FlagView",
-    "GenericVFS",
     "IOResult",
     "IndexCacheStore",
     "IndexConfig",

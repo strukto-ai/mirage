@@ -30,7 +30,7 @@ export interface HfSpacesVFSState {
 }
 
 export class HfSpacesVFS extends HfHubVFS {
-  readonly kind: string = VFSName.HF_SPACES
+  override readonly name: string = VFSName.HF_SPACES
   readonly prompt: string = HF_SPACES_PROMPT
   readonly config: HfRepoConfig
   readonly accessor: HfSpacesHubAccessor
@@ -51,7 +51,7 @@ export class HfSpacesVFS extends HfHubVFS {
 
   getState(): Promise<HfSpacesVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactHfRepoConfig(this.config),
     })
   }

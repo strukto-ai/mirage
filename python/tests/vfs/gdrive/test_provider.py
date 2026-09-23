@@ -48,4 +48,4 @@ def test_vfs_accessor(config):
 def test_vfs_commands_registered(config):
     with patch("mirage.core.google.client.refresh_access_token", ):
         vfs = GoogleDriveVFS(config)
-        assert len(vfs._commands) >= 50
+        assert len(vfs.commands()) >= 50

@@ -127,7 +127,7 @@ async def test_reconcile_private_index_can_resolve_github_ids(tree_calls):
     # place on the revalidatable roster: the instance declares the
     # capability so the mount can legally carry `read: fresh`.
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    vfs.READ_REVALIDATABLE = True
+    vfs.read_revalidatable = True
     ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     try:
         path = "/gh/src/main.py"
@@ -162,11 +162,12 @@ async def test_always_reads_current_github_blob_after_probe(
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
     monkeypatch.setattr("mirage.core.github.read.read_bytes", read_bytes)
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    vfs.READ_REVALIDATABLE = True
+    vfs.read_revalidatable = True
     ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     try:
         assert (await ws.shell("cat /gh/f.txt")).stdout == b"v1"
-        assert (await vfs.index.get("/gh/f.txt")).entry.id == "v1"
+        index = ws.mount("/gh").index_store
+        assert (await index.get("/gh/f.txt")).entry.id == "v1"
         sha = "v2"
         if surface == "shell":
             assert (await ws.shell("cat /gh/f.txt")).stdout == b"v2"

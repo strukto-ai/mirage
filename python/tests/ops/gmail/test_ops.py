@@ -26,6 +26,7 @@ def _op(name: str):
 def test_registers_read_only_trio():
     rows = {(o.name, o.vfs, o.filetype, o.write) for o in OPS}
     assert rows == {
+        ("glob", "gmail", None, False),
         ("read", "gmail", None, False),
         ("readdir", "gmail", None, False),
         ("stat", "gmail", None, False),

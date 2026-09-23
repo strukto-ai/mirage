@@ -20,8 +20,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from mirage import (NULL_INDEX, Accessor, CommandIO, FileStat, GenericVFS,
-                    IndexCacheStore, MountMode, PathSpec, Workspace,
+from mirage import (NULL_INDEX, Accessor, BaseVFS, CommandIO, FileStat,
+                    IndexCacheStore, Mount, MountMode, PathSpec, Workspace,
                     stream_from_bytes)
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.policy import Action, Deny, Policy, PolicyDenied
@@ -135,7 +135,7 @@ def _notes_io() -> CommandIO:
                      local=False)
 
 
-class Notes(GenericVFS):
+class Notes(BaseVFS):
     """Content the VFS owns rides its state, so a version restores it."""
 
     def __init__(self, pages: dict[str, str] | None = None) -> None:
@@ -149,7 +149,7 @@ class Notes(GenericVFS):
         self.notes.pages = dict(state.get("pages", {}))
 
 
-class Bare(GenericVFS):
+class Bare(BaseVFS):
     """Keeps the default state, so it has to be handed back live."""
 
     def __init__(self) -> None:
@@ -210,8 +210,8 @@ from functools import partial
 
 from pydantic import BaseModel
 
-from mirage import (NULL_INDEX, Accessor, CommandIO, FileStat,
-                    GenericVFS, stream_from_bytes)
+from mirage import (NULL_INDEX, Accessor, BaseVFS, CommandIO, FileStat,
+                    stream_from_bytes)
 from mirage.types import FileType
 
 
@@ -236,7 +236,7 @@ async def stat(accessor, path, index=NULL_INDEX):
     return FileStat(name="/", size=None, type=FileType.DIRECTORY)
 
 
-class Tagged(GenericVFS):
+class Tagged(BaseVFS):
     CONFIG_CLS = ZetaConfig
 
     def __init__(self, config: ZetaConfig) -> None:
@@ -262,8 +262,12 @@ async def test_a_colon_reference_rebuilds_through_the_recorded_ref(
     module = tmp_path / "tagged_backend.py"
     module.write_text(TAGGED_MODULE)
     ref = f"{module}:Tagged"
-    ws = Workspace({"/t/": build_vfs(ref, {"label": "x"})},
-                   mode=MountMode.READ)
+    ws = Workspace({
+        "/t/":
+        Mount(vfs=build_vfs(ref, {"label": "x"}),
+              mode=MountMode.READ,
+              vfs_ref=ref)
+    })
     try:
         state = await to_state_dict(ws)
     finally:
@@ -280,7 +284,7 @@ async def test_a_colon_reference_rebuilds_through_the_recorded_ref(
     # The config class is the declared CONFIG_CLS, not the first name in
     # the module ending in Config (AlphaConfig would have been picked).
     assert rebuilt.config.label == "x"
-    assert rebuilt.vfs_ref == ref
+    assert args.mount_args["/t/"].vfs_ref == ref
 
 
 @pytest.mark.asyncio
@@ -318,7 +322,10 @@ class SeededRAM(RAMVFS):
 @pytest.mark.asyncio
 async def test_an_alias_over_a_builtin_rebuilds_through_its_ref_not_its_type():
     register_vfs("seeded", SeededRAM)
-    ws = Workspace({"/s/": build_vfs("seeded")}, mode=MountMode.WRITE)
+    ws = Workspace({
+        "/s/":
+        Mount(vfs=build_vfs("seeded"), mode=MountMode.WRITE, vfs_ref="seeded")
+    })
     try:
         await ws.shell("echo one > /s/a.txt")
         state = await to_state_dict(ws)
@@ -333,7 +340,7 @@ async def test_an_alias_over_a_builtin_rebuilds_through_its_ref_not_its_type():
     try:
         seeded = [m for m in restored.mounts() if m.prefix == "/s/"][0]
         assert type(seeded.vfs) is SeededRAM
-        assert seeded.vfs.vfs_ref == "seeded"
+        assert seeded.vfs_ref == "seeded"
         result = await restored.shell("cat /s/a.txt")
         assert await result.stdout_str() == "one\n"
     finally:
@@ -346,7 +353,8 @@ async def test_a_colon_reference_subclassing_a_builtin_keeps_the_subclass(
     module = tmp_path / "seeded_backend.py"
     module.write_text(SEEDED_MODULE)
     ref = f"{module}:SeededRAM"
-    ws = Workspace({"/s/": build_vfs(ref)}, mode=MountMode.READ)
+    ws = Workspace(
+        {"/s/": Mount(vfs=build_vfs(ref), mode=MountMode.READ, vfs_ref=ref)})
     try:
         state = await to_state_dict(ws)
     finally:

@@ -31,6 +31,7 @@ import type { MountEntry } from './mount/mount.ts'
 const ENC = new TextEncoder()
 import { enotsup } from '../utils/errors.ts'
 import { Reconciler } from './reconcile.ts'
+import { ops } from '../test-utils.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 function enoent(path: string): Error {
@@ -123,7 +124,7 @@ describe('Reconciler', () => {
   // refused would sit there and refetch on every read forever.
   it('mayServeCached drops a bound-less entry under bounded rather than refusing it', async () => {
     const ram = new RAMVFS()
-    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), ENC.encode('v1'))
+    await ops(ram).write(PathSpec.fromStrPath('/f.txt'), ENC.encode('v1'))
     const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
     try {
       await ws.cache.set('/data/f.txt', ENC.encode('v1'))
@@ -162,7 +163,7 @@ describe('Reconciler', () => {
     // evicts. This used to be answered by a supportsSnapshot short-circuit
     // that never probed at all.
     const ram = new RAMVFS()
-    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
+    await ops(ram).write(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
     const ws = new Workspace({ '/data': ram })
     try {
       const mount = withFresh(mountOf(ws, '/data/f.txt'))
@@ -181,7 +182,7 @@ describe('Reconciler', () => {
     // ssh and dify stamp one without setting the flag. Reading the flag here
     // threw their verified entries away.
     const ram = new RAMVFS()
-    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
+    await ops(ram).write(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
     const ws = new Workspace({ '/data': ram })
     try {
       const mount = withFresh(mountOf(ws, '/data/f.txt'))
@@ -239,7 +240,7 @@ describe('Reconciler', () => {
       // anomaly worth surfacing. Asserting the log is what keeps the carve-out
       // from being dead weight.
       const ram = new RAMVFS()
-      await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
+      await ops(ram).write(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
       const ws = new Workspace({ '/data': ram })
       const logged = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
       try {
@@ -379,19 +380,19 @@ it.each(['gate', 'shell'])('reconciles GitHub IDs before the %s reread', async (
   try {
     const path = '/gh/f.txt'
     const scope = new PathSpec({ virtual: path, vfsPath: 'f.txt', directory: '/gh/' })
-    expect((await githubStat(accessor, scope, vfs.index)).fingerprint).toBe('v1')
+    const mount = withFresh(mountOf(ws, path))
+    expect((await githubStat(accessor, scope, mount.indexStore)).fingerprint).toBe('v1')
     await ws.cache.set(path, new TextEncoder().encode('v1'), { fingerprint: 'v1' })
     vi.spyOn(ws.opsRegistry, 'call').mockImplementation((_op, _vfs, _accessor, p, _args, kwargs) =>
       githubStat(accessor, p, kwargs?.index),
     )
-    const mount = withFresh(mountOf(ws, path))
     const rec = new Reconciler(ws.cache, ws.namespace, ws.opsRegistry)
     // An unchanged live object must not be mistaken for a missing path.
     expect(await rec.mayServeCached(mount, path)).toBe(true)
     sha = 'v2'
     if (surface === 'gate') expect(await rec.mayServeCached(mount, path)).toBe(false)
     else await rec.reconcileRead(mount, path)
-    expect(new TextDecoder().decode(await githubRead(accessor, scope, vfs.index))).toBe('v2')
+    expect(new TextDecoder().decode(await githubRead(accessor, scope, mount.indexStore))).toBe('v2')
   } finally {
     vi.restoreAllMocks()
     await ws.close()

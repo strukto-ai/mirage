@@ -525,7 +525,7 @@ describe('savedVfsBuild', () => {
   }
 
   it('rebuilds through the recorded ref before a type the registry also knows', () => {
-    // A subclass inherits `kind`, so an alias registered over a builtin
+    // A subclass inherits `name`, so an alias registered over a builtin
     // reports the builtin's type; the ref is the door it came through.
     expect(savedVfsBuild(saved('redis', 'seeded'), known)?.name).toBe('seeded')
     expect(savedVfsBuild(saved('ram', 'seeded'), known)?.name).toBe('seeded')

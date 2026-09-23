@@ -197,7 +197,7 @@ def check_read_capability(prefix: str, vfs: BaseVFS, spec: ReadSpec) -> None:
             f"mount {prefix!r}: read: fresh needs a resource that caches "
             f"reads; {name} does not, so the freshness check could "
             "never run")
-    if not vfs.READ_REVALIDATABLE:
+    if not vfs.read_revalidatable:
         raise ValueError(
             f"mount {prefix!r}: read: fresh needs a resource that stamps a "
             f"comparable content token on reads; {name} does not")

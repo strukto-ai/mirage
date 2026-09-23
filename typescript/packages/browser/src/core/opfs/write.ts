@@ -23,7 +23,7 @@ export async function writeBytes(
   p: PathSpec,
   data: Uint8Array,
 ): Promise<void> {
-  const root = accessor.rootHandle
+  const root = await accessor.root()
   const timer = startOp()
   const virtual = p.mountPath
   let handle: FileSystemFileHandle

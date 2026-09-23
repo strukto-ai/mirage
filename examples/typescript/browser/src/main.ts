@@ -25,7 +25,7 @@ import {
   OCIVFS,
   OPFSVFS,
   R2VFS,
-  type VFS,
+  type BaseVFS,
   S3VFS,
   type S3BrowserOperation,
   type S3BrowserSignOptions,
@@ -85,7 +85,7 @@ async function fetchConfigured(): Promise<BackendName[]> {
   }
 }
 
-function buildVfs(backend: BackendName): VFS {
+function buildVfs(backend: BackendName): BaseVFS {
   const provider = makePresigner(backend)
   switch (backend) {
     case 's3':
@@ -276,7 +276,7 @@ async function main(): Promise<void> {
   const configured = await fetchConfigured()
   line(`configured backends: ${configured.length > 0 ? configured.join(', ') : '(none)'}`, 'ok')
 
-  const mounts: Record<string, VFS> = {
+  const mounts: Record<string, BaseVFS> = {
     '/': new OPFSVFS({ root: 'mirage-browser-demo' }),
   }
   for (const b of configured) mounts[`/${b}/`] = buildVfs(b)

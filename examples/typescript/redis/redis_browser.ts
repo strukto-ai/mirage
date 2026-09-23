@@ -32,10 +32,7 @@ import { once } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { MountMode, RedisVFS, Workspace } from '@struktoai/mirage-browser'
-import {
-  RedisVFS as NodeRedisVFS,
-  Workspace as NodeWorkspace,
-} from '@struktoai/mirage-node'
+import { RedisVFS as NodeRedisVFS, Workspace as NodeWorkspace } from '@struktoai/mirage-node'
 import { createClient, RESP_TYPES } from 'redis'
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
@@ -87,7 +84,10 @@ function reply(res: ServerResponse, status: number, payload: Json): void {
 }
 
 async function startRestFront(token: string): Promise<{ url: string; close: () => Promise<void> }> {
-  const client = createClient({ url: REDIS_URL, socket: { reconnectStrategy: false } })
+  const client = createClient({
+    url: REDIS_URL,
+    socket: { reconnectStrategy: false },
+  })
   await client.connect()
   // Bulk strings as Buffers, so a value that is not UTF-8 survives the hop.
   // On the options, not through withTypeMapping: sendCommand reads the
@@ -96,7 +96,9 @@ async function startRestFront(token: string): Promise<{ url: string; close: () =
 
   const run = async (args: (string | Buffer)[], base64: boolean): Promise<Outcome> => {
     try {
-      return { result: encodeReply(await client.sendCommand(args, { typeMapping }), base64) }
+      return {
+        result: encodeReply(await client.sendCommand(args, { typeMapping }), base64),
+      }
     } catch (err) {
       return { error: errorText(err) }
     }
@@ -181,10 +183,9 @@ async function main(): Promise<void> {
     keyPrefix: KEY_PREFIX,
     maxRequestBytes: 64,
   })
-  await browserRedis.open()
   // Clear any previous state so the demo is reproducible.
   await browserRedis.store.clear()
-  await browserRedis.open()
+  await browserRedis.store.addDir('/')
   const ws = new Workspace({ '/data': browserRedis }, { mode: MountMode.WRITE })
 
   const nodeRedis = new NodeRedisVFS({ url: REDIS_URL, keyPrefix: KEY_PREFIX })

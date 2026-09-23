@@ -117,7 +117,7 @@ async def test_stat_gcs_orphaned_overlay_under_fresh():
     """
     ram = RAMVFS()
     ram.caches_reads = True
-    ram.READ_REVALIDATABLE = True
+    ram.read_revalidatable = True
     ws = Workspace({"/data/": ram},
                    mode=MountMode.WRITE,
                    read=ReadSpec(policy=ReadPolicy.FRESH))
@@ -138,7 +138,7 @@ async def test_shell_stat_gcs_orphan_under_fresh():
     the overlay."""
     ram = RAMVFS()
     ram.caches_reads = True
-    ram.READ_REVALIDATABLE = True
+    ram.read_revalidatable = True
     ws = Workspace({"/r/": ram},
                    mode=MountMode.WRITE,
                    read=ReadSpec(policy=ReadPolicy.FRESH))

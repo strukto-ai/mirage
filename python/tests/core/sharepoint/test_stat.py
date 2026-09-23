@@ -184,7 +184,7 @@ async def test_stat_site_and_drive_have_no_metadata():
 
 @pytest.mark.asyncio
 async def test_stat_size_matches_read_for_every_file():
-    # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat reports
+    # The fskit invariant behind sizes_always_known: the size stat reports
     # from the listing must equal the byte length a read delivers, for
     # every file in the tree, 0-byte files included.
     contents = {

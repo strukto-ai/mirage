@@ -16,21 +16,33 @@ import { describe, expect, it } from 'vitest'
 import { IndexType } from '../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
+import { Mount } from './mount/spec.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 describe('Workspace index option', () => {
   it('applies the workspace index config to mounts', async () => {
     const ram = new RAMVFS()
     const ws = new Workspace({ '/data': ram }, { index: { type: IndexType.RAM, ttl: 5 } })
-    expect(ram.index).toBeInstanceOf(RAMIndexCacheStore)
-    expect((ram.index as unknown as { ttl: number }).ttl).toBe(5)
+    const index = ws.mount('/data').indexStore
+    expect(index).toBeInstanceOf(RAMIndexCacheStore)
+    expect((index as unknown as { ttl: number }).ttl).toBe(5)
     await ws.close()
   })
 
   it('keeps the VFS default index when no workspace index is given', async () => {
     const ram = new RAMVFS()
     const ws = new Workspace({ '/data': ram }, {})
-    expect((ram.index as unknown as { ttl: number }).ttl).toBe(0)
+    expect((ws.mount('/data').indexStore as unknown as { ttl: number }).ttl).toBe(0)
+    await ws.close()
+  })
+
+  it('lets a mount placement win over the workspace index config', async () => {
+    const ram = new RAMVFS()
+    const ws = new Workspace(
+      { '/data': new Mount(ram, { index: { type: IndexType.RAM, ttl: 7 } }) },
+      { index: { type: IndexType.RAM, ttl: 5 } },
+    )
+    expect((ws.mount('/data').indexStore as unknown as { ttl: number }).ttl).toBe(7)
     await ws.close()
   })
 })

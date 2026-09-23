@@ -45,7 +45,7 @@ CONTENT = b'{"messages": 2}\n'
 class SizeUnknownRAM(RAMVFS):
     """A VFS that cannot size its files, like Slack or Gmail."""
 
-    SIZES_ALWAYS_KNOWN = False
+    sizes_always_known = False
 
 
 def attempt(fn: Callable[[], object]) -> str:

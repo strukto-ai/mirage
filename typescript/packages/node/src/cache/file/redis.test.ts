@@ -39,7 +39,6 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     cache = new RedisFileCacheStore(
       REDIS_URL !== undefined ? { url: REDIS_URL, keyPrefix: prefix } : { keyPrefix: prefix },
     )
-    await cache.open()
     await cache.clear()
   })
 

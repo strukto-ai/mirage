@@ -25,7 +25,7 @@ def test_vfs_name():
 
 def test_vfs_registers_three_ops():
     res = PostgresVFS(PostgresConfig(dsn="postgres://localhost/db"))
-    op_names = {ro.name for ro in res.ops_list()}
+    op_names = {ro.name for ro in res.ops()}
     assert {"read", "readdir", "stat"} <= op_names
 
 

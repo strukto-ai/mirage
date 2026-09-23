@@ -146,9 +146,9 @@ export function makeMockRoot(name = 'root'): FileSystemDirectoryHandle {
 }
 
 function fakeOPFSVfs(handle: FileSystemDirectoryHandle): {
-  requireHandle: () => FileSystemDirectoryHandle
+  root: () => Promise<FileSystemDirectoryHandle>
 } {
-  return { requireHandle: () => handle }
+  return { root: () => Promise.resolve(handle) }
 }
 
 export function makeMockAccessor(name = 'root'): OPFSAccessor {

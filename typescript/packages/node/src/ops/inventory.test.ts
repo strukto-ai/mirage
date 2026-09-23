@@ -37,6 +37,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
   disk: [
     ['append', 'disk', '', true],
     ['create', 'disk', '', true],
+    ['glob', 'disk', '', false],
     ['mkdir', 'disk', '', true],
     ['read', 'disk', '', false],
     ['readdir', 'disk', '', false],
@@ -49,6 +50,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['write', 'disk', '', true],
   ],
   email: [
+    ['glob', 'email', '', false],
     ['read', 'email', '', false],
     ['readdir', 'email', '', false],
     ['stat', 'email', '', false],
@@ -62,6 +64,10 @@ const OPS_INVENTORY: Record<string, Row[]> = {
     ['create', 'hf_datasets', '', true],
     ['create', 'hf_models', '', true],
     ['create', 'hf_spaces', '', true],
+    ['glob', 'hf_buckets', '', false],
+    ['glob', 'hf_datasets', '', false],
+    ['glob', 'hf_models', '', false],
+    ['glob', 'hf_spaces', '', false],
     ['mkdir', 'hf_buckets', '', true],
     ['mkdir', 'hf_datasets', '', true],
     ['mkdir', 'hf_models', '', true],
@@ -90,6 +96,7 @@ const OPS_INVENTORY: Record<string, Row[]> = {
   ssh: [
     ['append', 'ssh', '', true],
     ['create', 'ssh', '', true],
+    ['glob', 'ssh', '', false],
     ['mkdir', 'ssh', '', true],
     ['read', 'ssh', '', false],
     ['readdir', 'ssh', '', false],

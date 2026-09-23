@@ -60,7 +60,7 @@
   },
   "vfs_capabilities": {
     "github": {
-      "supports_snapshot": "TypeScript records the blob SHA as a snapshot fingerprint; python stamps the same SHA in core/github/stat.py but does not declare SUPPORTS_SNAPSHOT, so no drift check fires. Left to the snapshot redesign (#721) rather than flipped here, because turning it on changes what a python snapshot records."
+      "supports_snapshot": "TypeScript records the blob SHA as a snapshot fingerprint; python stamps the same SHA in core/github/stat.py but does not declare supports_snapshot, so no drift check fires. Left to the snapshot redesign (#721) rather than flipped here, because turning it on changes what a python snapshot records."
     },
     "lancedb": {
       "caches_reads": "Both languages compute it per mount from the URI scheme (remote tables cache, local ones do not): lancedb.py sets it in __init__, lancedb.ts in its constructor. The generators disagree because python reads the class attribute, which is still the base default at class level, while the TypeScript walk reads the constructor assignment. A per-instance value, not a table, so there is nothing to single-source."

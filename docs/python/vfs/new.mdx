@@ -11,14 +11,14 @@ A VFS maps an external system to Mirage's filesystem operations and shell comman
 
 ## Ship Your Own Backend
 
-Everything an out-of-tree backend needs is exported from the `mirage` package root, the same front door that hands out `Workspace` and the twin of what `@struktoai/mirage-core` gives a TypeScript backend; there is no separate SDK module. Write the core functions over your data source, put them on a `CommandIO`, and `GenericVFS` wires the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
+Everything an out-of-tree backend needs is exported from the `mirage` package root, the same front door that hands out `Workspace` and the twin of what `@struktoai/mirage-core` gives a TypeScript backend; there is no separate SDK module. Write the core functions over your data source, put them on a `CommandIO`, and `BaseVFS` wires the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
 
 ```python
 from functools import partial
 
 from pydantic import BaseModel, SecretStr
 
-from mirage import (Accessor, CommandIO, FileStat, GenericVFS,
+from mirage import (Accessor, CommandIO, FileStat, BaseVFS,
                     stream_from_bytes)
 
 
@@ -37,7 +37,7 @@ async def read_bytes(accessor, path, index=None) -> bytes: ...
 async def stat(accessor, path, index=None) -> FileStat: ...
 
 
-class JiraVFS(GenericVFS):
+class JiraVFS(BaseVFS):
     CONFIG_CLS = JiraConfig
 
     def __init__(self, config: JiraConfig) -> None:
@@ -149,7 +149,7 @@ Implement only the operations the backend supports. Read-only API-backed mounts 
 - `read_bytes(accessor, path, index)` returning bytes.
 - `stat(accessor, path, index)` returning `FileStat`.
 
-Glob resolution is not a per-backend file: bind it from readdir with `make_resolve_glob(readdir, cap)` (`mirage.utils.glob_walk`), or use the `CommandIO.resolve_glob` property.
+Glob resolution is not a per-backend file: `make_generic_ops` derives a `glob` op from the table's `readdir`, capped by its `max_glob_matches`, and the mount expands patterns through it.
 
 Use explicit types:
 
@@ -222,7 +222,10 @@ Import commands and ops at module scope, then register them in the constructor:
 ```python
 from mirage.accessor.my_vfs import MyAccessor
 from mirage.commands.builtin.my_vfs import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.ops.my_vfs import OPS as MY_VFS_OPS
+from mirage.ops.registry import RegisteredOp
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.my_vfs.config import MyConfig
 from mirage.types import VFSName
@@ -236,17 +239,21 @@ class MyVFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = MyAccessor(config)
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in MY_VFS_OPS:
-            self.register_op(fn)
+
+    def ops(self) -> list[RegisteredOp]:
+        return MY_VFS_OPS
+
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 ```
+
+The mount registers both tables when the driver is placed; a driver never registers anything onto itself.
 
 Set `caches_reads=True` only for stable, read-mostly content. Implement `get_state()` with credentials redacted and close any network clients in `close()`.
 
 ## 6. Snapshot Support
 
-Leave `SUPPORTS_SNAPSHOT=False` unless the complete drift contract is implemented:
+Leave `supports_snapshot=False` unless the complete drift contract is implemented:
 
 1. `stat()` returns a stable `FileStat.fingerprint`.
 1. Every read record includes the fingerprint that produced those bytes.

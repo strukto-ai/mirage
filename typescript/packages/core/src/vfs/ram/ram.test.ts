@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../accessor/base.ts'
 import { mkdir as coreMkdir } from '../../core/ram/mkdir.ts'
 import { OpsRegistry } from '../../ops/registry.ts'
+import { ops } from '../../test-utils.ts'
 import { FileType, MountMode, PathSpec, VFSName } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from './ram.ts'
@@ -39,7 +40,7 @@ function call(
 
 describe('RAMVFS.kind / ops()', () => {
   it('is VFSName.RAM', () => {
-    expect(new RAMVFS().kind).toBe(VFSName.RAM)
+    expect(new RAMVFS().name).toBe(VFSName.RAM)
   })
 
   it('exposes RAM ops covering the full RAM op surface', () => {
@@ -51,6 +52,7 @@ describe('RAMVFS.kind / ops()', () => {
     expect(names).toEqual([
       'append',
       'create',
+      'glob',
       'mkdir',
       'read',
       'readdir',
@@ -289,27 +291,30 @@ describe('RAMVFS mkdir -p parents', () => {
 
   it('mkdir -p across a plain file names the component and keeps the file', async () => {
     const { ram } = setup()
-    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('hi'))
-    await expect(
-      ram.mkdir(PathSpec.fromStrPath('/f.txt/y'), { recursive: true }),
-    ).rejects.toMatchObject({ code: 'ENOTDIR', virtualPath: '/f.txt' })
+    await ops(ram).write(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('hi'))
+    await expect(ops(ram).mkdir(PathSpec.fromStrPath('/f.txt/y'), true)).rejects.toMatchObject({
+      code: 'ENOTDIR',
+      virtualPath: '/f.txt',
+    })
     expect(ram.accessor.store.dirs.has('/f.txt')).toBe(false)
     expect(ram.accessor.store.files.has('/f.txt')).toBe(true)
   })
 
   it('mkdir -p onto a plain file target is EEXIST', async () => {
     const { ram } = setup()
-    await ram.writeFile(PathSpec.fromStrPath('/f.txt'), new Uint8Array())
-    await expect(
-      ram.mkdir(PathSpec.fromStrPath('/f.txt'), { recursive: true }),
-    ).rejects.toMatchObject({ code: 'EEXIST' })
+    await ops(ram).write(PathSpec.fromStrPath('/f.txt'), new Uint8Array())
+    await expect(ops(ram).mkdir(PathSpec.fromStrPath('/f.txt'), true)).rejects.toMatchObject({
+      code: 'EEXIST',
+    })
   })
 
   it('mkdir refuses an existing target, and -p is the idempotent form (GNU)', async () => {
     const { ram } = setup()
-    await ram.mkdir(PathSpec.fromStrPath('/d'))
-    await expect(ram.mkdir(PathSpec.fromStrPath('/d'))).rejects.toMatchObject({ code: 'EEXIST' })
-    await ram.mkdir(PathSpec.fromStrPath('/d'), { recursive: true })
+    await ops(ram).mkdir(PathSpec.fromStrPath('/d'))
+    await expect(ops(ram).mkdir(PathSpec.fromStrPath('/d'))).rejects.toMatchObject({
+      code: 'EEXIST',
+    })
+    await ops(ram).mkdir(PathSpec.fromStrPath('/d'), true)
     expect(ram.accessor.store.dirs.has('/d')).toBe(true)
   })
 })
@@ -322,8 +327,8 @@ describe('RAMVFS through Workspace', () => {
 
     const payload = new TextEncoder().encode('mirage')
     const acc = resolvedRes as unknown as Accessor
-    await registry.call('write', resolvedRes.kind, acc, resolvedPath, [payload])
-    const read = await registry.call('read', resolvedRes.kind, acc, resolvedPath)
+    await registry.call('write', resolvedRes.name, acc, resolvedPath, [payload])
+    const read = await registry.call('read', resolvedRes.name, acc, resolvedPath)
     void mode
     expect(read).toEqual(payload)
     await ws.close()

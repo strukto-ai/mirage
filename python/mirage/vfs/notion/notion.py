@@ -15,22 +15,15 @@
 from typing import Any
 
 from mirage.accessor.notion import NotionAccessor
+from mirage.commands.builtin.notion import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.read import read
-from mirage.core.notion.readdir import readdir
-from mirage.core.notion.stat import stat
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.notion import OPS as NOTION_VFS_OPS
+from mirage.ops.registry import RegisteredOp
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.notion.prompt import PROMPT, WRITE_PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
-
-_NOTION_OPS = {
-    "read_bytes": read,
-    "readdir": readdir,
-    "stat": stat,
-}
 
 
 class NotionVFS(BaseVFS):
@@ -38,28 +31,19 @@ class NotionVFS(BaseVFS):
     accessor: NotionAccessor
     name: str = VFSName.NOTION
     caches_reads: bool = True
-    _ops: dict[str, Any] = _NOTION_OPS
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: NotionConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = NotionAccessor(config)
-        from mirage.commands.builtin.notion import COMMANDS
-        from mirage.ops.notion import OPS as NOTION_VFS_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for op in NOTION_VFS_OPS:
-            self.register_op(op)
+    def ops(self) -> list[RegisteredOp]:
+        return NOTION_VFS_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

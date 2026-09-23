@@ -14,20 +14,13 @@
 
 import { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
 import { GDRIVE_COMMANDS } from '@struktoai/mirage-core/commands/builtin/gdrive/index'
-import { makeResolveGlob } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { RegisteredCommand } from '@struktoai/mirage-core/commands/config'
-import { read as gdriveRead } from '@struktoai/mirage-core/core/gdrive/read'
-import { readdir as gdriveReaddir } from '@struktoai/mirage-core/core/gdrive/readdir'
-import { stat as gdriveStat } from '@struktoai/mirage-core/core/gdrive/stat'
 import { TokenManager } from '@struktoai/mirage-core/core/google/client'
 import { GDRIVE_OPS } from '@struktoai/mirage-core/ops/gdrive/index'
 import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { GDRIVE_PROMPT } from '@struktoai/mirage-core/vfs/gdrive/prompt'
-import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { FileStat } from '@struktoai/mirage-core/types'
-import { mountKey, mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { VFSName } from '@struktoai/mirage-core/types'
 import {
   redactGDriveConfig,
   type GDriveConfig,
@@ -35,22 +28,19 @@ import {
 } from '@struktoai/mirage-core/vfs/gdrive/config'
 import { buildDeltaHook } from '@struktoai/mirage-core/core/gdrive/watch'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
-
-const gdriveResolveGlob = makeResolveGlob(gdriveReaddir)
-
 export interface GDriveVFSState {
   type: string
   config: GDriveConfigRedacted
 }
 
-export class GDriveVFS extends BaseVFS implements VFS {
-  readonly kind: string = VFSName.GDRIVE
-  readonly cachesReads: boolean = true
-  readonly supportsSnapshot: boolean = true
+export class GDriveVFS extends BaseVFS {
+  override readonly name: string = VFSName.GDRIVE
+  override readonly cachesReads: boolean = true
+  override readonly supportsSnapshot: boolean = true
   override readonly indexTtl: number = 86_400
-  readonly prompt: string = GDRIVE_PROMPT
+  override readonly prompt: string = GDRIVE_PROMPT
   readonly config: GDriveConfig
-  readonly accessor: GDriveAccessor
+  override readonly accessor: GDriveAccessor
 
   constructor(config: GDriveConfig) {
     super()
@@ -58,56 +48,20 @@ export class GDriveVFS extends BaseVFS implements VFS {
     const tm = new TokenManager(config)
     this.accessor = new GDriveAccessor({ tokenManager: tm })
   }
-
-  open(): Promise<void> {
-    return Promise.resolve()
-  }
-
-  commands(): readonly RegisteredCommand[] {
+  override commands(): readonly RegisteredCommand[] {
     return GDRIVE_COMMANDS
   }
 
-  ops(): readonly RegisteredOp[] {
+  override ops(): readonly RegisteredOp[] {
     return GDRIVE_OPS
   }
-
-  readFile(p: PathSpec): Promise<Uint8Array> {
-    return gdriveRead(this.accessor, p, this.index)
-  }
-
-  readdir(p: PathSpec): Promise<string[]> {
-    return gdriveReaddir(this.accessor, p, this.index)
-  }
-
-  stat(p: PathSpec): Promise<FileStat> {
-    return gdriveStat(this.accessor, p, this.index)
-  }
-
-  glob(paths: readonly PathSpec[], prefix = ''): Promise<PathSpec[]> {
-    const effective =
-      prefix !== ''
-        ? paths.map((p) =>
-            mountPrefixOf(p.virtual, p.vfsPath) !== ''
-              ? p
-              : new PathSpec({
-                  virtual: p.virtual,
-                  directory: p.directory,
-                  ...(p.pattern !== null ? { pattern: p.pattern } : {}),
-                  resolved: p.resolved,
-                  vfsPath: mountKey(p.virtual, prefix),
-                }),
-          )
-        : paths
-    return gdriveResolveGlob(this.accessor, effective, this.index)
-  }
-
-  deltaHook(): DeltaHook {
+  override deltaHook(): DeltaHook {
     return buildDeltaHook(this.accessor)
   }
 
   override getState(): Promise<GDriveVFSState> {
     return Promise.resolve({
-      type: this.kind,
+      type: this.name,
       config: redactGDriveConfig(this.config),
     })
   }

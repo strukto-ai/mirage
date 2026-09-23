@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   Accessor,
+  BaseVFS,
   command,
   type CommandIO,
   CommandSpec,
@@ -27,7 +28,6 @@ import {
   enotdir,
   FileStat,
   FileType,
-  GenericVFS,
   IOResult,
   MountMode,
   type PathSpec,
@@ -37,7 +37,7 @@ import {
 } from '@struktoai/mirage-node'
 
 // A whole custom backend in one script: four core functions over your
-// data source, one CommandIO table, one GenericVFS. Every generic
+// data source, one CommandIO table, one BaseVFS. Every generic
 // command (ls, cat, grep, find, head, wc, ...) works for free, and so
 // does versioning, in the shape the content calls for: the wiki's pages
 // are the VFS's own, so they ride its state and a snapshot rebuilds
@@ -105,7 +105,15 @@ function stat(accessor: WikiAccessor, path: PathSpec): Promise<FileStat> {
   // The fingerprint is the content's own hash: the stable identity a
   // snapshot records for every read and a load checks for drift.
   const fingerprint = createHash('sha256').update(data).digest('hex').slice(0, 16)
-  return Promise.resolve(new FileStat({ name, size: data.length, type: FileType.FILE, content: ContentType.TEXT, fingerprint }))
+  return Promise.resolve(
+    new FileStat({
+      name,
+      size: data.length,
+      type: FileType.FILE,
+      content: ContentType.TEXT,
+      fingerprint,
+    }),
+  )
 }
 
 function write(accessor: WikiAccessor, path: PathSpec, data: Uint8Array): Promise<void> {
@@ -150,7 +158,7 @@ function makeIO(): CommandIO<WikiAccessor> {
   }
 }
 
-class WikiVFS extends GenericVFS<WikiAccessor> {
+class WikiVFS extends BaseVFS<WikiAccessor> {
   readonly wiki: WikiAccessor
 
   constructor(pages: Tree = PAGES) {
@@ -174,7 +182,7 @@ class WikiVFS extends GenericVFS<WikiAccessor> {
   // a remote service keeps the default state instead and is only
   // observed, through the fingerprints its stat reports.
   override getState(): { type: string; pages: Tree } {
-    return { type: this.kind, pages: structuredClone(this.wiki.pages) }
+    return { type: this.name, pages: structuredClone(this.wiki.pages) }
   }
 
   // Typed against the saved shape the loader hands back (`type` plus
@@ -193,7 +201,7 @@ class WikiVFS extends GenericVFS<WikiAccessor> {
 // is handed back needs no name in any registry.
 const FEED: Tree = { 'status.md': 'All systems go.\n' }
 
-class FeedVFS extends GenericVFS<WikiAccessor> {
+class FeedVFS extends BaseVFS<WikiAccessor> {
   constructor() {
     super({
       name: 'feed',

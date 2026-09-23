@@ -6,6 +6,7 @@ from mirage.commands.config import CommandOpts
 from mirage.types import PathSpec
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
+from tests.fixtures.driver_ops import ops
 
 
 class FakeClient:
@@ -31,7 +32,7 @@ async def test_search_command():
     res = _res()
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
     out, _io = await search.__wrapped__(res.accessor, [p], ["morning"],
-                                        CommandOpts(index=res.index))
+                                        CommandOpts(index=ops(res).index))
     assert b"aaa.json" in out
     assert b"eats banana" in out
 
@@ -42,7 +43,7 @@ async def test_search_requires_query():
     p = PathSpec(virtual="/mem", directory="/mem", vfs_path="")
     with pytest.raises(ValueError):
         await search.__wrapped__(res.accessor, [p], [],
-                                 CommandOpts(index=res.index))
+                                 CommandOpts(index=ops(res).index))
 
 
 @pytest.mark.asyncio
@@ -52,4 +53,4 @@ async def test_search_rejects_non_semantic_method():
     with pytest.raises(ValueError, match="only the 'semantic' method"):
         await search.__wrapped__(
             res.accessor, [p], ["morning"],
-            CommandOpts(index=res.index, flags={"method": "keyword"}))
+            CommandOpts(index=ops(res).index, flags={"method": "keyword"}))

@@ -734,11 +734,12 @@ export async function runCase(
 }> {
   if (c.clear_cache === true) {
     // A full clear means the file cache AND every mount's index cache:
-    // remote listings live in the per-VFS index, and a listing
-    // populated by an earlier case must not leak into this one. mounts
-    // without an index cache (e.g. opfs) have nothing to clear.
+    // remote listings live in the mount's index, and a listing
+    // populated by an earlier case must not leak into this one. Every
+    // mount carries a store, built when its driver was placed, so there
+    // is nothing to probe for.
     await ws.cache.clear()
-    for (const m of ws.mounts()) await m.vfs.index?.clear()
+    for (const m of ws.mounts()) await m.indexStore.clear()
   }
   const start = performance.now()
   if (c.provision === true) {

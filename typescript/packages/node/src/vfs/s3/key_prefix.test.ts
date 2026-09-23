@@ -1,3 +1,6 @@
+import { copy as copyCore } from '@struktoai/mirage-core/core/s3/copy'
+import { exists as existsCore } from '@struktoai/mirage-core/core/s3/exists'
+import { ops } from '@struktoai/mirage-core/test-utils'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -60,29 +63,29 @@ describe('S3VFS operations with keyPrefix (mocked)', () => {
   })
 
   it('write stores object under prefixed bucket key', async () => {
-    await vfs.writeFile(mkPath('/b.txt'), ENC.encode('hello'))
+    await ops(vfs).write(mkPath('/b.txt'), ENC.encode('hello'))
     expect(store.has(BUCKET, 'users/abc/b.txt')).toBe(true)
   })
 
   it('read retrieves content via user path (prefix-free)', async () => {
     store.set(BUCKET, 'users/abc/r.txt', ENC.encode('world'))
-    const bytes = await vfs.readFile(mkPath('/r.txt'))
+    const bytes = await ops(vfs).read(mkPath('/r.txt'))
     expect(DEC.decode(bytes)).toBe('world')
   })
 
   it('stat resolves object under prefixed key', async () => {
     store.set(BUCKET, 'users/abc/s.txt', ENC.encode('sized'))
-    const s = await vfs.stat(mkPath('/s.txt'))
+    const s = await ops(vfs).stat(mkPath('/s.txt'))
     expect(s.size).toBe(5)
   })
 
   it('exists returns true for prefixed key', async () => {
     store.set(BUCKET, 'users/abc/e.txt', ENC.encode('x'))
-    expect(await vfs.exists(mkPath('/e.txt'))).toBe(true)
+    expect(await existsCore(vfs.accessor, mkPath('/e.txt'))).toBe(true)
   })
 
   it('exists returns false when key not present', async () => {
-    expect(await vfs.exists(mkPath('/missing.txt'))).toBe(false)
+    expect(await existsCore(vfs.accessor, mkPath('/missing.txt'))).toBe(false)
   })
 
   it('readdir returns prefix-free user paths and stores under prefixed keys', async () => {
@@ -93,7 +96,7 @@ describe('S3VFS operations with keyPrefix (mocked)', () => {
       directory: '/dir/',
       vfsPath: 'dir',
     })
-    const entries = await vfs.readdir(dirPath)
+    const entries = await ops(vfs).readdir(dirPath)
     for (const entry of entries) {
       expect(entry).not.toContain(PREFIX)
     }
@@ -110,7 +113,7 @@ describe('S3VFS operations with keyPrefix (mocked)', () => {
       resolved: false,
       vfsPath: 'gdir/*.txt',
     })
-    const results = await vfs.glob([globPath])
+    const results = await ops(vfs).glob(globPath)
     expect(results.length).toBe(1)
     expect(results[0]?.virtual).toBe('/gdir/x.txt')
     expect(results[0]?.virtual).not.toContain(PREFIX)
@@ -118,21 +121,21 @@ describe('S3VFS operations with keyPrefix (mocked)', () => {
 
   it('copy stores destination under prefixed bucket key', async () => {
     store.set(BUCKET, 'users/abc/src.txt', ENC.encode('copy me'))
-    await vfs.copy(mkPath('/src.txt'), mkPath('/dst.txt'))
+    await copyCore(vfs.accessor, mkPath('/src.txt'), mkPath('/dst.txt'))
     expect(store.has(BUCKET, 'users/abc/dst.txt')).toBe(true)
     expect(DEC.decode(store.get(BUCKET, 'users/abc/dst.txt') ?? new Uint8Array())).toBe('copy me')
   })
 
   it('rename moves object to new prefixed key and removes old', async () => {
     store.set(BUCKET, 'users/abc/mv_src.txt', ENC.encode('moving'))
-    await vfs.rename(mkPath('/mv_src.txt'), mkPath('/mv_dst.txt'))
+    await ops(vfs).rename(mkPath('/mv_src.txt'), mkPath('/mv_dst.txt'))
     expect(store.has(BUCKET, 'users/abc/mv_dst.txt')).toBe(true)
     expect(store.has(BUCKET, 'users/abc/mv_src.txt')).toBe(false)
   })
 
   it('unlink removes object at prefixed key', async () => {
     store.set(BUCKET, 'users/abc/del.txt', ENC.encode('doomed'))
-    await vfs.unlink(mkPath('/del.txt'))
+    await ops(vfs).unlink(mkPath('/del.txt'))
     expect(store.has(BUCKET, 'users/abc/del.txt')).toBe(false)
   })
 })

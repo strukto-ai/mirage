@@ -15,14 +15,15 @@
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.commands.builtin.slack import COMMANDS
+from mirage.commands.config import RegisteredCommand
+from mirage.commands.registry import registered_commands
 from mirage.core.slack.config import SlackConfig
-from mirage.core.slack.readdir import readdir
-from mirage.types import PathSpec, VFSName
-from mirage.utils.glob_walk import make_resolve_glob
+from mirage.ops.registry import RegisteredOp
+from mirage.ops.slack import OPS as SLACK_VFS_OPS
+from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.slack.prompt import PROMPT, WRITE_PROMPT
-
-_resolve_glob = make_resolve_glob(readdir)
 
 
 class SlackVFS(BaseVFS):
@@ -34,28 +35,20 @@ class SlackVFS(BaseVFS):
     # are rendered at readdir from payloads the listing already fetched
     # (users.list is payload-identical to users.info, verified live), and
     # file blobs carry Slack's upload byte count.
-    SIZES_ALWAYS_KNOWN: bool = True
-    PROMPT: str = PROMPT
-    WRITE_PROMPT: str = WRITE_PROMPT
+    sizes_always_known: bool = True
+    prompt: str = PROMPT
+    write_prompt: str = WRITE_PROMPT
 
     def __init__(self, config: SlackConfig) -> None:
         super().__init__()
         self.config = config
         self.accessor = SlackAccessor(self.config)
-        from mirage.commands.builtin.slack import COMMANDS
-        from mirage.ops.slack import OPS as SLACK_VFS_OPS
 
-        for fn in COMMANDS:
-            self.register(fn)
-        for fn in SLACK_VFS_OPS:
-            self.register_op(fn)
+    def ops(self) -> list[RegisteredOp]:
+        return SLACK_VFS_OPS
 
-    async def resolve_glob(
-        self,
-        paths: list[PathSpec],
-        prefix: str = '',
-    ) -> list[PathSpec]:
-        return await _resolve_glob(self.accessor, paths, index=self._index)
+    def commands(self) -> list[RegisteredCommand]:
+        return registered_commands(COMMANDS)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

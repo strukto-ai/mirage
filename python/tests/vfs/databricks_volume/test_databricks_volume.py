@@ -22,11 +22,15 @@ from pydantic import ValidationError
 
 from mirage import MountMode, Workspace
 from mirage.cache.index import IndexEntry, LookupStatus
+from mirage.core.databricks_volume.exists import exists
 from mirage.core.databricks_volume.path import backend_path
+from mirage.core.databricks_volume.read import read_bytes
+from mirage.core.databricks_volume.stream import range_read, read_stream
 from mirage.types import PathSpec, VFSName
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.databricks_volume import (DatabricksVolumeConfig,
                                           DatabricksVolumeVFS)
+from tests.fixtures.driver_ops import ops
 
 
 class NotFoundError(Exception):
@@ -281,7 +285,7 @@ def test_vfs_state_redacts_token():
 
 def test_vfs_registers_ops():
     vfs = make_vfs(FakeFiles())
-    op_names = {op.name for op in vfs.ops_list()}
+    op_names = {op.name for op in vfs.ops()}
     assert {"read", "readdir", "stat", "write", "create", "unlink"} <= op_names
     assert vfs.name == "databricks_volume"
     assert vfs.caches_reads is True
@@ -325,16 +329,19 @@ async def test_read_stat_readdir_range_stream_and_exists():
     ]
     vfs = make_vfs(files)
 
-    assert await vfs.read_bytes(
+    assert await read_bytes(
+        vfs.accessor,
         PathSpec.from_str_path(
             "/volume/reports/latest.md",
             mount_key("/volume/reports/latest.md", "/volume"))) == b"abcdef"
-    assert await vfs.range_read(
+    assert await range_read(
+        vfs.accessor,
         PathSpec.from_str_path(
             "/volume/reports/latest.md",
             mount_key("/volume/reports/latest.md", "/volume")), 1, 4) == b"bcd"
     chunks = [
-        chunk async for chunk in vfs.read_stream(
+        chunk async for chunk in read_stream(
+            vfs.accessor,
             PathSpec.from_str_path(
                 "/volume/reports/latest.md",
                 mount_key("/volume/reports/latest.md", "/volume")),
@@ -342,25 +349,25 @@ async def test_read_stat_readdir_range_stream_and_exists():
         )
     ]
     assert chunks == [b"ab", b"cd", b"ef"]
-    file_stat = await vfs.stat(
+    file_stat = await ops(vfs).stat(
         PathSpec.from_str_path(
             "/volume/reports/latest.md",
             mount_key("/volume/reports/latest.md", "/volume")))
     assert file_stat.name == "latest.md"
     assert file_stat.size == 6
     assert file_stat.modified == "2023-11-14T22:13:20Z"
-    assert await vfs.exists(
+    assert await exists(
+        vfs.accessor,
         PathSpec.from_str_path(
             "/volume/reports/latest.md",
             mount_key("/volume/reports/latest.md", "/volume")))
-    assert not await vfs.exists(
+    assert not await exists(
+        vfs.accessor,
         PathSpec.from_str_path("/volume/missing.md",
                                mount_key("/volume/missing.md", "/volume")))
-    entries = await vfs.readdir(
+    entries = await ops(vfs).readdir(
         PathSpec.from_str_path("/volume/reports",
-                               mount_key("/volume/reports", "/volume")),
-        vfs.index,
-    )
+                               mount_key("/volume/reports", "/volume")))
     assert entries == ["/volume/reports/latest.md"]
 
 
@@ -388,22 +395,16 @@ async def test_vfs_exposes_file_write_ops():
     seed_directory(files, root)
     vfs = make_vfs(files)
 
-    await vfs.write(
+    await ops(vfs).write(
         PathSpec.from_str_path("/volume/new.txt",
                                mount_key("/volume/new.txt", "/volume")),
-        b"hello",
-        vfs.index,
-    )
-    await vfs.create(
+        b"hello")
+    await ops(vfs).create(
         PathSpec.from_str_path("/volume/empty.txt",
-                               mount_key("/volume/empty.txt", "/volume")),
-        vfs.index,
-    )
-    await vfs.unlink(
+                               mount_key("/volume/empty.txt", "/volume")))
+    await ops(vfs).unlink(
         PathSpec.from_str_path("/volume/new.txt",
-                               mount_key("/volume/new.txt", "/volume")),
-        vfs.index,
-    )
+                               mount_key("/volume/new.txt", "/volume")))
 
     assert files.downloads[f"{root}/empty.txt"] == b""
     assert f"{root}/new.txt" not in files.downloads
@@ -429,40 +430,37 @@ async def test_workspace_write_mode_invalidates_parent_directory_index():
     files = FakeFiles()
     root = "/Volumes/main/default/agent_files/root"
     seed_directory(files, root)
-    vfs = make_vfs(files)
-    ws = Workspace({"/dbx/": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.WRITE)
+    index = ws.mount("/dbx/").index_store
 
-    await vfs.index.set_dir("/dbx", [("old.txt",
-                                      IndexEntry(
-                                          id="/dbx/old.txt",
-                                          name="old.txt",
-                                          resource_type="file",
-                                      ))])
-    assert (await vfs.index.list_dir("/dbx")).entries == ["/dbx/old.txt"]
+    await index.set_dir("/dbx", [("old.txt",
+                                  IndexEntry(
+                                      id="/dbx/old.txt",
+                                      name="old.txt",
+                                      resource_type="file",
+                                  ))])
+    assert (await index.list_dir("/dbx")).entries == ["/dbx/old.txt"]
 
     await ws.vfs.write("/dbx/new.txt", b"hello")
-    assert (await
-            vfs.index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
+    assert (await index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
 
-    await vfs.index.set_dir("/dbx", [("new.txt",
-                                      IndexEntry(
-                                          id="/dbx/new.txt",
-                                          name="new.txt",
-                                          resource_type="file",
-                                      ))])
+    await index.set_dir("/dbx", [("new.txt",
+                                  IndexEntry(
+                                      id="/dbx/new.txt",
+                                      name="new.txt",
+                                      resource_type="file",
+                                  ))])
     await ws.vfs.create("/dbx/empty.txt")
-    assert (await
-            vfs.index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
+    assert (await index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
 
-    await vfs.index.set_dir("/dbx", [("empty.txt",
-                                      IndexEntry(
-                                          id="/dbx/empty.txt",
-                                          name="empty.txt",
-                                          resource_type="file",
-                                      ))])
+    await index.set_dir("/dbx", [("empty.txt",
+                                  IndexEntry(
+                                      id="/dbx/empty.txt",
+                                      name="empty.txt",
+                                      resource_type="file",
+                                  ))])
     await ws.vfs.unlink("/dbx/empty.txt")
-    assert (await
-            vfs.index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
+    assert (await index.list_dir("/dbx")).status == (LookupStatus.NOT_FOUND)
 
 
 @pytest.mark.asyncio

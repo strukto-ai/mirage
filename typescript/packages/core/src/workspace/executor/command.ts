@@ -17,7 +17,6 @@ import { SPECS } from '../../commands/spec/index.ts'
 import { concatBytes } from '../../core/jq/format.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import type { VFS } from '../../vfs/base.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { PathSpec } from '../../types.ts'
@@ -151,7 +150,6 @@ export async function handleCommand(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
-  ensureOpen?: (vfs: VFS) => Promise<void>,
   runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision,
@@ -377,7 +375,6 @@ export async function handleCommand(
       session,
       dispatch,
       ...(namespace !== undefined ? { namespace } : {}),
-      ...(ensureOpen !== undefined ? { ensureOpen } : {}),
       ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
       ...(routingDecision !== undefined ? { routingDecision } : {}),
       ...(executeFn !== undefined ? { executeFn } : {}),
@@ -394,7 +391,6 @@ export async function handleCommand(
       registry,
       session.cwd,
       csNs,
-      ensureOpen,
       csStat,
       mergeSignals(signal, session.abortSignal),
     )
@@ -536,10 +532,6 @@ export async function handleCommand(
       ? new TextEncoder().encode(parseWarnings.map((w) => `${cmdName}: ${w}\n`).join(''))
       : null
 
-  if (ensureOpen !== undefined) {
-    await ensureOpen(mount.vfs)
-  }
-
   const singleNs = namespaceViewOf(registry, namespace ?? null, dispatch)
   const singleStat: StatPath = (path: string) => pathStat(dispatch, path, null)
   if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
@@ -553,7 +545,6 @@ export async function handleCommand(
       session.cwd,
       cmdStr,
       stdin,
-      ensureOpen,
       singleNs,
       singleStat,
       mergeSignals(signal, session.abortSignal),
@@ -592,7 +583,6 @@ export async function handleCommand(
     session,
     dispatch,
     ...(namespace !== undefined ? { namespace } : {}),
-    ...(ensureOpen !== undefined ? { ensureOpen } : {}),
     ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
     ...(routingDecision !== undefined ? { routingDecision } : {}),
     ...(executeFn !== undefined ? { executeFn } : {}),
