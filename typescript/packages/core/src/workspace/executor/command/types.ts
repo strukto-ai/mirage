@@ -54,4 +54,9 @@ export interface ParsedCommand {
   // dialect, which is why they carry names and order at all.
   missingRequiredOperands: readonly string[]
   typedDests: readonly string[]
+  // Whether the line was read against the builtin's own grammar rather
+  // than a registered command's that borrowed its name: the parser's
+  // answer, carried so `optionError` words the refusal for the right
+  // program. False when no spec was parsed.
+  builtin: boolean
 }

@@ -340,6 +340,16 @@ def follows_last_component(name: str, words: list[str | PathSpec]) -> bool:
     ``follow_paths``' job because the slash is a property of the operand
     rather than of the command.
 
+    The four tables this reads (NO_FOLLOW_COMMANDS, DEREFERENCE_FLAGS,
+    LAST_WINS_LINK_OPTIONS, NO_FOLLOW_FLAGS) and SELF_RESOLVING are keyed
+    on the name alone, unlike the parser's per-program rules, and have
+    to be: they run off the raw line before ``resolve_mount``, and the
+    mount that owns the command (and so the spec that would say whether
+    this is the builtin's grammar) is chosen by the operand's path,
+    which is exactly what the answer here rewrites. A registered command
+    that borrows one of these names therefore gets the builtin's link
+    policy, in the lstat direction for every name in the tables.
+
     Args:
         name (str): command name.
         words (list[str | PathSpec]): the command's raw words.

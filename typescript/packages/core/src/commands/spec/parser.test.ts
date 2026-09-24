@@ -1710,3 +1710,23 @@ describe('ParsedArgs helpers', () => {
     expect(parsed.flag('--missing', 'def')).toBe('def')
   })
 })
+
+// The parse result says whose grammar it read the line against, so a
+// consumer downstream (the executor's refusal door) never re-derives it
+// from the spelling. Both forms of the builtin's grammar count; a spec that
+// only borrowed the name does not, and neither does a CLI node.
+describe('ParsedArgs.builtin', () => {
+  it("is the parser's isBuiltinGrammar answer", () => {
+    expect(parseCommand(specOf('grep'), ['x'], '/', 'grep').builtin).toBe(true)
+    expect(parseCommand(registeredSpec('grep', specOf('grep')), ['x'], '/', 'grep').builtin).toBe(
+      true,
+    )
+    const borrowed = new CommandSpec({
+      options: [new Option({ long: '--mode', type: 'str' })],
+      rest: new Operand({ type: 'str' }),
+    })
+    expect(parseCommand(borrowed, ['x'], '/', 'grep').builtin).toBe(false)
+    expect(parseCommand(borrowed, ['x'], '/', 'grep', undefined, true).builtin).toBe(false)
+    expect(parseCommand(specOf('grep'), ['x'], '/', '').builtin).toBe(false)
+  })
+})

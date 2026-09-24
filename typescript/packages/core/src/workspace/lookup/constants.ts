@@ -288,6 +288,16 @@ const SELF_RESOLVING: ReadonlySet<string> = new Set([
 // trailing slash overrides a false per operand, which is `followPaths`'
 // job because the slash is a property of the operand rather than of the
 // command.
+//
+// The four tables this reads (NO_FOLLOW_COMMANDS, DEREFERENCE_FLAGS,
+// LAST_WINS_LINK_OPTIONS, NO_FOLLOW_FLAGS) and SELF_RESOLVING are keyed on
+// the name alone, unlike the parser's per-program rules, and have to be:
+// they run off the raw line before `resolveMount`, and the mount that owns
+// the command (and so the spec that would say whether this is the builtin's
+// grammar) is chosen by the operand's path, which is exactly what the
+// answer here rewrites. A registered command that borrows one of these
+// names therefore gets the builtin's link policy, in the lstat direction
+// for every name in the tables.
 export function followsLastComponent(name: string, words: readonly (string | PathSpec)[]): boolean {
   if (reportsLink(name, words) || SELF_RESOLVING.has(name)) return false
   return !NO_FOLLOW_COMMANDS.has(name) || dereferences(name, words)

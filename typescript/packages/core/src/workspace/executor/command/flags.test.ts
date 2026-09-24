@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { SPECS, specOf } from '../../../commands/spec/index.ts'
+import { registeredSpec } from '../../../commands/spec/builtins.ts'
 import { PathSpec } from '../../../types.ts'
 import { CommandSpec, Operand, Option } from '../../../commands/spec/types.ts'
 import { optionError, parseFlags } from './flags.ts'
@@ -264,5 +265,52 @@ describe("optionError — tar's old option style", () => {
     expect(refusal).toBeNull()
     expect(parsed.flagKwargs.x).toBe(true)
     expect(parsed.flagKwargs.z).toBe(true)
+  })
+})
+
+// The parser settles whose grammar a line was read against and the door
+// reads that bit, never the spelling: a mount may register its own command
+// under a builtin's name (nothing refuses it), and the measured per-program
+// tables describe one real program each.
+describe('optionError on a borrowed builtin name', () => {
+  const BORROWED = new CommandSpec({
+    options: [new Option({ long: '--mode', type: 'str' })],
+    rest: new Operand({ type: 'str' }),
+  })
+  const td = new TextDecoder()
+
+  it("parseFlags carries the parser's builtin bit", () => {
+    expect(parseFlags(['x'], registeredSpec('grep', specOf('grep')), 'grep', '/').builtin).toBe(
+      true,
+    )
+    expect(parseFlags(['x'], specOf('grep'), 'grep', '/').builtin).toBe(true)
+    expect(parseFlags(['x'], BORROWED, 'grep', '/').builtin).toBe(false)
+    expect(parseFlags(['x'], null, 'grep', '/').builtin).toBe(false)
+  })
+
+  it('a borrowed name is refused like any custom command', () => {
+    for (const name of ['grep', 'diff', 'python3', 'curl', 'tar']) {
+      const refusal = optionError(name, parseFlags(['--bogus', 'x'], BORROWED, name, '/'))
+      expect(refusal).not.toBeNull()
+      if (refusal === null) throw new Error('unreachable')
+      expect(td.decode(refusal[0])).toBe(
+        `${name}: unrecognized option '--bogus'\nTry '${name} --help' for more information.\n`,
+      )
+      expect(refusal[1]).toBe(1)
+    }
+    expect(optionError('grep', parseFlags(['x'], specOf('grep'), 'grep', '/'))).toBeNull()
+    const builtin = optionError('grep', parseFlags(['--bogus', 'x'], specOf('grep'), 'grep', '/'))
+    expect(builtin?.[1]).toBe(2)
+  })
+
+  // The find exemption is the builtin's: its expression is validated by
+  // parseFindExpression. A borrowed `find` has no such parser, so its
+  // undeclared option is refused rather than silently dropped.
+  it('a borrowed find is not exempt from option refusal', () => {
+    const refusal = optionError('find', parseFlags(['--bogus', 'x'], BORROWED, 'find', '/'))
+    expect(refusal).not.toBeNull()
+    if (refusal === null) throw new Error('unreachable')
+    expect(td.decode(refusal[0])).toMatch(/^find: unrecognized option '--bogus'\n/)
+    expect(optionError('find', parseFlags(['-name', 'x'], specOf('find'), 'find', '/'))).toBeNull()
   })
 })

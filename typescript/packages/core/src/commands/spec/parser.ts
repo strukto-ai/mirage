@@ -132,6 +132,14 @@ export interface ParsedArgsInit {
    */
   typedDests?: string[]
   oldOptionNeedsValue?: string | null
+  /**
+   * Whether the spec this line was read against is the builtin's own
+   * grammar (`isBuiltinGrammar`). What the executor's refusal door keys
+   * the measured per-program tables on, so a registered command that
+   * borrowed a builtin's name answers in the generic voice. False when
+   * nobody vouched for it, which is the safe direction.
+   */
+  builtin?: boolean
 }
 
 export class ParsedArgs {
@@ -185,6 +193,7 @@ export class ParsedArgs {
   // argument needs before argp ever validates a letter, so `tar Qf` and
   // `tar fQ` both name f, not Q.
   readonly oldOptionNeedsValue: string | null
+  readonly builtin: boolean
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
@@ -208,6 +217,7 @@ export class ParsedArgs {
     this.missingRequiredOperands = init.missingRequiredOperands ?? []
     this.typedDests = init.typedDests ?? []
     this.oldOptionNeedsValue = init.oldOptionNeedsValue ?? null
+    this.builtin = init.builtin ?? false
   }
 
   paths(): string[] {
@@ -539,6 +549,12 @@ export function parseCommand(
     ambiguousValues: [],
   }
   const needsValueOptions: string[] = []
+  // Whether this is the builtin's own grammar rather than a registered
+  // command that borrowed its name. Settled here, once, because the parser
+  // is the one reader holding both the name and the spec; it leaves on the
+  // parse result so the executor's refusal door reads the answer instead of
+  // re-deriving it from the spelling.
+  const builtin = isBuiltinGrammar(cmdName, spec)
   // Who owns a dashed word the spec does not declare. The caller already
   // answered that with unknownIsOperand.
   let noLongOptionParser: boolean
@@ -570,7 +586,6 @@ export function parseCommand(
     // a builtin's name (nothing refuses it), and the sole-argument rule turns
     // such a spec's declared `--mode=x` into an operand its handler then
     // never sees.
-    const builtin = isBuiltinGrammar(cmdName, spec)
     noLongOptionParser = builtin && NO_LONG_OPTIONS.has(cmdName)
     // gnulib's parse_long_options reads argv[1] only when it is the whole
     // line, so outside that one-argument window the program has no long
@@ -1023,6 +1038,7 @@ export function parseCommand(
     missingRequiredOperands,
     typedDests,
     oldOptionNeedsValue: old !== null ? old.needsValue : null,
+    builtin,
     wordKinds,
     wordBases,
   })

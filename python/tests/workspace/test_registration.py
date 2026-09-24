@@ -18,6 +18,7 @@ from mirage import MountMode, Workspace
 from mirage.commands.config import command
 from mirage.commands.registry import RegisteredCommand
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import CommandSpec, Operand, Option
 from mirage.io.types import IOResult
 from mirage.ops.registry import op
 from mirage.vfs.ram import RAMVFS
@@ -192,3 +193,38 @@ def test_register_fns_multi_vfs_filters_to_matching(ws):
     m = ws.mount("/data/")
     m.register_fns([multi])
     assert "multi" in m.commands()
+
+
+# A mount may register its own command under a builtin's name, and
+# nothing refuses it. The measured per-program tables (USAGE_EXIT,
+# USAGE_HINT_PREFIX, PYTHON_NAMES) describe the real program, so the
+# borrowed name must answer as the control `mycmd` does. The session cwd
+# is inside the mount because `resolve_mount` picks the mount by the
+# operand's path, and with the cwd outside every mount the name lookup
+# would find the borrowed command by a different route.
+@pytest.mark.asyncio
+async def test_a_borrowed_builtin_name_answers_like_a_custom_command(ws):
+    spec = CommandSpec(options=(Option(long="--mode", type="str"), ),
+                       rest=Operand(type="str"))
+
+    async def custom(accessor, paths, texts, opts):
+        return b"custom\n", IOResult()
+
+    m = ws.mount("/data/")
+    for name in ("grep", "diff", "python3", "mycmd"):
+        if name in m.commands():
+            m.unregister([name])
+        m.register_general(
+            RegisteredCommand(name,
+                              spec=spec,
+                              vfs=None,
+                              filetype=None,
+                              fn=custom))
+    for name in ("grep", "diff", "python3", "mycmd"):
+        result = await ws.shell(f"cd /data && {name} --mode=a x")
+        assert (result.exit_code, result.stdout) == (0, b"custom\n"), name
+        result = await ws.shell(f"cd /data && {name} --bogus x")
+        assert result.exit_code == 1, name
+        assert result.stderr == (
+            f"{name}: unrecognized option '--bogus'\n"
+            f"Try '{name} --help' for more information.\n").encode(), name
