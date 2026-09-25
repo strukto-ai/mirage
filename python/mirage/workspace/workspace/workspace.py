@@ -964,14 +964,20 @@ class Workspace:
         # The declarations travel with the copy the way a live CLI
         # install does: an env pointer restores from state naming its
         # instance, and without the block the copy would answer the
-        # first read with "unknown secrets source". Workspace command
-        # limits are deployment config the state dict never carries.
+        # first read with "unknown secrets source". Profiles and
+        # command limits are deployment config the state dict never
+        # carries; without them the copy runs every session unconfined.
+        # Policy instances and the route policy stay behind: a policy
+        # is a live host object whose state two workspaces must not
+        # share, and the route names runtimes the copy does not carry.
         return await type(self)._from_state(
             state,
             mounts=mounts,
             clis=reusable_clis(self),
             secrets=self._declared_sources,
-            command_limits=self._registry.command_limits)
+            command_limits=self._registry.command_limits,
+            profiles=self._profiles,
+            profile=self._default_profile_name)
 
     @classmethod
     async def _from_state(
@@ -983,6 +989,8 @@ class Workspace:
         secrets: Mapping[str, SecretSource | Mapping[str, Any]]
         | None = None,
         command_limits: Mapping[str, Limit] | None = None,
+        profiles: Mapping[str, SessionProfile] | None = None,
+        profile: str | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
         # No read= here: each restored Mount carries its own spec, and
@@ -992,7 +1000,9 @@ class Workspace:
                  agent_id=args.default_agent_id,
                  clis=args.clis,
                  secrets=secrets,
-                 command_limits=command_limits)
+                 command_limits=command_limits,
+                 profiles=profiles,
+                 profile=profile)
         if mounts:
             ws._shared_mounts = {id(r) for r in mounts.values()}
         await apply_state_dict(ws, state)

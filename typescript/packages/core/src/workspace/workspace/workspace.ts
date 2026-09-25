@@ -1577,10 +1577,17 @@ export class Workspace {
       // The declarations travel with the copy the way a live CLI
       // install does: an env pointer restores from state naming its
       // instance, and without the block the copy would answer the
-      // first read with "unknown secrets source". Workspace command
-      // limits are deployment config the state never carries.
+      // first read with "unknown secrets source". Profiles and command
+      // limits are deployment config the state never carries; without
+      // them the copy runs every session unconfined. Policy instances and
+      // the route policy stay behind: a policy is a live host object whose
+      // state two workspaces must not share, and the route names runtimes
+      // the copy does not carry. A caller's own profile table brings its
+      // own default.
       secrets: options.secrets ?? this.declaredSecretSources,
       commandLimits: options.commandLimits ?? this.registry.commandLimits,
+      profiles: options.profiles ?? this.profiles,
+      profile: options.profile ?? (options.profiles == null ? this.defaultProfileName : null),
     }
     const copyAgentId = options.agentId ?? this.agentId
     if (copyAgentId !== null) opts.agentId = copyAgentId

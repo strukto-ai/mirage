@@ -4,8 +4,8 @@
 # process, here built from a generated workspace yaml (`mirage
 # workspace create`) and executed with `mirage execute`. This is the
 # yaml -> daemon -> CLI construction path: entry captures, config
-# blocks, per-entry scripts (policy), the global route, per-mount
-# command_limits, and the per-line --runtime argument.
+# blocks, per-entry scripts (policy), the global route, workspace,
+# mount and profile command_limits, and the per-line --runtime argument.
 #
 # Cases whose steps need the SDK surface (add_runtime, rename, s3_put,
 # read_op, facade — the last calls ws.vfs directly) or a runner-local
@@ -100,6 +100,9 @@ write_world_yaml() {
        mounts: ((.mounts // {"/ram": {"vfs": "ram"}})
          | map_values({vfs: .vfs}
              + (if .limits then {command_limits: .limits} else {} end)))}
+      + (if .command_limits then {command_limits: .command_limits} else {} end)
+      + (if .profiles then {profiles: .profiles} else {} end)
+      + (if .profile then {profile: .profile} else {} end)
       + (if .runtimes then {runtimes: .runtimes} else {} end)
       + (if .route_policy then {route_policy: .route_policy} else {} end)
       + (if .clis then {clis: .clis} else {} end)' \

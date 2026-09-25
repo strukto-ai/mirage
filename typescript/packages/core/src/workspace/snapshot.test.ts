@@ -193,6 +193,27 @@ describe('Workspace.copy', () => {
     await ws.close()
     await cp.close()
   })
+
+  it('keeps profiles and the default profile', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: { ro: { commands: { deny: [{ reason: 'read-only', commands: ['rm'] }] } } },
+        profile: 'ro',
+      },
+    )
+    const cp = await ws.copy()
+    try {
+      expect((await cp.shell('touch /data/a; rm /data/a')).exitCode).toBe(126)
+      cp.createSession('named', { profile: 'ro' })
+      expect((await cp.shell('rm /data/a', { sessionId: 'named' })).exitCode).toBe(126)
+    } finally {
+      await cp.close()
+      await ws.close()
+    }
+  })
 })
 
 // Port of tests/workspace/test_snapshot.py::test_ram_round_trip_filenames_with_spaces.
