@@ -42,6 +42,15 @@ interface LimitMount {
 }
 
 /**
+ * A command's own entry in a limit table, or null. Command names are
+ * script-controlled, so `toString` must not resolve an `Object.prototype`
+ * member of a table built with `{...}`.
+ */
+export function ownLimit(table: Readonly<Record<string, Limit>>, name: string): Limit | null {
+  return Object.hasOwn(table, name) ? (table[name] ?? null) : null
+}
+
+/**
  * Resolve one command's limit, the one entry point.
  *
  * Profile override, mount override, workspace default, command default,
@@ -56,7 +65,8 @@ export function resolveLimit(
   workspaceLimits: Readonly<Record<string, Limit>> = {},
   profileLimits: Readonly<Record<string, Limit>> = {},
 ): Limit | null {
-  if (Object.hasOwn(profileLimits, name)) return profileLimits[name] ?? null
+  const profile = ownLimit(profileLimits, name)
+  if (profile !== null) return profile
   if (mountOverride !== null) return mountOverride
   if (mounts.length > 0)
     return Limit.aggr(
@@ -64,16 +74,12 @@ export function resolveLimit(
         resolveLimit(name, [], commandDefault, m.commandLimits.get(name) ?? null, workspaceLimits),
       ),
     )
-  if (Object.hasOwn(workspaceLimits, name)) return workspaceLimits[name] ?? null
-  if (commandDefault !== null) return commandDefault
-  return DEFAULT_COMMAND_LIMITS[name] ?? FALLBACK_LIMIT
-}
-
-export function resolveAcrossMounts(name: string, mounts: Iterable<LimitMount>): Limit | null {
-  const resolved = [...mounts].map((m) =>
-    resolveLimit(name, [], null, m.commandLimits.get(name) ?? null),
+  return (
+    ownLimit(workspaceLimits, name) ??
+    commandDefault ??
+    DEFAULT_COMMAND_LIMITS[name] ??
+    FALLBACK_LIMIT
   )
-  return Limit.aggr(resolved)
 }
 
 export type OverrideLookup = (prefix: string, name: string) => Limit | null

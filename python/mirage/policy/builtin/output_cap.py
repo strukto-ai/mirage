@@ -56,6 +56,10 @@ def resolve_limit(
             default, when the caller knows it.
         mount_override (Limit | None): one mount's per-command
             override, when the caller knows it.
+        workspace_limits (Mapping[str, Limit] | None): the workspace
+            defaults, keyed by command.
+        profile_limits (Mapping[str, Limit] | None): the session
+            profile's overrides, keyed by command.
     """
     if profile_limits is not None and name in profile_limits:
         return profile_limits[name]
@@ -75,28 +79,6 @@ def resolve_limit(
     return DEFAULT_COMMAND_LIMITS.get(name, FALLBACK_LIMIT)
 
 
-def resolve_across_mounts(
-    name: str,
-    mounts: Iterable[Any],
-) -> Limit | None:
-    """Resolve and aggregate the bound across the mounts a command spans.
-
-    A command that touches several mounts but yields one stream
-    (cross-mount cat, fan-out find/grep -r/du/tree/ls -R) must respect
-    every spanned mount's bound, so each mount's per-command override is
-    resolved and combined with Limit.aggr (tightest per field).
-
-    Args:
-        name (str): command name being resolved.
-        mounts (Iterable): the mounts the command spans.
-    """
-    resolved = [
-        resolve_limit(name, mount_override=m.command_limits.get(name))
-        for m in mounts
-    ]
-    return Limit.aggr(resolved)
-
-
 def resolve_producer(
         producer: Producer,
         override_for: OverrideLookup,
@@ -112,6 +94,10 @@ def resolve_producer(
         producer (Producer): facts stamped at the dispatch site.
         override_for (OverrideLookup): (prefix, name) -> that mount's
             configured override.
+        workspace_limits (Mapping[str, Limit] | None): the workspace
+            defaults, keyed by command.
+        profile_limits (Mapping[str, Limit] | None): the session
+            profile's overrides, keyed by command.
     """
     if not producer.command:
         return None

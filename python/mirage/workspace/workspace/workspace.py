@@ -964,11 +964,14 @@ class Workspace:
         # The declarations travel with the copy the way a live CLI
         # install does: an env pointer restores from state naming its
         # instance, and without the block the copy would answer the
-        # first read with "unknown secrets source".
-        return await type(self)._from_state(state,
-                                            mounts=mounts,
-                                            clis=reusable_clis(self),
-                                            secrets=self._declared_sources)
+        # first read with "unknown secrets source". Workspace command
+        # limits are deployment config the state dict never carries.
+        return await type(self)._from_state(
+            state,
+            mounts=mounts,
+            clis=reusable_clis(self),
+            secrets=self._declared_sources,
+            command_limits=self._registry.command_limits)
 
     @classmethod
     async def _from_state(
@@ -978,7 +981,8 @@ class Workspace:
         mounts: dict[str, Any] | None = None,
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]]
-        | None = None
+        | None = None,
+        command_limits: Mapping[str, Limit] | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
         # No read= here: each restored Mount carries its own spec, and
@@ -987,7 +991,8 @@ class Workspace:
                  session_id=args.default_session_id,
                  agent_id=args.default_agent_id,
                  clis=args.clis,
-                 secrets=secrets)
+                 secrets=secrets,
+                 command_limits=command_limits)
         if mounts:
             ws._shared_mounts = {id(r) for r in mounts.values()}
         await apply_state_dict(ws, state)

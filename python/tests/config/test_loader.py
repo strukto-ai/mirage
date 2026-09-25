@@ -1405,6 +1405,20 @@ async def test_global_and_profile_command_limits_from_config():
         }
     },
     {
+        "command_limits": {
+            "sleep": {
+                "timeout_seconds": -1
+            }
+        }
+    },
+    {
+        "command_limits": {
+            "sleep": {
+                "timeout_seconds": float("inf")
+            }
+        }
+    },
+    {
         "profiles": {
             "research": {
                 "command_limits": {

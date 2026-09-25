@@ -32,6 +32,7 @@ import { envSnapshot, sessionView } from '../../session/state.ts'
 import { linkTargetStat, pathExists, pathReaddir, pathStat } from '../builtins/links/index.ts'
 import { mergeOverlayStat } from '../../mount/namespace/overlay.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
+import { ownLimit } from '../../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../../runtime/table.ts'
 import type { RouteDecision } from '../../../runtime/routing/index.ts'
@@ -256,20 +257,12 @@ export async function runOnMount(
     await ensureOpen(mount.vfs)
   }
 
-  // resolveMount may redirect a warm remote read to the cache mount, which
-  // does not carry the origin mount's per-command limits. Resolve the
-  // limit from the real (pre-redirect) mount so the cap survives the hit.
-  // A spec can bucket a path-shaped operand as TEXT (python3's script), so
-  // when the spec-split paths are empty fall back to the classified scope
-  // hint before cwd, mirroring the Python executor.
-  const realMount = registry.tryMountFor(paths[0]?.virtual ?? hint?.virtual ?? session.cwd)
+  // The profile, serving mount and workspace entries, in precedence order;
+  // the mount folds in the command's declared default and the built-in.
   const limitOverride =
-    (Object.hasOwn(session.commandLimits, cmdName) ? session.commandLimits[cmdName] : undefined) ??
-    realMount?.commandLimits.get(cmdName) ??
-    (Object.hasOwn(registry.commandLimits, cmdName)
-      ? registry.commandLimits[cmdName]
-      : undefined) ??
-    null
+    ownLimit(session.commandLimits, cmdName) ??
+    mount.commandLimits.get(cmdName) ??
+    ownLimit(registry.commandLimits, cmdName)
 
   // The name plane's facts, bundled as one view: the attr overlay so
   // ls -l and stat -c agree (cp/mv -u freshness and find -mtime compare

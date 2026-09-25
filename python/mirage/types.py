@@ -19,8 +19,8 @@ from enum import Enum, StrEnum
 from typing import (TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Protocol,
                     TypeAlias)
 
-from pydantic import (BaseModel, ConfigDict, Field, NonNegativeInt,
-                      model_validator)
+from pydantic import (BaseModel, ConfigDict, Field, NonNegativeFloat,
+                      NonNegativeInt, model_validator)
 
 if TYPE_CHECKING:
     import aiohttp
@@ -557,7 +557,9 @@ class Limit(BaseModel):
 
     max_bytes: Annotated[NonNegativeInt | None, Aggr(_min_bound)] = None
     max_lines: Annotated[NonNegativeInt | None, Aggr(_min_bound)] = None
-    timeout_seconds: Annotated[float | None, Aggr(_min_positive)] = None
+    timeout_seconds: Annotated[NonNegativeFloat | None,
+                               Field(allow_inf_nan=False),
+                               Aggr(_min_positive)] = None
     on_exceed: Annotated[OnExceed, Aggr(_prefer_error)] = OnExceed.TRUNCATE
 
     @classmethod

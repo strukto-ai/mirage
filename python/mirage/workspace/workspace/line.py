@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 
 from mirage.commands.builtin.utils.limit import guard_output, run_with_timeout
 from mirage.io import IOResult
@@ -36,7 +36,7 @@ async def run_whole_line(
         mounts: list[MountEntry],
         policies: Policies,
         invalidate: Callable[[], Awaitable[None]],
-        command_limits: dict[str, Limit] | None = None) -> IOResult:
+        command_limits: Mapping[str, Limit] | None = None) -> IOResult:
     """Hand the raw line to one runtime instead of walking its tree.
 
     A whole line is a command like any other: the same boundary
@@ -54,6 +54,8 @@ async def run_whole_line(
         policies (Policies): the workspace's policies.
         invalidate (Callable[[], Awaitable[None]]): drops local read
             caches once the line has run.
+        command_limits (Mapping[str, Limit] | None): the workspace
+            defaults, keyed by command.
     """
     assert isinstance(runtime, Runtime)
     data = await materialize(stdin) if stdin is not None else None

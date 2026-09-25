@@ -1,5 +1,3 @@
-import { CLISpec } from '../commands/cli/types.ts'
-import { IOResult } from '../io/types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,15 +12,17 @@ import { IOResult } from '../io/types.ts'
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SessionState } from './session/session.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { CLISpec } from '../commands/cli/types.ts'
+import { IOResult } from '../io/types.ts'
 import { OpsRegistry } from '../ops/registry.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { Limit, MountMode, OnExceed } from '../types.ts'
 import { Mount } from './mount/spec.ts'
+import { SessionState } from './session/session.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const require = createRequire(import.meta.url)
@@ -263,6 +263,25 @@ it('keeps profile limits on the session across storage and forks', async () => {
     expect(restored.fork().commandLimits.head?.maxLines).toBe(2)
     expect(small.toJSON()).not.toHaveProperty('terminalOutput')
   } finally {
+    await ws.close()
+  }
+})
+
+it('keeps workspace limits on a copy', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      shellParser: parser,
+      commandLimits: { cat: new Limit({ maxLines: 2 }) },
+    },
+  )
+  const copy = await ws.copy()
+  try {
+    await copy.shell('seq 1 5 > /data/n')
+    expect(DEC.decode((await copy.shell('cat /data/n')).stdout)).toBe('1\n2\n')
+  } finally {
+    await copy.close()
     await ws.close()
   }
 })

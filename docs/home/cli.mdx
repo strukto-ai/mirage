@@ -315,54 +315,47 @@ mirage workspace clone demo --at <version> --id demo_at_v1
 
 ## Command limits
 
-Set workspace defaults with `command_limits`, and override individual commands
-for a session in `profiles.<name>.command_limits`. Mounts may also declare
-command overrides. The order is profile, mount, workspace, command-declared
-default, then the built-in default. A selected command entry replaces the
-whole limit; an omitted command inherits. `max_lines: null` and
-`max_bytes: null` mean unlimited, while zero permits no output.
+`cat`, `grep`, `rg`, `head`, and `tail` cap their output at 2000 lines, and
+every command stops after 600 seconds. Change that with `command_limits` for
+the workspace, a mount, or a session profile:
 
 ```yaml
-command_limits:
+command_limits:            # the default for every session
   head:
-    max_lines: 2000
-profiles:
-  researcher:
-    command_limits:
-      head:
-        max_lines: 10000
+    max_lines: 500
+    timeout_seconds: 30
 mounts:
   /data:
     vfs: ram
     mode: WRITE
-    command_limits:
-      cat:
-        max_lines: 1000
+    command_limits:        # commands that run on /data
+      grep:
+        max_lines: 50
+        on_exceed: error
+profiles:
+  researcher:
+    command_limits:        # sessions created with this profile
+      head:
+        max_lines: 5000
 ```
 
-A pipe-only reader uses its profile or workspace default: it does not inherit
-upstream mount settings. Thus `cat /data/n.txt | head -n 3000` returns up to
-2000 lines normally and all 3000 under `researcher`. Commands spanning several
-mounts use the tightest resolved bound across those mounts.
+A command's limit comes from the first place that names it: the session's
+profile, the mount the command runs on, the workspace, then the built-in
+default. A command that spans several mounts takes the tightest of their
+limits. An entry replaces that command's whole limit, so restate
+`timeout_seconds` if you still want a deadline; commands it does not name keep
+their defaults.
 
-Caps apply to each command's terminal stdout before outputs are combined.
-`cat big.txt; echo end` caps `cat` and still prints `end`. Intermediate pipe
-stages, file redirects, and captured substitutions retain their full data.
-This is a deliberate output-display safeguard beyond GNU behavior; it does
-not change how much data `cat big.txt | wc -l` counts.
+- `max_lines` / `max_bytes` cap the output; `null` means no cap.
+- `timeout_seconds` is a deadline; a command that runs past it exits `124`.
+- `on_exceed: truncate` (default) keeps the capped output, adds a stderr
+  notice, and leaves the exit code alone. `on_exceed: error` drops the output
+  and exits `1`, so `&&` and `||` see the failure.
 
-Each entry accepts `max_lines`, `max_bytes`, `timeout_seconds`, and `on_exceed`.
-`truncate` retains the bounded output and adds a command-attributed stderr
-notice without changing the command's status. `error` discards that command's
-stdout and exits 1, before `&&`, `||`, `$?`, and `PIPESTATUS` use its status.
-A timeout exits 124. Exact-fit output has no truncation notice.
-Without configuration, `cat`, `grep`, `rg`, `head`, and `tail` cap at 2000 lines.
-
-Independent policy ceilings still apply. A policy's `post_execute` limit
-bounds the complete response; it is separate from command defaults. A runtime
-executing an opaque whole shell line exposes one invocation, so its cap is
-applied to the returned response rather than to internal pipeline stages.
-See [Output Limits](/python/quickstart#output-limits) for SDK examples.
+Caps apply to what each command prints, one command at a time:
+`cat big.txt; echo end` still prints `end`. Data going into a pipe, a
+redirect, or `$(...)` is never cut, so `cat big.txt | wc -l` counts every
+line. See [Output Limits](/python/quickstart#output-limits) for the SDK form.
 
 ## Daemon control
 

@@ -505,11 +505,6 @@ class SessionState:
                                              m["from"], m["ref"], m["key"],
                                              m.get("fetch") == "eager"))
             data["vars"] = out_vars
-        data = dict(data)
-        data["command_limits"] = {
-            name: Limit.model_validate(limit)
-            for name, limit in data.get("command_limits", {}).items()
-        }
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")
@@ -518,10 +513,11 @@ class SessionState:
         commands = data.get("commands")
         script = data.get("script")
         decisions = data.get("decisions")
+        limits = data.get("command_limits")
         if (modes is not None or paths is not None or shown is not None
                 or reasons is not None or vars_ is not None
                 or commands is not None or script is not None
-                or decisions is not None):
+                or decisions is not None or limits is not None):
             data = dict(data)
         if modes is not None:
             data["mount_modes"] = {
@@ -551,6 +547,11 @@ class SessionState:
             data["script"] = script_from_dict(script)
         if decisions is not None:
             data["decisions"] = tuple(decision_from_dict(d) for d in decisions)
+        if limits is not None:
+            data["command_limits"] = {
+                name: Limit.model_validate(limit)
+                for name, limit in limits.items()
+            }
         return cls(**data)
 
     @property

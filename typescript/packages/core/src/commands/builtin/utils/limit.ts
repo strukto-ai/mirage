@@ -232,13 +232,6 @@ export async function applyLimit(
   return [io.exitCode !== 0 ? null : data, io]
 }
 
-/**
- * Apply output caps at a boundary and merge the outcome.
- *
- * The one boundary rule, shared by the command tree and the
- * whole-line runtimes: cap stdout, append the truncation notice to
- * stderr, and let an ERROR-mode guard override the exit code.
- */
 async function* errorStream(
   src: ByteSource,
   io: IOResult,
@@ -272,6 +265,13 @@ export function guardIO(
     : boundedStream(stdout, io, limit, command)
 }
 
+/**
+ * Apply output caps at a boundary and merge the outcome.
+ *
+ * The one boundary rule, shared by the command tree and the
+ * whole-line runtimes: cap stdout, append the truncation notice to
+ * stderr, and let an ERROR-mode guard override the exit code.
+ */
 export async function guardOutput(
   stdout: ByteSource | null,
   stderr: ByteSource | null,

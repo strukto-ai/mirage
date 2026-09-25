@@ -948,6 +948,42 @@
    ]
   },
   {
+   "id": "mount_beats_workspace",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      },
+      "limits": {
+       "head": {
+        "max_lines": 1
+       }
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "head -n 4 /data/n",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n",
+      "stderr_contains": "head: output truncated"
+     }
+    }
+   ]
+  },
+  {
    "id": "profile_small",
    "world": {
     "mounts": {
@@ -955,6 +991,11 @@
       "vfs": "ram",
       "files": {
        "n": "1\n2\n3\n4\n5\n"
+      },
+      "limits": {
+       "head": {
+        "max_lines": 1
+       }
       }
      }
     },
@@ -983,6 +1024,22 @@
      "expect": {
       "exit": 0,
       "stdout": "1\n2\n"
+     }
+    },
+    {
+     "command": "head -n 4 /data/n",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n",
+      "stderr_contains": "head: output truncated"
+     }
+    },
+    {
+     "command": "cat /data/n",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n",
+      "stderr_contains": "cat: output truncated"
      }
     }
    ]

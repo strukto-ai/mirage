@@ -15,8 +15,8 @@
 from mirage.policy.base import Policy
 from mirage.policy.builtin import (DEFAULT_COMMAND_LIMITS, FALLBACK_LIMIT,
                                    MountRootPolicy, OutputCapPolicy,
-                                   PermissionsPolicy, resolve_across_mounts,
-                                   resolve_limit, resolve_producer)
+                                   PermissionsPolicy, resolve_limit,
+                                   resolve_producer)
 from mirage.policy.constants import (DEFAULT_ASK_REASON, DEFAULT_DENY_REASON,
                                      POLICY_DENIED_EXIT)
 from mirage.policy.decisions import (AskHandler, Decisions, ask_rule, covers,
@@ -92,7 +92,6 @@ __all__ = [
     "refusal_of",
     "render_deny",
     "render_pending",
-    "resolve_across_mounts",
     "resolve_limit",
     "resolve_producer",
     "says_why",

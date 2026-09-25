@@ -216,3 +216,18 @@ async def test_profile_can_raise_the_global_timeout():
                                session_id="relaxed")).exit_code == 0
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_copy_keeps_workspace_command_limits():
+    ws = Workspace({"/data": RAMVFS()},
+                   mode=MountMode.WRITE,
+                   command_limits={"cat": Limit(max_lines=2)})
+    copy = await ws.copy()
+    try:
+        await copy.shell("seq 1 5 > /data/n")
+        result = await copy.shell("cat /data/n")
+        assert await result.stdout_str() == "1\n2\n"
+    finally:
+        await copy.close()
+        await ws.close()

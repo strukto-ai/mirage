@@ -1577,8 +1577,10 @@ export class Workspace {
       // The declarations travel with the copy the way a live CLI
       // install does: an env pointer restores from state naming its
       // instance, and without the block the copy would answer the
-      // first read with "unknown secrets source".
+      // first read with "unknown secrets source". Workspace command
+      // limits are deployment config the state never carries.
       secrets: options.secrets ?? this.declaredSecretSources,
+      commandLimits: options.commandLimits ?? this.registry.commandLimits,
     }
     const copyAgentId = options.agentId ?? this.agentId
     if (copyAgentId !== null) opts.agentId = copyAgentId
