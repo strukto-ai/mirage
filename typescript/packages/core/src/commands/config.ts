@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessView } from '../process/types.ts'
 import type { Accessor } from '../accessor/base.ts'
 import type { IndexCacheStore } from '../cache/index/index.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
@@ -58,6 +59,7 @@ export interface ExecContext {
   sessionId?: string
   env?: Record<string, string>
   sessionView?: SessionView
+  processes?: ProcessView
   execAllowed?: boolean
   execPathAllowed?: (virtual: string) => boolean
   runtime?: Runtime
@@ -96,6 +98,7 @@ export interface CommandOpts {
   // writes); `env` above stays the frozen process-view snapshot. A
   // command that does not read this simply ignores it.
   sessionView?: SessionView
+  processes?: ProcessView
   execAllowed?: boolean
   /**
    * Whether code may be loaded from one path, for an interpreter's file

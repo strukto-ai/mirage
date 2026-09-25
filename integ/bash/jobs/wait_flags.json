@@ -163,10 +163,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(exit 3) & (exit 5) & wait -p WPV %1 %2; echo rc=$? V=$WPV",
+      "command": "(exit 3) & (exit 5) & p=$!; wait -p V %1 %2; echo rc=$?; test \"$V\" = \"$p\" && echo pid-match",
       "expect": {
         "exit": 0,
-        "stdout": "rc=5 V=2\n",
+        "stdout": "rc=5\npid-match\n",
         "stderr": ""
       }
     },

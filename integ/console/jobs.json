@@ -55,6 +55,45 @@
         "stdout": "payload\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "console_managed_pid_matches_jobs_p",
+      "seq": 509008,
+      "targets": [
+        "ram"
+      ],
+      "command": "sleep 5 & p=$!; j=$(jobs -p); test \"$p\" = \"$j\" && echo pid-ok; kill \"$p\"; wait \"$p\" 2>/dev/null || :",
+      "expect": {
+        "exit": 0,
+        "stdout": "pid-ok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_disowned_process_remains_visible",
+      "seq": 509010,
+      "targets": [
+        "ram"
+      ],
+      "command": "sleep 5 & p=$!; disown \"$p\"; ps | grep \"^$p\" >/dev/null && echo visible; kill \"$p\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "visible\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "console_shell_identity_is_virtual",
+      "seq": 509012,
+      "targets": [
+        "ram"
+      ],
+      "command": "s=$$; test \"$s\" = \"$(echo $$)\" && echo shell-ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "shell-ok\n",
+        "stderr": ""
+      }
     }
   ]
 }

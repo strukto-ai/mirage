@@ -1,3 +1,4 @@
+import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -146,6 +147,7 @@ export interface SessionProfile {
    * policy.
    */
   readonly policy?: ProfilePolicySpec | null
+  readonly processes?: ProcessPermissions | null
 }
 
 /**
@@ -183,6 +185,7 @@ export interface CompiledProfile {
   readonly hideReasons?: readonly HideReason[]
   /** The profile's name, null for a document passed without one; the session's group. */
   readonly profile?: string | null
+  readonly processes?: ProcessPermissions
 }
 
 const RULE_FIELDS = ['reason', 'commands', 'paths'] as const
@@ -191,7 +194,16 @@ const VARS_FIELDS = ['hide'] as const
 const COMMANDS_FIELDS = ['allow', 'ask', 'deny'] as const
 const MOUNT_COMMANDS_FIELDS = ['ask', 'deny'] as const
 const PROFILE_MOUNT_FIELDS = ['mode', 'commands', 'paths'] as const
-const PROFILE_FIELDS = ['cwd', 'env', 'mounts', 'paths', 'vars', 'commands', 'policy'] as const
+const PROFILE_FIELDS = [
+  'cwd',
+  'env',
+  'mounts',
+  'paths',
+  'vars',
+  'commands',
+  'policy',
+  'processes',
+] as const
 const POLICY_FIELDS = ['script', 'runtime'] as const
 
 // A document mapping, not merely "an object": a Set, a Date or any class
@@ -568,7 +580,9 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     vars?: VarsBlock | null
     commands?: CommandsBlock | null
     policy?: ProfilePolicySpec | null
+    processes?: ProcessPermissions
   } = {}
+  if (obj.processes != null) out.processes = parseProcessPermissions(obj.processes)
   if (obj.policy !== undefined && obj.policy !== null) {
     out.policy = parseProfilePolicy(obj.policy, `${where}.policy`)
   }

@@ -23,6 +23,7 @@ from mirage.commands.spec.types import (CommandSpec, FlagValue,
                                         ParsedFlagValue, UsageStyle)
 from mirage.io.types import ByteSource
 from mirage.ops.types import NamespaceView, SessionView, StatPath
+from mirage.process.types import ProcessView
 from mirage.runtime.types import DispatchFn, ScriptSource
 from mirage.types import Limit, PathSpec
 
@@ -80,6 +81,7 @@ class CLIDoors:
     stat_path: StatPath | None = None
     ns: NamespaceView | None = None
     session_view: SessionView | None = None
+    processes: ProcessView | None = None
 
 
 @dataclass(frozen=True)

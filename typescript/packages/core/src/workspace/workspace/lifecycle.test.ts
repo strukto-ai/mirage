@@ -61,8 +61,8 @@ function deaf(release: { fire?: () => void }): JobRunner {
 describe('closeWorkspace', () => {
   // A bare abort leaves such a job RUNNING with no ending chunk, so
   // anyone parked on waitFinished waits forever on a workspace that is
-  // already gone. killAll never joins the runner, so settling here
-  // cannot block shutdown on a job that is mid-write.
+  // already gone. The console ends promptly; the supervisor
+  // keeps teardown pending until the runner has really settled.
   it('settles a job whose runner never observes the abort', async () => {
     const ws = buildWs()
     const release: { fire?: () => void } = {}
@@ -74,7 +74,11 @@ describe('closeWorkspace', () => {
     })
     expect(job.status).toBe(JobStatus.RUNNING)
 
-    await ws.close()
+    const closing = ws.close()
+    await job.console.waitFinished()
+    expect(job.process?.info.state).toBe('stopping')
+    release.fire?.()
+    await closing
 
     expect(job.status).toBe(JobStatus.KILLED)
     expect(job.exitCode).toBe(137)
@@ -96,7 +100,10 @@ describe('closeWorkspace', () => {
       cwd: '/',
     })
 
-    await ws.close()
+    const closing = ws.close()
+    await job.console.waitFinished()
+    release.fire?.()
+    await closing
     await ws.close()
 
     expect(job.status).toBe(JobStatus.KILLED)

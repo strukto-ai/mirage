@@ -48,11 +48,10 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   // Settle jobs rather than merely aborting them: killAll records the
   // outcome and finishes each console, which is what releases a reader
   // parked on waitFinished; a bare abort leaves the job RUNNING with no
-  // ending chunk and that reader waits forever. It never joins the
-  // runner, so this cannot block shutdown on a job mid-write, and it
-  // happens before any VFS closes so a job cannot keep touching one
-  // that is already gone.
+  // ending chunk and that reader waits forever. The supervisor then joins the
+  // managed runners before their mounts are released.
   await deps.jobTable.killAll()
+  deps.jobTable.processes.stop()
   await deps.jobTable.closeConsoles()
   // Runtimes next, and before the cache or any VFS closes. A runtime
   // that was interrupted mid-run still has a journal to replay, and that
@@ -74,6 +73,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
     }
   }
   try {
+    await deps.jobTable.processes.drain()
     const retirements = await Promise.allSettled([...deps.registry.retiringMounts.values()])
     for (const result of retirements) {
       if (result.status === 'rejected') throw result.reason as Error

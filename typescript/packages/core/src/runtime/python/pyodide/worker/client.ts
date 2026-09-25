@@ -1,3 +1,5 @@
+import { PathSpec } from '../../../../types.ts'
+import { decodeBase64, encodeBase64 } from '../../../../utils/base64.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -161,7 +163,15 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = respond(message.buffer, () =>
-            scope.run(() => this.operation(message, vfs, dispatch)),
+            scope.run(() =>
+              this.operation(
+                message,
+                vfs,
+                dispatch,
+                request.method === 'run' ? context : { ...context, processes: null },
+                signal,
+              ),
+            ),
           )
           responses.add(response)
           void response.then(() => {
@@ -219,8 +229,43 @@ export class PyodideWorkerClient {
     request: VfsRequest,
     vfs: RuntimeVFS,
     dispatch: BridgeDispatchFn,
+    context: RuntimeContext,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     switch (request.op) {
+      case 'process': {
+        if (context.processes?.spawn === undefined)
+          throw new Error('runtime has no process spawn door')
+        const data = JSON.parse(request.payload ?? '{}') as {
+          argv: string[]
+          input: string
+          cwd: string
+          env?: Record<string, string>
+        }
+        if (!Array.isArray(data.argv) || !data.argv.every((arg) => typeof arg === 'string'))
+          throw new Error('invalid argv')
+        signal?.throwIfAborted()
+        const child = context.processes.spawn({
+          argv: data.argv,
+          cwd: PathSpec.fromStrPath(data.cwd),
+          ...(data.env === undefined ? {} : { env: data.env }),
+        })
+        const abort = () => {
+          child.terminate()
+        }
+        signal?.addEventListener('abort', abort, { once: true })
+        try {
+          if (signal?.aborted) abort()
+          const result = await child.communicate(decodeBase64(data.input))
+          return JSON.stringify({
+            stdout: encodeBase64(result.stdout),
+            stderr: encodeBase64(result.stderr),
+            returncode: result.exitCode,
+          })
+        } finally {
+          signal?.removeEventListener('abort', abort)
+        }
+      }
       case 'read':
         return vfs.read(request.path)
       case 'stat':

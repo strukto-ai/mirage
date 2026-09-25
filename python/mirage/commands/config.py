@@ -33,6 +33,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import NamespaceView, ReaddirPath, SessionView, StatPath
+from mirage.process.types import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn, ExecPathFn
 from mirage.types import Limit, PathSpec
@@ -93,6 +94,7 @@ class ExecContext:
     stat_path: StatPath | None = None
     readdir_path: ReaddirPath | None = None
     session_view: SessionView | None = None
+    processes: ProcessView | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +176,7 @@ class CommandOpts:
     stat_path: StatPath | None = None
     readdir_path: ReaddirPath | None = None
     session_view: SessionView | None = None
+    processes: ProcessView | None = None
 
 
 CommandFnResult = tuple[ByteSource | None, IOResult] | None

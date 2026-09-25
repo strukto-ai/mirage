@@ -22,6 +22,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource
 from mirage.policy.types import (AdmissionRules, Decision, HideReason,
                                  ProfileScript)
+from mirage.process.config import ProcessPermissions
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
 from mirage.shell.constants import (BIN_PREFIX, RANDOM, RANDOM_UNSET,
@@ -287,6 +288,10 @@ class SessionState:
     # unrestricted session. What an owner-rendering command prints as
     # the group. Stamped by the profile like script, so it persists.
     profile: str | None = None
+    processes: ProcessPermissions = ProcessPermissions()
+    process_id: int | None = None
+    shell_pid: int | None = None
+    process_depth: int = 0
     # The host's standing answers to asked lines (design 3.9): session
     # state like functions and cwd, persisted, read and written through
     # the manager by id so a fork shares them, never another session's.
@@ -464,6 +469,8 @@ class SessionState:
             data["commands"] = commands_to_dict(self.commands)
         if self.script is not None:
             data["script"] = script_to_dict(self.script)
+        if self.processes != ProcessPermissions():
+            data["processes"] = self.processes.model_dump()
         if self.profile is not None:
             data["profile"] = self.profile
         if self.decisions:
@@ -539,6 +546,11 @@ class SessionState:
             data["script"] = script_from_dict(script)
         if decisions is not None:
             data["decisions"] = tuple(decision_from_dict(d) for d in decisions)
+        if "processes" in data:
+            data = {
+                **data, "processes":
+                ProcessPermissions.model_validate(data["processes"])
+            }
         return cls(**data)
 
     @property
@@ -641,7 +653,10 @@ class SessionState:
                 **defaults["vars"], "PWD":
                 ShellVar(overrides["cwd"], frozenset({VarAttr.EXPORT}))
             }
-        return SessionState(**defaults)
+        forked = SessionState(**defaults)
+        if self._random_seed == RANDOM_UNSET:
+            forked._random_seed = RANDOM_UNSET
+        return forked
 
     def snapshot(self) -> dict[str, Any]:
         """Copy the state a child shell runs on top of.

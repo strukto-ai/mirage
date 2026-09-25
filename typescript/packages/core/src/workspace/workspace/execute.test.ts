@@ -361,12 +361,13 @@ describe('same-session lines run one at a time', () => {
       }),
     )
     const first = ws.shell('stall')
+    const interrupted = expect(first).rejects.toMatchObject({ name: 'AbortError' })
     const queued = ws.shell('echo queued')
     const refused = expect(queued).rejects.toThrow('Workspace is closed')
     await new Promise((resolve) => setTimeout(resolve, 10))
     const closing = ws.close()
     release()
-    await first
+    await interrupted
     await refused
     await closing
   })

@@ -555,6 +555,7 @@ export class MountEntry {
         ...(context.sessionId !== undefined ? { sessionId: context.sessionId } : {}),
         ...(context.env !== undefined ? { env: context.env } : {}),
         ...(context.sessionView !== undefined ? { sessionView: context.sessionView } : {}),
+        ...(context.processes !== undefined ? { processes: context.processes } : {}),
         ...(context.execAllowed !== undefined ? { execAllowed: context.execAllowed } : {}),
         ...(context.execPathAllowed !== undefined
           ? { execPathAllowed: context.execPathAllowed }

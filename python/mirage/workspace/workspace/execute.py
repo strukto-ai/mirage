@@ -27,10 +27,12 @@ from mirage.observe.context import RecordingScope
 from mirage.policy import HandOff, resolve_limit
 from mirage.provision import ProvisionResult
 from mirage.runtime.routing import RouteDecision, RouteDeny, RouteError
+from mirage.shell.console import JobConsole
+from mirage.shell.literal import literal_tree
 from mirage.shell.parse import (find_syntax_error, find_unterminated_backtick,
                                 parse, syntax_error_result)
 from mirage.shell.types import TSNodeLike
-from mirage.types import Refusal
+from mirage.types import PathSpec, Refusal
 from mirage.workspace.abort import (MirageAbortError, StatusWriter,
                                     set_line_writer)
 from mirage.workspace.executor.statement import (StatusSnapshot, record_status,
@@ -218,6 +220,9 @@ async def execute_line(
     routing_decision: RouteDecision | None,
     handed: HandOff | None = None,
     frame: LineFrame | None = None,
+    argv: tuple[str, ...] | None = None,
+    sink: JobConsole | None = None,
+    tracked: bool = False,
 ) -> IOResult | ProvisionResult:
     """The body of ``Workspace.shell``; see its docstring for the
     argument contract.
@@ -264,6 +269,35 @@ async def execute_line(
         if session_id is None:
             session_id = ws._session_mgr.default_id
         session = ws._session_mgr.get(session_id)
+    if not tracked and not provision and session.process_id is None:
+        results: list[IOResult | ProvisionResult] = []
+
+        async def run() -> int:
+            token = set_current_session(session, owner=ws._session_mgr)
+            try:
+                result = await execute_line(ws, command, session_id, stdin,
+                                            provision, agent_id, cwd, env,
+                                            cancel, record, runtime,
+                                            routing_decision, handed, frame,
+                                            argv, sink, True)
+                results.append(result)
+                return result.exit_code if isinstance(result, IOResult) else 0
+            finally:
+                reset_current_session(token)
+
+        process = ws.processes.start(session_id=session.session_id,
+                                     command=command,
+                                     cwd=PathSpec.from_str_path(
+                                         cwd or session.cwd),
+                                     run=run)
+        session.process_id = process.info.pid
+        if session.shell_pid is None:
+            session.shell_pid = process.info.pid
+        try:
+            await process.task
+            return results[0]
+        finally:
+            session.process_id = None
     effective_session = fork_for_call(session, cwd, env)
     # The agent of this line, carried with the execution rather than
     # held on the workspace: a nested line inherits it through
@@ -293,12 +327,12 @@ async def execute_line(
         # and every nested evaluation under it inherits the identity.
         set_line_writer(frame.writer)
     try:
-        ast = parse(command)
+        ast = parse(command) if argv is None else literal_tree(argv)
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
         # consulted about it.
         offending = find_syntax_error(ast)
-        if offending is None:
+        if offending is None and argv is None:
             # tree-sitter accepts an unclosed backtick as a complete
             # command, so the region is scanned separately.
             offending = find_unterminated_backtick((ast.text or b"").decode())
@@ -484,6 +518,7 @@ async def execute_line(
                 cancel,
                 routing_decision=decision,
                 handed=handed,
+                sink=sink,
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).

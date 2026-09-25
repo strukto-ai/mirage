@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+from collections.abc import Callable
 from typing import Protocol
 from weakref import WeakValueDictionary
 
@@ -23,6 +24,7 @@ from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.context import effective_path_mode, strongest_mode_under
 from mirage.ops.config import OpsMount
 from mirage.policy import Decisions, MountRootPolicy, OutputCapPolicy, Policies
+from mirage.process.types import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import WorkspaceRuntime
 from mirage.types import Limit, MountMode, PathSpec, ReadPolicy, ReadSpec
@@ -32,6 +34,7 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
 from mirage.workspace.cli import CLIRegistry
 from mirage.workspace.mount.mount import MountEntry
+from mirage.workspace.session.session import SessionState
 
 DEV_PREFIX = "/dev/"
 
@@ -75,6 +78,7 @@ class MountRegistry:
     """
 
     def __init__(self) -> None:
+        self.process_view: Callable[[SessionState], ProcessView] | None = None
         self._mounts: list[MountEntry] = []
         self.retiring_mounts: dict[int, asyncio.Task[None]] = {}
         self.retired_mounts: WeakValueDictionary[int, BaseVFS] = (

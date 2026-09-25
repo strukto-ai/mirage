@@ -423,6 +423,8 @@ async def run_on_mount(
                 session_id=session.session_id,
                 env=env_snapshot(session),
                 session_view=session_view(session, registry.policies),
+                processes=registry.process_view(session)
+                if registry.process_view is not None else None,
                 exec_allowed=registry.is_exec_allowed(),
                 exec_path_allowed=registry.exec_allowed_at,
                 runtime=line_runtime,

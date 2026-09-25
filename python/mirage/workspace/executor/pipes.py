@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from functools import partial
 from typing import Any
 
 from mirage.commands.builtin.utils.limit import run_with_timeout
@@ -22,6 +23,7 @@ from mirage.io.stream import (async_chain, close_quietly, discard_io,
 from mirage.io.types import ByteSource, materialize
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console.pipe import PipeConsole
@@ -32,6 +34,7 @@ from mirage.shell.errors import ExitSignal, PipeClosed
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
+from mirage.types import PathSpec
 from mirage.workspace.executor.builtins.exec import (divert_statement,
                                                      stdout_to_stderr)
 from mirage.workspace.executor.jobs import handle_background, pump
@@ -50,6 +53,7 @@ async def handle_pipe(
     session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    processes: ProcessSupervisor | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Connect commands via pipes: stdout -> stdin."""
     pipes = [
@@ -59,8 +63,10 @@ async def handle_pipe(
     ios: list[IOResult] = [IOResult() for _ in commands]
     child_nodes: list[ExecutionNode] = [ExecutionNode() for _ in commands]
 
-    async def run_segment(i: int, cmd: TSNodeLike) -> None:
-        child = session.fork()
+    children = [session.fork() for _ in commands]
+
+    async def run_segment(i: int, cmd: TSNodeLike) -> int:
+        child = children[i]
         token = set_current_session(child)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
@@ -95,11 +101,20 @@ async def handle_pipe(
             ios[i] = io
             child_nodes[i] = child_exec
             reset_current_session(token)
+        return io.exit_code
 
-    tasks = [
-        asyncio.create_task(run_segment(i, cmd))
-        for i, cmd in enumerate(commands)
-    ]
+    tasks: list[asyncio.Task[int]] = []
+    for i, cmd in enumerate(commands):
+        if processes is None:
+            tasks.append(asyncio.create_task(run_segment(i, cmd)))
+        else:
+            process = processes.start(session_id=session.session_id,
+                                      command=(cmd.text or b"").decode(),
+                                      cwd=PathSpec.from_str_path(session.cwd),
+                                      parent_pid=session.process_id,
+                                      run=partial(run_segment, i, cmd))
+            children[i].process_id = process.info.pid
+            tasks.append(process.task)
     failed = False
     try:
         result = await run_with_timeout(

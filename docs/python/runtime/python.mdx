@@ -256,3 +256,27 @@ cancellation: monty kills its worker process, wasi traps the run
 through wasmtime's epoch interruption, and local kills the
 subprocess. A timed-out `python3` run is reclaimed at the deadline,
 not left burning in the background.
+
+## Managed child commands
+
+Monty exposes an asynchronous host callback; it does not import CPython's native
+`subprocess` implementation:
+
+```python
+result = await mirage_run(["printf", "%s", "hello"])
+print(result["stdout"])
+```
+
+The child crosses the workspace's command admission gate and inherits the
+calling session's confinement. Nested Python calls use separate worker capacity.
+See [managed execution](/home/architecture#managed-execution) for process views,
+lifetimes and provider limits.
+
+Host applications can use the same door:
+
+```python
+from mirage.process.types import SpawnRequest
+
+child = ws.spawn(SpawnRequest(("cat",)))
+result = await child.communicate(b"hello\n")
+```

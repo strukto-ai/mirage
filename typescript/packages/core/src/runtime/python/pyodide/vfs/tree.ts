@@ -180,6 +180,20 @@ export class NodeTree {
     return parent.children?.get(name)
   }
 
+  invalidate(): void {
+    if (this.root === null) return
+    const pending = [...(this.root.children?.values() ?? [])]
+    while (pending.length > 0) {
+      const node = pending.pop()
+      if (node === undefined) break
+      pending.push(...(node.children?.values() ?? []))
+      node.loaded = false
+      delete node.contents
+      this.host.destroyNode?.(node)
+    }
+    this.root.children?.clear()
+  }
+
   childNames(node: FSNode): string[] {
     return [...(node.children?.keys() ?? [])]
   }

@@ -23,6 +23,7 @@ from mirage.policy import (ExecuteResultContext, HandOff, post_execute_gate,
 from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
+from mirage.shell.console import JobConsole
 from mirage.shell.job_table import JobTable
 from mirage.types import Producer
 from mirage.workspace.mount import MountRegistry
@@ -45,6 +46,7 @@ async def run_command_tree(
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision | None = None,
     handed: HandOff | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[IOResult, ExecutionNode]:
     """Run a parsed command tree and finalize its output stream.
 
@@ -92,6 +94,7 @@ async def run_command_tree(
         cancel=cancel,
         routing_decision=routing_decision,
         handed=handed,
+        sink=sink,
     )
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
     # The boundary consultation: the envelope's producer facts become

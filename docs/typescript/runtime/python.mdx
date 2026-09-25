@@ -240,3 +240,33 @@ a busy `while True` loop. The watchdog needs `SharedArrayBuffer`
 (always present in Node; in a browser only on cross-origin isolated
 pages) — without it, a busy pyodide loop blocks the event loop until
 it finishes, so prefer monty for untrusted code there.
+
+## Managed child commands
+
+Pyodide's shared-memory worker supports an admitted subprocess bridge:
+
+```python
+import subprocess
+
+result = subprocess.run(["printf", "%s", "hello"],
+                        capture_output=True, text=True, check=True)
+print(result.stdout)
+```
+
+Only the worker waits synchronously; Mirage's host event loop stays asynchronous.
+Writes flush before the child runs, and the guest's cached files invalidate after
+it completes. `Popen`, terminals and unsupported options fail explicitly. The
+bridge is unavailable in the fallback without shared-memory workers.
+
+Monty instead exposes `await mirage_run(argv, input, cwd)`, returning a mapping
+with text `stdout`, `stderr` and `returncode`.
+
+Host applications use the same admitted argv door:
+
+```typescript
+const child = ws.spawn({ argv: ['cat'] })
+const result = await child.communicate(new TextEncoder().encode('hello\n'))
+```
+
+See [managed execution](/home/architecture#managed-execution) for process views,
+lifetimes and provider limits.

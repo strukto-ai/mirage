@@ -51,3 +51,96 @@ Browse the [VFS Matrix](/home/vfs-matrix) for the full list.
 - [VFS Matrix](/home/vfs-matrix) to pick a backend to mount.
 - [Python Quickstart](/python/quickstart) for working code in minutes.
 - [TypeScript Quickstart](/typescript/quickstart) for the same Workspace API in Node, browser, or edge.
+
+## Managed execution
+
+The workspace also owns a process supervisor. Shell lines, background jobs, pipeline stages, subshells and
+`Workspace.spawn` share this inventory. A process is an asynchronous Mirage
+execution; its PID is workspace-local and is never a native worker PID. Native
+runtimes still execute in the environment described by their `reach` guarantee.
+
+`spawn` accepts literal argv, opens bounded asynchronous byte pipes, and returns
+an immediate handle. Arguments enter the same command lookup, admission and
+runtime routing as shell commands. For example, `['printf', '%s', '$(whoami)']`
+prints the literal operand. To interpret a script, explicitly spawn
+`['sh', '-c', script]`. Command and CLI handlers receive the same scoped spawn
+door on `opts.processes` and `inv.doors.processes`; runtime contexts carry it too.
+
+```mermaid
+flowchart LR
+    Caller[Shell / CLI / guest / dsh] --> Spawn[Admitted argv execution]
+    Spawn --> Supervisor[Workspace process supervisor]
+    Supervisor --> Lookup[Command lookup and runtime routing]
+    Lookup --> Workspace[Builtins and registered CLIs]
+    Lookup --> Guest[Monty / Pyodide / QuickJS / WASI]
+    Lookup --> Provider[Local / SSH / Docker / sandbox provider]
+    Guest -->|supported guest bridge| Spawn
+```
+
+Use `communicate(input)` to send input and drain both output pipes concurrently.
+Calling `wait` without consuming a piped output can apply backpressure, just as
+with a native pipe. Termination requests cancellation; the process remains
+`stopping` until its runner and tracked cleanup settle. Parent cancellation
+reaches its live managed children. Workspace shutdown awaits tracked runners before closing their mounts;
+a runner that ignores cancellation keeps shutdown pending. Metadata includes
+parent and execution-group IDs. A provider's native descendants are not inferred from these IDs.
+
+The shell keeps its job table separately: `%1` is local to a session, while `$!`
+and `jobs -p` return the managed PID. `wait PID` resolves a child job and numeric
+`kill PID` can reach an authorized managed runner even after `disown` removed
+its job entry. `ps`, `ps aux`, `ps -e` and `ps -ef` list visible live runners,
+including foreground work. Their deliberately compact format is `PID<TAB>COMMAND`:
+Mirage has no CPU, RSS, TTY or native process-tree accounting to populate GNU's
+columns. Subshells keep private job tables while sharing the workspace process supervisor.
+`$$` is the session's virtual shell identity, inherited by shell forks; an idle
+shell is not a live runner in `ps`. Signals, stopped jobs and native process
+groups are not emulated. Existing shell cancellation retains exit status 137;
+the Debian bash reference reports 143 for its default SIGTERM.
+
+Profiles grant views rather than owning processes:
+
+```yaml
+profiles:
+  reviewer:
+    processes:
+      metadata: session
+      details: none
+      control: none
+      spawn: true
+```
+
+`metadata`, `details` and `control` each accept `none`, `session` or `workspace`.
+Defaults are `session`; spawn defaults to true and still passes command
+admission. `details: none` redacts command text, cwd and failure details. Control
+also requires metadata visibility. Inline permissions only narrow these grants.
+Two sessions using the same profile do not thereby share their processes.
+Replacing a profile revokes captured doors and requests cancellation of that
+session's executions; closing the session also cancels its managed work.
+Output remains owned by the returned child handle or shell job console: metadata
+access does not grant another process's output stream or replay. Only live
+processes appear in the supervisor; retain a handle to inspect its final result.
+
+For a workspace backed by stored sessions, hydrate with `ensure_sessions_loaded`
+(Python) or `ensureSessionsLoaded` (TypeScript) before spawning. A session replaced
+by hydration fails a pending spawn instead of executing with stale permissions.
+
+| Runtime or entry point | Managed execution | Guest child execution |
+| --- | --- | --- |
+| Builtins, commands, registered CLIs | Shared supervisor and admission | Scoped process door for handlers |
+| Monty, both SDKs | Managed worker execution | `await mirage_run(argv, input, cwd)`; returns text stdout, stderr and returncode |
+| Pyodide, TypeScript | Managed execution | `subprocess.run(argv, ...)` in a shared-memory worker |
+| QuickJS and WASI | Managed execution | No subprocess ABI supplied by Mirage |
+| Local Python and process runtimes | Tracks the admitted invocation | Native subprocess APIs retain native reach and bypass the guest bridge |
+| SSH, Docker, E2B, Daytona, SmolVM, Sandlock | Existing runtime routing, where that SDK provides the adapter | Native provider behavior; no generic descendant-control guarantee |
+| dsh `ctx.subprocess` | Shared argv, pipes, collection and managed-range wait | Workspace-only runtimes; PTYs and native/remote worlds refused |
+
+Nested Monty and Pyodide calls use independent execution capacity and have a
+maximum nesting depth of 16. A parent never waits for a child queued behind its
+own interpreter. Pyodide blocks only its worker for the synchronous Python API;
+the host answers asynchronously. Guest mutations flush before spawning and guest
+file caches invalidate afterward. A host without shared-memory worker support
+gets an explicit unsupported error. Pyodide supports `run` with argv, input,
+PIPE/DEVNULL/inherited output, text conversion, cwd and check; it does not supply
+`Popen`, PTYs, shell=True, or the remaining Popen options. Its explicit env follows
+Mirage's environment-overlay convention. Provider adapters may buffer their output;
+the byte-pipe API does not turn a buffered provider into an incremental one.

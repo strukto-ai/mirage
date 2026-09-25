@@ -16,7 +16,9 @@ import asyncio
 import logging
 from collections.abc import (AsyncIterator, Awaitable, Callable, Mapping,
                              Sequence)
+from dataclasses import replace
 from functools import partial
+from shlex import join as shell_join
 from types import TracebackType
 from typing import Any, Literal, overload
 
@@ -30,6 +32,7 @@ from mirage.context import (get_current_session_for,
                             get_current_session_unless_foreign,
                             reset_current_session, set_current_session)
 from mirage.io import IOResult
+from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
@@ -38,6 +41,10 @@ from mirage.ops import Ops
 from mirage.policy import (AskHandler, Decisions, Explanation, HandOff,
                            PermissionsPolicy, Policies, Policy, PolicyError,
                            ScriptPolicy, SessionProfile)
+from mirage.process.child import ChildProcess
+from mirage.process.stdio import ProcessInput, ProcessOutput
+from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.types import ProcessView, SpawnRequest
 from mirage.provision import ProvisionResult
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding, capture_binding
@@ -50,8 +57,10 @@ from mirage.secrets.registry import source_for
 from mirage.secrets.sources import resolve_sources
 from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
+from mirage.shell.console import Channel
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import ConsoleFactory, JobTable
+from mirage.shell.literal import literal_tree
 from mirage.types import (CacheFacts, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
                           ReadSpec, parse_mount_mode)
@@ -145,6 +154,7 @@ class Workspace:
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
     ) -> None:
         self._registry = MountRegistry()
+        self._registry.process_view = self._process_view
         # The permission profiles: one per name, and the one a session
         # gets when it names none. A profile is the whole document a
         # session runs under, so there is no workspace-wide block
@@ -184,7 +194,8 @@ class Workspace:
         # VFS overrides) stay open here; their origin closes them.
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
-        self.job_table = JobTable(console_factory)
+        self.processes = ProcessSupervisor()
+        self.job_table = JobTable(console_factory, self.processes)
         self._default_agent_id = agent_id
         # The env block, translated once: a literal entry becomes an
         # exported var, a managed one becomes a pointer the fill step
@@ -686,10 +697,109 @@ class Workspace:
                 ns=namespace_view_of(self._registry, self._namespace,
                                      self.dispatch),
                 session_view=session_view(session, self.policies),
+                processes=self._process_view(session),
                 cwd=PathSpec.from_str_path(session.cwd),
                 env=env_snapshot(session))
         finally:
             reset_current_session(token)
+
+    def spawn(self,
+              request: SpawnRequest,
+              session_id: str | None = None) -> ChildProcess:
+        """Spawn literal argv through admission in an isolated session fork.
+
+        Args:
+            request (SpawnRequest): program, arguments and launch overrides.
+            session_id (str | None): host-selected session; defaults to
+                the active session.
+        """
+        session = self._session_mgr.get(
+            session_id) if session_id is not None else self._op_session()
+        return self._spawn_for_session(request, session)
+
+    def _process_view(self, session: SessionState) -> ProcessView:
+        parent_pid = session.process_id
+        view = self.processes.view(session.session_id,
+                                   lambda: session.processes)
+
+        def spawn(request: SpawnRequest) -> ChildProcess:
+            view.check_spawn()
+            return self._spawn_for_session(request,
+                                           session.fork(process_id=parent_pid))
+
+        return replace(view, spawn=spawn, depth=session.process_depth)
+
+    def _spawn_for_session(self, request: SpawnRequest,
+                           session: SessionState) -> ChildProcess:
+        if self._closing or self._closed:
+            raise RuntimeError("Workspace is closed")
+        if not session.processes.spawn:
+            raise PermissionError("process spawn is not permitted")
+        if session.process_depth >= 16:
+            raise RuntimeError("process nesting limit (16) reached")
+        argv = tuple(request.argv)
+        literal_tree(argv)
+        cwd = request.cwd or PathSpec.from_str_path(session.cwd)
+        child = session.fork(cwd=cwd.virtual,
+                             process_depth=session.process_depth + 1)
+        input_stream, output = ProcessInput(), ProcessOutput()
+        env = dict(request.env) if request.env is not None else None
+        owner = self._session_mgr.get(session.session_id)
+        admission = self.processes.view(session.session_id,
+                                        lambda: owner.processes)
+
+        async def run() -> int:
+            await self.ensure_sessions_loaded()
+            if self._session_mgr.get(session.session_id) is not owner:
+                raise RuntimeError(
+                    "session changed during hydration; retry spawn after "
+                    "ensure_sessions_loaded")
+            admission.check_spawn()
+            token = set_current_session(child, self._session_mgr)
+            try:
+                result = await execute_line(self,
+                                            shell_join(argv),
+                                            child.session_id,
+                                            input_stream.stream(),
+                                            False,
+                                            None,
+                                            cwd.virtual,
+                                            env,
+                                            None,
+                                            True,
+                                            None,
+                                            None,
+                                            argv=argv,
+                                            sink=output)
+                if not isinstance(result, IOResult):
+                    raise RuntimeError("spawn returned a provision plan")
+                await output.emit(Channel.STDOUT, await
+                                  materialize(result.stdout))
+                await output.emit(Channel.STDERR, await
+                                  materialize(result.stderr))
+                return result.exit_code
+            finally:
+                reset_current_session(token)
+                input_stream.stop()
+                output.end()
+
+        process = self.processes.start(session_id=child.session_id,
+                                       command=shell_join(argv),
+                                       cwd=cwd,
+                                       run=run,
+                                       parent_pid=session.process_id)
+        child.process_id = process.info.pid
+        child.shell_pid = process.info.pid
+
+        def cancel() -> None:
+            process.terminate()
+            for child_process in self.processes.live():
+                if child_process.info.group_id == process.info.pid:
+                    child_process.terminate()
+            input_stream.stop()
+            output.stop()
+
+        return ChildProcess(process, input_stream, output, cancel)
 
     def add_runtime(self, runtime: Runtime | str) -> Runtime:
         """Append a runtime entry to the workspace's ordered set.
@@ -1182,7 +1292,12 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if was_default:
             session_id = self.default_session_id
-        return await self._session_mgr.set_profile(session_id, compiled)
+        session = await self._session_mgr.set_profile(session_id, compiled)
+        self.processes.revoke_session(session_id)
+        for process in self.processes.live():
+            if process.info.session_id == session_id:
+                process.terminate()
+        return session
 
     def list_sessions(self) -> list[SessionState]:
         return self._session_mgr.list()

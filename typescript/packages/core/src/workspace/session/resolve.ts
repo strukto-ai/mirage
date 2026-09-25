@@ -1,3 +1,8 @@
+import {
+  DEFAULT_PROCESS_PERMISSIONS,
+  restrictProcesses,
+  type ProcessPermissions,
+} from '../../process/config.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -187,7 +192,11 @@ export function withInline(
       'inline permissions may add ask and deny rules, not a policy; state one on the profile',
     )
   }
-  if (base === null) return inline
+  const processes =
+    inline.processes == null
+      ? (base?.processes ?? DEFAULT_PROCESS_PERMISSIONS)
+      : restrictProcesses(base?.processes ?? DEFAULT_PROCESS_PERMISSIONS, inline.processes)
+  if (base === null) return inline.processes == null ? inline : { ...inline, processes }
   const hidePaths = unionHide(base.paths, inline.paths)
   const hideVars = unionHide(base.vars, inline.vars)
   const out: {
@@ -198,7 +207,9 @@ export function withInline(
     vars?: VarsBlock | null
     commands?: CommandsBlock | null
     policy?: ProfilePolicySpec | null
+    processes?: ProcessPermissions
   } = {}
+  out.processes = processes
   out.cwd = inline.cwd ?? base.cwd ?? null
   if (base.env != null || inline.env != null) out.env = { ...base.env, ...inline.env }
   if (base.mounts != null || inline.mounts != null) {
@@ -389,6 +400,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
   const commands = compileCommands(effective)
   checkRules(commands)
   return {
+    ...(effective.processes == null ? {} : { processes: effective.processes }),
     mountModes: modesOf(effective),
     hiddenPaths: hiddenOf(effective),
     hiddenVars: classifyVars(effective.vars?.hide ?? []),
@@ -420,6 +432,7 @@ export function narrow(session: SessionState, compiled: CompiledProfile): void {
   session.commands = compiled.commands
   session.script = compiled.script ?? null
   session.profile = compiled.profile ?? null
+  session.processes = compiled.processes ?? DEFAULT_PROCESS_PERMISSIONS
 }
 
 /**

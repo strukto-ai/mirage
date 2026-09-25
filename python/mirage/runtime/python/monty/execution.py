@@ -19,6 +19,8 @@ import os
 import signal
 from typing import Any
 
+from mirage.process.bridge import GuestProcesses
+from mirage.process.types import ProcessView
 from mirage.runtime.errors import EvalError
 from mirage.runtime.python.monty.binding import pydantic_monty
 from mirage.runtime.python.monty.constants import (DEFAULT_PROG,
@@ -66,7 +68,10 @@ class MontyExecution:
         await pool.__aenter__()
         return pool
 
-    async def run(self, args: RunArgs, bridge: MirageOSAccess) -> RunResult:
+    async def run(self,
+                  args: RunArgs,
+                  bridge: MirageOSAccess,
+                  processes: ProcessView | None = None) -> RunResult:
         # Execution lives in a monty worker subprocess (0.0.19 moved it
         # out of process so an interpreter crash cannot take the host
         # with it). feed_run awaits off the event loop, so the loop
@@ -97,6 +102,10 @@ class MontyExecution:
                 try:
                     await session.feed_run(args.code,
                                            inputs=inputs,
+                                           external_lookup={
+                                               "mirage_run":
+                                               GuestProcesses(processes).run
+                                           },
                                            print_callback=collector,
                                            cwd=cwd,
                                            os=bridge)

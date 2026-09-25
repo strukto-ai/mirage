@@ -280,3 +280,23 @@ A concrete scenario: serving agents from a TypeScript server (an Express endpoin
 | [Claude Agent SDK](/typescript/agents/claude-agent-sdk) | ~40 ms (+ ~150 ms sandbox startup) | ~15 |
 
 Concurrency is estimated as about 6 GB of free memory divided by a session's measured resident footprint (a dsh session with a live Python engine is about 27 MB, idle workspaces 240 KB, a Codex session about 200 MB, a Claude Code CLI session about 430 MB); startup is the measured time to bring one session up, process boot for the CLIs and workspace construction for dsh. The dsh numbers already include isolation, since monty is the sandbox and each engine runs on its own crash-isolated worker process; the CLI sessions run on the host, so isolating them means provisioning a container or remote sandbox per session, measured at about 150 ms even for a warm local container and more for a cold or remote one.
+
+## Subprocess provider
+
+The bundle also replaces `dsh-subprocess-local` with `MirageSubprocess`. Executable
+lookup and argv execution stay in the same workspace as `ctx.fs` and `ctx.shell`.
+It supplies raw pipes or bounded, independently readable output tails.
+`terminate()` requests cancellation of its managed execution group;
+`waitForExit(signal)` waits for that group's tracked runners, or returns false
+if the wait is aborted. Disposal terminates and awaits the provider's groups.
+
+This provider currently requires workspace-only runtimes. It refuses native or
+remote reach, terminal allocation, subprocess spill requests, and environment
+tombstones instead of falling back to host processes. `graceMs` is validated but
+cancellation is immediate, with no simulated TERM/KILL escalation. Use `ctx.spill`
+for separate tool-result artifacts. Native process trees and PTYs need a provider
+that can actually observe and control them.
+
+Set the subprocess provider's `sessionId` to bind it to an existing workspace
+session and its profile. Omit it to use the default session. Configure the same
+session on the shell provider when both should share that authority.

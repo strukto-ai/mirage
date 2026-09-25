@@ -254,6 +254,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   private vfs: RuntimeVFS | null = null
   private readonly journal: MutationJournal = createJournal()
   private readonly mounted = new Set<string>()
+  private readonly mountedFilesystems = new Map<string, MirageFs>()
   // Prefixes this runtime cannot mount, remembered so the refusal is
   // reported once rather than on every run.
   private readonly refused = new Set<string>()
@@ -304,6 +305,14 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
   }
 
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
+    if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
+      const nested = new PyodideRuntime({ config: this.config as PyodideConfig })
+      try {
+        return await nested.runOne(args, context)
+      } finally {
+        await nested.close()
+      }
+    }
     if (args.cwd === undefined && context !== undefined) args = { ...args, cwd: context.cwd }
     const scope =
       context?.scope ?? new ContextScope([...captureSessionContext(), ...captureRecordingContext()])
@@ -326,6 +335,16 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
   ): Promise<EvalResult> {
     const context = this.captureContext()
+    if (this.sync === undefined && (context?.processes?.depth ?? 0) > 0) {
+      if (opts.session !== undefined)
+        throw new EvalError('nested persistent evaluation is unsupported')
+      const nested = new PyodideRuntime({ config: this.config as PyodideConfig })
+      try {
+        return await nested.evalOne(code, opts, context)
+      } finally {
+        await nested.close()
+      }
+    }
     const scope =
       context?.scope ?? new ContextScope([...captureSessionContext(), ...captureRecordingContext()])
     const task = (): Promise<EvalResult> => scope.run(() => this.evalOne(code, opts, context))
@@ -426,6 +445,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       this.initPromise = null
       this.vfs = null
       this.mounted.clear()
+      this.mountedFilesystems.clear()
       try {
         ;(await worker)?.close()
       } finally {
@@ -530,6 +550,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       if (wanted.has(prefix)) continue
       pyodide.FS.unmount(mountpointOf(prefix))
       this.mounted.delete(prefix)
+      this.mountedFilesystems.delete(prefix)
     }
     for (const prefix of [...wanted].sort((a, b) => a.length - b.length)) {
       // Collect before touching the mount table: a failed readdir then
@@ -574,6 +595,7 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
       // before that inherits an undefined one.
       fs.seed(seed)
       this.mounted.add(prefix)
+      this.mountedFilesystems.set(prefix, fs)
     }
     this.seedSysPath(pyodide)
   }
@@ -598,8 +620,25 @@ export class PyodideRuntime extends PythonRuntime implements Evaluator {
     }
   }
 
+  private guestProcess(payload: string): string {
+    if (this.sync?.process === undefined)
+      throw new Error('subprocess requires a Pyodide worker with shared memory')
+    if (this.syncFailures.length > 0) throw new Error(this.syncFailures[0])
+    const failure = this.sync.flush(this.journal.takeMutations())
+    if (failure !== undefined) throw new Error(failure.message)
+    try {
+      return this.sync.process(payload)
+    } finally {
+      for (const fs of this.mountedFilesystems.values()) fs.invalidate()
+    }
+  }
+
   private guestModule(pyodide: PyodideInterface): PyodideExecution {
-    this.guest ??= new PyodideExecution(pyodide, this.guestXattr.bind(this))
+    this.guest ??= new PyodideExecution(
+      pyodide,
+      this.guestXattr.bind(this),
+      this.guestProcess.bind(this),
+    )
     return this.guest
   }
 

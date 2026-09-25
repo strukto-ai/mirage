@@ -69,16 +69,11 @@
 #     so it is ignored in favour of the workspace default rather than
 #     run in a directory the agent cannot reach.
 #
-# One boundary this patch does NOT move: `ctx.subprocess`. dsh-base
-# registers `dsh-subprocess-local`, which spawns real host processes,
-# and mirage provides no subprocess seam — a mirage world is a shell
-# interpreter over mounts, not a process table. In dsh-base that row is
-# inert, because the only three plugins that consume it (`bash-sandbox`,
-# `pwsh-sandbox`, `tool-fs-search`) are all disabled above. A profile
-# that adds a subprocess consumer of its own — `terminal-bash` and
-# `lsp-stdio` are the ones that exist — puts that plugin on the HOST
-# while the file and shell tools stay in the workspace, so the world is
-# no longer one. Disable those rows, or leave them off the profile.
+# ctx.subprocess shares the workspace's argv admission and process supervisor.
+# Termination covers managed Mirage runners. Native OS descendant tracking and
+# PTYs are unsupported; this provider refuses worlds with native/remote reach.
+- id: subprocess
+  disabled: true
 
 # The host filesystem and bash providers step aside; mirage provides the
 # same ctx.fs and ctx.shell seams over the workspace.
@@ -129,6 +124,9 @@
 
     - id: mirage-fs
       name: '@struktoai/mirage-dsh/fs'
+
+    - id: mirage-subprocess
+      name: '@struktoai/mirage-dsh/subprocess'
 
     - id: mirage-shell
       name: '@struktoai/mirage-dsh/shell'

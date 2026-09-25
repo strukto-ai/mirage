@@ -87,10 +87,16 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
 
   async run(args: RunArgs, context = this.captureContext()): Promise<RunResult> {
     const notice = unhonoredNotice((args.flags ?? {}) as InitFlags, this.name)
-    const result = await this.execution.run(
-      args.cwd === undefined && context !== undefined ? { ...args, cwd: context.cwd } : args,
-      this.perRunVfs(context),
-    )
+    const execution = (context?.processes?.depth ?? 0) > 0 ? new MontyExecution() : this.execution
+    const result = await execution
+      .run(
+        args.cwd === undefined && context !== undefined ? { ...args, cwd: context.cwd } : args,
+        this.perRunVfs(context),
+        context?.processes ?? null,
+      )
+      .finally(async () => {
+        if (execution !== this.execution) await execution.close()
+      })
     if (notice.length === 0) return result
     const stderr = result.stderr ?? new Uint8Array()
     const merged = new Uint8Array(notice.length + stderr.length)
@@ -104,11 +110,19 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
     opts: { inputs?: Record<string, EvalValue>; session?: string } = {},
   ): Promise<EvalResult> {
     const context = this.captureContext()
-    return this.execution.eval(
-      code,
-      this.perRunVfs(context),
-      context === undefined ? opts : { ...opts, cwd: context.cwd },
-    )
+    const nested = (context?.processes?.depth ?? 0) > 0
+    if (nested && opts.session !== undefined)
+      return Promise.reject(new Error('nested persistent evaluation is unsupported'))
+    const execution = nested ? new MontyExecution() : this.execution
+    return execution
+      .eval(
+        code,
+        this.perRunVfs(context),
+        context === undefined ? opts : { ...opts, cwd: context.cwd },
+      )
+      .finally(async () => {
+        if (execution !== this.execution) await execution.close()
+      })
   }
 
   override close(): Promise<void> {

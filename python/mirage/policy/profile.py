@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from mirage.policy.constants import DEFAULT_ASK_REASON, DEFAULT_DENY_REASON
 from mirage.policy.types import (AdmissionRules, CommandRule, HideReason,
                                  ProfileScript)
+from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import ScriptSource
 from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
                           ShownPaths, parse_mount_mode)
@@ -593,6 +594,7 @@ class SessionProfile(BaseModel):
     vars: VarsBlock | None = None
     commands: CommandsBlock | None = None
     policy: ProfilePolicy | None = None
+    processes: ProcessPermissions | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -684,3 +686,4 @@ class CompiledProfile:
     shown_paths: ShownPaths | None = None
     hide_reasons: tuple[HideReason, ...] = ()
     profile: str | None = None
+    processes: ProcessPermissions = ProcessPermissions()

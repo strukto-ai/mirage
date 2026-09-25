@@ -229,6 +229,9 @@ export async function handleCommand(
           statPath: (path: string) => pathStat(dispatch, path, null),
           ns: namespaceViewOf(registry, namespace ?? null, dispatch),
           sessionView: sessionView(session, registry.policies),
+          ...(registry.processView === undefined
+            ? {}
+            : { processes: registry.processView(session) }),
         },
         dropsMountCaches(cliInstall.spec) ? () => dropMountCaches(registry) : null,
       ),

@@ -484,3 +484,74 @@ describe('JobTable per-session scoping', () => {
     await jt.killAll()
   })
 })
+
+it('keeps a disowned process visible until its cancelled runner really exits', async () => {
+  const table = new JobTable(),
+    release: { fire?: () => void } = {}
+  const job = table.submit({
+    command: 'long',
+    run: deaf(release),
+    cwd: '/',
+    sessionId: 'a',
+    abort: new AbortController(),
+  })
+  await Promise.resolve()
+  const process = job.process
+  if (process === null) throw new Error('missing process')
+  const view = table.processes.view('a')
+  expect(table.disown(job.id, 'a')).toBe(true)
+  expect(table.listJobs('a')).toEqual([])
+  expect(view.get(process.info.pid)).not.toBeNull()
+  await table.killAll()
+  expect(job.status).toBe(JobStatus.KILLED)
+  expect(view.get(process.info.pid)?.state).toBe('stopping')
+  if (release.fire === undefined) throw new Error('runner did not start')
+  release.fire()
+  expect(await process.join()).toMatchObject({ exitCode: 0, cancellationRequested: true })
+  expect(view.list()).toEqual([])
+})
+
+it('does not restart process IDs with shell job numbers', async () => {
+  const table = new JobTable()
+  const submit = (sessionId: string) => {
+    const abort = new AbortController()
+    return table.submit({ command: 'wait', run: pending(abort), abort, cwd: '/', sessionId })
+  }
+  const a = submit('a'),
+    b = submit('b')
+  expect(a.id).toBe(1)
+  expect(b.id).toBe(1)
+  const pa = a.process,
+    pb = b.process
+  if (pa === null || pb === null) throw new Error('missing process')
+  expect(pa.info.pid).not.toBe(pb.info.pid)
+  await table.kill(a.id, 'a')
+  table.reap(a.id, 'a')
+  const replacement = submit('a')
+  expect(replacement.id).toBe(1)
+  const pr = replacement.process
+  if (pr === null) throw new Error('missing process')
+  expect(pr.info.pid).toBeGreaterThan(pb.info.pid)
+  await table.killAll()
+  await Promise.all([pa.join(), pb.join(), pr.join()])
+})
+
+it('settles an already aborted job without entering its runner', async () => {
+  const table = new JobTable(),
+    abort = new AbortController()
+  abort.abort()
+  let entered = false
+  const job = table.submit({
+    command: 'cancelled',
+    abort,
+    cwd: '/',
+    run: () => {
+      entered = true
+      return quiet(job)
+    },
+  })
+  await table.wait(job.id)
+  expect(entered).toBe(false)
+  expect(job.status).toBe(JobStatus.KILLED)
+  expect(await job.process?.join()).toMatchObject({ exitCode: 137, cancellationRequested: true })
+})

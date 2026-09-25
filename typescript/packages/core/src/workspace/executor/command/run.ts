@@ -304,6 +304,7 @@ export async function runOnMount(
       sessionId: session.sessionId,
       env: envSnapshot(session),
       sessionView: sessionView(session, registry.policies),
+      ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
       execAllowed: registry.isExecAllowed(),
       execPathAllowed: registry.execAllowedAt,
       ...(lineRuntime !== undefined ? { runtime: lineRuntime } : {}),

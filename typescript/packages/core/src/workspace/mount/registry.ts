@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessView } from '../../process/types.ts'
+import type { SessionState } from '../session/session.ts'
 import { isNoMount, noMount } from '../../utils/errors.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { Runtime } from '../../runtime/base.ts'
@@ -72,6 +74,7 @@ export interface OpsMountInfo {
 }
 
 export class MountRegistry {
+  processView?: (session: SessionState) => ProcessView
   private readonly mountList: MountEntry[]
   readonly retiringMounts = new Map<VFS, Promise<void>>()
   readonly retiredMounts = new WeakSet<VFS>()

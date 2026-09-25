@@ -7,13 +7,82 @@ import importlib
 import io
 import json
 import os
+import subprocess
 import sys
 import traceback
 import types
 import warnings
 from contextlib import contextmanager
 
+import _mirage_process
 import _mirage_xattr
+
+
+def _subprocess_run(args,
+                    *,
+                    input=None,
+                    capture_output=False,
+                    check=False,
+                    text=False,
+                    encoding=None,
+                    errors=None,
+                    cwd=None,
+                    env=None,
+                    shell=False,
+                    stdout=None,
+                    stderr=None,
+                    **kwargs):
+    if shell or kwargs:
+        raise NotImplementedError("Mirage subprocess.run accepts argv; "
+                                  "shell and Popen options are unsupported")
+    if not isinstance(args, (list, tuple)) or not args or not all(
+            isinstance(arg, str) for arg in args):
+        raise TypeError("args must be a nonempty argv sequence")
+    if capture_output:
+        if stdout is not None or stderr is not None:
+            raise ValueError(
+                "stdout and stderr may not be used with capture_output")
+        stdout = stderr = subprocess.PIPE
+    if stdout not in (None, subprocess.PIPE,
+                      subprocess.DEVNULL) or stderr not in (
+                          None, subprocess.PIPE, subprocess.DEVNULL):
+        raise NotImplementedError(
+            "only PIPE, DEVNULL and inherited output are supported")
+    codec, error_mode = encoding or "utf-8", errors or "strict"
+    is_text = text or encoding is not None or errors is not None
+    if input is None:
+        raw = b""
+    elif is_text:
+        raw = input.encode(codec, error_mode)
+    else:
+        raw = bytes(input)
+    request = {
+        "argv": list(args),
+        "cwd": os.fspath(cwd) if cwd is not None else os.getcwd(),
+        "input": base64.b64encode(raw).decode("ascii")
+    }
+    if env is not None:
+        request["env"] = dict(env)
+    result = json.loads(_mirage_process.run(json.dumps(request)))
+    out, err = base64.b64decode(result["stdout"]), base64.b64decode(
+        result["stderr"])
+    if stdout is None:
+        sys.stdout.buffer.write(out)
+    if stderr is None:
+        sys.stderr.buffer.write(err)
+    out = out if stdout == subprocess.PIPE else None
+    err = err if stderr == subprocess.PIPE else None
+    if is_text:
+        out = out.decode(codec, error_mode) if out is not None else None
+        err = err.decode(codec, error_mode) if err is not None else None
+    completed = subprocess.CompletedProcess(args, result["returncode"], out,
+                                            err)
+    if check:
+        completed.check_returncode()
+    return completed
+
+
+subprocess.run = _subprocess_run
 
 
 class OutputCapture(io.RawIOBase):

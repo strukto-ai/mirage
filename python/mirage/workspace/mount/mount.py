@@ -653,6 +653,7 @@ class MountEntry:
                 stat_path=stat_path,
                 readdir_path=context.readdir_path,
                 session_view=context.session_view,
+                processes=context.processes,
             )
 
             recording_token = push_mount_context(self.mount_id)

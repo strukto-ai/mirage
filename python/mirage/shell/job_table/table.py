@@ -15,11 +15,13 @@
 import asyncio
 import logging
 
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.shell.console import (KILLED_OUTCOME, Channel, JobConsole,
                                   exit_outcome)
 from mirage.shell.job_table.constants import KILLED_EXIT_CODE
 from mirage.shell.job_table.types import (ConsoleFactory, Job, JobRunner,
                                           JobStatus)
+from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +37,11 @@ def cancel_job(job: Job) -> None:
     Args:
         job (Job): the job to cancel.
     """
-    task = job.task
-    if task is None:
-        return
     try:
-        task.get_loop().call_soon_threadsafe(task.cancel)
+        if job.process is not None:
+            job.process.terminate()
+        elif job.task is not None:
+            job.task.get_loop().call_soon_threadsafe(job.task.cancel)
     except RuntimeError as exc:
         # The loop that was running this job is gone, so the job is too.
         logger.debug("job %d loop is gone: %s", job.id, exc)
@@ -55,7 +57,7 @@ async def _mark_killed(console: JobConsole) -> None:
     await console.finish(KILLED_OUTCOME)
 
 
-async def _settle(run: JobRunner, job: Job) -> None:
+async def _settle(run: JobRunner, job: Job) -> int:
     """Run a job to completion and record how it ended.
 
     A job settles exactly once. Normally that happens here, in the job's
@@ -85,10 +87,13 @@ async def _settle(run: JobRunner, job: Job) -> None:
         # keeps running to completion even if this one is cancelled
         # again; RAM completes without ever suspending either way.
         marker = asyncio.ensure_future(_mark_killed(job.console))
-        try:
-            await asyncio.shield(marker)
-        except asyncio.CancelledError:
-            logger.debug("job %d cancelled again while marking killed", job.id)
+        while not marker.done():
+            try:
+                await asyncio.shield(marker)
+            except asyncio.CancelledError:
+                logger.debug("job %d cancelled again while marking killed",
+                             job.id)
+        marker.result()
         raise
     except Exception as exc:
         # Recorded as the job's output and exit status rather than
@@ -96,19 +101,20 @@ async def _settle(run: JobRunner, job: Job) -> None:
         # strand the error in an unretrieved future.
         logger.debug("background job %d failed: %s", job.id, exc)
         if job.status != JobStatus.RUNNING:
-            return
+            return 1
         job.status = JobStatus.COMPLETED
         job.exit_code = 1
         await job.console.emit(Channel.STDERR, str(exc).encode())
         await job.console.finish(exit_outcome(1))
-        return
+        return 1
     if job.status != JobStatus.RUNNING:
-        return
+        return io_result.exit_code
     job.io_result = io_result
     job.execution_node = exec_node
     job.exit_code = io_result.exit_code
     job.status = JobStatus.COMPLETED
     await job.console.finish(exit_outcome(job.exit_code))
+    return io_result.exit_code
 
 
 class JobTable:
@@ -119,7 +125,10 @@ class JobTable:
     that session's list empties (GNU bash), and ``jobs``, ``wait``,
     ``fg``, ``kill`` and ``disown`` only ever see the calling session's
     list, exactly as one bash never lists another bash's jobs. Mirage
-    has no pid: ``$!`` and ``jobs -l`` answer with the job number.
+    now tracks runner PIDs separately; ``$!`` and ``jobs -l`` still answer
+    with the job number until shell process-addressing is wired. A job's
+    KILLED outcome ends its console, while ``job.process`` stays STOPPING
+    until the runner actually finishes.
 
     The table is still owned by the workspace rather than by a session,
     because the workspace owns the tasks: teardown must stop every job
@@ -131,7 +140,9 @@ class JobTable:
     test) shares.
     """
 
-    def __init__(self, console_factory: ConsoleFactory | None = None) -> None:
+    def __init__(self,
+                 console_factory: ConsoleFactory | None = None,
+                 processes: ProcessSupervisor | None = None) -> None:
         """Create a table, optionally choosing where consoles live.
 
         Args:
@@ -149,6 +160,7 @@ class JobTable:
                 still outlives its table entry, so ``reap`` never closes
                 one.
         """
+        self.processes = processes or ProcessSupervisor()
         self._jobs: dict[str, dict[int, Job]] = {}
         self._next_ids: dict[str, int] = {}
         self._console_factory = console_factory
@@ -165,6 +177,7 @@ class JobTable:
         cwd: str,
         agent: str = "unknown",
         session_id: str = "",
+        parent_pid: int | None = None,
     ) -> Job:
         """Register a job in its session's list and start it.
 
@@ -200,7 +213,18 @@ class JobTable:
                   console=console)
         jobs[job_id] = job
         self._next_ids[session_id] = job_id + 1
-        job.task = asyncio.create_task(_settle(run, job))
+
+        async def execute() -> int:
+            if job.status == JobStatus.RUNNING:
+                return await _settle(run, job)
+            return job.exit_code
+
+        job.process = self.processes.start(session_id=session_id,
+                                           command=command,
+                                           cwd=PathSpec.from_str_path(cwd),
+                                           run=execute,
+                                           parent_pid=parent_pid)
+        job.task = job.process.task
         return job
 
     def load(self, job: Job) -> None:
@@ -298,9 +322,8 @@ class JobTable:
         What happens to a bash's jobs when that bash exits: they are
         hung up, and a later shell that reuses the same id starts from
         an empty list numbered from 1 rather than inheriting jobs it
-        never launched, under a profile it may not share. A disowned
-        job is off the list already and keeps running, as in bash,
-        until ``kill_all`` at teardown.
+        never launched, under a profile it may not share. Session closure
+        revokes its process doors and stops disowned runners too.
 
         Args:
             session_id (str): the session being closed.
@@ -308,6 +331,10 @@ class JobTable:
         running = self.running_jobs(session_id)
         for job in running:
             await self.kill(job.id, session_id)
+        self.processes.revoke_session(session_id)
+        for process in self.processes.live():
+            if process.info.session_id == session_id:
+                process.terminate()
         self._jobs.pop(session_id, None)
         self._next_ids.pop(session_id, None)
         return running

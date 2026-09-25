@@ -315,3 +315,38 @@ it('command execution supplies its active workspace context', async () => {
     await ws.close()
   }
 })
+
+it('does not share process views by profile or follow reused session IDs', async () => {
+  const ws = new Workspace({}, { runtimes: [], profiles: { agent: {} } })
+  try {
+    ws.createSession('one', { profile: 'agent' })
+    ws.createSession('two', { profile: 'agent' })
+    const one = required(ws.runtimeContext('one').processes)
+    const two = required(ws.runtimeContext('two').processes)
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const process = ws.processes.start({
+      sessionId: 'one',
+      command: 'private work',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: async () => {
+        await gate
+        return 0
+      },
+    })
+    expect(one.list()).toEqual([process.info])
+    expect(two.list()).toEqual([])
+    expect(two.get(process.info.pid)).toBeNull()
+    await ws.closeSession('one')
+    ws.createSession('one', { profile: 'agent' })
+    expect(one.list()).toEqual([])
+    expect(required(ws.runtimeContext('one').processes).list()).toEqual([])
+    release()
+    await process.join()
+  } finally {
+    await ws.close()
+  }
+})

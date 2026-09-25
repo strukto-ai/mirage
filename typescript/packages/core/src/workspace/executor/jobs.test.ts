@@ -278,7 +278,9 @@ describe('& inside a compound body', () => {
   it('$! names each loop-body job', async () => {
     const ws = buildWs()
     const io = await ws.shell('for i in 1 2; do sleep 0.1 & echo $!; done; wait')
-    expect(stdoutStr(io)).toBe('1\n2\n')
+    const pids = stdoutStr(io).trim().split('\n').map(Number)
+    expect(pids).toHaveLength(2)
+    expect(pids[1]).toBeGreaterThan(pids[0] ?? 0)
   })
 
   it('errexit does not trip on a body launch', async () => {
@@ -337,7 +339,7 @@ describe('jobs are scoped to the session that launched them', () => {
       const io = await ws.shell('wait %1', { sessionId: 'b' })
       expect(io.exitCode).toBe(127)
       expect(stderrStr(io)).toContain('no such job')
-      expect(stdoutStr(await ws.shell('ps', { sessionId: 'b' }))).toBe('')
+      expect(stdoutStr(await ws.shell('ps', { sessionId: 'b' }))).not.toContain('sleep 30')
       expect((await ws.shell('kill %1', { sessionId: 'a' })).exitCode).toBe(0)
     } finally {
       await ws.close()
@@ -358,7 +360,10 @@ describe('jobs are scoped to the session that launched them', () => {
       // A session reusing the id starts from one and inherits nothing.
       ws.createSession('a')
       expect(stdoutStr(await ws.shell('jobs', { sessionId: 'a' }))).toBe('')
-      expect(stdoutStr(await ws.shell('sleep 30 & echo $!', { sessionId: 'a' }))).toBe('1\n')
+      expect(
+        Number(stdoutStr(await ws.shell('sleep 30 & echo $!', { sessionId: 'a' }))),
+      ).toBeGreaterThan(old?.process?.info.pid ?? 0)
+      expect(ws.jobTable.get(1, 'a')).not.toBeNull()
       const io = await ws.shell('wait %2', { sessionId: 'a' })
       expect(io.exitCode).toBe(127)
       expect(stderrStr(io)).toContain('no such job')
@@ -393,11 +398,9 @@ describe('jobs are scoped to the session that launched them', () => {
       const firstA = await ws.shell('sleep 30 & echo $!', { sessionId: 'a' })
       const firstB = await ws.shell('sleep 30 & echo $!', { sessionId: 'b' })
       const secondA = await ws.shell('sleep 30 & echo $!', { sessionId: 'a' })
-      expect([stdoutStr(firstA), stdoutStr(firstB), stdoutStr(secondA)]).toEqual([
-        '1\n',
-        '1\n',
-        '2\n',
-      ])
+      expect(new Set([stdoutStr(firstA), stdoutStr(firstB), stdoutStr(secondA)]).size).toBe(3)
+      expect(ws.jobTable.listJobs('a').map((j) => j.id)).toEqual([1, 2])
+      expect(ws.jobTable.listJobs('b').map((j) => j.id)).toEqual([1])
     } finally {
       await ws.close()
     }

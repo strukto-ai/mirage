@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessHandle } from '../../process/handle.ts'
 import type { IOResult } from '../../io/types.ts'
 import type { ExecutionNode } from '../../workspace/types.ts'
 import { JobConsole } from '../console/index.ts'
@@ -43,6 +44,7 @@ export class Job {
   readonly command: string
   // null for jobs restored from a snapshot (already finished, no live task).
   task: Promise<void> | null
+  process: ProcessHandle | null = null
   readonly abort: AbortController | null
   readonly cwd: string
   readonly agent: string
