@@ -198,9 +198,7 @@ export function identifierNames(text: string): ReadonlySet<string> {
  */
 function arithRegionNames(region: TSNodeLike, out: Set<string>): void {
   for (const current of walkNamedOutsideDefs(region)) {
-    if (current.type === 'variable_name') {
-      if (current.text !== '') out.add(current.text)
-    } else if (current.type === 'word') {
+    if (current.type === 'variable_name' || current.type === 'word') {
       if (current.text !== '') for (const name of identifierNames(current.text)) out.add(name)
     }
   }
@@ -217,7 +215,7 @@ function substringArithNames(expansion: TSNodeLike, out: Set<string>): void {
   let seenColon = false
   for (const child of expansion.children) {
     if (!seenColon) {
-      seenColon = child.type === ':'
+      seenColon = child.text === ':'
       continue
     }
     if (child.isNamed === true || expansion.namedChildren.some((n) => sameNode(n, child))) {

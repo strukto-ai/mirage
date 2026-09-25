@@ -17,6 +17,7 @@ import tree_sitter_bash
 
 from mirage.shell.parameter import scan_parameter
 from mirage.shell.parse.constants import ARITH_OPEN_TOKEN, QUOTES
+from mirage.shell.parse.expansion import expansion_source
 from mirage.shell.parse.heredoc import (heredoc_operators, protected_source,
                                         same_shape)
 from mirage.shell.parse.heredoc.lower import lower_heredocs, rebase_source
@@ -94,25 +95,22 @@ def _is_arithmetic(data: bytes, start: int) -> bool:
 
 
 def _parse_bytes(data: bytes) -> tree_sitter.Node:
-    """Parse ``data`` with every heredoc body shielded from the lexer.
+    """Parse structure using same-width lexical shields.
 
-    tree-sitter-bash mis-lexes a body whose first line opens with a
-    backslash or with whitespace (see protected_source). The shielded
-    copy has the same length, so its clean tree is handed back to
-    tree-sitter as the old tree for a reparse of the untouched bytes:
-    with no edit to apply, every node is reused as it stands, and the
-    result reads the typed bytes at the shielded structure. The reuse is
-    verified node by node; when anything differs, or the shielded copy
-    does not parse cleanly, the plain parse stands.
+    Heredoc bodies and substring operands need word grammar where
+    tree-sitter's lexer otherwise rejects them. The shielded tree is reused
+    against the original bytes without edits, retaining every source span.
+    Verify reuse node by node; if shielding or reuse fails, keep the original
+    parse so a real structural error still reaches syntax validation.
 
     Args:
         data (bytes): encoded shell source.
     """
     tree = TS_PARSER.parse(data)
-    if b"<<" not in data:
-        return tree.root_node
-    shielded_data = protected_source(data, tree.root_node)
-    if shielded_data is None:
+    shielded_data = (protected_source(data, tree.root_node)
+                     if b"<<" in data else None) or data
+    shielded_data = expansion_source(shielded_data, tree.root_node)
+    if shielded_data == data:
         return tree.root_node
     shielded = TS_PARSER.parse(shielded_data)
     if shielded.root_node.has_error:

@@ -132,6 +132,9 @@ def test_identifier_names(text, names):
         # the default-value form is not.
         ("echo ${a[i+1]}", {"a", "i"}),
         ("echo ${v:1+off}", {"off"}),
+        ('echo "${v:$off:$length}"', {"off", "length"}),
+        ('echo "${v:flag?off:other:length}"',
+         {"flag", "off", "other", "length"}),
         ("echo ${v:-$d}", set()),
         # The [[ numeric comparators resolve bare words as variables;
         # string comparison and test/[ never do.

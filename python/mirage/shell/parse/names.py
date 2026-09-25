@@ -214,11 +214,7 @@ def _arith_region_names(region: TSNodeLike, out: set[str]) -> None:
         out (set[str]): collects the names.
     """
     for n in walk_named_outside_defs(region):
-        if n.type == "variable_name":
-            text = n.text
-            if text:
-                out.add(text.decode())
-        elif n.type == "word":
+        if n.type in ("variable_name", "word"):
             text = n.text
             if text:
                 out.update(identifier_names(text.decode()))
@@ -238,7 +234,7 @@ def _substring_arith_names(expansion: TSNodeLike, out: set[str]) -> None:
     seen_colon = False
     for child in expansion.children:
         if not seen_colon:
-            seen_colon = not child.is_named and child.type == ":"
+            seen_colon = not child.is_named and child.text == b":"
             continue
         if child.is_named:
             _arith_region_names(child, out)

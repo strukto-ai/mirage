@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from mirage.shell.errors import ExitSignal
+from mirage.shell.parse import parse
 from mirage.shell.variable import ShellVar
 from mirage.workspace.expand.variable import (_ArithOperand, _case_mod,
                                               _glob_replace, _glob_strip,
@@ -97,30 +100,33 @@ def test_lookup_var_array_first_element():
     (["-2"], ["3", "4"]),
     (["1", "-1"], ["2", "3"]),
 ])
-def test_slice_array(groups, expected):
+@pytest.mark.asyncio
+async def test_slice_array(groups, expected):
     operand = _ArithOperand(SessionState(session_id="s", cwd="/"))
-    assert _slice_array(["1", "2", "3", "4"], groups, operand) == expected
+    node = parse("echo ${a[@]: " + ":".join(groups) +
+                 "}").named_children[0].named_children[-1]
+    assert await _slice_array(["1", "2", "3", "4"], node, AsyncMock(),
+                              operand) == expected
 
 
-def test_arith_operand_resolves_expressions_and_records_writes():
+@pytest.mark.asyncio
+async def test_arith_operand_resolves_expressions_and_applies_writes():
     session = SessionState(session_id="s", cwd="/")
     seed_var(session, "i", "1")
     seed_var(session, "o", "2")
     operand = _ArithOperand(session)
-    assert operand.value("3") == 3
-    assert operand.value(" -2 ") == -2
-    assert operand.value("1+1") == 2
-    assert operand.value("i+1") == 2
-    assert operand.value("o") == 2
+    assert await operand.value("3") == 3
+    assert await operand.value(" -2 ") == -2
+    assert await operand.value("1+1") == 2
+    assert await operand.value("i+1") == 2
+    assert await operand.value("o") == 2
     # An operand that does not evaluate ends the line in bash's words,
     # the reference leading.
     operand.ref = "v"
     with pytest.raises(ExitSignal) as caught:
-        operand.value("notanum;")
+        await operand.value("notanum;")
     assert caught.value.stderr.startswith(b"bash: v: notanum;: ")
-    # An assignment is recorded for the door and seen by the operands
-    # after it, which is bash binding `${v:x=1:y=x+1}` left to right.
-    assert operand.value("x=1") == 1
-    assert operand.value("x+1") == 2
-    assert [(w.name, w.value) for w in operand.writes] == [("x", "1")]
-    assert "x" not in session.env
+    # The next bound and its expansions see the assignment through the door.
+    assert await operand.value("x=1") == 1
+    assert await operand.value("x+1") == 2
+    assert session.env["x"] == "1"

@@ -357,7 +357,8 @@ async def expand_node_marked(
         expand_child = partial(expand_node,
                                session=session,
                                execute_fn=execute_fn,
-                               call_stack=call_stack)
+                               call_stack=call_stack,
+                               view=view)
         return prefix + await expand_braces(
             ts_node, session, call_stack, expand_child, view=view)
 

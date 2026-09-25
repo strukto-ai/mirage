@@ -326,6 +326,8 @@ class ArithParser:
             return target
         try:
             return ("num", _parse_literal(tok))
+        except ArithError:
+            raise
         except ValueError:
             raise ArithError(f'syntax error: unexpected token "{tok}"') \
                 from None

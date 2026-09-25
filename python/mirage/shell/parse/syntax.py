@@ -169,7 +169,8 @@ def find_syntax_error(node: TSNodeLike) -> str | None:
     # Parameter syntax is judged during expansion (bad substitution), and
     # `[` is a builtin whose argument grammar is judged by that builtin.
     if node.type == "expansion":
-        return None
+        return "" if any(c.is_missing and c.type == "}"
+                         for c in node.children) else None
     if (node.type == "test_command" and node.children
             and node.children[0].type == "["):
         return _missing_quote(node)

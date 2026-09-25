@@ -117,17 +117,12 @@ def test_assign_op_inside_function_local(shell):
     assert out == "zz\ninner=zz\nouter=[]\n"
 
 
-def test_dollar_spelled_substring_offset_is_bad_substitution(shell):
-    # tree-sitter-bash cannot parse a $-spelled offset (${v:$o}); mirage
-    # fails loudly (exit 2) instead of emitting the mis-parse. bash
-    # accepts it, so spell it ${v:o} or ${v:$((o))} (both supported).
-    code, out, err = shell.mirage_result('v=hello; o=2; echo "X${v:$o}Y"')
-    assert code == 2
-    assert out == ""
-    assert err == "bash: ${v}: bad substitution\n"
+def test_dollar_spelled_substring_offset(shell):
+    assert shell.mirage_result('v=hello; o=2; echo "X${v:$o}Y"') == (0,
+                                                                     "XlloY\n",
+                                                                     "")
 
 
 def test_dollar_spelled_substring_offset_with_length(shell):
-    code, _, err = shell.mirage_result('v=hello; o=2; echo "${v:$o:2}"')
-    assert code == 2
-    assert "bad substitution" in err
+    assert shell.mirage_result('v=hello; o=2; echo "${v:$o:2}"') == (0, "ll\n",
+                                                                     "")

@@ -156,7 +156,9 @@ export function findSyntaxError(
   parse?: (command: string) => TSNodeLike,
 ): string | null {
   // Expansion and the `[` builtin own their argument grammar.
-  if (node.type === 'expansion') return null
+  if (node.type === 'expansion') {
+    return node.children.some((child) => child.isMissing && child.type === '}') ? '' : null
+  }
   if (node.type === 'test_command' && node.children[0]?.type === '[') return missingQuote(node)
   if (node.type === 'command_substitution') {
     const unclosed = findUnterminatedBacktick(node.text)

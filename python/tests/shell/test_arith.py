@@ -21,7 +21,7 @@ def test_trunc_division_and_mod_match_c():
 def test_literals():
     assert evaluate_arith("0x10", {}).value == 16
     assert evaluate_arith("010", {}).value == 8
-    with pytest.raises(ArithError):
+    with pytest.raises(ArithError, match="value too great for base"):
         evaluate_arith("08", {})
 
 

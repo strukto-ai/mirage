@@ -34,7 +34,7 @@ describe('evaluateArith', () => {
   it('parses hex and octal literals', () => {
     expect(evaluateArith('0x10', {}).value).toBe(16n)
     expect(evaluateArith('010', {}).value).toBe(8n)
-    expect(() => evaluateArith('08', {})).toThrow(ArithError)
+    expect(() => evaluateArith('08', {})).toThrow('value too great for base')
   })
 
   it('records assignments as writes', () => {

@@ -50,6 +50,8 @@ const REFUSED: [string, string][] = [
   ['AWS_PROFILE=x', 'AWS_PROFILE'],
   ['echo "${AWS_PROFILE:=x}"', 'AWS_PROFILE'],
   ['echo $((AWS_LIMIT=5))', 'AWS_LIMIT'],
+  ['v=abcdef; echo "${v:$((AWS_LIMIT=1)):2}"', 'AWS_LIMIT'],
+  ['a=(one two); echo "${a[@]:${AWS_LIMIT:=1}}"', 'AWS_LIMIT'],
   ['((AWS_LIMIT=5))', 'AWS_LIMIT'],
   ['printf -v AWS_KEY %s x', 'AWS_KEY'],
   ['for ((AWS_I=0; AWS_I<1; AWS_I++)); do :; done', 'AWS_I'],
@@ -131,5 +133,20 @@ describe('a session write states itself as a whole variable', () => {
         await ws.close()
       }
     })
+  }
+})
+
+it('does not expand length after a refused offset', async () => {
+  const ws = await guarded()
+  try {
+    const result = await ws.shell('v=abcdef; echo "${v:(AWS_LIMIT=1):${OTHER:=2}}"')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toContain('not yours to set')
+    for (const name of ['AWS_LIMIT', 'OTHER']) {
+      const after = await ws.shell(`echo [$${name}]`)
+      expect(DEC.decode(after.stdout).trim()).toBe('[]')
+    }
+  } finally {
+    await ws.close()
   }
 })

@@ -61,7 +61,8 @@ async def _expand_string_with_array(
     expand_child = partial(expand_node,
                            session=session,
                            execute_fn=execute_fn,
-                           call_stack=call_stack)
+                           call_stack=call_stack,
+                           view=view)
     fragments: list[str] = [""]
     splat_yielded = False
     for child in node.children:

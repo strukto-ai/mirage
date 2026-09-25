@@ -16,6 +16,7 @@ import { Language, type Node, Parser } from 'web-tree-sitter'
 
 import { scanParameter } from '../parameter.ts'
 import { ARITH_OPEN_TOKEN, QUOTES } from './constants.ts'
+import { expansionSource } from './expansion.ts'
 import { heredocOperators, protectedSource, sameShape } from './heredoc/index.ts'
 import { discoverHeredocs } from './heredoc/reader.ts'
 import { lowerHeredocs, rebaseSource } from './heredoc/lower.ts'
@@ -86,23 +87,20 @@ function isArithmetic(parser: Parser, command: string, start: number): boolean {
 }
 
 /**
- * Parse `text` with every heredoc body shielded from the lexer.
- *
- * tree-sitter-bash mis-lexes a body whose first line opens with a
- * backslash or with whitespace (see protectedSource). The shielded copy
- * has the same length, so its clean tree is handed back to tree-sitter as
- * the old tree for a reparse of the untouched text: with no edit to
- * apply, every node is reused as it stands, and the result reads the
- * typed text at the shielded structure. The reuse is verified node by
- * node; when anything differs, or the shielded copy does not parse
- * cleanly, the plain parse stands.
+ * Parse structure using same-width lexical shields. Heredoc bodies and
+ * substring operands need word grammar where tree-sitter otherwise rejects
+ * them. Reuse the shielded tree against the original text without edits and
+ * verify every node's span. If shielding or reuse fails, keep the original
+ * parse so structural errors still reach syntax validation.
  */
 function parseProtected(parser: Parser, text: string): Node {
   const tree = parser.parse(text)
   if (tree === null) throw new Error('shell parse returned null')
-  if (!text.includes('<<')) return tree.rootNode
-  const shieldedText = protectedSource(text, tree.rootNode)
-  if (shieldedText === null) return tree.rootNode
+  const shieldedText = expansionSource(
+    (text.includes('<<') ? protectedSource(text, tree.rootNode) : null) ?? text,
+    tree.rootNode,
+  )
+  if (shieldedText === text) return tree.rootNode
   const shielded = parser.parse(shieldedText)
   if (shielded === null || shielded.rootNode.hasError) return tree.rootNode
   const reused = parser.parse(text, shielded)
