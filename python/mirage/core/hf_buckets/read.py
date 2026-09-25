@@ -66,12 +66,12 @@ async def read_bytes(accessor: HfBucketsAccessor,
     rel = path.mount_path
     if not rel.strip("/"):
         raise eisdir(path)
-    if size == 0:
-        # No request: a zero-length Range header is not one the Hub, or
-        # the client building it, accepts.
-        return b""
-    window = ByteWindow(offset=offset,
-                        size=size) if offset or size is not None else None
+    # A zero-length Range header is not one the client can build, so a
+    # zero-length window asks for one byte and discards it: the request
+    # still answers whether the file exists, which an empty return would
+    # skip.
+    window = ByteWindow(offset=offset, size=1 if size == 0 else size) \
+        if offset or size is not None else None
     timer = start_op()
     try:
         with refusals_denied(path, REFUSED_STATUSES):
@@ -89,6 +89,8 @@ async def read_bytes(accessor: HfBucketsAccessor,
         # ops factory, because a caller reading the range door directly
         # (the VFS range_read, tail -f) has no fold of its own.
         data, etag = b"", ""
+    if size == 0:
+        data = b""
     record("read",
            path.virtual,
            accessor.VFS_NAME,

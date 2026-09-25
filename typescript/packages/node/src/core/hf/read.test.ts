@@ -174,15 +174,19 @@ describe('hf read', () => {
     expect(Buffer.from(short).toString()).toBe('abc')
   })
 
-  it('answers a zero-length window empty without a request', async () => {
+  it('answers a zero-length window empty but still checks the file', async () => {
     // The table's range door reaches here with no factory short-circuit, and a
-    // zero-length Range header is not one the client can build.
+    // zero-length Range header is not one the client can build; the read still
+    // has to say whether the file is there, as opendal's open did.
     const { accessor, hub } = await mounted({ 'a.txt': 'abc' })
     const data = await read(accessor, PathSpec.fromStrPath('/a.txt'), undefined, {
       offset: 1,
       size: 0,
     })
-    expect([data.byteLength, hub.count('bucket_resolve')]).toEqual([0, 0])
+    expect([data.byteLength, hub.count('bucket_resolve')]).toEqual([0, 1])
+    await expect(
+      read(accessor, PathSpec.fromStrPath('/missing.txt'), undefined, { offset: 0, size: 0 }),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('serves the prefixed object under a key prefix', async () => {

@@ -58,14 +58,14 @@ export async function read(
 ): Promise<Uint8Array> {
   const rel = path.mountPath
   if (rel.replace(/^\/+|\/+$/g, '') === '') throw eisdir(path)
-  // No request: a zero-length Range header is not one the Hub, or the client
-  // building it, accepts.
-  if (options.size === 0) return new Uint8Array()
   // `size: null` is the window's own spelling for "the rest of the file",
   // which is not the same as asking for no window at all.
   const hasWindow = (options.offset ?? 0) > 0 || options.size !== undefined
+  // A zero-length Range header is not one the client can build, so a
+  // zero-length window asks for one byte and discards it: the request still
+  // answers whether the file exists, which an empty return would skip.
   const window: ByteWindow | undefined = hasWindow
-    ? { offset: options.offset ?? 0, size: options.size ?? null }
+    ? { offset: options.offset ?? 0, size: options.size === 0 ? 1 : (options.size ?? null) }
     : undefined
   const timer = startOp()
   let data: Uint8Array
@@ -87,6 +87,7 @@ export async function read(
     data = new Uint8Array()
     etag = ''
   }
+  if (options.size === 0) data = new Uint8Array()
   record('read', path.virtual, accessor.vfsName, data.byteLength, timer, {
     fingerprint: readToken(etag),
   })

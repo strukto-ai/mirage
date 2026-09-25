@@ -192,13 +192,19 @@ async def test_a_name_that_needs_encoding_reads_whole(make_acc):
 
 
 @pytest.mark.asyncio
-async def test_a_zero_length_window_is_empty_without_a_request(
+async def test_a_zero_length_window_is_empty_but_still_checks_the_file(
         make_acc, fake_hub):
     # The VFS range door reaches here with no factory short-circuit, and a
-    # zero-length Range header is not one the client can build.
+    # zero-length Range header is not one the client can build; the read
+    # still has to say whether the file is there, as opendal's open did.
     acc = make_acc({"a.txt": SEED})
     assert await read_bytes(acc,
                             PathSpec.from_str_path("/a.txt"),
                             offset=3,
                             size=0) == b""
-    assert fake_hub.count("bucket_resolve") == 0
+    assert fake_hub.count("bucket_resolve") == 1
+    with pytest.raises(FileNotFoundError):
+        await read_bytes(acc,
+                         PathSpec.from_str_path("/missing.txt"),
+                         offset=0,
+                         size=0)

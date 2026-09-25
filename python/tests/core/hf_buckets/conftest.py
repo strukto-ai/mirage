@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Iterator
-from functools import partial
+from collections.abc import AsyncIterator, Callable, Iterator
 
 import pytest
+import pytest_asyncio
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from tests.fixtures.hf_buckets_opendal import (BUCKET, FakeAsyncOperator,
@@ -35,6 +35,18 @@ def fake_hub() -> Iterator[FakeHub]:
         yield hub
 
 
-@pytest.fixture
-def make_acc(fake_hub: FakeHub) -> Callable[..., HfBucketsAccessor]:
-    return partial(make_accessor, hub=fake_hub)
+@pytest_asyncio.fixture
+async def make_acc(
+        fake_hub: FakeHub) -> AsyncIterator[Callable[..., HfBucketsAccessor]]:
+    # Each accessor owns an HTTP pool; close them on the loop that opened
+    # them, so no session outlives its test.
+    made: list[HfBucketsAccessor] = []
+
+    def build(*args, **kwargs) -> HfBucketsAccessor:
+        acc = make_accessor(*args, hub=fake_hub, **kwargs)
+        made.append(acc)
+        return acc
+
+    yield build
+    for acc in made:
+        await acc.close()
