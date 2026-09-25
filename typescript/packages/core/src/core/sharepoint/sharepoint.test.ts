@@ -195,3 +195,74 @@ describe('SharePoint record paths', () => {
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })
 })
+
+const API = 'https://graph.microsoft.com/v1.0'
+const SP_ITEM = `${API}/drives/b%21drive/root:/a.bin`
+const SP_DOWNLOAD = 'https://download.test/a.bin'
+
+// A scoped mount resolves its site and drive once, then addresses the item.
+// Routes by URL without its query and logs each call's URL, Authorization and
+// Range; an unrouted URL throws, so a request the read should not make fails.
+function routedDrive(item: () => Response, download?: () => Response) {
+  const calls: [string, string | undefined, string | undefined][] = []
+  const routes: Record<string, () => Response> = {
+    [`${API}/sites`]: () =>
+      new Response(JSON.stringify({ value: [{ id: 'site', name: 'team', displayName: 'Team' }] })),
+    [`${API}/sites/site/drives`]: () =>
+      new Response(JSON.stringify({ value: [{ id: 'b!drive', name: 'Documents' }] })),
+    [SP_ITEM]: item,
+    ...(download === undefined ? {} : { [SP_DOWNLOAD]: download }),
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: URL | RequestInfo, init?: RequestInit) => {
+      const url = (requestUrl(input).split('?')[0] ?? '').replace('b!drive', 'b%21drive')
+      const headers = (init?.headers ?? {}) as Record<string, string>
+      calls.push([url, headers.Authorization, headers.Range])
+      const route = routes[url]
+      if (route === undefined) throw new Error(`unrouted ${url}`)
+      return Promise.resolve(route())
+    }),
+  )
+  return calls
+}
+
+describe('an unrecorded SharePoint read', () => {
+  const path = new PathSpec({ virtual: '/sp/a.bin', directory: '/sp/', vfsPath: 'a.bin' })
+  const accessor = (): SharePointAccessor =>
+    new SharePointAccessor({ accessToken: 'token', site: 'Team', drive: 'Documents' })
+  const item = (): Response =>
+    new Response(
+      JSON.stringify({ id: 'i', cTag: 'ctag-1', '@microsoft.graph.downloadUrl': SP_DOWNLOAD }),
+    )
+
+  it('fetches the item, then its download URL without the bearer token', async () => {
+    const calls = routedDrive(item, () => new Response(new Uint8Array([1, 2, 3])))
+    const data = await read(accessor(), path)
+    expect([...data]).toEqual([1, 2, 3])
+    expect(calls.slice(2).map(([url, auth]) => [url, auth])).toEqual([
+      [SP_ITEM, 'Bearer token'],
+      [SP_DOWNLOAD, undefined],
+    ])
+  })
+
+  it('reports ENOENT with the virtual path when the item is missing', async () => {
+    routedDrive(
+      () =>
+        new Response(JSON.stringify({ error: { code: 'itemNotFound', message: 'no' } }), {
+          status: 404,
+        }),
+    )
+    await expect(read(accessor(), path)).rejects.toMatchObject({
+      code: 'ENOENT',
+      message: expect.stringContaining('/sp/a.bin'),
+    })
+  })
+
+  it('sends a window to the download URL', async () => {
+    const calls = routedDrive(item, () => new Response(new TextEncoder().encode('llo'), { status: 206 }))
+    const data = await read(accessor(), path, undefined, { offset: 2, size: 3 })
+    expect(new TextDecoder().decode(data)).toBe('llo')
+    expect(calls.at(-1)).toEqual([SP_DOWNLOAD, undefined, 'bytes=2-4'])
+  })
+})

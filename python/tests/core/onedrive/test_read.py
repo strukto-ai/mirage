@@ -2,6 +2,7 @@ import re
 
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
 from mirage.core.onedrive.read import read_bytes
@@ -17,15 +18,72 @@ def _accessor(**kw) -> OneDriveAccessor:
 
 _BASE = "https://graph.microsoft.com/v1.0/me/drive"
 _CONTENT = _BASE + "/root:/Docs/a.txt:/content"
+_ITEM = _BASE + "/root:/Docs/a.txt"
+_BYTES = "https://download.example/a.txt"
+
+
+def _item(download: str | None = _BYTES) -> dict:
+    item = {"id": "01", "cTag": "ctag-xyz", "eTag": "etag-xyz"}
+    if download is not None:
+        item["@microsoft.graph.downloadUrl"] = download
+    return item
+
+
+def _calls(m: aioresponses, url: str) -> int:
+    return len(m.requests.get(("GET", URL(url)), []))
 
 
 @pytest.mark.asyncio
 async def test_read_returns_current_content():
     with aioresponses() as m:
-        m.get(_CONTENT, body=b"current bytes")
+        m.get(_ITEM, payload=_item())
+        m.get(_BYTES, body=b"current bytes")
+        data = await read_bytes(_accessor(),
+                                PathSpec.from_str_path("/Docs/a.txt"))
+        assert (_calls(m, _ITEM), _calls(m, _BYTES)) == (1, 1)
+    assert data == b"current bytes"
+
+
+@pytest.mark.asyncio
+async def test_an_unrecorded_read_fetches_the_item_then_its_download_url():
+    seen: list[tuple[str, str | None]] = []
+
+    def item(url, **kwargs):
+        seen.append(("item", kwargs["headers"].get("Authorization")))
+        return CallbackResult(payload=_item())
+
+    def download(url, **kwargs):
+        seen.append(("download", kwargs["headers"].get("Authorization")))
+        return CallbackResult(body=b"current bytes")
+
+    with aioresponses() as m:
+        m.get(_ITEM, callback=item)
+        m.get(_BYTES, callback=download)
         data = await read_bytes(_accessor(),
                                 PathSpec.from_str_path("/Docs/a.txt"))
     assert data == b"current bytes"
+    # The token comes first, so a write between the two requests can only
+    # make the cached bytes look stale. The download URL is pre-signed and
+    # must not carry the mount's bearer token.
+    assert seen == [("item", "Bearer tok"), ("download", None)]
+
+
+@pytest.mark.asyncio
+async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url():
+    seen: list[str | None] = []
+
+    def content(url, **kwargs):
+        seen.append(kwargs["headers"].get("Authorization"))
+        return CallbackResult(body=b"current bytes")
+
+    with aioresponses() as m:
+        m.get(_ITEM, payload=_item(download=None))
+        m.get(_CONTENT, callback=content)
+        data = await read_bytes(_accessor(),
+                                PathSpec.from_str_path("/Docs/a.txt"))
+        assert _calls(m, _ITEM) == 1
+    assert data == b"current bytes"
+    assert seen == ["Bearer tok"]
 
 
 @pytest.mark.asyncio
@@ -51,7 +109,8 @@ async def test_read_range_sends_range_header():
         return CallbackResult(body=b"llo", status=206)
 
     with aioresponses() as m:
-        m.get(_CONTENT, callback=_cb)
+        m.get(_ITEM, payload=_item())
+        m.get(_BYTES, callback=_cb)
         data = await read_bytes(_accessor(),
                                 PathSpec.from_str_path("/Docs/a.txt"),
                                 offset=2,
@@ -66,7 +125,8 @@ async def test_a_200_answer_to_a_range_request_is_sliced_locally():
     which may answer 200 with the whole item. Before this was handled
     the caller got every byte for what it asked to be a window."""
     with aioresponses() as m:
-        m.get(_CONTENT, body=b"hello", status=200)
+        m.get(_ITEM, payload=_item())
+        m.get(_BYTES, body=b"hello", status=200)
         data = await read_bytes(_accessor(),
                                 PathSpec.from_str_path("/Docs/a.txt"),
                                 offset=2,
@@ -137,7 +197,7 @@ async def test_capture_reads_pinned_download_url_not_live_content():
 @pytest.mark.asyncio
 async def test_read_missing_raises_file_not_found():
     with aioresponses() as m:
-        m.get(_CONTENT,
+        m.get(_ITEM,
               status=404,
               payload={"error": {
                   "code": "itemNotFound",

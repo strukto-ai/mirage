@@ -2,6 +2,7 @@ import re
 
 import pytest
 from aioresponses import CallbackResult, aioresponses
+from yarl import URL
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.read import read_bytes
@@ -12,6 +13,18 @@ from mirage.utils.key_prefix import mount_key
 _BASE = "https://graph.microsoft.com/v1.0"
 _SITE_ID = "tenant.sharepoint.com,site-guid,web-guid"
 _DRIVE_ID = "b!driveXYZ"
+_BYTES = "https://download.example/item"
+
+
+def _item(download: str | None = _BYTES) -> dict:
+    item = {"id": "01", "cTag": "ctag-xyz", "eTag": "etag-xyz"}
+    if download is not None:
+        item["@microsoft.graph.downloadUrl"] = download
+    return item
+
+
+def _calls(m: aioresponses, url: str) -> int:
+    return len(m.requests.get(("GET", URL(url)), []))
 
 
 def _accessor() -> SharePointAccessor:
@@ -23,20 +36,63 @@ def _accessor() -> SharePointAccessor:
 
 @pytest.mark.asyncio
 async def test_read_returns_content():
-    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/report.txt:/content"
+    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/report.txt"
     with aioresponses() as m:
-        m.get(url, body=b"file content")
+        m.get(url, payload=_item())
+        m.get(_BYTES, body=b"file content")
+        path = PathSpec(vfs_path=mount_key(
+            "/sp/Engineering/Documents/report.txt", "/sp"),
+                        virtual="/sp/Engineering/Documents/report.txt",
+                        directory="/sp/Engineering/Documents/report.txt")
+        data = await read_bytes(_accessor(), path)
+        assert (_calls(m, url), _calls(m, _BYTES)) == (1, 1)
+    assert data == b"file content"
+
+
+@pytest.mark.asyncio
+async def test_an_unrecorded_read_fetches_the_item_then_its_download_url():
+    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/report.txt"
+    seen: list[tuple[str, str | None]] = []
+
+    def item(url, **kwargs):
+        seen.append(("item", kwargs["headers"].get("Authorization")))
+        return CallbackResult(payload=_item())
+
+    def download(url, **kwargs):
+        seen.append(("download", kwargs["headers"].get("Authorization")))
+        return CallbackResult(body=b"file content")
+
+    with aioresponses() as m:
+        m.get(url, callback=item)
+        m.get(_BYTES, callback=download)
         path = PathSpec(vfs_path=mount_key(
             "/sp/Engineering/Documents/report.txt", "/sp"),
                         virtual="/sp/Engineering/Documents/report.txt",
                         directory="/sp/Engineering/Documents/report.txt")
         data = await read_bytes(_accessor(), path)
     assert data == b"file content"
+    # Token first, then the pre-signed download without the bearer token.
+    assert seen == [("item", "Bearer tok"), ("download", None)]
+
+
+@pytest.mark.asyncio
+async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url():
+    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/report.txt"
+    with aioresponses() as m:
+        m.get(url, payload=_item(download=None))
+        m.get(f"{url}:/content", body=b"file content")
+        path = PathSpec(vfs_path=mount_key(
+            "/sp/Engineering/Documents/report.txt", "/sp"),
+                        virtual="/sp/Engineering/Documents/report.txt",
+                        directory="/sp/Engineering/Documents/report.txt")
+        data = await read_bytes(_accessor(), path)
+        assert (_calls(m, url), _calls(m, f"{url}:/content")) == (1, 1)
+    assert data == b"file content"
 
 
 @pytest.mark.asyncio
 async def test_read_missing_raises_file_not_found():
-    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/nope.txt:/content"
+    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/nope.txt"
     with aioresponses() as m:
         m.get(url,
               status=404,
@@ -54,7 +110,7 @@ async def test_read_missing_raises_file_not_found():
 
 @pytest.mark.asyncio
 async def test_read_range():
-    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/data.bin:/content"
+    url = f"{_BASE}/drives/{_DRIVE_ID}/root:/data.bin"
     captured = {}
 
     def _cb(url, **kwargs):
@@ -62,7 +118,8 @@ async def test_read_range():
         return CallbackResult(body=b"llo", status=206)
 
     with aioresponses() as m:
-        m.get(url, callback=_cb)
+        m.get(url, payload=_item())
+        m.get(_BYTES, callback=_cb)
         path = PathSpec(vfs_path=mount_key(
             "/sp/Engineering/Documents/data.bin", "/sp"),
                         virtual="/sp/Engineering/Documents/data.bin",

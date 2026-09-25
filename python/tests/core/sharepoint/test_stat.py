@@ -165,6 +165,44 @@ async def test_stat_from_index_after_readdir():
 
 
 @pytest.mark.asyncio
+async def test_stat_from_index_carries_the_ctag():
+    # A listing already names each file's cTag, so a stat served from it
+    # carries the same token a network stat does; a folder carries none.
+    index = RAMIndexCacheStore()
+    with aioresponses() as m:
+        m.get(f"{_BASE}/drives/{_DRIVE_ID}/root/children",
+              payload={
+                  "value": [{
+                      "id": "1",
+                      "name": "notes.txt",
+                      "size": 42,
+                      "file": {},
+                      "cTag": "c1",
+                      "eTag": "e1",
+                      "lastModifiedDateTime": "2026-06-19T09:28:00Z"
+                  }, {
+                      "id": "2",
+                      "name": "Docs",
+                      "folder": {
+                          "childCount": 1
+                      },
+                      "cTag": "cf",
+                      "eTag": "ef",
+                      "lastModifiedDateTime": "2026-06-19T09:28:00Z"
+                  }]
+              })
+        await readdir(_accessor(), _ps("/sp/Engineering/Documents"), index)
+    notes = await stat(_accessor(), _ps("/sp/Engineering/Documents/notes.txt"),
+                       index)
+    docs = await stat(_accessor(), _ps("/sp/Engineering/Documents/Docs"),
+                      index)
+    assert notes.fingerprint == "c1"
+    assert (notes.extra["ctag"], notes.extra["etag"]) == ("c1", "e1")
+    assert docs.type == FileType.DIRECTORY
+    assert docs.fingerprint is None
+
+
+@pytest.mark.asyncio
 async def test_stat_site_and_drive_have_no_metadata():
     site_path = PathSpec(vfs_path=mount_key("/sp/Engineering", "/sp"),
                          virtual="/sp/Engineering",
@@ -234,7 +272,10 @@ async def test_stat_size_matches_read_for_every_file():
                   }]
               })
         for path, body in contents.items():
-            m.get(drive + f"/root:{path}:/content", body=body)
+            download = f"https://download.example{path}"
+            m.get(drive + f"/root:{path}",
+                  payload={"@microsoft.graph.downloadUrl": download})
+            m.get(download, body=body)
         files: list[str] = []
         stack = ["/sp/Engineering/Documents"]
         while stack:

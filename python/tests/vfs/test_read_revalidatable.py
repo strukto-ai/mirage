@@ -34,13 +34,16 @@ import mirage.core.gridfs.stream as gridfs_stream
 import mirage.core.gridfs.watch as gridfs_watch
 import mirage.core.hf_hub.read as hf_read
 import mirage.core.hf_hub.stream as hf_stream
+import mirage.core.msgraph.drive_ops as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.gridfs.io import IO as GRIDFS_IO
 from mirage.commands.builtin.hf_hub.io import IO as HF_IO
+from mirage.commands.builtin.onedrive.io import IO as ONEDRIVE_IO
 from mirage.commands.builtin.s3.io import IO as S3_IO
+from mirage.commands.builtin.sharepoint.io import IO as SHAREPOINT_IO
 from mirage.core.hf_hub.client import etag_value
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import IOResult
@@ -57,6 +60,9 @@ from mirage.workspace.mount import Mount
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
+from tests.fixtures.msgraph_api import (DRIVE_ID, DRIVE_NAME, ME, SITE_NAME,
+                                        FakeGraph)
+from tests.fixtures.msgraph_api import serve as serve_graph
 
 S3_FAMILY = ("s3", "aliyun", "backblaze", "ceph", "digitalocean", "gcs",
              "minio", "oci", "qingstor", "r2", "scaleway", "seaweedfs",
@@ -78,7 +84,14 @@ HARNESSES = {
         name: "hf_models"
         for name in HF_FAMILY
     },
+    "onedrive": "onedrive",
+    "sharepoint": "sharepoint",
 }
+
+# The drive each Graph backend addresses in the fake: OneDrive the signed-in
+# user's own, SharePoint one library of one site, mounted scoped so the keys
+# stay drive-relative (unscoped, `a.txt` would name a site).
+GRAPH = {"onedrive": (ME, ONEDRIVE_IO), "sharepoint": (DRIVE_ID, SHAREPOINT_IO)}
 
 # One document per family, identical in the TypeScript twin. oci is the one
 # alias with a required field beyond these; every other one-of (r2's
@@ -303,8 +316,47 @@ def _hf_fake(name: str, shape: str, data: bytes,
 
 
 @contextmanager
+def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
+    key = KEYS[shape]
+    prefix = PREFIX if shape == "prefixed" else None
+    stored = (prefix or "") + key
+    drive, io = GRAPH[name]
+    files = {stored: data}
+    config: dict[str, str] = {"access_token": "t"}
+    if name == "sharepoint":
+        config.update(site=SITE_NAME, drive=DRIVE_NAME)
+    if prefix is not None:
+        files[key] = DECOY
+        config["key_prefix"] = prefix
+    # A children listing is a walk no read or stat should make; the listed
+    # shape's own `ls` is the one allowed.
+    graph = FakeGraph(drives={drive: files},
+                      children_allowed=1 if shape == "listed" else 0)
+    with serve_graph(graph):
+        vfs = build_vfs(name, {**config, "graph_base_url": graph.url})
+        assert ((vfs.accessor.config.key_prefix or "").strip("/") == (
+            prefix or "").strip("/"))
+
+        def rewrite(new: bytes) -> None:
+            graph.write(drive, stored, new)
+
+        yield Fake(vfs=vfs,
+                   key=key,
+                   fetches=graph.fetches,
+                   rewrite=rewrite,
+                   reach=graph.reach,
+                   io=io,
+                   read_mod=drive_ops,
+                   stream_mod=drive_ops)
+
+
+@contextmanager
 def _fake(name: str, shape: str, data: bytes,
           monkeypatch: pytest.MonkeyPatch) -> Iterator[Fake]:
+    if HARNESSES[name] in GRAPH:
+        with _graph_fake(name, shape, data) as fake:
+            yield fake
+        return
     if HARNESSES[name] == "hf_models":
         with _hf_fake(name, shape, data, monkeypatch) as fake:
             yield fake
@@ -332,7 +384,8 @@ def _cases(rows: tuple[str, ...]) -> list:
 
 
 A_CASES = _cases(("bytes", "stream", "drain")) + [
-    pytest.param("s3", "listed", "stream", id="s3-listed-stream")
+    pytest.param(name, "listed", "stream", id=f"{name}-listed-stream")
+    for name in ("s3", *GRAPH)
 ]
 B_CASES = _cases(("bytes", "stream"))
 
@@ -608,20 +661,30 @@ def test_an_unrecorded_read_stamps_the_stat_token(name, shape, row,
 
 FAMILIES = sorted(set(HARNESSES.values()))
 
+# A Graph listing leaves each file's cTag in the mount index, so the listed
+# rows put a token-bearing row in front of the probe: only a probe that
+# stats through a throwaway index sees the rewrite.
+CHANGED_CASES = [
+    pytest.param(f, "root", id=f"{f}-changed-stream") for f in FAMILIES
+] + [
+    pytest.param(name, "listed", id=f"{name}-listed-changed-stream")
+    for name in GRAPH
+]
 
-@pytest.mark.parametrize("name",
-                         FAMILIES,
-                         ids=[f"{f}-changed-stream" for f in FAMILIES])
-def test_a_changed_object_is_refetched(name, monkeypatch):
+
+@pytest.mark.parametrize(("name", "shape"), CHANGED_CASES)
+def test_a_changed_object_is_refetched(name, shape, monkeypatch):
     # The rows above prove stat and read agree; this proves what they agree
     # on is the content. A backend stamping a constant, or the key, on both
     # sides passes every other row and serves stale bytes here.
-    with _fake(name, "root", SEED, monkeypatch) as fake:
+    with _fake(name, shape, SEED, monkeypatch) as fake:
         virtual = "/m/" + fake.key
 
         async def run():
             ws = _fresh_workspace(fake.vfs)
             try:
+                if shape == "listed":
+                    await _line(ws, "ls /m")
                 await _line(ws, f"cat {virtual}")
                 fake.rewrite(CHANGED)
                 stat = await _reconcile_stat(ws, virtual)
@@ -805,4 +868,39 @@ def test_the_contract_goes_red_on_hf_stamping_another_kind(monkeypatch):
     assert holds_read_token
     assert fingerprint == blob_oid(SEED)
     assert fingerprint != xet_hash(SEED)
+    assert not fresh
+
+
+def test_the_contract_goes_red_on_msgraph_stamping_another_kind(monkeypatch):
+    # onedrive forced to stamp the item's eTag on the read while stat
+    # reports its cTag: both tokens exist and differ as strings on every
+    # write, so the contract must call the entry stale.
+    capture = drive_ops.capture_item_metadata
+
+    async def etag_instead(config, loc, *args, **kwargs):
+        _ctag, revision, url = await capture(config, loc, *args, **kwargs)
+        item = await drive_ops.graph_get(config, loc.item())
+        return item["eTag"], revision, url
+
+    with _fake("onedrive", "root", SEED, monkeypatch) as fake:
+        monkeypatch.setitem(vars(drive_ops), "capture_item_metadata",
+                            etag_instead)
+        monkeypatch.setattr(fake.vfs, "READ_REVALIDATABLE", True)
+        virtual = "/m/" + fake.key
+
+        async def run():
+            ws = _fresh_workspace(fake.vfs)
+            try:
+                await _line(ws, f"cat {virtual}")
+                holds_read_token = await ws.cache.is_fresh(virtual, "e1")
+                stat = await _reconcile_stat(ws, virtual)
+                fresh = await ws.cache.is_fresh(virtual, stat.fingerprint)
+                return holds_read_token, stat.fingerprint, fresh
+            finally:
+                await ws.close()
+
+        holds_read_token, fingerprint, fresh = asyncio.run(run())
+
+    assert holds_read_token
+    assert fingerprint == "c1"
     assert not fresh
