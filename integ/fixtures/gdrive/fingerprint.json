@@ -1,0 +1,38 @@
+{
+  "md5_wins_over_a_revision_and_a_stamp": {
+    "md5": "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e",
+    "head_revision": "0BxY-r3",
+    "modified": "2026-01-01T00:00:00Z",
+    "expected": "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e"
+  },
+  "head_revision_when_drive_withholds_the_md5": {
+    "md5": null,
+    "head_revision": "0BxY-r3",
+    "modified": "2026-01-01T00:00:00Z",
+    "expected": "0BxY-r3"
+  },
+  "modified_when_neither_token_exists": {
+    "md5": null,
+    "head_revision": null,
+    "modified": "2026-01-01T00:00:00Z",
+    "expected": "2026-01-01T00:00:00Z"
+  },
+  "empty_strings_are_absent_not_values": {
+    "md5": "",
+    "head_revision": "",
+    "modified": "",
+    "expected": null
+  },
+  "all_absent": {
+    "md5": null,
+    "head_revision": null,
+    "modified": null,
+    "expected": null
+  },
+  "a_non_string_candidate_is_skipped": {
+    "md5": 12345,
+    "head_revision": "0BxY-r3",
+    "modified": "2026-01-01T00:00:00Z",
+    "expected": "0BxY-r3"
+  }
+}

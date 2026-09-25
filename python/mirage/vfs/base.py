@@ -85,9 +85,9 @@ class BaseVFS:
     # silently serves bounded is the bug the policy exists to prevent.
     #
     # Distinct from SUPPORTS_SNAPSHOT, which asks whether a token exists
-    # at all: gdrive stamps one on both sides and still cannot honour
-    # fresh, because stat returns a timestamp where read returns an md5.
-    # Distinct from caches_reads, which asks whether the gate can fire.
+    # at all, and from caches_reads, which asks whether the gate can
+    # fire. A backend can have a token on both sides and still fail this
+    # one, by stamping two different kinds.
     #
     # A declarer must stamp the token on every read, not only while a
     # recorder is active: tests/vfs/test_read_revalidatable.py holds each

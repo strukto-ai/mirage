@@ -134,10 +134,9 @@ export interface VFS {
    * exists to prevent.
    *
    * Distinct from {@link VFS.supportsSnapshot}, which asks whether a token
-   * exists at all: gdrive stamps one on both sides and still cannot honour
-   * fresh, because stat returns a timestamp where read returns an md5.
-   * Distinct from {@link VFS.cachesReads}, which asks whether the gate can
-   * fire.
+   * exists at all, and from {@link VFS.cachesReads}, which asks whether the
+   * gate can fire. A backend can have a token on both sides and still fail
+   * this one, by stamping two different kinds.
    *
    * A declarer must stamp the token on every read, not only while a
    * recorder is active: node's read_revalidatable.test.ts holds each one to

@@ -118,6 +118,17 @@ export async function readdir(
     // Drive's source size must not become FileStat.size (render-derived or
     // null, see the CLAUDE.md FUSE rules); it lives in extra instead.
     const extra: Record<string, unknown> = f.driveId !== undefined ? { drive_id: f.driveId } : {}
+    // Carried so stat can answer the same token the read stamps without a
+    // second request. Omitted when Drive omits them, as drive_id is: a folder
+    // and a native google-apps file have neither, and that absence is what
+    // sends driveFingerprint on to the stamp.
+    // Truthiness, not `!== undefined`, to match the python twin: an empty or
+    // null token is absent, and storing it on one host only would leave the
+    // two `extra` dicts different for the same listing.
+    if (typeof f.md5Checksum === 'string' && f.md5Checksum !== '')
+      extra.md5_checksum = f.md5Checksum
+    if (typeof f.headRevisionId === 'string' && f.headRevisionId !== '')
+      extra.head_revision_id = f.headRevisionId
     let size: number | null = null
     if (resourceType === 'gdrive/file') {
       size = sourceSize

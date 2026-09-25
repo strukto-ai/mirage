@@ -516,3 +516,130 @@ async def test_readdir_scoped_mount_lists_folder_children(
         index=NULL_INDEX,
     )
     assert entries == ["/in.txt"]
+
+
+@pytest.mark.asyncio
+async def test_readdir_carries_both_content_tokens_onto_the_entry(
+        accessor, index):
+    """stat reads its token off the entry, so the listing has to store it.
+
+    Asserted key by key rather than against the whole dict, so the two
+    keys that were already there keep their own assertions below.
+    """
+    files = [{
+        "id": "f1",
+        "name": "report.pdf",
+        "mimeType": "application/pdf",
+        "modifiedTime": "2026-04-01T00:00:00.000Z",
+        "size": "2048",
+        "md5Checksum": "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e",
+        "headRevisionId": "f1-r3",
+    }]
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=files), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, return_value=[]):
+        await readdir(accessor,
+                      PathSpec(vfs_path="", virtual="/", directory="/"), index)
+
+    entry = (await index.get("/report.pdf")).entry
+    assert entry.extra["md5_checksum"] == "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e"
+    assert entry.extra["head_revision_id"] == "f1-r3"
+
+
+@pytest.mark.asyncio
+async def test_readdir_omits_the_tokens_a_native_file_does_not_have(
+        accessor, index):
+    """A gdoc carries neither field, and the key must be absent, not None.
+
+    Key presence is the observable because the listing omits what Drive did
+    not send. If the fixture handed every item an md5 instead, the chain's
+    second and third steps would never run in any test here.
+    """
+    files = [{
+        "id": "d1",
+        "name": "My Document",
+        "mimeType": "application/vnd.google-apps.document",
+        "modifiedTime": "2026-04-01T00:00:00.000Z",
+    }]
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=files), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, return_value=[]):
+        await readdir(accessor,
+                      PathSpec(vfs_path="", virtual="/", directory="/"), index)
+
+    entry = (await index.get("/My Document.gdoc.json")).entry
+    assert "md5_checksum" not in entry.extra
+    assert "head_revision_id" not in entry.extra
+
+
+@pytest.mark.asyncio
+async def test_readdir_adds_the_tokens_without_displacing_the_old_keys(
+        accessor, index):
+    """`extra` is extended, not replaced.
+
+    The binary file is the case that separates the two: it is the only kind
+    that carries a content token AND an older key at the same time, so a
+    rebuilt dict drops drive_id here and nowhere else. A native file cannot
+    show it, because the token the rebuild would assign is never set.
+    """
+    files = [
+        {
+            "id": "f1",
+            "name": "report.pdf",
+            "mimeType": "application/pdf",
+            "modifiedTime": "2026-04-01T00:00:00.000Z",
+            "size": "2048",
+            "driveId": "drive1",
+            "md5Checksum": "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e",
+            "headRevisionId": "f1-r3",
+        },
+        {
+            "id": "d1",
+            "name": "My Document",
+            "mimeType": "application/vnd.google-apps.document",
+            "modifiedTime": "2026-04-01T00:00:00.000Z",
+            "driveId": "drive1",
+            "quotaBytesUsed": "9999",
+        },
+    ]
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=files), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, return_value=[]):
+        await readdir(accessor,
+                      PathSpec(vfs_path="", virtual="/", directory="/"), index)
+
+    binary = (await index.get("/report.pdf")).entry
+    assert binary.extra["drive_id"] == "drive1"
+    assert binary.extra["md5_checksum"] == "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e"
+    native = (await index.get("/My Document.gdoc.json")).entry
+    assert native.extra["drive_id"] == "drive1"
+    assert native.extra["source_size"] == 9999
+
+
+@pytest.mark.asyncio
+async def test_a_shared_drive_root_carries_no_content_token(accessor, index):
+    """A shared drive root is a directory and has no content to fingerprint.
+
+    The listing builds those entries at a second construction site, which
+    the file-entry guard cannot reach, so adding the keys there would go
+    unnoticed by every other test in this file.
+    """
+    drives = [{"id": "drive1", "name": "Team Drive"}]
+    with patch("mirage.core.gdrive.readdir.list_files",
+               new_callable=AsyncMock, return_value=[]), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives",
+               new_callable=AsyncMock, return_value=drives):
+        await readdir(accessor,
+                      PathSpec(vfs_path="", virtual="/", directory="/"), index)
+
+    entry = (await index.get("/Team Drive")).entry
+    assert "md5_checksum" not in entry.extra
+    result = await stat(
+        accessor,
+        PathSpec(vfs_path="Team Drive",
+                 virtual="/Team Drive",
+                 directory="/Team Drive"), index)
+    assert result.fingerprint is None
