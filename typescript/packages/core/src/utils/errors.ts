@@ -82,6 +82,10 @@ export function eacces(path: string | { virtual: string }): FsError {
   return fsError(path, 'EACCES')
 }
 
+export function eperm(path: string | { virtual: string }): FsError {
+  return fsError(path, 'EPERM')
+}
+
 // An extended attribute the path does not carry. ENODATA is linux's
 // spelling; classify reads it, and macOS's ENOATTR, as NO_XATTR.
 export function noXattr(path: string | { virtual: string }): FsError {

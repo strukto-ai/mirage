@@ -32,6 +32,7 @@ def _file_stat(memory: dict[str, Any]) -> FileStat:
         content=ContentType.JSON,
         size=len(body),
         modified=memory.get("updated_at") or memory.get("created_at"),
+        id=memory["id"],
         extra={
             "created_at": memory.get("created_at"),
             "updated_at": memory.get("updated_at"),

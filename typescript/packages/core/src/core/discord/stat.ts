@@ -33,6 +33,7 @@ function guildStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): File
   return new FileStat({
     name: entry.vfsName !== '' ? entry.vfsName : entry.name,
     type: FileType.DIRECTORY,
+    id: entry.id,
     extra: { guild_id: entry.id },
   })
 }
@@ -43,6 +44,7 @@ function channelStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): Fi
     name: entry.vfsName !== '' ? entry.vfsName : entry.name,
     type: FileType.DIRECTORY,
     ...(modified !== null ? { modified } : {}),
+    id: entry.id,
     extra: { channel_id: entry.id },
   })
 }
@@ -54,6 +56,7 @@ function fileBlobStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): F
     ...(entry.size !== null ? { size: entry.size } : {}),
     type: FileType.FILE,
     content: contentTypeForMime(mimetype),
+    id: entry.id,
     extra: { content_type: mimetype, attachment_id: entry.id },
   })
 }

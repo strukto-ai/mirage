@@ -37,7 +37,7 @@ from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.types import (DEFAULT_READ_TTL, CacheFacts, FileStat, FileType,
                           PathSpec, VFSName)
-from mirage.utils.errors import MISS_ERRORS, enoent, no_mount
+from mirage.utils.errors import MISS_ERRORS, enoent, eperm, no_mount
 from mirage.utils.hidden import move_reveals
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import norm_dir, owner_prefix
@@ -51,8 +51,9 @@ from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.snapshot.drift import DriftQueue
 
 from mirage.workspace.dispatcher.constants import (  # isort: skip
-    DISPATCH_READ_OPS, DISPATCH_WRITE_OPS, HIDDEN_CREATE_OPS, LINK_ENTRY_OPS,
-    NAMESPACE_TABLE_OPS, POLICY_WRITE_OPS, SETATTR_KEYS, XATTR_OPS)
+    DISPATCH_READ_OPS, DISPATCH_WRITE_OPS, HIDDEN_CREATE_OPS, ID_XATTR,
+    LINK_ENTRY_OPS, NAMESPACE_TABLE_OPS, POLICY_WRITE_OPS, SETATTR_KEYS,
+    XATTR_OPS)
 
 
 def _memory_answered(report: OpReport | None,
@@ -849,8 +850,10 @@ class Dispatcher:
 
         The attributes a caller sets live on the path's node, so they
         survive on a backend that has no such slot and move with a
-        rename. The listing is sorted, so both hosts and every backend
-        agree on its order.
+        rename; the backend's own facts are read off its stat on every
+        call and refused to writers with EPERM, the answer for an
+        attribute the filesystem keeps for itself. The listing is
+        sorted, so both hosts and every backend agree on its order.
         Gated like a setattr: both admission gates fire on the path's
         turf, and a write needs a writable turf.
 
@@ -872,17 +875,19 @@ class Dispatcher:
         await pre_ops_gate(policies, op, path, write, owner, _session_id())
         if write:
             require_turf_writable(mount, path)
-        await self._xattr_target(mount, path)
+        facts = await self._xattr_facts(mount, path)
         stored = self._namespace.xattrs(path.virtual)
         name = str(kwargs.get("name", ""))
         result: bytes | list[str] | None = None
         if op == "listxattr":
-            result = sorted(stored)
+            result = sorted({*facts, *stored})
         elif op == "getxattr":
-            found = stored.get(name)
+            found = facts.get(name, stored.get(name))
             if found is None:
                 raise _no_xattr(path)
             result = found
+        elif name in facts:
+            raise eperm(path)
         elif op == "setxattr":
             if kwargs.get("create") and name in stored:
                 raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST),
@@ -904,20 +909,25 @@ class Dispatcher:
             return await apply_op_limit(result, bound)
         return result
 
-    async def _xattr_target(self, mount: MountEntry | None,
-                            path: PathSpec) -> None:
-        """Settle that an attribute op's path exists, which it answers first.
+    async def _xattr_facts(self, mount: MountEntry | None,
+                           path: PathSpec) -> dict[str, bytes]:
+        """The read-only attributes a path carries from its backend.
 
-        A link node's own attributes and a directory that exists only in
-        the namespace have no backend behind them; anything else the
-        backend's stat must find, or the op is ENOENT.
+        The id the backend's stat reports reads back as
+        ``user.mirage.id``: a Drive file id, a Notion page id, a Slack
+        channel id. A backend whose path is the only id (S3, disk, RAM)
+        reports none, so its paths carry no such attribute. The stat
+        also settles whether the path exists, which an attribute op
+        answers first (ENOENT). A link node's own attributes and a
+        directory that exists only in the namespace have no backend
+        behind them, so they carry none.
 
         Args:
             mount (MountEntry | None): the mount owning the path.
             path (PathSpec): the path the op names.
         """
         if self._namespace.is_link(path.virtual):
-            return
+            return {}
         stat: FileStat | None = None
         if mount is not None:
             await mount.ensure_ready()
@@ -926,12 +936,14 @@ class Dispatcher:
             except FileNotFoundError:
                 await self._reconciler.on_op_missing(mount, "stat",
                                                      path.virtual)
-        if stat is not None or isinstance(
-                self._namespace_result("stat", path.virtual), FileStat):
-            return
-        if mount is None:
-            raise no_mount(path.virtual)
-        raise enoent(path)
+        if stat is None:
+            if isinstance(self._namespace_result("stat", path.virtual),
+                          FileStat):
+                return {}
+            if mount is None:
+                raise no_mount(path.virtual)
+            raise enoent(path)
+        return {} if stat.id is None else {ID_XATTR: stat.id.encode()}
 
     async def _apply_setattr(self, mount: MountEntry, path: PathSpec,
                              kwargs: dict[str, Any]) -> dict[str, Any]:

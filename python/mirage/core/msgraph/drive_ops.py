@@ -299,6 +299,7 @@ def entry_stat(item: dict[str, Any]) -> FileStat:
         return FileStat(name=name,
                         type=FileType.DIRECTORY,
                         modified=item.get("lastModifiedDateTime"),
+                        id=item.get("id"),
                         extra={
                             "size_bytes": item.get("size"),
                             "child_count": folder_child_count(item),
@@ -310,6 +311,7 @@ def entry_stat(item: dict[str, Any]) -> FileStat:
         type=FileType.FILE,
         content=content_type_for_path(name),
         fingerprint=item.get("cTag"),
+        id=item.get("id"),
         extra={
             "id": item.get("id"),
             "ctag": item.get("cTag"),

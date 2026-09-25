@@ -62,3 +62,14 @@ def test_file_prompt_substitutes_prefix_in_write_prompt():
     prompt = ws.file_prompt
     assert "/home/zecheng/gdocs/owned/<file>.gdoc.json" in prompt
     assert "{prefix}" not in prompt
+
+
+def test_file_prompt_names_the_id_attribute_once():
+    ws = Workspace(
+        {
+            "/a": (RAMVFS(), MountMode.WRITE),
+            "/b": (RAMVFS(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+    )
+    assert ws.file_prompt.count("user.mirage.id") == 1

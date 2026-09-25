@@ -30,6 +30,7 @@ function statFromEntry(entry: DropboxEntry): FileStat {
       name: entry.name,
       type: FileType.DIRECTORY,
       modified,
+      id: entry.id ?? null,
       extra: { dropbox_id: entry.id ?? entry.path_display ?? entry.name },
     })
   }
@@ -40,6 +41,7 @@ function statFromEntry(entry: DropboxEntry): FileStat {
     content: contentTypeForPath(entry.name),
     modified,
     fingerprint: modified !== '' ? modified : null,
+    id: entry.id ?? null,
     extra: {
       dropbox_id: entry.id ?? entry.path_display ?? entry.name,
       resource_type: 'dropbox/file',
@@ -106,6 +108,7 @@ export async function stat(
       name: result.entry.vfsName !== '' ? result.entry.vfsName : result.entry.name,
       type: FileType.DIRECTORY,
       modified: result.entry.remoteTime,
+      id: result.entry.id,
       extra: { dropbox_id: result.entry.id },
     })
   }
@@ -116,6 +119,7 @@ export async function stat(
     content: contentTypeForPath(result.entry.vfsName),
     modified: result.entry.remoteTime,
     fingerprint: result.entry.remoteTime !== '' ? result.entry.remoteTime : null,
+    id: result.entry.id,
     extra: {
       dropbox_id: result.entry.id,
       resource_type: result.entry.resourceType,

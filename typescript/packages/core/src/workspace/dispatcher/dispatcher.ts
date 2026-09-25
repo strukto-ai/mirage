@@ -27,6 +27,7 @@ import {
   einval,
   enoent,
   enotempty,
+  eperm,
   isMissError,
   isMissingOp,
   noMount,
@@ -64,6 +65,7 @@ import { Reconciler } from '../reconcile.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import {
+  ID_XATTR,
   DISPATCH_READ_OPS,
   DISPATCH_WRITE_OPS,
   HIDDEN_CREATE_OPS,
@@ -1025,16 +1027,18 @@ export class Dispatcher {
     const write = POLICY_WRITE_OPS.has(opName)
     await preOpsGate(this.policies, opName, path, write, owner, sessionId(), issuer)
     if (write) requireTurfWritable(mount, path)
-    await this.xattrTarget(mount, path)
+    const facts = await this.xattrFacts(mount, path)
     const stored = this.namespace.xattrs(path.virtual)
     const name = typeof kwargs.name === 'string' ? kwargs.name : ''
     let result: Uint8Array | string[] | null = null
     if (opName === 'listxattr') {
-      result = [...stored.keys()].sort(compareCodePoints)
+      result = [...new Set([...facts.keys(), ...stored.keys()])].sort(compareCodePoints)
     } else if (opName === 'getxattr') {
-      const found = stored.get(name)
+      const found = facts.get(name) ?? stored.get(name)
       if (found === undefined) throw noXattr(path.virtual)
       result = found
+    } else if (facts.has(name)) {
+      throw eperm(path.virtual)
     } else if (opName === 'setxattr') {
       if (kwargs.create === true && stored.has(name)) throw eexist(path.virtual)
       if (kwargs.replace === true && !stored.has(name)) throw noXattr(path.virtual)
@@ -1057,14 +1061,23 @@ export class Dispatcher {
   }
 
   /**
-   * Settle that an attribute op's path exists, which it answers first. A
-   * link node's own attributes and a directory that exists only in the
-   * namespace have no backend behind them; anything else the backend's
-   * stat must find, or the op is ENOENT. Mirrors Python's
-   * Dispatcher._xattr_target.
+   * The read-only attributes a path carries from its backend.
+   *
+   * The id the backend's stat reports reads back as `user.mirage.id`:
+   * a Drive file id, a Notion page id, a Slack channel id. A backend
+   * whose path is the only id (S3, disk, RAM) reports none, so its paths
+   * carry no such attribute. The stat also settles whether the path
+   * exists, which an attribute op answers first (ENOENT). A link node's
+   * own attributes and a directory that exists only in the namespace
+   * have no backend behind them, so they carry none. Mirrors Python's
+   * Dispatcher._xattr_facts.
    */
-  private async xattrTarget(mount: MountEntry | null, path: PathSpec): Promise<void> {
-    if (this.namespace.isLink(path.virtual)) return
+  private async xattrFacts(
+    mount: MountEntry | null,
+    path: PathSpec,
+  ): Promise<Map<string, Uint8Array>> {
+    const facts = new Map<string, Uint8Array>()
+    if (this.namespace.isLink(path.virtual)) return facts
     let stat: FileStat | null = null
     if (mount !== null) {
       const [vfs, scope] = await this.namespace.resolve(path.virtual, false)
@@ -1083,8 +1096,12 @@ export class Dispatcher {
         await this.reconciler.onOpMissing(mount, 'stat', path.virtual, err)
       }
     }
-    if (stat !== null || this.namespaceResult('stat', path.virtual) instanceof FileStat) return
-    throw mount === null ? noMount(path.virtual) : enoent(path.virtual)
+    if (stat === null) {
+      if (this.namespaceResult('stat', path.virtual) instanceof FileStat) return facts
+      throw mount === null ? noMount(path.virtual) : enoent(path.virtual)
+    }
+    if (stat.id !== null) facts.set(ID_XATTR, new TextEncoder().encode(stat.id))
+    return facts
   }
 
   /**

@@ -24,6 +24,7 @@ function pageStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileS
     name: entry.vfsName,
     type: FileType.DIRECTORY,
     modified: entry.remoteTime !== '' ? entry.remoteTime : null,
+    id: entry.id,
     extra: { page_id: entry.id },
   })
 }
@@ -42,6 +43,7 @@ function databaseStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): F
     name: entry.vfsName,
     type: FileType.DIRECTORY,
     modified: entry.remoteTime !== '' ? entry.remoteTime : null,
+    id: entry.id,
     extra: { database_id: entry.id },
   })
 }
@@ -52,6 +54,7 @@ function databaseJsonStat(match: ScopeMatch, _path: PathSpec, entry: IndexEntry)
     type: FileType.FILE,
     content: ContentType.JSON,
     size: entry.size,
+    id: match.slots.database_id ?? null,
     extra: { database_id: match.slots.database_id ?? '' },
   })
 }
@@ -61,6 +64,7 @@ function dataSourceStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry):
     name: entry.vfsName,
     type: FileType.DIRECTORY,
     modified: entry.remoteTime !== '' ? entry.remoteTime : null,
+    id: entry.id,
     extra: { data_source_id: entry.id },
   })
 }
@@ -71,6 +75,7 @@ function dataSourceJsonStat(match: ScopeMatch, _path: PathSpec, entry: IndexEntr
     type: FileType.FILE,
     content: ContentType.JSON,
     size: entry.size,
+    id: match.slots.data_source_id ?? null,
     extra: { data_source_id: match.slots.data_source_id ?? '' },
   })
 }

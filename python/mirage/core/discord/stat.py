@@ -36,6 +36,7 @@ def _guild_stat(match: ScopeMatch, path: PathSpec,
     return FileStat(
         name=entry.vfs_name or entry.name,
         type=FileType.DIRECTORY,
+        id=entry.id,
         extra={"guild_id": entry.id},
     )
 
@@ -46,6 +47,7 @@ def _channel_stat(match: ScopeMatch, path: PathSpec,
         name=entry.vfs_name or entry.name,
         type=FileType.DIRECTORY,
         modified=snowflake_to_iso(entry.remote_time),
+        id=entry.id,
         extra={"channel_id": entry.id},
     )
 
@@ -58,6 +60,7 @@ def _file_blob_stat(match: ScopeMatch, path: PathSpec,
         size=entry.size,
         type=FileType.FILE,
         content=content_type_for_mime(mimetype),
+        id=entry.id,
         extra={
             "content_type": mimetype,
             "attachment_id": entry.id,

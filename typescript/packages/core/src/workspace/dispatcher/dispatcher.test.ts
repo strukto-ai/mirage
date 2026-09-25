@@ -660,18 +660,50 @@ describe('the door answers extended attributes from the node table', () => {
     }
   })
 
-  it("keeps a backend stat's extra out of the attributes", async () => {
+  it('reads the backend id as user.mirage.id and refuses writers', async () => {
+    // A Drive folder's id is what the agent needed and could not find; the
+    // id any backend's stat reports reads back the same way, and nothing
+    // else the stat carries in extra becomes an attribute.
     const ws = await open()
     const stat = vi.spyOn(ws.opsRegistry, 'call')
     stat.mockImplementation(async (op, ...rest) => {
       if (op === 'stat') {
-        return new FileStat({ name: 'd', type: FileType.DIRECTORY, extra: { file_id: '1AbC' } })
+        return new FileStat({
+          name: 'd',
+          type: FileType.DIRECTORY,
+          id: '1AbC',
+          extra: { file_id: '1AbC', shared: true },
+        })
       }
       return OpsRegistry.prototype.call.call(ws.opsRegistry, op, ...rest)
     })
     try {
       await ws.vfs.setxattr('/r/f', 'user.tag', ENC.encode('t'))
-      expect(await ws.vfs.listxattr('/r/f')).toEqual(['user.tag'])
+      expect(await ws.vfs.listxattr('/r/f')).toEqual(['user.mirage.id', 'user.tag'])
+      expect(DEC.decode(await ws.vfs.getxattr('/r/f', 'user.mirage.id'))).toBe('1AbC')
+      await expect(
+        ws.vfs.setxattr('/r/f', 'user.mirage.id', ENC.encode('x')),
+      ).rejects.toMatchObject({ code: 'EPERM' })
+      await expect(ws.vfs.removexattr('/r/f', 'user.mirage.id')).rejects.toMatchObject({
+        code: 'EPERM',
+      })
+    } finally {
+      stat.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it('gives a backend with no id no id attribute', async () => {
+    const ws = await open()
+    const stat = vi.spyOn(ws.opsRegistry, 'call')
+    stat.mockImplementation(async (op, ...rest) => {
+      if (op === 'stat') {
+        return new FileStat({ name: 'f', type: FileType.FILE, extra: { etag: 'abc' } })
+      }
+      return OpsRegistry.prototype.call.call(ws.opsRegistry, op, ...rest)
+    })
+    try {
+      expect(await ws.vfs.listxattr('/r/f')).toEqual([])
     } finally {
       stat.mockRestore()
       await ws.close()

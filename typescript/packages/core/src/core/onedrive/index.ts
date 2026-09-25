@@ -137,6 +137,7 @@ export async function stat(
         name: '/',
         type: FileType.DIRECTORY,
         modified: typeof item.lastModifiedDateTime === 'string' ? item.lastModifiedDateTime : null,
+        id: typeof item.id === 'string' ? item.id : null,
         extra: { size_bytes: asNumber(item.size), child_count: folderChildCount(item) },
       })
     } catch (error) {

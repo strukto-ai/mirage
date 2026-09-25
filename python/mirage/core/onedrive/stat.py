@@ -44,6 +44,7 @@ async def stat(accessor: OneDriveAccessor,
         return FileStat(name="/",
                         type=FileType.DIRECTORY,
                         modified=item.get("lastModifiedDateTime"),
+                        id=item.get("id"),
                         extra={
                             "size_bytes": item.get("size"),
                             "child_count": folder_child_count(item),

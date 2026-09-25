@@ -18,9 +18,11 @@ import { rstripSlash } from '../utils/slash.ts'
 
 const HELP_HINT =
   'Tip: run `man` to list every available command grouped by VFS, `man <cmd>` for a single entry, and `<cmd> --help` for flag details.'
+const ID_HINT =
+  "Tip: `getfattr -d <path>` lists a path's extended attributes; `user.mirage.id` is the id the backend's own API uses for it (a Drive folder, a Notion page, a Slack channel), the one its CLI takes."
 
 export function buildFilePrompt(mounts: readonly MountEntry[]): string {
-  const parts: string[] = [HELP_HINT]
+  const parts: string[] = [HELP_HINT, ID_HINT]
   for (const m of mounts) {
     const r = m.vfs as { prompt?: string; writePrompt?: string }
     const prompt = r.prompt

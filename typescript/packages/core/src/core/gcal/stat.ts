@@ -34,6 +34,7 @@ function fileStat(_match: ScopeMatch, _path: PathSpec, entry: IndexEntry): FileS
     content: ContentType.JSON,
     modified: entry.remoteTime,
     size: entry.size,
+    id: entry.id,
     extra: { event_id: entry.id, ...entry.extra },
   })
 }

@@ -35,8 +35,12 @@ POLICY_WRITE_OPS = DISPATCH_WRITE_OPS | frozenset(
     {"setattr", "symlink", "setxattr", "removexattr"})
 
 # The extended-attribute ops, which the node table answers: what a caller
-# sets is stored on the path's node beside the overlay's mode and times.
+# sets is stored on the path's node beside the overlay's mode and times,
+# and the id the backend's own API uses for the object (a Drive file id,
+# a Notion page id) reads back as ``user.mirage.id``, which only the
+# backend can change.
 XATTR_OPS = frozenset({"getxattr", "listxattr", "setxattr", "removexattr"})
+ID_XATTR = "user.mirage.id"
 
 # Ops the node table itself answers: a symlink is namespace state with
 # no backend behind it, so the door is the authority for both

@@ -652,7 +652,8 @@ class Ops:
                        session_id: str | None = None) -> bytes:
         """One extended attribute's value.
 
-        The node table answers with what a caller set.
+        The node table answers: what a caller set, and the id the
+        backend's own API uses for the object as ``user.mirage.id``.
 
         Args:
             path (str): Virtual path.
@@ -700,7 +701,7 @@ class Ops:
         """Store an extended attribute on a path.
 
         Stored on the path's namespace node, so it works on every
-        backend and moves with a rename.
+        backend and moves with a rename. ``user.mirage.id`` is read-only.
 
         Args:
             path (str): Virtual path.
@@ -712,6 +713,9 @@ class Ops:
                 it is not (XATTR_REPLACE).
             nofollow (bool): write a link entry's own attributes.
             session_id (str | None): Session to run as outside a line.
+
+        Raises:
+            PermissionError: EPERM for ``user.mirage.id``.
         """
         await self._call("setxattr",
                          path,
@@ -737,7 +741,8 @@ class Ops:
             session_id (str | None): Session to run as outside a line.
 
         Raises:
-            OSError: the attribute-not-set errno when it is not set.
+            OSError: the attribute-not-set errno when it is not set;
+                EPERM for ``user.mirage.id``.
         """
         await self._call("removexattr",
                          path,

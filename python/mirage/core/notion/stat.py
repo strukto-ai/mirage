@@ -26,6 +26,7 @@ def _page_stat(match: ScopeMatch, path: PathSpec,
         name=entry.vfs_name,
         type=FileType.DIRECTORY,
         modified=entry.remote_time or None,
+        id=entry.id,
         extra={"page_id": entry.id},
     )
 
@@ -44,6 +45,7 @@ def _database_stat(match: ScopeMatch, path: PathSpec,
         name=entry.vfs_name,
         type=FileType.DIRECTORY,
         modified=entry.remote_time or None,
+        id=entry.id,
         extra={"database_id": entry.id},
     )
 
@@ -55,6 +57,7 @@ def _database_json_stat(match: ScopeMatch, path: PathSpec,
         type=FileType.FILE,
         content=ContentType.JSON,
         size=entry.size,
+        id=match.slots["database_id"],
         extra={"database_id": match.slots["database_id"]},
     )
 
@@ -65,6 +68,7 @@ def _data_source_stat(match: ScopeMatch, path: PathSpec,
         name=entry.vfs_name,
         type=FileType.DIRECTORY,
         modified=entry.remote_time or None,
+        id=entry.id,
         extra={"data_source_id": entry.id},
     )
 
@@ -76,6 +80,7 @@ def _data_source_json_stat(match: ScopeMatch, path: PathSpec,
         type=FileType.FILE,
         content=ContentType.JSON,
         size=entry.size,
+        id=match.slots["data_source_id"],
         extra={"data_source_id": match.slots["data_source_id"]},
     )
 

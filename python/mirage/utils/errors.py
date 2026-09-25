@@ -141,6 +141,11 @@ def eacces(path: str | PathSpec) -> PermissionError:
     return PermissionError(_virtual_of(path))
 
 
+def eperm(path: str | PathSpec) -> PermissionError:
+    return PermissionError(errno.EPERM, "Operation not permitted",
+                           _virtual_of(path))
+
+
 def no_mount(path: str | PathSpec) -> NoMountError:
     return NoMountError(f"no mount matches path: {str(path)!r}")
 

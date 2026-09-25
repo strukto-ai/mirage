@@ -38,6 +38,7 @@ def _stat_from_item(item: dict[str, Any]) -> FileStat:
             name=vfs_name,
             type=FileType.DIRECTORY,
             modified=item.get("modified_at") or "",
+            id=item["id"],
             extra={"box_id": item["id"]},
         )
     remote_time = item.get("modified_at") or ""
@@ -53,6 +54,7 @@ def _stat_from_item(item: dict[str, Any]) -> FileStat:
         content=content_type_for_path(vfs_name),
         modified=remote_time,
         fingerprint=sha1 or remote_time or None,
+        id=item["id"],
         extra={
             "box_id": item["id"],
             "resource_type": rt,
@@ -82,6 +84,7 @@ async def stat(
             name="/",
             type=FileType.DIRECTORY,
             modified=info.get("modified_at") or "",
+            id=root_id,
             extra={"box_id": root_id},
         )
     virtual_key = prefix + "/" + key if prefix else "/" + key
@@ -115,6 +118,7 @@ async def stat(
             name=result.entry.vfs_name or result.entry.name,
             type=FileType.DIRECTORY,
             modified=result.entry.remote_time,
+            id=result.entry.id,
             extra={"box_id": result.entry.id},
         )
     sha1 = result.entry.extra.get("sha1")
@@ -125,6 +129,7 @@ async def stat(
         content=content_type_for_path(result.entry.vfs_name),
         modified=result.entry.remote_time,
         fingerprint=sha1 or result.entry.remote_time or None,
+        id=result.entry.id,
         extra={
             "box_id": result.entry.id,
             "resource_type": result.entry.resource_type,

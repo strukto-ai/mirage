@@ -54,6 +54,7 @@ async def stat_from_api(accessor: GDriveAccessor, key: str,
         return FileStat(name=node.name,
                         type=FileType.DIRECTORY,
                         modified=modified,
+                        id=node.id,
                         extra={"file_id": node.id})
     ext = MIME_TO_EXT.get(node.mime_type)
     vfs_name = f"{node.name}{ext}" if ext else node.name
@@ -66,6 +67,7 @@ async def stat_from_api(accessor: GDriveAccessor, key: str,
         content=content_type_for_path(vfs_name),
         modified=modified,
         fingerprint=modified or None,
+        id=node.id,
         extra={
             "file_id": node.id,
             "resource_type": _MIME_TO_RT.get(node.mime_type, "gdrive/file"),
@@ -103,6 +105,7 @@ async def stat(
             name=entry.vfs_name,
             type=FileType.DIRECTORY,
             modified=entry.remote_time,
+            id=entry.id,
             extra={"file_id": entry.id},
         )
     return FileStat(
@@ -112,6 +115,7 @@ async def stat(
         content=content_type_for_path(entry.vfs_name),
         modified=entry.remote_time,
         fingerprint=entry.remote_time or None,
+        id=entry.id,
         extra={
             "file_id": entry.id,
             "resource_type": entry.resource_type,

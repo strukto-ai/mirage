@@ -36,6 +36,7 @@ def _file_stat(match: ScopeMatch, path: PathSpec,
         content=ContentType.JSON,
         modified=entry.remote_time,
         size=entry.size,
+        id=entry.id,
         extra={
             "event_id": entry.id,
             **entry.extra
