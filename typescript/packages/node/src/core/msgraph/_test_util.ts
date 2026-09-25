@@ -96,10 +96,13 @@ export class FakeGraph {
     const versions = [...(previous?.versions ?? [])]
     const history = new Map(previous?.history ?? [])
     const version = `${String(versions.length + 1)}.0`
+    // A copy, so a caller mutating its buffer afterwards cannot rewrite a
+    // version already written.
+    const stored = new Uint8Array(data)
     versions.push({ id: version, lastModifiedDateTime: stamp(n) })
-    history.set(version, data)
+    history.set(version, stored)
     this.rows.set(`${drive}|${path}`, {
-      data,
+      data: stored,
       ctag: `c${String(n)}`,
       etag: `e${String(n)}`,
       modified: stamp(n),
