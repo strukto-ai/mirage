@@ -379,9 +379,11 @@ describe('an unrecorded OneDrive read', () => {
           status: 404,
         }),
     })
-    await expect(
-      read(new OneDriveAccessor({ accessToken: 'token' }), path),
-    ).rejects.toMatchObject({ code: 'ENOENT', message: expect.stringContaining('/od/a.bin') })
+    const error: unknown = await read(new OneDriveAccessor({ accessToken: 'token' }), path).catch(
+      (e: unknown) => e,
+    )
+    expect(error).toMatchObject({ code: 'ENOENT' })
+    expect((error as Error).message).toContain('/od/a.bin')
   })
 
   it('sends a window to the download URL and slices a 200 answer locally', async () => {

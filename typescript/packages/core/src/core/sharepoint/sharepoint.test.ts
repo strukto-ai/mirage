@@ -203,7 +203,11 @@ const SP_DOWNLOAD = 'https://download.test/a.bin'
 // A scoped mount resolves its site and drive once, then addresses the item.
 // Routes by URL without its query and logs each call's URL, Authorization and
 // Range; an unrouted URL throws, so a request the read should not make fails.
-function routedDrive(item: () => Response, download?: () => Response) {
+function routedDrive(
+  item: () => Response,
+  download?: () => Response,
+  extra: Record<string, () => Response> = {},
+) {
   const calls: [string, string | undefined, string | undefined][] = []
   const routes: Record<string, () => Response> = {
     [`${API}/sites`]: () =>
@@ -212,6 +216,7 @@ function routedDrive(item: () => Response, download?: () => Response) {
       new Response(JSON.stringify({ value: [{ id: 'b!drive', name: 'Documents' }] })),
     [SP_ITEM]: item,
     ...(download === undefined ? {} : { [SP_DOWNLOAD]: download }),
+    ...extra,
   }
   vi.stubGlobal(
     'fetch',
@@ -246,6 +251,21 @@ describe('an unrecorded SharePoint read', () => {
     ])
   })
 
+  it('falls back to /content when Graph omits the download URL', async () => {
+    const content = `${SP_ITEM}:/content`
+    const calls = routedDrive(
+      () => new Response(JSON.stringify({ id: 'i', cTag: 'ctag-1' })),
+      undefined,
+      { [content]: () => new Response(new Uint8Array([4, 5])) },
+    )
+    const data = await read(accessor(), path)
+    expect([...data]).toEqual([4, 5])
+    expect(calls.slice(2).map(([url, auth]) => [url, auth])).toEqual([
+      [SP_ITEM, 'Bearer token'],
+      [content, 'Bearer token'],
+    ])
+  })
+
   it('reports ENOENT with the virtual path when the item is missing', async () => {
     routedDrive(
       () =>
@@ -253,14 +273,16 @@ describe('an unrecorded SharePoint read', () => {
           status: 404,
         }),
     )
-    await expect(read(accessor(), path)).rejects.toMatchObject({
-      code: 'ENOENT',
-      message: expect.stringContaining('/sp/a.bin'),
-    })
+    const error: unknown = await read(accessor(), path).catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'ENOENT' })
+    expect((error as Error).message).toContain('/sp/a.bin')
   })
 
   it('sends a window to the download URL', async () => {
-    const calls = routedDrive(item, () => new Response(new TextEncoder().encode('llo'), { status: 206 }))
+    const calls = routedDrive(
+      item,
+      () => new Response(new TextEncoder().encode('llo'), { status: 206 }),
+    )
     const data = await read(accessor(), path, undefined, { offset: 2, size: 3 })
     expect(new TextDecoder().decode(data)).toBe('llo')
     expect(calls.at(-1)).toEqual([SP_DOWNLOAD, undefined, 'bytes=2-4'])

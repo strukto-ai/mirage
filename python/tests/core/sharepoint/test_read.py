@@ -76,7 +76,8 @@ async def test_an_unrecorded_read_fetches_the_item_then_its_download_url():
 
 
 @pytest.mark.asyncio
-async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url():
+async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url(
+):
     url = f"{_BASE}/drives/{_DRIVE_ID}/root:/report.txt"
     with aioresponses() as m:
         m.get(url, payload=_item(download=None))

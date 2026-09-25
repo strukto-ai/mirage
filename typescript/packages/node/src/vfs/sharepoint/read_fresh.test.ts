@@ -12,7 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_READ_TTL, MountMode, ReadPolicy } from '@struktoai/mirage-core/types'
+import {
+  DEFAULT_READ_TTL,
+  type FileStat,
+  MountMode,
+  PathSpec,
+  ReadPolicy,
+} from '@struktoai/mirage-core/types'
 import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
@@ -81,27 +87,30 @@ const ROWS: [string, boolean, string][] = [
 ]
 
 describe('sharepoint under read: fresh', () => {
-  it.each(ROWS)('refetches a write between the token and the bytes (%s)', async (_id, scoped, template) => {
-    const graph = await graphOf(OLD)
-    const w = ws(await vfsOf(graph, scoped))
-    const command = template.replace('{v}', scoped ? SCOPED : UNSCOPED)
-    try {
-      // The file changes after the bytes are taken and before they are sent,
-      // so the read holds OLD while Graph already holds NEW. A token read
-      // after the bytes would label OLD with NEW's cTag.
-      graph.onBytes(() => {
-        graph.write(DRIVE_ID, 'a.txt', NEW)
-      })
-      expect(await out(w, command)).toBe(DEC.decode(OLD))
-      expect(graph.hookFired).toBe(1)
-      const before = graph.fetches()
-      expect(await out(w, command)).toBe(DEC.decode(NEW))
-      expect(graph.fetches() - before).toBe(1)
-      expect(graph.reach).toEqual([])
-    } finally {
-      await w.close()
-    }
-  })
+  it.each(ROWS)(
+    'refetches a write between the token and the bytes (%s)',
+    async (_id, scoped, template) => {
+      const graph = await graphOf(OLD)
+      const w = ws(await vfsOf(graph, scoped))
+      const command = template.replace('{v}', scoped ? SCOPED : UNSCOPED)
+      try {
+        // The file changes after the bytes are taken and before they are sent,
+        // so the read holds OLD while Graph already holds NEW. A token read
+        // after the bytes would label OLD with NEW's cTag.
+        graph.onBytes(() => {
+          graph.write(DRIVE_ID, 'a.txt', NEW)
+        })
+        expect(await out(w, command)).toBe(DEC.decode(OLD))
+        expect(graph.hookFired).toBe(1)
+        const before = graph.fetches()
+        expect(await out(w, command)).toBe(DEC.decode(NEW))
+        expect(graph.fetches() - before).toBe(1)
+        expect(graph.reach).toEqual([])
+      } finally {
+        await w.close()
+      }
+    },
+  )
 
   it('a listed cTag never answers for a changed file', async () => {
     const graph = await graphOf(OLD, 1)
@@ -110,9 +119,28 @@ describe('sharepoint under read: fresh', () => {
       // The listing leaves c1 in the mount index. A probe that trusted it
       // would match the c1 the cache holds and serve OLD.
       await out(w, 'ls /m')
+      // The fixture held: the mount index answers a stat with c1 and no
+      // request of its own, so there is a stale row to trust.
+      const mount = w.mount('/m')
+      const accessor = mount.vfs.accessor
+      const index = mount.index
+      if (accessor === undefined || index === undefined) {
+        throw new Error('a Graph mount has an accessor and an index')
+      }
+      const items = graph.count('item')
+      const listed = (await w.opsRegistry.call(
+        'stat',
+        mount.vfs,
+        accessor,
+        new PathSpec({ virtual: '/m/a.txt', directory: '/m/', vfsPath: 'a.txt' }),
+        [],
+        { index },
+      )) as FileStat
+      expect([listed.fingerprint, graph.count('item')]).toEqual(['c1', items])
       expect(await out(w, `cat ${SCOPED}`)).toBe(DEC.decode(OLD))
       graph.write(DRIVE_ID, 'a.txt', NEW)
       expect(await out(w, `cat ${SCOPED}`)).toBe(DEC.decode(NEW))
+      expect([graph.count('children'), graph.reach]).toEqual([1, []])
     } finally {
       await w.close()
     }

@@ -86,16 +86,26 @@ async def test_a_write_between_the_token_and_the_bytes_is_refetched(
 
 @pytest.mark.asyncio
 async def test_a_listed_ctag_never_answers_for_a_changed_file():
-    with serve(FakeGraph(drives={DRIVE_ID: {"a.txt": OLD}},
-                         children_allowed=1)) as graph:
+    with serve(FakeGraph(drives={DRIVE_ID: {
+            "a.txt": OLD
+    }}, children_allowed=1)) as graph:
         ws = _ws(_vfs(graph))
         try:
             # The listing leaves c1 in the mount index. A probe that trusted
             # it would match the c1 the cache holds and serve OLD.
             await _out(ws, "ls /m")
+            # The fixture held: the mount index answers a stat with c1 and
+            # no request of its own, so there is a stale row to trust.
+            mount = ws.mount("/m")
+            items = graph.count("item")
+            listed = await mount.execute_op("stat",
+                                            "/m/a.txt",
+                                            index=mount.index)
+            assert (listed.fingerprint, graph.count("item")) == ("c1", items)
             assert await _out(ws, f"cat {SCOPED}") == OLD
             graph.write(DRIVE_ID, "a.txt", NEW)
             assert await _out(ws, f"cat {SCOPED}") == NEW
+            assert (graph.count("children"), graph.reach) == (1, [])
         finally:
             await ws.close()
 

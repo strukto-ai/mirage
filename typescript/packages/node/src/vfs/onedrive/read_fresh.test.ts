@@ -15,7 +15,13 @@
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import { read, stream } from '@struktoai/mirage-core/core/onedrive/index'
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
-import { DEFAULT_READ_TTL, MountMode, PathSpec, ReadPolicy } from '@struktoai/mirage-core/types'
+import {
+  DEFAULT_READ_TTL,
+  type FileStat,
+  MountMode,
+  PathSpec,
+  ReadPolicy,
+} from '@struktoai/mirage-core/types'
 import type { VFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
@@ -95,7 +101,12 @@ describe('onedrive under read: fresh', () => {
   it('an unrecorded read fetches the bare item, then its bytes', async () => {
     const graph = await graphOf(OLD)
     const vfs = await vfsOf(graph)
-    const data = await read(vfs.accessor as OneDriveAccessor, SPEC)
+    let data: Uint8Array
+    try {
+      data = await read(vfs.accessor as OneDriveAccessor, SPEC)
+    } finally {
+      await vfs.close()
+    }
     expect(DEC.decode(data)).toBe(DEC.decode(OLD))
     // No version history: the revision only matters to a snapshot, and only a
     // recorded read can land in one.
@@ -105,20 +116,23 @@ describe('onedrive under read: fresh', () => {
     ])
   })
 
-  it.each(['bytes', 'stream'])('a recorded %s read keeps the revision snapshots pin', async (slot) => {
-    const graph = await graphOf(OLD)
-    graph.write(ME, 'a.txt', NEW)
-    const accessor = (await vfsOf(graph)).accessor as OneDriveAccessor
-    const [data, records] = await runWithRecording(async () => {
-      if (slot === 'bytes') return read(accessor, SPEC)
-      const parts: Uint8Array[] = []
-      for await (const chunk of stream(accessor, SPEC)) parts.push(chunk)
-      return Buffer.concat(parts)
-    })
-    expect(DEC.decode(data)).toBe(DEC.decode(NEW))
-    expect(graph.queries('item')).toEqual(['$expand=versions'])
-    expect(records.map((r) => [r.fingerprint, r.revision])).toEqual([['c2', '2.0']])
-  })
+  it.each(['bytes', 'stream'])(
+    'a recorded %s read keeps the revision snapshots pin',
+    async (slot) => {
+      const graph = await graphOf(OLD)
+      graph.write(ME, 'a.txt', NEW)
+      const accessor = (await vfsOf(graph)).accessor as OneDriveAccessor
+      const [data, records] = await runWithRecording(async () => {
+        if (slot === 'bytes') return read(accessor, SPEC)
+        const parts: Uint8Array[] = []
+        for await (const chunk of stream(accessor, SPEC)) parts.push(chunk)
+        return Buffer.concat(parts)
+      })
+      expect(DEC.decode(data)).toBe(DEC.decode(NEW))
+      expect(graph.queries('item')).toEqual(['$expand=versions'])
+      expect(records.map((r) => [r.fingerprint, r.revision])).toEqual([['c2', '2.0']])
+    },
+  )
 
   it('a ranged read stamps the whole item cTag', async () => {
     const graph = await graphOf(OLD)
@@ -138,9 +152,28 @@ describe('onedrive under read: fresh', () => {
       // The listing leaves c1 in the mount index. A probe that trusted it
       // would match the c1 the cache holds and serve OLD.
       await out(w, 'ls /m')
+      // The fixture held: the mount index answers a stat with c1 and no
+      // request of its own, so there is a stale row to trust.
+      const mount = w.mount('/m')
+      const accessor = mount.vfs.accessor
+      const index = mount.index
+      if (accessor === undefined || index === undefined) {
+        throw new Error('a Graph mount has an accessor and an index')
+      }
+      const items = graph.count('item')
+      const listed = (await w.opsRegistry.call(
+        'stat',
+        mount.vfs,
+        accessor,
+        new PathSpec({ virtual: '/m/a.txt', directory: '/m/', vfsPath: 'a.txt' }),
+        [],
+        { index },
+      )) as FileStat
+      expect([listed.fingerprint, graph.count('item')]).toEqual(['c1', items])
       expect(await out(w, CAT)).toBe(DEC.decode(OLD))
       graph.write(ME, 'a.txt', NEW)
       expect(await out(w, CAT)).toBe(DEC.decode(NEW))
+      expect([graph.count('children'), graph.reach]).toEqual([1, []])
     } finally {
       await w.close()
     }

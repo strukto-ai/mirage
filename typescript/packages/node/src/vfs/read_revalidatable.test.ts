@@ -572,7 +572,9 @@ const A_CASES = [
 // rows put a token-bearing row in front of the probe: only a probe that stats
 // through a throwaway index sees the rewrite.
 const CHANGED_CASES: { name: string; shape: Shape }[] = [
-  ...[...new Set(Object.values(HARNESSES))].sort().map((name) => ({ name, shape: 'root' as const })),
+  ...[...new Set(Object.values(HARNESSES))]
+    .sort()
+    .map((name) => ({ name, shape: 'root' as const })),
   ...Object.keys(GRAPH).map((name) => ({ name, shape: 'listed' as const })),
 ]
 const B_CASES = cases(['bytes', 'stream'])

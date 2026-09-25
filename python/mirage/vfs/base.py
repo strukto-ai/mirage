@@ -92,8 +92,9 @@ class BaseVFS:
     # A declarer must stamp the token on every read, not only while a
     # recorder is active: tests/vfs/test_read_revalidatable.py holds each
     # one to that (#1165). onedrive and sharepoint qualify because every
-    # unpinned read fetches the item's cTag before its bytes, recorded or
-    # not.
+    # unpinned byte read fetches the item's cTag before its bytes, recorded
+    # or not; a stream stamps only under a recorder, the one place its token
+    # can land.
     READ_REVALIDATABLE: bool = False
 
     def __init__(

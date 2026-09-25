@@ -347,7 +347,8 @@ function currentVersionId(versions: Record<string, unknown>[]): string | null {
 // sees as stale; the other order would label old bytes with the new token and
 // serve them as fresh. `versions` also expands the version history for the
 // current revision, which only a snapshot needs; without it the revision is
-// null.
+// null. Every shell line records, so only reads outside one (FUSE, a runtime's
+// guest, the ops facade) skip it.
 async function captureItemMetadata(
   config: MsGraphConfigResolved,
   loc: DriveLoc,

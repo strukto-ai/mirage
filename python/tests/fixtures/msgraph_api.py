@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from aiohttp import web
 
@@ -101,8 +101,10 @@ class FakeGraph:
         stamp = f"2026-01-01T00:00:{n:02d}Z"
         row = self._rows.get((drive, path))
         versions = list(row.versions) if row is not None else []
-        versions.append({"id": f"{len(versions) + 1}.0",
-                         "lastModifiedDateTime": stamp})
+        versions.append({
+            "id": f"{len(versions) + 1}.0",
+            "lastModifiedDateTime": stamp
+        })
         self._rows[(drive, path)] = _Row(data=data,
                                          ctag=f"c{n}",
                                          etag=f"e{n}",
@@ -125,22 +127,29 @@ class FakeGraph:
         self._on_bytes = fn
 
     def _item(self, drive: str, path: str,
-              request: web.Request) -> dict[str, Any] | None:
+              request: web.Request | None) -> dict[str, Any] | None:
         row = self._rows.get((drive, path))
         name = path.rsplit("/", 1)[-1]
         if row is not None:
             item: dict[str, Any] = {
-                "id": f"{drive}:{path}",
-                "name": name,
-                "size": len(row.data),
+                "id":
+                f"{drive}:{path}",
+                "name":
+                name,
+                "size":
+                len(row.data),
                 "file": {},
-                "cTag": row.ctag,
-                "eTag": row.etag,
-                "lastModifiedDateTime": row.modified,
+                "cTag":
+                row.ctag,
+                "eTag":
+                row.etag,
+                "lastModifiedDateTime":
+                row.modified,
                 "@microsoft.graph.downloadUrl":
                 f"{self.url}/download/{quote(drive, safe='')}/{quote(path)}",
             }
-            if "versions" in request.query.get("$expand", ""):
+            if (request is not None
+                    and "versions" in request.query.get("$expand", "")):
                 item["versions"] = list(reversed(row.versions))
             return item
         under = path + "/" if path else ""
@@ -172,7 +181,7 @@ class FakeGraph:
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
         tail = request.match_info["tail"]
-        query = request.query_string
+        query = unquote(request.query_string)
         parts = tail.split("/")
         if parts[0] == "sites" and len(parts) == 1:
             return self._sites(query)
@@ -240,7 +249,7 @@ class FakeGraph:
             if self._item(drive, path, request) is None:
                 return _error(404, "itemNotFound", "no such folder")
             items = [
-                self._item(drive, child, request)
+                self._item(drive, child, None)
                 for child in self._children(drive, path)
             ]
             return web.json_response({"value": items})

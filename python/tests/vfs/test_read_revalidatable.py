@@ -91,7 +91,10 @@ HARNESSES = {
 # The drive each Graph backend addresses in the fake: OneDrive the signed-in
 # user's own, SharePoint one library of one site, mounted scoped so the keys
 # stay drive-relative (unscoped, `a.txt` would name a site).
-GRAPH = {"onedrive": (ME, ONEDRIVE_IO), "sharepoint": (DRIVE_ID, SHAREPOINT_IO)}
+GRAPH = {
+    "onedrive": (ME, ONEDRIVE_IO),
+    "sharepoint": (DRIVE_ID, SHAREPOINT_IO)
+}
 
 # One document per family, identical in the TypeScript twin. oci is the one
 # alias with a required field beyond these; every other one-of (r2's
@@ -334,8 +337,8 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
                       children_allowed=1 if shape == "listed" else 0)
     with serve_graph(graph):
         vfs = build_vfs(name, {**config, "graph_base_url": graph.url})
-        assert ((vfs.accessor.config.key_prefix or "").strip("/") == (
-            prefix or "").strip("/"))
+        assert ((vfs.accessor.config.key_prefix
+                 or "").strip("/") == (prefix or "").strip("/"))
 
         def rewrite(new: bytes) -> None:
             graph.write(drive, stored, new)

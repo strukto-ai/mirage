@@ -1,3 +1,17 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
@@ -14,9 +28,15 @@ afterEach(() => {
 function drive() {
   const row = { cTag: 'c1', eTag: 'e1', lastModifiedDateTime: 'T1', size: 3 }
   const routes: Record<string, () => unknown> = {
-    'https://graph.microsoft.com/v1.0/sites': () => ({ value: [{ id: 'site', name: 'team', displayName: 'Team' }] }),
-    'https://graph.microsoft.com/v1.0/sites/site/drives': () => ({ value: [{ id: 'b!drive', name: 'Documents' }] }),
-    'https://graph.microsoft.com/v1.0/drives/b!drive/root/children': () => ({ value: [{ id: 'i', name: 'a.txt', file: {}, ...row }] }),
+    'https://graph.microsoft.com/v1.0/sites': () => ({
+      value: [{ id: 'site', name: 'team', displayName: 'Team' }],
+    }),
+    'https://graph.microsoft.com/v1.0/sites/site/drives': () => ({
+      value: [{ id: 'b!drive', name: 'Documents' }],
+    }),
+    'https://graph.microsoft.com/v1.0/drives/b!drive/root/children': () => ({
+      value: [{ id: 'i', name: 'a.txt', file: {}, ...row }],
+    }),
   }
   vi.stubGlobal(
     'fetch',
@@ -34,7 +54,9 @@ function drive() {
 describe('the sharepoint watch fingerprint', () => {
   it('ignores a metadata edit and reports a content write once', async () => {
     const row = drive()
-    const hook = buildDeltaHook(new SharePointAccessor({ accessToken: 'token', site: 'Team', drive: 'Documents' }))
+    const hook = buildDeltaHook(
+      new SharePointAccessor({ accessToken: 'token', site: 'Team', drive: 'Documents' }),
+    )
     const root = PathSpec.fromStrPath('/', '')
     const baseline = await hook.pull(root, null)
     // The walk stats each file from the listing it just made; that row has

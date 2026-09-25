@@ -58,7 +58,7 @@
   },
   "core/msgraph": {
    "typescript_only": {
-    "_test_util": "The FakeGraph node:http server shared by the read-token contract and the onedrive and sharepoint read-fresh workspace tests; it has to be a real server because the hf rows in the same contract file use the real fetch, and the contract's ordering row rewrites a file between two of its requests. TypeScript colocates tests with sources, so a shared test helper lands in the source directory; python keeps the same fake in tests/fixtures/msgraph_api.py, which this gate does not scan."
+    "_test_util": "The FakeGraph node:http server shared by the read-token contract and the onedrive and sharepoint read-fresh workspace tests; it has to be a real server because the hf rows in the same contract file use the real fetch, and the read-fresh suites' ordering row rewrites a file between two of its requests. TypeScript colocates tests with sources, so a shared test helper lands in the source directory; python keeps the same fake in tests/fixtures/msgraph_api.py, which this gate does not scan."
    }
   },
   "core/dropbox": {

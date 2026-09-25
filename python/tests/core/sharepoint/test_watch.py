@@ -18,24 +18,26 @@ from mirage.core.sharepoint.watch import build_delta_hook
 from mirage.types import FileChangeKind, PathSpec
 from mirage.vfs.registry import build_vfs
 from mirage.watch.fingerprint import stat_fingerprint
-from tests.fixtures.msgraph_api import (DRIVE_ID, DRIVE_NAME, SITE_NAME, FakeGraph,
-                                        serve)
+from tests.fixtures.msgraph_api import (DRIVE_ID, DRIVE_NAME, SITE_NAME,
+                                        FakeGraph, serve)
 
 OLD = b"one\n"
 NEW = b"two, longer\n"
 
 
 def _accessor(graph: FakeGraph):
-    return build_vfs("sharepoint", {
-        "access_token": "t",
-        "graph_base_url": graph.url,
-        "site": SITE_NAME,
-        "drive": DRIVE_NAME
-    }).accessor
+    return build_vfs(
+        "sharepoint", {
+            "access_token": "t",
+            "graph_base_url": graph.url,
+            "site": SITE_NAME,
+            "drive": DRIVE_NAME
+        }).accessor
 
 
 @pytest.mark.asyncio
-async def test_a_metadata_edit_reports_nothing_and_a_write_reports_one_update():
+async def test_a_metadata_edit_reports_nothing_and_a_write_reports_one_update(
+):
     with serve(FakeGraph(drives={DRIVE_ID: {"a.txt": OLD}})) as graph:
         accessor = _accessor(graph)
         hook = build_delta_hook(accessor)
@@ -53,9 +55,8 @@ async def test_a_metadata_edit_reports_nothing_and_a_write_reports_one_update():
             await accessor.close()
     assert baseline.changes == ()
     assert touched.changes == ()
-    assert [(e.kind, e.path.virtual) for e in written.changes] == [
-        (FileChangeKind.UPDATE, "/a.txt")
-    ]
+    assert [(e.kind, e.path.virtual)
+            for e in written.changes] == [(FileChangeKind.UPDATE, "/a.txt")]
     metadata = written.changes[0].metadata
     assert metadata is not None
     assert metadata.fingerprint == stat_fingerprint(
