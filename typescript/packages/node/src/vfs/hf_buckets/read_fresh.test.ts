@@ -190,7 +190,9 @@ describe('hf_buckets under read: fresh', () => {
         1,
         'ls: fake bucket_paths_info refused\n',
       ])
-      expect((await vfs.index.get('/m/a.txt')).entry ?? null).toBeNull()
+      const index = vfs.index
+      if (index === undefined) throw new Error('an hf_buckets mount has an index')
+      expect((await index.get('/m/a.txt')).entry ?? null).toBeNull()
     } finally {
       await w.close()
     }
