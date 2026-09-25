@@ -325,14 +325,29 @@ def current_version_id(versions: list[dict[str, Any]]) -> str | None:
     return current.get("id")
 
 
-async def capture_item_metadata(config: MsGraphConfig,
-                                loc: DriveLoc,
-                                session: SessionArg = None
-                                ) -> tuple[str | None, str | None, str | None]:
-    item = await graph_get(config,
-                           loc.item(),
-                           params={"$expand": "versions"},
-                           session=session)
+async def capture_item_metadata(
+        config: MsGraphConfig,
+        loc: DriveLoc,
+        session: SessionArg = None,
+        versions: bool = True) -> tuple[str | None, str | None, str | None]:
+    """The item's cTag, current version and download URL, in one GET.
+
+    Callers fetch this before the bytes and download from the URL it
+    returns. Graph can change the item between the two requests, and in
+    this order a change can only pair an older token with newer bytes,
+    which the next freshness probe sees as stale; the other order would
+    label old bytes with the new token and serve them as fresh.
+
+    Args:
+        config (MsGraphConfig): Graph credentials and endpoint.
+        loc (DriveLoc): the drive item.
+        session (SessionArg): pool or live session to ride.
+        versions (bool): also expand the version history for the current
+            revision, which only a snapshot needs; without it the revision
+            is None.
+    """
+    params = {"$expand": "versions"} if versions else None
+    item = await graph_get(config, loc.item(), params=params, session=session)
     fingerprint = item.get("cTag")
     revision = current_version_id(item.get("versions", []))
     download_url = item.get("@microsoft.graph.downloadUrl")
@@ -358,9 +373,12 @@ async def read_item(config: MsGraphConfig,
                                          loc.item(action),
                                          window,
                                          session=session)
-        elif active_recorder() is not None:
+        else:
             fingerprint, revision, download_url = await capture_item_metadata(
-                config, loc, session=session)
+                config,
+                loc,
+                session=session,
+                versions=active_recorder() is not None)
             if download_url:
                 data = await graph_get_bytes(config,
                                              download_url,
@@ -372,11 +390,6 @@ async def read_item(config: MsGraphConfig,
                                              loc.item("/content"),
                                              window,
                                              session=session)
-        else:
-            data = await graph_get_bytes(config,
-                                         loc.item("/content"),
-                                         window,
-                                         session=session)
     except GraphError as exc:
         if exc.status == 404:
             raise enoent(virtual)
@@ -410,7 +423,8 @@ async def stream_item(config: MsGraphConfig,
             (rec.fingerprint, rec.revision,
              download_url) = await capture_item_metadata(config,
                                                          loc,
-                                                         session=session)
+                                                         session=session,
+                                                         versions=True)
             if download_url:
                 url = download_url
                 auth = False
@@ -689,10 +703,13 @@ async def readdir_items(config: MsGraphConfig,
         rtype = ResourceType.FOLDER if is_dir else ResourceType.FILE
         # Folder `size` is aggregate storage metadata, never rendered
         # content length: cache it as extra, not as the entry size.
-        extra = ({
-            "size_bytes": child.get("size"),
-            "child_count": folder_child_count(child),
-        } if is_dir else {})
+        extra: dict[str, Any] = {
+            "ctag": child.get("cTag"),
+            "etag": child.get("eTag"),
+        }
+        if is_dir:
+            extra.update(size_bytes=child.get("size"),
+                         child_count=folder_child_count(child))
         index_entries.append(
             (cname,
              IndexEntry(id=key,
@@ -727,6 +744,7 @@ async def stat_item(config: MsGraphConfig,
                         modified=entry.remote_time or None,
                         type=FileType.FILE,
                         content=content_type_for_path(entry.name),
+                        fingerprint=entry.extra.get("ctag"),
                         extra=dict(entry.extra))
     parent = virtual_key.rsplit("/", 1)[0] or "/"
     parent_listing = await index.list_dir(parent)

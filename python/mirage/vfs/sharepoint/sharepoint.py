@@ -26,6 +26,9 @@ class SharePointVFS(BoundVFS):
     index_ttl: float = 86_400
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
+    # stat and every unpinned read stamp the item's cTag, the read taking
+    # it before the bytes, so the gate compares like with like.
+    READ_REVALIDATABLE: bool = True
 
     def __init__(self, config: SharePointConfig) -> None:
         super().__init__(io=IO)

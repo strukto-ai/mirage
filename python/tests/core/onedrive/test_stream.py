@@ -77,8 +77,13 @@ async def test_range_read_returns_requested_bytes():
         captured["range"] = kwargs["headers"].get("Range")
         return CallbackResult(body=b"cde", status=206)
 
+    # A range read is a windowed read_bytes: the item first, then the window
+    # from its download URL.
+    download = "https://download.example/a.txt"
     with aioresponses() as m:
-        m.get(_CONTENT, callback=_cb)
+        m.get(_CONTENT.removesuffix(":/content"),
+              payload={"@microsoft.graph.downloadUrl": download})
+        m.get(download, callback=_cb)
         data = await range_read(_accessor(),
                                 PathSpec.from_str_path("/Docs/a.txt"), 2, 5)
     assert data == b"cde"

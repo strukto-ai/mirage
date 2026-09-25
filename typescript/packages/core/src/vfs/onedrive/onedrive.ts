@@ -30,6 +30,9 @@ export class OneDriveVFS extends BoundVFS<OneDriveAccessor> implements VFS {
   // the aggregate storage number in extra.
   readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = true
+  // stat and every unpinned read stamp the item's cTag, the read taking it
+  // before the bytes, so the gate compares like with like.
+  readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
   readonly prompt: string = ONEDRIVE_PROMPT
   readonly accessor: OneDriveAccessor
