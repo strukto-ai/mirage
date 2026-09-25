@@ -537,6 +537,11 @@ def _prefer_error(values: Iterable["OnExceed"]) -> "OnExceed":
                                   for v in values) else OnExceed.TRUNCATE)
 
 
+def _min_bound(values: Iterable[int | None]) -> int | None:
+    bounds = [v for v in values if v is not None]
+    return min(bounds) if bounds else None
+
+
 class Limit(BaseModel):
     """A bound on a result: the policy layer's limit arm and the shape
     every cap config parses into.
@@ -548,8 +553,10 @@ class Limit(BaseModel):
 
     kind: ClassVar[str] = "limit"
 
-    max_bytes: Annotated[NonNegativeInt | None, Aggr(_min_positive)] = None
-    max_lines: Annotated[NonNegativeInt | None, Aggr(_min_positive)] = None
+    model_config = ConfigDict(extra="forbid")
+
+    max_bytes: Annotated[NonNegativeInt | None, Aggr(_min_bound)] = None
+    max_lines: Annotated[NonNegativeInt | None, Aggr(_min_bound)] = None
     timeout_seconds: Annotated[float | None, Aggr(_min_positive)] = None
     on_exceed: Annotated[OnExceed, Aggr(_prefer_error)] = OnExceed.TRUNCATE
 
@@ -587,7 +594,7 @@ class Producer:
 
     Rides the IO envelope from the dispatch site to the workspace
     boundary; merge keeps the rightmost producer, so this names the
-    command whose stream the caller actually sees. Post-layer policies
+    last command that ran, not every byte of a list. Post-layer policies
     (output caps today; budgets and attribution later) read it as
     context. Facts only: no policy reads a decision off the
     envelope; the one a chain hands down is written beside it as

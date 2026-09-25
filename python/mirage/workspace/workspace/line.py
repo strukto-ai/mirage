@@ -22,16 +22,21 @@ from mirage.policy import (ExecuteResultContext, Policies, post_execute_gate,
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import ShellExecution
-from mirage.types import PathSpec, Producer
+from mirage.types import Limit, PathSpec, Producer
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.workspace.utils import command_name
 
 
 async def run_whole_line(
-        runtime: LineExecutorMixin, command: str, stdin: ByteSource | None,
-        session: SessionState, mounts: list[MountEntry], policies: Policies,
-        invalidate: Callable[[], Awaitable[None]]) -> IOResult:
+        runtime: LineExecutorMixin,
+        command: str,
+        stdin: ByteSource | None,
+        session: SessionState,
+        mounts: list[MountEntry],
+        policies: Policies,
+        invalidate: Callable[[], Awaitable[None]],
+        command_limits: dict[str, Limit] | None = None) -> IOResult:
     """Hand the raw line to one runtime instead of walking its tree.
 
     A whole line is a command like any other: the same boundary
@@ -53,7 +58,10 @@ async def run_whole_line(
     assert isinstance(runtime, Runtime)
     data = await materialize(stdin) if stdin is not None else None
     name = command_name(command)
-    guard = resolve_limit(name, mounts)
+    guard = resolve_limit(name,
+                          mounts,
+                          workspace_limits=command_limits,
+                          profile_limits=session.command_limits)
     timeout = guard.timeout_seconds if guard is not None else None
     try:
         result = await run_with_timeout(
@@ -78,7 +86,7 @@ async def run_whole_line(
                         stdout=None,
                         stderr=existing + err,
                         refusal=refusal_of(deny))
-    stdout, stderr, exit_code = await guard_output(result.stdout or b"",
-                                                   result.stderr,
-                                                   result.exit_code, bound)
+    stdout, stderr, exit_code = await guard_output(
+        result.stdout or b"", result.stderr, result.exit_code,
+        Limit.aggr([guard if session.terminal_output else None, bound]))
     return IOResult(exit_code=exit_code, stdout=stdout, stderr=stderr)

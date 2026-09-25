@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from mirage.policy.base import Policy
-from mirage.policy.types import Action, ExecuteResultContext, OpsResultContext
+from mirage.policy.types import Action, OpsResultContext
 from mirage.types import Limit, Producer
 
 _DEFAULT_MAX_LINES = 2000
@@ -39,15 +39,15 @@ def resolve_limit(
     mounts: Iterable[Any] = (),
     command_default: Limit | None = None,
     mount_override: Limit | None = None,
+    workspace_limits: Mapping[str, Limit] | None = None,
+    profile_limits: Mapping[str, Limit] | None = None,
 ) -> Limit | None:
     """Resolve one command's bound, the one precedence engine.
 
-    Precedence is override semantics, not the container's tighten-only
-    merge (an override may loosen a default), which is why it lives
-    inside this built-in and nowhere else: an explicit mount_override,
-    then the command's own declared default, then aggregation across
-    the mounts the command spans (tightest per field), then the global
-    table.
+    Profile override, mount override, workspace default, command default,
+    then the built-in table. Each selected entry replaces the whole Limit;
+    absent command names inherit. Multiple mounts aggregate to the tightest
+    bound after resolution. Independent policy ceilings compose separately.
 
     Args:
         name (str): command name being resolved.
@@ -57,13 +57,21 @@ def resolve_limit(
         mount_override (Limit | None): one mount's per-command
             override, when the caller knows it.
     """
+    if profile_limits is not None and name in profile_limits:
+        return profile_limits[name]
     if mount_override is not None:
         return mount_override
-    if command_default is not None:
-        return command_default
     spanned = list(mounts)
     if spanned:
-        return resolve_across_mounts(name, spanned)
+        return Limit.aggr(
+            resolve_limit(name,
+                          command_default=command_default,
+                          mount_override=m.command_limits.get(name),
+                          workspace_limits=workspace_limits) for m in spanned)
+    if workspace_limits is not None and name in workspace_limits:
+        return workspace_limits[name]
+    if command_default is not None:
+        return command_default
     return DEFAULT_COMMAND_LIMITS.get(name, FALLBACK_LIMIT)
 
 
@@ -89,14 +97,16 @@ def resolve_across_mounts(
     return Limit.aggr(resolved)
 
 
-def resolve_producer(producer: Producer,
-                     override_for: OverrideLookup) -> Limit | None:
+def resolve_producer(
+        producer: Producer,
+        override_for: OverrideLookup,
+        workspace_limits: Mapping[str, Limit] | None = None,
+        profile_limits: Mapping[str, Limit] | None = None) -> Limit | None:
     """Resolve the bound a producer's facts name.
 
-    Shared by OutputCapPolicy and the dispatch sites that still need
-    the resolved timeout locally: per-prefix override first, then the
-    producer's declared bound, then the global table, aggregated to
-    the tightest value when the command spanned several mounts.
+    Shared by command output guards and dispatch timeouts. Resolution
+    uses the same profile, mount, workspace and command precedence,
+    aggregated to the tightest value across the spanned mounts.
 
     Args:
         producer (Producer): facts stamped at the dispatch site.
@@ -107,11 +117,15 @@ def resolve_producer(producer: Producer,
         return None
     if not producer.prefixes:
         return resolve_limit(producer.command,
-                             command_default=producer.declared)
+                             command_default=producer.declared,
+                             workspace_limits=workspace_limits,
+                             profile_limits=profile_limits)
     per_mount = [
         resolve_limit(producer.command,
                       command_default=producer.declared,
-                      mount_override=override_for(prefix, producer.command))
+                      mount_override=override_for(prefix, producer.command),
+                      workspace_limits=workspace_limits,
+                      profile_limits=profile_limits)
         for prefix in producer.prefixes
     ]
     return Limit.aggr(per_mount)
@@ -120,10 +134,9 @@ def resolve_producer(producer: Producer,
 class OutputCapPolicy(Policy):
     """The built-in output cap, seeded by the registry.
 
-    Answers post_execute with the resolution the ``command_limits:`` config
-    surface promises (override semantics, see resolve_limit) and
-    post_ops with a mount's per-op bound. Config parses into this
-    policy; the container and dispatch know nothing about caps.
+    Answers post_ops with a mount's per-op bound. Command output is finalized
+    at its terminal destination using resolve_producer; post_execute remains
+    the hook for explicit whole-invocation policies.
 
     Args:
         override_for (OverrideLookup): maps (mount prefix, command or
@@ -133,9 +146,6 @@ class OutputCapPolicy(Policy):
 
     def __init__(self, override_for: OverrideLookup) -> None:
         self._override_for = override_for
-
-    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
-        return resolve_producer(ctx.producer, self._override_for)
 
     async def post_ops(self, ctx: OpsResultContext) -> Action | None:
         return self._override_for(ctx.prefix, ctx.op)

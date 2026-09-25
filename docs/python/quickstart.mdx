@@ -116,9 +116,37 @@ stays 0.
 Caps fire only on the **terminal** command of a pipeline, so
 `cat big.txt | head -n 30` still shows 30 lines.
 
+### Workspace and profile defaults
+
+```python
+from mirage import Workspace
+from mirage.types import Limit, MountMode
+from mirage.vfs.ram import RAMVFS
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.WRITE,
+    command_limits={"head": Limit(max_lines=2000)},
+    profiles={
+        "researcher": {
+            "command_limits": {"head": {"max_lines": 10000}},
+        },
+    },
+)
+ws.create_session("research", profile="researcher")
+# A pipe-only reader uses the session's profile limit.
+result = await ws.shell("cat /data/n.txt | head -n 3000", session_id="research")
+```
+
+A profile overrides a mount's limit, which overrides the workspace default;
+command-declared and built-in defaults follow. Overrides replace a whole
+command entry. An omitted command inherits; `None` removes a bound. Each
+terminal command is capped separately, so `cat big.txt; echo end` preserves
+`end`. Pipe input, file redirects, and captured substitutions retain full data.
+
 ### Configure per mount
 
-Limits are per-command and per-mount. Attach them when you mount a
+Attach per-mount overrides when you mount a
 VFS by passing a `(vfs, mode, {command: Limit})`
 tuple. Each guard sets `max_lines` / `max_bytes` (output cap) and/or
 `timeout_seconds` (deadline); `on_exceed` is `TRUNCATE` (default, exit 0

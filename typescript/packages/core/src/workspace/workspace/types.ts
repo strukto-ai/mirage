@@ -54,7 +54,7 @@ export interface WorkspaceOptions {
    * mount block, where it cannot be confused with `index: {ttl:}`.
    */
   read?: ReadSpec
-  commandLimits?: Record<string, Record<string, Limit>>
+  commandLimits?: Record<string, Limit>
   /**
    * Behaviour for the post-load drift check on fingerprinted reads. Only
    * consulted by `Workspace.load` / `Workspace.fromState`; fresh

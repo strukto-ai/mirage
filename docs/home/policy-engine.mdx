@@ -72,7 +72,9 @@ silent allow.
   the result; a **Limit** caps a byte-producing one.
 - **`post_execute`** — one finished `execute()` line. A **Limit**
   returned here merges with every other opining policy's and caps the
-  line's output at the workspace boundary.
+  line's output at the workspace boundary. This is a whole-response ceiling;
+  built-in `command_limits` are resolved separately for each terminal command
+  from its session profile, mounts, and workspace defaults.
 
 ## The answers
 

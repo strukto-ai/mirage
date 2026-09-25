@@ -96,6 +96,7 @@ class MountRegistry:
         # script's language), which the bindings dict cannot answer:
         # an entry behind another capturer never binds a command.
         self.runtime_entries: list[Runtime] = []
+        self.command_limits: dict[str, Limit] = {}
         # Why a command that SOME runtime class captures has no live
         # binding: default-world entries that failed to build (missing
         # extra) record their construction error per captured command,

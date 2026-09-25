@@ -313,36 +313,56 @@ mirage workspace clone demo --at <version> --id demo_at_v1
 | `mirage job wait JOB [--timeout SECS]` | Block until the job is done; returns the result. |
 | `mirage job cancel JOB` | Cancel a running job. |
 
-## Per-mount command limits
+## Command limits
 
-Cap what a command may stream back per mount with `command_limits`, so a
-runaway `cat`/`grep`/`rg` can't flood the agent or hang. Each entry sets
-`max_lines` / `max_bytes` (output cap) and/or `timeout_seconds` (deadline),
-with `on_exceed: truncate` (stop, exit 0, add a stderr notice) or
-`on_exceed: error` (stop, exit 1):
+Set workspace defaults with `command_limits`, and override individual commands
+for a session in `profiles.<name>.command_limits`. Mounts may also declare
+command overrides. The order is profile, mount, workspace, command-declared
+default, then the built-in default. A selected command entry replaces the
+whole limit; an omitted command inherits. `max_lines: null` and
+`max_bytes: null` mean unlimited, while zero permits no output.
 
 ```yaml
+command_limits:
+  head:
+    max_lines: 2000
+profiles:
+  researcher:
+    command_limits:
+      head:
+        max_lines: 10000
 mounts:
   /data:
     vfs: ram
     mode: WRITE
     command_limits:
-      head:                  # cap output, keep going
-        max_lines: 100
-        on_exceed: truncate
-      grep:                  # cap output, fail hard
-        max_lines: 50
-        on_exceed: error
-      rg:                    # deadline in seconds
-        timeout_seconds: 30
+      cat:
+        max_lines: 1000
 ```
 
-Caps fire on the **terminal** command of a pipeline only, so
-`cat big.txt | head -n 30` still shows 30 lines. Truncation exits `0`, `error`
-exits `1`, and a timeout exits `124` -- each with a stderr notice. Without a
-`command_limits` block, `cat`/`grep`/`rg`/`head`/`tail` still cap at 2000
-lines by default. See [Output Limits](/python/quickstart#output-limits)
-for the SDK form and the same fields.
+A pipe-only reader uses its profile or workspace default: it does not inherit
+upstream mount settings. Thus `cat /data/n.txt | head -n 3000` returns up to
+2000 lines normally and all 3000 under `researcher`. Commands spanning several
+mounts use the tightest resolved bound across those mounts.
+
+Caps apply to each command's terminal stdout before outputs are combined.
+`cat big.txt; echo end` caps `cat` and still prints `end`. Intermediate pipe
+stages, file redirects, and captured substitutions retain their full data.
+This is a deliberate output-display safeguard beyond GNU behavior; it does
+not change how much data `cat big.txt | wc -l` counts.
+
+Each entry accepts `max_lines`, `max_bytes`, `timeout_seconds`, and `on_exceed`.
+`truncate` retains the bounded output and adds a command-attributed stderr
+notice without changing the command's status. `error` discards that command's
+stdout and exits 1, before `&&`, `||`, `$?`, and `PIPESTATUS` use its status.
+A timeout exits 124. Exact-fit output has no truncation notice.
+Without configuration, `cat`, `grep`, `rg`, `head`, and `tail` cap at 2000 lines.
+
+Independent policy ceilings still apply. A policy's `post_execute` limit
+bounds the complete response; it is separate from command defaults. A runtime
+executing an opaque whole shell line exposes one invocation, so its cap is
+applied to the returned response rather than to internal pipeline stages.
+See [Output Limits](/python/quickstart#output-limits) for SDK examples.
 
 ## Daemon control
 

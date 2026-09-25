@@ -108,6 +108,25 @@ def _stdin_dest(session: SessionState) -> _Fd | str:
     return identity
 
 
+def _terminal_stdout(redirects: list[Redirect], session: SessionState) -> bool:
+    """Whether fd 1 remains on terminal stdout after ordered redirects.
+
+    Args:
+        redirects (list[Redirect]): expanded descriptor changes.
+        session (SessionState): the enclosing output destination.
+    """
+    fds = [session.exec_stdin_identity == TO_STDOUT, True, False]
+    for redirect in redirects:
+        if isinstance(redirect.target, int):
+            fds[redirect.fd] = (redirect.target != FD_CLOSE
+                                and fds[redirect.target])
+        elif redirect.fd == FD_BOTH:
+            fds[FD_STDOUT] = fds[FD_STDERR] = False
+        else:
+            fds[redirect.fd] = False
+    return session.terminal_output and fds[FD_STDOUT]
+
+
 async def handle_redirect(
     execute_node,
     dispatch,
@@ -274,6 +293,8 @@ async def handle_redirect(
             if r.kind not in (RedirectKind.HEREDOC, RedirectKind.HERESTRING)
             and not isinstance(r.target, int))
         token = set_redirect_paths(command.id, targets)
+        terminal_output = session.terminal_output
+        session.terminal_output = _terminal_stdout(redirects, session)
         try:
             command_stdin = inputs[FD_STDIN]
             stdout, io, exec_node = await execute_node(
@@ -281,6 +302,7 @@ async def handle_redirect(
                 unreadable_stdin() if isinstance(command_stdin, _Unreadable)
                 else command_stdin, call_stack)
         finally:
+            session.terminal_output = terminal_output
             reset_redirect_paths(token)
         refused = exec_node.refused
         try:

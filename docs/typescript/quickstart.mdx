@@ -101,38 +101,46 @@ stays 0.
 Caps fire only on the **terminal** command of a pipeline, so
 `cat big.txt | head -n 30` still shows 30 lines.
 
-### Configure per mount
-
-Pass a `commandLimits` option keyed by mount prefix, then command.
-Each `Limit` sets `maxLines` / `maxBytes` (output cap) and/or
-`timeoutSeconds` (deadline); `onExceed` is `TRUNCATE` (default, exit 0
-plus notice) or `ERROR` (exit 1 plus notice):
+### Workspace, profile, and mount limits
 
 ```ts
-import {
-  Limit,
-  MountMode,
-  OnExceed,
-  RAMVFS,
-  Workspace,
-} from '@struktoai/mirage-node'
+import { Limit, Mount, MountMode, OnExceed, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
-  { '/data': new RAMVFS() },
   {
-    mode: MountMode.WRITE,
-    commandLimits: {
-      '/data': {
-        head: new Limit({ maxLines: 100 }), // cap, keep going
-        grep: new Limit({ maxLines: 50, onExceed: OnExceed.ERROR }),
-        rg: new Limit({ timeoutSeconds: 30 }), // deadline
-      },
+    '/data': new Mount(new RAMVFS(), {
+      mode: MountMode.WRITE,
+      commandLimits: { cat: new Limit({ maxLines: 1000, onExceed: OnExceed.ERROR }) },
+    }),
+  },
+  {
+    commandLimits: { head: new Limit({ maxLines: 2000 }) },
+    profiles: {
+      researcher: { commandLimits: { head: new Limit({ maxLines: 10000 }) } },
     },
   },
 )
+ws.createSession('research', { profile: 'researcher' })
+const result = await ws.shell('cat /data/n.txt | head -n 3000', { sessionId: 'research' })
 ```
 
-The same limits are available to the CLI as a `command_limits` block in the workspace YAML.
+The workspace `commandLimits` option is keyed by command name. Per-mount
+settings belong on `Mount` (or its tuple form). The precedence is profile,
+mount, workspace, command-declared default, then built-in default. A selected
+entry replaces the whole limit; omitted commands inherit. `null` removes a
+bound and zero permits no output.
+
+A pipe-only reader uses the profile or workspace setting, without inheriting
+upstream mount limits. Each terminal command is capped separately, so
+`cat big.txt; echo end` preserves `end`. Pipe input, file redirects, and
+captured substitutions retain full data.
+
+`Limit` accepts `maxLines`, `maxBytes`, `timeoutSeconds`, and `onExceed`.
+`TRUNCATE` retains bounded output and adds a notice without changing status;
+`ERROR` discards that command's stdout and sets exit 1 before shell control
+flow decides the next command. Exact-fit output produces no notice.
+The same configuration uses `command_limits` and snake_case fields in YAML.
+Independent whole-response policy ceilings still constrain the result.
 
 ## Next Steps
 

@@ -61,6 +61,8 @@ async def handle_pipe(
 
     async def run_segment(i: int, cmd: TSNodeLike) -> None:
         child = session.fork()
+        child.terminal_output = session.terminal_output and i == len(
+            commands) - 1
         token = set_current_session(child)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()

@@ -65,6 +65,7 @@ export async function handlePipe(
   let failed = false
   const tasks = commands.map((cmd, i) => {
     const child = session.fork()
+    child.terminalOutput = session.terminalOutput && i === commands.length - 1
     child.abortSignal = mergeSignals(session.abortSignal, abort.signal) ?? abort.signal
     const output = pipes[i]
     if (output === undefined) throw new Error('Missing pipeline segment')

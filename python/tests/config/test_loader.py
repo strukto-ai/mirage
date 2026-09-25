@@ -1358,3 +1358,64 @@ def test_a_mount_declaring_fresh_on_ram_is_refused_when_the_workspace_builds():
     kwargs = cfg.to_workspace_kwargs()
     with pytest.raises(ValueError, match="needs a resource that caches reads"):
         Workspace(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_global_and_profile_command_limits_from_config():
+    cfg = load_config({
+        "mounts": {
+            "/data": {
+                "vfs": "ram",
+                "mode": "WRITE"
+            }
+        },
+        "command_limits": {
+            "head": {
+                "max_lines": 2
+            }
+        },
+        "profiles": {
+            "research": {
+                "command_limits": {
+                    "head": {
+                        "max_lines": 4
+                    }
+                }
+            }
+        },
+    })
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    try:
+        ws.create_session("research", profile="research")
+        for session_id, expected in [(None, "1\n2\n"),
+                                     ("research", "1\n2\n3\n")]:
+            result = await ws.shell("seq 1 5 | head -n 3",
+                                    session_id=session_id)
+            assert await result.stdout_str() == expected
+    finally:
+        await ws.close()
+
+
+@pytest.mark.parametrize("block", [
+    {
+        "command_limits": {
+            "head": {
+                "max_line": 2
+            }
+        }
+    },
+    {
+        "profiles": {
+            "research": {
+                "command_limits": {
+                    "head": {
+                        "max_line": 2
+                    }
+                }
+            }
+        }
+    },
+])
+def test_bad_command_limit_fields_fail_at_config_door(block):
+    with pytest.raises(ValueError):
+        load_config({"mounts": {"/data": {"vfs": "ram"}}, **block})

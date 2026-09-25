@@ -263,7 +263,13 @@ export async function runOnMount(
   // when the spec-split paths are empty fall back to the classified scope
   // hint before cwd, mirroring the Python executor.
   const realMount = registry.tryMountFor(paths[0]?.virtual ?? hint?.virtual ?? session.cwd)
-  const limitOverride = realMount?.commandLimits.get(cmdName) ?? null
+  const limitOverride =
+    (Object.hasOwn(session.commandLimits, cmdName) ? session.commandLimits[cmdName] : undefined) ??
+    realMount?.commandLimits.get(cmdName) ??
+    (Object.hasOwn(registry.commandLimits, cmdName)
+      ? registry.commandLimits[cmdName]
+      : undefined) ??
+    null
 
   // The name plane's facts, bundled as one view: the attr overlay so
   // ls -l and stat -c agree (cp/mv -u freshness and find -mtime compare

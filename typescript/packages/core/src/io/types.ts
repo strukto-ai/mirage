@@ -87,11 +87,12 @@ export class IOResult {
   writes: Record<string, ByteSource>
   cache: string[]
   // Provenance of this result (which command, spanning which
-  // mounts); merge keeps the rightmost producer, mirroring whose
-  // stream the shell shows. The workspace boundary hands it to the
+  // mounts); merge keeps the last command for attribution, not
+  // ownership of every byte in a combined result. The workspace boundary hands it to the
   // policy layer as context. Facts ride the envelope as policy
   // input; the decision a chain hands down rides beside them as
   // `refusal`, written after the last hook has spoken.
+  outputFinalized = false
   producer: Producer | null
   // Why the line did not run, when a policy or an unanswered ask
   // refused it; null on every ordinary run. stderr stays in bash's
@@ -170,6 +171,7 @@ export class IOResult {
       producer: other.producer,
       refusal: other.refusal ?? this.refusal,
     })
+    result.outputFinalized = other.outputFinalized
     result.streamSource = other
     return result
   }

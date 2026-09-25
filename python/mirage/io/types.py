@@ -119,7 +119,7 @@ class IOResult:
             writes).
         producer (Producer | None): provenance of this result (which
             command, spanning which mounts); merge keeps the rightmost
-            producer, mirroring whose stream the shell shows. The
+            producer, for attribution, not ownership of aggregate output. The
             workspace boundary hands it to the policy layer as
             context. Facts ride the envelope as policy input; the
             decision a chain hands down rides beside them as
@@ -149,6 +149,7 @@ class IOResult:
         self.writes: dict[str,
                           ByteSource] = writes if writes is not None else {}
         self.cache: list[str] = cache if cache is not None else []
+        self.output_finalized = False
         self.producer = producer
         self.refusal = refusal
         self._stream_source: IOResult | None = None
@@ -205,5 +206,6 @@ class IOResult:
             refusal=(other.refusal
                      if other.refusal is not None else self.refusal),
         )
+        result.output_finalized = other.output_finalized
         result._stream_source = other
         return result

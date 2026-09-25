@@ -115,12 +115,15 @@ async def child_line(session: SessionState,
             node, for a backtick region holding several.
     """
     saved = session.snapshot()
+    terminal_output = session.terminal_output
+    session.terminal_output = False
     try:
         return await execute_fn(text,
                                 session_id=session.session_id,
                                 node=node,
                                 span=span)
     finally:
+        session.terminal_output = terminal_output
         session.restore(saved)
 
 

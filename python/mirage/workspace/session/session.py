@@ -30,7 +30,7 @@ from mirage.shell.types import FunctionBody
 from mirage.shell.variable import (ManagedRef, ShellVar, VarAttr,
                                    attrs_from_letters, stored_attrs,
                                    with_value)
-from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
+from mirage.types import (HiddenPaths, HiddenVars, Limit, MountMode, ShowEntry,
                           ShownPaths)
 from mirage.workspace.abort import StatusWriter
 from mirage.workspace.session.constants import (CHILD_SHELL_FIELDS,
@@ -287,6 +287,8 @@ class SessionState:
     # unrestricted session. What an owner-rendering command prints as
     # the group. Stamped by the profile like script, so it persists.
     profile: str | None = None
+    command_limits: dict[str, Limit] = field(default_factory=dict)
+    terminal_output: bool = True
     # The host's standing answers to asked lines (design 3.9): session
     # state like functions and cwd, persisted, read and written through
     # the manager by id so a fork shares them, never another session's.
@@ -464,6 +466,11 @@ class SessionState:
             data["commands"] = commands_to_dict(self.commands)
         if self.script is not None:
             data["script"] = script_to_dict(self.script)
+        if self.command_limits:
+            data["command_limits"] = {
+                name: limit.model_dump()
+                for name, limit in self.command_limits.items()
+            }
         if self.profile is not None:
             data["profile"] = self.profile
         if self.decisions:
@@ -498,6 +505,11 @@ class SessionState:
                                              m["from"], m["ref"], m["key"],
                                              m.get("fetch") == "eager"))
             data["vars"] = out_vars
+        data = dict(data)
+        data["command_limits"] = {
+            name: Limit.model_validate(limit)
+            for name, limit in data.get("command_limits", {}).items()
+        }
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")

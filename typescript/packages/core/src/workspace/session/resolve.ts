@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Limit } from '../../types.ts'
 import { checkRules } from './validate.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import type { CommandRule, AdmissionRules, HideReason, ProfileScript } from '../../policy/types.ts'
@@ -182,6 +183,8 @@ export function withInline(
   if (inline === null) return base
   refuseAllow(inline.commands)
   refuseShow(inline)
+  if (inline.commandLimits != null)
+    throw new PolicyError('command_limits belong on the profile, not inline permissions')
   if (inline.policy !== undefined && inline.policy !== null) {
     throw new PolicyError(
       'inline permissions may add ask and deny rules, not a policy; state one on the profile',
@@ -198,7 +201,9 @@ export function withInline(
     vars?: VarsBlock | null
     commands?: CommandsBlock | null
     policy?: ProfilePolicySpec | null
+    commandLimits?: Readonly<Record<string, Limit>> | null
   } = {}
+  out.commandLimits = base.commandLimits ?? null
   out.cwd = inline.cwd ?? base.cwd ?? null
   if (base.env != null || inline.env != null) out.env = { ...base.env, ...inline.env }
   if (base.mounts != null || inline.mounts != null) {
@@ -380,6 +385,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
       env: null,
       cwd: null,
       commands: null,
+      commandLimits: null,
       script: null,
       shownPaths: null,
       hideReasons: [],
@@ -396,6 +402,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
     cwd: effective.cwd ?? null,
     commands,
     script: compileScript(effective, name),
+    commandLimits: effective.commandLimits ?? null,
     shownPaths: shownOf(effective),
     hideReasons: hideReasonsOf(effective),
     profile: name === '' ? null : name,
@@ -420,6 +427,7 @@ export function narrow(session: SessionState, compiled: CompiledProfile): void {
   session.commands = compiled.commands
   session.script = compiled.script ?? null
   session.profile = compiled.profile ?? null
+  session.commandLimits = { ...compiled.commandLimits }
 }
 
 /**

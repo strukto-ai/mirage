@@ -53,7 +53,7 @@ from mirage.shell import parse
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.types import (CacheFacts, DriftPolicy, FileEvent, FileStat,
-                          JsonValue, MountBackend, MountMode, PathSpec,
+                          JsonValue, Limit, MountBackend, MountMode, PathSpec,
                           ReadSpec, parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.vfs.base import BaseVFS
@@ -123,6 +123,7 @@ class Workspace:
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
         read: ReadSpec | None = None,
+        command_limits: Mapping[str, Limit] | None = None,
         session_id: str | None = None,
         agent_id: str | None = None,
         workspace_id: str | None = None,
@@ -145,6 +146,7 @@ class Workspace:
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
     ) -> None:
         self._registry = MountRegistry()
+        self._registry.command_limits = dict(command_limits or {})
         # The permission profiles: one per name, and the one a session
         # gets when it names none. A profile is the whole document a
         # session runs under, so there is no workspace-wide block

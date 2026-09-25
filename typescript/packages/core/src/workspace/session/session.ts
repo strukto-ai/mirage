@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Limit } from '../../types.ts'
+import { parseCommandLimits, commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
 import { BIN_PREFIX, RANDOM, RANDOM_UNSET, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
@@ -170,6 +172,7 @@ export interface SessionInit {
    * group. Stamped by the profile like script, so it persists.
    */
   profile?: string | null
+  commandLimits?: Readonly<Record<string, Limit>>
   /**
    * The host's standing answers to asked lines (design 3.9): session
    * state like functions and cwd, persisted, read and written through
@@ -502,6 +505,8 @@ export class SessionState {
   commands: AdmissionRules | null
   script: ProfileScript | null
   profile: string | null
+  commandLimits: Readonly<Record<string, Limit>>
+  terminalOutput = true
   decisions: readonly Decision[]
   generation: number
   pipelineTimeoutSeconds: number | null
@@ -528,6 +533,7 @@ export class SessionState {
     this.commands = init.commands ?? null
     this.script = init.script ?? null
     this.profile = init.profile ?? null
+    this.commandLimits = { ...init.commandLimits }
     this.decisions = init.decisions ?? []
     this.generation = init.generation ?? 0
     this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
@@ -589,11 +595,13 @@ export class SessionState {
       commands: overrides.commands ?? this.commands,
       script: overrides.script ?? this.script,
       profile: overrides.profile ?? this.profile,
+      commandLimits: overrides.commandLimits ?? this.commandLimits,
       decisions: overrides.decisions ?? this.decisions,
       generation: overrides.generation ?? this.generation,
       pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
+    forked.terminalOutput = this.terminalOutput
     forked.pipeStatus = [...this.pipeStatus]
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
@@ -839,6 +847,8 @@ export class SessionState {
     }
     if (this.commands !== null) data.commands = commandsToJSON(this.commands)
     if (this.script !== null) data.script = scriptToJSON(this.script)
+    if (Object.keys(this.commandLimits).length > 0)
+      data.command_limits = commandLimitsToJSON(this.commandLimits)
     if (this.profile !== null) data.profile = this.profile
     if (this.decisions.length > 0) data.decisions = this.decisions.map(decisionToJSON)
     return data
@@ -859,6 +869,7 @@ export class SessionState {
     commands?: CommandsJSON | null
     script?: ScriptJSON | null
     profile?: string | null
+    command_limits?: unknown
     decisions?: DecisionJSON[] | null
     generation?: number
   }): SessionState {
@@ -899,6 +910,7 @@ export class SessionState {
       commands: data.commands != null ? commandsFromJSON(data.commands) : null,
       script: data.script != null ? scriptFromJSON(data.script) : null,
       profile: data.profile ?? null,
+      commandLimits: parseCommandLimits(data.command_limits),
       decisions: data.decisions != null ? data.decisions.map(decisionFromJSON) : [],
     })
   }

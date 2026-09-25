@@ -80,6 +80,7 @@ class ExecContext:
             gated handle.
     """
 
+    limit_override: Limit | None = None
     stdin: ByteSource | None = None
     cwd: str = "/"
     dispatch: DispatchFn | None = None
