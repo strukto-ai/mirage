@@ -14,7 +14,7 @@
 
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import { read, stream } from '@struktoai/mirage-core/core/onedrive/index'
-import { runWithRecording } from '@struktoai/mirage-core/observe/context'
+import { runWithRecording, runWithRevisions } from '@struktoai/mirage-core/observe/context'
 import {
   DEFAULT_READ_TTL,
   type FileStat,
@@ -133,6 +133,31 @@ describe('onedrive under read: fresh', () => {
       expect(records.map((r) => [r.fingerprint, r.revision])).toEqual([['c2', '2.0']])
     },
   )
+
+  it.each([
+    ['1.0', OLD],
+    ['9.0', null],
+  ] as const)('a pinned read of %s gets that version bytes', async (pin, expected) => {
+    const graph = await graphOf(OLD)
+    graph.write(ME, 'a.txt', NEW)
+    const vfs = await vfsOf(graph)
+    const pinned = (): Promise<Uint8Array> =>
+      runWithRevisions(new Map([['/a.txt', pin]]), () =>
+        read(vfs.accessor as OneDriveAccessor, SPEC),
+      )
+    try {
+      // A snapshot pin reads the version it names, straight from its content
+      // route, even after a rewrite; a version the item never had is absent.
+      if (expected === null) {
+        await expect(pinned()).rejects.toMatchObject({ code: 'ENOENT' })
+      } else {
+        expect(DEC.decode(await pinned())).toBe(DEC.decode(expected))
+      }
+    } finally {
+      await vfs.close()
+    }
+    expect(graph.log.map(([route]) => route)).toEqual(['version_content'])
+  })
 
   it('a ranged read stamps the whole item cTag', async () => {
     const graph = await graphOf(OLD)

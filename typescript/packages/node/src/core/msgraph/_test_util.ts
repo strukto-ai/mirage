@@ -29,6 +29,7 @@ interface GraphRow {
   etag: string
   modified: string
   versions: { id: string; lastModifiedDateTime: string }[]
+  history: Map<string, Uint8Array>
 }
 
 type Item = Record<string, unknown>
@@ -49,7 +50,9 @@ function stamp(n: number): string {
  * and eTag `e<n>` while `touch` moves only the eTag; the download URL is
  * live, serving whatever the row holds when the download arrives, since only
  * a live URL can tell a token read before the bytes from one read after;
- * and `/content` answers 200 so no client has to follow a 302. A real server
+ * `/content` answers 200 so no client has to follow a 302; and
+ * `/versions/{id}/content` serves the bytes that version was written with, so
+ * a pinned read after a rewrite gets the old content. A real server
  * rather than a stubbed fetch, because the hf rows beside it in the contract
  * use the real fetch.
  */
@@ -89,14 +92,19 @@ export class FakeGraph {
 
   write(drive: string, path: string, data: Uint8Array): void {
     const n = ++this.seq
-    const versions = [...(this.rows.get(`${drive}|${path}`)?.versions ?? [])]
-    versions.push({ id: `${String(versions.length + 1)}.0`, lastModifiedDateTime: stamp(n) })
+    const previous = this.rows.get(`${drive}|${path}`)
+    const versions = [...(previous?.versions ?? [])]
+    const history = new Map(previous?.history ?? [])
+    const version = `${String(versions.length + 1)}.0`
+    versions.push({ id: version, lastModifiedDateTime: stamp(n) })
+    history.set(version, data)
     this.rows.set(`${drive}|${path}`, {
       data,
       ctag: `c${String(n)}`,
       etag: `e${String(n)}`,
       modified: stamp(n),
       versions,
+      history,
     })
   }
 
@@ -297,7 +305,7 @@ export class FakeGraph {
     }
     if (action.startsWith('/versions/') && action.endsWith('/content')) {
       this.log.push(['version_content', path, query])
-      this.bytes(req, res, drive, path)
+      this.bytes(req, res, drive, path, action.slice('/versions/'.length, -'/content'.length))
       return
     }
     if (action === '/delta') {
@@ -309,13 +317,24 @@ export class FakeGraph {
     this.unrouted(res, rest, query)
   }
 
-  private bytes(req: IncomingMessage, res: ServerResponse, drive: string, path: string): void {
+  private bytes(
+    req: IncomingMessage,
+    res: ServerResponse,
+    drive: string,
+    path: string,
+    version: string | null = null,
+  ): void {
     const row = this.rows.get(`${drive}|${path}`)
     if (row === undefined) {
       error(res, 404, 'itemNotFound', 'no such item')
       return
     }
-    const data = row.data
+    const pinned = version === null ? row.data : row.history.get(version)
+    if (pinned === undefined) {
+      error(res, 404, 'itemNotFound', 'no such version')
+      return
+    }
+    const data = pinned
     // The store changes after the body is taken and before a byte of it is
     // written, so the next request, whatever it is, already sees the new
     // row; no event-loop ordering can reorder the two.

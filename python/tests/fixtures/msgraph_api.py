@@ -37,6 +37,7 @@ class _Row:
     etag: str
     modified: str
     versions: list[dict[str, Any]] = field(default_factory=list)
+    history: dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass
@@ -60,6 +61,9 @@ class FakeGraph:
       only a live one can tell token-before-bytes from bytes-before-token.
     - ``/content`` answers 200 with the bytes, so no client has to follow
       the 302 real Graph sends.
+    - ``/versions/{id}/content`` serves the bytes that version was written
+      with, and 404s an id the item never had, so a pinned read after a
+      rewrite gets the old content.
 
     Args:
         drives (dict): drive id (``me`` for OneDrive) to ``{path: bytes}``.
@@ -101,15 +105,16 @@ class FakeGraph:
         stamp = f"2026-01-01T00:00:{n:02d}Z"
         row = self._rows.get((drive, path))
         versions = list(row.versions) if row is not None else []
-        versions.append({
-            "id": f"{len(versions) + 1}.0",
-            "lastModifiedDateTime": stamp
-        })
+        history = dict(row.history) if row is not None else {}
+        version = f"{len(versions) + 1}.0"
+        versions.append({"id": version, "lastModifiedDateTime": stamp})
+        history[version] = data
         self._rows[(drive, path)] = _Row(data=data,
                                          ctag=f"c{n}",
                                          etag=f"e{n}",
                                          modified=stamp,
-                                         versions=versions)
+                                         versions=versions,
+                                         history=history)
 
     def touch(self, drive: str, path: str) -> None:
         row = self._rows[(drive, path)]
@@ -258,19 +263,25 @@ class FakeGraph:
             return self._bytes(request, drive, path)
         if action.startswith("/versions/") and action.endswith("/content"):
             self.log.append(("version_content", path, query))
-            return self._bytes(request, drive, path)
+            version = action[len("/versions/"):-len("/content")]
+            return self._bytes(request, drive, path, version)
         if action == "/delta":
             self.log.append(("delta", path, query))
             self.reach.append("delta")
             return web.json_response({"value": []})
         return self._unrouted(rest, query)
 
-    def _bytes(self, request: web.Request, drive: str,
-               path: str) -> web.Response:
+    def _bytes(self,
+               request: web.Request,
+               drive: str,
+               path: str,
+               version: str | None = None) -> web.Response:
         row = self._rows.get((drive, path))
         if row is None:
             return _error(404, "itemNotFound", "no such item")
-        data = row.data
+        if version is not None and version not in row.history:
+            return _error(404, "itemNotFound", "no such version")
+        data = row.data if version is None else row.history[version]
         # The store changes after the body is taken and before a byte of it
         # is written, so the next request, whatever it is, already sees the
         # new row; no thread timing can reorder the two.
