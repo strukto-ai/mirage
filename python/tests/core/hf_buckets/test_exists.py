@@ -28,3 +28,15 @@ async def test_exists_true_for_file(make_acc):
 async def test_exists_false_for_missing(make_acc):
     acc = make_acc({})
     assert await exists(acc, PathSpec.from_str_path("/missing.txt")) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,code", [(401, ""), (404, "RepoNotFound")])
+async def test_exists_raises_on_a_refused_bucket(make_acc, fake_hub, status,
+                                                 code):
+    # A bucket the Hub will not show is not a missing file: False here
+    # would let a caller conclude it can create the path.
+    acc = make_acc({"a.txt": b"x"})
+    fake_hub.fail["bucket_paths_info"] = (status, code)
+    with pytest.raises(PermissionError):
+        await exists(acc, PathSpec.from_str_path("/a.txt"))

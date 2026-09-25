@@ -11,7 +11,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { makeStat } from '@struktoai/mirage-core/core/object_store/stat'
+import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import type { HfBucketsAccessor } from '../../accessor/hf.ts'
+import { refusalsDenied } from '../hf_hub/lookup.ts'
 import { DRIVER } from './driver.ts'
 
-export const stat = makeStat(DRIVER)
+const kitStat = makeStat(DRIVER)
+
+/**
+ * Stat one path, a refused bucket reading as permission denied.
+ *
+ * paths-info answers a missing path with an empty list, never an error, so a
+ * 401, 403 or 404 from it is about the bucket: an anonymous caller asking for
+ * one that does not exist gets 401. Answering that as "no such file" would let
+ * reconcile delete what a refreshed token can see.
+ */
+export async function stat(
+  accessor: HfBucketsAccessor,
+  pathSpec: PathSpec,
+  index?: IndexCacheStore,
+): Promise<FileStat> {
+  return refusalsDenied(pathSpec, () => kitStat(accessor, pathSpec, index))
+}

@@ -18,16 +18,16 @@ import { HfBucketsAccessor } from '../../accessor/hf.ts'
 import { fakeHfOperator, installFakeOperator } from './mock.ts'
 import { rmR } from './rm.ts'
 
-function accessorWith(files: Record<string, string | Buffer>) {
+async function accessorWith(files: Record<string, string | Buffer>) {
   const accessor = new HfBucketsAccessor({ bucket: 'ns/bucket' })
   const fake = fakeHfOperator(files)
-  installFakeOperator(accessor, fake)
+  await installFakeOperator(accessor, fake)
   return { accessor, fake }
 }
 
 describe('hf rmR', () => {
   it('deletes every key under the prefix and keeps siblings', async () => {
-    const { accessor, fake } = accessorWith({
+    const { accessor, fake } = await accessorWith({
       'data/a.txt': 'a',
       'data/sub/b.txt': 'b',
       'data/sub/deep/c.txt': 'c',

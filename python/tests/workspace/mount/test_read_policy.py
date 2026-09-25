@@ -23,6 +23,8 @@ from mirage.vfs.backblaze.backblaze import BackblazeVFS
 from mirage.vfs.ceph.ceph import CephVFS
 from mirage.vfs.digitalocean.digitalocean import DigitalOceanVFS
 from mirage.vfs.disk.disk import DiskVFS
+from mirage.vfs.dropbox.config import DropboxConfig
+from mirage.vfs.dropbox.dropbox import DropboxVFS
 from mirage.vfs.gcs.gcs import GCSVFS
 from mirage.vfs.gridfs import GridFSConfig
 from mirage.vfs.gridfs.gridfs import GridFSVFS
@@ -217,12 +219,13 @@ def test_fresh_is_refused_on_disk_which_cannot_cache_reads(tmp_path):
 
 
 def test_fresh_is_refused_on_a_backend_that_caches_but_stamps_nothing():
-    # hf_buckets reaches the gate -- it caches reads -- but its read
-    # record carries no fingerprint, so there is nothing to compare.
-    vfs = HfBucketsVFS(HfBucketsConfig(bucket="acme/data"))
+    # dropbox reaches the gate -- it caches reads -- but its read record
+    # carries no fingerprint, so there is nothing to compare.
+    vfs = DropboxVFS(
+        DropboxConfig(client_id="i", client_secret="s", refresh_token="r"))
     assert vfs.caches_reads is True
     with pytest.raises(ValueError) as exc:
-        check_read_capability("/hf/", vfs, FRESH)
+        check_read_capability("/dbx/", vfs, FRESH)
     assert "comparable content token" in str(exc.value)
 
 
@@ -267,6 +270,16 @@ def test_gridfs_is_allowed_fresh_on_a_constructed_instance():
     assert check_read_capability("/g/", vfs, FRESH) is None
 
 
+def test_hf_buckets_is_allowed_fresh_on_a_constructed_instance():
+    # The token behind the claim -- stat's paths-info xetHash equals the
+    # download's ETag -- is pinned in tests/core/hf_buckets and by the
+    # read-token contract; this proves the verdict itself lets it through.
+    assert HfBucketsVFS.READ_REVALIDATABLE is True
+    vfs = HfBucketsVFS(HfBucketsConfig(bucket="acme/data"))
+    assert vfs.caches_reads is True
+    assert check_read_capability("/hf/", vfs, FRESH) is None
+
+
 def test_bounded_is_allowed_on_a_backend_that_cannot_revalidate():
     assert check_read_capability("/d/", RAMVFS(), ReadSpec()) is None
 
@@ -280,7 +293,8 @@ def test_bounded_is_allowed_on_a_backend_that_cannot_revalidate():
 REVALIDATABLE = {
     "s3", "aliyun", "backblaze", "ceph", "digitalocean", "gcs", "minio", "oci",
     "qingstor", "r2", "scaleway", "seaweedfs", "supabase", "tencent", "wasabi",
-    "gridfs", "hf_models", "hf_datasets", "hf_spaces", "onedrive", "sharepoint"
+    "gridfs", "hf_models", "hf_datasets", "hf_spaces", "onedrive", "sharepoint",
+    "hf_buckets"
 }
 
 
@@ -313,8 +327,8 @@ def test_the_typescript_roster_is_the_same_list(host):
         for name, caps in spec["capabilities"].items()
         if caps and caps.get("read_revalidatable") is True
     }
-    # gridfs and the Hugging Face Hub repos have no browser implementation;
-    # nothing else differs.
+    # gridfs and the Hugging Face repos and buckets have no browser
+    # implementation; nothing else differs.
     assert declared == {n for n in REVALIDATABLE if n in spec["capabilities"]}
 
 

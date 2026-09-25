@@ -16,7 +16,7 @@ import { VFSAdapter } from '@struktoai/mirage-core/vfs/adapter'
 
 import { rangeOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { CommandIO } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import type { HfAccessor } from '../../../accessor/hf.ts'
+import type { HfBucketsAccessor } from '../../../accessor/hf.ts'
 import { SCOPE_ERROR } from '../../../core/hf/constants.ts'
 import { create as hfCreate } from '../../../core/hf/create.ts'
 import { size as hfDu, entries as hfDuAll } from '../../../core/hf/du/index.ts'
@@ -31,7 +31,7 @@ import { stream as hfStream } from '../../../core/hf/stream.ts'
 import { exists as hfExists } from '../../../core/hf/exists.ts'
 import { write as hfWrite } from '../../../core/hf/write.ts'
 
-export const HF_IO: CommandIO<HfAccessor> = new VFSAdapter<HfAccessor>({
+export const HF_IO: CommandIO<HfBucketsAccessor> = new VFSAdapter<HfBucketsAccessor>({
   read: { readdir: hfReaddir, readBytes: hfRead, stat: hfStat },
   native: {
     readRange: rangeOf(hfRead),

@@ -36,6 +36,10 @@ class HfBucketsVFS(BoundVFS):
     SIZES_ALWAYS_KNOWN: bool = True
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
+    # stat stamps the paths-info xet hash and a read stamps its download's
+    # strong ETag, which is that same hash, so a `fresh` probe compares
+    # like with like.
+    READ_REVALIDATABLE: bool = True
 
     def __init__(self, config: HfBucketsConfig) -> None:
         super().__init__(io=IO)

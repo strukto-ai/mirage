@@ -140,3 +140,17 @@ async def test_readdir_backfills_lister_omitted_size(make_acc):
     entry = (await cache.get("/a.txt")).entry
     assert entry is not None
     assert entry.size == 5
+
+
+@pytest.mark.asyncio
+async def test_readdir_under_a_key_prefix_lists_mount_relative(make_acc):
+    acc = make_acc(
+        {
+            "pfx/a.txt": b"a",
+            "pfx/sub/b.txt": b"b",
+            "a.txt": b"decoy",
+        },
+        key_prefix="pfx/")
+    entries = await readdir(acc, PathSpec.from_str_path("/"),
+                            RAMIndexCacheStore(ttl=60))
+    assert sorted(entries) == ["/a.txt", "/sub"]

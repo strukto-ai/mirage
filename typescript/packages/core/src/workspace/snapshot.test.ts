@@ -573,6 +573,7 @@ describe('savedVfsBuild', () => {
       'hf_spaces',
       'onedrive',
       'sharepoint',
+      'hf_buckets',
     ]) {
       expect(restoresAsFreshRAM(saved(revalidatable, null))).toBe(false)
     }

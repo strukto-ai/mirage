@@ -247,7 +247,7 @@
       "has_prompt": true,
       "has_write_prompt": false,
       "index_ttl": 600,
-      "read_revalidatable": false,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "statfs": false,
       "storage_id": false,

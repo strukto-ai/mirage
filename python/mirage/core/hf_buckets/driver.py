@@ -14,39 +14,58 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from opendal import AsyncOperator
 from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
-from mirage.accessor._hf import _HfAccessor
+from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.hf_buckets.constants import SCOPE_ERROR
+from mirage.core.hf_buckets.hub import fetch_row
+from mirage.core.hf_hub.client import HfHubError
 from mirage.core.object_store.driver import (ChildEntry, ObjectMeta,
                                              ObjectStoreDriver, TreeEntry)
 
 
-def _key_prefix_of(accessor: _HfAccessor) -> str:
+@dataclass(frozen=True, slots=True)
+class HfConn:
+    """One op's handle on a bucket: the operator and the Hub behind it.
+
+    Listing and mutation go through opendal; the point lookup goes to the
+    Hub directly, because opendal drops the bucket's content token.
+
+    Args:
+        accessor (HfBucketsAccessor): endpoint, credential and pool for
+            the direct Hub calls.
+        op (AsyncOperator): the opendal operator rooted at key_prefix.
+    """
+
+    accessor: HfBucketsAccessor
+    op: AsyncOperator
+
+
+def _key_prefix_of(accessor: HfBucketsAccessor) -> str:
     # key_prefix is applied as the operator's root (see _HfAccessor), so
     # every key the driver sees is already prefix-relative.
     return ""
 
 
 @asynccontextmanager
-async def _connect(accessor: _HfAccessor) -> AsyncIterator[AsyncOperator]:
+async def _connect(accessor: HfBucketsAccessor) -> AsyncIterator[HfConn]:
     # One fresh AsyncOperator per op invocation, held for the op's whole
     # body (the Hub client is stateless; the accessor builds it cheaply).
-    yield accessor.operator()
+    yield HfConn(accessor=accessor, op=accessor.operator())
 
 
 def _dir_path(pfx: str) -> str:
     return pfx if pfx else "/"
 
 
-async def _list_children(op: AsyncOperator,
-                         pfx: str) -> AsyncIterator[ChildEntry]:
+async def _list_children(conn: HfConn, pfx: str) -> AsyncIterator[ChildEntry]:
     path = _dir_path(pfx)
     try:
-        async for entry in await op.list(path):
+        async for entry in await conn.op.list(path):
             rel = entry.path
             if not rel:
                 continue
@@ -66,7 +85,7 @@ async def _list_children(op: AsyncOperator,
                 # the lister omits the metadata, one stat per affected
                 # file fills the gap so the index never caches an unknown
                 # size.
-                md = await op.stat(rel)
+                md = await conn.op.stat(rel)
                 size = md.content_length
             yield ChildEntry(key=rel, kind="f", size=size)
     except NotFound:
@@ -76,10 +95,10 @@ async def _list_children(op: AsyncOperator,
         return
 
 
-async def _list_tree(op: AsyncOperator, pfx: str) -> AsyncIterator[TreeEntry]:
+async def _list_tree(conn: HfConn, pfx: str) -> AsyncIterator[TreeEntry]:
     path = _dir_path(pfx)
     try:
-        async for entry in await op.list(path, recursive=True):
+        async for entry in await conn.op.list(path, recursive=True):
             rel = entry.path
             if not rel:
                 continue
@@ -102,12 +121,11 @@ async def _list_tree(op: AsyncOperator, pfx: str) -> AsyncIterator[TreeEntry]:
         return
 
 
-async def _list_subtree(op: AsyncOperator,
-                        stem: str) -> AsyncIterator[TreeEntry]:
+async def _list_subtree(conn: HfConn, stem: str) -> AsyncIterator[TreeEntry]:
     if stem:
         md = None
         try:
-            md = await op.stat(stem)
+            md = await conn.op.stat(stem)
         except NotFound:
             md = None
         if md is not None and md.mode != EntryMode.Dir:
@@ -120,7 +138,7 @@ async def _list_subtree(op: AsyncOperator,
             return
     base = stem + "/" if stem else "/"
     try:
-        async for entry in await op.list(base, recursive=True):
+        async for entry in await conn.op.list(base, recursive=True):
             rel = entry.path
             if not rel or rel.endswith("/"):
                 continue
@@ -133,64 +151,76 @@ async def _list_subtree(op: AsyncOperator,
         return
 
 
-async def _head(op: AsyncOperator, key: str) -> ObjectMeta | None:
+async def _head(conn: HfConn, key: str) -> ObjectMeta | None:
+    # paths-info, not opendal's stat: the binding reads the bucket's xet
+    # hash only for the size and drops it, so a bucket stat through it
+    # carries no token. A Hub refusal propagates; the stat door names the
+    # path it was asked about, which a key cannot.
+    row = await fetch_row(conn.accessor, key)
+    if row is None:
+        return None
+    token = row.get("xetHash")
+    fingerprint = token if isinstance(token, str) and token else None
+    size = row.get("size")
+    if not isinstance(size, int):
+        # A file row always carries its size; one that does not is an
+        # answer the client cannot read, not a zero-byte file.
+        raise HfHubError(f"paths-info answered no size for {key}", 0,
+                         "InvalidResponse")
+    # No mtime, though the row carries uploadedAt: a listing reads its
+    # times through opendal, and a stat that disagreed with the listing
+    # about one file would be the worse answer.
+    return ObjectMeta(size=size,
+                      modified=None,
+                      fingerprint=fingerprint,
+                      extra={"etag": fingerprint} if fingerprint else {})
+
+
+async def _get(conn: HfConn, key: str) -> bytes | None:
     try:
-        md = await op.stat(key)
+        return bytes(await conn.op.read(key))
     except NotFound:
         return None
-    if md.mode == EntryMode.Dir:
-        return None
-    modified = md.last_modified.isoformat() if md.last_modified else None
-    etag = md.etag
-    return ObjectMeta(size=md.content_length,
-                      modified=modified,
-                      fingerprint=etag,
-                      extra={"etag": etag} if etag else {})
 
 
-async def _get(op: AsyncOperator, key: str) -> bytes | None:
-    try:
-        return bytes(await op.read(key))
-    except NotFound:
-        return None
-
-
-async def _put(op: AsyncOperator, key: str, data: bytes) -> ObjectMeta | None:
+async def _put(conn: HfConn, key: str, data: bytes) -> ObjectMeta | None:
     # A missing repo or revision answers NotFound; it propagates so the
     # write factory can name the path the user typed, not this key.
     # No token: the python opendal binding's write returns nothing where
     # node's answers Metadata, and node's is discarded to match, so an hf
-    # write stamps the same absence in both languages. Closing it needs a
-    # stat per write.
-    await op.write(key, data)
+    # write stamps the same absence in both languages. The written entry
+    # then verifies against nothing, so the next fresh read refetches once
+    # and stamps the download's token (#1138).
+    await conn.op.write(key, data)
     return None
 
 
-async def _delete_file(op: AsyncOperator, key: str) -> None:
+async def _delete_file(conn: HfConn, key: str) -> None:
     try:
-        await op.delete(key)
+        await conn.op.delete(key)
     except NotFound:
         # Deleting a missing key is silent, per the driver contract.
         return
 
 
-async def _delete_prefix(op: AsyncOperator, pfx: str) -> None:
+async def _delete_prefix(conn: HfConn, pfx: str) -> None:
     path = _dir_path(pfx)
     try:
         keys = [
-            entry.path async for entry in await op.list(path, recursive=True)
+            entry.path
+            async for entry in await conn.op.list(path, recursive=True)
             if not entry.path.endswith("/")
         ]
     except NotFound:
         return
     # The Hub has no batch delete; one request per key.
     for key in keys:
-        await op.delete(key)
+        await conn.op.delete(key)
 
 
-async def _probe_prefix(op: AsyncOperator, pfx: str) -> bool:
+async def _probe_prefix(conn: HfConn, pfx: str) -> bool:
     try:
-        async for _ in await op.list(_dir_path(pfx)):
+        async for _ in await conn.op.list(_dir_path(pfx)):
             return True
     except NotFound:
         return False
@@ -201,7 +231,7 @@ def _is_not_found(exc: Exception) -> bool:
     return isinstance(exc, NotFound)
 
 
-DRIVER: ObjectStoreDriver[_HfAccessor, AsyncOperator] = ObjectStoreDriver(
+DRIVER: ObjectStoreDriver[HfBucketsAccessor, HfConn] = ObjectStoreDriver(
     vfs="hf",
     scope_error=SCOPE_ERROR,
     key_prefix_of=_key_prefix_of,
