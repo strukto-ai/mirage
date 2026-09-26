@@ -37,6 +37,7 @@ class _AsyncIter:
 
 def _build_mock_client(docs):
     cursor = MagicMock()
+    cursor.close = AsyncMock()
     cursor.sort = MagicMock(return_value=cursor)
     cursor.batch_size = MagicMock(return_value=cursor)
     cursor.__aiter__ = lambda self: _AsyncIter(docs).__aiter__()
@@ -201,6 +202,7 @@ async def test_get_validator_returns_none_when_collection_missing():
 
 def _build_indexstats_client(rows):
     cursor = MagicMock()
+    cursor.close = AsyncMock()
     cursor.__aiter__ = lambda self: _AsyncIter(rows).__aiter__()
     col = MagicMock()
     col.aggregate = AsyncMock(return_value=cursor)
@@ -338,3 +340,12 @@ async def test_iter_inserts_skips_changes_without_full_document():
     async for doc in iter_inserts(client, "db1", "coll1"):
         out.append(doc)
     assert out == [{"_id": 1}, {"_id": 2}]
+
+
+@pytest.mark.asyncio
+async def test_iter_documents_closes_cursor_on_early_stop():
+    client, col, cursor = _build_mock_client([{"_id": 1}, {"_id": 2}])
+    stream = iter_documents(client, "db", "collection")
+    assert await anext(stream) == {"_id": 1}
+    await stream.aclose()
+    cursor.close.assert_awaited_once()

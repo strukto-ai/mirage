@@ -60,11 +60,11 @@ def _fake_cluster():
          patch("mirage.core.mongodb.readdir.entity_exists", **exists), \
          patch("mirage.core.mongodb.readdir.database_exists", **exists), \
          patch("mirage.core.mongodb.readdir.entity_exists", **exists), \
-         patch("mirage.core.mongodb.stat.count_documents",
+         patch("mirage.core.mongodb.client.count_documents",
                new_callable=AsyncMock, return_value=2), \
-         patch("mirage.core.mongodb.stat.is_view",
+         patch("mirage.core.mongodb.client.is_view",
                new_callable=AsyncMock, return_value=False), \
-         patch("mirage.core.mongodb.stat.get_indexes",
+         patch("mirage.core.mongodb.client.get_indexes",
                new_callable=AsyncMock, return_value=[]):
         yield
 

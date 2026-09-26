@@ -90,6 +90,32 @@
         "stdout": "exit=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "wget_stdout_no_dash_file",
+      "seq": 910054,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "cd /data; set -o pipefail; wget -q -O - {http}/hello | wc -c; test ! -e /data/-; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "16\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wget_404_no_implicit_file",
+      "seq": 910055,
+      "targets": [
+        "http-ram"
+      ],
+      "command": "cd /data; wget -q {http}/missing; echo $?; test ! -e missing; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "8\n0\n",
+        "stderr": ""
+      }
     }
   ]
 }

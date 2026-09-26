@@ -13,14 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import {
-  countDocuments,
-  getIndexStats,
-  getValidator,
-  isView,
-  listCollections,
-  listIndexes,
-} from './client.ts'
+import { getValidator, isView, listCollections, listIndexes } from './client.ts'
 import { sampleFieldTypes, type SampledField } from './_sampler.ts'
 import { EntityKind, IndexType, PRIMARY_KEY } from './types.ts'
 
@@ -31,7 +24,6 @@ function indexType(idx: Record<string, unknown>): string {
 
 interface DatabaseJsonCollection {
   name: string
-  document_count: number
 }
 
 interface DatabaseJsonView {
@@ -48,17 +40,12 @@ export async function buildDatabaseJson(
   accessor: MongoDBAccessor,
   database: string,
 ): Promise<DatabaseJson> {
-  const allNames = await listCollections(accessor, database)
-  const collections: DatabaseJsonCollection[] = []
-  const views: DatabaseJsonView[] = []
-  for (const name of allNames) {
-    if (await isView(accessor, database, name)) {
-      views.push({ name })
-    } else {
-      const doc_count = await countDocuments(accessor, database, name)
-      collections.push({ name, document_count: doc_count })
-    }
-  }
+  const collections = (await listCollections(accessor, database, EntityKind.COLLECTION)).map(
+    (name) => ({ name }),
+  )
+  const views = (await listCollections(accessor, database, EntityKind.VIEW)).map((name) => ({
+    name,
+  }))
   return { database, collections, views }
 }
 
@@ -66,7 +53,6 @@ interface CollectionSchemaIndex {
   name: string | undefined
   keys: Record<string, unknown>
   type: string
-  stats: Record<string, unknown>
 }
 
 export interface CollectionSchemaJson {
@@ -77,7 +63,6 @@ export interface CollectionSchemaJson {
   fields: SampledField[]
   primary_key: string
   indexes: CollectionSchemaIndex[]
-  document_count: number
   sampled: number
 }
 
@@ -90,16 +75,13 @@ export async function buildCollectionSchemaJson(
   const view = await isView(accessor, database, collection)
   const validator = await getValidator(accessor, database, collection)
   const fields = await sampleFieldTypes(accessor, database, collection, sampleSize)
-  const docCount = await countDocuments(accessor, database, collection)
   let enrichedIndexes: CollectionSchemaIndex[] = []
   if (!view) {
     const indexes = await listIndexes(accessor, database, collection)
-    const stats = await getIndexStats(accessor, database, collection)
     enrichedIndexes = indexes.map((idx) => ({
       name: idx.name as string | undefined,
       keys: (idx.key as Record<string, unknown> | undefined) ?? {},
       type: indexType(idx),
-      stats: (stats[idx.name as string] as Record<string, unknown> | undefined) ?? {},
     }))
   }
   return {
@@ -110,7 +92,6 @@ export async function buildCollectionSchemaJson(
     fields,
     primary_key: PRIMARY_KEY,
     indexes: enrichedIndexes,
-    document_count: docCount,
     sampled: sampleSize,
   }
 }

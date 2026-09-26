@@ -194,6 +194,227 @@
         "stdout": "5\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mongodb_metadata_read_0_0",
+      "seq": 622000,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(head -n 1 /mongodb/mirage_integ/database.json) && piped=$(cat /mongodb/mirage_integ/database.json | head -n 1) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_0_1",
+      "seq": 622001,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(sed -n 1p /mongodb/mirage_integ/database.json) && piped=$(cat /mongodb/mirage_integ/database.json | sed -n 1p) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_0_2",
+      "seq": 622002,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(awk '{print}' /mongodb/mirage_integ/database.json) && piped=$(cat /mongodb/mirage_integ/database.json | awk '{print}') && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_0_3",
+      "seq": 622003,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(jq -c . /mongodb/mirage_integ/database.json) && piped=$(cat /mongodb/mirage_integ/database.json | jq -c .) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_0_4",
+      "seq": 622004,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(md5sum < /mongodb/mirage_integ/database.json) && piped=$(cat /mongodb/mirage_integ/database.json | md5sum) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_1_0",
+      "seq": 622010,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(head -n 1 /mongodb/mirage_integ/collections/books/schema.json) && piped=$(cat /mongodb/mirage_integ/collections/books/schema.json | head -n 1) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_1_1",
+      "seq": 622011,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(sed -n 1p /mongodb/mirage_integ/collections/books/schema.json) && piped=$(cat /mongodb/mirage_integ/collections/books/schema.json | sed -n 1p) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_1_2",
+      "seq": 622012,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(awk '{print}' /mongodb/mirage_integ/collections/books/schema.json) && piped=$(cat /mongodb/mirage_integ/collections/books/schema.json | awk '{print}') && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_1_3",
+      "seq": 622013,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(jq -c . /mongodb/mirage_integ/collections/books/schema.json) && piped=$(cat /mongodb/mirage_integ/collections/books/schema.json | jq -c .) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_1_4",
+      "seq": 622014,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(md5sum < /mongodb/mirage_integ/collections/books/schema.json) && piped=$(cat /mongodb/mirage_integ/collections/books/schema.json | md5sum) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_2_0",
+      "seq": 622020,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(head -n 1 /mongodb/mirage_integ/views/recent_books/schema.json) && piped=$(cat /mongodb/mirage_integ/views/recent_books/schema.json | head -n 1) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_2_1",
+      "seq": 622021,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(sed -n 1p /mongodb/mirage_integ/views/recent_books/schema.json) && piped=$(cat /mongodb/mirage_integ/views/recent_books/schema.json | sed -n 1p) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_2_2",
+      "seq": 622022,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(awk '{print}' /mongodb/mirage_integ/views/recent_books/schema.json) && piped=$(cat /mongodb/mirage_integ/views/recent_books/schema.json | awk '{print}') && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_2_3",
+      "seq": 622023,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(jq -c . /mongodb/mirage_integ/views/recent_books/schema.json) && piped=$(cat /mongodb/mirage_integ/views/recent_books/schema.json | jq -c .) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_metadata_read_2_4",
+      "seq": 622024,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "set -o pipefail; direct=$(md5sum < /mongodb/mirage_integ/views/recent_books/schema.json) && piped=$(cat /mongodb/mirage_integ/views/recent_books/schema.json | md5sum) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_schema_stable",
+      "seq": 622040,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "test \"$(cat /mongodb/mirage_integ/collections/books/schema.json)\" = \"$(cat /mongodb/mirage_integ/collections/books/schema.json)\"; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mongodb_unknown_size",
+      "seq": 622041,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "stat -c %s /mongodb/mirage_integ/database.json /mongodb/mirage_integ/collections/books/schema.json /mongodb/mirage_integ/collections/books/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "-\n-\n-\n",
+        "stderr": ""
+      }
     }
   ]
 }

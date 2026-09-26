@@ -20,6 +20,7 @@ from bson import ObjectId
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.commands.builtin.mongodb.io import IO
 from mirage.core.mongodb.read import read
 from mirage.types import PathSpec
 from mirage.vfs.mongodb.config import MongoDBConfig
@@ -182,3 +183,42 @@ async def test_read_database_json_missing_db_raises(accessor, index):
     ):
         with pytest.raises(FileNotFoundError):
             await read(accessor, _path("/ghost/database.json"), index)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path,builder", [
+    (DBJSON_PATH, "build_database_json"),
+    (SCHEMA_PATH, "build_collection_schema_json"),
+])
+async def test_registered_stream_matches_read_for_metadata(
+        accessor, index, path, builder):
+    with patch("mirage.core.mongodb.read." + builder,
+               new=AsyncMock(return_value={
+                   "name": "café",
+                   "fields": []
+               })):
+        expected = await IO.read_bytes(accessor, _path(path), index=index)
+        actual = b"".join([
+            chunk async for chunk in IO.read_stream(
+                accessor, _path(path), index=index)
+        ])
+    assert actual == expected
+    assert b"fields" in actual
+
+
+@pytest.mark.asyncio
+async def test_registered_document_stream_is_lazy(accessor, index):
+    consumed = 0
+
+    async def documents(*args, **kwargs):
+        nonlocal consumed
+        for i in range(1_000_000):
+            consumed += 1
+            yield {"_id": i, "value": "x" * 1024}
+
+    with patch("mirage.core.mongodb.stream.iter_documents", new=documents):
+        stream = IO.read_stream(accessor, _path(DOCS_PATH), index=index)
+        first = await anext(stream)
+        assert consumed == 1
+        assert json.loads(first)["_id"] == 0
+        await stream.aclose()

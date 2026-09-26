@@ -73,7 +73,7 @@ async def test_name_quoted_size_type():
     assert await _render("%n", _fs()) == "/data/f.txt"
     assert await _render("%N", _fs()) == "'/data/f.txt'"
     assert await _render("%s", _fs(size=42)) == "42"
-    assert await _render("%s", _fs(size=None)) == "0"
+    assert await _render("%s", _fs(size=None)) == "-"
     assert await _render("%F", _fs()) == "regular file"
     assert await _render("%F", _fs(type=FileType.DIRECTORY)) == "directory"
 

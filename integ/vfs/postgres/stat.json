@@ -9,7 +9,7 @@
       "command": "stat -c '%s %n' /pg/public/tables/books/rows.jsonl",
       "expect": {
         "exit": 0,
-        "stdout": "0 /pg/public/tables/books/rows.jsonl\n",
+        "stdout": "- /pg/public/tables/books/rows.jsonl\n",
         "stderr": ""
       }
     }

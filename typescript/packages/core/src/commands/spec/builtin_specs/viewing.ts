@@ -108,6 +108,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Option({ short: '-j', long: '--skip-bytes', type: 'str' }),
       new Option({ short: '-N', long: '--read-bytes', type: 'str' }),
       new Option({ short: '-t', long: '--format', type: 'str', multiple: true }),
+      new Option({ short: '-c', type: 'bool' }),
     ],
     rest: new Operand({ type: 'path' }),
   }),

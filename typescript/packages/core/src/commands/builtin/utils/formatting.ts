@@ -360,8 +360,6 @@ function lsSizeAndTime(
   columns: LsColumns = DEFAULT_COLUMNS,
 ): [string, string] {
   const whenIso = timeOf(s, columns.timeKind)
-  // An unknown modification time renders the epoch, as it always has;
-  // only a kind no backend reports at all (birth) is honestly `-`.
   const knownTime = columns.timeKind !== 'birth'
   const renderTime = (): string =>
     !knownTime
@@ -376,9 +374,11 @@ function lsSizeAndTime(
       whenIso === null ? UNKNOWN_NAME : renderTime(),
     ]
   }
-  const size = scaledSize(contentSize(s), columns.blockSize, human)
-  if (s.size == null && s.modified == null) return [isDir(s) ? size : UNKNOWN_NAME, UNKNOWN_NAME]
-  return [size, renderTime()]
+  const size =
+    !isDir(s) && s.size === null
+      ? UNKNOWN_NAME
+      : scaledSize(contentSize(s), columns.blockSize, human)
+  return [size, whenIso === null ? UNKNOWN_NAME : renderTime()]
 }
 
 // `ls -l` rows: mode, links, owner, group, size, time, name. The owner is

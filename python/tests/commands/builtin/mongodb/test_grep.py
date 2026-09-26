@@ -41,11 +41,11 @@ def _stat_reads(monkeypatch):
     # what it reads at call time: the existence probes and the counters.
     monkeypatch.setattr("mirage.core.mongodb.readdir.entity_exists",
                         AsyncMock(return_value=True))
-    monkeypatch.setattr("mirage.core.mongodb.stat.count_documents",
+    monkeypatch.setattr("mirage.core.mongodb.client.count_documents",
                         AsyncMock(return_value=5))
-    monkeypatch.setattr("mirage.core.mongodb.stat.is_view",
+    monkeypatch.setattr("mirage.core.mongodb.client.is_view",
                         AsyncMock(return_value=False))
-    monkeypatch.setattr("mirage.core.mongodb.stat.get_indexes",
+    monkeypatch.setattr("mirage.core.mongodb.client.get_indexes",
                         AsyncMock(return_value=[]))
 
 

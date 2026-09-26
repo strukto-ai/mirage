@@ -12,18 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import hashlib
-
-import orjson
-
-from mirage.accessor.postgres import PostgresAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
-from mirage.core.postgres import client
 from mirage.core.postgres.readdir import entity_guard, readdir, schema_guard
 from mirage.core.postgres.scope import detect_scope
-from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
 def _schema_extra(match: ScopeMatch) -> dict[str, str]:
@@ -45,38 +37,6 @@ def _entity_extra(match: ScopeMatch) -> dict[str, str]:
     }
 
 
-async def _rows_stat(accessor: PostgresAccessor, match: ScopeMatch,
-                     path: PathSpec, index: IndexCacheStore) -> FileStat:
-    await entity_guard(accessor, match, path.virtual)
-    schema = match.slots["schema"]
-    kind = match.slots["kind"]
-    entity = match.slots["entity"]
-    pool = await accessor.pool()
-    async with pool.acquire() as conn:
-        cols = await client.fetch_columns(conn, schema, entity)
-        rows = await client.estimated_row_count(conn, schema, entity)
-        size = await client.table_size_bytes(conn, schema, entity)
-    fp_payload = orjson.dumps({"columns": cols, "rows": rows})
-    fingerprint = hashlib.sha256(fp_payload).hexdigest()
-    # size stays None: table_size_bytes is the on-disk storage size, not the
-    # rendered JSONL length (FileStat.size must be render-derived or None,
-    # see the CLAUDE.md FUSE rules). The storage size remains in extra.
-    return FileStat(
-        name="rows.jsonl",
-        type=FileType.FILE,
-        content=ContentType.TEXT,
-        size=None,
-        fingerprint=fingerprint,
-        extra={
-            "schema": schema,
-            "kind": kind,
-            "name": entity,
-            "row_count": rows,
-            "size_bytes": size
-        },
-    )
-
-
 stat = make_stat(
     detect_scope,
     readdir,
@@ -86,6 +46,7 @@ stat = make_stat(
         "entity": entity_guard,
         "entity_schema": entity_guard,
         "entity_semantic": entity_guard,
+        "entity_rows": entity_guard,
     },
     extras={
         "schema": _schema_extra,
@@ -93,6 +54,6 @@ stat = make_stat(
         "entity": _entity_extra,
         "entity_schema": _entity_extra,
         "entity_semantic": _entity_extra,
+        "entity_rows": _entity_extra,
     },
-    overrides={"entity_rows": _rows_stat},
 )

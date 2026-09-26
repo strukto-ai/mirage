@@ -78,7 +78,7 @@ describe('stat', () => {
     expect(r.extra).toEqual({ schema: 'public', kind: 'tables', name: 'users' })
   })
 
-  it('marks rows.jsonl as TEXT with null size (storage size in extra) + fingerprint', async () => {
+  it('marks rows.jsonl as TEXT without fetching planner statistics or content', async () => {
     vi.mocked(client.fetchColumns).mockResolvedValue([
       { name: 'id', type: 'uuid', nullable: false },
     ])
@@ -94,9 +94,10 @@ describe('stat', () => {
     )
     expect(r.content).toBe(ContentType.TEXT)
     expect(r.size).toBeNull()
-    expect(r.extra.size_bytes).toBe(4096)
-    expect(r.fingerprint).toMatch(/^[a-f0-9]{64}$/)
-    expect(r.extra.row_count).toBe(42)
+    expect(r.fingerprint).toBeNull()
+    expect(client.fetchColumns).not.toHaveBeenCalled()
+    expect(client.estimatedRowCount).not.toHaveBeenCalled()
+    expect(client.tableSizeBytes).not.toHaveBeenCalled()
   })
 
   it('throws ENOENT for invalid path', async () => {

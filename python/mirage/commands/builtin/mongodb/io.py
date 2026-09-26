@@ -14,22 +14,14 @@
 
 from mirage.core.hierarchy.search import make_search_op
 from mirage.core.mongodb.read import read as _read
+from mirage.core.mongodb.read import stream_any as _read_stream
 from mirage.core.mongodb.readdir import readdir as _readdir
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.search import SEARCHERS
 from mirage.core.mongodb.stat import stat as _stat
-from mirage.core.mongodb.stream import read_stream as _read_stream
 from mirage.vfs.adapter import VFSAdapter
 from mirage.vfs.types import NativeReadOps, ReadOps, SearchOps
 
-# Mongo documents are read through the generic factory (find walks readdir,
-# classifying via stat). grep and rg push down to MongoDB queries,
-# tail follows via change streams (tail -f), wc -l
-# counts via server-side count_documents instead of reading every document, and
-# cat dispatches by path (native document streaming vs rendered .json metadata,
-# which the document-only read_stream cannot serve), so they stay bespoke.
-# Mongo is read-only, so the generic byte-mutation commands are intentionally
-# absent (no write op wired).
 IO = VFSAdapter(search=SearchOps(
     search=make_search_op(detect_scope, SEARCHERS, _stat),
     meta={"grep": {

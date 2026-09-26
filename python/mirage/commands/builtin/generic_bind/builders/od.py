@@ -16,7 +16,10 @@ async def od(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["od"])
     paths = await resolve_or_empty(ops, accessor, paths, opts.index)
-    formats = fl.as_list("format")
+    formats = [
+        "c" if name == "c" else str(value)
+        for name, value in fl.occurrences("format", "c")
+    ]
     # as_str, not `x or y`: the latter would swallow an explicitly empty
     # value, which GNU rejects loudly (`od -N ''` is an invalid argument,
     # not an absent flag).

@@ -171,3 +171,26 @@ def test_exit_code_constants_match_wget():
     g = wget.__wrapped__.__globals__
     assert (g["EXIT_GENERIC"], g["EXIT_NETWORK"],
             g["EXIT_SERVER_ERROR"]) == (1, 4, 8)
+
+
+@pytest.mark.parametrize("quiet", [False, True])
+def test_output_dash_is_stdout_without_a_write(monkeypatch, quiet):
+    _stub(monkeypatch, _ok(b"page"))
+    writes = []
+
+    async def dispatch(*args, **kwargs):
+        writes.append(args)
+
+    body, io = _run("http://x.test/", args_O="-", q=quiet, dispatch=dispatch)
+    assert body == b"page"
+    assert io.exit_code == 0
+    assert io.writes == {}
+    assert writes == []
+
+
+def test_http_error_without_output_option_does_not_create_file(monkeypatch):
+    _stub(monkeypatch, _ok(b"missing", 404, "Not Found"))
+    body, io = _run("http://x.test/index.html", q=True)
+    assert io.exit_code == 8
+    assert body == b""
+    assert io.writes == {}

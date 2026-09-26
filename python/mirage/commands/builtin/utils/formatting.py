@@ -391,8 +391,6 @@ def _ls_size_and_time(s: FileStat,
             the ``--block-size`` scale.
     """
     when_iso = time_of(s, columns.time_kind)
-    # An unknown modification time renders the epoch, as it always has;
-    # only a kind no backend reports at all (birth) is honestly ``-``.
     known_time = columns.time_kind is not LsTimeKind.BIRTH
     dev = s.extra.get(DEVICE_NUMBERS_KEY) if s.extra else None
     if dev:
@@ -400,10 +398,9 @@ def _ls_size_and_time(s: FileStat,
                 _ls_time_string(when_iso, find_rule=find_rule)
                 if find_rule else styled_time(when_iso, columns.time_style))
         return f"{dev[0]}, {dev[1]}", when
-    size = scaled_size(content_size(s), columns.block_size, human)
-    if s.size is None and s.modified is None:
-        return size if is_dir(s) else UNKNOWN_NAME, UNKNOWN_NAME
-    if not known_time:
+    size = (UNKNOWN_NAME if not is_dir(s) and s.size is None else scaled_size(
+        content_size(s), columns.block_size, human))
+    if not known_time or when_iso is None:
         return size, UNKNOWN_NAME
     if find_rule:
         return size, _ls_time_string(when_iso, find_rule=True)

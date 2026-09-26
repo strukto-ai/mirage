@@ -76,7 +76,7 @@ async def test_schema_view_marks_kind_and_skips_indexes(accessor):
                                            "high_rated_films")
     assert s["kind"] == "view"
     assert s["indexes"] == []
-    assert s["document_count"] == 40
+    assert "document_count" not in s
 
 
 @pytest.mark.asyncio

@@ -72,13 +72,23 @@ async def wget(
         err = b"" if q else b"Remote file exists.\n"
         return None, IOResult(stderr=err)
 
+    explicit_output = isinstance(args_O, (str, PathSpec)) and bool(args_O)
+    stdout = args_O == "-" or (isinstance(args_O, PathSpec)
+                               and args_O.raw_path == "-")
+    if stdout or (resp.is_error and not explicit_output):
+        err = b""
+        if resp.is_error and not q:
+            err = f"ERROR {resp.status}: {resp.reason}.\n".encode()
+        return (None if resp.is_error else resp.body), IOResult(
+            exit_code=EXIT_SERVER_ERROR if resp.is_error else 0, stderr=err)
+
     dest_raw: str | PathSpec
     if isinstance(args_O, (str, PathSpec)) and args_O:
         dest_raw = args_O
     elif paths:
         dest_raw = paths[0]
     else:
-        dest_raw = url.rsplit("/", 1)[-1]
+        dest_raw = url.rsplit("/", 1)[-1] or "index.html"
     dest_str = dest_raw.virtual if isinstance(dest_raw, PathSpec) else dest_raw
 
     # An error status still creates the destination, empty, the way GNU wget

@@ -15,7 +15,7 @@
 PROMPT = """\
 {prefix}
   <database>/
-    database.json                  collections, views, and document counts
+    database.json                  collection and view names
     collections/<collection>/
       schema.json                  sampled field types, validator, indexes
       documents.jsonl              streamed BSON Extended JSON documents
@@ -24,4 +24,6 @@ PROMPT = """\
       documents.jsonl
   Read database.json first to discover entities. Use schema.json before
   reading large document streams; head, tail, wc, grep, rg, and jq understand
-  documents.jsonl, with directory-scope grep/rg pushed down to MongoDB."""
+  documents.jsonl, with directory-scope grep/rg pushed down to MongoDB.
+  Unknown stat sizes display as -; wc -c measures bytes and wc -l counts
+  documents on demand. These counts may scan the collection."""

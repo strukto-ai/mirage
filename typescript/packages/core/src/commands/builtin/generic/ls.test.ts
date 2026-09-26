@@ -681,7 +681,7 @@ describe('honest per-entry errors', () => {
   it('keeps a ? row and reports the entry when the listing needs its stat', async () => {
     const { code, stdout, stderr } = await run({ args_l: true }, stamped('/apple.txt', 'ENOENT'))
     expect(code).toBe(LS_MINOR_PROBLEM)
-    expect(stdout.split('\n')[2]).toBe('?????????? ? ? ? ?            ? apple.txt')
+    expect(stdout.split('\n')[3]).toBe('?????????? ? ? ? ?            ? apple.txt')
     expect(stderr).toBe("ls: cannot access '/apple.txt': No such file or directory\n")
   })
 
@@ -897,7 +897,7 @@ describe('lsGeneric columns and time styles', () => {
   it('-g -o drop the owner and group, -i and -Z lead with ?', async () => {
     expect(
       await line({ g: true, o: true, inode: true, context: true, time_style: 'long-iso' }),
-    ).toBe('? -rw-r--r-- 1 ? 42 2025-01-15 10:30 a.txt\n')
+    ).toBe('total ?\n? -rw-r--r-- 1 ? 42 2025-01-15 10:30 a.txt\n')
     expect(await line({ inode: true, context: true })).toBe('? ? a.txt\n')
   })
 
@@ -909,16 +909,16 @@ describe('lsGeneric columns and time styles', () => {
     ['+%Y\n%H:%M', '2025'],
   ])('--time-style=%s spells an old time as GNU does', async (style, expected) => {
     expect(await line({ g: true, o: true, time_style: style })).toBe(
-      `-rw-r--r-- 1 42 ${expected} a.txt\n`,
+      `total ?\n-rw-r--r-- 1 42 ${expected} a.txt\n`,
     )
   })
 
   it('--block-size scales and rounds up', async () => {
     expect(await line({ g: true, o: true, block_size: 'K', time_style: '+x' })).toBe(
-      '-rw-r--r-- 1 1K x a.txt\n',
+      'total ?\n-rw-r--r-- 1 1K x a.txt\n',
     )
     expect(await line({ g: true, o: true, block_size: '4', time_style: '+x' })).toBe(
-      '-rw-r--r-- 1 11 x a.txt\n',
+      'total ?\n-rw-r--r-- 1 11 x a.txt\n',
     )
   })
 

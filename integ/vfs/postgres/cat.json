@@ -77,6 +77,266 @@
         "stdout": "{\"id\":4,\"title\":\"delta\",\"author\":\"ada\",\"year\":2023,\"rating\":4}\n{\"id\":5,\"title\":\"epsilon\",\"author\":\"ben\",\"year\":2024,\"rating\":2.5}\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "pg_read_surface_0_0",
+      "seq": 612000,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(head -n 1 /pg/database.json) && piped=$(cat /pg/database.json | head -n 1) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_0_1",
+      "seq": 612001,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(sed -n 1p /pg/database.json) && piped=$(cat /pg/database.json | sed -n 1p) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_0_2",
+      "seq": 612002,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(awk '{print}' /pg/database.json) && piped=$(cat /pg/database.json | awk '{print}') && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_0_3",
+      "seq": 612003,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(jq -c . /pg/database.json) && piped=$(cat /pg/database.json | jq -c .) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_0_4",
+      "seq": 612004,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(md5sum < /pg/database.json) && piped=$(cat /pg/database.json | md5sum) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_1_0",
+      "seq": 612010,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(head -n 1 /pg/public/tables/books/schema.json) && piped=$(cat /pg/public/tables/books/schema.json | head -n 1) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_1_1",
+      "seq": 612011,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(sed -n 1p /pg/public/tables/books/schema.json) && piped=$(cat /pg/public/tables/books/schema.json | sed -n 1p) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_1_2",
+      "seq": 612012,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(awk '{print}' /pg/public/tables/books/schema.json) && piped=$(cat /pg/public/tables/books/schema.json | awk '{print}') && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_1_3",
+      "seq": 612013,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(jq -c . /pg/public/tables/books/schema.json) && piped=$(cat /pg/public/tables/books/schema.json | jq -c .) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_1_4",
+      "seq": 612014,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(md5sum < /pg/public/tables/books/schema.json) && piped=$(cat /pg/public/tables/books/schema.json | md5sum) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_2_0",
+      "seq": 612020,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(head -n 1 /pg/public/tables/books/semantic.json) && piped=$(cat /pg/public/tables/books/semantic.json | head -n 1) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_2_1",
+      "seq": 612021,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(sed -n 1p /pg/public/tables/books/semantic.json) && piped=$(cat /pg/public/tables/books/semantic.json | sed -n 1p) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_2_2",
+      "seq": 612022,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(awk '{print}' /pg/public/tables/books/semantic.json) && piped=$(cat /pg/public/tables/books/semantic.json | awk '{print}') && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_2_3",
+      "seq": 612023,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(jq -c . /pg/public/tables/books/semantic.json) && piped=$(cat /pg/public/tables/books/semantic.json | jq -c .) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_2_4",
+      "seq": 612024,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(md5sum < /pg/public/tables/books/semantic.json) && piped=$(cat /pg/public/tables/books/semantic.json | md5sum) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_3_0",
+      "seq": 612030,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(head -n 1 /pg/public/tables/books/rows.jsonl) && piped=$(cat /pg/public/tables/books/rows.jsonl | head -n 1) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_3_1",
+      "seq": 612031,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(sed -n 1p /pg/public/tables/books/rows.jsonl) && piped=$(cat /pg/public/tables/books/rows.jsonl | sed -n 1p) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_3_2",
+      "seq": 612032,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(awk '{print}' /pg/public/tables/books/rows.jsonl) && piped=$(cat /pg/public/tables/books/rows.jsonl | awk '{print}') && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_3_3",
+      "seq": 612033,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(jq -c . /pg/public/tables/books/rows.jsonl) && piped=$(cat /pg/public/tables/books/rows.jsonl | jq -c .) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "pg_read_surface_3_4",
+      "seq": 612034,
+      "targets": [
+        "postgres"
+      ],
+      "command": "set -o pipefail; direct=$(md5sum < /pg/public/tables/books/rows.jsonl) && piped=$(cat /pg/public/tables/books/rows.jsonl | md5sum) && test \"$direct\" = \"$piped\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -968,6 +968,7 @@ export function parseCommand(
       flags[flagName] = resolvedList
       pathFlagValues.push(...resolvedList)
     } else if (typeof val === 'string') {
+      if (cmdName === 'wget' && flagName === '-O' && val === '-') continue
       const resolved = resolvePath(val, cwd)
       flags[flagName] = resolved
       pathFlagValues.push(resolved)
@@ -987,7 +988,11 @@ export function parseCommand(
 
   for (const occurrence of flagOccurrences(flags)) {
     const [name, value] = occurrence
-    if (cs.kindByDest.get(name) === 'path' && typeof value === 'string')
+    if (
+      cs.kindByDest.get(name) === 'path' &&
+      typeof value === 'string' &&
+      !(cmdName === 'wget' && name === '-O' && value === '-')
+    )
       occurrence[1] = resolvePath(value, cwd)
   }
   return new ParsedArgs({
