@@ -28,11 +28,11 @@ from bson import ObjectId
 from moto.server import ThreadedMotoServer
 
 import mirage.cache.file.io as cache_io
+import mirage.core.github.read as github_read
 import mirage.core.gridfs.client as gridfs_client
 import mirage.core.gridfs.driver as gridfs_driver
 import mirage.core.gridfs.read as gridfs_read
 import mirage.core.gridfs.stream as gridfs_stream
-import mirage.core.github.read as github_read
 import mirage.core.gridfs.watch as gridfs_watch
 import mirage.core.hf_hub.read as hf_read
 import mirage.core.hf_hub.stream as hf_stream
@@ -443,8 +443,9 @@ def _cases(rows: tuple[str, ...]) -> list:
     for name, family in HARNESSES.items():
         # The aliases share every read and stat path with s3, so the key
         # shapes run once per family.
-        shapes = SHAPES.get(name, ("root", "nested", "prefixed")
-                            ) if name == family else ("root", )
+        shapes = SHAPES.get(name,
+                            ("root", "nested",
+                             "prefixed")) if name == family else ("root", )
         for shape in shapes:
             for row in rows:
                 cases.append(

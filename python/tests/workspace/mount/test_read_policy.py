@@ -280,8 +280,8 @@ def test_bounded_is_allowed_on_a_backend_that_cannot_revalidate():
 REVALIDATABLE = {
     "s3", "aliyun", "backblaze", "ceph", "digitalocean", "gcs", "minio", "oci",
     "qingstor", "r2", "scaleway", "seaweedfs", "supabase", "tencent", "wasabi",
-    "gridfs", "hf_models", "hf_datasets", "hf_spaces", "onedrive", "sharepoint",
-    "github"
+    "gridfs", "hf_models", "hf_datasets", "hf_spaces", "onedrive",
+    "sharepoint", "github"
 }
 
 
