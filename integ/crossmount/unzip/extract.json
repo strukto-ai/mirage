@@ -33,6 +33,74 @@
         "stdout": "zx\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xm_unzip_v_lists_without_extracting",
+      "seq": 962316,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xzv && echo zv | tee /data/xzv/v.txt > /dev/null && zip -q -r /data/xzv.zip /data/xzv && unzip -v /data/xzv.zip -d /data2/xzvout 2>/dev/null | head -n 1 && ls /data2/xzvout",
+      "expect": {
+        "exit": 2,
+        "stdout": "Archive:  /data/xzv.zip\n",
+        "stderr": "ls: cannot access '/data2/xzvout': No such file or directory\n"
+      }
+    },
+    {
+      "id": "xm_unzip_x_excludes_across_mounts",
+      "seq": 962317,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/xzx && echo keep | tee /data/xzx/keep.txt > /dev/null && echo drop | tee /data/xzx/drop.txt > /dev/null && zip -q -r /data/xzx.zip /data/xzx && unzip -q /data/xzx.zip -x '*drop.txt' -d /data2/xzxout && ls /data2/xzxout/data/xzx",
+      "expect": {
+        "exit": 0,
+        "stdout": "keep.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }
