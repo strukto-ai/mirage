@@ -285,7 +285,7 @@ function readZipEntries(data: Uint8Array): {
   entries: ZipEntry[]
   count: number
   slack: number
-  comment: string
+  comment: Uint8Array
 } {
   const eocd = findEocd(data)
   if (eocd === -1) throw new ZipFormatError('no_eocd')
@@ -334,15 +334,13 @@ function readZipEntries(data: Uint8Array): {
       dateTime: dosDateTime(date, time),
       hasExtra: extraLen > 0,
       crc,
-      comment: DEC.decode(data.subarray(offset + 46 + nameLen + extraLen, next)),
+      comment: data.subarray(offset + 46 + nameLen + extraLen, next),
       content,
     })
     offset = next
   }
   if (offset !== eocd) throw new ZipFormatError('corrupt_cdir')
-  const comment = DEC.decode(
-    data.subarray(eocd + EOCD_LEN, eocd + EOCD_LEN + readU16LE(data, eocd + 20)),
-  )
+  const comment = data.subarray(eocd + EOCD_LEN, eocd + EOCD_LEN + readU16LE(data, eocd + 20))
   return { entries, count, slack: shift, comment }
 }
 
@@ -443,7 +441,7 @@ export async function unzipGeneric(
   let entries: ZipEntry[]
   let count: number
   let slack: number
-  let comment: string
+  let comment: Uint8Array
   try {
     ;({ entries, count, slack, comment } = readZipEntries(data))
   } catch (err) {
@@ -498,7 +496,7 @@ export async function unzipGeneric(
     if ((listMode || verbose) && !(testMode || pipeMode)) {
       let out: ByteSource
       if (verbose) {
-        out = ENC.encode(renderVerbose(archivePath.virtual, selected, quiet, comment))
+        out = renderVerbose(archivePath.virtual, selected, quiet, comment)
       } else {
         const lines = ['  Length      Name', '---------  ----']
         for (const e of selected) {

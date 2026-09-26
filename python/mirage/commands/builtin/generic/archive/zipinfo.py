@@ -79,6 +79,9 @@ VERBOSE_HEADER = (
     "--------  ------  ------- ---- ---------- ----- --------  ----\n")
 VERBOSE_RULE = ("--------          -------  ---                            "
                 "-------\n")
+# Info-ZIP's comment filter (fileio.c, do_string): a comment ends at
+# NUL, loses CR and ^S, and shows ESC as "^[".
+COMMENT_DROPPED = b"\r\x13"
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +103,7 @@ class ZipRow:
             and day left at 0 when the stamp is 0.
         has_extra (bool): whether the central entry carries an extra field.
         crc (int): the CRC-32 the central entry records.
-        comment (str): the central entry comment.
+        comment (bytes): the central entry comment, as stored.
     """
     name: str
     size: int
@@ -114,7 +117,7 @@ class ZipRow:
     date_time: tuple[int, int, int, int, int, int]
     has_extra: bool
     crc: int
-    comment: str
+    comment: bytes
 
 
 ZipinfoRows = Literal["none", "names", "short", "medium", "long"]
@@ -384,48 +387,57 @@ def _saved(uncompressed: int, compressed: int) -> str:
     return f"{'-' if ratio < 0 else ' '}{percent}%"
 
 
-def _comment(text: str) -> str:
-    """Info-ZIP comments stop at NUL, omit CR and end on a new line.
+def _comment(raw: bytes) -> bytes:
+    """An archive or entry comment as Info-ZIP prints it.
+
+    The stored bytes up to a NUL, less CR and ^S, with ESC shown as
+    ``^[`` and a new line at the end. No code page is assumed, so a
+    legacy comment keeps its bytes.
 
     Args:
-        text (str): the archive or entry comment.
+        raw (bytes): the archive or entry comment as stored.
     """
-    text = text.split("\0", 1)[0].replace("\r", "")
-    return text + "\n" if text and not text.endswith("\n") else text
+    text = raw.split(b"\0", 1)[0].translate(None, COMMENT_DROPPED)
+    text = text.replace(b"\x1b", b"^[")
+    return text + b"\n" if text and not text.endswith(b"\n") else text
 
 
 def render_verbose(archive: str, rows: list[ZipRow], quiet: bool,
-                   comment: str) -> str:
+                   comment: bytes) -> bytes:
     """``unzip -v`` with an archive: Info-ZIP's verbose listing (list.c).
 
     The ``-l`` columns plus the method, compressed size, percent saved
     and CRC-32 of each entry, dated from its DOS stamp, and a totals
-    line. ``-q`` drops the ``Archive:`` line and all comments.
+    line. ``-q`` drops the ``Archive:`` line and all comments. The
+    listing is bytes because a comment is written as stored.
 
     Args:
         archive (str): the archive operand.
         rows (list[ZipRow]): the entries to list.
         quiet (bool): ``-q``.
-        comment (str): the archive comment.
+        comment (bytes): the archive comment as stored.
     """
-    lines = [] if quiet else [f"Archive:  {archive}\n", _comment(comment)]
-    lines.append(VERBOSE_HEADER)
+    parts = [] if quiet else [
+        f"Archive:  {archive}\n".encode(),
+        _comment(comment)
+    ]
+    parts.append(VERBOSE_HEADER.encode())
     for row in rows:
         year, month, day, hour, minute, _ = row.date_time
         csize = _compressed(row)
-        lines.append(f"{row.size:>8}  {_list_method(row):<7}{csize:>8} "
+        parts.append(f"{row.size:>8}  {_list_method(row):<7}{csize:>8} "
                      f"{_saved(row.size, csize):>4} {year:04d}-{month:02d}-"
                      f"{day:02d} {hour:02d}:{minute:02d} {row.crc:08x}  "
-                     f"{row.name}\n")
+                     f"{row.name}\n".encode())
         if not quiet:
-            lines.append(_comment(row.comment))
+            parts.append(_comment(row.comment))
     size = sum(r.size for r in rows)
     csize = sum(_compressed(r) for r in rows)
     plural = "" if len(rows) == 1 else "s"
-    lines.append(f"{VERBOSE_RULE}{size:>8}         {csize:>8} "
+    parts.append(f"{VERBOSE_RULE}{size:>8}         {csize:>8} "
                  f"{_saved(size, csize):>4}{' ' * 28}{len(rows)} "
-                 f"file{plural}\n")
-    return "".join(lines)
+                 f"file{plural}\n".encode())
+    return b"".join(parts)
 
 
 __all__ = [

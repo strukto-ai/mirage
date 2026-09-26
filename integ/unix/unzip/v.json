@@ -340,6 +340,68 @@
         "stdout": "Archive:  /data/unzip-comments/a.zip\narchive comment\nsecond line\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  b.txt\nother comment\n--------          -------  ---                            -------\n       3                3   0%                            1 file\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "unzip_v_legacy_comments_keep_their_bytes",
+      "seq": 601411,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-legacy && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwECFAMUAAAAAAAAACEAwkEkNQMAAAADAAAABQAAAAgAAAAAAAAApIEAAAAAYS50eHRuYe92ZRMg/1BLBQYAAAAAAQABADsAAAAmAAAADgBjYWbpIBtbMW0NCmZpbg==' | base64 -d > /data/unzip-legacy/l.zip && unzip -v /data/unzip-legacy/l.zip | cat -v)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzip-legacy/l.zip\ncafM-i ^[[1m\nfin\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\nnaM-ove M-^?\n--------          -------  ---                            -------\n       3                3   0%                            1 file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comment_esc_prints_as_caret_bracket",
+      "seq": 601412,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-legacy && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwECFAMUAAAAAAAAACEAwkEkNQMAAAADAAAABQAAAAgAAAAAAAAApIEAAAAAYS50eHRuYe92ZRMg/1BLBQYAAAAAAQABADsAAAAmAAAADgBjYWbpIBtbMW0NCmZpbg==' | base64 -d > /data/unzip-legacy/l.zip && unzip -v /data/unzip-legacy/l.zip | head -n 2 | tail -n 1 | od -An -tc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "   c   a   f 351       ^   [   [   1   m  \\n\n",
+        "stderr": ""
+      }
     }
   ]
 }

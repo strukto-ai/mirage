@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { concat } from '../../../../io/cachable_iterator.ts'
+
+const ENC = new TextEncoder()
+
 // Info-ZIP zipinfo's short-listing vocabulary (zipinfo.c, zi_short),
 // indexed by the host byte of "version made by" and by compression
 // method. A host past the table reads as the last "???" slot, as the
@@ -117,6 +121,14 @@ const VERBOSE_HEADER =
   ' Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n' +
   '--------  ------  ------- ---- ---------- ----- --------  ----\n'
 const VERBOSE_RULE = '--------          -------  ---                            -------\n'
+// Info-ZIP's comment filter (fileio.c, do_string): a comment ends at NUL,
+// loses CR and ^S, and shows ESC as "^[". Mirrors archive/zipinfo.py.
+const NUL = 0x00
+const LF = 0x0a
+const CR = 0x0d
+const CTRL_S = 0x13
+const ESC = 0x1b
+const ESC_SHOWN: readonly number[] = [0x5e, 0x5b]
 
 /** One central-directory entry as zipinfo reads it. */
 export interface ZipRow {
@@ -147,8 +159,8 @@ export interface ZipRow {
   hasExtra: boolean
   /** The CRC-32 the central entry records. */
   crc: number
-  /** The central entry comment. */
-  comment: string
+  /** The central entry comment, as stored. */
+  comment: Uint8Array
 }
 
 export type ZipinfoRows = 'none' | 'names' | 'short' | 'medium' | 'long'
@@ -391,10 +403,21 @@ function saved(uncompressed: number, compressed: number): string {
   return `${ratio < 0 ? '-' : ' '}${String(percent)}%`
 }
 
-/** Info-ZIP comments stop at NUL, omit CR and end on a new line. */
-function renderComment(text: string): string {
-  const comment = (text.split('\0', 1)[0] ?? '').replaceAll('\r', '')
-  return comment !== '' && !comment.endsWith('\n') ? comment + '\n' : comment
+/**
+ * An archive or entry comment as Info-ZIP prints it: the stored bytes up to
+ * a NUL, less CR and ^S, with ESC shown as `^[` and a new line at the end.
+ * No code page is assumed, so a legacy comment keeps its bytes.
+ */
+function renderComment(raw: Uint8Array): Uint8Array {
+  const out: number[] = []
+  for (const byte of raw) {
+    if (byte === NUL) break
+    if (byte === CR || byte === CTRL_S) continue
+    if (byte === ESC) out.push(...ESC_SHOWN)
+    else out.push(byte)
+  }
+  if (out.length > 0 && out[out.length - 1] !== LF) out.push(LF)
+  return Uint8Array.from(out)
 }
 
 /**
@@ -402,25 +425,28 @@ function renderComment(text: string): string {
  *
  * The `-l` columns plus the method, compressed size, percent saved and
  * CRC-32 of each entry, dated from its DOS stamp, and a totals line. `-q`
- * drops the `Archive:` line and all comments.
+ * drops the `Archive:` line and all comments. The listing is bytes because
+ * a comment is written as stored.
  */
 export function renderVerbose(
   archive: string,
   rows: readonly ZipRow[],
   quiet: boolean,
-  comment: string,
-): string {
-  const lines = quiet ? [] : [`Archive:  ${archive}\n`, renderComment(comment)]
-  lines.push(VERBOSE_HEADER)
+  comment: Uint8Array,
+): Uint8Array {
+  const parts = quiet ? [] : [ENC.encode(`Archive:  ${archive}\n`), renderComment(comment)]
+  parts.push(ENC.encode(VERBOSE_HEADER))
   for (const row of rows) {
     const [year, month, day, hour, minute] = row.dateTime
     const csize = compressedOf(row)
     const date = `${String(year).padStart(4, '0')}-${two(month)}-${two(day)} ${two(hour)}:${two(minute)}`
-    lines.push(
-      `${String(row.size).padStart(8, ' ')}  ${listMethod(row).padEnd(7, ' ')}${String(csize).padStart(8, ' ')} ` +
-        `${saved(row.size, csize).padStart(4, ' ')} ${date} ${row.crc.toString(16).padStart(8, '0')}  ${row.name}\n`,
+    parts.push(
+      ENC.encode(
+        `${String(row.size).padStart(8, ' ')}  ${listMethod(row).padEnd(7, ' ')}${String(csize).padStart(8, ' ')} ` +
+          `${saved(row.size, csize).padStart(4, ' ')} ${date} ${row.crc.toString(16).padStart(8, '0')}  ${row.name}\n`,
+      ),
     )
-    if (!quiet) lines.push(renderComment(row.comment))
+    if (!quiet) parts.push(renderComment(row.comment))
   }
   let size = 0
   let csize = 0
@@ -429,9 +455,11 @@ export function renderVerbose(
     csize += compressedOf(row)
   }
   const plural = rows.length === 1 ? '' : 's'
-  lines.push(
-    `${VERBOSE_RULE}${String(size).padStart(8, ' ')}         ${String(csize).padStart(8, ' ')} ` +
-      `${saved(size, csize).padStart(4, ' ')}${' '.repeat(28)}${String(rows.length)} file${plural}\n`,
+  parts.push(
+    ENC.encode(
+      `${VERBOSE_RULE}${String(size).padStart(8, ' ')}         ${String(csize).padStart(8, ' ')} ` +
+        `${saved(size, csize).padStart(4, ' ')}${' '.repeat(28)}${String(rows.length)} file${plural}\n`,
+    ),
   )
-  return lines.join('')
+  return concat(parts)
 }

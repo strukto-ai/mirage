@@ -19,6 +19,7 @@ import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import { FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../types.ts'
+import { decodeBase64 } from '../../../utils/base64.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { readTar } from '../tar_helper.ts'
 import { UsageError } from '../../errors.ts'
@@ -1255,6 +1256,10 @@ describe('unzip -Z (zipinfo mode)', () => {
 
 describe('unzip -v', () => {
   const M = [PathSpec.fromStrPath('/m.zip')]
+  // a.txt ("abc", stored, 1980 stamp) commented "na\xefve\x13 \xff", in an
+  // archive commented "caf\xe9 \x1b[1m\r\nfin": Latin-1 bytes, ^S, ESC, CR.
+  const LEGACY_COMMENTS =
+    'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwECFAMUAAAAAAAAACEAwkEkNQMAAAADAAAABQAAAAgAAAAAAAAApIEAAAAAYS50eHRuYe92ZRMg/1BLBQYAAAAAAQABADsAAAAmAAAADgBjYWbpIBtbMW0NCmZpbg=='
 
   it('lists the verbose table', async () => {
     const vfs = await makeMulti()
@@ -1272,6 +1277,26 @@ describe('unzip -v', () => {
     expect(lines[5]).toMatch(/^ {7}1 {2}Defl:N +\d+ +-?\d+% 1980-01-01 00:00 71beeff9 {2}b\.txt$/)
     expect(lines[6]).toBe('--------          -------  ---                            -------')
     expect(lines[7]).toMatch(/^ {5}201 +\d+ +-?\d+% {28}3 files$/)
+    expect([r.exitCode, r.stderr.byteLength]).toEqual([0, 0])
+  })
+
+  it('writes comments as stored', async () => {
+    // Info-ZIP assumes no code page for a comment, so a legacy one keeps its
+    // bytes; only NUL, CR, ^S and ESC are touched.
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/l.zip', decodeBase64(LEGACY_COMMENTS))
+    const r = await runCmd(RAM_UNZIP, vfs, [PathSpec.fromStrPath('/l.zip')], { v: true })
+    expect(String.fromCharCode(...r.out)).toBe(
+      'Archive:  /l.zip\n' +
+        'caf\xe9 ^[[1m\n' +
+        'fin\n' +
+        ' Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n' +
+        '--------  ------  ------- ---- ---------- ----- --------  ----\n' +
+        '       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\n' +
+        'na\xefve \xff\n' +
+        '--------          -------  ---                            -------\n' +
+        '       3                3   0%                            1 file\n',
+    )
     expect([r.exitCode, r.stderr.byteLength]).toEqual([0, 0])
   })
 
