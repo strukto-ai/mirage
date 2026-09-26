@@ -40,6 +40,8 @@ const resolveGlob = resolveGlobOf(GMAIL_IO)
 // provider itself supplies: Gmail matches whole words, so a bare literal
 // would under-report and only -w makes the two agree.
 export const SEARCH_HONORED = ['w'] as const
+// rg spells the same flag by its long name.
+export const RG_SEARCH_HONORED = ['word_regexp'] as const
 export const SEARCH_MAX_RESULTS = 50
 
 const ENC = new TextEncoder()

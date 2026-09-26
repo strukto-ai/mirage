@@ -44,12 +44,12 @@ async def _no_dispatch(op, path):
 
 
 @pytest.mark.asyncio
-async def test_rg_pattern_file_from_stdin_lowers_to_e():
+async def test_rg_pattern_file_from_stdin_lowers_to_regexp():
     texts, flags, rest, error = await prepare_program("rg", ["/in"],
-                                                      {"f": [_typed("-")]},
+                                                      {"file": [_typed("-")]},
                                                       b"a\nb\n", _no_dispatch)
     assert error is None
-    assert (texts, flags) == (["/in"], {"f": [], "e": ["a\nb"]})
+    assert (texts, flags) == (["/in"], {"file": [], "regexp": ["a\nb"]})
     assert await materialize(rest) == b""
 
 
@@ -58,7 +58,7 @@ async def test_rg_refuses_a_second_dash_pattern_file():
     # ripgrep 14.1.1: `rg -f - -f -` reads stdin once and refuses the
     # second before any operand is looked at.
     *_, error = await prepare_program(
-        "rg", [], {"f": [_typed("-"), _typed("-")]}, b"a\n", _no_dispatch,
+        "rg", [], {"file": [_typed("-"), _typed("-")]}, b"a\n", _no_dispatch,
         [_typed("-")])
     assert error is not None
     assert (error.exit_code, error.stderr) == (2, RG_STDIN_REREAD.encode())
@@ -67,7 +67,7 @@ async def test_rg_refuses_a_second_dash_pattern_file():
 @pytest.mark.asyncio
 async def test_rg_refuses_a_dash_operand_after_dash_pattern_file():
     *_, error = await prepare_program(
-        "rg", [], {"f": [_typed("-")]}, b"a\n", _no_dispatch,
+        "rg", [], {"file": [_typed("-")]}, b"a\n", _no_dispatch,
         [_typed("/in"), _typed("-")])
     assert error is not None
     assert (error.exit_code, error.stderr) == (2, RG_STDIN_SEARCHED.encode())
@@ -78,10 +78,10 @@ async def test_rg_dev_stdin_pattern_file_takes_no_dash():
     # ripgrep reads `-f /dev/stdin` as a file, so a `-` operand after it
     # searches what is left of stdin (nothing) rather than being refused.
     _, flags, rest, error = await prepare_program(
-        "rg", [], {"f": [_typed("/dev/stdin")]}, b"a\n", _no_dispatch,
+        "rg", [], {"file": [_typed("/dev/stdin")]}, b"a\n", _no_dispatch,
         [_typed("-")])
     assert error is None
-    assert flags == {"f": [], "e": ["a"]}
+    assert flags == {"file": [], "regexp": ["a"]}
     assert await materialize(rest) == b""
 
 

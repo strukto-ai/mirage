@@ -991,6 +991,45 @@
         "stdout": "/ghost\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nest_rg_sort_spans_mounts",
+      "seq": 950081,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "rg --sort path -e top -e deep /data; rg --sortr path -e top -e deep /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/inner/leaf.txt:deep\n/data/top.txt:top\n/data/top.txt:top\n/data/inner/leaf.txt:deep\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_rg_depth_stays_relative_to_operand",
+      "seq": 950082,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "rg -d1 -e top -e deep /data; rg -d1 ghost /ghost; echo rc=$?; rg -d2 ghost /ghost",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/top.txt:top\nrc=1\n/ghost/deep/g.txt:ghost\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "nest_rg_time_sort_spans_mounts",
+      "seq": 950083,
+      "targets": [
+        "ram-nested"
+      ],
+      "command": "touch -t 202001010000 /data/top.txt; touch -t 202101010000 /data/inner/leaf.txt; rg --sort modified -e top -e deep /data; rg --sortr modified -e top -e deep /data",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/top.txt:top\n/data/inner/leaf.txt:deep\n/data/inner/leaf.txt:deep\n/data/top.txt:top\n",
+        "stderr": ""
+      }
     }
   ]
 }

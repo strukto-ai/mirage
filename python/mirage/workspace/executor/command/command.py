@@ -373,8 +373,13 @@ async def handle_command(
         # it, exactly as the same operand would on a line of its own.
         cross_stat = (functools.partial(path_stat, dispatch)
                       if dispatch is not None else None)
-        run_operand = functools.partial(run_with_fanout, run_single, registry,
-                                        session.cwd, cross_ns, cross_stat)
+        run_operand = functools.partial(run_with_fanout,
+                                        run_single,
+                                        registry,
+                                        session.cwd,
+                                        cross_ns,
+                                        cross_stat,
+                                        dispatch=dispatch)
         stdout, io = await handle_cross_mount(
             cmd_name,
             cross_scopes,
@@ -502,7 +507,8 @@ async def handle_command(
                                                     cmd_str,
                                                     stdin,
                                                     ns=single_ns,
-                                                    stat_path=single_stat)
+                                                    stat_path=single_stat,
+                                                    dispatch=dispatch)
         if cmd_name == "find":
             stdout = await _finish_find(stdout,
                                         io,

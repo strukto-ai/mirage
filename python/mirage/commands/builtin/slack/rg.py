@@ -15,17 +15,17 @@
 import logging
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.commands.builtin.generic.rg import RG_NO_PATTERN
+from mirage.commands.builtin.generic.rg import (parse_flags,
+                                                refuse_missing_pattern)
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import pushdown_operand
-from mirage.commands.builtin.slack.grep import (SEARCH_HONORED,
+from mirage.commands.builtin.slack.grep import (RG_SEARCH_HONORED,
                                                 SEARCH_MAX_RESULTS)
 from mirage.commands.builtin.slack.io import resolve_glob
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
-from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -49,14 +49,15 @@ logger = logging.getLogger(__name__)
 async def rg(accessor: SlackAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])
-    pattern_str = pattern_arg(texts, fl)
-    if pattern_str is None:
-        raise UsageError(RG_NO_PATTERN)
+    pattern_str = pattern_arg(texts, fl, "regexp")
+    refuse_missing_pattern(pattern_str, fl, parse_flags(fl))
 
     # Same gate as slack grep, from the same table: only a lone concrete
     # operand with no reshaping flag may be answered by the search API.
-    operand = pushdown_operand(paths, opts.flags, pattern_str, SEARCH_HONORED)
-    if operand is not None and fl.as_bool("w"):
+    operand = pushdown_operand(paths, opts.flags, pattern_str,
+                               RG_SEARCH_HONORED)
+    if (operand is not None and pattern_str is not None
+            and fl.as_bool("word_regexp")):
         match = detect_scope(operand)
         if match.kind in NATIVE_KINDS and search_available(accessor.config):
             target = search_target(match)

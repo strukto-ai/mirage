@@ -289,7 +289,7 @@ describe('parseCommand — multiple value flags accumulate newline-joined', () =
 
   it('accumulates repeated -e for rg and frees the positional slot', () => {
     const p = parseCommand(specOf('rg'), ['-e', 'foo', '-e', 'bar', '/x'], '/')
-    expect(p.flags['-e']).toEqual(['foo', 'bar'])
+    expect(p.flags['--regexp']).toEqual(['foo', 'bar'])
     expect(p.texts()).toEqual([])
     expect(p.paths()).toEqual(['/x'])
   })
@@ -322,7 +322,7 @@ describe('parseCommand — grep -f pattern file', () => {
   it('keeps rg -f - as stdin, as grep does', () => {
     // Resolved against the cwd, `-` became a pattern file named `/-`.
     const p = parseCommand(specOf('rg'), ['-f', '-', '/a.txt'], '/data', 'rg')
-    expect(p.flags['-f']).toEqual(['-'])
+    expect(p.flags['--file']).toEqual(['-'])
     expect(p.paths()).toEqual(['/a.txt'])
   })
 })
@@ -336,7 +336,7 @@ describe('parseCommand — GNU long flag =value syntax', () => {
 
   it('parses rg --type=md', () => {
     const p = parseCommand(specOf('rg'), ['--type=md', 'pat', '/x'], '/')
-    expect(p.flags['--type']).toBe('md')
+    expect(p.flags['--type']).toEqual(['md'])
     expect(p.texts()).toEqual(['pat'])
     expect(p.paths()).toEqual(['/x'])
   })

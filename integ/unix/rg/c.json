@@ -27,10 +27,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg -c hello /data/mixed.txt",
+      "command": "rg -c hello /data/mixed.txt; rg --count-matches o /data/mixed.txt; rg -c --include-zero zzz /data/mixed.txt; echo rc=$?; rg --count-matches -c o /data/mixed.txt",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "1\n4\n0\nrc=1\n3\n",
         "stderr": ""
       },
       "flags": [

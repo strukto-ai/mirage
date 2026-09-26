@@ -23,7 +23,7 @@ import { readFailExitCode } from '../../../spec/usage.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { parseFlags as parseGrepFlags, printsContext as grepPrintsContext } from '../grep.ts'
-import { parseFlags as parseRgFlags, printsContext as rgPrintsContext } from '../rg.ts'
+import { betweenFiles as rgBetweenFiles, parseFlags as parseRgFlags } from '../rg.ts'
 
 const ENC = new TextEncoder()
 
@@ -32,18 +32,20 @@ const ENC = new TextEncoder()
 // expands the operand's glob natively). Output is materialized and the lazy
 // exit code synced, so combiners see final values.
 /**
- * Whether one run's grep or rg output is set off from the next by `--`. Both
- * print the separator between one file's context and the next file's, so the
- * runs a line splits into join the way one run would.
+ * What sets one run's grep or rg output off from the next's. Both print a
+ * separator between one file's context and the next file's (rg's own, or
+ * none under --no-context-separator), and rg a blank line between --heading
+ * groups, so the runs a line splits into join the way one run would. Nothing
+ * for any other output, a plain line stream.
  */
-export function contextSeparated(cmdName: string, flagKwargs: Record<string, FlagValue>): boolean {
+export function runSeparator(cmdName: string, flagKwargs: Record<string, FlagValue>): string {
   if (cmdName === 'rg') {
-    return rgPrintsContext(parseRgFlags(new FlagView(flagKwargs, specOf('rg'))))
+    return rgBetweenFiles(parseRgFlags(new FlagView(flagKwargs, specOf('rg'))))
   }
   if (cmdName === 'grep') {
-    return grepPrintsContext(parseGrepFlags(new FlagView(flagKwargs, specOf('grep'))))
+    return grepPrintsContext(parseGrepFlags(new FlagView(flagKwargs, specOf('grep')))) ? '--\n' : ''
   }
-  return false
+  return ''
 }
 
 export async function runOperands(
@@ -53,7 +55,10 @@ export async function runOperands(
   texts: string[],
   flagKwargs: Record<string, FlagValue>,
   stdinBytes: Uint8Array | null = null,
+  stopAtSuccess = false,
 ): Promise<OperandRun[]> {
+  // `stopAtSuccess` runs no operand after one that exits 0, which is how
+  // grep -q and rg -q stop at their first match.
   const results: OperandRun[] = []
   for (const scope of scopes) {
     const [out, io] = await runSingle(cmdName, [scope], texts, flagKwargs, {
@@ -80,6 +85,7 @@ export async function runOperands(
       data = new Uint8Array()
     }
     results.push({ scope, data, io })
+    if (stopAtSuccess && io.exitCode === 0) break
   }
   return results
 }

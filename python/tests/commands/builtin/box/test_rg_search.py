@@ -71,13 +71,13 @@ async def test_plain_rg_allows_narrowing(harness, index):
 async def test_invert_type_and_glob_force_the_full_walk(harness, index):
     narrow, _ = harness
     await rg(make_accessor(), [scope()], ['needle'],
-             CommandOpts(index=index, flags={'v': True}))
+             CommandOpts(index=index, flags={'invert_match': True}))
     assert narrow.await_args.kwargs["exact_file_set"]
     await rg(make_accessor(), [scope()], ['needle'],
-             CommandOpts(index=index, flags={'type': 'py'}))
+             CommandOpts(index=index, flags={'type': ['py']}))
     assert narrow.await_args.kwargs["exact_file_set"]
     await rg(make_accessor(), [scope()], ['needle'],
-             CommandOpts(index=index, flags={'glob': '*.py'}))
+             CommandOpts(index=index, flags={'glob': ['*.py']}))
     assert narrow.await_args.kwargs["exact_file_set"]
 
 
@@ -86,7 +86,7 @@ async def test_narrowed_run_forces_filename_labels(harness, index):
     narrow, generic = harness
     narrow.return_value = ([spec("/data/a.txt")], True)
     await rg(make_accessor(), [scope()], ['needle'], CommandOpts(index=index))
-    assert generic.await_args.args[2].flags.get("H") is True
+    assert generic.await_args.args[2].flags.get("with_filename") is True
 
 
 @pytest.mark.asyncio
@@ -94,8 +94,8 @@ async def test_dash_upper_i_suppression_survives_narrowing(harness, index):
     narrow, generic = harness
     narrow.return_value = ([spec("/data/a.txt")], True)
     await rg(make_accessor(), [scope()], ['needle'],
-             CommandOpts(index=index, flags={'args_I': True}))
-    assert "H" not in generic.await_args.args[2].flags
+             CommandOpts(index=index, flags={'no_filename': True}))
+    assert "with_filename" not in generic.await_args.args[2].flags
 
 
 @pytest.mark.asyncio
@@ -103,7 +103,7 @@ async def test_walk_fallback_leaves_flags_alone(harness, index):
     narrow, generic = harness
     narrow.return_value = ([scope()], False)
     await rg(make_accessor(), [scope()], ['needle'], CommandOpts(index=index))
-    assert "H" not in generic.await_args.args[2].flags
+    assert "with_filename" not in generic.await_args.args[2].flags
 
 
 @pytest.mark.asyncio

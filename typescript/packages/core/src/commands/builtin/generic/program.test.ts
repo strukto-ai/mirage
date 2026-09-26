@@ -86,16 +86,16 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 describe('rg program files from stdin', () => {
-  it('lowers a -f - to -e', async () => {
+  it('lowers a -f - to --regexp', async () => {
     const [texts, flags, rest, error] = await prepareProgram(
       'rg',
       ['/in'],
-      { f: ['-'] },
+      { file: ['-'] },
       ENC.encode('a\nb\n'),
       noDispatch,
     )
     expect(error).toBeNull()
-    expect([texts, flags]).toEqual([['/in'], { f: [], e: ['a\nb'] }])
+    expect([texts, flags]).toEqual([['/in'], { file: [], regexp: ['a\nb'] }])
     expect(await materialize(rest)).toEqual(new Uint8Array())
   })
 
@@ -105,7 +105,7 @@ describe('rg program files from stdin', () => {
     const [, , , error] = await prepareProgram(
       'rg',
       [],
-      { f: ['-', '-'] },
+      { file: ['-', '-'] },
       ENC.encode('a\n'),
       noDispatch,
       [typed('-')],
@@ -120,7 +120,7 @@ describe('rg program files from stdin', () => {
     const [, , , error] = await prepareProgram(
       'rg',
       [],
-      { f: ['-'] },
+      { file: ['-'] },
       ENC.encode('a\n'),
       noDispatch,
       [typed('/in'), typed('-')],
@@ -137,13 +137,13 @@ describe('rg program files from stdin', () => {
     const [, flags, rest, error] = await prepareProgram(
       'rg',
       [],
-      { f: ['/dev/stdin'] },
+      { file: ['/dev/stdin'] },
       ENC.encode('a\n'),
       noDispatch,
       [typed('-')],
     )
     expect(error).toBeNull()
-    expect(flags).toEqual({ f: [], e: ['a'] })
+    expect(flags).toEqual({ file: [], regexp: ['a'] })
     expect(await materialize(rest)).toEqual(new Uint8Array())
   })
 

@@ -374,6 +374,17 @@ def _set_bool_flag(
         flags[name] = True
 
 
+def _attached(value: str, equals: bool) -> str:
+    """An attached short-option value, one leading ``=`` dropped for a
+    program that reads ``-x=VALUE`` as ``VALUE`` (EQUALS_SHORT_VALUES).
+
+    Args:
+        value (str): the value as it follows the option letter.
+        equals (bool): whether this program drops the ``=``.
+    """
+    return value[1:] if equals and value.startswith("=") else value
+
+
 def _match_mixed_cluster(
     tok: str,
     cs: CompiledSpec,
@@ -552,6 +563,7 @@ def parse_command(
         no_long_option_parser = lenient_dash_operands
         outside_sole_argument = False
         digit_options = False
+        equals_values = False
         synonyms: dict[str, str] = {}
     else:
         # getopt_long, with exactly two exceptions, both named rather
@@ -582,6 +594,7 @@ def parse_command(
         # are the real program's own tables, not facts any declaration
         # states.
         digit_options = builtin and cmd_name in constants.DIGIT_OPTIONS
+        equals_values = builtin and cmd_name in constants.EQUALS_SHORT_VALUES
         synonyms = {
             spelling: same
             for (name, spelling), same in constants.LONG_SYNONYMS.items()
@@ -749,9 +762,10 @@ def parse_command(
                     matched_value = True
                     break
                 if tok.startswith(vf) and len(tok) > len(vf):
+                    attached_value = _attached(tok[len(vf):], equals_values)
                     _set_value_flag(flags, refusals, cs, argmatch_dests, vf,
-                                    tok[len(vf):])
-                    base = _rebase(flags, cs, vf, tok[len(vf):], base)
+                                    attached_value)
+                    base = _rebase(flags, cs, vf, attached_value, base)
                     i += 1
                     matched_value = True
                     break
@@ -789,6 +803,7 @@ def parse_command(
             if mixed is not None:
                 cluster_bools, vflag, attached = mixed
                 if attached is not None:
+                    attached = _attached(attached, equals_values)
                     for name in cluster_bools:
                         _set_bool_flag(flags, cs, name)
                     _set_value_flag(flags, refusals, cs, argmatch_dests, vflag,

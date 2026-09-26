@@ -131,7 +131,7 @@ def test_grep_repeated_dash_f_accumulates_and_routes_each_file():
 
 def test_rg_dash_e_frees_positional_and_accumulates():
     parsed = parse_command(SPECS["rg"], ["-e", "foo", "-e", "bar", "/x"], "/")
-    assert parsed.flags["-e"] == ["foo", "bar"]
+    assert parsed.flags["--regexp"] == ["foo", "bar"]
     assert parsed.texts() == []
     assert parsed.paths() == ["/x"]
 
@@ -141,7 +141,7 @@ def test_rg_dash_f_dash_stays_stdin_as_grep_does():
     parsed = parse_command(SPECS["rg"], ["-f", "-", "/a.txt"],
                            "/data",
                            cmd_name="rg")
-    assert parsed.flags["-f"] == ["-"]
+    assert parsed.flags["--file"] == ["-"]
     assert parsed.paths() == ["/a.txt"]
 
 
@@ -153,7 +153,7 @@ def test_long_value_flag_equals_syntax():
 
 def test_long_value_flag_equals_syntax_rg():
     parsed = parse_command(SPECS["rg"], ["--type=md", "pat", "/x"], "/")
-    assert parsed.flags["--type"] == "md"
+    assert parsed.flags["--type"] == ["md"]
     assert parsed.texts() == ["pat"]
     assert parsed.paths() == ["/x"]
 

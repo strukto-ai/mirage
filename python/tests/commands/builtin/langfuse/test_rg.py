@@ -98,7 +98,7 @@ async def test_shaping_flag_defers_to_generic(accessor):
                new=AsyncMock(return_value=SUMMARIES)) as fetch, patch.dict(
                    GENERICS, {"rg": generic}):
         await rg(accessor, [_spec("/traces")], ["search-me"],
-                 _opts(args_l=True))
+                 _opts(files_with_matches=True))
     fetch.assert_not_awaited()
     generic.assert_awaited_once()
 

@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg -v error /data/r4/app.log",
+      "command": "rg -v error /data/r4/app.log; rg -v --no-invert-match error /data/r4/app.log",
       "expect": {
         "exit": 0,
-        "stdout": "warning: low memory\ninfo: all good\nnote: done\n",
+        "stdout": "warning: low memory\ninfo: all good\nnote: done\nerror: disk full\nerror: timeout\n",
         "stderr": ""
       },
       "flags": [

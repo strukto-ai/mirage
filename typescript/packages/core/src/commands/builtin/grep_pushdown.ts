@@ -174,6 +174,8 @@ export function textCandidates(paths: readonly PathSpec[]): PathSpec[] {
   return paths.filter((p) => !BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? ''))
 }
 
+// grep's dests, then rg's, which spells each flag by its long name; a
+// spec-less view reads both, and neither command sets the other's.
 const PUSHDOWN_SHAPING_BOOL = [
   'v',
   'n',
@@ -188,21 +190,70 @@ const PUSHDOWN_SHAPING_BOOL = [
   'h',
   'args_I',
   'text',
+  'invert_match',
+  'line_number',
+  'count',
+  'files_with_matches',
+  'word_regexp',
+  'only_matching',
+  'quiet',
+  'with_filename',
+  'no_filename',
+  'line_regexp',
+  'column',
+  'vimgrep',
+  'trim',
+  'null',
+  'count_matches',
+  'include_zero',
+  'files',
+  'type_list',
+  'heading',
+  'passthru',
+  'passthrough',
+  'binary',
+  'sort_files',
 ] as const
 const PUSHDOWN_SHAPING_INT = ['m', 'A', 'B', 'C'] as const
+// rg's valued options defer on presence alone: a value the generic would
+// refuse in ripgrep's words is not the push-down's to parse.
+const PUSHDOWN_SHAPING_VALUE = [
+  'max_count',
+  'after_context',
+  'before_context',
+  'context',
+  'max_columns',
+  'replace',
+  'field_match_separator',
+  'max_depth',
+  'max_filesize',
+  'sort',
+  'sortr',
+] as const
 // Split the way Python's `_PUSHDOWN_FILTER_STR` / `_PUSHDOWN_FILTER_LIST`
 // are, because the two halves are tested differently: a repeatable option
 // arrives as a list and an empty list means "not supplied", while a
 // single-valued one arrives as a string. One flat list tested with
-// `!== undefined` answered differently from Python for both.
-const PUSHDOWN_FILTER_STR = ['type', 'glob', 'binary_files'] as const
-const PUSHDOWN_FILTER_LIST = ['include', 'exclude', 'exclude_dir'] as const
+// `!== undefined` answered differently from Python for both. -f adds
+// patterns the pushed-down one never carried.
+const PUSHDOWN_FILTER_STR = ['binary_files'] as const
+const PUSHDOWN_FILTER_LIST = [
+  'include',
+  'exclude',
+  'exclude_dir',
+  'file',
+  'glob',
+  'iglob',
+  'type',
+  'type_not',
+] as const
 
 // True when a flag alters the match set or output shape of grep/rg. A search
 // push-down prints each matching record as one whole line, so it cannot honor
-// -v/-n/-b/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), nor rg's
-// file-filtering --glob/--type; the wrapper must defer to the generic scan
-// when any is present.
+// -v/-n/-b/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no filename), -x, -r,
+// --column and the rest of its output options, nor the file filters
+// (--include/--exclude, rg's -g/-t/-T/-d) or the patterns -f adds; the wrapper
+// must defer to the generic scan when any is present.
 //
 // `honored` names the flags this particular push-down implements itself, so
 // their presence is not a reason to defer. Two shapes need it. A provider
@@ -223,6 +274,7 @@ export function hasSearchShapingFlags(
   const gated = (name: string): boolean => !honored.includes(name)
   if (PUSHDOWN_SHAPING_BOOL.some((name) => gated(name) && fl.asBool(name))) return true
   if (PUSHDOWN_SHAPING_INT.some((name) => gated(name) && fl.asInt(name) !== undefined)) return true
+  if (PUSHDOWN_SHAPING_VALUE.some((name) => gated(name) && fl.raw(name) !== undefined)) return true
   if (PUSHDOWN_FILTER_LIST.some((name) => gated(name) && fl.asList(name).length > 0)) return true
   return PUSHDOWN_FILTER_STR.some((name) => gated(name) && fl.asStr(name) !== undefined)
 }
@@ -234,7 +286,9 @@ export function hasSearchShapingFlags(
 // down (mongodb) gate on hasSearchShapingFlags alone instead.
 export function searchPushdownOk(bag: Record<string, FlagValue>, pattern: string): boolean {
   if (pattern.includes('\n')) return false
-  return isLiteralPattern(pattern, new FlagView(bag).asBool('F')) && !hasSearchShapingFlags(bag)
+  const fl = new FlagView(bag)
+  const fixed = fl.asBool('F') || fl.asBool('fixed_strings')
+  return isLiteralPattern(pattern, fixed) && !hasSearchShapingFlags(bag)
 }
 
 // The one operand a search push-down may answer for, or null. A push-down

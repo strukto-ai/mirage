@@ -16,9 +16,11 @@ import asyncio
 
 import pytest
 
+from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.grep_pattern import compile_pattern
 from mirage.commands.builtin.grep_scan import grep_recursive
-from mirage.commands.builtin.rg_scan import rg_full
+from mirage.commands.config import CommandOpts
+from mirage.io.stream import materialize
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -134,9 +136,9 @@ async def test_grep_scan_warns_on_missing_dir():
 async def test_rg_scan_collects_warnings_on_unreadable_file():
 
     async def read_bytes(path):
-        if path == "/good.py":
+        if path.virtual == "/good.py":
             return b"hello world\n"
-        raise FileNotFoundError(path)
+        raise FileNotFoundError(path.virtual)
 
     readdir = _make_readdir({"/": ["/good.py", "/bad.py"]})
     stat_fn = _make_stat({
@@ -155,34 +157,20 @@ async def test_rg_scan_collects_warnings_on_unreadable_file():
     })
 
     async def async_readdir(path):
-        return readdir(path)
+        return readdir(path.virtual)
 
     async def async_stat(path):
-        return stat_fn(path)
+        return stat_fn(path.virtual)
 
-    warnings: list[str] = []
-    results = await rg_full(
-        async_readdir,
-        async_stat,
-        read_bytes,
-        "/",
-        "hello",
-        ignore_case=False,
-        invert=False,
-        line_numbers=True,
-        count_only=False,
-        files_only=False,
-        fixed_string=False,
-        only_matching=False,
-        max_count=None,
-        whole_word=False,
-        context_before=0,
-        context_after=0,
-        file_type=None,
-        glob_pattern=None,
-        hidden=False,
-        warnings=warnings,
-    )
+    # The scan reports the file it could not read and keeps searching.
+    out, io = await generic_rg([PathSpec.from_str_path("/")], ["hello"],
+                               CommandOpts(),
+                               readdir=async_readdir,
+                               stat=async_stat,
+                               read_bytes=read_bytes,
+                               read_stream=None)
+    results = (await materialize(out)).decode().splitlines()
+    warnings = (await materialize(io.stderr)).decode().splitlines()
     assert any("hello" in r for r in results)
     assert len(warnings) == 1
     assert "/bad.py" in warnings[0]

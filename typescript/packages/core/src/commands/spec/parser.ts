@@ -21,6 +21,7 @@ import {
   ARG_PLACEHOLDER,
   ARGMATCH_CHOICE_OPTIONS,
   DIGIT_OPTIONS,
+  EQUALS_SHORT_VALUES,
   FLOAT_VALUE,
   flagKwargName,
   INT_VALUE,
@@ -391,6 +392,12 @@ interface MixedCluster {
 // cluster as its value, as getopt does, so `date -uIs` is `-u -Is`; with
 // nothing after it, it is one more bool flag. Returns null when any character
 // is unknown or no value flag terminates it.
+// An attached short-option value, one leading `=` dropped for a program that
+// reads `-x=VALUE` as `VALUE` (EQUALS_SHORT_VALUES).
+function attached(value: string, equals: boolean): string {
+  return equals && value.startsWith('=') ? value.slice(1) : value
+}
+
 function matchMixedCluster(tok: string, cs: CompiledSpec): MixedCluster | null {
   const bools: string[] = []
   const chars = tok.slice(1)
@@ -526,6 +533,7 @@ export function parseCommand(
   let outsideSoleArgument: boolean
   let lenientDashOperands: boolean
   let digitOptions: boolean
+  let equalsValues: boolean
   const synonyms = new Map<string, string>()
   if (unknownIsOperand) {
     // Where the word goes is still the grammar's to say: it lands in a textual
@@ -539,6 +547,7 @@ export function parseCommand(
     noLongOptionParser = lenientDashOperands
     outsideSoleArgument = false
     digitOptions = false
+    equalsValues = false
   } else {
     // getopt_long, with exactly two exceptions, both named rather than derived
     // from the spec because nothing in a declaration tells them apart: see
@@ -564,6 +573,7 @@ export function parseCommand(
     // Gated the same way: the digit letters and the synonym pairs are the real
     // program's own tables, not facts any declaration states.
     digitOptions = builtin && DIGIT_OPTIONS.has(cmdName)
+    equalsValues = builtin && EQUALS_SHORT_VALUES.has(cmdName)
     if (builtin) {
       for (const [key, same] of LONG_SYNONYMS) {
         const [name, spelling] = key.split(' ')
@@ -743,8 +753,9 @@ export function parseCommand(
           break
         }
         if (tok.startsWith(vf) && tok.length > vf.length) {
-          setValueFlag(flags, refusals, cs, argmatchDestSet, vf, tok.slice(vf.length))
-          base = rebase(flags, cs, vf, tok.slice(vf.length), base)
+          const attachedValue = attached(tok.slice(vf.length), equalsValues)
+          setValueFlag(flags, refusals, cs, argmatchDestSet, vf, attachedValue)
+          base = rebase(flags, cs, vf, attachedValue, base)
           i += 1
           matchedValue = true
           break
@@ -786,9 +797,10 @@ export function parseCommand(
       const mixed = matchMixedCluster(tok, cs)
       if (mixed !== null) {
         if (mixed.attached !== null) {
+          const attachedValue = attached(mixed.attached, equalsValues)
           for (const name of mixed.bools) setBoolFlag(flags, cs, name)
-          setValueFlag(flags, refusals, cs, argmatchDestSet, mixed.valueFlag, mixed.attached)
-          base = rebase(flags, cs, mixed.valueFlag, mixed.attached, base)
+          setValueFlag(flags, refusals, cs, argmatchDestSet, mixed.valueFlag, attachedValue)
+          base = rebase(flags, cs, mixed.valueFlag, attachedValue, base)
           i += 1
           continue
         }

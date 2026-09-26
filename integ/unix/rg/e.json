@@ -64,10 +64,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg -e world -e bar /data/a.txt",
+      "command": "rg -e world -e bar /data/a.txt; rg --regexp world --regexp=bar /data/a.txt; rg -e=world /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "world\nbar\n",
+        "stdout": "world\nbar\nworld\nbar\nworld\n",
         "stderr": ""
       },
       "flags": [

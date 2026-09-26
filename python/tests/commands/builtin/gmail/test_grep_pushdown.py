@@ -74,8 +74,10 @@ async def test_rg_word_uses_native_search():
     accessor = AsyncMock()
     with patch("mirage.commands.builtin.gmail.rg.search_messages",
                new=AsyncMock(return_value=ROWS)) as spy:
-        await rg(accessor, [_label_scope()], ['hello'],
-                 CommandOpts(index=RAMIndexCacheStore(), flags={'w': True}))
+        await rg(
+            accessor, [_label_scope()], ['hello'],
+            CommandOpts(index=RAMIndexCacheStore(),
+                        flags={'word_regexp': True}))
     spy.assert_awaited_once()
 
 
@@ -138,8 +140,10 @@ async def test_rg_second_operand_defers_to_generic():
                   new=AsyncMock(return_value=[])), \
             patch("mirage.commands.builtin.gmail.rg.generic_rg",
                   new=AsyncMock(return_value=(b"", IOResult()))) as generic:
-        await rg(accessor, [_label_scope(), sent], ['hello'],
-                 CommandOpts(index=RAMIndexCacheStore(), flags={'w': True}))
+        await rg(
+            accessor, [_label_scope(), sent], ['hello'],
+            CommandOpts(index=RAMIndexCacheStore(),
+                        flags={'word_regexp': True}))
     spy.assert_not_awaited()
     generic.assert_awaited_once()
 

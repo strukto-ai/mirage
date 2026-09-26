@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg -w alpha /data/r4/notes.txt",
+      "command": "rg -w alpha /data/r4/notes.txt; rg -x alpha /data/r4/notes.txt; rg -xi alpha /data/r4/notes.txt; rg -w -x alph /data/r4/notes.txt; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "alpha\n",
+        "stdout": "alpha\nalpha\nalpha\nALPHA\nrc=1\n",
         "stderr": ""
       },
       "flags": [

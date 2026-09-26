@@ -1,4 +1,4 @@
-import { mergePatternList } from '../grep_pattern.ts'
+import { PATTERN_KEYS, mergePatternList } from '../grep_pattern.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { specOf } from '../../spec/index.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -16,11 +16,18 @@ const RG_STDIN_REREAD = 'rg: error reading -f/--file from stdin: stdin has alrea
 const RG_STDIN_SEARCHED =
   'rg: error: attempted to read patterns from stdin while also searching stdin\n'
 
+// The dest each command's spec gives its program file.
+const FILE_KEYS: Readonly<Record<string, string>> = {
+  grep: 'file',
+  rg: 'file',
+  sed: 'f',
+  awk: 'f',
+  jq: 'from_file',
+}
+
 /** The invocation's program files, or an empty list for inline programs. */
 export function programFiles(name: string, bag: Record<string, FlagValue>): string[] {
-  const fl = new FlagView(bag, specOf(name))
-  const key = name === 'jq' ? 'from_file' : name === 'grep' ? 'file' : 'f'
-  return fl.asList(key)
+  return new FlagView(bag, specOf(name)).asList(FILE_KEYS[name] ?? 'f')
 }
 
 /** Read program files once before input routing or traversal fan-out.
@@ -39,7 +46,7 @@ export async function prepareProgram(
   operands: readonly PathSpec[] = [],
 ): Promise<[string[], Record<string, FlagValue>, ByteSource | null, IOResult | null]> {
   const fl = new FlagView(bag, specOf(name))
-  const key = name === 'jq' ? 'from_file' : name === 'grep' ? 'file' : 'f'
+  const key = FILE_KEYS[name] ?? 'f'
   const files = programFiles(name, bag)
   if (files.length === 0) return [texts, bag, stdin, null]
   const source = resolveSource(stdin)
@@ -95,12 +102,13 @@ export async function prepareProgram(
   const out = Object.fromEntries(Object.entries(bag).filter(([name]) => name !== key))
   const dec = new TextDecoder()
   if (name === 'grep' || name === 'rg') {
-    const expressions = fl.asList('e')
+    const patternKey = PATTERN_KEYS[name] ?? 'e'
+    const expressions = fl.asList(patternKey)
     let pattern = expressions.length > 0 ? expressions.join('\n') : null
     for (const data of pieces) pattern = mergePatternList(pattern, data)
     // An empty pattern-file list preserves grep's zero-pattern sentinel.
     out[key] = []
-    out.e = pattern === null ? [] : [pattern]
+    out[patternKey] = pattern === null ? [] : [pattern]
   } else if (name === 'sed') {
     out.e = [...fl.asList('e'), ...pieces.map((data) => dec.decode(data).replace(/\n$/, ''))]
   } else {

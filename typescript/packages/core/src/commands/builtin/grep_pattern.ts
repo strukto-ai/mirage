@@ -22,6 +22,15 @@ import { FlagView } from '../spec/flag_view.ts'
 import { type FlagValue } from '../spec/types.ts'
 
 export const NEVER_MATCH = '(?!)'
+// The dest -e fills in each search command's spec: rg spells its options by
+// their long names.
+export const PATTERN_KEYS: Readonly<Record<string, string>> = {
+  grep: 'e',
+  zgrep: 'e',
+  rg: 'regexp',
+}
+// The dest -f fills: grep's and rg's name the long spelling, zgrep has none.
+const FILE_KEYS: Readonly<Record<string, string>> = { grep: 'file', zgrep: 'f', rg: 'file' }
 
 const DEC = new TextDecoder()
 
@@ -35,11 +44,13 @@ function escapeRegex(s: string): string {
 export function patternArg(
   texts: readonly string[],
   bag: Record<string, FlagValue>,
+  patternKey = 'e',
 ): string | null {
   // Spec-less, as the shared push-down helpers are: `-e` and `-f` are
   // declared by the grep, rg and zgrep specs alike, and this helper is
-  // reached from all three.
-  const e = new FlagView(bag).asList('e')
+  // reached from all three; `patternKey` is the dest -e fills (rg's is
+  // `regexp`).
+  const e = new FlagView(bag).asList(patternKey)
   if (e.length > 0) return e.join('\n')
   if (texts.length > 0 && texts[0] !== undefined) return texts[0]
   return null
@@ -63,12 +74,12 @@ export async function resolvePattern(
   mountPrefix: string | null | undefined,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<PatternResolution> {
-  let pattern = patternArg(texts, bag)
+  let pattern = patternArg(texts, bag, PATTERN_KEYS[name] ?? 'e')
   let neverMatch = false
-  // `raw` rather than `asList`, mirroring Python's `flags.raw("f")`: an
+  // `raw` rather than `asList`, mirroring Python's `flags.raw(file_key)`: an
   // empty -f list still means "-f was supplied", which is what turns on the
   // NEVER_MATCH sentinel below.
-  const patternFiles = new FlagView(bag).raw(name === 'grep' ? 'file' : 'f')
+  const patternFiles = new FlagView(bag).raw(FILE_KEYS[name] ?? 'f')
   if (Array.isArray(patternFiles)) {
     const first = paths[0]
     const prefix =
@@ -143,7 +154,7 @@ function sourceOf(part: string, fixedString: boolean, basic: boolean): string {
 // patterns are basic regular expressions, which grep reads by default and which
 // invert most of the RegExp operators; false leaves them alone, which is right
 // for -E and for rg's own dialect.
-function buildPatternStr(
+export function buildPatternStr(
   pattern: string,
   fixedString = false,
   wholeWord = false,

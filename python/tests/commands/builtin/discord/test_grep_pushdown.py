@@ -332,7 +332,7 @@ async def test_discord_rg_channel_dir_uses_native_search():
             new=AsyncMock(return_value=fake_channels),
     ):
         out, io = await rg(accessor, [_channel_path()], ['hello'],
-                           CommandOpts(flags={'w': True}))
+                           CommandOpts(flags={'word_regexp': True}))
     assert fake_search.await_count == 1
     assert io.exit_code == 0
     assert b"hello" in out
@@ -375,11 +375,12 @@ async def test_discord_rg_multi_pattern_skips_native_search():
                                                 type=FileType.FILE,
                                                 content=ContentType.TEXT)),
     ):
-        _, io = await rg(accessor, paths, [],
-                         CommandOpts(flags={
-                             'e': ['ada', 'ben'],
-                             'w': True
-                         }))
+        _, io = await rg(
+            accessor, paths, [],
+            CommandOpts(flags={
+                'regexp': ['ada', 'ben'],
+                'word_regexp': True
+            }))
     assert fake_search.await_count == 0
     assert fake_resolve.await_count == 1
 

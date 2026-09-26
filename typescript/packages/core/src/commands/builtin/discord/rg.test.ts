@@ -84,7 +84,7 @@ describe('discord rg', () => {
         }),
       ],
       ['hello'],
-      { w: true },
+      { word_regexp: true },
       { index: idx, transport },
     )
     expect(transport.calls[0]?.endpoint).toBe('/guilds/G1/messages/search')
@@ -106,7 +106,7 @@ describe('discord rg', () => {
         }),
       ],
       ['hello'],
-      { w: true },
+      { word_regexp: true },
       { transport },
     )
     expect(out.exitCode).toBe(1)

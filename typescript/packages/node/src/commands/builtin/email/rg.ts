@@ -13,9 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
-import { RG_NO_PATTERN, rgGeneric } from '@struktoai/mirage-core/commands/builtin/generic/rg'
+import {
+  parseFlags,
+  refuseMissingPattern,
+  rgGeneric,
+  rgMatcher,
+} from '@struktoai/mirage-core/commands/builtin/generic/rg'
 import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
-import { compilePattern, patternArg } from '@struktoai/mirage-core/commands/builtin/grep_pattern'
+import { patternArg } from '@struktoai/mirage-core/commands/builtin/grep_pattern'
 import { pushdownOperand, searchQuery } from '@struktoai/mirage-core/commands/builtin/grep_pushdown'
 import { grepLines } from '@struktoai/mirage-core/commands/builtin/grep_scan'
 import type { GrepLinesOptions } from '@struktoai/mirage-core/commands/builtin/grep_scan'
@@ -34,7 +39,7 @@ import { stat as emailStat } from '../../../core/email/stat.ts'
 import { detectScope, NATIVE_KINDS } from '../../../core/email/scope.ts'
 import { searchAndFormat } from '../../../core/email/search.ts'
 import { EMAIL_IO } from './io.ts'
-import { SEARCH_HONORED, messageLines } from './grep.ts'
+import { RG_SEARCH_HONORED, messageLines } from './grep.ts'
 
 const resolveGlob = resolveGlobOf(EMAIL_IO)
 
@@ -54,29 +59,27 @@ async function rgCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const pattern = patternArg(texts, opts.flags)
-  if (pattern === null) {
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${RG_NO_PATTERN}\n`) })]
-  }
+  const pattern = patternArg(texts, opts.flags, 'regexp')
   const fl = new FlagView(opts.flags, specOf('rg'))
-  // -l is short-only, so it lands on the disambiguated `args_l` dest
-  // (`AMBIGUOUS_NAMES`); a plain `l` key is one the parser never emits.
+  const f = parseFlags(fl)
+  const refused = refuseMissingPattern(pattern, fl, f)
+  if (refused !== null) return refused
   const lineOpts: GrepLinesOptions = {
     invert: false,
-    lineNumbers: fl.asBool('n'),
+    lineNumbers: f.lineNumbers,
     countOnly: false,
-    filesOnly: fl.asBool('args_l'),
-    onlyMatching: fl.asBool('o'),
-    maxCount: fl.asInt('m') ?? null,
+    filesOnly: f.filesOnly,
+    onlyMatching: f.onlyMatching,
+    maxCount: f.maxCount,
   }
 
   // Same gate as email grep, from the same table, and it reads the scope the
   // same way: a line the push-down cannot answer takes the generic scan.
-  const operand = pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
+  const operand = pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
   // The server is asked for the literal every match must contain, never
   // the regex's own spelling: IMAP TEXT is a substring search.
-  const query = searchQuery(pattern, fl.asBool('F'))
-  if (operand !== null && query !== null) {
+  const query = pattern === null ? null : searchQuery(pattern, f.fixedString)
+  if (operand !== null && pattern !== null && query !== null) {
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind)) {
       const filePrefix = mountPrefixOf(operand.virtual, operand.vfsPath)
@@ -87,7 +90,7 @@ async function rgCommand(
         filePrefix,
         accessor.config.maxMessages,
       )
-      const pat = compilePattern(pattern, fl.asBool('i'), fl.asBool('F'), fl.asBool('w'))
+      const pat = rgMatcher(pattern, false, f)
       const lines: string[] = []
       for (const [vfsPath, msgText] of pairs) {
         const matched = grepLines(vfsPath, messageLines(msgText), pat, lineOpts)

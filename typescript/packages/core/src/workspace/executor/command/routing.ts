@@ -28,8 +28,8 @@ import { classifyBarePath } from '../../expand/classify/index.ts'
 // grep -r and bare rg print bare relative names (empty raw). Two gates:
 // grep only defaults under -r/-R (and ignores stdin, GNU's rule); rg
 // yields to an attached stdin, even an empty one (its readable-stdin
-// rule), unless `-f -` reads it for patterns. All pinned on
-// debian:stable-slim / ripgrep 14.
+// rule), unless `-f -` reads it for patterns or --files lists. All pinned
+// on debian:stable-slim / ripgrep 14.
 export const CWD_DEFAULT_RAW: Record<string, string> = {
   grep: '',
   rg: '',
@@ -64,20 +64,21 @@ export function defaultCwdOperand(
   }
   const parsed = parseCommand(spec, argv, cwd, cmdName)
   if (parsed.paths().length > 0) return null
+  // --type-list reads no path, so there is no cwd to walk.
+  if (cmdName === 'rg' && new FlagView(parseToKwargs(parsed), spec).asBool('type_list')) {
+    return null
+  }
   if (cmdName === 'grep') {
     const kwargs = parseToKwargs(parsed)
     if (kwargs.r !== true && kwargs.R !== true) return null
-  } else if (
-    cmdName === 'rg' &&
-    stdin !== null &&
-    !(stdin instanceof DeviceInput) &&
-    !new FlagView(parseToKwargs(parsed), spec).asList('f').includes('-')
-  ) {
-    // `-f -` reads the attached stdin for patterns first, which leaves
-    // ripgrep nothing to search there but the cwd. A stdin that is no file,
-    // FIFO or socket (`< /dev/null`) is not searched either
-    // (grep_cli::is_readable_stdin, ripgrep 14.1.1).
-    return null
+  } else if (cmdName === 'rg' && stdin !== null && !(stdin instanceof DeviceInput)) {
+    const fl = new FlagView(parseToKwargs(parsed), spec)
+    // `-f -` reads the attached stdin for patterns first, and --files lists
+    // rather than searches, and either leaves ripgrep nothing to do with
+    // stdin but walk the cwd instead. A stdin that is no file, FIFO or socket
+    // (`< /dev/null`) is not searched either (grep_cli::is_readable_stdin,
+    // ripgrep 14.1.1).
+    if (!fl.asList('file').includes('-') && !fl.asBool('files')) return null
   }
   const operand = classifyBarePath('.', registry, cwd)
   if (typeof operand === 'string') return null
@@ -96,7 +97,10 @@ export function pathFlagScopes(cmdName: string, argv: string[], cwd: string): Pa
   if (spec === undefined) return []
   const parsed = parseCommand(spec, argv, cwd, cmdName)
   const key = (
-    { grep: '--file', rg: '-f', sed: '-f', awk: '-f', jq: '--from-file' } as Record<string, string>
+    { grep: '--file', rg: '--file', sed: '-f', awk: '-f', jq: '--from-file' } as Record<
+      string,
+      string
+    >
   )[cmdName]
   const program = key === undefined ? undefined : parsed.flags[key]
   const programPaths = Array.isArray(program) ? program : [program]

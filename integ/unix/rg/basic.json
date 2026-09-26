@@ -283,10 +283,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg alpha /data/r4 | sort",
+      "command": "rg alpha /data/r4 | sort; rg --sort path alpha /data/r4; rg --sortr path -l alpha /data/r4; rg -d 1 alpha /data/r4; rg --max-depth=1 -l a /data/r4 | sort; rg --max-filesize 25 -l a /data/r4 | sort; rg -q alpha /data/r4; echo rc=$?; rg -q zzz /data/r4; echo rc=$?; rg --trim return /data/r4/code.py; rg -M 5 alpha /data/r4/notes.txt; rg -M 3 --max-columns-preview beta /data/r4/notes.txt; rg --one-file-system -l alpha /data/r4 | sort",
       "expect": {
         "exit": 0,
-        "stdout": "/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n",
+        "stdout": "/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/sub/inner.txt\n/data/r4/notes.txt\n/data/r4/notes.txt:alpha\n/data/r4/app.log\n/data/r4/code.js\n/data/r4/code.py\n/data/r4/notes.txt\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\nrc=0\nrc=1\nreturn 42\n[Omitted long matching line]\nbet [... omitted end of long line]\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\n",
         "stderr": ""
       }
     },

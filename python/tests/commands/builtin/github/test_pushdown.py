@@ -115,9 +115,9 @@ async def test_rg_shortcircuit_no_match_exit_1(mock_github_api, github_env,
         accessor, [_root()], ['import'],
         CommandOpts(index=index,
                     flags={
-                        'args_l': True,
-                        'glob': '*.nomatch',
-                        'w': True
+                        'files_with_matches': True,
+                        'glob': ['*.nomatch'],
+                        'word_regexp': True
                     }))
     body = (await materialize(stdout)).decode()
     assert io.exit_code == 1
@@ -234,7 +234,7 @@ async def test_rg_falls_back_on_a_foreign_answer_too(mock_github_api,
     _answer(monkeypatch,
             [_hit("src/main.py", "bbb222", "test-owner/test-repo-fork")])
     stdout, _ = await rg(accessor, [_root()], ["import"],
-                         CommandOpts(index=index, flags={"w": True}))
+                         CommandOpts(index=index, flags={"word_regexp": True}))
     await materialize(stdout)
     assert len(counting_read) == len(MOCK_BLOBS)
 
@@ -292,7 +292,7 @@ async def test_a_file_search_never_indexes_is_still_read(
     }, "grep: 12 files in scope, narrow the path, "
      "or use -w to enable code search\n"),
     (rg, {
-        "w": True
+        "word_regexp": True
     }, "rg: 12 files in scope and code search could not narrow them; "
      "narrow the path\n"),
 ])
@@ -411,7 +411,7 @@ async def test_a_named_file_is_always_read(mock_github_api, github_env,
         "w": True
     }),
     (rg, {
-        "w": True
+        "word_regexp": True
     }),
 ])
 async def test_a_narrowing_left_empty_matches_nothing_and_never_reads_stdin(
@@ -461,16 +461,16 @@ _GUIDE = PathSpec(vfs_path="docs/guide.md",
         "file": [_GUIDE]
     }),
     (rg, {
-        "w": True,
-        "v": True
+        "word_regexp": True,
+        "invert_match": True
     }),
     (rg, {
-        "w": True,
+        "word_regexp": True,
         "files_without_match": True
     }),
     (rg, {
-        "w": True,
-        "f": [_GUIDE]
+        "word_regexp": True,
+        "file": [_GUIDE]
     }),
 ])
 async def test_an_answer_that_depends_on_every_file_is_never_narrowed(

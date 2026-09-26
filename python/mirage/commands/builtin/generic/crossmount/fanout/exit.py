@@ -19,22 +19,22 @@ def combined_exit(cmd_name: str,
                   codes: list[int],
                   errored: list[bool] | None = None,
                   quiet: bool = False) -> int:
-    # grep-style: a usage error (2) dominates, then a failed operand (a
-    # read error, seen as exit 1 with stderr) forces 1 even when another
-    # operand matched, then any match wins (0), then no-match (1).
-    # ``-q`` keeps GNU's match-wins rule over errors. Everything else:
-    # worst operand wins.
+    # grep-style: ``-q`` with a match exits 0 whatever else failed (GNU
+    # grep and ripgrep both), then a usage error (2) dominates, then a
+    # failed operand (a read error, seen as exit 1 with stderr) forces 1
+    # even when another operand matched, then any match wins (0), then
+    # no-match (1). Everything else: worst operand wins.
     #
     # A read error is no longer one of the codes this has to invent: the
     # generics answer GNU's own number for a failed read, so a failed
-    # operand arrives here as 2 and the first branch carries it through.
+    # operand arrives here as 2 and the exit-2 branch carries it through.
     # The `errored` branch below is for an operand that reported something
     # on stderr while still exiting 1, which no read failure does now.
     if cmd_name in (Cmd.GREP, Cmd.RG):
-        if any(code > 1 for code in codes):
-            return max(codes)
         if quiet and 0 in codes:
             return 0
+        if any(code > 1 for code in codes):
+            return max(codes)
         if errored is not None and any(errored):
             return 1
         if 0 in codes:

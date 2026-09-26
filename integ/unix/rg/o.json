@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg -o \"err[a-z]*\" /data/r4/app.log",
+      "command": "rg -o \"err[a-z]*\" /data/r4/app.log; rg -o -r X 'err[a-z]*' /data/r4/app.log; rg -r '[$0]' 'err[a-z]*' /data/r4/app.log; rg -r '<$1>' 'e(r+)' /data/r4/app.log",
       "expect": {
         "exit": 0,
-        "stdout": "error\nerror\n",
+        "stdout": "error\nerror\nX\nX\n[error]: disk full\n[error]: timeout\n<rr>or: disk full\n<rr>or: timeout\n",
         "stderr": ""
       },
       "flags": [

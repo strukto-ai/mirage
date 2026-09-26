@@ -30,7 +30,7 @@ from mirage.workspace.mount import MountRegistry
 # grep -r and bare rg print bare relative names (empty raw). Two gates:
 # grep only defaults under -r/-R (and ignores stdin, GNU's rule); rg
 # yields to an attached stdin, even an empty one (its readable-stdin
-# rule), unless `-f -` reads it for patterns. All pinned on
+# rule), unless `-f -` reads it for patterns or --files lists. All pinned on
 # debian:stable-slim / ripgrep 14.
 CWD_DEFAULT_RAW = {
     "grep": "",
@@ -72,18 +72,24 @@ def default_cwd_operand(parts: list[str | PathSpec], cmd_name: str,
     parsed = parse_command(spec, argv, cwd, cmd_name)
     if parsed.paths():
         return None
+    if cmd_name == "rg" and FlagView(parse_to_kwargs(parsed),
+                                     spec=spec).as_bool("type_list"):
+        # --type-list reads no path, so there is no cwd to walk.
+        return None
     if cmd_name == "grep":
         kwargs = parse_to_kwargs(parsed)
         if kwargs.get("r") is not True and kwargs.get("R") is not True:
             return None
     elif (cmd_name == "rg" and stdin is not None
-          and not isinstance(stdin, DeviceInput) and "-" not in FlagView(
-              parse_to_kwargs(parsed), spec=spec).as_list("f")):
-        # `-f -` reads the attached stdin for patterns first, which
-        # leaves ripgrep nothing to search there but the cwd. A stdin
-        # that is no file, FIFO or socket (`< /dev/null`) is not searched
-        # either (grep_cli::is_readable_stdin, ripgrep 14.1.1).
-        return None
+          and not isinstance(stdin, DeviceInput)):
+        fl = FlagView(parse_to_kwargs(parsed), spec=spec)
+        # `-f -` reads the attached stdin for patterns first, and --files
+        # lists rather than searches, and either leaves ripgrep nothing to
+        # do with stdin but walk the cwd instead. A stdin that is no file,
+        # FIFO or socket (`< /dev/null`) is not searched either
+        # (grep_cli::is_readable_stdin, ripgrep 14.1.1).
+        if "-" not in fl.as_list("file") and not fl.as_bool("files"):
+            return None
     operand = classify_bare_path(".", registry, cwd)
     if not isinstance(operand, PathSpec):
         return None
@@ -98,7 +104,7 @@ def path_flag_scopes(cmd_name: str, argv: list[str],
     parsed = parse_command(spec, argv, cwd, cmd_name)
     key = {
         "grep": "--file",
-        "rg": "-f",
+        "rg": "--file",
         "sed": "-f",
         "awk": "-f",
         "jq": "--from-file"

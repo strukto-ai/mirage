@@ -54,9 +54,9 @@ async function runRg(
 describe('rg', () => {
   it.each([
     [{}, ''],
-    [{ H: true }, '/tmp/binary.txt:'],
-    [{ args_I: true }, ''],
-    [{ H: true, args_I: true }, ''],
+    [{ with_filename: true }, '/tmp/binary.txt:'],
+    [{ no_filename: true }, ''],
+    [{ with_filename: true, no_filename: true }, ''],
   ])('keeps rg filename flags separate from grep binary flags: %j', async (flags, prefix) => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/tmp/binary.txt', ENC.encode('needle\0tail\n'))
@@ -73,7 +73,7 @@ describe('rg', () => {
       vfs,
       ['needle'],
       [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
-      { args_I: true },
+      { no_filename: true },
     )
     expect(r.out).toBe('needle\0a\nneedle\0b\n')
     expect(r.exitCode).toBe(0)
@@ -99,7 +99,7 @@ describe('rg', () => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/tmp/a.txt', ENC.encode('Hello World\nhello world\nHELLO\n'))
     const r = await runRg(vfs, ['hello'], [PathSpec.fromStrPath('/tmp/a.txt')], {
-      i: true,
+      ignore_case: true,
     })
     expect(r.lines.length).toBe(3)
   })
@@ -108,7 +108,7 @@ describe('rg', () => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/tmp/a.txt', ENC.encode('hello\nworld\nhello again\n'))
     const r = await runRg(vfs, ['hello'], [PathSpec.fromStrPath('/tmp/a.txt')], {
-      v: true,
+      invert_match: true,
     })
     expect(r.lines).toEqual(['world'])
   })
@@ -117,7 +117,7 @@ describe('rg', () => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\nfoo baz\n'))
     const r = await runRg(vfs, ['foo'], [PathSpec.fromStrPath('/tmp/a.txt')], {
-      c: true,
+      count: true,
     })
     expect(r.lines).toEqual(['2'])
   })
@@ -125,7 +125,7 @@ describe('rg', () => {
   it('-c on a zero-match file omits the count and exits 1 (unlike grep -c)', async () => {
     const vfs = new RAMVFS()
     vfs.store.files.set('/tmp/a.txt', ENC.encode('foo\nbar\n'))
-    const r = await runRg(vfs, ['zzz'], [PathSpec.fromStrPath('/tmp/a.txt')], { c: true })
+    const r = await runRg(vfs, ['zzz'], [PathSpec.fromStrPath('/tmp/a.txt')], { count: true })
     expect(r.lines).toEqual([])
     expect(r.exitCode).toBe(1)
   })
@@ -138,7 +138,7 @@ describe('rg', () => {
       vfs,
       ['foo'],
       [PathSpec.fromStrPath('/tmp/a.txt'), PathSpec.fromStrPath('/tmp/b.txt')],
-      { c: true },
+      { count: true },
     )
     expect(r.lines).toEqual(['/tmp/a.txt:2'])
     expect(r.exitCode).toBe(0)
@@ -146,7 +146,13 @@ describe('rg', () => {
 
   it('-n prepends line numbers in stdin mode', async () => {
     const vfs = new RAMVFS()
-    const r = await runRg(vfs, ['foo'], [], { n: true }, ENC.encode('foo\nbar\nfoo baz\n'))
+    const r = await runRg(
+      vfs,
+      ['foo'],
+      [],
+      { line_number: true },
+      ENC.encode('foo\nbar\nfoo baz\n'),
+    )
     expect(r.lines).toContain('1:foo')
     expect(r.lines).toContain('3:foo baz')
   })
@@ -165,7 +171,7 @@ describe('rg', () => {
     vfs.store.files.set('/tmp/a.txt', ENC.encode('hello\n'))
     vfs.store.files.set('/tmp/sub/b.txt', ENC.encode('world\n'))
     const r = await runRg(vfs, ['hello'], [PathSpec.fromStrPath('/tmp')], {
-      args_l: true,
+      files_with_matches: true,
     })
     expect(r.lines.some((l) => l.includes('/tmp/a.txt'))).toBe(true)
     expect(r.lines.some((l) => l.includes('/tmp/sub/b.txt'))).toBe(false)

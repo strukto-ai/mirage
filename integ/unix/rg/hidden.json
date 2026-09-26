@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg --hidden alpha /data/r4 | sort",
+      "command": "rg --hidden alpha /data/r4 | sort; rg -. alpha /data/r4 | sort; rg -.l alpha /data/r4 | sort; rg -i. ALPHA /data/r4 | sort; rg -. --no-hidden alpha /data/r4 | sort; rg -uu -l alpha /data/r4 | sort; rg -- -. /data/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "/data/r4/.hidden.txt:secret alpha\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n",
+        "stdout": "/data/r4/.hidden.txt:secret alpha\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/.hidden.txt:secret alpha\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/.hidden.txt\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\n/data/r4/.hidden.txt:secret alpha\n/data/r4/notes.txt:ALPHA\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/notes.txt:alpha\n/data/r4/sub/inner.txt:alpha inner\n/data/r4/.hidden.txt\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\nrc=1\n",
         "stderr": ""
       },
       "flags": [

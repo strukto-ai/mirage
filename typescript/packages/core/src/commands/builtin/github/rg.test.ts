@@ -106,19 +106,19 @@ describe('github rg push-down', () => {
     // A walk labels every file it finds; one narrowed candidate arrives as
     // a lone explicit operand, which the generic scan would print bare.
     narrow.mockResolvedValue({ resolved: [spec('/src/a.py')], fileCount: 1, usedSearch: true })
-    await runRg({ w: true })
-    expect(generic.mock.calls[0]?.[2]?.flags.H).toBe(true)
+    await runRg({ word_regexp: true })
+    expect(generic.mock.calls[0]?.[2]?.flags.with_filename).toBe(true)
   })
 
   it('keeps -I suppression instead of forcing labels', async () => {
     narrow.mockResolvedValue({ resolved: [spec('/src/a.py')], fileCount: 1, usedSearch: true })
-    await runRg({ w: true, args_I: true })
-    expect('H' in (generic.mock.calls[0]?.[2]?.flags ?? {})).toBe(false)
+    await runRg({ word_regexp: true, no_filename: true })
+    expect('with_filename' in (generic.mock.calls[0]?.[2]?.flags ?? {})).toBe(false)
   })
 
   it('leaves flags alone on the walk fallback', async () => {
-    await runRg({ w: true })
-    expect('H' in (generic.mock.calls[0]?.[2]?.flags ?? {})).toBe(false)
+    await runRg({ word_regexp: true })
+    expect('with_filename' in (generic.mock.calls[0]?.[2]?.flags ?? {})).toBe(false)
   })
 
   it('prunes hidden candidates', async () => {
@@ -127,7 +127,7 @@ describe('github rg push-down', () => {
       fileCount: 3,
       usedSearch: true,
     })
-    await runRg({ w: true })
+    await runRg({ word_regexp: true })
     expect((generic.mock.calls[0]?.[0] ?? []).map((p) => p.virtual)).toEqual(['/src/a.py'])
   })
 
@@ -137,7 +137,7 @@ describe('github rg push-down', () => {
       fileCount: 2,
       usedSearch: true,
     })
-    await runRg({ w: true, hidden: true })
+    await runRg({ word_regexp: true, hidden: true })
     expect((generic.mock.calls[0]?.[0] ?? []).map((p) => p.virtual)).toEqual([
       '/src/.env',
       '/src/a.py',
@@ -146,7 +146,7 @@ describe('github rg push-down', () => {
 
   it('exits 1 when every narrowed candidate is hidden', async () => {
     narrow.mockResolvedValue({ resolved: [spec('/src/.env')], fileCount: 1, usedSearch: true })
-    const result = await runRg({ w: true })
+    const result = await runRg({ word_regexp: true })
     expect(result).not.toBeNull()
     const [out, io] = result as [Uint8Array, IOResult]
     expect(out).toEqual(new Uint8Array())
@@ -156,13 +156,13 @@ describe('github rg push-down', () => {
 
   it('hands the generic the candidates the walk would search', async () => {
     narrow.mockResolvedValue({ resolved: [spec('/src/a.py')], fileCount: 1, usedSearch: true })
-    await runRg({ w: true, type: 'py' })
+    await runRg({ word_regexp: true, type: ['py'] })
     expect((generic.mock.calls[0]?.[0] ?? []).map((p) => p.virtual)).toEqual(['/src/a.py'])
   })
 
   it('answers no match when the walk would search nothing', async () => {
     narrow.mockResolvedValue({ resolved: [spec('/src/a.py')], fileCount: 1, usedSearch: true })
-    const result = await runRg({ w: true, type: 'md' })
+    const result = await runRg({ word_regexp: true, type: ['md'] })
     expect(generic).not.toHaveBeenCalled()
     const [out, io] = result as [Uint8Array, IOResult]
     expect(out).toEqual(new Uint8Array())
@@ -170,14 +170,14 @@ describe('github rg push-down', () => {
   })
 
   it.each<[string, CommandOpts['flags']]>([
-    ['-v', { w: true, v: true }],
-    ['--files-without-match', { w: true, files_without_match: true }],
-    ['-f', { w: true, f: ['/docs/patterns.txt'] }],
+    ['-v', { word_regexp: true, invert_match: true }],
+    ['--files-without-match', { word_regexp: true, files_without_match: true }],
+    ['-f', { word_regexp: true, file: ['/docs/patterns.txt'] }],
   ])('treats %s as needing every file', async (_flag, flags) => {
     expect(await exactFileSet(flags)).toBe(true)
   })
 
   it('still narrows a plain -w search', async () => {
-    expect(await exactFileSet({ w: true })).toBe(false)
+    expect(await exactFileSet({ word_regexp: true })).toBe(false)
   })
 })

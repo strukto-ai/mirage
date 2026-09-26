@@ -43,6 +43,8 @@ from mirage.utils.key_prefix import mount_prefix_of
 # provider itself supplies: Gmail matches whole words, so a bare literal would
 # under-report and only -w makes the two agree.
 SEARCH_HONORED = ("w", )
+# rg spells the same flag by its long name.
+RG_SEARCH_HONORED = ("word_regexp", )
 SEARCH_MAX_RESULTS = 50
 
 

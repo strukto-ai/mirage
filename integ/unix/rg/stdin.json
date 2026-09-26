@@ -979,10 +979,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(cd /data/sub && printf 'content\\n' | rg -l content)",
+      "command": "(cd /data/sub && printf 'content\\n' | rg -l content); (cd /data/sub && printf 'x\\n' | rg --files --sort path -g '*deeper*' -g 'nested.txt'); (cd /data/sub && printf 'x\\n' | rg --type-list | grep '^rust:')",
       "expect": {
         "exit": 0,
-        "stdout": "<stdin>\n",
+        "stdout": "<stdin>\ndeep/deeper.txt\nnested.txt\nrust: *.rs\n",
         "stderr": ""
       }
     },
@@ -1106,6 +1106,70 @@
       "expect": {
         "exit": 0,
         "stdout": "x.txt:hit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_null_data_records",
+      "seq": 612301,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\000b\\000c\\000d\\000a' | rg --null-data -n -b a; printf 'a\\000b\\000c\\000d\\000a' | rg --null-data -A1 a; printf 'a\\000b\\000a' | rg --null-data -c a",
+      "expect": {
+        "exit": 0,
+        "stdout": "1:0:a\u00005:8:a\u0000a\u0000b\u0000--\u0000a\u00002\u0000",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_null_data_inter_file_context_uses_newline",
+      "seq": 612303,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\000b\\000' > /data/rnul1.txt; printf 'a\\000b\\000' > /data/rnul2.txt; rg --null-data -A1 a /data/rnul1.txt /data/rnul2.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rnul1.txt:a\u0000/data/rnul1.txt-b\u0000--\n/data/rnul2.txt:a\u0000/data/rnul2.txt-b\u0000",
         "stderr": ""
       }
     }

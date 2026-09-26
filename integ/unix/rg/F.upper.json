@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg -F \"main()\" /data/r4/code.py",
+      "command": "rg -F \"main()\" /data/r4/code.py; rg -F --no-fixed-strings 'main\\(\\)' /data/r4/code.py",
       "expect": {
         "exit": 0,
-        "stdout": "def main():\n",
+        "stdout": "def main():\ndef main():\n",
         "stderr": ""
       },
       "flags": [

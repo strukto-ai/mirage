@@ -4,9 +4,11 @@ import os
 
 import pytest
 
-from mirage.commands.builtin import grep_offsets
+from mirage.commands.builtin import rg_search
 from mirage.commands.builtin.generic.rg import labelled, parse_flags, rg
+from mirage.commands.builtin.rg_search import RgFlags
 from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -111,7 +113,7 @@ async def test_rg_count_stdin_uses_match_count():
     output, io = await rg(
         [],
         ["foo"],
-        CommandOpts(flags={"c": True}),
+        CommandOpts(flags={"count": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -128,7 +130,7 @@ async def test_rg_count_stdin_zero_exits_1_without_output():
     output, io = await rg(
         [],
         ["foo"],
-        CommandOpts(flags={"c": True}),
+        CommandOpts(flags={"count": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -207,7 +209,7 @@ async def test_rg_count_dir_skips_zero_count_files():
     output, io = await rg(
         [_spec("/dir")],
         ["foo"],
-        CommandOpts(flags={"c": True}),
+        CommandOpts(flags={"count": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -228,7 +230,7 @@ async def test_rg_files_only_on_dir():
     output, _ = await rg(
         [_spec("/dir")],
         ["apple"],
-        CommandOpts(flags={"args_l": True}),
+        CommandOpts(flags={"files_with_matches": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -248,7 +250,7 @@ async def test_rg_hidden_excluded_by_default():
     output, _ = await rg(
         [_spec("/dir")],
         ["apple"],
-        CommandOpts(flags={"args_l": True}),
+        CommandOpts(flags={"files_with_matches": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -269,7 +271,7 @@ async def test_rg_hidden_included_with_flag():
         [_spec("/dir")],
         ["apple"],
         CommandOpts(flags={
-            "args_l": True,
+            "files_with_matches": True,
             "hidden": True
         }),
         readdir=readdir,
@@ -292,8 +294,8 @@ async def test_rg_file_type_filter():
         [_spec("/dir")],
         ["apple"],
         CommandOpts(flags={
-            "args_l": True,
-            "type": "py"
+            "files_with_matches": True,
+            "type": ["py"]
         }),
         readdir=readdir,
         stat=stat,
@@ -315,8 +317,8 @@ async def test_rg_glob_filter():
         [_spec("/dir")],
         ["apple"],
         CommandOpts(flags={
-            "args_l": True,
-            "glob": "*.log"
+            "files_with_matches": True,
+            "glob": ["*.log"]
         }),
         readdir=readdir,
         stat=stat,
@@ -406,7 +408,7 @@ async def test_rg_files_only_mount_prefix_not_doubled():
     output, _ = await rg(
         [p],
         ["apple"],
-        CommandOpts(flags={"args_l": True}),
+        CommandOpts(flags={"files_with_matches": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -446,7 +448,7 @@ async def test_rg_files_only_multiple_files():
     output, _ = await rg(
         [_spec("/t1.txt"), _spec("/t2.txt")],
         ["apple"],
-        CommandOpts(flags={"args_l": True}),
+        CommandOpts(flags={"files_with_matches": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -457,22 +459,38 @@ async def test_rg_files_only_multiple_files():
     assert "/t2.txt" in decoded
 
 
-def test_parse_flags_c_overrides_a_and_b():
-    f = parse_flags(FlagView({
-        "A": "2",
-        "B": "1",
-        "C": "4"
-    }),
-                    never_match=False)
-    assert f.context_after == 4
-    assert f.context_before == 4
-    f = parse_flags(FlagView({"A": "2"}), never_match=False)
-    assert f.context_after == 2
-    assert f.context_before == 0
+def _parsed(flags: dict) -> RgFlags:
+    return parse_flags(FlagView(flags, spec=SPECS["rg"]))
+
+
+def test_parse_flags_a_and_b_outrank_c():
+    # ripgrep 14.1.1: -A and -B, even at 0, beat -C for their own side,
+    # in either order (`rg -C 2 -A 0 x` prints two lines before, none
+    # after).
+    f = _parsed({"after_context": "2", "before_context": "1", "context": "4"})
+    assert (f.context_before, f.context_after) == (1, 2)
+    f = _parsed({"context": "2", "after_context": "0"})
+    assert (f.context_before, f.context_after) == (2, 0)
+    f = _parsed({"after_context": "2"})
+    assert (f.context_before, f.context_after) == (0, 2)
+
+
+def test_parse_flags_passthru_and_context_are_last_wins():
+    # --passthru drops the context options before it; one after it
+    # starts afresh (ripgrep 14.1.1: `-A 1 --passthru -B 1` is -B 1).
+    assert _parsed({"context": "1", "passthru": True}).passthru
+    f = _parsed({"passthru": True, "context": "1"})
+    assert (f.passthru, f.context_before, f.context_after) == (False, 1, 1)
+    f = _parsed({
+        "after_context": "1",
+        "passthru": True,
+        "before_context": "1"
+    })
+    assert (f.passthru, f.context_before, f.context_after) == (False, 1, 0)
 
 
 def test_parse_flags_struct_rejects_typos():
-    f = parse_flags(FlagView({"hidden": True}), never_match=False)
+    f = _parsed({"hidden": True})
     assert f.hidden is True
     with pytest.raises(AttributeError):
         _ = f.hiden
@@ -484,7 +502,7 @@ async def test_rg_with_filename_labels_single_file():
     output, _ = await rg(
         [_spec("/a.txt")],
         ["ap"],
-        CommandOpts(flags={"H": True}),
+        CommandOpts(flags={"with_filename": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -500,8 +518,8 @@ async def test_rg_with_filename_labels_single_file_count():
         [_spec("/a.txt")],
         ["ap"],
         CommandOpts(flags={
-            "H": True,
-            "c": True
+            "with_filename": True,
+            "count": True
         }),
         readdir=readdir,
         stat=stat,
@@ -520,7 +538,7 @@ async def test_rg_no_filename_suppresses_multi_file_labels():
     output, _ = await rg(
         [_spec("/a.txt"), _spec("/b.txt")],
         ["ap"],
-        CommandOpts(flags={"args_I": True}),
+        CommandOpts(flags={"no_filename": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -539,7 +557,7 @@ async def test_rg_context_after_single_file():
     output, io = await rg(
         [_spec("/app.log")],
         ["warning"],
-        CommandOpts(flags={"A": "1"}),
+        CommandOpts(flags={"after_context": "1"}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -556,7 +574,7 @@ async def test_rg_context_c_merges_adjacent_groups():
     output, _ = await rg(
         [_spec("/app.log")],
         ["error"],
-        CommandOpts(flags={"C": "1"}),
+        CommandOpts(flags={"context": "1"}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -574,8 +592,8 @@ async def test_rg_context_line_numbers_use_dash_separator():
         [_spec("/app.log")],
         ["warning"],
         CommandOpts(flags={
-            "n": True,
-            "A": "1"
+            "line_number": True,
+            "after_context": "1"
         }),
         readdir=readdir,
         stat=stat,
@@ -593,8 +611,8 @@ async def test_rg_context_respects_max_count():
         [_spec("/app.log")],
         ["error"],
         CommandOpts(flags={
-            "m": "1",
-            "C": "1"
+            "max_count": "1",
+            "context": "1"
         }),
         readdir=readdir,
         stat=stat,
@@ -611,7 +629,7 @@ async def test_rg_context_separates_distant_groups():
     output, _ = await rg(
         [_spec("/f.txt")],
         ["hit"],
-        CommandOpts(flags={"A": "1"}),
+        CommandOpts(flags={"after_context": "1"}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -629,7 +647,7 @@ async def test_rg_dir_search_prints_labelled_context():
     output, _ = await rg(
         [_spec("/dir")],
         ["warning"],
-        CommandOpts(flags={"A": "1"}),
+        CommandOpts(flags={"after_context": "1"}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -649,7 +667,7 @@ async def test_rg_no_filename_dir_walk():
     output, _ = await rg(
         [_spec("/dir")],
         ["alpha"],
-        CommandOpts(flags={"args_I": True}),
+        CommandOpts(flags={"no_filename": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -696,7 +714,7 @@ async def test_rg_not_a_directory_operand_keeps_the_others():
     output, io = await rg(
         [_spec("/a.txt/x"), _spec("/real")],
         ["foo"],
-        CommandOpts(flags={"args_l": True}),
+        CommandOpts(flags={"files_with_matches": True}),
         readdir=readdir_enotdir,
         stat=stat,
         read_bytes=rb,
@@ -711,14 +729,14 @@ async def test_rg_not_a_directory_operand_keeps_the_others():
 @pytest.mark.parametrize("flags,prefix", [
     ({}, ""),
     ({
-        "H": True
+        "with_filename": True
     }, "/binary.txt:"),
     ({
-        "args_I": True
+        "no_filename": True
     }, ""),
     ({
-        "H": True,
-        "args_I": True
+        "with_filename": True,
+        "no_filename": True
     }, ""),
 ])
 async def test_rg_filename_flags_preserve_nul_matches(flags, prefix):
@@ -745,7 +763,7 @@ async def test_rg_no_filename_preserves_multi_file_nul_matches():
     output, io = await rg(
         [_spec("/a.txt"), _spec("/b.txt")],
         ["needle"],
-        CommandOpts(flags={"args_I": True}),
+        CommandOpts(flags={"no_filename": True}),
         readdir=readdir,
         stat=stat,
         read_bytes=rb,
@@ -807,7 +825,7 @@ async def test_rg_files_without_match_stdin_m0_lists_nothing():
             ["hello"],
             CommandOpts(flags={
                 "files_without_match": True,
-                "m": "0"
+                "max_count": "0"
             }),
             readdir=readdir,
             stat=stat,
@@ -822,23 +840,11 @@ async def test_rg_files_without_match_stdin_m0_lists_nothing():
 def test_rg_output_mode_is_the_last_of_c_l_and_files_without_match():
     # ripgrep 14.1.1: `-c --files-without-match` lists the matchless
     # files, `--files-without-match -c` prints counts, `-l -c` counts.
-    later = parse_flags(FlagView({
-        "c": True,
-        "files_without_match": True
-    }),
-                        never_match=False)
+    later = _parsed({"count": True, "files_without_match": True})
     assert (later.count_only, later.files_without_match) == (False, True)
-    earlier = parse_flags(FlagView({
-        "files_without_match": True,
-        "c": True
-    }),
-                          never_match=False)
+    earlier = _parsed({"files_without_match": True, "count": True})
     assert (earlier.count_only, earlier.files_without_match) == (True, False)
-    counted = parse_flags(FlagView({
-        "args_l": True,
-        "c": True
-    }),
-                          never_match=False)
+    counted = _parsed({"files_with_matches": True, "count": True})
     assert (counted.files_only, counted.count_only) == (False, True)
 
 
@@ -885,7 +891,7 @@ async def test_rg_dash_beside_a_file_is_named_stdin():
                          b"world\n", files)
     assert (out, io.exit_code) == (b"<stdin>:world\n/a.txt:world\n", 0)
     out, io = await _run([_stdin_operand(), _spec("/a.txt")], ["world"],
-                         {"c": True}, b"world\n", files)
+                         {"count": True}, b"world\n", files)
     assert (out, io.exit_code) == (b"<stdin>:1\n/a.txt:1\n", 0)
 
 
@@ -902,9 +908,11 @@ async def test_rg_dash_twice_reads_stdin_once():
 
 @pytest.mark.asyncio
 async def test_rg_dash_listing_names_stdin():
-    out, io = await _run([_stdin_operand()], ["b"], {"args_l": True}, b"b\n")
+    out, io = await _run([_stdin_operand()], ["b"],
+                         {"files_with_matches": True}, b"b\n")
     assert (out, io.exit_code) == (b"<stdin>\n", 0)
-    out, io = await _run([_stdin_operand()], ["z"], {"args_l": True}, b"b\n")
+    out, io = await _run([_stdin_operand()], ["z"],
+                         {"files_with_matches": True}, b"b\n")
     assert (out, io.exit_code) == (b"", 1)
     out, io = await _run([_stdin_operand()], ["z"],
                          {"files_without_match": True}, b"b\n")
@@ -916,7 +924,7 @@ async def test_rg_dash_listing_names_stdin():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("flags", [{
-    "args_l": True
+    "files_with_matches": True
 }, {
     "files_without_match": True
 }])
@@ -925,7 +933,7 @@ async def test_rg_dash_listing_stops_at_the_first_match(flags):
     # stdin is never read past it.
     out, io = await _run([_stdin_operand()], ["hello"], flags,
                          _endless_after_first_match())
-    expected = (b"<stdin>\n", 0) if "args_l" in flags else (b"", 1)
+    expected = (b"<stdin>\n", 0) if "files_with_matches" in flags else (b"", 1)
     assert (out, io.exit_code) == expected
 
 
@@ -933,14 +941,15 @@ async def test_rg_dash_listing_stops_at_the_first_match(flags):
 async def test_rg_dash_is_never_filtered_by_type_or_glob():
     # ripgrep searches an explicit operand whatever --type or --glob say,
     # and stdin is always explicit.
-    for flags in ({"type": "py"}, {"glob": "*.rs"}):
+    for flags in ({"type": ["py"]}, {"glob": ["*.rs"]}):
         out, io = await _run([_stdin_operand()], ["b"], flags, b"b\n")
         assert (out, io.exit_code) == (b"b\n", 0)
 
 
 @pytest.mark.asyncio
 async def test_rg_dash_prints_context():
-    out, io = await _run([_stdin_operand()], ["b"], {"C": "1"}, b"a\nb\nc\n")
+    out, io = await _run([_stdin_operand()], ["b"], {"context": "1"},
+                         b"a\nb\nc\n")
     assert (out, io.exit_code) == (b"a\nb\nc\n", 0)
 
 
@@ -961,15 +970,15 @@ async def _pipe_that_goes_on(first: bytes):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("flags, paths, want", [
     ({
-        "m": "1",
-        "C": "1"
+        "max_count": "1",
+        "context": "1"
     }, [None], b"a\nb\nc\n"),
     ({
-        "m": "1",
-        "type": "py"
+        "max_count": "1",
+        "type": ["py"]
     }, [None], b"b\n"),
     ({
-        "m": "1"
+        "max_count": "1"
     }, [None, "/a.txt"], b"<stdin>:b\n"),
 ])
 async def test_rg_dash_stops_reading_at_max_count(flags, paths, want):
@@ -986,24 +995,24 @@ async def test_rg_dash_stops_reading_at_max_count(flags, paths, want):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("flags, data, want", [
     ({
-        "args_l": True
+        "files_with_matches": True
     }, b"b\n", (b"<stdin>\n", 0)),
     ({
-        "H": True
+        "with_filename": True
     }, b"b\n", (b"<stdin>:b\n", 0)),
     ({
-        "H": True,
-        "c": True
+        "with_filename": True,
+        "count": True
     }, b"b\n", (b"<stdin>:1\n", 0)),
     ({
-        "C": "1"
+        "context": "1"
     }, b"a\nb\nc\n", (b"a\nb\nc\n", 0)),
     ({
-        "type": "rust"
+        "type": ["rust"]
     }, b"b\n", (b"b\n", 0)),
     ({
-        "args_l": True,
-        "m": "0"
+        "files_with_matches": True,
+        "max_count": "0"
     }, b"b\n", (b"", 1)),
 ])
 async def test_rg_no_operand_searches_stdin_as_an_implicit_dash(
@@ -1018,15 +1027,15 @@ async def test_rg_no_operand_searches_stdin_as_an_implicit_dash(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("flags, want", [
     ({
-        "args_l": True
+        "files_with_matches": True
     }, b"<stdin>\n"),
     ({
-        "m": "1",
-        "C": "1"
+        "max_count": "1",
+        "context": "1"
     }, b"a\nb\nc\n"),
     ({
-        "m": "1",
-        "H": True
+        "max_count": "1",
+        "with_filename": True
     }, b"<stdin>:b\n"),
 ])
 async def test_rg_no_operand_stops_reading_at_the_answer(flags, want):
@@ -1041,7 +1050,7 @@ async def test_rg_no_operand_cancellation_closes_stdin(monkeypatch):
     closed = False
     calls = 0
     task = asyncio.current_task()
-    original = grep_offsets.MatchOffsets.at
+    original = rg_search.ByteCursor.at
 
     def measured(self, index):
         nonlocal calls
@@ -1058,9 +1067,12 @@ async def test_rg_no_operand_cancellation_closes_stdin(monkeypatch):
         finally:
             closed = True
 
-    monkeypatch.setattr(grep_offsets.MatchOffsets, "at", measured)
+    monkeypatch.setattr(rg_search.ByteCursor, "at", measured)
     with pytest.raises(asyncio.CancelledError):
-        await _run([], ["needle"], {"o": True, "byte_offset": True}, source())
+        await _run([], ["needle"], {
+            "only_matching": True,
+            "byte_offset": True
+        }, source())
     assert closed
     assert calls < 100000
 
@@ -1071,17 +1083,17 @@ A_TXT = b"hello\nworld\nfoo\nbar\nbaz\n"
 @pytest.mark.asyncio
 @pytest.mark.parametrize("flags, paths, want", [
     ({
-        "A": "1"
+        "after_context": "1"
     }, ["/a.txt", "/a.txt"
         ], b"/a.txt:world\n/a.txt-foo\n--\n/a.txt:world\n/a.txt-foo\n"),
     ({
-        "H": True,
-        "n": True,
-        "C": "1"
+        "with_filename": True,
+        "line_number": True,
+        "context": "1"
     }, ["/a.txt"], b"/a.txt-1-hello\n/a.txt:2:world\n/a.txt-3-foo\n"),
     ({
-        "args_I": True,
-        "A": "1"
+        "no_filename": True,
+        "after_context": "1"
     }, ["/a.txt", "/a.txt"], b"world\nfoo\n--\nworld\nfoo\n"),
 ])
 async def test_rg_labelled_search_prints_context(flags, paths, want):
@@ -1097,7 +1109,7 @@ async def test_rg_labelled_search_prints_context(flags, paths, want):
 async def test_rg_labelled_stdin_prints_context_beside_a_file():
     # `printf 'a\nb\nc\n' | rg -C1 b - a.txt` on ripgrep 14.1.1.
     out, io = await _run([_stdin_operand(), _spec("/a.txt")], ["b"],
-                         {"C": "1"}, b"a\nb\nc\n", {"/a.txt": A_TXT})
+                         {"context": "1"}, b"a\nb\nc\n", {"/a.txt": A_TXT})
     assert (out, io.exit_code) == (b"<stdin>-a\n<stdin>:b\n<stdin>-c\n--\n"
                                    b"/a.txt-foo\n/a.txt:bar\n/a.txt:baz\n", 0)
 
@@ -1106,7 +1118,7 @@ async def test_rg_labelled_stdin_prints_context_beside_a_file():
 @pytest.mark.parametrize("flags, want", [
     ({}, b"/sub/nested.txt:content\n"),
     ({
-        "c": True
+        "count": True
     }, b"/sub/nested.txt:1\n"),
 ])
 async def test_rg_walks_a_directory_named_after_a_file(flags, want):
@@ -1128,9 +1140,9 @@ async def test_rg_m_prints_a_selected_trailing_line_as_selected(paths, stdin):
     # GNU grep prints `2-world`: past -m, a trailing line that would be
     # selected still prints as selected.
     out, io = await _run([_spec(p) for p in paths], ["o"], {
-        "n": True,
-        "m": "1",
-        "A": "1"
+        "line_number": True,
+        "max_count": "1",
+        "after_context": "1"
     }, stdin, {"/a.txt": A_TXT})
     assert (out, io.exit_code) == (b"1:hello\n2:world\n", 0)
 
@@ -1155,9 +1167,9 @@ async def test_rg_o_v_prints_the_unmatched_lines_whole(paths, stdin, want):
     # `rg -v -o -n y` over x\ny\nzz\n on ripgrep 14.1.1, where GNU grep
     # prints nothing: a selected line with no match prints whole.
     out, io = await _run([_spec(p) for p in paths], ["y"], {
-        "o": True,
-        "v": True,
-        "n": True
+        "only_matching": True,
+        "invert_match": True,
+        "line_number": True
     }, stdin, O_FILES)
     assert (out, io.exit_code) == (want, 0)
 
@@ -1172,8 +1184,8 @@ async def test_rg_o_v_prints_the_unmatched_lines_whole(paths, stdin, want):
 async def test_rg_o_c_counts_matches_not_lines(paths, stdin, want):
     # `rg -o -c '[0-9]'` over b1\nb22\n is 3 on ripgrep 14.1.1.
     out, io = await _run([_spec(p) for p in paths], ["[0-9]"], {
-        "o": True,
-        "c": True
+        "only_matching": True,
+        "count": True
     }, stdin, O_FILES)
     assert (out, io.exit_code) == (want, 0)
 
@@ -1190,9 +1202,9 @@ async def test_rg_o_v_c_lists_an_input_that_selected_with_no_match(
     # ripgrep 14.1.1 counts the matches an inverted selection holds, none,
     # and still lists every input that selected a line.
     out, io = await _run([_spec(p) for p in paths], ["abc"], {
-        "o": True,
-        "v": True,
-        "c": True
+        "only_matching": True,
+        "invert_match": True,
+        "count": True
     }, stdin, O_FILES)
     assert (out, io.exit_code) == (want, code)
 
@@ -1206,9 +1218,9 @@ async def test_rg_o_v_c_lists_an_input_that_selected_with_no_match(
 async def test_rg_o_prints_context_lines_whole(paths, stdin, want):
     # `rg -o -n -C1 b` on ripgrep 14.1.1; GNU grep -o prints no context.
     out, io = await _run([_spec(p) for p in paths], ["b"], {
-        "o": True,
-        "n": True,
-        "C": "1"
+        "only_matching": True,
+        "line_number": True,
+        "context": "1"
     }, stdin, O_FILES)
     assert (out, io.exit_code) == (want, 0)
 
@@ -1241,8 +1253,8 @@ async def _run_locked(paths: list[PathSpec], flags: dict):
     return await _drain_async(output), await _drain_async(io.stderr), io
 
 
-TYPE_TXT = {"type": "txt"}
-LISTING = {"args_l": True}
+TYPE_TXT = {"type": ["txt"]}
+LISTING = {"files_with_matches": True}
 
 
 @pytest.mark.asyncio
@@ -1269,9 +1281,9 @@ async def test_rg_walk_names_a_file_it_could_not_read_as_typed():
 
 
 def test_labelled_asks_for_the_filename_a_walk_would_have_printed():
-    assert labelled(CommandOpts(flags={})).flags == {"H": True}
+    assert labelled(CommandOpts(flags={})).flags == {"with_filename": True}
 
 
 def test_labelled_lets_dash_upper_i_win():
-    opts = CommandOpts(flags={"args_I": True})
+    opts = CommandOpts(flags={"no_filename": True})
     assert labelled(opts) is opts

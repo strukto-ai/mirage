@@ -52,6 +52,10 @@ from mirage.utils.key_prefix import mount_prefix_of
 # defer now, along with -q, -H/-h, -A/-B/-C, rg's -I and the file filters,
 # which the open-coded version ignored outright.
 SEARCH_HONORED = ("n", "args_l", "w", "o", "m")
+# rg spells the same flags by their long names; its -x narrows within a
+# message too, which the scan's compiled pattern honors.
+RG_SEARCH_HONORED = ("line_number", "files_with_matches", "word_regexp",
+                     "only_matching", "max_count", "line_regexp")
 
 
 async def grep_provision(accessor: EmailAccessor, paths: list[PathSpec],

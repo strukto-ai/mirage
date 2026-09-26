@@ -22,9 +22,9 @@ from mirage.commands.builtin.generic.grep import \
     parse_flags as parse_grep_flags
 from mirage.commands.builtin.generic.grep import \
     prints_context as grep_prints_context
-from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
 from mirage.commands.builtin.generic.rg import \
-    prints_context as rg_prints_context
+    between_files as rg_between_files
+from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -83,7 +83,8 @@ async def run_operands(run_single: RunSingle,
                        scopes: list[PathSpec],
                        texts: list[str],
                        flag_kwargs: dict[str, FlagValue],
-                       stdin_bytes: bytes | None = None) -> list[OperandRun]:
+                       stdin_bytes: bytes | None = None,
+                       stop_at_success: bool = False) -> list[OperandRun]:
     """Run one native single-mount command per operand, in operand order.
 
     Each operand executes on its owning mount through ``run_single`` (which
@@ -97,6 +98,8 @@ async def run_operands(run_single: RunSingle,
         texts (list[str]): Positional text operands shared by every run.
         flag_kwargs (dict): Flags shared by every run.
         stdin_bytes (bytes | None): Stdin re-fed to every run (tee).
+        stop_at_success (bool): run no operand after one that exits 0,
+            which is how grep -q and rg -q stop at their first match.
     """
     results: list[OperandRun] = []
     for scope in scopes:
@@ -119,6 +122,8 @@ async def run_operands(run_single: RunSingle,
             io.exit_code = read_fail_exit(cmd_name, exc)
             data = b""
         results.append(OperandRun(scope, data, io))
+        if stop_at_success and io.exit_code == 0:
+            break
     return results
 
 
@@ -146,11 +151,13 @@ async def merge_operand_ios(results: list[OperandRun],
     return io
 
 
-def context_separated(cmd_name: str, flags: dict[str, FlagValue]) -> bool:
-    """Whether one run's grep or rg output is set off from the next by ``--``.
+def run_separator(cmd_name: str, flags: dict[str, FlagValue]) -> bytes:
+    """What sets one run's grep or rg output off from the next's.
 
-    Both print the separator between one file's context and the next
-    file's, so the runs a line splits into join the way one run would.
+    Both print a separator between one file's context and the next file's
+    (rg's own, or none under --no-context-separator), and rg a blank line
+    between --heading groups, so the runs a line splits into join the way
+    one run would. Nothing for any other output, a plain line stream.
 
     Args:
         cmd_name (str): the command the runs ran.
@@ -158,11 +165,12 @@ def context_separated(cmd_name: str, flags: dict[str, FlagValue]) -> bool:
     """
     if cmd_name == Cmd.RG:
         fl = FlagView(flags, spec=SPECS[Cmd.RG])
-        return rg_prints_context(parse_rg_flags(fl, never_match=False))
+        return rg_between_files(parse_rg_flags(fl))
     if cmd_name == Cmd.GREP:
         fl = FlagView(flags, spec=SPECS[Cmd.GREP])
-        return grep_prints_context(parse_grep_flags(fl, never_match=False))
-    return False
+        if grep_prints_context(parse_grep_flags(fl, never_match=False)):
+            return b"--\n"
+    return b""
 
 
 def flat_scopes(scopes: list[PathSpec]) -> list[PathSpec]:

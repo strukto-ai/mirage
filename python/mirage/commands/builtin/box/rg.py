@@ -14,8 +14,10 @@
 
 from mirage.accessor.box import BoxAccessor
 from mirage.commands.builtin.box.pushdown import narrow_scope
-from mirage.commands.builtin.generic.rg import labelled
+from mirage.commands.builtin.generic.rg import (filters_files, labelled,
+                                                needs_every_file, parse_flags)
 from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.rg import walk_filter
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.rg_scan import walk_candidates
@@ -35,27 +37,27 @@ from mirage.types import PathSpec
 async def rg(accessor: BoxAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])
-    pattern_str = pattern_arg(texts, fl)
+    pattern_str = pattern_arg(texts, fl, "regexp")
 
     run_opts = opts
     if paths:
-        # -v needs the walk (a narrowed superset hides fully non-matching
-        # files whose every line matches inverted); --type/--glob keep the
-        # walk so their file filtering stays in one place.
+        f = parse_flags(fl)
+        # -v and the rest of needs_every_file need the walk (a narrowed
+        # superset hides the files they answer for); -g/-t keep the walk
+        # so their file filtering stays in one place.
         narrowed, used_search = await narrow_scope(
             accessor,
             opts.index,
             paths,
             pattern_str,
-            fixed_string=fl.as_bool("F"),
+            fixed_string=f.fixed_string,
             recursive=True,
-            whole_word=fl.as_bool("w"),
-            exact_file_set=(fl.as_bool("v") or fl.as_str("type") is not None
-                            or fl.as_str("glob") is not None),
+            whole_word=f.whole_word,
+            exact_file_set=needs_every_file(fl, f) or filters_files(f),
         )
         if used_search:
-            narrowed = walk_candidates(narrowed, paths, fl.as_str("type"),
-                                       fl.as_str("glob"), fl.as_bool("hidden"))
+            narrowed = walk_candidates(narrowed, paths, walk_filter(f),
+                                       opts.cwd.virtual)
             if not narrowed:
                 return b"", IOResult(exit_code=1)
             run_opts = labelled(opts)

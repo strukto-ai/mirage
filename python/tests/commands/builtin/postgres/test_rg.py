@@ -80,7 +80,7 @@ async def test_rg_multi_pattern_skips_native_search(accessor):
     ), patch.dict(GENERICS, {"rg": fake_generic}):
         _, io = await rg(
             accessor, [_path()], [],
-            CommandOpts(index=NULL_INDEX, flags={'e': ['ada', 'ben']}))
+            CommandOpts(index=NULL_INDEX, flags={'regexp': ['ada', 'ben']}))
 
     assert io.exit_code == 0
     assert seen["generic"] == ["/public/tables/books/rows.jsonl"]

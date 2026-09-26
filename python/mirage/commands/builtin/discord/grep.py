@@ -56,6 +56,8 @@ logger = logging.getLogger(__name__)
 # was widened the same way. Reporting messages the line did not ask for is not
 # a better failure than dropping an operand. One operand or the generic scan.
 SEARCH_HONORED = ("w", )
+# rg spells the same flag by its long name.
+RG_SEARCH_HONORED = ("word_regexp", )
 SEARCH_MAX_RESULTS = 100
 
 

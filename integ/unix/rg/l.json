@@ -60,10 +60,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\nab\\n' > /data/rl1.txt; rg -l a /data/rl1.txt",
+      "command": "mkdir -p /data/r4/sub; touch /data/r4/app.log /data/r4/code.js /data/r4/code.py /data/r4/notes.txt /data/r4/sub/inner.txt; printf 'a\\nab\\n' > /data/rl1.txt; rg -l a /data/rl1.txt; rg --files /data/r4 | sort; rg --files -g '*.py' /data/r4; rg --files -0 /data/r4/sub | tr '\\000' '@'; rg --files-with-matches a /data/rl1.txt",
       "expect": {
         "exit": 0,
-        "stdout": "/data/rl1.txt\n",
+        "stdout": "/data/rl1.txt\n/data/r4/app.log\n/data/r4/code.js\n/data/r4/code.py\n/data/r4/notes.txt\n/data/r4/sub/inner.txt\n/data/r4/code.py\n/data/r4/sub/inner.txt@/data/rl1.txt\n",
         "stderr": ""
       },
       "flags": [

@@ -305,15 +305,77 @@
   },
   "options": [
     {
+      "long": "--regexp",
+      "multiple": true,
+      "short": "-e",
+      "type": "str"
+    },
+    {
+      "long": "--file",
+      "multiple": true,
+      "short": "-f",
+      "type": "path"
+    },
+    {
+      "long": "--ignore-case",
       "short": "-i",
       "type": "bool"
     },
     {
+      "long": "--case-sensitive",
+      "short": "-s",
+      "type": "bool"
+    },
+    {
+      "long": "--smart-case",
+      "short": "-S",
+      "type": "bool"
+    },
+    {
+      "long": "--invert-match",
       "short": "-v",
       "type": "bool"
     },
     {
+      "long": "--no-invert-match",
+      "type": "bool"
+    },
+    {
+      "long": "--word-regexp",
+      "short": "-w",
+      "type": "bool"
+    },
+    {
+      "long": "--line-regexp",
+      "short": "-x",
+      "type": "bool"
+    },
+    {
+      "long": "--fixed-strings",
+      "short": "-F",
+      "type": "bool"
+    },
+    {
+      "long": "--no-fixed-strings",
+      "type": "bool"
+    },
+    {
+      "long": "--max-count",
+      "short": "-m",
+      "type": "str"
+    },
+    {
+      "long": "--stop-on-nonmatch",
+      "type": "bool"
+    },
+    {
+      "long": "--line-number",
       "short": "-n",
+      "type": "bool"
+    },
+    {
+      "long": "--no-line-number",
+      "short": "-N",
       "type": "bool"
     },
     {
@@ -322,10 +384,89 @@
       "type": "bool"
     },
     {
+      "long": "--no-byte-offset",
+      "type": "bool"
+    },
+    {
+      "long": "--column",
+      "type": "bool"
+    },
+    {
+      "long": "--no-column",
+      "type": "bool"
+    },
+    {
+      "long": "--vimgrep",
+      "type": "bool"
+    },
+    {
+      "long": "--only-matching",
+      "short": "-o",
+      "type": "bool"
+    },
+    {
+      "long": "--replace",
+      "short": "-r",
+      "type": "str"
+    },
+    {
+      "long": "--trim",
+      "type": "bool"
+    },
+    {
+      "long": "--no-trim",
+      "type": "bool"
+    },
+    {
+      "long": "--max-columns",
+      "short": "-M",
+      "type": "str"
+    },
+    {
+      "long": "--max-columns-preview",
+      "type": "bool"
+    },
+    {
+      "long": "--no-max-columns-preview",
+      "type": "bool"
+    },
+    {
+      "long": "--null",
+      "short": "-0",
+      "type": "bool"
+    },
+    {
+      "long": "--null-data",
+      "type": "bool"
+    },
+    {
+      "long": "--path-separator",
+      "type": "str"
+    },
+    {
+      "long": "--quiet",
+      "short": "-q",
+      "type": "bool"
+    },
+    {
+      "long": "--count",
       "short": "-c",
       "type": "bool"
     },
     {
+      "long": "--count-matches",
+      "type": "bool"
+    },
+    {
+      "long": "--include-zero",
+      "type": "bool"
+    },
+    {
+      "long": "--no-include-zero",
+      "type": "bool"
+    },
+    {
+      "long": "--files-with-matches",
       "short": "-l",
       "type": "bool"
     },
@@ -334,74 +475,365 @@
       "type": "bool"
     },
     {
-      "short": "-w",
+      "long": "--files",
       "type": "bool"
     },
     {
-      "short": "-F",
+      "long": "--type-list",
       "type": "bool"
     },
     {
-      "short": "-o",
-      "type": "bool"
-    },
-    {
+      "long": "--with-filename",
       "short": "-H",
       "type": "bool"
     },
     {
+      "long": "--no-filename",
       "short": "-I",
       "type": "bool"
     },
     {
-      "multiple": true,
-      "short": "-e",
-      "type": "str"
+      "long": "--heading",
+      "type": "bool"
     },
     {
-      "multiple": true,
-      "short": "-f",
-      "type": "path"
+      "long": "--no-heading",
+      "type": "bool"
     },
     {
-      "short": "-m",
-      "type": "str"
-    },
-    {
+      "long": "--after-context",
       "short": "-A",
       "type": "str"
     },
     {
+      "long": "--before-context",
       "short": "-B",
       "type": "str"
     },
     {
+      "long": "--context",
       "short": "-C",
       "type": "str"
     },
     {
-      "long": "--hidden",
+      "long": "--passthru",
       "type": "bool"
     },
     {
-      "long": "--type",
+      "long": "--passthrough",
+      "type": "bool"
+    },
+    {
+      "long": "--context-separator",
+      "type": "str"
+    },
+    {
+      "long": "--no-context-separator",
+      "type": "bool"
+    },
+    {
+      "long": "--field-match-separator",
+      "type": "str"
+    },
+    {
+      "long": "--field-context-separator",
       "type": "str"
     },
     {
       "long": "--glob",
+      "multiple": true,
+      "short": "-g",
       "type": "str"
     },
     {
+      "long": "--iglob",
+      "multiple": true,
+      "type": "str"
+    },
+    {
+      "long": "--glob-case-insensitive",
+      "type": "bool"
+    },
+    {
+      "long": "--no-glob-case-insensitive",
+      "type": "bool"
+    },
+    {
+      "long": "--type",
+      "multiple": true,
+      "short": "-t",
+      "type": "str"
+    },
+    {
+      "long": "--type-not",
+      "multiple": true,
+      "short": "-T",
+      "type": "str"
+    },
+    {
+      "long": "--type-add",
+      "multiple": true,
+      "type": "str"
+    },
+    {
+      "long": "--type-clear",
+      "multiple": true,
+      "type": "str"
+    },
+    {
+      "long": "--hidden",
+      "short": "-.",
+      "type": "bool"
+    },
+    {
+      "long": "--no-hidden",
+      "type": "bool"
+    },
+    {
+      "count": true,
+      "long": "--unrestricted",
+      "short": "-u",
+      "type": "bool"
+    },
+    {
+      "long": "--max-depth",
+      "short": "-d",
+      "type": "str"
+    },
+    {
+      "long": "--max-filesize",
+      "type": "str"
+    },
+    {
+      "long": "--one-file-system",
+      "type": "bool"
+    },
+    {
+      "long": "--no-one-file-system",
+      "type": "bool"
+    },
+    {
+      "long": "--text",
+      "short": "-a",
+      "type": "bool"
+    },
+    {
+      "long": "--no-text",
+      "type": "bool"
+    },
+    {
+      "long": "--binary",
+      "type": "bool"
+    },
+    {
+      "long": "--no-binary",
+      "type": "bool"
+    },
+    {
+      "long": "--sort",
+      "type": "str"
+    },
+    {
+      "long": "--sortr",
+      "type": "str"
+    },
+    {
+      "long": "--sort-files",
+      "type": "bool"
+    },
+    {
+      "long": "--no-sort-files",
+      "type": "bool"
+    },
+    {
+      "long": "--no-messages",
+      "type": "bool"
+    },
+    {
+      "long": "--messages",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore-dot",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore-dot",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore-exclude",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore-exclude",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore-files",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore-files",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore-global",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore-global",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore-messages",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore-messages",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore-parent",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore-parent",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore-vcs",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore-vcs",
+      "type": "bool"
+    },
+    {
+      "long": "--no-require-git",
+      "type": "bool"
+    },
+    {
+      "long": "--require-git",
+      "type": "bool"
+    },
+    {
+      "long": "--ignore-file-case-insensitive",
+      "type": "bool"
+    },
+    {
+      "long": "--no-ignore-file-case-insensitive",
+      "type": "bool"
+    },
+    {
+      "long": "--no-config",
+      "type": "bool"
+    },
+    {
+      "long": "--threads",
+      "short": "-j",
+      "type": "str"
+    },
+    {
+      "long": "--line-buffered",
+      "type": "bool"
+    },
+    {
+      "long": "--no-line-buffered",
+      "type": "bool"
+    },
+    {
+      "long": "--block-buffered",
+      "type": "bool"
+    },
+    {
+      "long": "--no-block-buffered",
+      "type": "bool"
+    },
+    {
+      "long": "--mmap",
+      "type": "bool"
+    },
+    {
+      "long": "--no-mmap",
+      "type": "bool"
+    },
+    {
+      "long": "--no-follow",
+      "type": "bool"
+    },
+    {
+      "long": "--no-stats",
+      "type": "bool"
+    },
+    {
+      "long": "--no-crlf",
+      "type": "bool"
+    },
+    {
+      "long": "--no-multiline",
+      "type": "bool"
+    },
+    {
+      "long": "--no-multiline-dotall",
+      "type": "bool"
+    },
+    {
+      "long": "--no-pcre2",
+      "type": "bool"
+    },
+    {
+      "long": "--no-json",
+      "type": "bool"
+    },
+    {
+      "long": "--no-search-zip",
+      "type": "bool"
+    },
+    {
+      "long": "--no-encoding",
+      "type": "bool"
+    },
+    {
+      "long": "--no-pre",
+      "type": "bool"
+    },
+    {
+      "long": "--unicode",
+      "type": "bool"
+    },
+    {
+      "long": "--pcre2-unicode",
+      "type": "bool"
+    },
+    {
+      "long": "--no-pcre2-unicode",
+      "type": "bool"
+    },
+    {
+      "long": "--no-auto-hybrid-regex",
+      "type": "bool"
+    },
+    {
       "long": "--color",
-      "type": "str",
-      "value_optional": true
+      "type": "str"
     }
   ],
   "positional": [
     {
       "provided_by": [
         "-e",
-        "-f"
+        "-f",
+        "--files",
+        "--type-list"
       ],
       "type": "str"
     }

@@ -91,16 +91,41 @@ def test_run_fanout_forces_grep_filenames_unless_suppressed():
 def test_run_fanout_forces_rg_filenames_unless_suppressed():
     rs = FakeRunSingle({"/a/x": (b"", 1), "/b/y": (b"", 1)})
     _run(run_fanout("rg", [_scope("/a/x"), _scope("/b/y")], ["pat"], {}, rs))
-    assert all(c["flags"].get("H") is True for c in rs.calls)
+    assert all(c["flags"].get("with_filename") is True for c in rs.calls)
     rs2 = FakeRunSingle({"/a/x": (b"", 1), "/b/y": (b"", 1)})
     _run(
         run_fanout("rg", [_scope("/a/x"), _scope("/b/y")], ["pat"],
-                   {"args_I": True}, rs2))
-    assert all("H" not in c["flags"] for c in rs2.calls)
+                   {"no_filename": True}, rs2))
+    assert all("with_filename" not in c["flags"] for c in rs2.calls)
+    # -H and -I are last-wins in ripgrep, so a -H after -I labels again.
+    rs3 = FakeRunSingle({"/a/x": (b"", 1), "/b/y": (b"", 1)})
+    _run(
+        run_fanout("rg", [_scope("/a/x"), _scope("/b/y")], ["pat"], {
+            "no_filename": True,
+            "with_filename": True
+        }, rs3))
+    assert all(c["flags"]["with_filename"] is True for c in rs3.calls)
 
 
-@pytest.mark.parametrize("cmd", ["grep", "rg"])
-def test_run_fanout_separates_context_runs(cmd):
+def test_run_fanout_stops_a_quiet_search_at_its_first_match():
+    # grep -q and rg -q exit at the first match, so the operands after it
+    # are never read (GNU grep 3.11, ripgrep 14.1.1: `rg -q x a /nope`
+    # says nothing about /nope).
+    for cmd, flags in (("grep", {"q": True}), ("rg", {"quiet": True})):
+        rs = FakeRunSingle({"/a/x": (b"", 0), "/b/y": (b"", 2)})
+        _, io = _run(
+            run_fanout(cmd, [_scope("/a/x"), _scope("/b/y")], ["pat"], flags,
+                       rs))
+        assert [c["paths"] for c in rs.calls] == [["/a/x"]]
+        assert io.exit_code == 0
+
+
+@pytest.mark.parametrize("cmd, flags", [("grep", {
+    "A": "1"
+}), ("rg", {
+    "after_context": "1"
+})])
+def test_run_fanout_separates_context_runs(cmd, flags):
     # GNU grep 3.11 and ripgrep 14.1.1 put `--` between one file's context
     # and the next file's, so runs on different mounts join the same way;
     # a run that printed nothing adds no separator.
@@ -113,19 +138,48 @@ def test_run_fanout_separates_context_runs(cmd):
         run_fanout(
             cmd,
             [_scope("/a/x"), _scope("/c/w"),
-             _scope("/b/y")], ["hit"], {"A": "1"}, rs))
+             _scope("/b/y")], ["hit"], flags, rs))
     assert _run(materialize(out)) == (b"/a/x:hit\n/a/x-next\n--\n"
                                       b"/b/y:hit\n/b/y-next\n")
 
 
-@pytest.mark.parametrize("cmd", ["grep", "rg"])
-def test_run_fanout_joins_counts_without_a_separator(cmd):
+@pytest.mark.parametrize("flags, joined", [
+    ({
+        "after_context": "1",
+        "context_separator": "@@"
+    }, b"/a/x:hit\n@@\n/b/y:hit\n"),
+    ({
+        "after_context": "1",
+        "no_context_separator": True
+    }, b"/a/x:hit\n/b/y:hit\n"),
+    ({
+        "heading": True
+    }, b"/a/x:hit\n\n/b/y:hit\n"),
+])
+def test_run_fanout_joins_rg_runs_with_rgs_own_separator(flags, joined):
+    # ripgrep 14.1.1 sets files apart with its --context-separator (none
+    # under --no-context-separator), and --heading groups with a blank
+    # line.
+    rs = FakeRunSingle({
+        "/a/x": (b"/a/x:hit\n", 0),
+        "/b/y": (b"/b/y:hit\n", 0)
+    })
+    out, _ = _run(
+        run_fanout("rg", [_scope("/a/x"), _scope("/b/y")], ["hit"], flags, rs))
+    assert _run(materialize(out)) == joined
+
+
+@pytest.mark.parametrize("cmd, flags", [("grep", {
+    "A": "1",
+    "c": True
+}), ("rg", {
+    "after_context": "1",
+    "count": True
+})])
+def test_run_fanout_joins_counts_without_a_separator(cmd, flags):
     rs = FakeRunSingle({"/a/x": (b"/a/x:1\n", 0), "/b/y": (b"/b/y:1\n", 0)})
     out, _ = _run(
-        run_fanout(cmd, [_scope("/a/x"), _scope("/b/y")], ["hit"], {
-            "A": "1",
-            "c": True
-        }, rs))
+        run_fanout(cmd, [_scope("/a/x"), _scope("/b/y")], ["hit"], flags, rs))
     assert _run(materialize(out)) == b"/a/x:1\n/b/y:1\n"
 
 

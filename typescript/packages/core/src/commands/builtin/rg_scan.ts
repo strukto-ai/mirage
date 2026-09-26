@@ -14,328 +14,198 @@
 
 import type { FileStat, PathSpec } from '../../types.ts'
 import { FileType } from '../../types.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { fsStrerror } from '../../utils/errors.ts'
-import { gnuBasename } from '../../utils/path.ts'
+import { fsStrerror, isWalkError } from '../../utils/errors.ts'
+import { gnuBasename, respellOne } from '../../utils/path.ts'
 import { getExtension } from '../resolve.ts'
 import { BINARY_EXTENSIONS } from './constants.ts'
-import { compilePattern } from './grep_pattern.ts'
-import { grepContextLines } from './grep_context.ts'
-import { decodeLine, lineOffsets, MatchOffsets, prefixOf, rgPieces } from './grep_offsets.ts'
-import type { IOResult } from '../../io/types.ts'
-import { fnmatch } from '../../utils/fnmatch.ts'
-import { splitLines } from './utils/lines.ts'
-import type { AsyncReadBytesFn, AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
+import type { FileTypes } from './rg_filetypes.ts'
+import { type Overrides, Verdict, walkCandidate } from './rg_glob.ts'
+import type { AsyncReaddirFn, AsyncStatFn } from './utils/types.ts'
 
-const TYPE_EXTENSIONS: Record<string, string[]> = {
-  py: ['.py'],
-  js: ['.js', '.jsx'],
-  ts: ['.ts', '.tsx'],
-  java: ['.java'],
-  go: ['.go'],
-  rs: ['.rs'],
-  rb: ['.rb'],
-  c: ['.c', '.h'],
-  cpp: ['.cpp', '.hpp', '.cc', '.cxx'],
-  css: ['.css'],
-  html: ['.html', '.htm'],
-  json: ['.json'],
-  yaml: ['.yaml', '.yml'],
-  toml: ['.toml'],
-  md: ['.md'],
-  txt: ['.txt'],
-  xml: ['.xml'],
-  sql: ['.sql'],
-  sh: ['.sh', '.bash'],
-  csv: ['.csv'],
-}
+/**
+ * What ripgrep's walker keeps below a directory operand. The ignore crate's
+ * order: a `-g` glob decides first and outranks everything after it, then
+ * `-t`/`-T`, and a dot entry is left out unless a glob or a `-t` type kept
+ * it or `--hidden` is on. A file is also left out past `--max-filesize`,
+ * and for a binary extension unless `-a`/`--binary` asked for it. A name on
+ * the line is never filtered: only walked entries are. `maxDepth` is the
+ * deepest entry kept (1 is the operand's own children).
+ */
+export class WalkFilter {
+  constructor(
+    readonly overrides: Overrides,
+    readonly types: FileTypes,
+    readonly hidden: boolean,
+    readonly maxDepth: number | null,
+    readonly maxFilesize: number | null,
+    readonly binary: boolean,
+  ) {}
 
-function rgMatchesFilter(
-  entry: string,
-  fileType: string | null,
-  globPattern: string | null,
-  hidden: boolean,
-): boolean {
-  const base = gnuBasename(entry)
-  if (!hidden && base.startsWith('.')) return false
-  if (fileType !== null) {
-    const exts = TYPE_EXTENSIONS[fileType] ?? [`.${fileType}`]
-    if (!exts.some((ext) => entry.endsWith(ext))) return false
+  // Whether a walked entry is kept (a directory: descended). `candidate`
+  // is its path as the globs match it, `name` its file name.
+  admits(candidate: string, name: string, isDir: boolean): boolean {
+    const verdict = this.overrides.verdict(candidate, isDir)
+    if (verdict === Verdict.IGNORE) return false
+    if (verdict === Verdict.WHITELIST) return true
+    const typed = this.types.verdict(name, isDir)
+    if (typed === Verdict.IGNORE) return false
+    return typed === Verdict.WHITELIST || this.hidden || !name.startsWith('.')
   }
-  if (globPattern !== null && !fnmatch(base, globPattern)) return false
-  return true
+
+  // Whether a walked file is searched, its stat read when the walk has one.
+  admitsFile(candidate: string, name: string, stat: FileStat | null): boolean {
+    if (!this.admits(candidate, name, false)) return false
+    const size = stat?.size ?? null
+    if (this.maxFilesize !== null && size !== null && size > this.maxFilesize) return false
+    return this.binary || !BINARY_EXTENSIONS.has(getExtension(name) ?? '')
+  }
 }
 
 /**
- * The candidates a walk of `scopes` would have searched. A search push-down
- * narrows a directory search to candidate files and hands them on as operands
- * of their own, which ripgrep never filters, so the walk's filters are applied
- * here instead: no dot segment below the candidate's (longest-matching) scope
- * unless --hidden, since the walk never descends into a hidden directory, and
- * --type and --glob on the file itself.
+ * One input rg searches: its virtual path (`-` for stdin), the path rg
+ * prints for it, its stat when the walk read one (the time sorts read it),
+ * and the operand itself when it was named on the line, which a stream read
+ * takes.
  */
-export function walkCandidates(
-  candidates: PathSpec[],
-  scopes: readonly PathSpec[],
-  fileType: string | null,
-  globPattern: string | null,
-  hidden: boolean,
-): PathSpec[] {
-  const kept: PathSpec[] = []
-  for (const p of candidates) {
-    let rel = p.virtual
-    let best = -1
-    for (const scope of scopes) {
-      const base = scope.virtual.replace(/\/+$/, '')
-      if (base.length > best && (p.virtual === base || p.virtual.startsWith(base + '/'))) {
-        rel = p.virtual.slice(base.length)
-        best = base.length
-      }
-    }
-    const segments = rel.split('/').filter((s) => s !== '')
-    if (!hidden && segments.some((s) => s.startsWith('.'))) continue
-    if (!rgMatchesFilter(p.virtual, fileType, globPattern, true)) continue
-    kept.push(p)
-  }
-  return kept
+export interface Haystack {
+  virtual: string
+  shown: string
+  stat: FileStat | null
+  spec: PathSpec | null
 }
 
-export interface RgFullOptions {
-  ignoreCase: boolean
-  invert: boolean
-  lineNumbers: boolean
-  countOnly: boolean
-  filesOnly: boolean
-  fixedString: boolean
-  onlyMatching: boolean
-  maxCount: number | null
-  wholeWord: boolean
-  contextBefore: number
-  contextAfter: number
-  fileType: string | null
-  globPattern: string | null
-  hidden: boolean
-  noFilename?: boolean
-  // -b: prefix each printed line with the byte offset of its own start, or of
-  // the match itself under -o.
-  byteOffsets?: boolean
-  // --files-without-match: answer with the paths that selected NO line. -c
-  // outranks it, as it does in ripgrep (`rg --files-without-match -c`
-  // prints counts).
-  filesWithoutMatch?: boolean
+function errorText(err: unknown): string {
+  return fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
 }
 
-// Whether the output shows -A/-B/-C context. Only printed lines carry it: -c,
-// -l and --files-without-match answer per file. -o keeps it, each line printed
-// as its matches.
-function printsContext(opts: RgFullOptions): boolean {
-  return (
-    (opts.contextBefore > 0 || opts.contextAfter > 0) &&
-    !opts.countOnly &&
-    !opts.filesOnly &&
-    opts.filesWithoutMatch !== true
-  )
+// An entry's path without the folder mark some backends append.
+function entryName(entry: string): string {
+  return entry.replace(/\/+$/, '')
+}
+
+function byName(a: string, b: string): number {
+  const x = entryName(a)
+  const y = entryName(b)
+  return x < y ? -1 : x > y ? 1 : 0
 }
 
 /**
- * Search one already-read file. `io`, when given, receives exit status 0 as
- * soon as a line is selected, so no caller reads the status off the returned
- * list.
+ * The files a walk of one directory operand searches, in walk order. `root`
+ * is the operand's virtual path and `shownRoot` the operand as typed, which
+ * every printed path below it starts with; `cwd` is the root the globs are
+ * matched from. `sortByName` is --sort path, each directory's entries in
+ * name order rather than the backend's. `boundary` is --one-file-system's
+ * test for a mount root, which the walk does not enter, or null to enter
+ * everything the backend lists. `depth` is how deep `directory` is below the
+ * operand, which is listed when `directory` is null.
  */
-function searchFile(
-  path: string,
-  data: string[],
-  compiled: RegExp,
-  opts: RgFullOptions,
-  prefixPath: string | null,
-  io: IOResult | null = null,
-): string[] {
-  if (opts.maxCount === 0) {
-    // ripgrep and GNU both select no line at all under -m0 and print
-    // nothing, count included; read before the scan because `count >= 0` is
-    // already true at the bottom of the loop.
-    return []
-  }
-  const count = { n: 0 }
-  const byteOffsets = opts.byteOffsets === true
-  const withoutMatch = opts.filesWithoutMatch === true && !opts.countOnly
-  if (printsContext(opts)) {
-    // Context rides the shared renderer: match lines `N:`, context lines
-    // `N-`, `--` between groups, all led by the label when the search prints
-    // one, and a trailing line that would be selected past -m printed as
-    // selected, as ripgrep prints it.
-    const rendered = grepContextLines(
-      data,
-      compiled,
-      opts.invert,
-      opts.lineNumbers,
-      opts.maxCount,
-      opts.contextAfter,
-      opts.contextBefore,
-      byteOffsets,
-      prefixPath,
-      true,
-      opts.onlyMatching,
-    )
-    if (rendered.length > 0 && io !== null) io.exitCode = 0
-    // `decodeLine` because the renderer puts a smuggled byte back as itself,
-    // and `formatRecords` puts it out as itself too.
-    return rendered.map((chunk) => decodeLine(chunk).replace(/\n$/, ''))
-  }
-  const offsets = byteOffsets ? lineOffsets(data) : []
-  // -o -c counts matches, not the lines that hold them (ripgrep 14.1.1).
-  let matches = 0
-  const results: string[] = []
-  for (let i = 0; i < data.length; i++) {
-    const line = data[i] ?? ''
-    const found = compiled.test(line)
-    compiled.lastIndex = 0
-    const matched = found !== opts.invert
-    if (!matched) continue
-    count.n += 1
-    if (io !== null) io.exitCode = 0
-    const start = byteOffsets ? (offsets[i] ?? 0) : 0
-    // -l answers with the path, and the path is the whole output, so it is
-    // never dropped for want of a label: a single unlabelled operand used to
-    // answer with an empty line here where the python twin answered with the
-    // file.
-    if (opts.filesOnly) return [prefixPath ?? path]
-    if (withoutMatch) return []
-    const lineNo = i + 1
-    if (opts.onlyMatching) {
-      // ripgrep's -o prints each match, an empty one included, and a line
-      // with none (an inverted selection) whole; see rgPieces.
-      const pieces = rgPieces(compiled, line)
-      if (!opts.invert) matches += pieces.length
-      const pieceOffsets = byteOffsets ? new MatchOffsets(start, line) : null
-      for (const [at, text] of pieces) {
-        const only = prefixOf(opts.lineNumbers ? lineNo : null, pieceOffsets?.at(at) ?? null) + text
-        results.push(prefixPath !== null ? `${prefixPath}:${only}` : only)
-      }
-    } else {
-      const out = prefixOf(opts.lineNumbers ? lineNo : null, byteOffsets ? start : null) + line
-      results.push(prefixPath !== null ? `${prefixPath}:${out}` : out)
-    }
-    if (opts.maxCount !== null && count.n >= opts.maxCount) break
-  }
-  if (opts.countOnly) {
-    if (count.n === 0) return []
-    const shown = String(opts.onlyMatching ? matches : count.n)
-    return prefixPath !== null ? [`${prefixPath}:${shown}`] : [shown]
-  }
-  if (withoutMatch) return [path]
-  return results
-}
-
-/**
- * Search one operand, returning the lines ripgrep would print. `warnings`
- * collects `[path, error]` for each path that could not be read, the path as
- * walked, for the caller to respell and name. Mirrors Python's rg_full.
- */
-export async function rgFull(
+export async function* walkHaystacks(
   readdirFn: AsyncReaddirFn,
   statFn: AsyncStatFn,
-  readBytesFn: AsyncReadBytesFn,
-  path: string,
-  pattern: string,
-  opts: RgFullOptions,
-  warnings: [string, string][] | null,
-  filePrefix: string | null = null,
-  io: IOResult | null = null,
-): Promise<string[]> {
-  const compiled = compilePattern(pattern, opts.ignoreCase, opts.fixedString, opts.wholeWord)
-
-  let isDir = false
-  let startType: FileType | null = null
-  try {
-    const s = await statFn(path)
-    startType = s.type
-    isDir = s.type === FileType.DIRECTORY
-  } catch {
-    try {
-      await readdirFn(path)
-      isDir = true
-    } catch {
-      // not readable
-    }
-  }
-
-  if (!isDir) {
-    if (startType === FileType.CHAR_DEVICE) return []
-    // ripgrep searches a file named on the line whatever --type, --glob or a
-    // leading dot say: its walker filters no entry at depth 0. A push-down
-    // that narrows a walk filters its candidates itself (walkCandidates).
-    let data: string[]
-    try {
-      data = splitLines(decodeLine(await readBytesFn(path)))
-    } catch (err) {
-      if (warnings !== null) warnings.push([path, fsStrerror(err) ?? String(err)])
-      return []
-    }
-    return searchFile(path, data, compiled, opts, filePrefix, io)
-  }
-
-  // ripgrep puts `--` between one file's context and the next file's,
-  // labelled or not.
-  const context = printsContext(opts)
-  const results: string[] = []
+  root: string,
+  shownRoot: string,
+  cwd: string,
+  walk: WalkFilter,
+  sortByName: boolean,
+  warnings: string[] | null,
+  boundary: ((path: string) => boolean) | null = null,
+  depth = 0,
+  directory: string | null = null,
+): AsyncGenerator<Haystack> {
+  const here = directory ?? root
+  if (walk.maxDepth !== null && depth >= walk.maxDepth) return
   let entries: string[]
   try {
-    entries = await readdirFn(path)
+    entries = await readdirFn(here)
   } catch (err) {
-    if (warnings !== null) warnings.push([path, fsStrerror(err) ?? String(err)])
-    return results
+    if (!isWalkError(err)) throw err
+    warnings?.push(`rg: ${respellOne(here, root, shownRoot)}: ${errorText(err)}`)
+    return
   }
-
+  if (sortByName) entries = [...entries].sort(byName)
   for (const entry of entries) {
+    // box/dropbox readdir marks folders with a trailing slash.
+    const child = entryName(entry) || entry
+    const shown = respellOne(child, root, shownRoot)
     let s: FileStat
     try {
       s = await statFn(entry)
     } catch (err) {
-      if (warnings !== null) warnings.push([entry, fsStrerror(err) ?? String(err)])
+      if (!isWalkError(err)) throw err
+      warnings?.push(`rg: ${shown}: ${errorText(err)}`)
       continue
     }
-
+    const name = gnuBasename(child)
+    const candidate = walkCandidate(shown, cwd)
     if (s.type === FileType.DIRECTORY) {
-      // box/dropbox readdir marks folders with a trailing slash; strip it so
-      // basename sees the real directory name (hidden-dir skip).
-      const child = rstripSlash(entry)
-      const base = gnuBasename(child)
-      if (!opts.hidden && base.startsWith('.')) continue
-      const sub = await rgFull(
-        readdirFn,
-        statFn,
-        readBytesFn,
-        child,
-        pattern,
-        opts,
-        warnings,
-        null,
-        io,
-      )
-      if (context && results.length > 0 && sub.length > 0) results.push('--')
-      results.push(...sub)
-      continue
+      if (boundary?.(child) === true) continue
+      if (walk.admits(candidate, name, true)) {
+        yield* walkHaystacks(
+          readdirFn,
+          statFn,
+          root,
+          shownRoot,
+          cwd,
+          walk,
+          sortByName,
+          warnings,
+          boundary,
+          depth + 1,
+          child,
+        )
+      }
+    } else if (s.type === FileType.FILE && walk.admitsFile(candidate, name, s)) {
+      yield { virtual: child, shown, stat: s, spec: null }
     }
-    if (s.type === FileType.CHAR_DEVICE) continue
-
-    if (BINARY_EXTENSIONS.has(getExtension(entry) ?? '')) continue
-    if (!rgMatchesFilter(entry, opts.fileType, opts.globPattern, opts.hidden)) continue
-
-    let data: string[]
-    try {
-      data = splitLines(decodeLine(await readBytesFn(entry)))
-    } catch (err) {
-      if (warnings !== null) warnings.push([entry, fsStrerror(err) ?? String(err)])
-      continue
-    }
-    // ripgrep -I drops per-file labels in directory walks; -l keeps
-    // paths (they are the output).
-    const walkPrefix = opts.noFilename === true && !opts.filesOnly ? null : entry
-    const fileResults = searchFile(entry, data, compiled, opts, walkPrefix, io)
-    if (context && results.length > 0 && fileResults.length > 0) results.push('--')
-    results.push(...fileResults)
   }
+}
 
-  return results
+/**
+ * The candidates a walk of `scopes` would have searched. A search push-down
+ * narrows a directory search to candidate files and hands them on as
+ * operands of their own, which ripgrep never filters, so the walk's filters
+ * are applied here instead, to each directory on the way down (a directory
+ * the walk would not descend hides everything below it) and to the file
+ * itself, and -d counts the depth below the candidate's (longest-matching)
+ * scope.
+ */
+export function walkCandidates(
+  candidates: PathSpec[],
+  scopes: readonly PathSpec[],
+  walk: WalkFilter,
+  cwd: string,
+): PathSpec[] {
+  const kept: PathSpec[] = []
+  for (const p of candidates) {
+    let base = ''
+    let raw = ''
+    let best = -1
+    for (const scope of scopes) {
+      const root = scope.virtual.replace(/\/+$/, '')
+      if (root.length > best && (p.virtual === root || p.virtual.startsWith(root + '/'))) {
+        base = root
+        raw = scope.rawPath
+        best = root.length
+      }
+    }
+    if (best < 0 || p.virtual === base) {
+      kept.push(p)
+      continue
+    }
+    const segments = p.virtual.slice(base.length + 1).split('/')
+    if (walk.maxDepth !== null && segments.length > walk.maxDepth) continue
+    let admitted = true
+    for (let i = 0; i < segments.length - 1; i++) {
+      const below = base + '/' + segments.slice(0, i + 1).join('/')
+      const shown = respellOne(below, base, raw)
+      if (!walk.admits(walkCandidate(shown, cwd), segments[i] ?? '', true)) {
+        admitted = false
+        break
+      }
+    }
+    const shown = respellOne(p.virtual, base, raw)
+    const last = segments[segments.length - 1] ?? ''
+    if (admitted && walk.admitsFile(walkCandidate(shown, cwd), last, null)) kept.push(p)
+  }
+  return kept
 }

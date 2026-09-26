@@ -13,14 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.commands.builtin.generic.rg import RG_NO_PATTERN, labelled
+from mirage.commands.builtin.generic.rg import (labelled, needs_every_file,
+                                                parse_flags,
+                                                refuse_missing_pattern)
 from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.rg import walk_filter
 from mirage.commands.builtin.generic_bind.adapter import bound_op
 from mirage.commands.builtin.github.pushdown import narrow_scope, scope_refusal
 from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.rg_scan import walk_candidates
 from mirage.commands.config import CommandOpts
-from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -36,9 +38,9 @@ from mirage.types import PathSpec
 async def rg(accessor: GitHubAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])
-    pattern_str = pattern_arg(texts, fl)
-    if pattern_str is None:
-        raise UsageError(RG_NO_PATTERN)
+    pattern_str = pattern_arg(texts, fl, "regexp")
+    f = parse_flags(fl)
+    refuse_missing_pattern(pattern_str, fl, f)
 
     run_opts = opts
     if paths:
@@ -47,27 +49,26 @@ async def rg(accessor: GitHubAccessor, paths: list[PathSpec], texts: list[str],
             opts.index,
             paths,
             pattern_str,
-            fixed_string=fl.as_bool("F"),
+            fixed_string=f.fixed_string,
             recursive=True,
-            whole_word=fl.as_bool("w"),
+            whole_word=f.whole_word,
             # A narrowing holds only files matching the searched literal:
             # -v and --files-without-match print from the rest, and -f adds
             # patterns code search never saw.
-            exact_file_set=fl.as_bool("v") or fl.as_bool("files_without_match")
-            or bool(fl.raw("f")),
+            exact_file_set=needs_every_file(fl, f),
         )
         if used_search:
-            # The walk a narrowing stands in for prunes hidden entries and
-            # labels every file it finds.
-            narrowed = walk_candidates(narrowed, paths, fl.as_str("type"),
-                                       fl.as_str("glob"), fl.as_bool("hidden"))
+            # The walk a narrowing stands in for filters what it walks
+            # (-g, -t, hidden entries, -d) and labels every file it finds.
+            narrowed = walk_candidates(narrowed, paths, walk_filter(f),
+                                       opts.cwd.virtual)
             if not narrowed:
                 return b"", IOResult(exit_code=1)
             run_opts = labelled(opts)
-        if file_count > SCOPE_ERROR:
+        if file_count > SCOPE_ERROR and not (f.list_files or f.type_list):
             # A scope this large with no trusted narrowing is refused rather
-            # than scanned blob by blob.
-            msg = scope_refusal("rg", file_count, fl.as_bool("w"))
+            # than scanned blob by blob; a listing reads no blob.
+            msg = scope_refusal("rg", file_count, f.whole_word)
             return b"", IOResult(exit_code=1, stderr=msg.encode())
         paths = narrowed
 

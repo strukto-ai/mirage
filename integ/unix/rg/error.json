@@ -27,11 +27,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg",
+      "command": "rg; echo rc=$?; rg -t nosuch x /data/a.txt; echo rc=$?; rg -g '[' x /data/a.txt; echo rc=$?; rg --sort nope x /data/a.txt; echo rc=$?; rg -m x x /data/a.txt; echo rc=$?; rg --path-separator '::' x /data/a.txt; echo rc=$?; rg --max-filesize 1Q x /data/a.txt; echo rc=$?; rg --type-add 'bad' -t bad x /data/a.txt; echo rc=$?",
       "expect": {
-        "exit": 2,
-        "stdout": "",
-        "stderr": "rg: ripgrep requires at least one pattern to execute a search\n"
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=2\nrc=2\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "rg: ripgrep requires at least one pattern to execute a search\nrg: unrecognized file type: nosuch\nrg: error parsing glob '[': unclosed character class; missing ']'\nrg: error parsing flag --sort: choice 'nope' is unrecognized\nrg: error parsing flag -m: value is not a valid number: invalid digit found in string\nrg: error parsing flag --path-separator: A path separator must be exactly one byte, but the given separator is 2 bytes: ::\nIn some shells on Windows '/' is automatically expanded. Use '//' instead.\nrg: error parsing flag --max-filesize: invalid size: invalid format for size '1Q', which should be a non-empty sequence of digits followed by an optional 'K', 'M' or 'G' suffix\nrg: invalid definition (format is type:glob, e.g., html:*.html)\n"
       }
     },
     {
@@ -416,6 +416,38 @@
       "flags": [
         "C"
       ]
+    },
+    {
+      "id": "rg_created_sort_reports_missing_capability",
+      "seq": 612302,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "rg --sort created hello /data/a.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: sorting by creation time is not supported by the virtual filesystem\n"
+      }
     }
   ]
 }

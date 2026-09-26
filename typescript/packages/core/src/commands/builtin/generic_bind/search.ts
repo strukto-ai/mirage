@@ -25,14 +25,14 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
 import { grepGeneric } from '../generic/grep.ts'
-import { rgGeneric } from '../generic/rg.ts'
+import { foldsCase, parseFlags as parseRgFlags, rgGeneric } from '../generic/rg.ts'
 import {
   grepSearchMeta,
   textSearchResults,
   literalPushdownOperand,
   pushdownOperand,
 } from '../grep_pushdown.ts'
-import { patternArg } from '../grep_pattern.ts'
+import { PATTERN_KEYS, patternArg } from '../grep_pattern.ts'
 import { formatRecords } from '../utils/output.ts'
 import { resolveGlobOf, type CommandIO } from './adapter.ts'
 
@@ -85,6 +85,29 @@ async function* nativeOrBytes<A extends Accessor>(
   }
 }
 
+// How a native search matches the pushed-down pattern.
+export function searchOptions(
+  name: 'grep' | 'rg',
+  fl: FlagView,
+  pattern: string,
+): Record<string, boolean> {
+  if (name === 'rg') {
+    const f = parseRgFlags(fl)
+    return {
+      ignore_case: foldsCase(pattern, f.fixedString, f),
+      fixed_string: f.fixedString,
+      whole_word: f.wholeWord,
+      basic: false,
+    }
+  }
+  return {
+    ignore_case: fl.asBool('i'),
+    fixed_string: fl.asBool('F'),
+    whole_word: fl.asBool('w'),
+    basic: !fl.asBool('E'),
+  }
+}
+
 /** Execute an adapter's qualified search; null requests the generic scan. */
 export async function runSearch<A extends Accessor>(
   io: CommandIO<A>,
@@ -97,7 +120,7 @@ export async function runSearch<A extends Accessor>(
   const capability = io.search
   const meta = grepSearchMeta(capability)
   const fl = new FlagView(opts.flags, specOf(name))
-  const pattern = patternArg(texts, opts.flags)
+  const pattern = patternArg(texts, opts.flags, PATTERN_KEYS[name])
   const gate = meta?.mode === 'literal' ? literalPushdownOperand : pushdownOperand
   const operand = gate(paths, opts.flags, pattern)
   if (
@@ -110,14 +133,7 @@ export async function runSearch<A extends Accessor>(
   ) {
     const query: SearchQuery = {
       query: pattern,
-      options: {
-        grep: {
-          ignore_case: fl.asBool('i'),
-          fixed_string: fl.asBool('F'),
-          whole_word: fl.asBool('w'),
-          basic: name === 'grep' && !fl.asBool('E'),
-        },
-      },
+      options: { grep: searchOptions(name, fl, pattern) },
     }
     let lines: string[] | null
     try {

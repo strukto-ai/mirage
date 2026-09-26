@@ -24,21 +24,27 @@ from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.posix import translate_classes
 
 NEVER_MATCH = r"(?!)"
+# The dest -e fills in each search command's spec: rg spells its options
+# by their long names.
+PATTERN_KEYS = {"grep": "e", "zgrep": "e", "rg": "regexp"}
 
 
-def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
+def pattern_arg(texts: Sequence[str],
+                flags: FlagView,
+                pattern_key: str = "e") -> str | None:
     """Resolve the pattern-list argument from -e values or the positional.
 
     Args:
         texts (Sequence[str]): positional TEXT operands.
         flags (FlagView): typed view over raw flag kwargs.
+        pattern_key (str): the dest -e fills (rg's is ``regexp``).
 
     Returns:
         str | None: POSIX newline-joined pattern list (each -e value may
             itself be a newline-separated list), or None when neither -e nor
             a positional pattern was supplied.
     """
-    e_values = flags.as_list("e")
+    e_values = flags.as_list(pattern_key)
     if e_values:
         return "\n".join(e_values)
     if texts:
@@ -52,6 +58,7 @@ async def resolve_pattern(
     read_bytes: Callable[[PathSpec], Awaitable[bytes]],
     usage: str,
     file_key: str = "f",
+    pattern_key: str = "e",
 ) -> tuple[str, bool]:
     """Resolve the search pattern from -e/positional/-f flag arguments.
 
@@ -62,13 +69,14 @@ async def resolve_pattern(
             whole-file reader used for -f pattern files.
         usage (str): usage error message when no pattern was supplied.
         file_key (str): canonical option key for pattern files.
+        pattern_key (str): canonical option key for -e patterns.
 
     Returns:
         tuple[str, bool]: (newline-separated pattern list, never_match) where
             never_match is True when -f supplied zero patterns (GNU: match
             nothing; -F escaping must be skipped for the sentinel).
     """
-    pattern = pattern_arg(texts, flags)
+    pattern = pattern_arg(texts, flags, pattern_key)
 
     pattern_file = flags.raw(file_key)
     if isinstance(pattern_file, (PathSpec, list)):

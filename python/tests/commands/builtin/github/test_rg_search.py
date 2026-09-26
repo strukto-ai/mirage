@@ -68,8 +68,8 @@ async def test_rg_root_large_tree_uses_search(mock_github_api, github_env,
     stdout, io = await rg(
         accessor, [_root()], ['import'],
         CommandOpts(index=index, flags={
-            'c': True,
-            'w': True
+            'count': True,
+            'word_regexp': True
         }))
     spy.assert_awaited_once()
     text = (await materialize(stdout)).decode()
@@ -85,7 +85,7 @@ async def test_rg_subdir_uses_search(mock_github_api, github_env, monkeypatch):
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
     await rg(accessor, [_subdir()], ['import'],
-             CommandOpts(index=index, flags={'w': True}))
+             CommandOpts(index=index, flags={'word_regexp': True}))
     spy.assert_awaited_once()
 
 
@@ -99,7 +99,7 @@ async def test_rg_regex_skips_search(mock_github_api, github_env, monkeypatch):
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
     await rg(accessor, [_root()], ['imp.*rt'],
-             CommandOpts(index=index, flags={'w': True}))
+             CommandOpts(index=index, flags={'word_regexp': True}))
     spy.assert_not_awaited()
 
 
@@ -111,7 +111,7 @@ async def test_rg_regex_without_literal_skips_search(mock_github_api,
     monkeypatch.setitem(_NGLOBALS, "SCOPE_WARN", 1)
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
     await rg(accessor, [_root()], ['imp|exp'],
-             CommandOpts(index=index, flags={'w': True}))
+             CommandOpts(index=index, flags={'word_regexp': True}))
     spy.assert_not_awaited()
 
 
@@ -122,7 +122,7 @@ async def test_rg_small_tree_skips_search(mock_github_api, github_env,
     spy = AsyncMock(return_value=[])
     monkeypatch.setitem(_NGLOBALS, "narrow_paths", spy)
     await rg(accessor, [_root()], ['import'],
-             CommandOpts(index=index, flags={'w': True}))
+             CommandOpts(index=index, flags={'word_regexp': True}))
     spy.assert_not_awaited()
 
 
@@ -131,8 +131,9 @@ async def test_rg_scope_error_when_too_many_files(mock_github_api, github_env,
                                                   monkeypatch):
     accessor, index = github_env
     monkeypatch.setitem(_GLOBALS, "SCOPE_ERROR", 1)
-    stdout, io = await rg(accessor, [_root()], ['import'],
-                          CommandOpts(index=index, flags={'w': True}))
+    stdout, io = await rg(
+        accessor, [_root()], ['import'],
+        CommandOpts(index=index, flags={'word_regexp': True}))
     assert io.exit_code == 1
     assert b"narrow the path" in (io.stderr or b"")
 
@@ -176,8 +177,8 @@ async def test_narrowed_run_forces_filename_labels(github_env, seam):
     narrow, generic = seam
     narrow.return_value = ([_narrowed("/src/a.py")], 1, True)
     await rg(accessor, [_subdir()], ["needle"],
-             CommandOpts(index=index, flags={"w": True}))
-    assert generic.await_args.args[2].flags.get("H") is True
+             CommandOpts(index=index, flags={"word_regexp": True}))
+    assert generic.await_args.args[2].flags.get("with_filename") is True
 
 
 @pytest.mark.asyncio
@@ -185,12 +186,14 @@ async def test_dash_upper_i_suppression_survives_narrowing(github_env, seam):
     accessor, index = github_env
     narrow, generic = seam
     narrow.return_value = ([_narrowed("/src/a.py")], 1, True)
-    await rg(accessor, [_subdir()], ["needle"],
-             CommandOpts(index=index, flags={
-                 "w": True,
-                 "args_I": True
-             }))
-    assert "H" not in generic.await_args.args[2].flags
+    await rg(
+        accessor, [_subdir()], ["needle"],
+        CommandOpts(index=index,
+                    flags={
+                        "word_regexp": True,
+                        "no_filename": True
+                    }))
+    assert "with_filename" not in generic.await_args.args[2].flags
 
 
 @pytest.mark.asyncio
@@ -198,8 +201,8 @@ async def test_walk_fallback_leaves_flags_alone(github_env, seam):
     accessor, index = github_env
     _, generic = seam
     await rg(accessor, [_subdir()], ["needle"],
-             CommandOpts(index=index, flags={"w": True}))
-    assert "H" not in generic.await_args.args[2].flags
+             CommandOpts(index=index, flags={"word_regexp": True}))
+    assert "with_filename" not in generic.await_args.args[2].flags
 
 
 @pytest.mark.asyncio
@@ -212,7 +215,7 @@ async def test_hidden_candidates_are_pruned(github_env, seam):
         _narrowed("/src/a.py"),
     ], 3, True)
     await rg(accessor, [_subdir()], ["needle"],
-             CommandOpts(index=index, flags={"w": True}))
+             CommandOpts(index=index, flags={"word_regexp": True}))
     assert [p.virtual for p in generic.await_args.args[0]] == ["/src/a.py"]
 
 
@@ -222,11 +225,12 @@ async def test_hidden_flag_keeps_hidden_candidates(github_env, seam):
     narrow, generic = seam
     narrow.return_value = ([_narrowed("/src/.env"),
                             _narrowed("/src/a.py")], 2, True)
-    await rg(accessor, [_subdir()], ["needle"],
-             CommandOpts(index=index, flags={
-                 "w": True,
-                 "hidden": True
-             }))
+    await rg(
+        accessor, [_subdir()], ["needle"],
+        CommandOpts(index=index, flags={
+            "word_regexp": True,
+            "hidden": True
+        }))
     assert [p.virtual
             for p in generic.await_args.args[0]] == ["/src/.env", "/src/a.py"]
 
@@ -236,8 +240,9 @@ async def test_all_hidden_narrowed_set_exits_one(github_env, seam):
     accessor, index = github_env
     narrow, generic = seam
     narrow.return_value = ([_narrowed("/src/.env")], 1, True)
-    stdout, io = await rg(accessor, [_subdir()], ["needle"],
-                          CommandOpts(index=index, flags={"w": True}))
+    stdout, io = await rg(
+        accessor, [_subdir()], ["needle"],
+        CommandOpts(index=index, flags={"word_regexp": True}))
     assert stdout == b""
     assert io.exit_code == 1
     generic.assert_not_awaited()
@@ -265,8 +270,8 @@ async def test_rg_narrowed_candidates_pass_the_walk_filters(
         accessor, [_root()], ['import'],
         CommandOpts(index=index,
                     flags={
-                        'c': True,
-                        'w': True,
+                        'count': True,
+                        'word_regexp': True,
                         'type': file_type
                     }))
     assert ((await materialize(stdout)).decode(), io.exit_code) == want

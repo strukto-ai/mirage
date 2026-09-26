@@ -65,7 +65,7 @@ async function runRg(
   const vfs = makeFakeVfs(options.transport)
   const result = await cmd.fn(vfs.accessor, paths, texts, {
     stdin: null,
-    flags: { w: true },
+    flags: { word_regexp: true },
     filetypeFns: null,
     cwd: '/',
     index: options.index,

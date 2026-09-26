@@ -33,8 +33,8 @@ import { command, type CommandFnResult, type CommandOpts } from '../../config.ts
 import { specOf } from '../../spec/builtins.ts'
 import { patternArg } from '../grep_pattern.ts'
 import { pushdownOperand } from '../grep_pushdown.ts'
-import { RG_NO_PATTERN, rgGeneric } from '../generic/rg.ts'
-import { SEARCH_HONORED, SEARCH_MAX_RESULTS } from './grep.ts'
+import { parseFlags, refuseMissingPattern, rgGeneric } from '../generic/rg.ts'
+import { RG_SEARCH_HONORED, SEARCH_MAX_RESULTS } from './grep.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
 const resolveSlackGlob = resolveGlobOf(SLACK_IO)
@@ -55,17 +55,16 @@ async function rgCommand(
   texts: string[],
   opts: CommandOpts,
 ): Promise<CommandFnResult> {
-  const pattern = patternArg(texts, opts.flags)
-  if (pattern === null) {
-    return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(`${RG_NO_PATTERN}\n`) })]
-  }
+  const pattern = patternArg(texts, opts.flags, 'regexp')
   const fl = new FlagView(opts.flags, specOf('rg'))
+  const refused = refuseMissingPattern(pattern, fl, parseFlags(fl))
+  if (refused !== null) return refused
 
   const pushdownWarnings: string[] = []
   // Same gate as slack grep, from the same table: only a lone concrete
   // operand with no reshaping flag may be answered by the search API.
-  const operand = pushdownOperand(paths, opts.flags, pattern, SEARCH_HONORED)
-  if (operand !== null && fl.asBool('w')) {
+  const operand = pushdownOperand(paths, opts.flags, pattern, RG_SEARCH_HONORED)
+  if (operand !== null && pattern !== null && fl.asBool('word_regexp')) {
     const match = detectScope(operand)
     if (NATIVE_KINDS.has(match.kind) && (accessor.transport.searchAvailable?.() ?? true)) {
       const target = searchTarget(match)

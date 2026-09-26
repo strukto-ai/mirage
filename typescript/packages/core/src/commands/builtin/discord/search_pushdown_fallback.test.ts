@@ -97,7 +97,7 @@ describe('discord rg push-down fallback', () => {
       ['hi'],
       {
         stdin: null,
-        flags: { w: true },
+        flags: { word_regexp: true },
         filetypeFns: null,
         cwd: '/',
         index: idx,

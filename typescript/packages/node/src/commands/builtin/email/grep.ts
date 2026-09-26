@@ -56,6 +56,16 @@ const ENC = new TextEncoder()
 // GNU's -c prints a `path:0` row for the files with no match at all. They
 // defer now, along with -q, -H/-h, -A/-B/-C, rg's -I and the file filters.
 export const SEARCH_HONORED = ['n', 'args_l', 'w', 'o', 'm'] as const
+// rg spells the same flags by their long names; its -x narrows within a
+// message too, which the scan's compiled pattern honors.
+export const RG_SEARCH_HONORED = [
+  'line_number',
+  'files_with_matches',
+  'word_regexp',
+  'only_matching',
+  'max_count',
+  'line_regexp',
+] as const
 
 // Messages are greped line by line, as python's `splitlines()` does; passing
 // the whole message as one line made -n report 1 for every hit and printed

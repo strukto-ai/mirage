@@ -453,6 +453,7 @@ export async function handleCommand(
       ensureOpen,
       csStat,
       mergeSignals(signal, session.abortSignal),
+      dispatch,
     )
     const [csStdout0, csIo, csExec] = await handleCrossMount(
       cmdName,
@@ -621,6 +622,7 @@ export async function handleCommand(
       singleNs,
       singleStat,
       mergeSignals(signal, session.abortSignal),
+      dispatch,
     )
     let fanOut = fanOut0
     if (cmdName === 'find') {

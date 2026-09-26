@@ -14,14 +14,15 @@
 
 import { Cmd } from '../types.ts'
 
-// grep-style: a usage error (2) dominates, then a failed operand (a read
-// error, seen as exit 1 with stderr) forces 1 even when another operand
-// matched, then any match wins (0), then no-match (1). `-q` keeps GNU's
-// match-wins rule over errors. Everything else: worst operand wins.
+// grep-style: `-q` with a match exits 0 whatever else failed (GNU grep and
+// ripgrep both), then a usage error (2) dominates, then a failed operand (a
+// read error, seen as exit 1 with stderr) forces 1 even when another operand
+// matched, then any match wins (0), then no-match (1). Everything else:
+// worst operand wins.
 //
 // A read error is no longer one of the codes this has to invent: the
 // generics answer GNU's own number for a failed read, so a failed operand
-// arrives here as 2 and the first branch carries it through. The `errored`
+// arrives here as 2 and the exit-2 branch carries it through. The `errored`
 // branch below is for an operand that reported something on stderr while
 // still exiting 1, which no read failure does now.
 export function combinedExit(
@@ -31,8 +32,8 @@ export function combinedExit(
   quiet = false,
 ): number {
   if (cmdName === Cmd.GREP || cmdName === Cmd.RG) {
-    if (codes.some((c) => c > 1)) return Math.max(...codes)
     if (quiet && codes.includes(0)) return 0
+    if (codes.some((c) => c > 1)) return Math.max(...codes)
     if (errored?.some(Boolean) === true) return 1
     if (codes.includes(0)) return 0
     return codes.length > 0 ? Math.max(...codes) : 0

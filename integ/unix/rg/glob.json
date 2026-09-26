@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg --glob \"*.log\" error /data/r4",
+      "command": "rg --glob \"*.log\" error /data/r4; rg -g '*.log' error /data/r4; rg -g'*.py' return /data/r4; rg -g=*.js return /data/r4; rg -g '*.py' -g '*.js' return /data/r4 | sort; rg -g '!*.py' return /data/r4; rg --iglob '*.LOG' disk /data/r4; rg --glob-case-insensitive -g '*.LOG' disk /data/r4; rg -g '!sub/' -l inner /data/r4; echo rc=$?; rg -g 'sub/**' alpha /data/r4",
       "expect": {
-        "exit": 0,
-        "stdout": "/data/r4/app.log:error: disk full\n/data/r4/app.log:error: timeout\n",
+        "exit": 1,
+        "stdout": "/data/r4/app.log:error: disk full\n/data/r4/app.log:error: timeout\n/data/r4/app.log:error: disk full\n/data/r4/app.log:error: timeout\n/data/r4/code.py:    return 42\n/data/r4/code.js:function main() { return 42; }\n/data/r4/code.js:function main() { return 42; }\n/data/r4/code.py:    return 42\n/data/r4/code.js:function main() { return 42; }\n/data/r4/app.log:error: disk full\n/data/r4/app.log:error: disk full\nrc=1\n",
         "stderr": ""
       },
       "flags": [
@@ -60,10 +60,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg --glob '*.rs' world /data/a.txt",
+      "command": "rg --glob '*.rs' world /data/a.txt; rg -g '*.rs' world /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "world\n",
+        "stdout": "world\nworld\n",
         "stderr": ""
       }
     },
@@ -94,10 +94,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg --glob '!a.txt' world /data/a.txt",
+      "command": "rg --glob '!a.txt' world /data/a.txt; rg -g '!a.txt' world /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "world\n",
+        "stdout": "world\nworld\n",
         "stderr": ""
       }
     }

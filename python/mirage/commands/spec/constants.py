@@ -124,7 +124,16 @@ DIGIT_OPTIONS = frozenset({"split"})
 LONG_SYNONYMS = {
     ("grep", "--colour"): "--color",
     ("date", "--universal"): "--utc",
+    ("rg", "--passthrough"): "--passthru",
 }
+
+# The programs whose short value options drop one `=` from an attached
+# value, the way lexopt (ripgrep's parser), clap and argparse read
+# `-x=VALUE`. GNU getopt keeps it (`head -n=5` is refused as `=5`), which
+# is every other builtin. Measured on ripgrep 14.1.1: `rg -g=*.py`,
+# `rg -m=1`, `rg -A=1` and `rg -e=hello` read `*.py`, `1`, `1` and
+# `hello`.
+EQUALS_SHORT_VALUES = frozenset({"rg"})
 
 # The one program whose standard options outrank every option refusal,
 # wherever the word sits. zgrep is a shell script that reads the line in

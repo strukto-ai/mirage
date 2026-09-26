@@ -85,8 +85,8 @@ async def test_rg_with_many_concrete_paths_defers_to_scan():
             accessor, _concrete_paths(7), ['hello'],
             CommandOpts(index=RAMIndexCacheStore(),
                         flags={
-                            'w': True,
-                            'i': True
+                            'word_regexp': True,
+                            'ignore_case': True
                         }))
     fake_search.assert_not_awaited()
     generic.assert_awaited_once()

@@ -18,7 +18,7 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { materialize, type ByteSource } from '../../../io/types.ts'
 import type { CommandFn, CommandOpts } from '../../config.ts'
-import * as helpers from '../../../shell/helpers.ts'
+import { ByteCursor } from '../rg_search.ts'
 import { rgGeneric } from './rg.ts'
 
 const ENC = new TextEncoder()
@@ -114,7 +114,9 @@ describe('rgGeneric multi-path dispatch', () => {
   })
 
   it('lists every file argument with -l', async () => {
-    expect(await run(['/top1.txt', '/top2.txt'], { args_l: true })).toBe('/top1.txt\n/top2.txt\n')
+    expect(await run(['/top1.txt', '/top2.txt'], { files_with_matches: true })).toBe(
+      '/top1.txt\n/top2.txt\n',
+    )
   })
 
   it('searches every directory argument in the filetype walk', async () => {
@@ -144,7 +146,7 @@ describe('rgGeneric -H/-I filename labels', () => {
     const result = await rgGeneric(
       [spec('/top1.txt')],
       ['hello'],
-      opts({ H: true, m: 1 }),
+      opts({ with_filename: true, max_count: 1 }),
       stat,
       readdir,
       limitedStream,
@@ -156,15 +158,17 @@ describe('rgGeneric -H/-I filename labels', () => {
   })
 
   it('-H labels a single file like ripgrep --with-filename', async () => {
-    expect(await run(['/top1.txt'], { H: true })).toBe('/top1.txt:hello one\n')
+    expect(await run(['/top1.txt'], { with_filename: true })).toBe('/top1.txt:hello one\n')
   })
 
   it('-H labels a single-file count', async () => {
-    expect(await run(['/top1.txt'], { H: true, c: true })).toBe('/top1.txt:1\n')
+    expect(await run(['/top1.txt'], { with_filename: true, count: true })).toBe('/top1.txt:1\n')
   })
 
   it('-I suppresses multi-file labels like ripgrep --no-filename', async () => {
-    expect(await run(['/top1.txt', '/top2.txt'], { args_I: true })).toBe('hello one\nhello two\n')
+    expect(await run(['/top1.txt', '/top2.txt'], { no_filename: true })).toBe(
+      'hello one\nhello two\n',
+    )
   })
 })
 
@@ -206,10 +210,9 @@ describe('rgGeneric --files-without-match on stdin', () => {
     // ripgrep 14.1.1: `printf 'x\n' | rg --files-without-match -m0 hello`
     // prints nothing and exits 1.
     for (const data of ['x\n', 'hello\n']) {
-      expect(await runStdin(ENC.encode(data), { files_without_match: true, m: '0' })).toEqual([
-        '',
-        1,
-      ])
+      expect(
+        await runStdin(ENC.encode(data), { files_without_match: true, max_count: '0' }),
+      ).toEqual(['', 1])
     }
   })
 })
@@ -232,19 +235,25 @@ it.each([
       closed = true
     }
   }
-  const original = helpers.byteOffset
-  const offset = vi.spyOn(helpers, 'byteOffset').mockImplementation((text, index) => {
+  // Every match's offset is one step of the line's byte cursor; the
+  // original is only ever called with the cursor it came from.
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const original = ByteCursor.prototype.at
+  const offset = vi.spyOn(ByteCursor.prototype, 'at').mockImplementation(function (
+    this: ByteCursor,
+    index: number,
+  ) {
     timer ??= setTimeout(() => {
       controller.abort()
     }, 0)
-    return original(text, index)
+    return original.call(this, index)
   })
   async function scan(): Promise<void> {
     const result = await rgGeneric(
       paths.map(spec),
       ['hello'],
       {
-        ...opts({ o: true, byte_offset: true, H: withFilename }),
+        ...opts({ only_matching: true, byte_offset: true, with_filename: withFilename }),
         stdin: paths.length === 0 ? source() : null,
         signal: controller.signal,
       },

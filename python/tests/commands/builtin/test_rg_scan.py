@@ -16,17 +16,22 @@ from functools import partial
 
 import pytest
 
-from mirage.commands.builtin.rg_scan import (_rg_matches_filter, rg_full,
-                                             walk_candidates)
-from mirage.commands.builtin.utils.wrap import (call_read_bytes, call_readdir,
-                                                call_stat, to_pathspec)
+from mirage.commands.builtin.generic.rg import parse_flags
+from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.rg import walk_filter
+from mirage.commands.builtin.rg_scan import WalkFilter, walk_candidates
+from mirage.commands.builtin.utils.wrap import to_pathspec
+from mirage.commands.config import CommandOpts
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.core.ram.mkdir import mkdir
 from mirage.core.ram.read import read
 from mirage.core.ram.readdir import readdir
 from mirage.core.ram.stat import stat
 from mirage.core.ram.write import write_bytes as _async_write_bytes
+from mirage.io.stream import materialize
 from mirage.io.types import IOResult
-from mirage.types import PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 
 
 async def _write(backend, path, content):
@@ -39,64 +44,115 @@ async def _mkdir(backend, path):
     await mkdir(accessor, to_pathspec(path), parents=True)
 
 
-def _bind(backend):
-    accessor = backend.accessor
-    backend.index
-    return (
-        partial(call_readdir, partial(readdir, accessor)),
-        partial(call_stat, partial(stat, accessor)),
-        partial(call_read_bytes, partial(read, accessor)),
-    )
+# The keywords the scan used to take, as the rg dests they stand for.
+_DESTS = {
+    "ignore_case": "ignore_case",
+    "invert": "invert_match",
+    "count_only": "count",
+    "files_only": "files_with_matches",
+    "fixed_string": "fixed_strings",
+    "only_matching": "only_matching",
+    "max_count": "max_count",
+    "whole_word": "word_regexp",
+    "context_before": "before_context",
+    "context_after": "after_context",
+    "hidden": "hidden",
+    "byte_offsets": "byte_offset",
+    "files_without_match": "files_without_match",
+}
 
 
 async def rg(backend, path, pattern, **kwargs):
-    rd, st, rb = _bind(backend)
-    return await rg_full(
-        rd,
-        st,
-        rb,
-        path,
-        pattern,
-        ignore_case=kwargs.get("ignore_case", False),
-        invert=kwargs.get("invert", False),
-        line_numbers=kwargs.get("line_numbers", True),
-        count_only=kwargs.get("count_only", False),
-        files_only=kwargs.get("files_only", False),
-        fixed_string=kwargs.get("fixed_string", False),
-        only_matching=kwargs.get("only_matching", False),
-        max_count=kwargs.get("max_count", None),
-        whole_word=kwargs.get("whole_word", False),
-        context_before=kwargs.get("context_before", 0),
-        context_after=kwargs.get("context_after", 0),
-        file_type=kwargs.get("file_type", None),
-        glob_pattern=kwargs.get("glob_pattern", None),
-        hidden=kwargs.get("hidden", False),
-        warnings=kwargs.get("warnings", None),
-        byte_offsets=kwargs.get("byte_offsets", False),
-        io=kwargs.get("io"),
-        files_without_match=kwargs.get("files_without_match", False),
-    )
+    """Run the generic rg over one operand on the RAM backend and answer
+    with its printed lines, the way the scan these tests were written for
+    answered.
+
+    A line number prints unless ``line_numbers=False``; ``warnings``
+    receives stderr's lines and ``io`` the exit status.
+    """
+    flags: dict = {}
+    if kwargs.get("line_numbers", True):
+        flags["line_number"] = True
+    # In the order the call gave them, which is line order to a
+    # last-wins option.
+    for key, value in kwargs.items():
+        dest = _DESTS.get(key)
+        if dest is None or value is None or value is False:
+            continue
+        flags[dest] = str(value) if isinstance(
+            value, int) and not isinstance(value, bool) else value
+    if kwargs.get("file_type") is not None:
+        flags["type"] = [kwargs["file_type"]]
+    if kwargs.get("glob_pattern") is not None:
+        flags["glob"] = [kwargs["glob_pattern"]]
+    accessor = backend.accessor
+    out, io = await generic_rg([to_pathspec(path)], [pattern],
+                               CommandOpts(flags=flags),
+                               readdir=partial(readdir, accessor),
+                               stat=partial(stat, accessor),
+                               read_bytes=partial(read, accessor),
+                               read_stream=None)
+    data = await materialize(out) if out is not None else b""
+    if kwargs.get("warnings") is not None and io.stderr:
+        stderr = await materialize(io.stderr)
+        kwargs["warnings"].extend(stderr.decode().splitlines())
+    if kwargs.get("io") is not None:
+        kwargs["io"].exit_code = io.exit_code
+    text = data.decode(errors="surrogateescape")
+    # Split on the terminator alone, as rg does: a \r or \v stays.
+    return text.split("\n")[:-1] if text else []
 
 
-class TestRgMatchesFilter:
+def _walk(**flags) -> WalkFilter:
+    return walk_filter(parse_flags(FlagView(flags, spec=SPECS["rg"])))
+
+
+class TestWalkFilter:
 
     def test_hidden_excluded(self):
-        assert not _rg_matches_filter(".hidden", None, None, False)
+        assert not _walk().admits_file(".hidden", ".hidden", None)
 
     def test_hidden_included(self):
-        assert _rg_matches_filter(".hidden", None, None, True)
+        assert _walk(hidden=True).admits_file(".hidden", ".hidden", None)
 
     def test_file_type_match(self):
-        assert _rg_matches_filter("file.py", "py", None, False)
+        assert _walk(type=["py"]).admits_file("file.py", "file.py", None)
 
     def test_file_type_no_match(self):
-        assert not _rg_matches_filter("file.txt", "py", None, False)
+        assert not _walk(type=["py"]).admits_file("file.txt", "file.txt", None)
 
     def test_glob_match(self):
-        assert _rg_matches_filter("file.py", None, "*.py", False)
+        assert _walk(glob=["*.py"]).admits_file("file.py", "file.py", None)
 
     def test_glob_no_match(self):
-        assert not _rg_matches_filter("file.txt", None, "*.py", False)
+        assert not _walk(glob=["*.py"]).admits_file("file.txt", "file.txt",
+                                                    None)
+
+    def test_a_type_or_glob_keeps_a_hidden_file(self):
+        # ripgrep 14.1.1: `rg -t txt` and `rg -g '*.txt'` search
+        # .hid.txt, since a whitelist decides before the hidden filter.
+        assert _walk(type=["txt"]).admits_file(".hid.txt", ".hid.txt", None)
+        assert _walk(glob=["*.txt"]).admits_file(".hid.txt", ".hid.txt", None)
+
+    def test_a_negated_glob_outranks_a_type(self):
+        walk = _walk(type=["py"], glob=["!b.py"])
+        assert not walk.admits_file("b.py", "b.py", None)
+        assert walk.admits_file("a.py", "a.py", None)
+
+    def test_max_filesize_drops_a_larger_file(self):
+        walk = _walk(max_filesize="10")
+        small = FileStat(name="a", size=10, type=FileType.FILE)
+        big = FileStat(name="b", size=11, type=FileType.FILE)
+        assert walk.admits_file("a", "a", small)
+        assert not walk.admits_file("b", "b", big)
+
+    def test_a_binary_extension_is_walked_only_on_request(self):
+        assert not _walk().admits_file("m.gguf", "m.gguf", None)
+        assert _walk(text=True).admits_file("m.gguf", "m.gguf", None)
+        assert _walk(binary=True).admits_file("m.gguf", "m.gguf", None)
+        assert _walk(unrestricted=3).admits_file("m.gguf", "m.gguf", None)
+        assert not _walk(text=True, no_text=True).admits_file(
+            "m.gguf", "m.gguf", None)
 
 
 class TestBasicMatching:
@@ -397,16 +453,16 @@ class TestWarnings:
 
     @pytest.mark.anyio
     async def test_warnings_on_missing_file(self, backend):
-        # The path as walked, for the caller to respell the way the
-        # operand was typed.
+        # The path named the way the operand was typed.
         warnings = []
         result = await rg(backend,
                           "/tmp/nonexistent.txt",
                           "foo",
                           warnings=warnings)
         assert result == []
-        assert warnings == [("/tmp/nonexistent.txt",
-                             "No such file or directory")]
+        assert warnings == [
+            "rg: /tmp/nonexistent.txt: No such file or directory"
+        ]
 
     @pytest.mark.anyio
     async def test_warnings_none_does_not_error(self, backend):
@@ -421,7 +477,7 @@ class TestWarnings:
         warnings = []
         result = await rg(backend, "/tmp/nodir", "foo", warnings=warnings)
         assert result == []
-        assert warnings == [("/tmp/nodir", "No such file or directory")]
+        assert warnings == ["rg: /tmp/nodir: No such file or directory"]
 
 
 class TestOnlyMatchingDirectoryWalk:
@@ -875,13 +931,20 @@ class TestFilesWithoutMatch:
         assert result == ["/tmp/sub/b.txt"]
 
     @pytest.mark.anyio
-    async def test_count_outranks_it(self, backend):
+    async def test_the_later_of_it_and_count_wins(self, backend):
+        # ripgrep 14.1.1: `--files-without-match -c` prints counts and
+        # `-c --files-without-match` lists the matchless files.
         await _write(backend, "/tmp/a.txt", "foo\nfoo")
         assert await rg(backend,
                         "/tmp/a.txt",
                         "foo",
+                        files_without_match=True,
+                        count_only=True) == ["2"]
+        assert await rg(backend,
+                        "/tmp/a.txt",
+                        "foo",
                         count_only=True,
-                        files_without_match=True) == ["2"]
+                        files_without_match=True) == []
 
     @pytest.mark.anyio
     async def test_m0_lists_nothing(self, backend):
@@ -955,24 +1018,35 @@ class TestWalkCandidates:
             _candidate("/data/.env"),
             _candidate("/data/.git/config"),
             _candidate("/data/a.txt")
-        ], [_scope()], None, None, False)
+        ], [_scope()], _walk(), "/")
         assert [p.virtual for p in kept] == ["/data/a.txt"]
 
     def test_hidden_flag_keeps_dotfiles(self):
         paths = [_candidate("/data/.env"), _candidate("/data/a.txt")]
-        assert walk_candidates(paths, [_scope()], None, None, True) == paths
+        assert walk_candidates(paths, [_scope()], _walk(hidden=True),
+                               "/") == paths
 
     def test_ignores_dots_in_the_scope_itself(self):
         kept = walk_candidates([_candidate("/data/.cfg/a.txt")],
-                               [_scope("/data/.cfg")], None, None, False)
+                               [_scope("/data/.cfg")], _walk(), "/")
         assert [p.virtual for p in kept] == ["/data/.cfg/a.txt"]
 
     def test_applies_type_and_glob_to_the_file(self):
         paths = [_candidate("/data/a.py"), _candidate("/data/b.md")]
-        by_type = walk_candidates(paths, [_scope()], "py", None, False)
-        by_glob = walk_candidates(paths, [_scope()], None, "*.md", False)
+        by_type = walk_candidates(paths, [_scope()], _walk(type=["py"]), "/")
+        by_glob = walk_candidates(paths, [_scope()], _walk(glob=["*.md"]), "/")
         assert [p.virtual for p in by_type] == ["/data/a.py"]
         assert [p.virtual for p in by_glob] == ["/data/b.md"]
+
+    def test_a_directory_the_walk_would_skip_hides_its_files(self):
+        paths = [_candidate("/data/sub/a.py"), _candidate("/data/b.py")]
+        kept = walk_candidates(paths, [_scope()], _walk(glob=["!sub/"]), "/")
+        assert [p.virtual for p in kept] == ["/data/b.py"]
+
+    def test_max_depth_counts_below_the_scope(self):
+        paths = [_candidate("/data/a.py"), _candidate("/data/sub/b.py")]
+        kept = walk_candidates(paths, [_scope()], _walk(max_depth="1"), "/")
+        assert [p.virtual for p in kept] == ["/data/a.py"]
 
 
 class TestNamedOperandsAreNeverFiltered:
@@ -987,15 +1061,18 @@ class TestNamedOperandsAreNeverFiltered:
 
     @pytest.mark.anyio
     async def test_a_walked_file_is_still_filtered(self, backend):
+        # The type keeps .hid.rs whatever its leading dot says (ripgrep
+        # 14.1.1's `rg -t txt` searches .hid.txt), and drops `in`.
         await _mkdir(backend, "/tmp/w")
         await _write(backend, "/tmp/w/in", "b\n")
         await _write(backend, "/tmp/w/.hid.rs", "b\n")
-        assert await rg(backend, "/tmp/w", "b", file_type="rust") == []
+        assert await rg(backend, "/tmp/w", "b",
+                        file_type="rust") == ["/tmp/w/.hid.rs:1:b"]
 
 
 def test_walk_candidates_prunes_below_the_longest_matching_scope():
     scopes = [_scope(), _scope("/data/.cfg")]
     kept = walk_candidates(
         [_candidate("/data/.cfg/a.txt"),
-         _candidate("/data/.cfg/.secret")], scopes, None, None, False)
+         _candidate("/data/.cfg/.secret")], scopes, _walk(), "/")
     assert [p.virtual for p in kept] == ["/data/.cfg/a.txt"]

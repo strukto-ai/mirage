@@ -381,12 +381,16 @@ describe('handleCrossMount — stream/fanout via runSingle', () => {
     const paths = [PathSpec.fromStrPath('/ram/a'), PathSpec.fromStrPath('/disk/b')]
     const [, io] = await handleCrossMount('rg', paths, ['ap'], {}, noDispatch, rs, null, 'rg')
     expect(io.exitCode).toBe(0)
-    expect(calls.every((c) => (c.flags as Record<string, unknown>).H === true)).toBe(true)
+    expect(calls.every((c) => (c.flags as Record<string, unknown>).with_filename === true)).toBe(
+      true,
+    )
 
     const calls2: Record<string, unknown>[] = []
     const rs2 = runSingleFrom({ '/ram/a': ['apple\n', 0], '/disk/b': ['apricot\n', 0] }, calls2)
-    await handleCrossMount('rg', paths, ['ap'], { args_I: true }, noDispatch, rs2, null, 'rg')
-    expect(calls2.every((c) => !('H' in (c.flags as Record<string, unknown>)))).toBe(true)
+    await handleCrossMount('rg', paths, ['ap'], { no_filename: true }, noDispatch, rs2, null, 'rg')
+    expect(calls2.every((c) => !('with_filename' in (c.flags as Record<string, unknown>)))).toBe(
+      true,
+    )
   })
 
   it('grep any-match wins over no-match in the merged exit code', async () => {

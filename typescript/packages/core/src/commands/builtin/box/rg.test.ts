@@ -83,30 +83,30 @@ describe('box rg push-down', () => {
   })
 
   it('forces the full walk for -v, --type, and --glob', async () => {
-    await runRg({ v: true })
+    await runRg({ invert_match: true })
     expect(narrow.mock.calls[0]?.[3]?.exactFileSet).toBe(true)
-    await runRg({ type: 'py' })
+    await runRg({ type: ['py'] })
     expect(narrow.mock.calls[1]?.[3]?.exactFileSet).toBe(true)
-    await runRg({ glob: '*.py' })
+    await runRg({ glob: ['*.py'] })
     expect(narrow.mock.calls[2]?.[3]?.exactFileSet).toBe(true)
   })
 
   it('forces filename labels for a narrowed run', async () => {
     narrow.mockResolvedValue({ resolved: [spec('/data/a.txt')], usedSearch: true })
     await runRg({})
-    expect(generic.mock.calls[0]?.[2]?.flags.H).toBe(true)
+    expect(generic.mock.calls[0]?.[2]?.flags.with_filename).toBe(true)
   })
 
   it('keeps -I suppression instead of forcing labels', async () => {
     narrow.mockResolvedValue({ resolved: [spec('/data/a.txt')], usedSearch: true })
-    await runRg({ args_I: true })
-    expect('H' in (generic.mock.calls[0]?.[2]?.flags ?? {})).toBe(false)
+    await runRg({ no_filename: true })
+    expect('with_filename' in (generic.mock.calls[0]?.[2]?.flags ?? {})).toBe(false)
   })
 
   it('leaves flags alone on the walk fallback', async () => {
     narrow.mockResolvedValue({ resolved: [scope()], usedSearch: false })
     await runRg({})
-    expect('H' in (generic.mock.calls[0]?.[2]?.flags ?? {})).toBe(false)
+    expect('with_filename' in (generic.mock.calls[0]?.[2]?.flags ?? {})).toBe(false)
   })
 
   it('prunes hidden candidates', async () => {

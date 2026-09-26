@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg -m1 error /data/r4/app.log",
+      "command": "rg -m1 error /data/r4/app.log; rg --max-count=1 error /data/r4/app.log; rg -m=1 error /data/r4/app.log; printf 'a1\\na2\\nb\\na3\\n' > /data/rson.txt; rg --stop-on-nonmatch a /data/rson.txt",
       "expect": {
         "exit": 0,
-        "stdout": "error: disk full\n",
+        "stdout": "error: disk full\nerror: disk full\nerror: disk full\na1\na2\n",
         "stderr": ""
       },
       "flags": [

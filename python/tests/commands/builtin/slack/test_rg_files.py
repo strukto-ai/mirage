@@ -58,7 +58,7 @@ async def test_rg_chat_jsonl_scans_the_named_day(accessor, index):
                 '/channels/general__C001/2026-04-10/chat.jsonl', ''),
                      virtual='/channels/general__C001/2026-04-10/chat.jsonl',
                      directory='/channels/general__C001/2026-04-10/chat.jsonl')
-        ], ['foo'], CommandOpts(index=index, flags={'w': True}))
+        ], ['foo'], CommandOpts(index=index, flags={'word_regexp': True}))
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0
     assert mock_generic.await_count == 1
@@ -80,7 +80,7 @@ async def test_rg_files_dir_redirects_to_generic_scan(accessor, index):
                 '/channels/general__C001/2026-04-10/files', ''),
                      virtual='/channels/general__C001/2026-04-10/files',
                      directory='/channels/general__C001/2026-04-10/files')
-        ], ['foo'], CommandOpts(index=index, flags={'w': True}))
+        ], ['foo'], CommandOpts(index=index, flags={'word_regexp': True}))
     assert mock_msgs.await_count == 0
     assert mock_files.await_count == 0
     assert mock_generic.await_count == 1
@@ -103,7 +103,7 @@ async def test_rg_both_when_channel_or_day_root(accessor, index):
                                         ''),
                      virtual='/channels/general__C001/2026-04-10',
                      directory='/channels/general__C001/2026-04-10')
-        ], ['foo'], CommandOpts(index=index, flags={'w': True}))
+        ], ['foo'], CommandOpts(index=index, flags={'word_regexp': True}))
     assert mock_msgs.await_count == 1
     assert mock_files.await_count == 1
 

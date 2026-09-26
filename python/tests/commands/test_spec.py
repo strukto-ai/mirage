@@ -341,7 +341,7 @@ def test_rg_spec_with_long_flags():
     parsed = parse_command(spec,
                            ["--type", "py", "--hidden", "pattern", "src/"],
                            cwd="/")
-    assert parsed.flag("--type") == "py"
+    assert parsed.flag("--type") == ["py"]
     assert parsed.flag("--hidden") is True
     assert parsed.args[0] == ("pattern", "str")
     assert parsed.args[1] == ("/src", "path")

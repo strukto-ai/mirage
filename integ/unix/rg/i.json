@@ -27,10 +27,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg -i WORLD /data/mixed.txt",
+      "command": "rg -i WORLD /data/mixed.txt; rg -S world /data/mixed.txt; rg -S World /data/mixed.txt; rg -i -s World /data/mixed.txt",
       "expect": {
         "exit": 0,
-        "stdout": "Hello World\nHELLO world\nhello WORLD\n",
+        "stdout": "Hello World\nHELLO world\nhello WORLD\nHello World\nHELLO world\nhello WORLD\nHello World\nHello World\n",
         "stderr": ""
       },
       "flags": [

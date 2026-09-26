@@ -64,10 +64,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg -f /data/patterns.txt /data/a.txt",
+      "command": "rg -f /data/patterns.txt /data/a.txt; rg --file /data/patterns.txt /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "world\nbar\n",
+        "stdout": "world\nbar\nworld\nbar\n",
         "stderr": ""
       },
       "flags": [

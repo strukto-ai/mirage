@@ -14,13 +14,17 @@
 
 import type * as BindModule from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type * as SearchModule from '../../../core/email/search.ts'
+import type * as RgModule from '@struktoai/mirage-core/commands/builtin/generic/rg'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../core/email/search.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof SearchModule>()),
   searchAndFormat: vi.fn(),
 }))
-vi.mock('@struktoai/mirage-core/commands/builtin/generic/rg', () => ({ rgGeneric: vi.fn() }))
+vi.mock('@struktoai/mirage-core/commands/builtin/generic/rg', async (importOriginal) => ({
+  ...(await importOriginal<typeof RgModule>()),
+  rgGeneric: vi.fn(),
+}))
 vi.mock('@struktoai/mirage-core/commands/builtin/generic_bind/index', async (importOriginal) => ({
   ...(await importOriginal<typeof BindModule>()),
   resolveGlobOf: () => (_accessor: unknown, paths: PathSpec[]) => Promise.resolve(paths),

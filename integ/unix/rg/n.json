@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg -n alpha /data/r4/notes.txt",
+      "command": "rg -n alpha /data/r4/notes.txt; rg -nN alpha /data/r4/notes.txt; rg --column alpha /data/r4/notes.txt; rg --vimgrep alpha /data/r4/notes.txt; rg --vimgrep --no-column alpha /data/r4/notes.txt",
       "expect": {
         "exit": 0,
-        "stdout": "1:alpha\n",
+        "stdout": "1:alpha\nalpha\n1:1:alpha\n/data/r4/notes.txt:1:1:alpha\n/data/r4/notes.txt:1:alpha\n",
         "stderr": ""
       },
       "flags": [

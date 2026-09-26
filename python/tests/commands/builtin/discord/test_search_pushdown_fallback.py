@@ -71,7 +71,7 @@ async def test_rg_emits_warning_on_rate_limit():
             new=AsyncMock(return_value=(b"", IOResult(exit_code=1))),
     ):
         _out, io = await rg(accessor, paths, ['hi'],
-                            CommandOpts(flags={'w': True}))
+                            CommandOpts(flags={'word_regexp': True}))
     stderr = (io.stderr or b"").decode()
     assert "push-down failed" in stderr
     # 429 doesn't trigger the perm hint; should still warn

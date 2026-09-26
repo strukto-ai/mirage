@@ -13,18 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.email import EmailAccessor
-from mirage.commands.builtin.email.grep import SEARCH_HONORED
+from mirage.commands.builtin.email.grep import RG_SEARCH_HONORED
 from mirage.commands.builtin.email.io import resolve_glob
-from mirage.commands.builtin.generic.rg import RG_NO_PATTERN
+from mirage.commands.builtin.generic.rg import (parse_flags,
+                                                refuse_missing_pattern)
 from mirage.commands.builtin.generic.rg import rg as generic_rg
+from mirage.commands.builtin.generic.rg import rg_matcher
 from mirage.commands.builtin.generic_bind.adapter import bound_op
-from mirage.commands.builtin.grep_pattern import compile_pattern, pattern_arg
+from mirage.commands.builtin.grep_pattern import pattern_arg
 from mirage.commands.builtin.grep_pushdown import (pushdown_operand,
                                                    search_query)
 from mirage.commands.builtin.grep_scan import grep_lines
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.config import CommandOpts
-from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -44,17 +45,9 @@ from mirage.utils.key_prefix import mount_prefix_of
 async def rg(accessor: EmailAccessor, paths: list[PathSpec], texts: list[str],
              opts: CommandOpts) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(opts.flags, spec=SPECS["rg"])
-    pattern_str = pattern_arg(texts, fl)
-    if pattern_str is None:
-        raise UsageError(RG_NO_PATTERN)
-    i = fl.as_bool("i")
-    n = fl.as_bool("n")
-    args_l = fl.as_bool("args_l")
-    w = fl.as_bool("w")
-    F = fl.as_bool("F")
-    o = fl.as_bool("o")
-    max_count = fl.as_int("m")
-    pat = compile_pattern(pattern_str, i, F, w)
+    pattern_str = pattern_arg(texts, fl, "regexp")
+    f = parse_flags(fl)
+    refuse_missing_pattern(pattern_str, fl, f)
 
     # IMAP text search takes one pattern; a newline-joined multi -e set must
     # fall through to the generic so each pattern matches (#347). The rest of
@@ -62,13 +55,16 @@ async def rg(accessor: EmailAccessor, paths: list[PathSpec], texts: list[str],
     # way: a line the push-down cannot answer takes the generic scan below.
     # It used to return exit 1 instead, reporting "nothing matched" for a
     # search it had not run.
-    operand = pushdown_operand(paths, opts.flags, pattern_str, SEARCH_HONORED)
+    operand = pushdown_operand(paths, opts.flags, pattern_str,
+                               RG_SEARCH_HONORED)
     # The server is asked for the literal every match must contain, never
     # the regex's own spelling: IMAP TEXT is a substring search.
-    query = search_query(pattern_str, F)
+    query = (search_query(pattern_str, f.fixed_string)
+             if pattern_str is not None else None)
     match = detect_scope(operand) if operand is not None else None
-    if (operand is not None and query is not None and match is not None
-            and match.kind in NATIVE_KINDS):
+    if (operand is not None and pattern_str is not None and query is not None
+            and match is not None and match.kind in NATIVE_KINDS):
+        pat = rg_matcher(pattern_str, False, f)
         folder = match.slots["folder"]
         uids = await search_messages(accessor,
                                      folder,
@@ -89,15 +85,15 @@ async def rg(accessor: EmailAccessor, paths: list[PathSpec], texts: list[str],
                                  lines,
                                  pat,
                                  invert=False,
-                                 line_numbers=n,
+                                 line_numbers=f.line_numbers,
                                  count_only=False,
-                                 files_only=args_l,
-                                 only_matching=o,
-                                 max_count=max_count)
+                                 files_only=f.files_only,
+                                 only_matching=f.only_matching,
+                                 max_count=f.max_count)
             if not matched:
                 continue
             any_match = True
-            if args_l:
+            if f.files_only:
                 all_results.append(vfs_path)
                 continue
             for line in matched:

@@ -69,7 +69,7 @@ async def test_rg_multi_pattern_skips_imap_search():
         _, io = await rg(
             accessor, [_path()], [],
             CommandOpts(index=RAMIndexCacheStore(),
-                        flags={'e': ['ada', 'ben']}))
+                        flags={'regexp': ['ada', 'ben']}))
 
     assert io.exit_code == 0
     assert seen["resolved"] == ["/email/INBOX"]
@@ -162,8 +162,10 @@ async def test_rg_invert_flag_defers_to_generic():
                   new=AsyncMock(return_value=[])), \
             patch("mirage.commands.builtin.email.rg.generic_rg",
                   new=AsyncMock(return_value=(b"", IOResult()))) as generic:
-        await rg(accessor, [_path()], ["foo"],
-                 CommandOpts(index=RAMIndexCacheStore(), flags={"v": True}))
+        await rg(
+            accessor, [_path()], ["foo"],
+            CommandOpts(index=RAMIndexCacheStore(),
+                        flags={"invert_match": True}))
     search.assert_not_awaited()
     generic.assert_awaited_once()
 

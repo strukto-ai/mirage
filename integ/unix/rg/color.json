@@ -23,11 +23,11 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg --color=never alpha /data/r4/notes.txt",
+      "command": "rg --color=never alpha /data/r4/notes.txt; rg --color never alpha /data/r4/notes.txt; rg -j1 --no-config --no-ignore --no-mmap --line-buffered alpha /data/r4/notes.txt; rg --color hello alpha /data/r4/notes.txt; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "alpha\n",
-        "stderr": ""
+        "stdout": "alpha\nalpha\nalpha\nrc=2\n",
+        "stderr": "rg: error parsing flag --color: choice 'hello' is unrecognized\n"
       },
       "flags": [
         "color"

@@ -23,10 +23,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "rg --type py \"return\" /data/r4",
+      "command": "rg --type py \"return\" /data/r4; rg -t py return /data/r4; rg -tpy return /data/r4; rg -T py return /data/r4; rg --type-add 'web:*.js' -t web return /data/r4; rg -t py -T py return /data/r4; echo rc=$?; rg --type-list | grep '^py:'",
       "expect": {
         "exit": 0,
-        "stdout": "/data/r4/code.py:    return 42\n",
+        "stdout": "/data/r4/code.py:    return 42\n/data/r4/code.py:    return 42\n/data/r4/code.py:    return 42\n/data/r4/code.js:function main() { return 42; }\n/data/r4/code.js:function main() { return 42; }\nrc=1\npy: *.py, *.pyi\n",
         "stderr": ""
       },
       "flags": [
@@ -60,10 +60,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rg --type rust world /data/a.txt",
+      "command": "rg --type rust world /data/a.txt; rg -t rust world /data/a.txt; rg -T txt world /data/a.txt",
       "expect": {
         "exit": 0,
-        "stdout": "world\n",
+        "stdout": "world\nworld\nworld\n",
         "stderr": ""
       }
     },
@@ -98,6 +98,38 @@
       "expect": {
         "exit": 0,
         "stdout": "/data/sub/nested.txt:content\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "rg_interleaved_type_occurrences",
+      "seq": 612300,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgorder; touch /data/rgorder/a.x /data/rgorder/b.y; rg --files --type-add 'foo:*.x' --type-clear foo --type-add 'foo:*.y' -t foo /data/rgorder; rg --files --type-add 'foo:*.y' -t foo -T foo -t foo /data/rgorder",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rgorder/b.y\n/data/rgorder/b.y\n",
         "stderr": ""
       }
     }

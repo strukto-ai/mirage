@@ -263,12 +263,28 @@ def search_query(pattern: str,
     return extract_required_literal(bre_source(pattern) if basic else pattern)
 
 
+# grep's dests, then rg's, which spells each flag by its long name; a
+# spec-less view reads both, and neither command sets the other's.
 _PUSHDOWN_SHAPING_BOOL = ("v", "n", "byte_offset", "c", "args_l",
                           "files_without_match", "w", "o", "q", "H", "h",
-                          "args_I", "text")
+                          "args_I", "text", "invert_match", "line_number",
+                          "count", "files_with_matches", "word_regexp",
+                          "only_matching", "quiet", "with_filename",
+                          "no_filename", "line_regexp", "column", "vimgrep",
+                          "trim", "null", "count_matches", "include_zero",
+                          "files", "type_list", "heading", "passthru",
+                          "passthrough", "binary", "sort_files")
 _PUSHDOWN_SHAPING_INT = ("m", "A", "B", "C")
-_PUSHDOWN_FILTER_STR = ("type", "glob", "binary_files")
-_PUSHDOWN_FILTER_LIST = ("include", "exclude", "exclude_dir")
+# rg's valued options defer on presence alone: a value the generic would
+# refuse in ripgrep's words is not the push-down's to parse.
+_PUSHDOWN_SHAPING_VALUE = ("max_count", "after_context", "before_context",
+                           "context", "max_columns", "replace",
+                           "field_match_separator", "max_depth",
+                           "max_filesize", "sort", "sortr")
+_PUSHDOWN_FILTER_STR = ("binary_files", )
+# -f adds patterns the pushed-down one never carried.
+_PUSHDOWN_FILTER_LIST = ("include", "exclude", "exclude_dir", "file", "glob",
+                         "iglob", "type", "type_not")
 
 
 def has_search_shaping_flags(
@@ -279,11 +295,12 @@ def has_search_shaping_flags(
 
     A search push-down prints each matching record as one whole line, so it
     cannot honor -v/-n/-b/-c/-l/-w/-o/-m/-A/-B/-C/-q/-H/-h, rg's -I (no
-    filename),
-    nor rg's file-filtering --glob/--type; when any is present the wrapper must
-    defer to the generic scan, which applies exact semantics. Reads through a
-    spec-less FlagView so the shared key set works for both the grep and rg
-    specs (rg simply never sets the grep-only keys).
+    filename), -x, -r, --column and the rest of its output options, nor
+    the file filters (--include/--exclude, rg's -g/-t/-T/-d) or the patterns
+    -f adds; when any is present the wrapper must defer to the generic scan,
+    which applies exact semantics. Reads through a spec-less FlagView so the
+    shared key set works for both the grep and rg specs (each simply never
+    sets the other's keys).
 
     ``honored`` names the flags this particular push-down implements itself,
     so their presence is not a reason to defer. Two shapes need it. A provider
@@ -303,6 +320,10 @@ def has_search_shaping_flags(
         return True
     if any(
             fl.as_int(k) is not None for k in _PUSHDOWN_SHAPING_INT
+            if k not in honored):
+        return True
+    if any(
+            fl.raw(k) is not None for k in _PUSHDOWN_SHAPING_VALUE
             if k not in honored):
         return True
     if any(fl.as_list(k) for k in _PUSHDOWN_FILTER_LIST if k not in honored):
@@ -330,7 +351,8 @@ def search_pushdown_ok(flags: Mapping[str, FlagValue] | None,
     if "\n" in pattern:
         return False
     fl = FlagView(flags)
-    return (is_literal_pattern(pattern, fl.as_bool("F"))
+    fixed = fl.as_bool("F") or fl.as_bool("fixed_strings")
+    return (is_literal_pattern(pattern, fixed)
             and not has_search_shaping_flags(flags))
 
 

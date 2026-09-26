@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 
-from mirage.commands.builtin.grep_pattern import merge_pattern_list
+from mirage.commands.builtin.grep_pattern import (PATTERN_KEYS,
+                                                  merge_pattern_list)
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -11,6 +12,14 @@ from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_error_line
 
 PROGRAM_FILE_COMMANDS = frozenset({"grep", "rg", "sed", "awk", "jq"})
+# The dest each command's spec gives its program file.
+FILE_KEYS = {
+    "grep": "file",
+    "rg": "file",
+    "sed": "f",
+    "awk": "f",
+    "jq": "from_file"
+}
 
 # ripgrep reads patterns from stdin once, and refuses both a second
 # `-f -` and a `-` operand after it, exit 2 (14.1.1).
@@ -27,9 +36,7 @@ def program_files(name: str, flags: dict[str, FlagValue]) -> list[PathSpec]:
         name (str): a PROGRAM_FILE_COMMANDS member.
         flags (dict[str, FlagValue]): spec-bound flags with PATH values.
     """
-    fl = FlagView(flags, spec=SPECS[name])
-    key = "from_file" if name == "jq" else "file" if name == "grep" else "f"
-    return fl.as_paths(key)
+    return FlagView(flags, spec=SPECS[name]).as_paths(FILE_KEYS[name])
 
 
 async def prepare_program(
@@ -59,7 +66,7 @@ async def prepare_program(
             checks for a `-` once `-f -` has read stdin.
     """
     fl = FlagView(flags, spec=SPECS[name])
-    key = "from_file" if name == "jq" else "file" if name == "grep" else "f"
+    key = FILE_KEYS[name]
     files = program_files(name, flags)
     if not files:
         return texts, flags, stdin, None
@@ -96,12 +103,13 @@ async def prepare_program(
     out = dict(flags)
     out.pop(key)
     if name in ("grep", "rg"):
-        pattern = "\n".join(fl.as_list("e")) if fl.as_list("e") else None
+        inline = fl.as_list(PATTERN_KEYS[name])
+        pattern = "\n".join(inline) if inline else None
         for data in pieces:
             pattern = merge_pattern_list(pattern, data)
         # An empty pattern-file list preserves grep's zero-pattern sentinel.
         out[key] = []
-        out["e"] = [] if pattern is None else [pattern]
+        out[PATTERN_KEYS[name]] = [] if pattern is None else [pattern]
     elif name == "sed":
         out["e"] = [
             *fl.as_list("e"),

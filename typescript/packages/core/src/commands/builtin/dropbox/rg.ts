@@ -21,7 +21,14 @@ import { type FileStat, VFSName, type PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { patternArg } from '../grep_pattern.ts'
-import { labelled, rgGeneric } from '../generic/rg.ts'
+import {
+  filtersFiles,
+  labelled,
+  needsEveryFile,
+  parseFlags,
+  rgGeneric,
+  walkFilter,
+} from '../generic/rg.ts'
 import { walkCandidates } from '../rg_scan.ts'
 import { narrowScope } from './pushdown.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -35,27 +42,21 @@ async function rgCommand(
   const fl = new FlagView(opts.flags, specOf('rg'))
   let resolved = paths
   let runOpts = opts
+  const pattern = patternArg(texts, opts.flags, 'regexp')
   if (paths.length > 0) {
-    const pattern = patternArg(texts, opts.flags)
-    // -v needs the walk (a narrowed superset hides fully non-matching
-    // files whose every line matches inverted); --type/--glob keep the
-    // walk so their file filtering stays in one place.
+    const f = parseFlags(fl)
+    // -v and the rest of needsEveryFile need the walk (a narrowed superset
+    // hides the files they answer for); -g/-t keep the walk so their file
+    // filtering stays in one place.
     const narrowed = await narrowScope(accessor, paths, pattern, {
-      fixedString: fl.asBool('F'),
+      fixedString: f.fixedString,
       recursive: true,
-      wholeWord: fl.asBool('w'),
-      exactFileSet:
-        fl.asBool('v') || fl.asStr('type') !== undefined || fl.asStr('glob') !== undefined,
+      wholeWord: f.wholeWord,
+      exactFileSet: needsEveryFile(fl, f) || filtersFiles(f),
       ...(opts.index !== null ? { index: opts.index } : {}),
     })
     if (narrowed.usedSearch) {
-      const visible = walkCandidates(
-        narrowed.resolved,
-        paths,
-        fl.asStr('type') ?? null,
-        fl.asStr('glob') ?? null,
-        fl.asBool('hidden'),
-      )
+      const visible = walkCandidates(narrowed.resolved, paths, walkFilter(f), opts.cwd)
       if (visible.length === 0) return [new Uint8Array(), new IOResult({ exitCode: 1 })]
       resolved = visible
       runOpts = labelled(opts)

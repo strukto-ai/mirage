@@ -17,9 +17,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.grep import grep as generic_grep
+from mirage.commands.builtin.generic.rg import folds_case
+from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
 from mirage.commands.builtin.generic.rg import rg as generic_rg
 from mirage.commands.builtin.generic_bind.adapter import CommandIO, bound_op
-from mirage.commands.builtin.grep_pattern import pattern_arg
+from mirage.commands.builtin.grep_pattern import PATTERN_KEYS, pattern_arg
 from mirage.commands.builtin.grep_pushdown import (grep_search_meta,
                                                    literal_pushdown_operand,
                                                    pushdown_operand,
@@ -30,13 +32,38 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.context import hidden_paths_intersect, path_rules_active
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 from mirage.utils.errors import FileTooLargeError
 from mirage.vfs.types import SearchQuery
 
 logger = logging.getLogger(__name__)
 
 _GENERICS = {"grep": generic_grep, "rg": generic_rg}
+
+
+def search_options(name: str, fl: FlagView,
+                   pattern: str) -> dict[str, JsonValue]:
+    """How a native search matches the pushed-down pattern.
+
+    Args:
+        name (str): grep or rg.
+        fl (FlagView): the invocation's flags.
+        pattern (str): the pattern pushed down.
+    """
+    if name == "rg":
+        f = parse_rg_flags(fl)
+        return {
+            "ignore_case": folds_case(pattern, f.fixed_string, f),
+            "fixed_string": f.fixed_string,
+            "whole_word": f.whole_word,
+            "basic": False,
+        }
+    return {
+        "ignore_case": fl.as_bool("i"),
+        "fixed_string": fl.as_bool("F"),
+        "whole_word": fl.as_bool("w"),
+        "basic": not fl.as_bool("E"),
+    }
 
 
 def native_or_bytes(
@@ -96,7 +123,7 @@ async def run_search(
     meta = grep_search_meta(capability)
     generic = _GENERICS[name]
     fl = FlagView(opts.flags, spec=SPECS[name])
-    pattern = pattern_arg(texts, fl)
+    pattern = pattern_arg(texts, fl, PATTERN_KEYS[name])
     gate = (literal_pushdown_operand if meta is not None
             and meta.mode == "literal" else pushdown_operand)
     operand = gate(paths, opts.flags, pattern)
@@ -104,19 +131,8 @@ async def run_search(
             and operand is not None
             and not hidden_paths_intersect(operand.virtual)
             and not path_rules_active()):
-        query = SearchQuery(query=pattern,
-                            options={
-                                "grep": {
-                                    "ignore_case":
-                                    fl.as_bool("i"),
-                                    "fixed_string":
-                                    fl.as_bool("F"),
-                                    "whole_word":
-                                    fl.as_bool("w"),
-                                    "basic":
-                                    name == "grep" and not fl.as_bool("E"),
-                                }
-                            })
+        query = SearchQuery(
+            query=pattern, options={"grep": search_options(name, fl, pattern)})
         try:
             lines = await capability.search(accessor, operand, query,
                                             opts.index)

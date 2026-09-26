@@ -17,8 +17,9 @@ import type { PathSpec } from '../../../../../types.ts'
 import { combinedExit } from './exit.ts'
 import { duTotal } from './du.ts'
 import { Cmd, type CrossResult, type OperandRun, type RunSingle } from '../types.ts'
-import { contextSeparated, mergeOperandIos, runOperands } from '../utils.ts'
-import { FlagView } from '../../../../spec/flag_view.ts'
+import { mergeOperandIos, runOperands, runSeparator } from '../utils.ts'
+import { labelFlags } from '../../rg.ts'
+import { FlagView, flagOccurrences } from '../../../../spec/flag_view.ts'
 import { type FlagValue } from '../../../../spec/types.ts'
 import { specOf } from '../../../../spec/builtins.ts'
 
@@ -68,7 +69,8 @@ export async function runFanout(
   runSingle: RunSingle,
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
-  const flags = { ...flagKwargs }
+  let flags = { ...flagKwargs }
+  flagOccurrences(flags).push(...flagOccurrences(flagKwargs))
   let stdinBytes: Uint8Array | null = null
   if (cmdName === Cmd.TEE) {
     stdinBytes = stdin !== null ? await materialize(stdin) : new Uint8Array()
@@ -76,9 +78,7 @@ export async function runFanout(
   if (cmdName === Cmd.GREP && !new FlagView(flags, specOf(Cmd.GREP)).asBool('h')) {
     flags.H = true
   }
-  if (cmdName === Cmd.RG && !new FlagView(flags, specOf(Cmd.RG)).asBool('args_I')) {
-    flags.H = true
-  }
+  if (cmdName === Cmd.RG) flags = labelFlags(flags)
   // head pairs -q/--quiet and -v/--verbose (canonical dests), tail declares
   // them short-only.
   const quietKey = cmdName === Cmd.HEAD ? 'quiet' : 'q'
@@ -95,9 +95,19 @@ export async function runFanout(
     flags.h = false
   }
 
-  const results = await runOperands(runSingle, cmdName, scopes, [...textArgs], flags, stdinBytes)
+  const quiet =
+    (cmdName === Cmd.GREP && new FlagView(flags, specOf(Cmd.GREP)).asBool('q')) ||
+    (cmdName === Cmd.RG && new FlagView(flags, specOf(Cmd.RG)).asBool('quiet'))
+  const results = await runOperands(
+    runSingle,
+    cmdName,
+    scopes,
+    [...textArgs],
+    flags,
+    stdinBytes,
+    quiet,
+  )
   const errored = results.map((r) => r.io.exitCode !== 0 && r.io.stderr !== null)
-  const quiet = cmdName === Cmd.GREP && new FlagView(flags, specOf(Cmd.GREP)).asBool('q')
   const exitCode = combinedExit(
     cmdName,
     results.map((r) => r.io.exitCode),
@@ -117,10 +127,11 @@ export async function runFanout(
     // Blank line between per-operand blocks, like one native run separates
     // its own file blocks.
     body = joinRuns(results, '\n')
-  } else if (contextSeparated(cmdName, flags)) {
-    // grep and ripgrep put `--` between one file's context and the next
-    // file's, as one native run separates its own files.
-    body = joinRuns(results, '--\n')
+  } else if (runSeparator(cmdName, flags) !== '') {
+    // grep and ripgrep set one file's context off from the next file's (and
+    // ripgrep one --heading group from the next), as one native run
+    // separates its own files.
+    body = joinRuns(results, runSeparator(cmdName, flags))
   } else {
     body = concatRuns(results)
   }
