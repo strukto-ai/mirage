@@ -1,0 +1,407 @@
+{
+  "cases": [
+    {
+      "id": "unzip_v_lists_the_verbose_table",
+      "seq": 601400,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punzv && echo 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/punzv/m.zip && unzip -v /data/punzv/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzv/m.zip\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       0  Defl:N        2   0% 2026-09-20 07:33 00000000  dir/\n     200  Defl:N        6  97% 2026-09-20 07:33 599af058  dir/a.txt\n       1  Defl:N        3 -200% 2026-09-20 07:33 71beeff9  b.txt\n--------          -------  ---                            -------\n     201               11  95%                            3 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_vq_drops_the_archive_line",
+      "seq": 601401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -vq /data/punzv/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       0  Defl:N        2   0% 2026-09-20 07:33 00000000  dir/\n     200  Defl:N        6  97% 2026-09-20 07:33 599af058  dir/a.txt\n       1  Defl:N        3 -200% 2026-09-20 07:33 71beeff9  b.txt\n--------          -------  ---                            -------\n     201               11  95%                            3 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_member_filters_the_rows_and_totals",
+      "seq": 601402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -v /data/punzv/m.zip b.txt nomatch",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzv/m.zip\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       1  Defl:N        3 -200% 2026-09-20 07:33 71beeff9  b.txt\n--------          -------  ---                            -------\n       1                3 -200%                            1 file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_x_leaving_nothing_exits_11",
+      "seq": 601403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -v /data/punzv/m.zip -x '*'",
+      "expect": {
+        "exit": 11,
+        "stdout": "Archive:  /data/punzv/m.zip\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n--------          -------  ---                            -------\n       0                0   0%                            0 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_lv_is_the_verbose_table",
+      "seq": 601404,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -lv /data/punzv/m.zip | sed -n 2p",
+      "expect": {
+        "exit": 0,
+        "stdout": " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_vp_pipes_instead_of_listing",
+      "seq": 601405,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -vp /data/punzv/m.zip b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "b",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_without_an_archive_prints_the_version_line",
+      "seq": 601406,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -v | cut -d' ' -f1,2",
+      "expect": {
+        "exit": 0,
+        "stdout": "unzip (Mirage)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comments_shown",
+      "seq": 601407,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-comments && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzip-comments/a.zip && unzip -v /data/unzip-comments/a.zip)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzip-comments/a.zip\narchive comment\nsecond line\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\nentry comment\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  b.txt\nother comment\n--------          -------  ---                            -------\n       6                6   0%                            2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comments_quiet",
+      "seq": 601408,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-comments && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzip-comments/a.zip && unzip -vq /data/unzip-comments/a.zip)",
+      "expect": {
+        "exit": 0,
+        "stdout": " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  b.txt\n--------          -------  ---                            -------\n       6                6   0%                            2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comments_include",
+      "seq": 601409,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-comments && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzip-comments/a.zip && unzip -v /data/unzip-comments/a.zip a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzip-comments/a.zip\narchive comment\nsecond line\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\nentry comment\n--------          -------  ---                            -------\n       3                3   0%                            1 file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comments_exclude",
+      "seq": 601410,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-comments && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzip-comments/a.zip && unzip -v /data/unzip-comments/a.zip -x a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzip-comments/a.zip\narchive comment\nsecond line\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  b.txt\nother comment\n--------          -------  ---                            -------\n       3                3   0%                            1 file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_legacy_comments_keep_their_bytes",
+      "seq": 601411,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-legacy && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwECFAMUAAAAAAAAACEAwkEkNQMAAAADAAAABQAAAAgAAAAAAAAApIEAAAAAYS50eHRuYe92ZRMg/1BLBQYAAAAAAQABADsAAAAmAAAADgBjYWbpIBtbMW0NCmZpbg==' | base64 -d > /data/unzip-legacy/l.zip && unzip -v /data/unzip-legacy/l.zip | cat -v)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzip-legacy/l.zip\ncafM-i ^[[1m\nfin\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\nnaM-ove M-^?\n--------          -------  ---                            -------\n       3                3   0%                            1 file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comment_esc_prints_as_caret_bracket",
+      "seq": 601412,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-legacy && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwECFAMUAAAAAAAAACEAwkEkNQMAAAADAAAABQAAAAgAAAAAAAAApIEAAAAAYS50eHRuYe92ZRMg/1BLBQYAAAAAAQABADsAAAAmAAAADgBjYWbpIBtbMW0NCmZpbg==' | base64 -d > /data/unzip-legacy/l.zip && unzip -v /data/unzip-legacy/l.zip | head -n 2 | tail -n 1 | od -An -tc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "   c   a   f 351       ^   [   [   1   m  \\n\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

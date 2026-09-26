@@ -60,22 +60,49 @@ class NoMountError(ValueError):
 class GzipDataError(ValueError):
     """Why ``gzip -d`` cannot decompress one input, in gzip's words.
 
-    ``fatal`` is gzip 1.13's split: an input with no gzip header is
+    ``fatal`` is gzip 1.13's split: an input with no gzip header, or
+    with a header naming a method or flag gzip does not support, is
     reported and the run moves on to the next operand, while a truncated
-    or corrupt one ends the run. The gzip front ends render the reason
-    under their own name, where GNU's (shell scripts over gzip) say
-    ``gzip:`` and put a blank line before the diagnostic.
+    or corrupt one ends the run, as does a CRC or length mismatch unless
+    ``-t`` is only testing. A mismatch in both carries both reasons, in
+    gzip's order. ``keeps_output`` says the bytes decoded before the
+    failure are whole members: after a refusal of a later member, of
+    trailing garbage, or of a trailer. An in-place run still writes them
+    when the refusal is not fatal, and tar reads them whatever gzip
+    does. The gzip
+    front ends render the reasons under their own name, where GNU's
+    (shell scripts over gzip) say ``gzip:`` and put a blank line before
+    most diagnostics.
 
     Args:
-        reason (str): gzip's description of the input.
+        reasons (tuple[str, ...]): gzip's descriptions of the input, each
+            with ``{}`` where the input's name goes.
         fatal (bool): whether gzip stops at this input.
         exit_code (int): One for an error, two for a trailing-data warning.
+        keeps_output (bool): whether the bytes decoded before the
+            failure are whole members.
     """
 
-    def __init__(self, reason: str, fatal: bool, exit_code: int = 1) -> None:
-        super().__init__(reason)
+    def __init__(self,
+                 reasons: tuple[str, ...],
+                 fatal: bool,
+                 exit_code: int = 1,
+                 keeps_output: bool = False) -> None:
+        super().__init__("\n".join(reasons))
+        self.reasons = reasons
         self.fatal = fatal
         self.exit_code = exit_code
+        self.keeps_output = keeps_output
+
+    def render(self, command: str, label: str) -> str:
+        """One ``command: ...`` line per reason, the input named ``label``.
+
+        Args:
+            command (str): the command reporting the failure.
+            label (str): the input as the diagnostic names it.
+        """
+        return "".join(f"{command}: {reason.replace('{}', label)}\n"
+                       for reason in self.reasons)
 
 
 class FileTooLargeError(OSError):

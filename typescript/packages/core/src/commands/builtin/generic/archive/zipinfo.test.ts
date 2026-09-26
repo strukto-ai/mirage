@@ -18,6 +18,7 @@ import {
   renderHeader,
   renderRow,
   renderTotals,
+  renderVerbose,
   zipinfoLayout,
   type ZipinfoLayout,
   type ZipinfoRequest,
@@ -25,6 +26,10 @@ import {
 } from './zipinfo.ts'
 
 const STAMP: ZipRow['dateTime'] = [2026, 9, 20, 7, 33, 0]
+
+// One char per byte both ways, so a test can state bytes no code page owns.
+const bytes = (text: string): Uint8Array => Uint8Array.from(text, (c) => c.charCodeAt(0))
+const chars = (data: Uint8Array): string => String.fromCharCode(...data)
 
 function row(over: Partial<ZipRow> = {}): ZipRow {
   return {
@@ -39,6 +44,8 @@ function row(over: Partial<ZipRow> = {}): ZipRow {
     hostVersion: 20,
     dateTime: STAMP,
     hasExtra: false,
+    crc: 0,
+    comment: new Uint8Array(),
     ...over,
   }
 }
@@ -198,4 +205,60 @@ describe('zipinfo layout', () => {
       totals: false,
     })
   })
+})
+
+describe('unzip -v rows', () => {
+  it('match the verbose listing of Info-ZIP', () => {
+    const rows = [
+      row({ name: 'dir/', size: 0, csize: 2, method: 8 }),
+      row({ name: 'dir/a.txt', size: 200, csize: 6, method: 8, crc: 0x599af058 }),
+      row({ name: 'b.txt', size: 1, csize: 3, method: 8, crc: 0x71beeff9 }),
+    ]
+    expect(chars(renderVerbose('m.zip', rows, false, new Uint8Array()))).toBe(
+      'Archive:  m.zip\n' +
+        ' Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n' +
+        '--------  ------  ------- ---- ---------- ----- --------  ----\n' +
+        '       0  Defl:N        2   0% 2026-09-20 07:33 00000000  dir/\n' +
+        '     200  Defl:N        6  97% 2026-09-20 07:33 599af058  dir/a.txt\n' +
+        '       1  Defl:N        3 -200% 2026-09-20 07:33 71beeff9  b.txt\n' +
+        '--------          -------  ---                            -------\n' +
+        '     201               11  95%                            3 files\n',
+    )
+  })
+
+  it.each([
+    [0, 0, 'Stored'],
+    [6, 6, 'Implode'],
+    [8, 4, 'Defl:F'],
+    [9, 2, 'Def64X'],
+    [12, 0, 'BZip2'],
+    [99, 0, 'Unk:099'],
+  ] as const)('name method %i (flags %i) as list.c does', (method, flags, label) => {
+    const listing = renderVerbose('a', [row({ method, flags })], true, new Uint8Array())
+    const line = chars(listing).split('\n')[2] ?? ''
+    expect(line.split(/ +/)[2]).toBe(label)
+  })
+
+  it('print a full growth as a bare hundred', () => {
+    const listing = renderVerbose('a', [row({ size: 1, csize: 2 })], true, new Uint8Array())
+    const line = chars(listing).split('\n')[2] ?? ''
+    expect(line.split(/ +/)[4]).toBe('100%')
+  })
+})
+
+it.each([
+  ['note', 'note\n'],
+  ['note\n', 'note\n'],
+  ['note\r\nnext', 'note\nnext\n'],
+  ['note\0hidden', 'note\n'],
+  ['note caf\xe9 \xff', 'note caf\xe9 \xff\n'],
+  ['note\x1b[1m\x13 end', 'note^[[1m end\n'],
+])('renders comments as Info-ZIP does and suppresses them under -q: %j', (comment, rendered) => {
+  const rows = [row({ comment: bytes(comment) })]
+  const listing = chars(renderVerbose('a.zip', rows, false, bytes(comment)))
+  expect(listing.startsWith('Archive:  a.zip\n' + rendered)).toBe(true)
+  expect(listing).toContain('document.txt\n' + rendered)
+  const quiet = chars(renderVerbose('a.zip', rows, true, bytes(comment)))
+  expect(quiet).not.toContain('note')
+  expect(quiet).not.toContain('Archive:')
 })

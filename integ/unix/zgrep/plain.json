@@ -119,6 +119,246 @@
         "stdout": "",
         "stderr": "zgrep: stdin: unexpected end of file\n"
       }
+    },
+    {
+      "id": "zgrep_damaged_crc_preserves_matches_lines",
+      "seq": 917104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep  hello bad.gz good.gz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "bad.gz:hello\nbad.gz:hello again\ngood.gz:hello\ngood.gz:hello again\n",
+        "stderr": "zgrep: bad.gz: invalid compressed data--crc error\n"
+      }
+    },
+    {
+      "id": "zgrep_damaged_crc_preserves_matches_counts",
+      "seq": 917105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -c hello bad.gz good.gz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "bad.gz:2\ngood.gz:2\n",
+        "stderr": "zgrep: bad.gz: invalid compressed data--crc error\n"
+      }
+    },
+    {
+      "id": "zgrep_damaged_crc_preserves_matches_line_numbers",
+      "seq": 917106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -n hello bad.gz good.gz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "bad.gz:1:hello\nbad.gz:3:hello again\ngood.gz:1:hello\ngood.gz:3:hello again\n",
+        "stderr": "zgrep: bad.gz: invalid compressed data--crc error\n"
+      }
+    },
+    {
+      "id": "zgrep_damaged_crc_preserves_matches_matching_files",
+      "seq": 917107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -l hello bad.gz good.gz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "bad.gz\ngood.gz\n",
+        "stderr": "zgrep: bad.gz: invalid compressed data--crc error\n"
+      }
+    },
+    {
+      "id": "zgrep_damaged_crc_preserves_matches_matchless_files",
+      "seq": 917108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -L hello bad.gz good.gz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "zgrep: bad.gz: invalid compressed data--crc error\n"
+      }
+    },
+    {
+      "id": "zgrep_damaged_crc_preserves_matches_quiet",
+      "seq": 917109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "(mkdir -p /data/zgrep-damaged && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gAAAAAABgAAAA=' | base64 -d > /data/zgrep-damaged/bad.gz && printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAA=' | base64 -d > /data/zgrep-damaged/good.gz && cd /data/zgrep-damaged && zgrep -q hello bad.gz good.gz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "zgrep: bad.gz: invalid compressed data--crc error\n"
+      }
+    },
+    {
+      "id": "zgrep_truncated_wrapper_preserves_count_trailer",
+      "seq": 917110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5Oaxg=' | base64 -d | zgrep -c hello",
+      "expect": {
+        "exit": 2,
+        "stdout": "2\n",
+        "stderr": "zgrep: stdin: unexpected end of file\n"
+      }
+    },
+    {
+      "id": "zgrep_truncated_wrapper_preserves_count_later_header",
+      "seq": 917111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '%s' 'H4sIAAAAAAACE8tIzcnJ58ovyUgt4soAsRUS0xMz87gA6a5OaxgAAAAfiwgAAAAAAAIT' | base64 -d | zgrep -c hello",
+      "expect": {
+        "exit": 2,
+        "stdout": "2\n",
+        "stderr": "zgrep: stdin: unexpected end of file\n"
+      }
     }
   ]
 }

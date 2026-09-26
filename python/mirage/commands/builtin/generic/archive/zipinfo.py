@@ -52,6 +52,36 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 DOS_HOSTS = frozenset({0, 4, 6, 11, 13, 14, 15})
 UNIX_TIME_HOSTS = frozenset({3, 6, 11})
 DOS_EXECUTABLE_SUFFIXES = ("com", "exe", "btm", "cmd", "bat")
+# Info-ZIP unzip's verbose-listing vocabulary (list.c): the method
+# column's names, where a deflate level letter replaces the "#" and a
+# method past the table reads "Unk:" and its id.
+LIST_METHODS = {
+    0: "Stored",
+    1: "Shrunk",
+    2: "Reduce1",
+    3: "Reduce2",
+    4: "Reduce3",
+    5: "Reduce4",
+    6: "Implode",
+    7: "Token",
+    8: "Defl:#",
+    9: "Def64#",
+    10: "ImplDCL",
+    12: "BZip2",
+    14: "LZMA",
+    18: "Terse",
+    19: "IBMLZ77",
+    97: "WavPack",
+    98: "PPMd",
+}
+VERBOSE_HEADER = (
+    " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n"
+    "--------  ------  ------- ---- ---------- ----- --------  ----\n")
+VERBOSE_RULE = ("--------          -------  ---                            "
+                "-------\n")
+# Info-ZIP's comment filter (fileio.c, do_string): a comment ends at
+# NUL, loses CR and ^S, and shows ESC as "^[".
+COMMENT_DROPPED = b"\r\x13"
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +102,8 @@ class ZipRow:
             decoded as (year, month, day, hour, minute, second), month
             and day left at 0 when the stamp is 0.
         has_extra (bool): whether the central entry carries an extra field.
+        crc (int): the CRC-32 the central entry records.
+        comment (bytes): the central entry comment, as stored.
     """
     name: str
     size: int
@@ -84,6 +116,8 @@ class ZipRow:
     host_version: int
     date_time: tuple[int, int, int, int, int, int]
     has_extra: bool
+    crc: int
+    comment: bytes
 
 
 ZipinfoRows = Literal["none", "names", "short", "medium", "long"]
@@ -326,6 +360,86 @@ def render_totals(rows: list[ZipRow]) -> str:
             f"{ratio % 10}%\n")
 
 
+def _list_method(row: ZipRow) -> str:
+    text = LIST_METHODS.get(row.method)
+    if text is None:
+        return f"Unk:{row.method:03d}"
+    if row.method in (8, 9):
+        return text[:5] + DEFLATE_LEVELS[(row.flags >> 1) & 3]
+    return text
+
+
+def _saved(uncompressed: int, compressed: int) -> str:
+    """unzip's Cmpr column: the percent saved, rounded away from zero.
+
+    list.c rounds the magnitude and prints the sign apart, so a growth
+    of -199.5% is ``-200%`` where zipinfo prints ``-199%``, and prints a
+    magnitude of 100 bare, so a 100% growth reads ``100%``.
+
+    Args:
+        uncompressed (int): uncompressed bytes.
+        compressed (int): compressed bytes.
+    """
+    ratio = compression_ratio(uncompressed, compressed)
+    percent = (abs(ratio) + 5) // 10
+    if percent == 100:
+        return "100%"
+    return f"{'-' if ratio < 0 else ' '}{percent}%"
+
+
+def _comment(raw: bytes) -> bytes:
+    """An archive or entry comment as Info-ZIP prints it.
+
+    The stored bytes up to a NUL, less CR and ^S, with ESC shown as
+    ``^[`` and a new line at the end. No code page is assumed, so a
+    legacy comment keeps its bytes.
+
+    Args:
+        raw (bytes): the archive or entry comment as stored.
+    """
+    text = raw.split(b"\0", 1)[0].translate(None, COMMENT_DROPPED)
+    text = text.replace(b"\x1b", b"^[")
+    return text + b"\n" if text and not text.endswith(b"\n") else text
+
+
+def render_verbose(archive: str, rows: list[ZipRow], quiet: bool,
+                   comment: bytes) -> bytes:
+    """``unzip -v`` with an archive: Info-ZIP's verbose listing (list.c).
+
+    The ``-l`` columns plus the method, compressed size, percent saved
+    and CRC-32 of each entry, dated from its DOS stamp, and a totals
+    line. ``-q`` drops the ``Archive:`` line and all comments. The
+    listing is bytes because a comment is written as stored.
+
+    Args:
+        archive (str): the archive operand.
+        rows (list[ZipRow]): the entries to list.
+        quiet (bool): ``-q``.
+        comment (bytes): the archive comment as stored.
+    """
+    parts = [] if quiet else [
+        f"Archive:  {archive}\n".encode(),
+        _comment(comment)
+    ]
+    parts.append(VERBOSE_HEADER.encode())
+    for row in rows:
+        year, month, day, hour, minute, _ = row.date_time
+        csize = _compressed(row)
+        parts.append(f"{row.size:>8}  {_list_method(row):<7}{csize:>8} "
+                     f"{_saved(row.size, csize):>4} {year:04d}-{month:02d}-"
+                     f"{day:02d} {hour:02d}:{minute:02d} {row.crc:08x}  "
+                     f"{row.name}\n".encode())
+        if not quiet:
+            parts.append(_comment(row.comment))
+    size = sum(r.size for r in rows)
+    csize = sum(_compressed(r) for r in rows)
+    plural = "" if len(rows) == 1 else "s"
+    parts.append(f"{VERBOSE_RULE}{size:>8}         {csize:>8} "
+                 f"{_saved(size, csize):>4}{' ' * 28}{len(rows)} "
+                 f"file{plural}\n".encode())
+    return b"".join(parts)
+
+
 __all__ = [
     "ZipRow",
     "ZipinfoLayout",
@@ -333,5 +447,6 @@ __all__ = [
     "render_row",
     "render_header",
     "render_totals",
+    "render_verbose",
     "compression_ratio",
 ]

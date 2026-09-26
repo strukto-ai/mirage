@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { concat } from '../../../../io/cachable_iterator.ts'
+
+const ENC = new TextEncoder()
+
 // Info-ZIP zipinfo's short-listing vocabulary (zipinfo.c, zi_short),
 // indexed by the host byte of "version made by" and by compression
 // method. A host past the table reads as the last "???" slot, as the
@@ -91,6 +95,40 @@ const MONTHS: readonly string[] = [
 const DOS_HOSTS: ReadonlySet<number> = new Set([0, 4, 6, 11, 13, 14, 15])
 const UNIX_TIME_HOSTS: ReadonlySet<number> = new Set([3, 6, 11])
 const DOS_EXECUTABLE_SUFFIXES: ReadonlySet<string> = new Set(['com', 'exe', 'btm', 'cmd', 'bat'])
+// Info-ZIP unzip's verbose-listing vocabulary (list.c): the method column's
+// names, where a deflate level letter replaces the "#" and a method past the
+// table reads "Unk:" and its id. Mirrors archive/zipinfo.py.
+const LIST_METHODS: Readonly<Record<number, string>> = {
+  0: 'Stored',
+  1: 'Shrunk',
+  2: 'Reduce1',
+  3: 'Reduce2',
+  4: 'Reduce3',
+  5: 'Reduce4',
+  6: 'Implode',
+  7: 'Token',
+  8: 'Defl:#',
+  9: 'Def64#',
+  10: 'ImplDCL',
+  12: 'BZip2',
+  14: 'LZMA',
+  18: 'Terse',
+  19: 'IBMLZ77',
+  97: 'WavPack',
+  98: 'PPMd',
+}
+const VERBOSE_HEADER =
+  ' Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n' +
+  '--------  ------  ------- ---- ---------- ----- --------  ----\n'
+const VERBOSE_RULE = '--------          -------  ---                            -------\n'
+// Info-ZIP's comment filter (fileio.c, do_string): a comment ends at NUL,
+// loses CR and ^S, and shows ESC as "^[". Mirrors archive/zipinfo.py.
+const NUL = 0x00
+const LF = 0x0a
+const CR = 0x0d
+const CTRL_S = 0x13
+const ESC = 0x1b
+const ESC_SHOWN: readonly number[] = [0x5e, 0x5b]
 
 /** One central-directory entry as zipinfo reads it. */
 export interface ZipRow {
@@ -119,6 +157,10 @@ export interface ZipRow {
   dateTime: readonly [number, number, number, number, number, number]
   /** Whether the central entry carries an extra field. */
   hasExtra: boolean
+  /** The CRC-32 the central entry records. */
+  crc: number
+  /** The central entry comment, as stored. */
+  comment: Uint8Array
 }
 
 export type ZipinfoRows = 'none' | 'names' | 'short' | 'medium' | 'long'
@@ -337,4 +379,87 @@ export function renderTotals(rows: readonly ZipRow[]): string {
   ratio = Math.abs(ratio)
   const plural = rows.length === 1 ? '' : 's'
   return `${String(rows.length)} file${plural}, ${String(uncompressed)} bytes uncompressed, ${String(compressed)} bytes compressed:  ${sign}${String(Math.floor(ratio / 10))}.${String(ratio % 10)}%\n`
+}
+
+function listMethod(row: ZipRow): string {
+  const text = LIST_METHODS[row.method]
+  if (text === undefined) return `Unk:${String(row.method).padStart(3, '0')}`
+  if (row.method === 8 || row.method === 9)
+    return text.slice(0, 5) + DEFLATE_LEVELS.charAt((row.flags >> 1) & 3)
+  return text
+}
+
+/**
+ * unzip's Cmpr column: the percent saved, rounded away from zero.
+ *
+ * list.c rounds the magnitude and prints the sign apart, so a growth of
+ * -199.5% is `-200%` where zipinfo prints `-199%`, and prints a magnitude of
+ * 100 bare, so a 100% growth reads `100%`.
+ */
+function saved(uncompressed: number, compressed: number): string {
+  const ratio = compressionRatio(uncompressed, compressed)
+  const percent = Math.floor((Math.abs(ratio) + 5) / 10)
+  if (percent === 100) return '100%'
+  return `${ratio < 0 ? '-' : ' '}${String(percent)}%`
+}
+
+/**
+ * An archive or entry comment as Info-ZIP prints it: the stored bytes up to
+ * a NUL, less CR and ^S, with ESC shown as `^[` and a new line at the end.
+ * No code page is assumed, so a legacy comment keeps its bytes.
+ */
+function renderComment(raw: Uint8Array): Uint8Array {
+  const out: number[] = []
+  for (const byte of raw) {
+    if (byte === NUL) break
+    if (byte === CR || byte === CTRL_S) continue
+    if (byte === ESC) out.push(...ESC_SHOWN)
+    else out.push(byte)
+  }
+  if (out.length > 0 && out[out.length - 1] !== LF) out.push(LF)
+  return Uint8Array.from(out)
+}
+
+/**
+ * `unzip -v` with an archive: Info-ZIP's verbose listing (list.c).
+ *
+ * The `-l` columns plus the method, compressed size, percent saved and
+ * CRC-32 of each entry, dated from its DOS stamp, and a totals line. `-q`
+ * drops the `Archive:` line and all comments. The listing is bytes because
+ * a comment is written as stored.
+ */
+export function renderVerbose(
+  archive: string,
+  rows: readonly ZipRow[],
+  quiet: boolean,
+  comment: Uint8Array,
+): Uint8Array {
+  const parts = quiet ? [] : [ENC.encode(`Archive:  ${archive}\n`), renderComment(comment)]
+  parts.push(ENC.encode(VERBOSE_HEADER))
+  for (const row of rows) {
+    const [year, month, day, hour, minute] = row.dateTime
+    const csize = compressedOf(row)
+    const date = `${String(year).padStart(4, '0')}-${two(month)}-${two(day)} ${two(hour)}:${two(minute)}`
+    parts.push(
+      ENC.encode(
+        `${String(row.size).padStart(8, ' ')}  ${listMethod(row).padEnd(7, ' ')}${String(csize).padStart(8, ' ')} ` +
+          `${saved(row.size, csize).padStart(4, ' ')} ${date} ${row.crc.toString(16).padStart(8, '0')}  ${row.name}\n`,
+      ),
+    )
+    if (!quiet) parts.push(renderComment(row.comment))
+  }
+  let size = 0
+  let csize = 0
+  for (const row of rows) {
+    size += row.size
+    csize += compressedOf(row)
+  }
+  const plural = rows.length === 1 ? '' : 's'
+  parts.push(
+    ENC.encode(
+      `${VERBOSE_RULE}${String(size).padStart(8, ' ')}         ${String(csize).padStart(8, ' ')} ` +
+        `${saved(size, csize).padStart(4, ' ')}${' '.repeat(28)}${String(rows.length)} file${plural}\n`,
+    ),
+  )
+  return concat(parts)
 }

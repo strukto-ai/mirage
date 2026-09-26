@@ -1,20 +1,22 @@
 import io
+import logging
 import tarfile
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 
 from mirage.commands.builtin.generic.archive.extract import (ensure_dir,
                                                              extract_dest)
 from mirage.commands.builtin.generic.archive.walk import (DirProbe, StatFn,
                                                           WalkFn)
-from mirage.commands.builtin.generic.tar.constants import (CREATE_ERROR_EXIT,
-                                                           ERROR_TRAILER,
-                                                           READ_MODES,
-                                                           WRITE_MODES)
+from mirage.commands.builtin.generic.tar.constants import (  # yapf: disable
+    CHILD_STATUS, CREATE_ERROR_EXIT, ERROR_TRAILER, FATAL_TRAILER,
+    INVALID_ARCHIVE, READ_MODES, WRITE_MODES)
 from mirage.commands.builtin.generic.tar.create import plan_create
 from mirage.commands.builtin.generic.tar.types import (CompressionSuffix,
                                                        CreateResult, Member,
-                                                       ReadMode, WriteMode)
+                                                       ReadMode, ReadResult,
+                                                       WriteMode)
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -22,7 +24,10 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
-from mirage.utils.errors import fs_strerror
+from mirage.utils.compress import GZIP_MAGIC, gunzip_partial
+from mirage.utils.errors import GzipDataError, fs_strerror
+
+logger = logging.getLogger(__name__)
 
 
 def _compression_suffix(z: bool, j: bool, J: bool) -> CompressionSuffix:
@@ -45,6 +50,58 @@ def _read_mode(suffix: CompressionSuffix) -> ReadMode:
 
 def _stderr(lines: list[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode() if lines else b""
+
+
+@contextmanager
+def _open_archive(data: bytes,
+                  suffix: CompressionSuffix) -> Iterator[ReadResult]:
+    """Open tar's input while preserving its gzip child's failure.
+
+    GNU tar 1.35 reads complete decoded members even when their gzip
+    trailer is damaged or missing. A tar parsing error must not mask the
+    child's diagnostic and exit status. Mirage still discards data when
+    gzip stops inside a deflate body; GNU can recover partial tar entries.
+
+    Args:
+        data (bytes): the archive file's bytes.
+        suffix (CompressionSuffix): the compression the flags asked for.
+    """
+    failure = None
+    mode = _read_mode(suffix)
+    if suffix == ":gz" or (suffix == "" and data.startswith(GZIP_MAGIC)):
+        data, failure = gunzip_partial(data)
+        mode = "r:"
+    if failure is not None and (not failure.keeps_output or not data):
+        yield ReadResult(None, failure)
+        return
+    notices: tuple[str, ...] = ()
+    with ExitStack() as stack:
+        tf: tarfile.TarFile | None
+        try:
+            tf = stack.enter_context(
+                tarfile.open(fileobj=io.BytesIO(data), mode=mode))
+            tf.getmembers()
+        except tarfile.TarError as exc:
+            if failure is None:
+                raise
+            logger.debug("tar: failed to parse gzip output: %s", exc)
+            tf = None
+            if len(data) >= tarfile.BLOCKSIZE:
+                notices = INVALID_ARCHIVE
+        yield ReadResult(tf, failure, notices)
+
+
+def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
+    """tar's stderr when its gzip child fails: gzip's own lines, what tar
+    printed meanwhile, then tar's two fatal lines. The run exits 2, and
+    the child's failure outranks every member that was not found.
+
+    Args:
+        failure (GzipDataError): why gzip stopped.
+        lines (list[str]): tar's own stderr lines from the run.
+    """
+    return failure.render("gzip", "stdin").encode() + _stderr(
+        lines + [CHILD_STATUS.format(failure.exit_code), FATAL_TRAILER])
 
 
 DOTDOT_NOTICE = "tar: Removing leading `../' from member names"
@@ -185,16 +242,21 @@ async def _list_archive(
     selectors: list[str],
     read_bytes: Callable[..., Awaitable[bytes]],
 ) -> tuple[ByteSource | None, IOResult]:
-    data = await read_bytes(archive_path)
-    with tarfile.open(fileobj=io.BytesIO(data),
-                      mode=_read_mode(mode_suffix)) as tf:
-        names = [
-            member.name + "/" if member.isdir() else member.name
-            for member in tf.getmembers()
-        ]
+    names: list[str] = []
+    with _open_archive(await read_bytes(archive_path), mode_suffix) as result:
+        tf, failure = result.archive, result.failure
+        if tf is not None:
+            names = [
+                member.name + "/" if member.isdir() else member.name
+                for member in tf.getmembers()
+            ]
     keep, misses = _selected(names, selectors)
     shown = [name for idx, name in enumerate(names) if idx in keep]
     stdout = ("\n".join(shown) + "\n").encode() if shown else None
+    if failure is not None:
+        return stdout, IOResult(exit_code=2,
+                                stderr=_child_failure(failure,
+                                                      list(result.notices)))
     if misses:
         return stdout, IOResult(exit_code=2,
                                 stderr=_stderr(misses + [ERROR_TRAILER]))
@@ -215,63 +277,67 @@ async def _extract_archive(
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn,
 ) -> tuple[ByteSource | None, IOResult]:
-    data = await read_bytes(archive_path)
     writes: dict[str, ByteSource] = {}
     names: list[str] = []
     notices: list[str] = []
     made: set[str] = set()
     extracted_bytes: list[bytes] = []
-    with tarfile.open(fileobj=io.BytesIO(data),
-                      mode=_read_mode(mode_suffix)) as tf:
-        members = tf.getmembers()
-        listed = [
-            member.name + "/" if member.isdir() else member.name
-            for member in members
-        ]
-        keep, misses = _selected(listed, selectors)
-        for idx, member in enumerate(members):
-            if idx not in keep:
-                continue
-            # A symlink member has no bytes to write and no namespace to
-            # write into from here (links are workspace state, not the
-            # backend's), so extraction skips it rather than dropping an
-            # empty file where a link belongs.
-            if not member.isfile() and not member.isdir():
-                continue
-            if member.isdir():
-                if not to_stdout:
-                    # A directory member is the only record an empty
-                    # directory leaves, so it has to be recreated even
-                    # though nothing is written inside it. Under -O
-                    # nothing reaches the filesystem at all.
-                    parts = _out_parts(member.name, strip_n, notices)
-                    if parts:
-                        out_dir = dest_path.rstrip("/") + "/" + "/".join(parts)
-                        await ensure_dir(out_dir, mkdir_fn, stat, made)
-                        names.append(member.name.rstrip("/") + "/")
-                continue
-            extracted = tf.extractfile(member)
-            if not extracted:
-                continue
-            content = extracted.read()
-            if to_stdout:
-                extracted_bytes.append(content)
+    misses: list[str] = []
+    with _open_archive(await read_bytes(archive_path), mode_suffix) as result:
+        tf, failure = result.archive, result.failure
+        if tf is not None:
+            members = tf.getmembers()
+            listed = [
+                member.name + "/" if member.isdir() else member.name
+                for member in members
+            ]
+            keep, misses = _selected(listed, selectors)
+            for idx, member in enumerate(members):
+                if idx not in keep:
+                    continue
+                # A symlink member has no bytes to write and no namespace to
+                # write into from here (links are workspace state, not the
+                # backend's), so extraction skips it rather than dropping an
+                # empty file where a link belongs.
+                if not member.isfile() and not member.isdir():
+                    continue
+                if member.isdir():
+                    if not to_stdout:
+                        # A directory member is the only record an empty
+                        # directory leaves, so it has to be recreated even
+                        # though nothing is written inside it. Under -O
+                        # nothing reaches the filesystem at all.
+                        parts = _out_parts(member.name, strip_n, notices)
+                        if parts:
+                            out_dir = dest_path.rstrip("/") + "/" + "/".join(
+                                parts)
+                            await ensure_dir(out_dir, mkdir_fn, stat, made)
+                            names.append(member.name.rstrip("/") + "/")
+                    continue
+                extracted = tf.extractfile(member)
+                if not extracted:
+                    continue
+                content = extracted.read()
+                if to_stdout:
+                    extracted_bytes.append(content)
+                    names.append(member.name)
+                    continue
+                parts = _out_parts(member.name, strip_n, notices)
+                if not parts:
+                    continue
+                out_path = dest_path.rstrip("/") + "/" + "/".join(parts)
+                parent = out_path.rsplit("/", 1)[0] or "/"
+                if parent != "/":
+                    await ensure_dir(parent, mkdir_fn, stat, made)
+                await write_bytes(PathSpec.from_str_path(out_path),
+                                  data=content)
+                if not relay:
+                    # Relay writes land on whichever mount owns each path
+                    # and invalidate through the dispatcher; keying them here
+                    # would have the runner prefix them onto this mount.
+                    writes[out_path] = content
                 names.append(member.name)
-                continue
-            parts = _out_parts(member.name, strip_n, notices)
-            if not parts:
-                continue
-            out_path = dest_path.rstrip("/") + "/" + "/".join(parts)
-            parent = out_path.rsplit("/", 1)[0] or "/"
-            if parent != "/":
-                await ensure_dir(parent, mkdir_fn, stat, made)
-            await write_bytes(PathSpec.from_str_path(out_path), data=content)
-            if not relay:
-                # Relay writes land on whichever mount owns each path
-                # and invalidate through the dispatcher; keying them here
-                # would have the runner prefix them onto this mount.
-                writes[out_path] = content
-            names.append(member.name)
+    notices[:0] = result.notices
     if to_stdout:
         # GNU moves the verbose listing to stderr when stdout carries
         # the member bytes.
@@ -282,6 +348,10 @@ async def _extract_archive(
             else None
         stdout = listing
         stderr_lines = list(notices)
+    if failure is not None:
+        return stdout, IOResult(exit_code=2,
+                                stderr=_child_failure(failure, stderr_lines),
+                                writes=writes)
     if misses:
         stderr_lines = stderr_lines + misses + [ERROR_TRAILER]
     return stdout, IOResult(exit_code=2 if misses else 0,

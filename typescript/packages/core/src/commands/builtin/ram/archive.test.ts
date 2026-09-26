@@ -19,11 +19,13 @@ import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { LinkView } from '../../../ops/types.ts'
 import { FileStat, FileType, LINK_TARGET_KEY, PathSpec } from '../../../types.ts'
+import { decodeBase64 } from '../../../utils/base64.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { readTar } from '../tar_helper.ts'
 import { UsageError } from '../../errors.ts'
 import { parseFlags } from '../../../workspace/executor/command/flags.ts'
 import { specOf } from '../../spec/builtins.ts'
+import { unzipWrites } from '../generic/unzip.ts'
 const RAM_TAR = RAM_COMMANDS.filter((c) => c.name === 'tar' && c.filetype == null)
 const RAM_ZIP = RAM_COMMANDS.filter((c) => c.name === 'zip' && c.filetype == null)
 const RAM_UNZIP = RAM_COMMANDS.filter((c) => c.name === 'unzip' && c.filetype == null)
@@ -1249,6 +1251,77 @@ describe('unzip -Z (zipinfo mode)', () => {
     await expect(runCmd(RAM_UNZIP, vfs, M, { h: true })).rejects.toThrow(
       'unzip: -h is a ZipInfo option and needs -Z',
     )
+  })
+})
+
+describe('unzip -v', () => {
+  const M = [PathSpec.fromStrPath('/m.zip')]
+  // a.txt ("abc", stored, 1980 stamp) commented "na\xefve\x13 \xff", in an
+  // archive commented "caf\xe9 \x1b[1m\r\nfin": Latin-1 bytes, ^S, ESC, CR.
+  const LEGACY_COMMENTS =
+    'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwECFAMUAAAAAAAAACEAwkEkNQMAAAADAAAABQAAAAgAAAAAAAAApIEAAAAAYS50eHRuYe92ZRMg/1BLBQYAAAAAAQABADsAAAAmAAAADgBjYWbpIBtbMW0NCmZpbg=='
+
+  it('lists the verbose table', async () => {
+    const vfs = await makeMulti()
+    const r = await runCmd(RAM_UNZIP, vfs, M, { v: true })
+    const lines = DEC.decode(r.out).split('\n')
+    expect(lines.slice(0, 4)).toEqual([
+      'Archive:  /m.zip',
+      ' Length   Method    Size  Cmpr    Date    Time   CRC-32   Name',
+      '--------  ------  ------- ---- ---------- ----- --------  ----',
+      '       0  Stored        0   0% 1980-01-01 00:00 00000000  d/',
+    ])
+    expect(lines[4]).toMatch(
+      /^ {5}200 {2}Defl:N +\d+ +\d+% 1980-01-01 00:00 599af058 {2}d\/a\.txt$/,
+    )
+    expect(lines[5]).toMatch(/^ {7}1 {2}Defl:N +\d+ +-?\d+% 1980-01-01 00:00 71beeff9 {2}b\.txt$/)
+    expect(lines[6]).toBe('--------          -------  ---                            -------')
+    expect(lines[7]).toMatch(/^ {5}201 +\d+ +-?\d+% {28}3 files$/)
+    expect([r.exitCode, r.stderr.byteLength]).toEqual([0, 0])
+  })
+
+  it('writes comments as stored', async () => {
+    // Info-ZIP assumes no code page for a comment, so a legacy one keeps its
+    // bytes; only NUL, CR, ^S and ESC are touched.
+    const vfs = new RAMVFS()
+    vfs.store.files.set('/l.zip', decodeBase64(LEGACY_COMMENTS))
+    const r = await runCmd(RAM_UNZIP, vfs, [PathSpec.fromStrPath('/l.zip')], { v: true })
+    expect(String.fromCharCode(...r.out)).toBe(
+      'Archive:  /l.zip\n' +
+        'caf\xe9 ^[[1m\n' +
+        'fin\n' +
+        ' Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n' +
+        '--------  ------  ------- ---- ---------- ----- --------  ----\n' +
+        '       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\n' +
+        'na\xefve \xff\n' +
+        '--------          -------  ---                            -------\n' +
+        '       3                3   0%                            1 file\n',
+    )
+    expect([r.exitCode, r.stderr.byteLength]).toEqual([0, 0])
+  })
+
+  it('prints the version line without an archive', async () => {
+    const r = await runCmd(RAM_UNZIP, new RAMVFS(), [], { v: true })
+    expect(DEC.decode(r.out)).toMatch(/^unzip \(Mirage\) /)
+    expect(r.exitCode).toBe(0)
+  })
+
+  it.each([[{ args_l: true }], [{ v: true }]])('yields to -t and -p (%o)', async (listing) => {
+    // Info-ZIP lists only when neither -t nor -p picks another mode.
+    const vfs = await makeMulti()
+    const p = await runCmd(RAM_UNZIP, vfs, M, { ...listing, p: true }, ['b.txt'])
+    expect(DEC.decode(p.out)).toBe('b')
+    const t = await runCmd(RAM_UNZIP, vfs, M, { ...listing, t: true })
+    expect(DEC.decode(t.out)).toBe('No errors detected in /m.zip\n')
+  })
+
+  it.each([
+    [['-v', '/m.zip'], false],
+    [['-v'], false],
+    [['/m.zip'], true],
+  ] as const)('writes for %o: %s', (argv, writes) => {
+    const parsed = parseFlags([...argv], specOf('unzip'), 'unzip', '/')
+    expect(unzipWrites(parsed.flagKwargs, parsed.paths)).toBe(writes)
   })
 })
 

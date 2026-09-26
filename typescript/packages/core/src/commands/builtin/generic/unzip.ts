@@ -20,13 +20,14 @@ import {
   renderHeader,
   renderRow,
   renderTotals,
+  renderVerbose,
   zipinfoLayout,
   type ZipRow,
 } from './archive/zipinfo.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { inflateRaw } from '../../../utils/compress.ts'
-import type { CommandFnResult, CommandOpts, WritesFn } from '../../config.ts'
+import { versionLine, type CommandFnResult, type CommandOpts, type WritesFn } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 
@@ -280,7 +281,12 @@ function dosDateTime(date: number, time: number): ZipRow['dateTime'] {
 // over, is a corrupt directory. Info-ZIP and zipfile read the truncated
 // entry anyway (Info-ZIP lists it and exits 1 or 51; a short count makes
 // Info-ZIP exit 3 after listing); mirage refuses up front on both hosts.
-function readZipEntries(data: Uint8Array): { entries: ZipEntry[]; count: number; slack: number } {
+function readZipEntries(data: Uint8Array): {
+  entries: ZipEntry[]
+  count: number
+  slack: number
+  comment: Uint8Array
+} {
   const eocd = findEocd(data)
   if (eocd === -1) throw new ZipFormatError('no_eocd')
   const count = readU16LE(data, eocd + 10)
@@ -298,6 +304,7 @@ function readZipEntries(data: Uint8Array): { entries: ZipEntry[]; count: number;
     const method = readU16LE(data, offset + 10)
     const time = readU16LE(data, offset + 12)
     const date = readU16LE(data, offset + 14)
+    const crc = readU32LE(data, offset + 16)
     const csize = readU32LE(data, offset + 20)
     const size = readU32LE(data, offset + 24)
     const nameLen = readU16LE(data, offset + 28)
@@ -326,12 +333,15 @@ function readZipEntries(data: Uint8Array): { entries: ZipEntry[]; count: number;
       hostVersion: madeBy & 0xff,
       dateTime: dosDateTime(date, time),
       hasExtra: extraLen > 0,
+      crc,
+      comment: data.subarray(offset + 46 + nameLen + extraLen, next),
       content,
     })
     offset = next
   }
   if (offset !== eocd) throw new ZipFormatError('corrupt_cdir')
-  return { entries, count, slack: shift }
+  const comment = data.subarray(eocd + EOCD_LEN, eocd + EOCD_LEN + readU16LE(data, eocd + 20))
+  return { entries, count, slack: shift, comment }
 }
 
 async function entryContent(
@@ -370,12 +380,13 @@ async function ensureParents(
   await mkdir(makePathSpec(dir), true)
 }
 
-// Whether an unzip invocation writes: it extracts the archive unless -l, -t,
-// -p or -Z asks it to list, test, pipe or describe the members instead.
+// Whether an unzip invocation writes: it extracts the archive unless -l, -v,
+// -t, -p or -Z asks it to list, test, pipe or describe the members instead.
 // Mirrors Python's unzip_writes.
 export const unzipWrites: WritesFn = (flags, paths) => {
   const fl = new FlagView(flags, specOf('unzip'))
-  const readOnly = fl.asBool('args_l') || fl.asBool('t') || fl.asBool('p') || fl.asBool('Z')
+  const readOnly =
+    fl.asBool('args_l') || fl.asBool('v') || fl.asBool('t') || fl.asBool('p') || fl.asBool('Z')
   return paths.length > 0 && !readOnly
 }
 
@@ -390,7 +401,11 @@ export async function unzipGeneric(
   relay = false,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(opts.flags, specOf('unzip'))
+  const verbose = fl.asBool('v')
   if (paths.length === 0) {
+    // Info-ZIP answers -v without an archive with its version banner, and
+    // mirage's version line is that banner here.
+    if (verbose) return [ENC.encode(versionLine('unzip')), new IOResult()]
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('unzip: missing operand\n') })]
   }
   const listMode = fl.asBool('args_l')
@@ -426,8 +441,9 @@ export async function unzipGeneric(
   let entries: ZipEntry[]
   let count: number
   let slack: number
+  let comment: Uint8Array
   try {
-    ;({ entries, count, slack } = readZipEntries(data))
+    ;({ entries, count, slack, comment } = readZipEntries(data))
   } catch (err) {
     if (err instanceof ZipFormatError) {
       return [null, refusal(err.fault, archivePath.virtual, zipinfoMode, pipeMode)]
@@ -475,12 +491,19 @@ export async function unzipGeneric(
           ? '/'
           : destRaw
 
-    if (listMode) {
-      const lines = ['  Length      Name', '---------  ----']
-      for (const e of selected) {
-        lines.push(`${String(e.size).padStart(9, ' ')}  ${e.name}`)
+    // Info-ZIP lists only when neither -t nor -p asks for another mode,
+    // and -v widens -l's columns into the verbose table.
+    if ((listMode || verbose) && !(testMode || pipeMode)) {
+      let out: ByteSource
+      if (verbose) {
+        out = renderVerbose(archivePath.virtual, selected, quiet, comment)
+      } else {
+        const lines = ['  Length      Name', '---------  ----']
+        for (const e of selected) {
+          lines.push(`${String(e.size).padStart(9, ' ')}  ${e.name}`)
+        }
+        out = ENC.encode(lines.join('\n') + '\n')
       }
-      const out: ByteSource = ENC.encode(lines.join('\n') + '\n')
       // GNU -l prints no caution lines and only exits 11 when the
       // patterns left nothing at all.
       if (nothingLeft) {

@@ -7,12 +7,10 @@ from dataclasses import dataclass
 from mirage.commands.builtin.generic.archive.extract import (ensure_dir,
                                                              extract_dest)
 from mirage.commands.builtin.generic.archive.walk import StatFn
-from mirage.commands.builtin.generic.archive.zipinfo import (ZipRow,
-                                                             render_header,
-                                                             render_row,
-                                                             render_totals,
-                                                             zipinfo_layout)
-from mirage.commands.config import CommandOpts
+from mirage.commands.builtin.generic.archive.zipinfo import (  # yapf: disable
+    ZipRow, render_header, render_row, render_totals, render_verbose,
+    zipinfo_layout)
+from mirage.commands.config import CommandOpts, version_line
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -233,7 +231,9 @@ def _row(info: zipfile.ZipInfo) -> ZipRow:
                   host=info.create_system,
                   host_version=info.create_version,
                   date_time=info.date_time,
-                  has_extra=bool(info.extra))
+                  has_extra=bool(info.extra),
+                  crc=info.CRC,
+                  comment=info.comment)
 
 
 def _zipinfo(archive: str, zip_size: int, infos: list[zipfile.ZipInfo],
@@ -324,6 +324,7 @@ async def unzip(
     q: bool = False,
     p: bool = False,
     t: bool = False,
+    v: bool = False,
     x: tuple[str, ...] = (),
     Z: bool = False,
     args_1: bool = False,
@@ -335,6 +336,10 @@ async def unzip(
     relay: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
     if not paths:
+        # Info-ZIP answers -v without an archive with its version
+        # banner, and mirage's version line is that banner here.
+        if v:
+            return version_line("unzip"), IOResult()
         raise ValueError("unzip: missing operand")
     if not Z:
         zipinfo_only = {"-1": args_1, "-2": args_2, "-s": s, "-m": m, "-h": h}
@@ -359,7 +364,7 @@ async def unzip(
     with zf:
         out, result = await _run(zf, data, archive_path, members, x,
                                  write_bytes, mkdir_fn, stat, args_l, d, q, p,
-                                 t, Z, args_1, args_2, s, m, h, cwd, relay)
+                                 t, v, Z, args_1, args_2, s, m, h, cwd, relay)
     slack = _offset_slack(data)
     if slack == 0:
         return out, result
@@ -385,6 +390,7 @@ async def _run(
     q: bool,
     p: bool,
     t: bool,
+    v: bool,
     Z: bool,
     args_1: bool,
     args_2: bool,
@@ -413,6 +419,7 @@ async def _run(
         q (bool): ``-q``.
         p (bool): ``-p``.
         t (bool): ``-t``.
+        v (bool): ``-v``.
         Z (bool): ``-Z``.
         args_1 (bool): ``-1``.
         args_2 (bool): ``-2``.
@@ -441,11 +448,18 @@ async def _run(
                         short=s,
                         header=h,
                         totals=t)
-    if args_l:
-        lines = ["  Length      Name", "---------  ----"]
-        for info in selected:
-            lines.append(f"{info.file_size:>9}  {info.filename}")
-        listing = ("\n".join(lines) + "\n").encode()
+    # Info-ZIP lists only when neither -t nor -p asks for another mode,
+    # and -v widens -l's columns into the verbose table.
+    if (args_l or v) and not (t or p):
+        if v:
+            listing = render_verbose(archive_path.virtual,
+                                     [_row(info) for info in selected], q,
+                                     zf.comment)
+        else:
+            lines = ["  Length      Name", "---------  ----"]
+            for info in selected:
+                lines.append(f"{info.file_size:>9}  {info.filename}")
+            listing = ("\n".join(lines) + "\n").encode()
         # GNU -l prints no caution lines and only exits 11 when the
         # patterns left nothing at all.
         if nothing_left:
@@ -541,6 +555,7 @@ class UnzipFlags:
     quiet: bool = False
     to_stdout: bool = False
     test_only: bool = False
+    verbose: bool = False
     excludes: tuple[str, ...] = ()
     zipinfo: bool = False
     names_only: bool = False
@@ -560,6 +575,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
         quiet=fl.as_bool("q"),
         to_stdout=fl.as_bool("p"),
         test_only=fl.as_bool("t"),
+        verbose=fl.as_bool("v"),
         excludes=tuple(fl.as_list("x")),
         zipinfo=fl.as_bool("Z"),
         names_only=fl.as_bool("args_1"),
@@ -573,16 +589,17 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
 def unzip_writes(flags: Mapping[str, FlagValue],
                  paths: list[PathSpec]) -> bool:
     """Whether an unzip invocation writes: it extracts the archive unless
-    ``-l``, ``-t``, ``-p`` or ``-Z`` asks it to list, test, pipe or
-    describe the members instead.
+    ``-l``, ``-v``, ``-t``, ``-p`` or ``-Z`` asks it to list, test, pipe
+    or describe the members instead.
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flag bag.
         paths (list[PathSpec]): the operands the mount received.
     """
     parsed = parse_flags(flags)
-    return bool(paths) and not (parsed.list_only or parsed.test_only
-                                or parsed.to_stdout or parsed.zipinfo)
+    return bool(paths) and not (parsed.list_only or parsed.verbose
+                                or parsed.test_only or parsed.to_stdout
+                                or parsed.zipinfo)
 
 
 async def unzip_generic(
@@ -608,6 +625,7 @@ async def unzip_generic(
                        q=parsed.quiet,
                        p=parsed.to_stdout,
                        t=parsed.test_only,
+                       v=parsed.verbose,
                        x=parsed.excludes,
                        Z=parsed.zipinfo,
                        args_1=parsed.names_only,

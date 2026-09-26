@@ -102,6 +102,10 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-q"),
             Option(short="-p"),
             Option(short="-t"),
+            # -v is -l's verbose table, or the version banner when no
+            # archive is named. zipinfo's own -v (a per-entry technical
+            # dump) is not rendered: under -Z the letter is ignored.
+            Option(short="-v"),
             # Info-ZIP reads -x as a variadic list of patterns; mirage
             # takes one per occurrence, since its spec has no variadic
             # option value and `-x a -x b` says the same thing (zip's -x

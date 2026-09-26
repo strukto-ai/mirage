@@ -15,7 +15,8 @@
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import \
     transfer_primitives
-from mirage.commands.builtin.generic.unzip import unzip
+from mirage.commands.builtin.generic.unzip import unzip_generic
+from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -30,7 +31,9 @@ async def run_unzip(scopes: list[PathSpec], text_args: list[str],
 
     Pure wiring: the shared generic runs on dispatch-relayed doors, so
     the archive is read from its mount and every extracted path lands
-    on whichever mount owns it.
+    on whichever mount owns it. The generic reads every flag itself, so
+    ``-v`` still lists and ``-x`` still excludes when ``-d`` names
+    another mount.
 
     Args:
         scopes (list[PathSpec]): Path operands; the archive is first.
@@ -45,18 +48,11 @@ async def run_unzip(scopes: list[PathSpec], text_args: list[str],
     # the archive is the first scope that is not the destination.
     dest = fl.as_str("d")
     operands = [s for s in scopes if s.virtual != dest]
-    return await unzip(
-        operands or scopes,
-        read_bytes=prim["read_bytes"],
-        write_bytes=prim["write"],
-        mkdir_fn=prim["mkdir"],
-        stat=prim["stat"],
-        members=tuple(text_args),
-        o=fl.as_bool("o"),
-        args_l=fl.as_bool("args_l"),
-        d=fl.as_str("d"),
-        q=fl.as_bool("q"),
-        p=fl.as_bool("p"),
-        t=fl.as_bool("t"),
-        relay=True,
-    )
+    return await unzip_generic(operands or scopes,
+                               list(text_args),
+                               CommandOpts(flags=flag_kwargs),
+                               read_bytes=prim["read_bytes"],
+                               write_bytes=prim["write"],
+                               mkdir_fn=prim["mkdir"],
+                               stat=prim["stat"],
+                               relay=True)

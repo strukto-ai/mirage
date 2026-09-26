@@ -54,18 +54,19 @@ async def decompress_inputs(
             chunks: list[bytes] = []
             try:
                 async for chunk in gunzip_stream(
-                        raw_stream(path) if in_place else stream(path)):
+                        raw_stream(path) if in_place else stream(path),
+                        test_only):
                     if in_place:
                         chunks.append(chunk)
                     elif not test_only:
                         yield chunk
             except GzipDataError as exc:
                 report(
-                    f"{command}: {operand_label(path, 'stdin')}: {exc}\n".
-                    encode(), exc.exit_code)
+                    exc.render(command, operand_label(path, "stdin")).encode(),
+                    exc.exit_code)
                 if exc.fatal:
                     return
-                if exc.exit_code != 2:
+                if not exc.keeps_output:
                     continue
             except FS_ERRORS as exc:
                 report(

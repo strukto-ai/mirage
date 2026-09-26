@@ -104,6 +104,142 @@
         "stdout": "",
         "stderr": "gzip: stdin: unexpected end of file\n"
       }
+    },
+    {
+      "id": "gzip_dc_damaged_trailer_keeps_the_inflated_bytes",
+      "seq": 852,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\x57\\x28\\xcf\\x2f\\xca\\x49\\xe1\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' | gzip -dc",
+      "expect": {
+        "exit": 1,
+        "stdout": "hello world\n",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\n"
+      }
+    },
+    {
+      "id": "gzip_dc_unknown_method_skips_to_the_next_input",
+      "seq": 853,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && printf '\\x1f\\x8b\\x07\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00' > gzm7.gz && printf 'hello\\n' | gzip > gzok.gz && gzip -dc gzm7.gz gzok.gz; rc=$?; rm -f gzm7.gz gzok.gz; exit $rc)",
+      "expect": {
+        "exit": 1,
+        "stdout": "hello\n",
+        "stderr": "gzip: gzm7.gz: unknown method 7 -- not supported\n"
+      }
+    },
+    {
+      "id": "gzip_dc_names_a_header_checksum_mismatch",
+      "seq": 854,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x8b\\x08\\x02\\x00\\x00\\x00\\x00\\x00\\x03\\x00\\x00\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00' | gzip -dc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gzip: stdin: header checksum 0x0000 != computed checksum 0x77a7\n"
+      }
+    },
+    {
+      "id": "gzip_dc_refuses_reserved_header_flags",
+      "seq": 855,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x8b\\x08\\x40\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00' | gzip -dc",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gzip: stdin has flags 0x40 -- not supported\n"
+      }
     }
   ]
 }

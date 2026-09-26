@@ -169,6 +169,74 @@
         "stdout": "",
         "stderr": "zcat: stdin: unexpected end of file\n"
       }
+    },
+    {
+      "id": "zcat_stops_at_a_damaged_trailer",
+      "seq": 850,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && printf 'x\\n' | gzip > zcok.gz && printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\x57\\x28\\xcf\\x2f\\xca\\x49\\xe1\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' | zcat - zcok.gz; rc=$?; rm -f zcok.gz; exit $rc)",
+      "expect": {
+        "exit": 1,
+        "stdout": "hello world\n",
+        "stderr": "zcat: stdin: invalid compressed data--crc error\nzcat: stdin: invalid compressed data--length error\n"
+      }
+    },
+    {
+      "id": "zcat_names_a_crc_mismatch_alone",
+      "seq": 851,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\x57\\x28\\xcf\\x2f\\xca\\x49\\xe1\\x02\\x00\\x00\\x00\\x00\\x00\\x0c\\x00\\x00\\x00' | zcat",
+      "expect": {
+        "exit": 1,
+        "stdout": "hello world\n",
+        "stderr": "zcat: stdin: invalid compressed data--crc error\n"
+      }
     }
   ]
 }

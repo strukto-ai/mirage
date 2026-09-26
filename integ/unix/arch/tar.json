@@ -854,6 +854,232 @@
         "C",
         "x"
       ]
+    },
+    {
+      "id": "arch_tar_z_non_gzip_is_gzips_refusal_then_tars",
+      "seq": 471,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && echo corrupted > tznot.tgz && tar -tzf tznot.tgz; rc=$?; rm -f tznot.tgz; exit $rc)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: not in gzip format\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_z_damaged_trailer_lists_every_member",
+      "seq": 471,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xed\\xd3\\x41\\x0a\\xc3\\x20\\x10\\x85\\x61\\xd7\\x3d\\x85\\x27\\xa8\\xda\\x38\\x7a\\x9e\\x04\\x85\\x2e\\x02\\x42\\x6a\\xa1\\xc7\\xaf\\x64\\x99\\x42\\xba\\x32\\x34\\xf4\\xff\\x36\\x33\\x30\\xb3\\x7b\\xbc\\x64\\x54\\x77\\xb6\\x89\\x22\\xeb\\x6c\\xb6\\x73\\xdd\\x9d\\xdc\\x44\\x42\\x18\\x86\\xa1\\xfd\\x39\\x6b\\x9d\\x57\\x5a\\xd4\\x01\\x9e\\x8f\\x3a\\x2e\\x5a\\xab\\xa5\\x94\\xba\\xf7\\xf7\\xed\\x7e\\x52\\xc9\\x8c\\xd7\\xfa\\xaa\\xdd\\xf3\\x0f\\xde\\xef\\xe4\\x1f\\xb6\\xf9\\xc7\\xe8\\x94\\xb6\\xe4\\xdf\\xdd\\x3d\\xcf\\x73\\xb9\\x28\\xfc\\xa9\\x64\\xa6\\x1f\\xe8\\xbf\\xff\\xec\\xbf\\xa5\\xff\\x47\\x98\\x72\\xa6\\xfd\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x9c\\xdc\\x1b\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' > tzcrc.tgz && tar -tzf tzcrc.tgz; rc=$?; rm -f tzcrc.tgz; exit $rc)",
+      "expect": {
+        "exit": 2,
+        "stdout": "d/\nd/a.txt\nd/b.txt\n",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_z_damaged_trailer_still_extracts",
+      "seq": 471,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xed\\xd3\\x41\\x0a\\xc3\\x20\\x10\\x85\\x61\\xd7\\x3d\\x85\\x27\\xa8\\xda\\x38\\x7a\\x9e\\x04\\x85\\x2e\\x02\\x42\\x6a\\xa1\\xc7\\xaf\\x64\\x99\\x42\\xba\\x32\\x34\\xf4\\xff\\x36\\x33\\x30\\xb3\\x7b\\xbc\\x64\\x54\\x77\\xb6\\x89\\x22\\xeb\\x6c\\xb6\\x73\\xdd\\x9d\\xdc\\x44\\x42\\x18\\x86\\xa1\\xfd\\x39\\x6b\\x9d\\x57\\x5a\\xd4\\x01\\x9e\\x8f\\x3a\\x2e\\x5a\\xab\\xa5\\x94\\xba\\xf7\\xf7\\xed\\x7e\\x52\\xc9\\x8c\\xd7\\xfa\\xaa\\xdd\\xf3\\x0f\\xde\\xef\\xe4\\x1f\\xb6\\xf9\\xc7\\xe8\\x94\\xb6\\xe4\\xdf\\xdd\\x3d\\xcf\\x73\\xb9\\x28\\xfc\\xa9\\x64\\xa6\\x1f\\xe8\\xbf\\xff\\xec\\xbf\\xa5\\xff\\x47\\x98\\x72\\xa6\\xfd\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x9c\\xdc\\x1b\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' > tzx.tgz && tar -xOzf tzx.tgz d/a.txt; rc=$?; rm -f tzx.tgz; exit $rc)",
+      "expect": {
+        "exit": 2,
+        "stdout": "hello\n",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_gzip_magic_without_z_reports_trailing_garbage",
+      "seq": 471,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "(cd /data && (printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xed\\xd3\\x41\\x0a\\xc3\\x20\\x10\\x85\\x61\\xd7\\x3d\\x85\\x27\\xa8\\xda\\x38\\x7a\\x9e\\x04\\x85\\x2e\\x02\\x42\\x6a\\xa1\\xc7\\xaf\\x64\\x99\\x42\\xba\\x32\\x34\\xf4\\xff\\x36\\x33\\x30\\xb3\\x7b\\xbc\\x64\\x54\\x77\\xb6\\x89\\x22\\xeb\\x6c\\xb6\\x73\\xdd\\x9d\\xdc\\x44\\x42\\x18\\x86\\xa1\\xfd\\x39\\x6b\\x9d\\x57\\x5a\\xd4\\x01\\x9e\\x8f\\x3a\\x2e\\x5a\\xab\\xa5\\x94\\xba\\xf7\\xf7\\xed\\x7e\\x52\\xc9\\x8c\\xd7\\xfa\\xaa\\xdd\\xf3\\x0f\\xde\\xef\\xe4\\x1f\\xb6\\xf9\\xc7\\xe8\\x94\\xb6\\xe4\\xdf\\xdd\\x3d\\xcf\\x73\\xb9\\x28\\xfc\\xa9\\x64\\xa6\\x1f\\xe8\\xbf\\xff\\xec\\xbf\\xa5\\xff\\x47\\x98\\x72\\xa6\\xfd\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x9c\\xdc\\x1b\\xd5\\xc0\\x69\\x8b\\x00\\x28\\x00\\x00'; printf junk) > tzjunk.tgz && tar -tf tzjunk.tgz; rc=$?; rm -f tzjunk.tgz; exit $rc)",
+      "expect": {
+        "exit": 2,
+        "stdout": "d/\nd/a.txt\nd/b.txt\n",
+        "stderr": "gzip: stdin: decompression OK, trailing garbage ignored\ntar: Child returned status 2\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_truncated_gzip_trailer_lists",
+      "seq": 962320,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar1269-0 && cd /data/tar1269-0 && echo 'H4sIAAAAAAACE+3RMQqDQBAF0Kk9RU4gWxhznhSChRCIK+T47qYSewXxveYPf4opZhym6dPmX47jpKLvun8W+6zbzVz7V5+e8UhxgmXO7285Gfc01v83AQAAAAAAAAAAwMWs' | base64 -d > input.tgz && tar -tzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "hello.txt\n",
+        "stderr": "gzip: stdin: unexpected end of file\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_truncated_gzip_trailer_extracts",
+      "seq": 962321,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar1269-1 && cd /data/tar1269-1 && echo 'H4sIAAAAAAACE+3RMQqDQBAF0Kk9RU4gWxhznhSChRCIK+T47qYSewXxveYPf4opZhym6dPmX47jpKLvun8W+6zbzVz7V5+e8UhxgmXO7285Gfc01v83AQAAAAAAAAAAwMWs' | base64 -d > input.tgz && tar -xzf input.tgz; status=$?; cat hello.txt; exit $status)",
+      "expect": {
+        "exit": 2,
+        "stdout": "hello\n",
+        "stderr": "gzip: stdin: unexpected end of file\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_truncated_gzip_trailer_pipes",
+      "seq": 962322,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar1269-2 && cd /data/tar1269-2 && echo 'H4sIAAAAAAACE+3RMQqDQBAF0Kk9RU4gWxhznhSChRCIK+T47qYSewXxveYPf4opZhym6dPmX47jpKLvun8W+6zbzVz7V5+e8UhxgmXO7285Gfc01v83AQAAAAAAAAAAwMWs' | base64 -d > input.tgz && tar -xOzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "hello\n",
+        "stderr": "gzip: stdin: unexpected end of file\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_truncated_later_gzip_header",
+      "seq": 962323,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar1269-3 && cd /data/tar1269-3 && echo 'H4sIAAAAAAACE+3RMQqDQBAF0Kk9RU4gWxhznhSChRCIK+T47qYSewXxveYPf4opZhym6dPmX47jpKLvun8W+6zbzVz7V5+e8UhxgmXO7285Gfc01v83AQAAAAAAAAAAwMWspGdw9AAoAAAfiw==' | base64 -d > input.tgz && tar -tf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "hello.txt\n",
+        "stderr": "gzip: stdin: unexpected end of file\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_gzip_error_outranks_tar_parse_error_t",
+      "seq": 962324,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar1269-4 && cd /data/tar1269-4 && echo 'H4sIAAAAAAACE8vLL1FIVChJLOICAAAAAAAAAAAA' | base64 -d > input.tgz && tar -tzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_gzip_error_outranks_tar_parse_error_xO",
+      "seq": 962325,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar1269-5 && cd /data/tar1269-5 && echo 'H4sIAAAAAAACE8vLL1FIVChJLOICAAAAAAAAAAAA' | base64 -d > input.tgz && tar -xOzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_invalid_header_and_bad_gzip_list",
+      "seq": 962400,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -tzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_invalid_header_and_bad_gzip_extract",
+      "seq": 962401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -xzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_invalid_header_and_bad_gzip_stdout",
+      "seq": 962402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -xOzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
     }
   ]
 }

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { TarEntry } from '../../tar_helper.ts'
+import type { GzipDataError } from '../../../../utils/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { MemberKind } from '../archive/types.ts'
 
@@ -44,4 +46,11 @@ export interface CreateResult {
   // enter), which leave no file behind; an operand it merely failed to
   // stat still writes the rest.
   write: boolean
+}
+
+/** Parsed entries, their gzip failure and independent tar diagnostics. */
+export interface ReadResult {
+  entries: TarEntry[]
+  failure: GzipDataError | null
+  notices: string[]
 }

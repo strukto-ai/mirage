@@ -16,7 +16,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { deflateRaw } from '../../../utils/compress.ts'
+import { crc32, deflateRaw } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
 import { lstripSlash, rstripSlash } from '../../../utils/slash.ts'
@@ -25,26 +25,6 @@ import type { MemberKind } from './archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type StatFn, type WalkFn } from './archive/walk.ts'
 
 const ENC = new TextEncoder()
-
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256)
-  for (let n = 0; n < 256; n++) {
-    let c = n
-    for (let k = 0; k < 8; k++) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-    }
-    table[n] = c >>> 0
-  }
-  return table
-})()
-
-function crc32(data: Uint8Array): number {
-  let c = 0xffffffff
-  for (let i = 0; i < data.byteLength; i++) {
-    c = (CRC_TABLE[((c ^ (data[i] ?? 0)) & 0xff) >>> 0] ?? 0) ^ (c >>> 8)
-  }
-  return (c ^ 0xffffffff) >>> 0
-}
 
 function writeU16LE(buf: Uint8Array, offset: number, value: number): void {
   buf[offset] = value & 0xff
