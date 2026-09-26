@@ -340,11 +340,12 @@ const gitTree = withRepo(async (ctx, repo) => {
     const shallow = treeItems(whole, subs, at).filter((it) => !it.path.includes('/'))
     return { status: 200, body: { sha: treeSha(at), tree: shallow, truncated: false } }
   }
-  // Without recursive=1 a ref names only its root directory's own rows, and
+  // Without recursive a ref names only its root directory's own rows, and
   // a listing that small is never cut short: the per-directory walk asks for
   // the root this way, and reading the recursive answer's truncation onto it
   // refused a listing GitHub would have served whole.
-  if (ctx.query.get('recursive') !== '1') {
+  // GitHub recurses for any value of the parameter, 0 and false included.
+  if (!ctx.query.has('recursive')) {
     const shallow = treeItems(files, subs).filter((it) => !it.path.includes('/'))
     return { status: 200, body: { sha: treeSha(''), tree: shallow, truncated: false } }
   }

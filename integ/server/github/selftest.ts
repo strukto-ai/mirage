@@ -156,6 +156,16 @@ async function main(): Promise<void> {
     eq('a path through a file is 422', (await shallow('main%3AREADME.md')).status, 422)
     eq('a missing directory is 404', (await shallow('main%3Anope')).status, 404)
     eq('an unknown ref is 404', (await shallow('gone%3Adocs')).status, 404)
+    // A bare ref without recursive names only the root's own rows, uncut: the
+    // truncated repository's per-directory walk asks for its root this way.
+    const bareRoot = await get(`${at}/repos/integ/repo-trunc/git/trees/main`)
+    eq('a bare ref lists the root shallow and whole', field(bareRoot, 'truncated'), false)
+    check(
+      'a bare ref lists no nested path',
+      (field(bareRoot, 'tree') as JsonValue[]).every(
+        (row) => !String(field(row, 'path')).includes('/'),
+      ),
+    )
     const whole = await get(`${at}/repos/${REPO}/git/trees/main?recursive=1`)
     const wholeRow = (field(whole, 'tree') as JsonValue[]).find(
       (row) => field(row, 'path') === 'docs/release.md',

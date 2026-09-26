@@ -370,6 +370,7 @@ describe('the truncated walk', () => {
     })
     const err = await readdir(accessor, path, index).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(GitHubApiError)
+    expect((err as GitHubApiError).message).toContain('truncated the tree listing')
     // Nothing partial was cached as the directory's whole listing.
     expect((await index.listDir('/gh/big')).entries ?? null).toBeNull()
   })
