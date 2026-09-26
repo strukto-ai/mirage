@@ -179,22 +179,10 @@ export async function read(
   else if (rt === 'gdrive/gsheet') rendered = await readSpreadsheet(accessor.tokenManager, entry.id)
   else rendered = await readPresentation(accessor.tokenManager, entry.id)
   const sliced = sliceWindow(rendered, offset, size)
-  // The token comes off the entry the listing already produced, so this costs
-  // no request, and it is never NEWER than the render because the listing
-  // preceded it -- so it can never mark stale bytes fresh.
-  //
-  // It can be older, though, by up to the index TTL (a day), and the two
-  // consumers of a read record disagree about what that costs. For the cache
-  // probe it is one wasted refetch. For snapshot drift it is a failed load:
-  // capture stores the stale stamp, and a STRICT load stats the live one and
-  // raises on a file nothing touched since the snapshot. Buying the fresher
-  // stamp means a metadata request per native read, which is the round trip
-  // this backend is built to avoid.
-  //
-  // `revision: null` deliberately: a pin REPLACES the drift check rather than
-  // supplementing it, and this branch dispatches before `revisionFor` is ever
-  // consulted, so a pin here would be dead and would silently disable the
-  // check it displaced.
+  // The entry's token costs no request and is never newer than the render. It
+  // can be a TTL older: a wasted refetch, or a STRICT drift raise on an
+  // untouched file. No revision: a pin would replace the drift check, and this
+  // branch never consults one.
   record('read', path.virtual, 'gdrive', sliced.length, timer, {
     fingerprint: wholeFile(offset, size)
       ? driveFingerprint(entry.extra.md5_checksum, entry.extra.head_revision_id, entry.remoteTime)
