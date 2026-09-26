@@ -63,6 +63,10 @@ async def lookup(
     longer names is absent even when its old row is still there. The
     parent is filled first if the index holds no listing for it.
 
+    Without an index the parent is read the way ``_readdir`` reads it with
+    none, which answers from the truncated walk alone; TypeScript's twin
+    answers absent for an undefined index, which no door passes.
+
     Args:
         accessor (GitHubAccessor): the mount's accessor.
         index (IndexCacheStore): the mount's index, or NULL_INDEX.

@@ -20,6 +20,7 @@ import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { populateIndex, refillIndex } from './tree.ts'
 import { read, stream } from './read.ts'
+import { stat } from './stat.ts'
 import type { GitHubTransport } from './client.ts'
 import { FakeGitHub, blobSha, raceIndex, servedAccessor } from './_test_util.ts'
 
@@ -229,5 +230,10 @@ describe('a read against the wire', () => {
     // live one. Only the first names the bytes this read returned.
     expect(DEC.decode(data)).toBe('old')
     expect(records.map((r) => r.fingerprint)).toEqual([await blobSha('old')])
+    // The probe that follows sees the live sha, which is not the one the read
+    // stamped, so the copy it left is stale rather than fresh.
+    const probe = await stat(accessor, at('a.txt', '/gh'), new RAMIndexCacheStore())
+    expect(probe.fingerprint).toBe(await blobSha('live'))
+    expect(probe.fingerprint).not.toBe(records[0]?.fingerprint)
   })
 })

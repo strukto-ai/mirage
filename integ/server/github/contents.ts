@@ -340,6 +340,14 @@ const gitTree = withRepo(async (ctx, repo) => {
     const shallow = treeItems(whole, subs, at).filter((it) => !it.path.includes('/'))
     return { status: 200, body: { sha: treeSha(at), tree: shallow, truncated: false } }
   }
+  // Without recursive=1 a ref names only its root directory's own rows, and
+  // a listing that small is never cut short: the per-directory walk asks for
+  // the root this way, and reading the recursive answer's truncation onto it
+  // refused a listing GitHub would have served whole.
+  if (ctx.query.get('recursive') !== '1') {
+    const shallow = treeItems(files, subs).filter((it) => !it.path.includes('/'))
+    return { status: 200, body: { sha: treeSha(''), tree: shallow, truncated: false } }
+  }
   // A truncated recursive tree keeps only the top-level entries, the way git
   // drops deep paths past its entry cap.
   let items = treeItems(files, subs)

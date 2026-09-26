@@ -1911,22 +1911,29 @@ async function openGitHub(target: Target, options?: OpenOptions): Promise<Open> 
       .filter((x) => path === x.path || path.startsWith(`${x.path.replace(/\/+$/, '')}/`))
       .sort((a, b) => b.path.length - a.path.length)[0]
     if (m === undefined || m.vfs === 'ram') throw new Error(`github cannot change ${path}`)
-    const vfs = await create(m)
     const rel = path.slice(m.path.replace(/\/+$/, '').length).replace(/^\/+/, '')
     const [owner, repo] = String(m.repo).split('/')
-    const endpoint = `/repos/${owner ?? ''}/${repo ?? ''}/contents/${encodeURI(rel)}`
+    // Each segment encoded as python's quote encodes it, so a `?` or `#` in a
+    // name cannot end the path on one host only.
+    const encoded = rel.split('/').map(encodeURIComponent).join('/')
+    const endpoint = `/repos/${owner ?? ''}/${repo ?? ''}/contents/${encoded}`
     const body: Record<string, string> = {
       message: `integ: change ${rel}`,
       content: Buffer.from(content).toString('base64'),
     }
+    const vfs = await create(m)
     try {
-      const current = (await vfs.accessor.transport.get(endpoint)) as { sha?: string }
-      if (current.sha !== undefined) body.sha = current.sha
-    } catch (err) {
-      // Absent: create it. GitHub refuses a sha for a new file.
-      if ((err as { status?: number }).status !== 404) throw err
+      try {
+        const current = (await vfs.accessor.transport.get(endpoint)) as { sha?: string }
+        if (current.sha !== undefined) body.sha = current.sha
+      } catch (err) {
+        // Absent: create it. GitHub refuses a sha for a new file.
+        if ((err as { status?: number }).status !== 404) throw err
+      }
+      await vfs.accessor.transport.request('PUT', endpoint, body)
+    } finally {
+      await vfs.close()
     }
-    await vfs.accessor.transport.request('PUT', endpoint, body)
   }
   return { ws: opened.ws, shadow: opened.shadow, mutate, cleanup: opened.closeAll }
 }

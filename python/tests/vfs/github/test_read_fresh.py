@@ -164,6 +164,19 @@ async def test_a_new_mount_lists_once_and_never_asks_one_directory():
 
 
 @pytest.mark.asyncio
+async def test_a_bounded_mount_lists_once_and_never_asks_one_directory():
+    with serve(_hub()) as hub:
+        ws = _ws(_vfs(hub), ReadPolicy.BOUNDED)
+        try:
+            await _out(ws, f"stat {PATH}")
+            await _out(ws, f"stat {PATH}")
+            await _out(ws, "ls /gh/docs")
+            assert hub.counts() == (0, 1, 0)
+        finally:
+            await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_revert_is_read_through_both_doors():
     # Content-addressed shas make every stamp source agree once the index is
     # refilled, so this guards that both the stream door (cat) and the bytes
@@ -246,6 +259,11 @@ async def test_a_repository_it_cannot_see_keeps_the_overlay():
                            "?recursive=1'\n")
             assert _kept(ws)
             err = await _fails(ws, f"cp {PATH} /r/x")
+            # cp renders a backend error without its own prefix, as it does
+            # for any backend (unchanged here).
+            assert err == ("404, message='Not Found', url='"
+                           f"{hub.url}/repos/o/r/git/trees/main"
+                           "?recursive=1'\n")
             assert _kept(ws)
         finally:
             await ws.close()
@@ -258,9 +276,14 @@ async def test_a_refused_token_keeps_the_overlay():
         try:
             await _out(ws, f"cat {PATH}")
             await _overlaid(ws)
+            # Only the one-directory route refuses: deferring on 401 would
+            # walk the tree, which answers, and hide the refusal.
             hub.fail["dir"] = (401, "Bad credentials")
-            hub.fail["recursive"] = (401, "Bad credentials")
-            await _fails(ws, f"cat {PATH}")
+            hub.log.clear()
+            err = await _fails(ws, f"cat {PATH}")
+            assert err == ("cat: 401, message='Unauthorized', url='"
+                           f"{hub.url}/repos/o/r/git/trees/main:docs'\n")
+            assert hub.count("recursive") == 0
             assert _kept(ws)
         finally:
             await ws.close()
@@ -284,7 +307,7 @@ async def test_a_parent_directory_gone_upstream_is_gone():
 
 
 @pytest.mark.asyncio
-async def test_a_file_gone_from_a_live_directory_is_gone_without_a_walk():
+async def test_a_file_gone_from_a_live_directory_is_gone():
     with serve(_hub()) as hub:
         ws = _ws(_vfs(hub))
         try:
@@ -324,7 +347,10 @@ async def test_the_dispatcher_door_never_reads_cannot_see_as_gone():
         ws = _ws(_vfs(hub))
         try:
             await _cleared_with_overlay(ws, hub)
-            await _fails(ws, f"cp {PATH} /r/x")
+            err = await _fails(ws, f"cp {PATH} /r/x")
+            assert err == ("401, message='Unauthorized', url='"
+                           f"{hub.url}/repos/o/r/git/trees/main"
+                           "?recursive=1'\n")
             assert _kept(ws)
         finally:
             await ws.close()
@@ -336,7 +362,10 @@ async def test_the_xattr_door_never_reads_cannot_see_as_gone():
         ws = _ws(_vfs(hub))
         try:
             await _cleared_with_overlay(ws, hub)
-            await _fails(ws, f"getfattr -d {PATH}")
+            err = await _fails(ws, f"getfattr -d {PATH}")
+            assert err == ("401, message='Unauthorized', url='"
+                           f"{hub.url}/repos/o/r/git/trees/main"
+                           "?recursive=1'\n")
             assert _kept(ws)
         finally:
             await ws.close()
@@ -353,7 +382,9 @@ async def test_a_truncated_parent_listing_is_not_absence():
             hub.log.clear()
             assert await _out(ws, f"cat {PATH}") == OLD
             assert _kept(ws)
-            assert hub.count("recursive") >= 1
+            # One listing of docs/ per probe, each cut short, so each defers
+            # to one walk of the whole tree, which finds the file.
+            assert hub.counts() == (2, 2, 0)
         finally:
             await ws.close()
 
@@ -377,11 +408,41 @@ async def test_a_truncated_repository_probes_one_directory():
         ws = _ws(vfs)
         try:
             assert await _out(ws, f"cat {PATH}") == OLD
-            assert vfs.accessor.refills > 0
+            # The walk listed the root and docs/ on the way to the file.
+            assert vfs.accessor.refills == 2
             hub.log.clear()
             assert await _out(ws, f"cat {PATH}") == OLD
             assert hub.counts() == (2, 0, 0)
             assert hub.count("sha_dir") == 0
+        finally:
+            await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_directory_github_cuts_short_is_not_absence():
+    # A truncated repository whose docs/ listing GitHub also cuts short: the
+    # walk refuses the cut listing rather than caching it whole, so a probe
+    # cannot read the file as gone, and the overlay stays.
+    files = {"top.txt": b"t", "docs/a.txt": OLD, "docs/b.txt": b"bravo"}
+    with serve(FakeGitHub(files=files, truncated_recursive=True)) as hub:
+        config = GitHubConfig(token="t", base_url=hub.url)
+        tree, truncated = await fetch_tree(config, "o", "r", "main")
+        vfs = GitHubVFS(config,
+                        "o",
+                        "r",
+                        "main",
+                        default_branch="main",
+                        tree=tree,
+                        truncated=truncated)
+        ws = _ws(vfs)
+        try:
+            assert await _out(ws, f"cat {PATH}") == OLD
+            await _overlaid(ws)
+            hub.truncated_dirs["docs"] = 0
+            err = await _fails(ws, f"cat {PATH}")
+            assert err.startswith(
+                "cat: GitHub truncated the tree listing of o/r ")
+            assert _kept(ws)
         finally:
             await ws.close()
 

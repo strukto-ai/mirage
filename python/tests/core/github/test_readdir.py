@@ -24,6 +24,7 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.read import read
 from mirage.core.github.readdir import readdir
@@ -343,3 +344,22 @@ async def test_the_truncated_walk_counts_each_listing_it_writes():
         # point route on a mount that never runs a whole-tree refill.
         assert accessor.refills == 3
         assert gh.count("recursive") == 0
+
+
+@pytest.mark.asyncio
+async def test_the_truncated_walk_refuses_a_directory_github_cut_short():
+    files = {"top.txt": b"t", "big/a.txt": b"a", "big/b.txt": b"b"}
+    with serve(FakeGitHub(files=files, truncated_recursive=True)) as gh:
+        gh.truncated_dirs["big"] = 1
+        accessor = GitHubAccessor(GitHubConfig(token="t", base_url=gh.url),
+                                  "o",
+                                  "r",
+                                  "main",
+                                  tree={},
+                                  truncated=True)
+        index = RAMIndexCacheStore()
+        path = PathSpec(vfs_path="big", virtual="/gh/big", directory="/gh/big")
+        with pytest.raises(GitHubApiError, match="truncated the tree listing"):
+            await readdir(accessor, path, index)
+        # Nothing partial was cached as the directory's whole listing.
+        assert (await index.list_dir("/gh/big")).entries is None

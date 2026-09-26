@@ -22,6 +22,7 @@ import pytest
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.core.github.client import GitHubApiError
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree import (ensure_live_index, ensure_tree,
                                      fetch_dir_page, fetch_dir_tree,
@@ -314,8 +315,9 @@ async def test_a_failed_refill_does_not_count():
     with serve(FakeGitHub(files={"a.txt": b"a"})) as gh:
         accessor = _served_accessor(gh)
         gh.fail["recursive"] = (500, "boom")
-        with pytest.raises(aiohttp.ClientResponseError):
+        with pytest.raises(aiohttp.ClientResponseError) as caught:
             await refill_index(accessor, RAMIndexCacheStore(), "/gh")
+        assert caught.value.status == 500
         assert accessor.refills == 0
 
 
@@ -387,6 +389,7 @@ async def test_a_directory_page_carries_truncation(mock_get, config):
     assert truncated is True
     # A gitlink has no blob and no size; the page drops it like the tree.
     assert [e.path for e in entries] == ["a.py"]
+    mock_get.return_value = {**mock_get.return_value, "truncated": False}
     assert await fetch_dir_tree(config, "o", "r", "sha") == entries
 
 
@@ -394,8 +397,26 @@ async def test_a_directory_page_carries_truncation(mock_get, config):
 @patch("mirage.core.github.tree.github_get")
 async def test_a_directory_page_without_a_tree_is_refused(mock_get, config):
     mock_get.return_value = {"message": "something else"}
-    with pytest.raises(ValueError):
+    with pytest.raises(GitHubApiError, match="carries no tree"):
         await fetch_dir_page(config, "o", "r", "sha")
+
+
+@pytest.mark.asyncio
+@patch("mirage.core.github.tree.github_get")
+async def test_a_directory_tree_github_cut_short_is_refused(mock_get, config):
+    # The fallback walk caches what it gets as the whole directory; a name
+    # past GitHub's cut would read as absent, and a fresh probe as gone.
+    mock_get.return_value = {
+        "truncated": True,
+        "tree": [{
+            "path": "a.py",
+            "type": "blob",
+            "sha": "a",
+            "size": 1
+        }],
+    }
+    with pytest.raises(GitHubApiError, match="truncated the tree listing"):
+        await fetch_dir_tree(config, "o", "r", "sha")
 
 
 @pytest.mark.asyncio
@@ -413,6 +434,8 @@ async def test_the_point_answers():
         # defer to the tree rather than answering absent.
         assert await point_row(accessor, "gone/a.txt") is None
         assert await point_row(accessor, "docs/a.txt/x") is None
+        assert await point_row(_served_accessor(gh, "deleted"),
+                               "docs/a.txt") is None
         for status in (401, 403, 409, 429, 500):
             gh.fail["dir"] = (status, "refused")
             with pytest.raises(aiohttp.ClientResponseError) as caught:
@@ -428,5 +451,5 @@ async def test_a_malformed_point_answer_is_refused():
         accessor = _served_accessor(gh)
         with patch("mirage.core.github.tree.github_get",
                    AsyncMock(return_value={})):
-            with pytest.raises(ValueError):
+            with pytest.raises(GitHubApiError, match="carries no tree"):
                 await point_row(accessor, "docs/a.txt")

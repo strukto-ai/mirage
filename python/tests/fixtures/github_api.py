@@ -24,7 +24,7 @@ from typing import Any
 from aiohttp import web
 
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import ListResult
+from mirage.cache.index import ListResult, LookupResult
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.tree import refill_index
 
@@ -83,7 +83,9 @@ class FakeGitHub:
     fail: dict[str, tuple[int, str]] = field(default_factory=dict)
     log: list[tuple[str, str]] = field(default_factory=list)
     blobs: dict[str, bytes] = field(default_factory=dict)
-    url: str = ""
+    # Unroutable until serve() sets it, so a config built too early fails
+    # rather than reaching api.github.com.
+    url: str = "http://127.0.0.1:9"
 
     def count(self, route: str) -> int:
         return sum(1 for name, _ in self.log if name == route)
@@ -304,7 +306,7 @@ class _StaleListing(RAMIndexCacheStore):
 
     async def list_dir(self, vfs_path: str) -> ListResult:
         result = await super().list_dir(vfs_path)
-        if self.fired or vfs_path != self.parent:
+        if self.fired or vfs_path != self.parent or self.accessor is None:
             return result
         self.fired = True
         stale = [k for k in result.entries or [] if k != self.key]
@@ -319,7 +321,7 @@ class _ClearedMidLookup(RAMIndexCacheStore):
         super().__init__()
         self.fired = False
 
-    async def get(self, vfs_path: str):
+    async def get(self, vfs_path: str) -> LookupResult:
         if not self.fired:
             self.fired = True
             await self.clear()
@@ -333,8 +335,8 @@ class _ClearedAndReseeded(RAMIndexCacheStore):
         self.accessor: GitHubAccessor | None = None
         self.fired = False
 
-    async def get(self, vfs_path: str):
-        if self.fired:
+    async def get(self, vfs_path: str) -> LookupResult:
+        if self.fired or self.accessor is None:
             return await super().get(vfs_path)
         self.fired = True
         await self.clear()

@@ -29,7 +29,7 @@ export interface Found {
   entry: IndexEntry | null
 }
 
-const ABSENT: Found = { entry: null }
+const ABSENT: Readonly<Found> = Object.freeze({ entry: null })
 
 /** The mount root's key, whose listing tells a live index from not. */
 export function rootOf(prefix: string): string {

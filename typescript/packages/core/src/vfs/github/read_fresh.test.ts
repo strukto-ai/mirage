@@ -165,6 +165,18 @@ describe('github under read: fresh', () => {
     }
   })
 
+  it('lists a bounded mount once and never asks one directory', async () => {
+    const w = await ws(await vfsOf(), ReadPolicy.BOUNDED)
+    try {
+      await out(w, `stat ${PATH}`)
+      await out(w, `stat ${PATH}`)
+      await out(w, 'ls /gh/docs')
+      expect(gh.counts()).toEqual([0, 1, 0])
+    } finally {
+      await w.close()
+    }
+  })
+
   it('reads a revert through both doors', async () => {
     // Content-addressed shas make every stamp source agree once the index is
     // refilled, so this guards that both the stream door (cat) and the bytes
@@ -242,7 +254,7 @@ describe('github cannot-see versus gone', () => {
       // prints aiohttp's rendering of the same 404. Never ENOENT.
       expect(await fails(w, `cat ${PATH}`)).toBe('cat: Not Found\n')
       expect(kept(w)).toBe(true)
-      await fails(w, `cp ${PATH} /r/x`)
+      expect(await fails(w, `cp ${PATH} /r/x`)).toBe('Not Found\n')
       expect(kept(w)).toBe(true)
     } finally {
       await w.close()
@@ -254,9 +266,12 @@ describe('github cannot-see versus gone', () => {
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
+      // Only the one-directory route refuses: deferring on 401 would walk the
+      // tree, which answers, and hide the refusal.
       gh.fail.set('dir', [401, 'Bad credentials'])
-      gh.fail.set('recursive', [401, 'Bad credentials'])
-      await fails(w, `cat ${PATH}`)
+      gh.log.length = 0
+      expect(await fails(w, `cat ${PATH}`)).toBe('cat: Bad credentials\n')
+      expect(gh.count('recursive')).toBe(0)
       expect(kept(w)).toBe(true)
     } finally {
       await w.close()
@@ -314,7 +329,7 @@ describe('github cannot-see versus gone', () => {
     const w = await ws(await vfsOf())
     try {
       await clearedWithOverlay(w)
-      await fails(w, `cp ${PATH} /r/x`)
+      expect(await fails(w, `cp ${PATH} /r/x`)).toBe('Bad credentials\n')
       expect(kept(w)).toBe(true)
     } finally {
       await w.close()
@@ -325,7 +340,7 @@ describe('github cannot-see versus gone', () => {
     const w = await ws(await vfsOf())
     try {
       await clearedWithOverlay(w)
-      await fails(w, `getfattr -d ${PATH}`)
+      expect(await fails(w, `getfattr -d ${PATH}`)).toBe(`getfattr: ${PATH}: Bad credentials\n`)
       expect(kept(w)).toBe(true)
     } finally {
       await w.close()
@@ -341,7 +356,9 @@ describe('github cannot-see versus gone', () => {
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       expect(kept(w)).toBe(true)
-      expect(gh.count('recursive')).toBeGreaterThanOrEqual(1)
+      // One listing of docs/ per probe, each cut short, so each defers to one
+      // walk of the whole tree, which finds the file.
+      expect(gh.counts()).toEqual([2, 2, 0])
     } finally {
       await w.close()
     }
@@ -360,11 +377,33 @@ describe('github cannot-see versus gone', () => {
     const w = await ws(vfs)
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
-      expect(vfs.accessor.refills).toBeGreaterThan(0)
+      // The walk listed the root and docs/ on the way to the file.
+      expect(vfs.accessor.refills).toBe(2)
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       expect(gh.counts()).toEqual([2, 0, 0])
       expect(gh.count('sha_dir')).toBe(0)
+    } finally {
+      await w.close()
+    }
+  })
+})
+
+describe('github directories cut short', () => {
+  it('does not read a directory GitHub cuts short as absence', async () => {
+    // A truncated repository whose docs/ listing GitHub also cuts short: the
+    // walk refuses the cut listing rather than caching it whole, so a probe
+    // cannot read the file as gone, and the overlay stays.
+    gh.truncatedRecursive = true
+    const w = await ws(await vfsOf())
+    try {
+      expect(await out(w, `cat ${PATH}`)).toBe(OLD)
+      await w.namespace.setAttrs(PATH, { mode: 0o600 })
+      gh.truncatedDirs.set('docs', 0)
+      expect(await fails(w, `cat ${PATH}`)).toMatch(
+        /^cat: GitHub truncated the tree listing of o\/r /,
+      )
+      expect(w.namespace.metaFor(PATH)?.mode).toBe(0o600)
     } finally {
       await w.close()
     }
@@ -404,7 +443,12 @@ describe('github snapshot pins', () => {
     expect(state.live_only_mounts ?? []).not.toContain('/gh/')
     await load(state, await vfsOf())
     gh.set('docs/a.txt', NEW)
-    await expect(load(state, await vfsOf())).rejects.toBeInstanceOf(ContentDriftError)
+    const err = await load(state, await vfsOf()).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ContentDriftError)
+    expect([
+      (err as ContentDriftError).snapshotFingerprint,
+      (err as ContentDriftError).liveFingerprint,
+    ]).toEqual([await blobSha(OLD), await blobSha(NEW)])
   })
 
   it('asks one directory when the drift check runs on a live mount', async () => {

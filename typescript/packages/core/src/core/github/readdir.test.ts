@@ -22,7 +22,7 @@ import { populateIndex } from './tree.ts'
 import { readdir } from './readdir.ts'
 import { read } from './read.ts'
 import { stat } from './stat.ts'
-import { HttpGitHubTransport, type GitHubTransport } from './client.ts'
+import { GitHubApiError, HttpGitHubTransport, type GitHubTransport } from './client.ts'
 import { BASE, FakeGitHub } from './_test_util.ts'
 
 const TREE = [
@@ -345,5 +345,32 @@ describe('the truncated walk', () => {
     // on a mount that never runs a whole-tree refill.
     expect(accessor.refills).toBe(3)
     expect(gh.count('recursive')).toBe(0)
+  })
+
+  it('refuses a directory GitHub cut short', async () => {
+    const gh = new FakeGitHub({ 'top.txt': 't', 'big/a.txt': 'a', 'big/b.txt': 'b' })
+    gh.truncatedRecursive = true
+    gh.truncatedDirs.set('big', 1)
+    vi.stubGlobal('fetch', gh.fetch)
+    const accessor = new GitHubAccessor({
+      transport: new HttpGitHubTransport({ token: 't', baseUrl: BASE }),
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      defaultBranch: 'main',
+      truncated: true,
+      tree: {},
+    })
+    const index = new RAMIndexCacheStore()
+    const path = new PathSpec({
+      virtual: '/gh/big',
+      directory: '/gh/big',
+      resolved: false,
+      vfsPath: 'big',
+    })
+    const err = await readdir(accessor, path, index).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(GitHubApiError)
+    // Nothing partial was cached as the directory's whole listing.
+    expect((await index.listDir('/gh/big')).entries ?? null).toBeNull()
   })
 })

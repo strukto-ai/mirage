@@ -97,8 +97,11 @@ for (const backend of ['ram', 'redis']) {
       it('answers a live index without a request', async () => {
         const index = store(backend)
         const accessor = await listed(index)
+        const refills = accessor.refills
         await stat(accessor, spec('docs/a.txt'), index)
         expect(gh.counts()).toEqual([0, 0, 0])
+        // Answering from a live listing writes none.
+        expect(accessor.refills).toBe(refills)
         await index.close()
       })
 

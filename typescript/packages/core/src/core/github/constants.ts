@@ -18,3 +18,9 @@ export const CODE_SEARCH_SIZE_LIMIT = 384 * 1024
 // The largest page code search serves.
 export const SEARCH_PAGE_SIZE = 100
 export const SCOPE_ERROR = 5000
+// A point request answering these did not see the parent directory: it is
+// missing, the ref is gone, the repository is hidden (GitHub answers 404 for
+// all three) or a component of the path is a file (422). None of them is an
+// answer about the file, so the caller asks the whole tree instead, where a
+// real absence is honest and a refusal raises.
+export const DEFER_STATUSES: ReadonlySet<number> = new Set([404, 422])

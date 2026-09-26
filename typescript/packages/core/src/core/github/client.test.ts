@@ -320,6 +320,19 @@ describe('fetchDirTreePage', () => {
     expect(page.truncated).toBe(true)
     // A gitlink has no blob and no size; the page drops it like the tree.
     expect(page.tree.map((item) => item.path)).toEqual(['a.py'])
-    expect(await fetchDirTree(transport, 'o', 'r', 'sha')).toEqual(page.tree)
+  })
+
+  it('refuses, through fetchDirTree, a directory GitHub cut short', async () => {
+    // The fallback walk caches what it gets as the whole directory; a name
+    // past GitHub's cut would read as absent, and a fresh probe as gone.
+    const reply = (truncated: boolean) =>
+      ({
+        get: () =>
+          Promise.resolve({ truncated, tree: [{ path: 'a.py', type: 'blob', sha: 'a', size: 1 }] }),
+      }) as unknown as GitHubTransport
+    expect(await fetchDirTree(reply(false), 'o', 'r', 'sha')).toHaveLength(1)
+    const err = await fetchDirTree(reply(true), 'o', 'r', 'sha').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(GitHubApiError)
+    expect((err as GitHubApiError).message).toContain('truncated the tree listing')
   })
 })

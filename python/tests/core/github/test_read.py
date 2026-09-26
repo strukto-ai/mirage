@@ -26,6 +26,7 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.commands.builtin.github.io import IO
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.read import read, read_bytes
+from mirage.core.github.stat import stat
 from mirage.core.github.tree import refill_index
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.observe.context import RecordingScope
@@ -158,7 +159,6 @@ async def test_a_read_records_the_blob_sha_under_the_virtual_path(prefix):
         assert (rec.op, rec.path, rec.source, rec.bytes,
                 rec.fingerprint) == ("read", path.virtual, "github", len(data),
                                      blob_sha(data))
-        assert rec.duration_ms >= 0
         # The stamped token is the sha the blob was fetched by.
         assert ("blob", rec.fingerprint) in gh.log
 
@@ -232,3 +232,8 @@ async def test_a_read_stamps_the_sha_it_fetched_not_a_newer_one():
         # the live one. Only the first names the bytes this read returned.
         assert data == old
         assert [r.fingerprint for r in scope.records] == [blob_sha(old)]
+        # The probe that follows sees the live sha, which is not the one the
+        # read stamped, so the copy it left is stale rather than fresh.
+        probe = await stat(accessor, _at("a.txt", "/gh"), RAMIndexCacheStore())
+        assert probe.fingerprint == blob_sha(live)
+        assert probe.fingerprint != scope.records[0].fingerprint

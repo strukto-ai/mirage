@@ -20,13 +20,7 @@ import type { IndexEntry } from '../../cache/index/config.ts'
 import type { GitHubTreeItem } from './client.ts'
 import { indexEntryFromTree, makeTreeEntry, type TreeEntry } from './tree_entry.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-
-// A point request answering these did not see the parent directory: it is
-// missing, the ref is gone, the repository is hidden (GitHub answers 404 for
-// all three) or a component of the path is a file (422). None of them is an
-// answer about the file, so the caller asks the whole tree instead, where a
-// real absence is honest and a refusal raises.
-const DEFER_STATUSES: ReadonlySet<number> = new Set([404, 422])
+import { DEFER_STATUSES } from './constants.ts'
 
 export function buildTreeMap(tree: GitHubTreeItem[]): Record<string, TreeEntry> {
   const map: Record<string, TreeEntry> = {}

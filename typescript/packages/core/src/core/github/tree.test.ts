@@ -165,9 +165,9 @@ describe('the refill count', () => {
     await refillIndex(accessor, undefined, '/gh')
     expect(accessor.refills).toBe(2)
     gh.fail.set('recursive', [401, 'Bad credentials'])
-    await expect(refillIndex(accessor, new RAMIndexCacheStore(), '/gh')).rejects.toBeInstanceOf(
-      GitHubApiError,
-    )
+    await expect(refillIndex(accessor, new RAMIndexCacheStore(), '/gh')).rejects.toMatchObject({
+      status: 401,
+    })
     expect(accessor.refills).toBe(2)
   })
 })
@@ -237,6 +237,7 @@ describe('the point request', () => {
     // defer to the tree rather than answering absent.
     expect(await pointRow(accessor, 'gone/a.txt')).toBeNull()
     expect(await pointRow(accessor, 'docs/a.txt/x')).toBeNull()
+    expect(await pointRow(servedAccessor('deleted'), 'docs/a.txt')).toBeNull()
     for (const status of [401, 403]) {
       gh.fail.set('dir', [status, 'refused'])
       const err = await pointRow(accessor, 'docs/a.txt').catch((e: unknown) => e)
@@ -278,6 +279,9 @@ describe('the point request', () => {
       ref: 'main',
       defaultBranch: 'main',
     })
-    await expect(pointRow(accessor, 'docs/a.txt')).rejects.toBeInstanceOf(GitHubApiError)
+    const err = await pointRow(accessor, 'docs/a.txt').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(GitHubApiError)
+    expect((err as GitHubApiError).status).toBe(0)
+    expect((err as GitHubApiError).message).toContain('carries no tree')
   })
 })

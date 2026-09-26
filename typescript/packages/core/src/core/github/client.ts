@@ -247,13 +247,30 @@ export async function fetchDirTreePage(
   return { tree: dropSubmodules(data.tree), truncated: data.truncated === true }
 }
 
+/**
+ * Fetch a single directory's whole tree (non-recursive).
+ *
+ * Used as fallback when the recursive tree was truncated, where the listing
+ * is cached as complete, so a directory GitHub cut short is refused rather
+ * than returned: a name past the cut would otherwise read as absent, which a
+ * `read: fresh` probe or a drift check takes as gone.
+ *
+ * Mirrors Python's `fetch_dir_tree`.
+ *
+ * Throws:
+ *   GitHubApiError: GitHub truncated the listing, or sent no tree.
+ */
 export async function fetchDirTree(
   transport: GitHubTransport,
   owner: string,
   repo: string,
   treeSha: string,
 ): Promise<GitHubTreeItem[]> {
-  return (await fetchDirTreePage(transport, owner, repo, treeSha)).tree
+  const page = await fetchDirTreePage(transport, owner, repo, treeSha)
+  if (page.truncated) {
+    throw new GitHubApiError(`GitHub truncated the tree listing of ${owner}/${repo} ${treeSha}`, 0)
+  }
+  return page.tree
 }
 
 export async function fetchBlob(

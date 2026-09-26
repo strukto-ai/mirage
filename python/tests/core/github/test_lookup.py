@@ -97,9 +97,12 @@ async def test_a_live_index_answers_without_a_request(gh, backend):
     index, client = await _store(backend)
     try:
         accessor = await _listed(gh, index)
+        refills = accessor.refills
         result = await stat(accessor, _spec("docs/a.txt"), index)
         assert result.fingerprint == blob_sha(b"alpha")
         assert gh.counts() == (0, 0, 0)
+        # Answering from a live listing writes none.
+        assert accessor.refills == refills
     finally:
         await _close(index, client)
 
