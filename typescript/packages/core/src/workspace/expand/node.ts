@@ -112,7 +112,7 @@ async function expandBacktickRegion(
  * under a subshell of their own. `span` is the pair's span within the
  * node, for a backtick region holding several.
  */
-async function childLine(
+export async function childLine(
   session: SessionState,
   executeFn: ExecuteFn,
   text: string,
@@ -120,6 +120,8 @@ async function childLine(
   span?: [number, number],
 ): Promise<IOResult> {
   const saved = session.snapshot()
+  const terminalOutput = session.terminalOutput
+  session.terminalOutput = false
   try {
     return await executeFn(text, {
       sessionId: session.sessionId,
@@ -127,6 +129,7 @@ async function childLine(
       ...(span === undefined ? {} : { span }),
     })
   } finally {
+    session.terminalOutput = terminalOutput
     session.restore(saved)
   }
 }

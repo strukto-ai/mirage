@@ -14,9 +14,12 @@
 
 import asyncio
 
+import pytest
+
 from mirage.types import Limit, MountMode, OnExceed
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.session.session import SessionState
 
 
 def _build_ws(n_lines: int) -> Workspace:
@@ -93,3 +96,138 @@ def test_below_limit_untouched():
     assert code == 0
     assert out == "line0\nline1\nline2\nline3\nline4\n"
     assert "truncated" not in err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command,expected,truncated",
+    [('seq 1 5; echo end | head -1', '1\n2\n3\n4\n5\nend\n', False),
+     ('cat /data/n; echo end', '1\n2\nend\n', True),
+     ('cat /data/n | wc -l', '5\n', False),
+     ('cat /data/n | head -n 4', '1\n2\n3\n', True),
+     ('head -n 3 /data/n', '1\n2\n3\n', False),
+     ('{ cat /data/n; echo end; }', '1\n2\nend\n', True),
+     ('f(){ cat /data/n; echo end; }; f', '1\n2\nend\n', True),
+     ('{ cat /data/n; echo end; } | wc -l', '6\n', False),
+     ('cat /data/n > /data/out; wc -l < /data/out', '5\n', False),
+     ('{ cat /data/n; echo end; } > /data/out; wc -l < /data/out', '6\n',
+      False), ('( cat /data/n; echo end )', '1\n2\nend\n', True),
+     ('cat /data/n | { head -n 4; echo end; }', '1\n2\n3\nend\n', True),
+     ('grep absent /data/n || echo missing', 'missing\n', False)])
+async def test_command_output_boundaries(command, expected, truncated):
+    ws = Workspace({"/data": RAMVFS()},
+                   mode=MountMode.EXEC,
+                   command_limits={
+                       "cat": Limit(max_lines=2),
+                       "head": Limit(max_lines=3),
+                       "grep": Limit(max_lines=2)
+                   })
+    try:
+        await ws.shell("seq 1 5 > /data/n")
+        result = await ws.shell(command)
+        assert await result.stdout_str() == expected
+        assert ("truncated" in await result.stderr_str()) is truncated
+        assert result.exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command,expected,code", [
+    ("cat /data/n && echo success", "", 1),
+    ("cat /data/n || echo recovery", "recovery\n", 0),
+    ("cat /data/n; echo $?", "1\n", 0),
+    ("seq 1 5 | cat; echo ${PIPESTATUS[@]}", "0 1\n", 0),
+])
+async def test_error_limit_precedes_control_flow(command, expected, code):
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        command_limits={"cat": Limit(max_lines=2, on_exceed=OnExceed.ERROR)})
+    try:
+        await ws.shell("seq 1 5 > /data/n")
+        result = await ws.shell(command)
+        assert await result.stdout_str() == expected
+        assert result.exit_code == code
+        assert "cat: output truncated" in await result.stderr_str()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_profile_limits_are_session_owned_and_survive_storage():
+    ws = Workspace(
+        {"/data": (RAMVFS(), MountMode.EXEC, {
+            "head": Limit(max_lines=1)
+        })},
+        command_limits={"head": Limit(max_lines=3)},
+        profiles={
+            "small": {
+                "command_limits": {
+                    "head": {
+                        "max_lines": 2
+                    }
+                }
+            },
+            "large": {
+                "command_limits": {
+                    "head": {
+                        "max_lines": None
+                    }
+                }
+            }
+        })
+    try:
+        await ws.shell("seq 1 5 > /data/n")
+        small = ws.create_session("small", profile="small")
+        ws.create_session("large", profile="large")
+        for session_id, count in [(None, 3), ("small", 2), ("large", 4)]:
+            result = await ws.shell("cat /data/n | head -n 4",
+                                    session_id=session_id)
+            assert len((await result.stdout_str()).splitlines()) == count
+        result = await ws.shell("head -n 4 /data/n", session_id="large")
+        assert len((await result.stdout_str()).splitlines()) == 4
+        restored = SessionState.from_dict(small.to_dict())
+        assert restored.command_limits["head"].max_lines == 2
+        assert restored.fork().command_limits["head"].max_lines == 2
+        assert "terminal_output" not in small.to_dict()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_profile_can_raise_the_global_timeout():
+    ws = Workspace({"/data": RAMVFS()},
+                   mode=MountMode.EXEC,
+                   command_limits={"sleep": Limit(timeout_seconds=0.005)},
+                   profiles={
+                       "relaxed": {
+                           "command_limits": {
+                               "sleep": {
+                                   "timeout_seconds": 1
+                               }
+                           }
+                       }
+                   })
+    try:
+        ws.create_session("relaxed", profile="relaxed")
+        assert (await ws.shell("sleep .02")).exit_code == 124
+        assert (await ws.shell("sleep .02",
+                               session_id="relaxed")).exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_copy_keeps_workspace_command_limits():
+    ws = Workspace({"/data": RAMVFS()},
+                   mode=MountMode.WRITE,
+                   command_limits={"cat": Limit(max_lines=2)})
+    copy = await ws.copy()
+    try:
+        await copy.shell("seq 1 5 > /data/n")
+        result = await copy.shell("cat /data/n")
+        assert await result.stdout_str() == "1\n2\n"
+    finally:
+        await copy.close()
+        await ws.close()

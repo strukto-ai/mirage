@@ -430,28 +430,10 @@ export class Workspace {
         mount.registerGeneral(cmd)
       }
     }
-    // A mount's own limits win, which is the order node's unwrap produced
-    // before it handed them to core: it spread options first and then
-    // overwrote per prefix from the Mount. Merged per command, not per
-    // prefix: spreading one whole record over the other dropped every
-    // command the losing side named, so a workspace-level `cat` limit
-    // disappeared the moment the mount itself named an `ls` one. Python
-    // reaches the same shape through `entry.command_limits.update()`.
-    const limitPrefixes = new Set([
-      ...Object.keys(options.commandLimits ?? {}),
-      ...Object.keys(normalized.commandLimits),
-    ])
-    for (const prefix of limitPrefixes) {
-      const mount = this.registry.tryMountForPrefix(prefix)
-      if (mount === null) {
-        throw new Error(`commandLimits references unknown mount prefix: ${prefix}`)
-      }
-      for (const [cmd, sg] of Object.entries({
-        ...(options.commandLimits?.[prefix] ?? {}),
-        ...(normalized.commandLimits[prefix] ?? {}),
-      })) {
-        mount.commandLimits.set(cmd, sg)
-      }
+    this.registry.commandLimits = { ...options.commandLimits }
+    for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
+      const mount = this.registry.mountForPrefix(prefix)
+      for (const [name, limit] of Object.entries(limits)) mount.commandLimits.set(name, limit)
     }
     // The facade delegates every op to the dispatcher, so FUSE and
     // programmatic ws.vfs walk the same pipeline as a shell command and
@@ -1424,7 +1406,10 @@ export class Workspace {
     // plan to honest UNKNOWN instead of resolving via execution.
     const executeFn: ExecuteFn = () => Promise.resolve(new IOResult())
     const provName = commandName(command)
-    const provResolved = provName !== '' ? resolveLimit(provName) : null
+    const provResolved =
+      provName !== ''
+        ? resolveLimit(provName, [], null, null, this.registry.commandLimits, session.commandLimits)
+        : null
     const provTimeout = provResolved !== null ? provResolved.timeoutSeconds : null
     return runWithTimeout(
       provisionNode(
@@ -1725,8 +1710,17 @@ export class Workspace {
       // The declarations travel with the copy the way a live CLI
       // install does: an env pointer restores from state naming its
       // instance, and without the block the copy would answer the
-      // first read with "unknown secrets source".
+      // first read with "unknown secrets source". Profiles and command
+      // limits are deployment config the state never carries; without
+      // them the copy runs every session unconfined. Policy instances and
+      // the route policy stay behind: a policy is a live host object whose
+      // state two workspaces must not share, and the route names runtimes
+      // the copy does not carry. A caller's own profile table brings its
+      // own default.
       secrets: options.secrets ?? this.declaredSecretSources,
+      commandLimits: options.commandLimits ?? this.registry.commandLimits,
+      profiles: options.profiles ?? this.profiles,
+      profile: options.profile ?? (options.profiles == null ? this.defaultProfileName : null),
     }
     const copyAgentId = options.agentId ?? this.agentId
     if (copyAgentId !== null) opts.agentId = copyAgentId

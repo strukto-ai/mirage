@@ -280,9 +280,16 @@ async def test_truncate_shrinks_content():
         captured["body"] = kwargs.get("data")
         return CallbackResult(status=200, payload={"id": "X"})
 
-    content = _BASE + "/root:/a.txt:/content"
+    item = _BASE + "/root:/a.txt"
+    content = item + ":/content"
+    download = "https://download.example/a.txt"
     with aioresponses() as m:
-        m.get(content, body=b"hello")
+        m.get(item, payload={"@microsoft.graph.downloadUrl": download})
+        m.get(download, body=b"hello")
         m.put(content, callback=_put_cb)
         await truncate(_accessor(), PathSpec.from_str_path("/a.txt"), 3)
+        calls = [(method, str(url)) for method, url in m.requests]
+    # A read that went nowhere would truncate an empty buffer into NULs;
+    # the old bytes have to come from the item's own download.
+    assert calls == [("GET", item), ("GET", download), ("PUT", content)]
     assert captured["body"] == b"hel"

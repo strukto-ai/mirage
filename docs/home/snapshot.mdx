@@ -72,6 +72,8 @@ TypeScript file-path snapshot I/O is available in Node. In the browser, `Workspa
 
 Both `snapshot` and `copy` are async because they serialize workspace state and collect recorded fingerprints.
 
+`copy` also keeps the workspace's profiles, default profile, and command limits. Policy objects and the route policy are not copied; add them to the copy again if it needs them.
+
 ## Versioning: commit, checkout, clone
 
 A tar snapshot is a *portable* capture you move between machines. Versioning is the in-place complement: a git-style history kept *with* the workspace, server-side and keyed by workspace id, so you can checkpoint, roll back, branch, and fork without writing a file. It is backed by a real git object store (dulwich) inside the daemon.

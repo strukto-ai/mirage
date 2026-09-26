@@ -56,6 +56,11 @@
     "_test_util": "The FakeHub node:http server shared by the read-token contract, the read-fresh workspace tests and the hf_hub unit tests; it has to be a real server because resolve answers a redirect whose two hops carry different ETags, which a stubbed fetch cannot follow. TypeScript colocates tests with sources, so a shared test helper lands in the source directory; python keeps the same fake in tests/fixtures/hf_hub_api.py, which this gate does not scan."
    }
   },
+  "core/msgraph": {
+   "typescript_only": {
+    "_test_util": "The FakeGraph node:http server shared by the read-token contract and the onedrive and sharepoint read-fresh workspace tests; it has to be a real server because the hf rows in the same contract file use the real fetch, and the read-fresh suites' ordering row rewrites a file between two of its requests. TypeScript colocates tests with sources, so a shared test helper lands in the source directory; python keeps the same fake in tests/fixtures/msgraph_api.py, which this gate does not scan."
+   }
+  },
   "core/dropbox": {
    "typescript_only": {
     "_test_util": "The FakeDropboxRpc transport fake shared by rmdir.test.ts and rename.test.ts. TypeScript colocates tests with sources, so a shared test helper lands in the source directory; python keeps the same fake in tests/core/dropbox/conftest.py, which this gate does not scan. core/gdrive carries an identical _test_util.ts, still counted in the baseline rather than excused here."

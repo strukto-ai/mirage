@@ -614,12 +614,9 @@ export class MountEntry {
                     // mount-resolved timeout must also bound the command
                     // body: eager commands do their work inside cmd.fn,
                     // where the stream-consumption guard never runs.
-                    // limitOverride carries the origin mount's cap across
-                    // a warm-cache redirect; a null one is "no opinion" and
-                    // must not shadow the serving mount's own table (a
-                    // path-less command with cwd outside every mount resolves
-                    // no origin, but the serving mount's cap still applies —
-                    // python always reads the serving mount).
+                    // limitOverride is the caller's profile, mount and
+                    // workspace entry; a null one is "no opinion" and must
+                    // not shadow this mount's own table.
                     const resolvedLimit = resolveLimit(
                       cmdName,
                       [],
@@ -659,17 +656,11 @@ export class MountEntry {
                       throw err
                     }
                     if (result !== null) {
-                      // A warm-cache redirect already resolved the origin
-                      // mount's cap (limitOverride); fold it as the
-                      // declared bound since the origin prefix is not ours.
-                      result[1].producer =
-                        context.limitOverride != null
-                          ? { command: cmdName, prefixes: [], declared: resolvedLimit }
-                          : {
-                              command: cmdName,
-                              prefixes: [this.prefix],
-                              declared: cmd.limit ?? null,
-                            }
+                      result[1].producer = {
+                        command: cmdName,
+                        prefixes: [this.prefix],
+                        declared: cmd.limit ?? null,
+                      }
                       return wrapMountStreams(result, this.mountId, this.activity)
                     }
                   }

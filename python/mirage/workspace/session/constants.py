@@ -44,6 +44,8 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "commands",
     "script",
     "profile",
+    "command_limits",
+    "terminal_output",
     "processes",
     "process_id",
     "shell_pid",

@@ -18,12 +18,12 @@ from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
-from mirage.commands.builtin.utils.limit import run_with_timeout
+from mirage.commands.builtin.utils.limit import guard_io, run_with_timeout
 from mirage.context import (redirect_paths_for, reset_admission,
                             reset_op_policies, set_admission, set_op_policies)
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.policy import PolicyDenied, resolve_limit
+from mirage.policy import PolicyDenied, resolve_limit, resolve_producer
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import encode_text
@@ -43,9 +43,11 @@ from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
+from mirage.workspace.expand.node import child_line
 from mirage.workspace.lookup import (SLASH_KEEPS_LAST, UNSUPPORTED_BUILTINS,
                                      Consumer, follows_last_component, lookup,
                                      runtime_refused)
+from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.node.admission import Admitted, Refused, admit
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.session.state import (ensure_var_visible,
@@ -287,18 +289,12 @@ async def _dispatch_command_body(
                 assert isinstance(dev, DevVFS)
             path, allocation = dev.allocate_input()
             proc_sub_inputs.append((path, allocation))
-            saved = session.snapshot()
-            try:
-                inner = get_process_sub_body(p)
-                if inner:
-                    io_ps = await execute_fn(inner,
-                                             session_id=session.session_id,
-                                             node=p)
-                    data = await materialize(io_ps.stdout)
-                    dev.set_input(path, allocation, data)
-                    proc_sub_stderr.append(await materialize(io_ps.stderr))
-            finally:
-                session.restore(saved)
+            inner = get_process_sub_body(p)
+            if inner:
+                io_ps = await child_line(session, execute_fn, inner, p)
+                data = await materialize(io_ps.stdout)
+                dev.set_input(path, allocation, data)
+                proc_sub_stderr.append(await materialize(io_ps.stderr))
             clean_parts.append(
                 SimpleNamespace(type=NT.WORD,
                                 text=path.encode(),
@@ -317,12 +313,15 @@ async def _dispatch_command_body(
 
         # Limits resolve against the expanded name, so `$CMD`-style
         # invocations get their real command's policy.
-        # External execution owns its mount-resolved deadline and cancellation.
-        external = ("/" not in argv.name
-                    and lookup(argv.name, session, registry,
-                               routing_decision) is Consumer.EXTERNAL)
-        resolved = resolve_limit(
-            argv.name) if argv.name and not external else None
+        # Mount, CLI and external dispatch own their resolved deadlines.
+        owns_deadline = ("/" not in argv.name and lookup(
+            argv.name, session, registry, routing_decision)
+                         in (Consumer.EXTERNAL, Consumer.MOUNT,
+                             Consumer.CLI)) or argv.name in INTERPRETER_NAMES
+        resolved = resolve_limit(argv.name,
+                                 workspace_limits=registry.command_limits,
+                                 profile_limits=session.command_limits
+                                 ) if argv.name and not owns_deadline else None
         timeout = (resolved.timeout_seconds if resolved is not None else None)
         body = _run_argv(recurse,
                          dispatch,
@@ -350,6 +349,15 @@ async def _dispatch_command_body(
             # expanded name here so post_execute policies keyed on a command
             # (echo, printf, ...) still see it.
             io.producer = Producer(command=argv.name)
+        if not io.output_finalized:
+            io.output_finalized = True
+            if session.terminal_output and session.exec_stdout in (
+                    None, "&1") and io.producer is not None:
+                bound = resolve_producer(io.producer, registry.limit_override,
+                                         registry.command_limits,
+                                         session.command_limits)
+                stdout = guard_io(stdout, io, bound, io.producer.command)
+                exec_node.exit_code = io.exit_code
         if proc_sub_stderr:
             io.stderr = b"".join(proc_sub_stderr) + await materialize(io.stderr
                                                                       )

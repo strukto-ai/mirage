@@ -294,6 +294,7 @@ describe('compileProfile', () => {
       env: null,
       cwd: null,
       commands: null,
+      commandLimits: null,
       script: null,
       shownPaths: null,
       hideReasons: [],

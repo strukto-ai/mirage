@@ -30,6 +30,9 @@ export class SharePointVFS extends BoundVFS<SharePointAccessor> implements VFS {
   // no aggregate-size root item.
   readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = true
+  // stat and every read that can fill the cache stamp the item's cTag, the
+  // read taking it before the bytes, so the gate compares like with like.
+  readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
   readonly prompt: string = SHAREPOINT_PROMPT
   readonly accessor: SharePointAccessor

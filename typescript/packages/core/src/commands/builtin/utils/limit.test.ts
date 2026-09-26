@@ -78,3 +78,22 @@ describe('applyLimit', () => {
     expect(DEC.decode(await materialize(io.stderr))).toContain('truncated')
   })
 })
+
+it.each([1, 2, 20])('intersects limits and detects exact fits with chunks of %i', async (size) => {
+  for (const [text, limit, expected, truncated] of [
+    ['a\nb\n', new Limit({ maxLines: 2 }), 'a\nb\n', false],
+    ['a\nb\nc\nd\n', new Limit({ maxLines: 2, maxBytes: 7 }), 'a\nb\n', true],
+    ['abc', new Limit({ maxLines: 0 }), '', true],
+    ['abc', new Limit({ maxBytes: 0 }), '', true],
+    ['abc', new Limit({ maxBytes: 3 }), 'abc', false],
+    ['a\nb', new Limit({ maxLines: 1 }), 'a\n', true],
+  ] as const) {
+    async function* source(): AsyncIterable<Uint8Array> {
+      for (let at = 0; at < text.length; at += size)
+        yield await Promise.resolve(new TextEncoder().encode(text.slice(at, at + size)))
+    }
+    const [out, io] = await applyLimit(source(), limit)
+    expect(new TextDecoder().decode(await materialize(out))).toBe(expected)
+    expect((await io.stderrStr()).includes('truncated')).toBe(truncated)
+  }
+})

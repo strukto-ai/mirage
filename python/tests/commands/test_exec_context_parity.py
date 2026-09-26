@@ -28,7 +28,10 @@ def test_every_context_field_is_spelled_as_command_opts_spells_it():
     # two ways across that seam is two vocabularies for one plane. The
     # mirrored TS pin is the ExecContext mapped type in
     # workspace/mount/mount.test.ts.
-    ctx = {f.name: f.type for f in fields(ExecContext)}
+    ctx = {
+        f.name: f.type
+        for f in fields(ExecContext) if f.name != "limit_override"
+    }
     opts = {f.name: f.type for f in fields(CommandOpts)}
     missing = sorted(set(ctx) - set(opts))
     assert not missing, (

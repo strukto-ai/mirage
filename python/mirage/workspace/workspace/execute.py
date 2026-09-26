@@ -363,7 +363,10 @@ async def execute_line(
                                  nested=nested)
         if provision:
             name = command_name(command)
-            guard = resolve_limit(name) if name else None
+            guard = resolve_limit(name,
+                                  workspace_limits=ws._registry.command_limits,
+                                  profile_limits=effective_session.
+                                  command_limits) if name else None
             timeout = guard.timeout_seconds if guard is not None else None
             return await run_with_timeout(
                 provision_node(ws._registry,
@@ -416,7 +419,8 @@ async def execute_line(
                 io = await run_whole_line(
                     line_runtime, command, stdin, effective_session,
                     ws._registry.mounts(), ws._registry.policies,
-                    ws._dispatcher.invalidate_all_after_remote)
+                    ws._dispatcher.invalidate_all_after_remote,
+                    ws._registry.command_limits)
                 record_status(session, io.exit_code)
                 return io
             # The line is the unit a rule judges, so every command in it is

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Limit } from '../../types.ts'
 import { guardOutput, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError } from '../../commands/errors.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -61,10 +62,11 @@ export async function runWholeLine(
   policies: Policies,
   invalidate: () => Promise<void>,
   signal?: AbortSignal,
+  commandLimits: Readonly<Record<string, Limit>> = {},
 ): Promise<LineResult> {
   const data = stdin !== null ? await materialize(stdin) : null
   const name = commandName(command)
-  const guard = resolveLimit(name, mounts)
+  const guard = resolveLimit(name, mounts, null, null, commandLimits, session.commandLimits)
   const timeout = guard?.timeoutSeconds ?? null
   const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
   const runSignal = mergeSignals(signal, deadline?.signal)
@@ -118,7 +120,7 @@ export async function runWholeLine(
     result.stdout,
     result.stderr,
     result.exitCode,
-    bound,
+    Limit.aggr([session.terminalOutput ? guard : null, bound]),
   )
   return {
     stdout: capped !== null ? await materialize(capped) : new Uint8Array(),

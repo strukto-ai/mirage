@@ -281,7 +281,7 @@
    ]
   },
   {
-   "id": "semicolon_rightmost_truncate",
+   "id": "semicolon_per_command_truncate",
    "world": {
     "mounts": {
      "/a": {
@@ -344,14 +344,14 @@
      "command": "cat /b/f.txt ; cat /a/f.txt",
      "expect": {
       "exit": 0,
-      "stdout": "6\n7\n8\n9\n",
+      "stdout": "1\n2\n3\n4\n",
       "stderr_contains": "output truncated"
      }
     }
    ]
   },
   {
-   "id": "and_rightmost_error",
+   "id": "and_per_command_error",
    "world": {
     "mounts": {
      "/a": {
@@ -414,14 +414,14 @@
      "command": "cat /a/f.txt && cat /b/f.txt",
      "expect": {
       "exit": 1,
-      "stdout": "",
+      "stdout": "1\n2\n3\n4\n",
       "stderr_contains": "output truncated"
      }
     }
    ]
   },
   {
-   "id": "or_rightmost_truncate",
+   "id": "or_per_command_truncate",
    "world": {
     "mounts": {
      "/a": {
@@ -491,7 +491,7 @@
    ]
   },
   {
-   "id": "subshell_rightmost",
+   "id": "subshell_per_command",
    "world": {
     "mounts": {
      "/a": {
@@ -554,7 +554,7 @@
      "command": "( cat /b/f.txt ; cat /a/f.txt )",
      "expect": {
       "exit": 0,
-      "stdout": "6\n7\n8\n9\n",
+      "stdout": "1\n2\n3\n4\n",
       "stderr_contains": "output truncated"
      }
     }
@@ -695,6 +695,527 @@
      "expect": {
       "exit": 1,
       "stdout": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "later_pipeline_preserves_earlier_output",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "seq 1 5; echo end | head -1",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n3\n4\n5\nend\n",
+      "stderr": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "later_builtin_does_not_lift_cap",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "cat /data/n; echo end",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\nend\n",
+      "stderr_contains": "output truncated"
+     }
+    }
+   ]
+  },
+  {
+   "id": "global_pipe_reader",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "cat /data/n | head -n 4",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n3\n",
+      "stderr_contains": "output truncated"
+     }
+    }
+   ]
+  },
+  {
+   "id": "exact_fit",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "head -n 3 /data/n",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n3\n",
+      "stderr": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "group_feeds_full_pipe",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "{ cat /data/n; echo end; } | wc -l",
+     "expect": {
+      "exit": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "group_redirect_preserves_data",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "{ cat /data/n; echo end; } > /data/out; wc -l < /data/out",
+     "expect": {
+      "exit": 0,
+      "stdout": "6\n",
+      "stderr": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "function_caps_each_output",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "f(){ cat /data/n; echo end; }; f",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\nend\n",
+      "stderr_contains": "output truncated"
+     }
+    }
+   ]
+  },
+  {
+   "id": "terminal_pipe_group",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "cat /data/n | { head -n 4; echo end; }",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n3\nend\n",
+      "stderr_contains": "output truncated"
+     }
+    }
+   ]
+  },
+  {
+   "id": "mount_beats_workspace",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      },
+      "limits": {
+       "head": {
+        "max_lines": 1
+       }
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "head -n 4 /data/n",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n",
+      "stderr_contains": "head: output truncated"
+     }
+    }
+   ]
+  },
+  {
+   "id": "profile_small",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      },
+      "limits": {
+       "head": {
+        "max_lines": 1
+       }
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    },
+    "profiles": {
+     "small": {
+      "command_limits": {
+       "head": {
+        "max_lines": 2
+       }
+      }
+     }
+    },
+    "profile": "small"
+   },
+   "steps": [
+    {
+     "command": "cat /data/n | head -n 4",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n"
+     }
+    },
+    {
+     "command": "head -n 4 /data/n",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n",
+      "stderr_contains": "head: output truncated"
+     }
+    },
+    {
+     "command": "cat /data/n",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n",
+      "stderr_contains": "cat: output truncated"
+     }
+    }
+   ]
+  },
+  {
+   "id": "profile_large",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    },
+    "profiles": {
+     "large": {
+      "command_limits": {
+       "head": {
+        "max_lines": null
+       }
+      }
+     }
+    },
+    "profile": "large"
+   },
+   "steps": [
+    {
+     "command": "cat /data/n | head -n 4",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n3\n4\n"
+     }
+    }
+   ]
+  },
+  {
+   "id": "error_limit_controls_status",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2,
+      "on_exceed": "error"
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "cat /data/n && echo success",
+     "expect": {
+      "exit": 1,
+      "stdout": "",
+      "stderr_contains": "cat: output truncated"
+     }
+    },
+    {
+     "command": "cat /data/n || echo recovery",
+     "expect": {
+      "exit": 0,
+      "stdout": "recovery\n"
+     }
+    },
+    {
+     "command": "seq 1 5 | cat; echo ${PIPESTATUS[@]}",
+     "expect": {
+      "exit": 0,
+      "stdout": "0 1\n"
+     }
+    }
+   ]
+  },
+  {
+   "id": "command_substitution_is_data",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "x=$(cat /data/n); printf \"%s\\n\" \"$x\"; cat /data/n",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n3\n4\n5\n1\n2\n",
+      "stderr_contains": "cat: output truncated"
+     }
+    }
+   ]
+  },
+  {
+   "id": "process_substitution_is_data",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "wc -l < <(cat /data/n)",
+     "expect": {
+      "exit": 0,
+      "stdout": "5\n",
+      "stderr": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "background_terminal_cap",
+   "world": {
+    "mounts": {
+     "/data": {
+      "vfs": "ram",
+      "files": {
+       "n": "1\n2\n3\n4\n5\n"
+      }
+     }
+    },
+    "command_limits": {
+     "cat": {
+      "max_lines": 2
+     },
+     "head": {
+      "max_lines": 3
+     }
+    }
+   },
+   "steps": [
+    {
+     "command": "cat /data/n & wait",
+     "expect": {
+      "exit": 0,
+      "stdout": "1\n2\n",
+      "stderr_contains": "cat: output truncated"
      }
     }
    ]

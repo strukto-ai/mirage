@@ -17,6 +17,8 @@ import {
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Limit } from '../../types.ts'
+import { parseCommandLimits, commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
 import { BIN_PREFIX, RANDOM, RANDOM_UNSET, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
@@ -175,6 +177,7 @@ export interface SessionInit {
    * group. Stamped by the profile like script, so it persists.
    */
   profile?: string | null
+  commandLimits?: Readonly<Record<string, Limit>>
   processes?: ProcessPermissions
   processId?: number | null
   shellPid?: number | null
@@ -511,6 +514,8 @@ export class SessionState {
   commands: AdmissionRules | null
   script: ProfileScript | null
   profile: string | null
+  commandLimits: Readonly<Record<string, Limit>>
+  terminalOutput = true
   processes: ProcessPermissions
   processId: number | null
   shellPid: number | null
@@ -544,6 +549,7 @@ export class SessionState {
     this.shellPid = init.shellPid ?? null
     this.processDepth = init.processDepth ?? 0
     this.profile = init.profile ?? null
+    this.commandLimits = { ...init.commandLimits }
     this.processes = parseProcessPermissions(init.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     this.decisions = init.decisions ?? []
     this.generation = init.generation ?? 0
@@ -606,6 +612,7 @@ export class SessionState {
       commands: overrides.commands ?? this.commands,
       script: overrides.script ?? this.script,
       profile: overrides.profile ?? this.profile,
+      commandLimits: overrides.commandLimits ?? this.commandLimits,
       processes: overrides.processes ?? this.processes,
       processId: overrides.processId ?? this.processId,
       shellPid: overrides.shellPid ?? this.shellPid,
@@ -616,6 +623,7 @@ export class SessionState {
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
     if (this.randomSeed === RANDOM_UNSET) forked.randomSeed = RANDOM_UNSET
+    forked.terminalOutput = this.terminalOutput
     forked.pipeStatus = [...this.pipeStatus]
     forked.getoptsPos = this.getoptsPos
     forked.getoptsOptind = this.getoptsOptind
@@ -861,6 +869,8 @@ export class SessionState {
     }
     if (this.commands !== null) data.commands = commandsToJSON(this.commands)
     if (this.script !== null) data.script = scriptToJSON(this.script)
+    if (Object.keys(this.commandLimits).length > 0)
+      data.command_limits = commandLimitsToJSON(this.commandLimits)
     if (JSON.stringify(this.processes) !== JSON.stringify(DEFAULT_PROCESS_PERMISSIONS))
       data.processes = this.processes
     if (this.profile !== null) data.profile = this.profile
@@ -883,6 +893,7 @@ export class SessionState {
     commands?: CommandsJSON | null
     script?: ScriptJSON | null
     profile?: string | null
+    command_limits?: unknown
     processes?: ProcessPermissions
     decisions?: DecisionJSON[] | null
     generation?: number
@@ -924,6 +935,7 @@ export class SessionState {
       commands: data.commands != null ? commandsFromJSON(data.commands) : null,
       script: data.script != null ? scriptFromJSON(data.script) : null,
       profile: data.profile ?? null,
+      commandLimits: parseCommandLimits(data.command_limits),
       processes: parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS),
       decisions: data.decisions != null ? data.decisions.map(decisionFromJSON) : [],
     })

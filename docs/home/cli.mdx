@@ -313,36 +313,50 @@ mirage workspace clone demo --at <version> --id demo_at_v1
 | `mirage job wait JOB [--timeout SECS]` | Block until the job is done; returns the result. |
 | `mirage job cancel JOB` | Cancel a running job. |
 
-## Per-mount command limits
+## Command limits
 
-Cap what a command may stream back per mount with `command_limits`, so a
-runaway `cat`/`grep`/`rg` can't flood the agent or hang. Each entry sets
-`max_lines` / `max_bytes` (output cap) and/or `timeout_seconds` (deadline),
-with `on_exceed: truncate` (stop, exit 0, add a stderr notice) or
-`on_exceed: error` (stop, exit 1):
+`cat`, `grep`, `rg`, `head`, and `tail` cap their output at 2000 lines, and
+every command stops after 600 seconds. Change that with `command_limits` in
+three places: at the top level for every session, on a mount for commands
+that run on it, and on a profile for sessions created with it:
 
 ```yaml
+command_limits:
+  head:
+    max_lines: 500
+    timeout_seconds: 30
 mounts:
   /data:
     vfs: ram
     mode: WRITE
     command_limits:
-      head:                  # cap output, keep going
-        max_lines: 100
-        on_exceed: truncate
-      grep:                  # cap output, fail hard
+      grep:
         max_lines: 50
         on_exceed: error
-      rg:                    # deadline in seconds
-        timeout_seconds: 30
+profiles:
+  researcher:
+    command_limits:
+      head:
+        max_lines: 5000
 ```
 
-Caps fire on the **terminal** command of a pipeline only, so
-`cat big.txt | head -n 30` still shows 30 lines. Truncation exits `0`, `error`
-exits `1`, and a timeout exits `124` -- each with a stderr notice. Without a
-`command_limits` block, `cat`/`grep`/`rg`/`head`/`tail` still cap at 2000
-lines by default. See [Output Limits](/python/quickstart#output-limits)
-for the SDK form and the same fields.
+A command's limit comes from the first place that names it: the session's
+profile, the mount the command runs on, the workspace, then the built-in
+default. A command that spans several mounts takes the tightest of their
+limits. An entry replaces that command's whole limit, so restate
+`timeout_seconds` if you still want a deadline; commands it does not name keep
+their defaults.
+
+- `max_lines` / `max_bytes` cap the output; `null` means no cap.
+- `timeout_seconds` is a deadline; a command that runs past it exits `124`.
+- `on_exceed: truncate` (default) keeps the capped output, adds a stderr
+  notice, and leaves the exit code alone. `on_exceed: error` drops the output
+  and exits `1`, so `&&` and `||` see the failure.
+
+Caps apply to what each command prints, one command at a time:
+`cat big.txt; echo end` still prints `end`. Data going into a pipe, a
+redirect, or `$(...)` is never cut, so `cat big.txt | wc -l` counts every
+line. See [Output Limits](/python/quickstart#output-limits) for the SDK form.
 
 ## Daemon control
 

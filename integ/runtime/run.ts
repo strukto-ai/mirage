@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -120,6 +121,7 @@ interface CliSpecJson {
 }
 
 interface World {
+  command_limits?: unknown
   register_runtimes?: Record<string, string>
   runtimes?: (string | Record<string, unknown>)[]
   route_policy?: string
@@ -546,7 +548,10 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
       seeds.push([prefix, name, content])
     }
   }
-  const options: Record<string, unknown> = { mode: MountMode.EXEC }
+  const options: Record<string, unknown> = {
+    mode: MountMode.EXEC,
+    commandLimits: parseCommandLimits(world.command_limits),
+  }
   if (world.runtimes !== undefined) options.runtimes = world.runtimes.map(buildEntry)
   if (world.route_policy !== undefined) options.routePolicy = new ScriptSource(world.route_policy)
   if (world.policies !== undefined) options.policies = world.policies.map(buildPolicy)

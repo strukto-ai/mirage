@@ -31,7 +31,7 @@ from mirage.shell.types import FunctionBody
 from mirage.shell.variable import (ManagedRef, ShellVar, VarAttr,
                                    attrs_from_letters, stored_attrs,
                                    with_value)
-from mirage.types import (HiddenPaths, HiddenVars, MountMode, ShowEntry,
+from mirage.types import (HiddenPaths, HiddenVars, Limit, MountMode, ShowEntry,
                           ShownPaths)
 from mirage.workspace.abort import StatusWriter
 from mirage.workspace.session.constants import (CHILD_SHELL_FIELDS,
@@ -288,6 +288,8 @@ class SessionState:
     # unrestricted session. What an owner-rendering command prints as
     # the group. Stamped by the profile like script, so it persists.
     profile: str | None = None
+    command_limits: dict[str, Limit] = field(default_factory=dict)
+    terminal_output: bool = True
     processes: ProcessPermissions = ProcessPermissions()
     process_id: int | None = None
     shell_pid: int | None = None
@@ -469,6 +471,11 @@ class SessionState:
             data["commands"] = commands_to_dict(self.commands)
         if self.script is not None:
             data["script"] = script_to_dict(self.script)
+        if self.command_limits:
+            data["command_limits"] = {
+                name: limit.model_dump()
+                for name, limit in self.command_limits.items()
+            }
         if self.processes != ProcessPermissions():
             data["processes"] = self.processes.model_dump()
         if self.profile is not None:
@@ -513,10 +520,13 @@ class SessionState:
         commands = data.get("commands")
         script = data.get("script")
         decisions = data.get("decisions")
+        limits = data.get("command_limits")
+        processes = data.get("processes")
         if (modes is not None or paths is not None or shown is not None
                 or reasons is not None or vars_ is not None
                 or commands is not None or script is not None
-                or decisions is not None):
+                or decisions is not None or limits is not None
+                or processes is not None):
             data = dict(data)
         if modes is not None:
             data["mount_modes"] = {
@@ -546,11 +556,13 @@ class SessionState:
             data["script"] = script_from_dict(script)
         if decisions is not None:
             data["decisions"] = tuple(decision_from_dict(d) for d in decisions)
-        if "processes" in data:
-            data = {
-                **data, "processes":
-                ProcessPermissions.model_validate(data["processes"])
+        if limits is not None:
+            data["command_limits"] = {
+                name: Limit.model_validate(limit)
+                for name, limit in limits.items()
             }
+        if processes is not None:
+            data["processes"] = ProcessPermissions.model_validate(processes)
         return cls(**data)
 
     @property

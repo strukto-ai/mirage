@@ -417,6 +417,9 @@ async def run_on_mount(
             texts,
             flag_kwargs,
             ExecContext(
+                limit_override=(session.command_limits.get(cmd_name)
+                                or mount.command_limits.get(cmd_name)
+                                or registry.command_limits.get(cmd_name)),
                 stdin=stdin,
                 cwd=session.cwd,
                 dispatch=dispatch,

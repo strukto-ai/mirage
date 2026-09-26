@@ -297,6 +297,11 @@ export interface LimitInit {
   onExceed?: OnExceed
 }
 
+function minBound(values: (number | null)[]): number | null {
+  const bounds = values.filter((v): v is number => v !== null)
+  return bounds.length > 0 ? Math.min(...bounds) : null
+}
+
 function minPositive(values: (number | null)[]): number | null {
   const positives = values.filter((v): v is number => v !== null && v > 0)
   return positives.length > 0 ? Math.min(...positives) : null
@@ -368,8 +373,8 @@ type LimitAggrField = Exclude<keyof Limit, 'kind'>
  * compile error, where the old inline literal would have silently dropped it.
  */
 const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[K] } = {
-  maxBytes: (present) => minPositive(present.map((s) => s.maxBytes)),
-  maxLines: (present) => minPositive(present.map((s) => s.maxLines)),
+  maxBytes: (present) => minBound(present.map((s) => s.maxBytes)),
+  maxLines: (present) => minBound(present.map((s) => s.maxLines)),
   timeoutSeconds: (present) => minPositive(present.map((s) => s.timeoutSeconds)),
   onExceed: (present) =>
     present.some((s) => s.onExceed === OnExceed.ERROR) ? OnExceed.ERROR : OnExceed.TRUNCATE,
@@ -380,7 +385,7 @@ const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[
  *
  * Rides the IO envelope from the dispatch site to the workspace
  * boundary; merge keeps the rightmost producer, so this names the
- * command whose stream the caller actually sees. Post-layer policies
+ * last command that ran; it does not describe every byte of a list. Post-layer policies
  * (output caps today; budgets and attribution later) read it as
  * context. Facts only: no policy reads a decision off the envelope;
  * the one a chain hands down is written beside it as

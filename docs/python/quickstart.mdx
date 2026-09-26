@@ -107,46 +107,52 @@ reports `unknown`. Full semantics live in the
 
 ## Output Limits
 
-To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`,
-and `tail` cap their **final** output at 2000 lines by default. When a
-cap fires, the agent sees the truncated bytes plus a stderr notice
-(`output truncated at limit (2000 lines); ...`); exit code
-stays 0.
+To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`, and
+`tail` cap their output at 2000 lines, and every command stops after 600
+seconds. When a cap fires, the agent sees the truncated output plus a stderr
+notice (`cat: output truncated at limit (2000 lines); ...`).
 
-Caps fire only on the **terminal** command of a pipeline, so
-`cat big.txt | head -n 30` still shows 30 lines.
-
-### Configure per mount
-
-Limits are per-command and per-mount. Attach them when you mount a
-VFS by passing a `(vfs, mode, {command: Limit})`
-tuple. Each guard sets `max_lines` / `max_bytes` (output cap) and/or
-`timeout_seconds` (deadline); `on_exceed` is `TRUNCATE` (default, exit 0
-plus notice) or `ERROR` (exit 1 plus notice):
+Set your own limits in three places. A mount's third tuple element covers
+commands that run on it, `command_limits` is the default for every session,
+and a profile's `command_limits` applies to sessions created with it:
 
 ```python
 from mirage import MountMode, Workspace
-from mirage.vfs.ram import RAMVFS
 from mirage.types import Limit, OnExceed
+from mirage.vfs.ram import RAMVFS
 
 ws = Workspace(
     {
-        "/data": (
-            RAMVFS(),
-            MountMode.WRITE,
-            {
-                "head": Limit(max_lines=100),  # cap, keep going
-                "grep": Limit(max_lines=50, on_exceed=OnExceed.ERROR),
-                "rg": Limit(timeout_seconds=30),  # deadline
-            },
-        ),
+        "/data": (RAMVFS(), MountMode.WRITE, {
+            "grep": Limit(max_lines=50, on_exceed=OnExceed.ERROR),
+        }),
     },
     mode=MountMode.WRITE,
+    command_limits={"head": Limit(max_lines=500, timeout_seconds=30)},
+    profiles={
+        "researcher": {"command_limits": {"head": Limit(max_lines=5000)}},
+    },
 )
+ws.create_session("research", profile="researcher")
 ```
 
-The same limits are available to the CLI as a `command_limits`
-block in the workspace YAML.
+A command's limit comes from the first place that names it: the session's
+profile, the mount the command runs on, the workspace, then the built-in
+default. An entry replaces that command's whole limit, so restate
+`timeout_seconds` if you still want a deadline; commands it does not name keep
+their defaults.
+
+- `max_lines` / `max_bytes` cap the output; `None` means no cap.
+- `timeout_seconds` is a deadline; a command that runs past it exits 124.
+- `on_exceed=TRUNCATE` (default) keeps the capped output, adds a stderr
+  notice, and leaves the exit code alone. `ERROR` drops the output and exits
+  1, so `&&` and `||` see the failure.
+
+Caps apply to what each command prints, one command at a time:
+`cat big.txt; echo end` still prints `end`. Data going into a pipe, a
+redirect, or `$(...)` is never cut, so `cat big.txt | wc -l` counts every
+line. The workspace YAML takes the same fields under `command_limits`; see
+[Command limits](/home/cli#command-limits).
 
 ## Next Steps
 

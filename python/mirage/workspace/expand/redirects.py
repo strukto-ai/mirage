@@ -14,6 +14,7 @@
 
 from typing import Any, Callable
 
+from mirage.io.types import materialize
 from mirage.ops.types import SessionView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
@@ -22,7 +23,7 @@ from mirage.shell.helpers import (get_process_sub_body,
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import ProcessSubDirection, Redirect, RedirectKind
 from mirage.workspace.expand.classify import classify_bare_path
-from mirage.workspace.expand.node import expand_node
+from mirage.workspace.expand.node import child_line, expand_node
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, visible_env
 
@@ -91,10 +92,9 @@ async def expand_redirects(
                 inner = get_process_sub_body(r.target_node)
                 inner_data = b""
                 if inner:
-                    io_ps = await execute_fn(inner,
-                                             session_id=session.session_id,
-                                             node=r.target_node)
-                    inner_data = io_ps.stdout or b""
+                    io_ps = await child_line(session, execute_fn, inner,
+                                             r.target_node)
+                    inner_data = await materialize(io_ps.stdout)
                 expanded.append(
                     Redirect(fd=0,
                              target=inner_data,

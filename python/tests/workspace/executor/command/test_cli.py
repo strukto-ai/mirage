@@ -823,3 +823,25 @@ async def test_git_usage_style_does_not_change_custom_cli_option_grammar():
                                      SessionState("t"))
     assert io.exit_code == 0
     assert await materialize(stdout) == b"sent[tok]\n"
+
+
+@pytest.mark.asyncio
+async def test_profile_and_workspace_override_a_cli_deadline():
+    spec = CLISpec(name="prog",
+                   fn=slow_send,
+                   limit=Limit(timeout_seconds=0.01))
+    with Workspace({"/ram": RAMVFS()},
+                   command_limits={"prog": Limit(timeout_seconds=1)},
+                   profiles={
+                       "short": {
+                           "command_limits": {
+                               "prog": {
+                                   "timeout_seconds": 0.01
+                               }
+                           }
+                       }
+                   }) as ws:
+        ws.register_cli("prog", spec)
+        ws.create_session("short", profile="short")
+        assert (await ws.shell("prog")).exit_code == 0
+        assert (await ws.shell("prog", session_id="short")).exit_code == 124

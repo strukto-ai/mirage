@@ -50,8 +50,9 @@ async def read_file_versioned(token_manager: TokenManager,
     """Download a binary file honouring snapshot revision pins.
 
     A pinned path reads that revision's content; an actively recorded read
-    captures (fingerprint, revision) so snapshots can pin it later,
-    mirroring the msgraph read_item.
+    captures (fingerprint, revision) so snapshots can pin it later. An
+    unrecorded read captures nothing, which is one reason gdrive does not
+    declare READ_REVALIDATABLE.
 
     Args:
         token_manager (TokenManager): OAuth2 token manager.

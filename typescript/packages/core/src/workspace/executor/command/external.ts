@@ -58,7 +58,14 @@ export async function runExternal(
       new ExecutionNode({ command, exitCode: 126, stderr }),
     ]
   }
-  const guard = resolveLimit(argv.name, registry.allMounts())
+  const guard = resolveLimit(
+    argv.name,
+    registry.allMounts(),
+    null,
+    null,
+    registry.commandLimits,
+    session.commandLimits,
+  )
   const timeout = guard?.timeoutSeconds ?? null
   const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
   const runSignal = mergeSignals(signal, deadline?.signal)

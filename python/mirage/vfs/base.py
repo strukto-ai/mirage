@@ -89,14 +89,12 @@ class BaseVFS:
     # fresh, because stat returns a timestamp where read returns an md5.
     # Distinct from caches_reads, which asks whether the gate can fire.
     #
-    # onedrive and sharepoint look like they qualify and do not: both
-    # stamp a cTag on stat and on read, and both label the read record
-    # with the virtual path, so on token kind alone the refusal reads as
-    # unnecessary. The read-side cTag, though, is captured only while a
-    # recorder is active (a gated metadata call), so an unrecorded read
-    # stamps nothing to compare. The flag stays withheld pending the
-    # #1165 read-token contract. gdrive additionally mismatches token
-    # kinds.
+    # A declarer must stamp the token on every read, not only while a
+    # recorder is active: tests/vfs/test_read_revalidatable.py holds each
+    # one to that (#1165). onedrive and sharepoint qualify because every
+    # unpinned byte read fetches the item's cTag before its bytes, recorded
+    # or not; a stream stamps only under a recorder, the one place its token
+    # can land.
     READ_REVALIDATABLE: bool = False
 
     def __init__(
