@@ -36,6 +36,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, CommandOutput
 from mirage.ops.types import NamespaceView, SessionView, StatPath
 from mirage.policy import resolve_limit
+from mirage.process.types import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language
@@ -217,6 +218,7 @@ class CLIContext:
     stat_path: StatPath | None = None
     ns: NamespaceView | None = None
     session_view: SessionView | None = None
+    processes: ProcessView | None = None
 
 
 def drops_mount_caches(spec: CLISpec) -> bool:
@@ -373,11 +375,12 @@ async def handle_cli(
     # CLIs never read it: an API client has no filesystem, while `git`
     # is nothing but one. None outside a workspace, so a verb that needs
     # a plane refuses there on its own.
-    opened = (dispatch, stat_path, ns, session_view)
+    opened = (dispatch, stat_path, ns, session_view, context.processes)
     doors = (CLIDoors(dispatch=dispatch,
                       stat_path=stat_path,
                       ns=ns,
-                      session_view=session_view) if any(
+                      session_view=session_view,
+                      processes=context.processes) if any(
                           door is not None for door in opened) else None)
     inv = CLIInvocation(install.config,
                         argv=tuple(argv),

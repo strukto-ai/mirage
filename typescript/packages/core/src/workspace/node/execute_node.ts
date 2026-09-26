@@ -1,3 +1,5 @@
+import { PathSpec } from '../../types.ts'
+import { runWithSession } from '../../context/session_context.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +14,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isProgramInvocation, runAsProgram } from '../../context/session_context.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -664,6 +667,7 @@ async function executeNodeBody(
       stdin,
       callStack,
       deps.signal,
+      jobTable.processes,
     )
     if (!negated) return [stdout, io, execNode]
     const flipped = new IOResult({
@@ -708,8 +712,14 @@ async function executeNodeBody(
     // A subshell is its own shell: background jobs started inside live
     // in a private job table (`$!`/`wait`/`kill` in the body see them;
     // the parent's table never does), mirroring bash's forked process.
-    const subTable = new JobTable()
-    const subDeps: ExecuteNodeDeps = { ...deps, jobTable: subTable }
+    const subTable = new JobTable(null, jobTable.processes)
+    const abort = new AbortController()
+    const subDeps: ExecuteNodeDeps = {
+      ...deps,
+      jobTable: subTable,
+      signal:
+        deps.signal === undefined ? abort.signal : AbortSignal.any([deps.signal, abort.signal]),
+    }
     // The opts parameter is load-bearing, not decoration: a job started
     // inside the subshell body hands `handleBackground` its own console
     // and abort signal through it. Dropping it (a 4-parameter closure
@@ -723,18 +733,41 @@ async function executeNodeBody(
       cs: CallStack | null,
       opts?: ExecuteNodeOpts,
     ): Promise<Result> => executeNode(withOpts(subDeps, opts), n, s, inp, cs)
-    return handleSubshell(
-      subRecurse,
-      node.children,
-      session,
-      stdin,
-      callStack,
-      subTable,
-      agentId,
-      dispatch,
-      deps.handed ?? null,
-      registry.decisions,
-    )
+    const childSession = session.fork()
+    const asProgram = isProgramInvocation(session)
+    let result: Result | undefined
+    const process = subTable.processes.start({
+      sessionId: session.sessionId,
+      command: node.text,
+      cwd: PathSpec.fromStrPath(session.cwd),
+      parentPid: session.processId,
+      cancel: () => {
+        abort.abort()
+      },
+      run: async () => {
+        const body = () =>
+          handleSubshell(
+            subRecurse,
+            node.children,
+            childSession,
+            stdin,
+            callStack,
+            subTable,
+            agentId,
+            dispatch,
+            deps.handed ?? null,
+            registry.decisions,
+          )
+        result = await runWithSession(childSession, () =>
+          asProgram ? runAsProgram(childSession, body) : body(),
+        )
+        return result[1].exitCode
+      },
+    })
+    childSession.processId = process.info.pid
+    await process.task
+    if (result === undefined) throw new Error('subshell completed without a result')
+    return result
   }
 
   if (kind === NodeKind.COMPOUND && node.children[0]?.type === NT.ARITH_OPEN) {

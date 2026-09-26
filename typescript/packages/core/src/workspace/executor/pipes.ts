@@ -1,3 +1,5 @@
+import type { ProcessSupervisor } from '../../process/supervisor.ts'
+import { PathSpec } from '../../types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,6 +50,7 @@ export async function handlePipe(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   signal?: AbortSignal,
+  processes?: ProcessSupervisor,
 ): Promise<Result> {
   const pipes = commands.map((_, i) => new PipeConsole(stderrFlags[i] === true))
   const ios: IOResult[] = commands.map(() => new IOResult())
@@ -107,7 +110,23 @@ export async function handlePipe(
         if (failed) await discardIo(io)
       }
     }
-    return asyncContextIsolatesTasks ? runWithSession(child, run) : run()
+    const execute = () => (asyncContextIsolatesTasks ? runWithSession(child, run) : run())
+    if (processes === undefined) return execute()
+    const process = processes.start({
+      sessionId: session.sessionId,
+      command: cmd.text,
+      cwd: PathSpec.fromStrPath(child.cwd),
+      parentPid: session.processId,
+      cancel: () => {
+        abort.abort()
+      },
+      run: async () => {
+        await execute()
+        return ios[i]?.exitCode ?? 0
+      },
+    })
+    child.processId = process.info.pid
+    return process.task.then(() => undefined)
   })
   const completed = Promise.all(tasks)
   // Attach the rejection handler before reading the last segment: an

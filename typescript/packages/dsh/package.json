@@ -42,6 +42,10 @@
     "./spill-store": {
       "types": "./dist/plugin/spill-store.d.ts",
       "import": "./dist/plugin/spill-store.js"
+    },
+    "./subprocess": {
+      "types": "./dist/plugin/subprocess.d.ts",
+      "import": "./dist/plugin/subprocess.js"
     }
   },
   "dsh": {
@@ -66,7 +70,8 @@
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-fs": "0.1.5-rc.2",
     "@deepseek-ai/dsh-shell": "0.1.5-rc.2",
-    "@deepseek-ai/dsh-spill": "0.1.5-rc.2"
+    "@deepseek-ai/dsh-spill": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
@@ -75,6 +80,7 @@
     "@deepseek-ai/dsh-spill": "0.1.5-rc.2",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "@deepseek-ai/dsh-subprocess": "0.1.5-rc.2"
   }
 }

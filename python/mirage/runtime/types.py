@@ -21,6 +21,7 @@ from mirage.types import PathSpec
 
 if TYPE_CHECKING:
     from mirage.ops.types import NamespaceView, SessionView
+    from mirage.process.types import ProcessView
     from mirage.runtime.binding import WorkspaceBinding
     from mirage.runtime.resolver import MountResolver
     from mirage.utils.context_scope import ContextScope
@@ -323,6 +324,7 @@ class RuntimeContext:
     cwd: PathSpec
     env: Mapping[str, str]
     scope: "ContextScope"
+    processes: "ProcessView | None" = None
 
 
 @dataclass(frozen=True, slots=True)

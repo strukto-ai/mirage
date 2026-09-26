@@ -23,6 +23,7 @@ export interface FlushFailure {
 }
 
 export interface SyncVFS {
+  process?(payload: string): string
   read(path: string): Uint8Array
   stat(path: string): VFSStat
   readdir(path: string): VFSEntry[]
@@ -166,6 +167,7 @@ export interface StreamOps {
 
 /** The node-building slice of the Emscripten FS namespace. */
 export interface NodeHost {
+  destroyNode?(node: FSNode): void
   createNode(parent: FSNode | null, name: string, mode: number, rdev: number): FSNode
   isDir(mode: number): boolean
   isFile(mode: number): boolean

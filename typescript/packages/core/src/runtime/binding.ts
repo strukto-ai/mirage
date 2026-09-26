@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessView } from '../process/types.ts'
 import { captureSessionContext } from '../context/session_context.ts'
 import { captureRecordingContext } from '../observe/context.ts'
 import type { NamespaceView, SessionView } from '../ops/types.ts'
@@ -39,6 +40,7 @@ export function captureBinding(
   views: {
     ns?: NamespaceView
     sessionView?: SessionView
+    processes?: ProcessView
     cwd?: PathSpec
     env?: Readonly<Record<string, string>>
   } = {},
@@ -97,6 +99,7 @@ export function captureBinding(
     },
     ns,
     sessionView,
+    processes: views.processes ?? null,
     cwd: views.cwd ?? PathSpec.fromStrPath('/'),
     env: Object.freeze({ ...views.env }),
     scope,

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessView } from '../../../process/types.ts'
 import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/cli/constants.ts'
 import { clapMissingOperands, leafRefusal } from '../../../commands/cli/refusal.ts'
 import { CLISpec, type CLIInvocation, type CLIDoors } from '../../../commands/cli/types.ts'
@@ -174,6 +175,7 @@ export interface CLIContext {
   statPath?: StatPath
   ns?: NamespaceView
   sessionView?: SessionView
+  processes?: ProcessView
 }
 
 /**
@@ -309,6 +311,7 @@ export async function handleCli(
   // while `git` is nothing but one. Absent outside a workspace, so a verb
   // that needs a mount refuses there on its own.
   const doors: CLIDoors = {
+    ...(context.processes === undefined ? {} : { processes: context.processes }),
     ...(context.dispatch !== undefined ? { dispatch: context.dispatch } : {}),
     ...(context.statPath !== undefined ? { statPath: context.statPath } : {}),
     ...(context.ns !== undefined ? { ns: context.ns } : {}),

@@ -24,6 +24,7 @@ from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
+from mirage.process.types import ProcessView
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
@@ -178,7 +179,8 @@ async def handle_background(
                                run=_run_bg,
                                cwd=bg_session.cwd,
                                agent=agent_id or "",
-                               session_id=session.session_id)
+                               session_id=session.session_id,
+                               parent_pid=session.process_id)
     except Exception:
         # A submission that fails (a console the table cannot build)
         # starts no runner, so nothing would ever revoke the job's
@@ -187,7 +189,9 @@ async def handle_background(
         if job_handed is not None and decisions is not None:
             await decisions.revoke(session.session_id, job_handed)
         raise
-    session.last_bg_job_id = job.id
+    bg_session.process_id = (job.process.info.pid
+                             if job.process is not None else None)
+    session.last_bg_job_id = job.pid
 
     if right is None:
         return None, IOResult(), ExecutionNode(
@@ -275,26 +279,81 @@ def _session_of(session: SessionState | None) -> str:
     return session.session_id if session is not None else ""
 
 
-def _resolve_spec(job_table: JobTable, spec: str,
-                  session_id: str) -> tuple[Job | None, str]:
-    """The job a `wait`/`disown` operand names, or bash's refusal.
-
-    A `%N` spec that names no job is `no such job`; a bare number is a
-    pid in bash, and mirage's `$!` yields the job id, so a bare number
-    that names no job is bash's `pid N is not a child of this shell`.
-    Anything else is `not a pid or valid job spec`.
+def _process_view(job_table: JobTable,
+                  session: SessionState | None) -> ProcessView:
+    """The managed runners `ps` and numeric `kill` reach, scoped by the
+    session's profile.
 
     Args:
         job_table (JobTable): the workspace's job table.
+        session (SessionState | None): the shell session, if any.
+    """
+    if session is None:
+        return job_table.processes.view("")
+    return job_table.processes.view(session.session_id,
+                                    lambda: session.processes)
+
+
+def _visible_jobs(job_table: JobTable,
+                  session: SessionState | None) -> list[Job]:
+    """The jobs a builtin may name or list.
+
+    A profile that grants no process metadata (``processes.metadata:
+    none``) sees none, whichever builtin asks, so `jobs`, `fg`,
+    `disown`, `kill %N` and `wait` with operands all answer as for an
+    empty table. Bare `wait` still joins every job: it names none, and
+    it is how a job's output reaches the line.
+
+    Args:
+        job_table (JobTable): the workspace's job table.
+        session (SessionState | None): the shell session, if any.
+    """
+    if session is not None and session.processes.metadata == "none":
+        return []
+    return job_table.list_jobs(_session_of(session))
+
+
+def _job_numbered(jobs: list[Job], job_id: int) -> Job | None:
+    """The job whose number is `job_id`, the one `%N` names.
+
+    Args:
+        jobs (list[Job]): the jobs the builtin can see.
+        job_id (int): the job number.
+    """
+    return next((j for j in jobs if j.id == job_id), None)
+
+
+def _command_of(job: Job, session: SessionState | None) -> str:
+    """The command line a builtin prints for a job, `[hidden]` when the
+    profile grants no process details (``processes.details: none``).
+
+    Args:
+        job (Job): the job.
+        session (SessionState | None): the shell session, if any.
+    """
+    if session is not None and session.processes.details == "none":
+        return "[hidden]"
+    return job.command
+
+
+def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
+    """The job a `wait`/`disown` operand names, or bash's refusal.
+
+    A `%N` spec that names no job is `no such job`; a bare number is a
+    managed PID, also returned by `$!`, so a bare number that names no
+    job is bash's `pid N is not a child of this shell`. Anything else
+    is `not a pid or valid job spec`.
+
+    Args:
+        jobs (list[Job]): the jobs the builtin can see.
         spec (str): the operand as typed.
-        session_id (str): the session whose list the spec names into.
     """
     if spec.startswith("%"):
         raw = spec[1:]
-        job = job_table.get(int(raw), session_id) if raw.isdigit() else None
+        job = _job_numbered(jobs, int(raw)) if raw.isdigit() else None
         return job, "" if job is not None else f"{spec}: no such job"
     if spec.isdigit():
-        job = job_table.get(int(spec), session_id)
+        job = next((j for j in jobs if j.pid == int(spec)), None)
         return job, "" if job is not None else (
             f"pid {spec} is not a child of this shell")
     return None, f"`{spec}': not a pid or valid job spec"
@@ -361,9 +420,7 @@ async def handle_wait(
     none is (which is the bare form, since it reports no one job);
     `-f` is accepted, since a mirage job cannot stop, only end.
 
-    Deliberate divergence: bash stores a PID in `-p`'s variable. A
-    mirage job is a coroutine with no OS process, so what goes there is
-    the job id, the same number `%N` and `jobs` already name.
+    `-p` stores the managed PID, matching `$!` and `jobs -p`.
     A spec naming no job is bash's own message and 127; a word that is
     neither is `not a pid or valid job spec` and 1.
 
@@ -425,15 +482,16 @@ async def handle_wait(
             await view.unset(var)
     errors: list[str] = []
     picked: list[Job] = []
+    visible = _visible_jobs(job_table, session)
     for spec in specs:
-        job, refusal = _resolve_spec(job_table, spec, sid)
+        job, refusal = _resolve_spec(visible, spec)
         if job is None:
             errors.append(f"bash: wait: {refusal}")
             continue
         picked.append(job)
     err_text = ("\n".join(errors) + "\n") if errors else ""
     if next_job:
-        candidates = picked if specs else job_table.list_jobs(sid)
+        candidates = picked if specs else visible
         if not candidates:
             # Nothing to wait for: the specs were all bad, or there are
             # no jobs. bash reports any bad spec and answers 127.
@@ -444,7 +502,7 @@ async def handle_wait(
                                                           exit_code=code)
         job = await _wait_first(job_table, candidates)
         if var is not None and view is not None:
-            await view.set(var, str(job.id))
+            await view.set(var, str(job.pid))
         stdout, io, node = await _adopt(job_table, job, cmd_str)
         if err_text:
             prior = io.stderr if isinstance(io.stderr, bytes) else b""
@@ -490,7 +548,7 @@ async def handle_wait(
     # that same job however many were waited for. Only the no-operand
     # form leaves the variable unset, since it reports no one job.
     if var is not None and view is not None and last_job is not None:
-        await view.set(var, str(last_job.id))
+        await view.set(var, str(last_job.pid))
     return b"".join(outs) or None, IOResult(exit_code=last_code,
                                             stderr=b"".join(errs)
                                             or None), ExecutionNode(
@@ -515,7 +573,8 @@ async def handle_disown(
     Args:
         job_table (JobTable): the session's jobs.
         parts (list[str]): the command words, `disown` first.
-        session (SessionState | None): unused; the job-builtin signature.
+        session (SessionState | None): the shell session, whose profile
+            decides which jobs are visible.
         view (SessionView | None): unused; the job-builtin signature.
     """
     cmd_str = " ".join(parts)
@@ -531,18 +590,18 @@ async def handle_disown(
     specs = scan.operands
     targets: list[Job] = []
     errors: list[str] = []
+    jobs = _visible_jobs(job_table, session)
     if specs:
         for spec in specs:
-            job, _ = _resolve_spec(job_table, spec, sid)
+            job, _ = _resolve_spec(jobs, spec)
             if job is None:
                 errors.append(f"bash: disown: {spec}: no such job")
                 continue
             targets.append(job)
     elif all_jobs or running_only:
-        targets = (job_table.running_jobs(sid)
-                   if running_only else job_table.list_jobs(sid))
+        targets = ([j for j in jobs if j.status == JobStatus.RUNNING]
+                   if running_only else jobs)
     else:
-        jobs = job_table.list_jobs(sid)
         if not jobs:
             return _job_result(cmd_str, "bash: disown: current: no such job\n",
                                1)
@@ -571,11 +630,15 @@ async def handle_fg(
         job_table (JobTable): the session's job table.
         parts (list[str]): argv including the command name; the
             optional operand is a job id, with or without ``%``.
+        session (SessionState | None): the shell session, whose profile
+            decides which jobs are visible and whether the command line
+            is printed.
     """
     cmd_str = " ".join(parts)
     sid = _session_of(session)
+    jobs = _visible_jobs(job_table, session)
     if len(parts) <= 1:
-        running = job_table.running_jobs(sid)
+        running = [j for j in jobs if j.status == JobStatus.RUNNING]
         if not running:
             err = b"fg: current: no such job\n"
             return None, IOResult(exit_code=1,
@@ -593,14 +656,14 @@ async def handle_fg(
                                   stderr=err), ExecutionNode(command=cmd_str,
                                                              exit_code=1,
                                                              stderr=err)
-        if job_table.get(job_id, sid) is None:
+        if _job_numbered(jobs, job_id) is None:
             err = f"fg: {parts[1]}: no such job\n".encode()
             return None, IOResult(exit_code=1,
                                   stderr=err), ExecutionNode(command=cmd_str,
                                                              exit_code=1,
                                                              stderr=err)
     job = await job_table.wait(job_id, sid)
-    header = (job.command + "\n").encode()
+    header = (_command_of(job, session) + "\n").encode()
     stdout = header + await job.console.snapshot(Channel.STDOUT)
     stderr = await job.console.snapshot(Channel.STDERR)
     job_table.reap(job_id, sid)
@@ -633,7 +696,17 @@ async def handle_kill(
                               stderr=err), ExecutionNode(command=cmd_str,
                                                          exit_code=1,
                                                          stderr=err)
-    killed = await job_table.kill(job_id, sid)
+    if parts[1].startswith("%"):
+        job = _job_numbered(_visible_jobs(job_table, session), job_id)
+        controlled = session is None or session.processes.control != "none"
+        killed = (job is not None and controlled
+                  and await job_table.kill(job_id, sid))
+    else:
+        killed = _process_view(job_table, session).terminate(job_id)
+        job = next((j for j in job_table.list_jobs(sid) if j.pid == job_id),
+                   None)
+        if killed and job is not None:
+            await job_table.kill(job.id, sid)
     if not killed:
         err = f"kill: no such job: {job_id}\n".encode()
         return None, IOResult(exit_code=1,
@@ -648,18 +721,19 @@ _JOBS_USAGE = ("jobs: usage: jobs [-lnprs] [jobspec ...] "
                "or jobs -x command [args]")
 
 
-def _job_row(job: Job, long: bool) -> str:
+def _job_row(job: Job, long: bool, session: SessionState | None) -> str:
     """One `jobs` line in mirage's own row shape.
 
     Args:
         job (Job): the job.
-        long (bool): `-l`, which inserts the id a second time where GNU
-            prints the process id; mirage jobs have no pid, so the job
-            id stands in and the row stays parseable.
+        long (bool): `-l`, which includes the managed process id.
+        session (SessionState | None): the shell session, whose profile
+            decides whether the command line is printed.
     """
+    command = _command_of(job, session)
     if long:
-        return f"[{job.id}] {job.id} {job.status.value} {job.command}"
-    return f"[{job.id}] {job.status.value} {job.command}"
+        return f"[{job.id}] {job.pid} {job.status.value} {command}"
+    return f"[{job.id}] {job.status.value} {command}"
 
 
 async def handle_jobs(
@@ -670,10 +744,8 @@ async def handle_jobs(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """List jobs, with bash's flags applied to mirage's row shape.
 
-    Mirage jobs are identified by table id, not pid, and never stop, so
-    two of GNU's flags map onto that model rather than reproducing it:
-    `-p` prints the job id (GNU's pid), and `-s` (stopped only) lists
-    nothing. `-r` keeps the running ones, `-l` adds the id column, and
+    `-p` prints the managed PID; `-s` lists nothing because suspended
+    processes are unsupported. `-r` keeps running jobs, `-l` adds the PID, and
     `-n` lists only the jobs whose status changed since the last `jobs`
     (which is every completed one not yet reaped, since reaping is what
     a listing does). A jobspec operand (`%2` or `2`) filters to that
@@ -701,12 +773,12 @@ async def handle_jobs(
             flags.update(word[1:])
         else:
             specs.append(word)
-    jobs = job_table.list_jobs(sid)
+    jobs = _visible_jobs(job_table, session)
     if specs:
         picked: list[Job] = []
         for spec in specs:
             raw = spec.lstrip("%")
-            job = job_table.get(int(raw), sid) if raw.isdigit() else None
+            job = _job_numbered(jobs, int(raw)) if raw.isdigit() else None
             if job is None:
                 err = f"bash: jobs: {spec}: no such job\n".encode()
                 return None, IOResult(exit_code=1, stderr=err), ExecutionNode(
@@ -720,9 +792,9 @@ async def handle_jobs(
     if "n" in flags:
         jobs = [j for j in jobs if j.status != JobStatus.RUNNING]
     if "p" in flags:
-        lines = [str(j.id) for j in jobs]
+        lines = [str(j.pid) for j in jobs]
     else:
-        lines = [_job_row(j, "l" in flags) for j in jobs]
+        lines = [_job_row(j, "l" in flags, session) for j in jobs]
     job_table.pop_completed(sid)
     out = ("\n".join(lines) + "\n").encode() if lines else b""
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
@@ -735,10 +807,16 @@ async def handle_ps(
     view: SessionView | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     cmd_str = " ".join(parts)
-    sid = _session_of(session)
-    running = job_table.running_jobs(sid)
-    lines = []
-    for job in running:
-        lines.append(f"{job.id}\t{job.command}")
+    processes = _process_view(job_table, session)
+    # Logical runners have no native CPU, RSS, or TTY accounting. Selection
+    # never broadens the profile view, including for ps aux and ps -ef.
+    if parts[1:] not in ([], ["aux"], ["-ef"], ["-e"]):
+        return _job_result(cmd_str,
+                           "ps: supported forms: ps, ps aux, ps -e, ps -ef\n",
+                           2)
+    lines = [
+        f"{info.pid}\t{info.command or '[hidden]'}"
+        for info in processes.list()
+    ]
     out = ("\n".join(lines) + "\n").encode() if lines else b""
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)

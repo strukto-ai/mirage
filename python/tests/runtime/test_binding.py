@@ -236,3 +236,32 @@ async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
         for entries in calls:
             assert any(entry in ("read:/data/link", "read:/data/file")
                        for entry in entries)
+
+
+@pytest.mark.asyncio
+async def test_process_views_do_not_share_by_profile_or_follow_reused_sessions(
+):
+    with Workspace({}, runtimes=[], profiles={"agent": {}}) as ws:
+        ws.create_session("one", profile="agent")
+        ws.create_session("two", profile="agent")
+        one = ws.runtime_context("one").processes
+        two = ws.runtime_context("two").processes
+        release = asyncio.Event()
+
+        async def run():
+            await release.wait()
+            return 0
+
+        process = ws.processes.start(session_id="one",
+                                     command="private work",
+                                     cwd=PathSpec.from_str_path("/"),
+                                     run=run)
+        assert one.list() == (process.info, )
+        assert two.list() == ()
+        assert two.get(process.info.pid) is None
+        await ws.close_session("one")
+        ws.create_session("one", profile="agent")
+        assert one.list() == ()
+        assert ws.runtime_context("one").processes.list() == ()
+        release.set()
+        await process.join()

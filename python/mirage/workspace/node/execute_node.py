@@ -16,8 +16,11 @@ import asyncio
 from functools import partial
 from typing import Any, Callable
 
+from mirage.context import (program_invocation, reset_program_invocation,
+                            set_program_invocation)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
+from mirage.io.types import ByteSource
 from mirage.ops.types import SessionView
 from mirage.policy import HandOff, PolicyDenied
 from mirage.runtime.routing import RouteDecision
@@ -32,6 +35,7 @@ from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
+from mirage.types import PathSpec
 from mirage.workspace.abort import MirageAbortError
 from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
@@ -59,7 +63,8 @@ from mirage.workspace.node.declaration import execute_declaration
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (expand_double_bracket,
                                              expand_test_expr)
-from mirage.workspace.session import SessionState
+from mirage.workspace.session import (SessionState, reset_current_session,
+                                      set_current_session)
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (ensure_var_visible, random_reader,
                                             session_elements, session_view,
@@ -614,9 +619,9 @@ async def _execute_node(
             ]
             pipe_recurse = partial(_recurse_pipe_stderr, recurse, dispatch,
                                    execute_fn, registry, targets)
-        stdout, io, exec_node = await handle_pipe(pipe_recurse, commands,
-                                                  stderr_flags, session, stdin,
-                                                  cs)
+        stdout, io, exec_node = await handle_pipe(
+            pipe_recurse, commands, stderr_flags, session, stdin, cs,
+            job_table.processes if job_table is not None else None)
         if negated:
             io = IOResult(
                 exit_code=0 if io.exit_code != 0 else 1,
@@ -657,7 +662,8 @@ async def _execute_node(
         # live in a private job table (`$!`/`wait`/`kill` in the body
         # see them; the parent's table never does), mirroring bash's
         # forked process.
-        sub_table = JobTable()
+        sub_table = JobTable(
+            processes=job_table.processes if job_table is not None else None)
         sub_recurse = partial(execute_node,
                               dispatch,
                               registry,
@@ -669,9 +675,36 @@ async def _execute_node(
                               routing_decision=routing_decision,
                               sink=sink,
                               handed=handed)
-        return await handle_subshell(sub_recurse, list(node.children), session,
-                                     stdin, cs, sub_table, agent_id, dispatch,
-                                     handed, registry.decisions)
+        child_session = session.fork()
+        as_program = program_invocation(session)
+        results: list[tuple[ByteSource | None, IOResult, ExecutionNode]] = []
+
+        async def run_subshell() -> int:
+            token = set_current_session(child_session)
+            program_token = set_program_invocation(
+                child_session) if as_program else None
+            try:
+                result = await handle_subshell(sub_recurse,
+                                               list(node.children),
+                                               child_session, stdin, cs,
+                                               sub_table, agent_id, dispatch,
+                                               handed, registry.decisions)
+                results.append(result)
+                return result[1].exit_code
+            finally:
+                reset_current_session(token)
+                if program_token is not None:
+                    reset_program_invocation(program_token)
+
+        process = sub_table.processes.start(session_id=session.session_id,
+                                            command=get_text(node),
+                                            cwd=PathSpec.from_str_path(
+                                                session.cwd),
+                                            parent_pid=session.process_id,
+                                            run=run_subshell)
+        child_session.process_id = process.info.pid
+        await process.task
+        return results[0]
 
     # ── arithmetic command ((( ... ))) ──────────
     if (kind == NodeKind.COMPOUND and node.children

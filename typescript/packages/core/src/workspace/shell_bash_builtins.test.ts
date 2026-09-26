@@ -338,12 +338,11 @@ const CASES: [string, string, string, string, number][] = [
     2,
   ],
   ['wait_n_answers_first_finisher', '(exit 3) & wait -n', '', '', 3],
-  // `-p` holds a job id, not bash's pid (a mirage job has no OS
-  // process); the rest of the line is bash's.
+  // `-p` holds the managed PID `$!` reported; the rest of the line is bash's.
   [
     'wait_p_names_the_job_reported',
-    '(exit 3) & (exit 5) & wait -p V %1 %2; echo rc=$? V=$V',
-    'rc=5 V=2\n',
+    '(exit 3) & (exit 5) & p=$!; wait -p V %1 %2; echo rc=$?; [ "$V" = "$p" ] && echo pid-match',
+    'rc=5\npid-match\n',
     '',
     0,
   ],

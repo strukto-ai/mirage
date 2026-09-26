@@ -408,14 +408,19 @@ async def test_close_settles_a_job_that_ignores_the_cancel():
 
     A bare cancel leaves the job RUNNING with no ending chunk, so anyone
     parked on ``wait_finished`` waits forever on a workspace that is
-    already gone. ``kill_all`` never joins the runner, so settling here
-    cannot block shutdown on a job that is mid-write.
+    already gone. The console ends promptly, while workspace teardown
+    waits for the managed runner before closing its mounts.
     """
     _RELEASE.clear()
     ws = _workspace()
     job = await _submit_deaf(ws)
     try:
-        await asyncio.wait_for(ws.close(), timeout=5)
+        closing = asyncio.create_task(ws.close())
+        await asyncio.wait_for(job.console.wait_finished(), timeout=2)
+        assert not closing.done()
+        for release in _RELEASE:
+            release.set()
+        await asyncio.wait_for(closing, timeout=5)
 
         assert job.status == JobStatus.KILLED
         assert job.exit_code == 137
@@ -438,7 +443,11 @@ async def test_close_is_idempotent_with_a_job_running():
     ws = _workspace()
     job = await _submit_deaf(ws)
     try:
-        await asyncio.wait_for(ws.close(), timeout=5)
+        closing = asyncio.create_task(ws.close())
+        await asyncio.wait_for(job.console.wait_finished(), timeout=2)
+        for release in _RELEASE:
+            release.set()
+        await asyncio.wait_for(closing, timeout=5)
         await asyncio.wait_for(ws.close(), timeout=5)
 
         assert job.status == JobStatus.KILLED

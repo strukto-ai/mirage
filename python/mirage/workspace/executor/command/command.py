@@ -209,6 +209,8 @@ async def handle_command(
                            if dispatch is not None else None),
                 ns=namespace_view_of(registry, namespace, dispatch),
                 session_view=session_view(session, registry.policies),
+                processes=registry.process_view(session)
+                if registry.process_view is not None else None,
             ),
             drop_caches=(functools.partial(drop_mount_caches, registry)
                          if drops_mount_caches(cli_install.spec) else None),

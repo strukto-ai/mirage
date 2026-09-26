@@ -240,3 +240,50 @@ a busy `while True` loop. The watchdog needs `SharedArrayBuffer`
 (always present in Node; in a browser only on cross-origin isolated
 pages) — without it, a busy pyodide loop blocks the event loop until
 it finishes, so prefer monty for untrusted code there.
+
+## Managed child commands
+
+Pyodide's shared-memory worker supports an admitted subprocess bridge:
+
+```python
+import subprocess
+
+result = subprocess.run(["printf", "%s", "hello"],
+                        capture_output=True, text=True, check=True)
+print(result.stdout)
+```
+
+Mirage supplies `subprocess.Popen`; Python's standard `run`, `call`,
+`check_call` and `check_output` use that implementation. `Popen` supports live
+pipes, `poll`, `wait`, `communicate`, termination, timeout retries, text mode,
+`stderr=STDOUT`, and `shell=True` through the workspace's `sh`. `sys.executable`
+points to `/usr/bin/python3`, and `shutil.which` queries the profile's program
+view. Functions and shell-only builtins are not executables.
+
+Only the worker waits synchronously; Mirage's host event loop stays asynchronous.
+Guest environment variables are inherited unless `env` supplies a replacement.
+Writes flush across the filesystem bridge before process operations, and guest
+file caches invalidate after them. A timed-out `wait` or `communicate` leaves the
+child alive; `run` kills and joins it. Unfinished children are cancelled and joined
+when the guest invocation exits.
+
+This is a virtual process interface. Native descriptors, PTYs, process groups,
+user switching, `preexec_fn`, and `asyncio.create_subprocess_exec` are not supplied.
+Stdin inheritance hands off buffered unread input; concurrent descriptor sharing
+and kernel file offsets are not emulated. Termination signals request immediate
+managed cancellation; guest signal handlers are not invoked. Some runtime
+providers buffer output until completion. The bridge requires shared-memory
+workers. Unsupported options fail explicitly.
+
+Monty keeps its normal unsupported `subprocess` import; no custom guest helper
+is injected.
+
+Host applications use the same admitted argv door:
+
+```typescript
+const child = ws.spawn({ argv: ['cat'] })
+const result = await child.communicate(new TextEncoder().encode('hello\n'))
+```
+
+See [managed execution](/home/architecture#managed-execution) for process views,
+lifetimes and provider limits.

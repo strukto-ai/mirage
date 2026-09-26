@@ -20,6 +20,7 @@ from enum import Enum
 from typing import Any
 
 from mirage.io.types import IOResult
+from mirage.process.handle import ProcessHandle
 from mirage.shell.console import JobConsole
 from mirage.workspace.types import ExecutionNode
 
@@ -50,6 +51,16 @@ class Job:
     created_at: float = field(default_factory=time.time)
     agent: str = "unknown"
     session_id: str = ""
+    process: ProcessHandle | None = None
+
+    @property
+    def pid(self) -> int:
+        """The managed PID `$!`, `jobs -p` and `wait -p` report.
+
+        A job restored from a snapshot has no runner, so its job number
+        stands in.
+        """
+        return self.process.info.pid if self.process is not None else self.id
 
 
 JobRunner = Callable[[Job], Coroutine[Any, Any, tuple[IOResult,

@@ -22,6 +22,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource
 from mirage.policy.types import (AdmissionRules, Decision, HideReason,
                                  ProfileScript)
+from mirage.process.config import ProcessPermissions
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
 from mirage.shell.constants import (BIN_PREFIX, RANDOM, RANDOM_UNSET,
@@ -289,6 +290,10 @@ class SessionState:
     profile: str | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)
     terminal_output: bool = True
+    processes: ProcessPermissions = ProcessPermissions()
+    process_id: int | None = None
+    shell_pid: int | None = None
+    process_depth: int = 0
     # The host's standing answers to asked lines (design 3.9): session
     # state like functions and cwd, persisted, read and written through
     # the manager by id so a fork shares them, never another session's.
@@ -471,6 +476,8 @@ class SessionState:
                 name: limit.model_dump()
                 for name, limit in self.command_limits.items()
             }
+        if self.processes != ProcessPermissions():
+            data["processes"] = self.processes.model_dump()
         if self.profile is not None:
             data["profile"] = self.profile
         if self.decisions:
@@ -514,10 +521,12 @@ class SessionState:
         script = data.get("script")
         decisions = data.get("decisions")
         limits = data.get("command_limits")
+        processes = data.get("processes")
         if (modes is not None or paths is not None or shown is not None
                 or reasons is not None or vars_ is not None
                 or commands is not None or script is not None
-                or decisions is not None or limits is not None):
+                or decisions is not None or limits is not None
+                or processes is not None):
             data = dict(data)
         if modes is not None:
             data["mount_modes"] = {
@@ -552,6 +561,8 @@ class SessionState:
                 name: Limit.model_validate(limit)
                 for name, limit in limits.items()
             }
+        if processes is not None:
+            data["processes"] = ProcessPermissions.model_validate(processes)
         return cls(**data)
 
     @property
@@ -654,7 +665,10 @@ class SessionState:
                 **defaults["vars"], "PWD":
                 ShellVar(overrides["cwd"], frozenset({VarAttr.EXPORT}))
             }
-        return SessionState(**defaults)
+        forked = SessionState(**defaults)
+        if self._random_seed == RANDOM_UNSET:
+            forked._random_seed = RANDOM_UNSET
+        return forked
 
     def snapshot(self) -> dict[str, Any]:
         """Copy the state a child shell runs on top of.

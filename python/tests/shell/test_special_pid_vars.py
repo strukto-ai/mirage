@@ -12,20 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import os
 
-
-def test_dollar_dollar_is_process_id(shell):
-    assert shell.mirage("echo $$") == f"{os.getpid()}\n"
+def test_dollar_dollar_is_a_positive_integer(shell):
+    assert int(shell.mirage("echo $$")) > 0
 
 
 def test_dollar_bang_empty_without_background_job(shell):
     assert shell.mirage("echo [$!]") == "[]\n"
 
 
-def test_dollar_bang_is_last_background_job_id(shell):
-    out = shell.mirage("sleep 0.05 & echo bg=$!")
-    assert out == "bg=1\n"
+def test_dollar_bang_is_last_background_jobs_managed_pid(shell):
+    out = shell.mirage('sleep 0.05 & p=$!; [ "$p" -gt 0 ] && '
+                       '[ "$p" = "$(jobs -p)" ] && echo bg=pid')
+    assert out == "bg=pid\n"
 
 
 def test_wait_on_dollar_bang(shell):

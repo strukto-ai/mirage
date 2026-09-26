@@ -20,6 +20,7 @@ import { RuntimeVFS } from '../../../vfs.ts'
 import { applyMutation } from '../vfs/journal.ts'
 import type { FlushFailure } from '../vfs/types.ts'
 import { respond } from './transport.ts'
+import { GuestProcessTable } from './process.ts'
 import type {
   ExecuteRequest,
   VfsRequest,
@@ -142,6 +143,9 @@ export class PyodideWorkerClient {
     const vfs = new RuntimeVFS(context.dispatch, context.resolver)
     const { dispatch, scope } = context
     const responses = new Set<Promise<void>>()
+    const processes = new GuestProcessTable(
+      request.method === 'run' ? context : { ...context, processes: null },
+    )
     const cells = new Int32Array(this.interruptBuffer)
     Atomics.store(cells, 3, 0)
     const abort = (): void => {
@@ -161,7 +165,7 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = respond(message.buffer, () =>
-            scope.run(() => this.operation(message, vfs, dispatch)),
+            scope.run(() => this.operation(message, vfs, dispatch, processes)),
           )
           responses.add(response)
           void response.then(() => {
@@ -183,6 +187,7 @@ export class PyodideWorkerClient {
       signal?.removeEventListener('abort', abort)
       // An interrupted guest can finish while a backend mutation is still pending.
       // Keep the runtime queue closed until every response has finished.
+      await processes.close()
       await Promise.all(responses)
     }
   }
@@ -219,8 +224,11 @@ export class PyodideWorkerClient {
     request: VfsRequest,
     vfs: RuntimeVFS,
     dispatch: BridgeDispatchFn,
+    processes: GuestProcessTable,
   ): Promise<unknown> {
     switch (request.op) {
+      case 'process':
+        return processes.call(request.payload ?? '{}')
       case 'read':
         return vfs.read(request.path)
       case 'stat':

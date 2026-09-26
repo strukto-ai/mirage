@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ProcessSupervisor } from '../../process/supervisor.ts'
+import { PathSpec } from '../../types.ts'
 import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from '../console/index.ts'
 import { KILLED_EXIT_CODE } from './constants.ts'
 import { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
@@ -32,20 +34,21 @@ function isAbortError(err: unknown): boolean {
  * Status is set before the console is finished, so a reader released by
  * the ending chunk always sees settled fields.
  */
-async function settle(run: JobRunner, job: Job): Promise<void> {
+async function settle(run: JobRunner, job: Job): Promise<number> {
   let result: JobResult
   try {
+    if (job.abort?.signal.aborted) throw new DOMException('aborted', 'AbortError')
     result = await run(job)
   } catch (err) {
     // A job killed while it was still running is already settled; the
     // runner unwinding afterwards must not reopen or relabel it.
-    if (job.status !== JobStatus.RUNNING) return
+    if (job.status !== JobStatus.RUNNING) return isAbortError(err) ? KILLED_EXIT_CODE : 1
     if (isAbortError(err)) {
       job.status = JobStatus.KILLED
       job.exitCode = KILLED_EXIT_CODE
       await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
       await job.console.finish(KILLED_OUTCOME)
-      return
+      return KILLED_EXIT_CODE
     }
     // Recorded as the job's output and exit status rather than
     // rethrown: nobody awaits this task, so rethrowing would only
@@ -55,15 +58,16 @@ async function settle(run: JobRunner, job: Job): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err)
     await job.console.emit(Channel.STDERR, new TextEncoder().encode(msg))
     await job.console.finish(exitOutcome(1))
-    return
+    return 1
   }
-  if (job.status !== JobStatus.RUNNING) return
   const [ioResult, execNode] = result
+  if (job.status !== JobStatus.RUNNING) return ioResult.exitCode
   job.ioResult = ioResult
   job.executionNode = execNode
   job.exitCode = ioResult.exitCode
   job.status = JobStatus.COMPLETED
   await job.console.finish(exitOutcome(job.exitCode))
+  return ioResult.exitCode
 }
 
 /**
@@ -73,8 +77,10 @@ async function settle(run: JobRunner, job: Job): Promise<void> {
  * within the session that launched it, numbering restarts at 1 once that
  * session's list empties (GNU bash), and `jobs`, `wait`, `fg`, `kill` and
  * `disown` only ever see the calling session's list, exactly as one bash
- * never lists another bash's jobs. Mirage has no pid: `$!` and `jobs -l`
- * answer with the job number.
+ * never lists another bash's jobs. Runner PIDs are tracked separately:
+ * `$!` and `jobs -l` report the managed PID, while `%N` names a
+ * session-local job number. A KILLED job ends its console; its process
+ * remains stopping until the runner actually finishes.
  *
  * The table is still owned by the workspace rather than by a session,
  * because the workspace owns the tasks: teardown must stop every job in
@@ -105,7 +111,10 @@ export class JobTable {
    *   Redis client per job) is invisible to the embedder; a console
    *   still outlives its table entry, so reap() never closes one.
    */
-  constructor(consoleFactory: ConsoleFactory | null = null) {
+  constructor(
+    consoleFactory: ConsoleFactory | null = null,
+    readonly processes = new ProcessSupervisor(),
+  ) {
     this.consoleFactory = consoleFactory
   }
 
@@ -132,6 +141,7 @@ export class JobTable {
     cwd: string
     agent?: string
     sessionId?: string
+    parentPid?: number | null
   }): Job {
     const sessionId = init.sessionId ?? ''
     const jobs = this.sessionJobs(sessionId)
@@ -158,7 +168,28 @@ export class JobTable {
     })
     jobs.set(job.id, job)
     this.nextIds.set(sessionId, jobId + 1)
-    job.task = settle(init.run, job)
+    job.process = this.processes.start({
+      sessionId,
+      parentPid: init.parentPid ?? null,
+      command: init.command,
+      cwd: PathSpec.fromStrPath(init.cwd),
+      run: async () => {
+        if (job.status === JobStatus.RUNNING) return settle(init.run, job)
+        return job.exitCode
+      },
+      cancel: () => {
+        init.abort.abort()
+      },
+    })
+    const process = job.process
+    const onAbort = () => {
+      process.terminate()
+    }
+    init.abort.signal.addEventListener('abort', onAbort, { once: true })
+    if (init.abort.signal.aborted) process.terminate()
+    job.task = process.join().then(() => {
+      init.abort.signal.removeEventListener('abort', onAbort)
+    })
     return job
   }
 
@@ -213,7 +244,8 @@ export class JobTable {
   async kill(jobId: number, sessionId = ''): Promise<boolean> {
     const job = this.get(jobId, sessionId)
     if (job?.status !== JobStatus.RUNNING) return false
-    job.abort?.abort()
+    if (job.process !== null) job.process.terminate()
+    else job.abort?.abort()
     job.status = JobStatus.KILLED
     job.exitCode = KILLED_EXIT_CODE
     await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))
@@ -243,12 +275,13 @@ export class JobTable {
    * What happens to a bash's jobs when that bash exits: they are hung
    * up, and a later shell that reuses the same id starts from an empty
    * list numbered from 1 rather than inheriting jobs it never launched,
-   * under a profile it may not share. A disowned job is off the list
-   * already and keeps running, as in bash, until `killAll` at teardown.
+   * under a profile it may not share. Session closure revokes process
+   * doors and stops disowned runners too.
    */
   async closeSession(sessionId: string): Promise<Job[]> {
     const running = this.runningJobs(sessionId)
     for (const job of running) await this.kill(job.id, sessionId)
+    this.processes.revokeSession(sessionId)
     this.jobs.delete(sessionId)
     this.nextIds.delete(sessionId)
     return running
@@ -265,7 +298,8 @@ export class JobTable {
     }
     for (const job of this.disowned) {
       if (job.status === JobStatus.RUNNING) {
-        job.abort?.abort()
+        if (job.process !== null) job.process.terminate()
+        else job.abort?.abort()
         job.status = JobStatus.KILLED
         job.exitCode = KILLED_EXIT_CODE
         await job.console.emit(Channel.STDERR, new TextEncoder().encode('Killed'))

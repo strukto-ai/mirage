@@ -20,10 +20,11 @@ export type ReadOperation = 'read' | 'stat' | 'readdir' | 'readlink'
 export interface VfsRequest {
   kind: 'vfs'
   buffer: SharedArrayBuffer
-  op: ReadOperation | 'dispatch' | 'flush'
+  op: ReadOperation | 'dispatch' | 'flush' | 'process'
   path: string
   args?: Parameters<BridgeDispatchFn>
   mutations?: MirageMutation[]
+  payload?: string
 }
 export interface ExecuteRequest {
   kind: 'execute'

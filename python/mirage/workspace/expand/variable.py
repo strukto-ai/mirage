@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -253,10 +252,8 @@ def _lookup_var(var: str,
     if var == "?":
         return str(last_exit_code)
     if var == "$":
-        return str(os.getpid())
+        return str(session.shell_pid or session.process_id or 0)
     if var == "!":
-        # Deliberate divergence from bash: jobs are identified by job
-        # table id, not OS pid, so $! yields the id `wait`/`kill` accept.
         last_job = session.last_bg_job_id
         return str(last_job) if last_job is not None else ""
     if var.isdigit():

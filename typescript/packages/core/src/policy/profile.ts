@@ -1,3 +1,4 @@
+import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -149,6 +150,7 @@ export interface SessionProfile {
    */
   readonly policy?: ProfilePolicySpec | null
   readonly commandLimits?: Readonly<Record<string, Limit>> | null
+  readonly processes?: ProcessPermissions | null
 }
 
 /**
@@ -187,6 +189,7 @@ export interface CompiledProfile {
   /** The profile's name, null for a document passed without one; the session's group. */
   readonly profile?: string | null
   readonly commandLimits?: Readonly<Record<string, Limit>> | null
+  readonly processes?: ProcessPermissions
 }
 
 const RULE_FIELDS = ['reason', 'commands', 'paths'] as const
@@ -204,6 +207,7 @@ const PROFILE_FIELDS = [
   'commands',
   'policy',
   'command_limits',
+  'processes',
 ] as const
 const POLICY_FIELDS = ['script', 'runtime'] as const
 
@@ -582,8 +586,10 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     commands?: CommandsBlock | null
     policy?: ProfilePolicySpec | null
     commandLimits?: Readonly<Record<string, Limit>> | null
+    processes?: ProcessPermissions
   } = {}
   if (obj.command_limits != null) out.commandLimits = parseCommandLimits(obj.command_limits)
+  if (obj.processes != null) out.processes = parseProcessPermissions(obj.processes)
   if (obj.policy !== undefined && obj.policy !== null) {
     out.policy = parseProfilePolicy(obj.policy, `${where}.policy`)
   }

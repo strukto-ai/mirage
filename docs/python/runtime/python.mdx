@@ -256,3 +256,22 @@ cancellation: monty kills its worker process, wasi traps the run
 through wasmtime's epoch interruption, and local kills the
 subprocess. A timed-out `python3` run is reclaimed at the deadline,
 not left burning in the background.
+
+## Managed child commands
+
+Monty keeps its normal module boundary: `import subprocess` raises
+`ModuleNotFoundError`. Mirage tracks the Monty invocation, but does not inject a
+replacement guest API. The TypeScript SDK's Pyodide runtime wires ordinary
+Python `subprocess.Popen` and its standard helpers into the workspace.
+
+See [managed execution](/home/architecture#managed-execution) for process views,
+lifetimes and provider limits.
+
+Host applications can use the same door:
+
+```python
+from mirage.process.types import SpawnRequest
+
+child = ws.spawn(SpawnRequest(("cat",)))
+result = await child.communicate(b"hello\n")
+```

@@ -25,8 +25,9 @@ import { type OpKwargs, OpsRegistry } from '../../ops/registry.ts'
 import type { VFS } from '../../vfs/base.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
+import { Consumer } from '../lookup/types.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
-import { programNote, programs } from '../lookup/lookup.ts'
+import { lookup, program, programNote, programs } from '../lookup/lookup.ts'
 import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
@@ -73,6 +74,12 @@ import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
+import { ChildProcess } from '../../process/child.ts'
+import { ProcessInput, ProcessOutput } from '../../process/stdio.ts'
+import type { SpawnRequest, ProcessView } from '../../process/types.ts'
+import { literalTree } from '../../shell/literal.ts'
+import { shellJoin } from '../../shell/join.ts'
+import { ProcessSupervisor } from '../../process/supervisor.ts'
 import { WorkspaceBinding, captureBinding } from '../../runtime/binding.ts'
 import type { RuntimeContext } from '../../runtime/types.ts'
 import { ContextScope } from '../../utils/context_scope.ts'
@@ -81,9 +88,12 @@ import {
   captureSessionContext,
   getCurrentSessionUnlessForeign,
   runWithSession,
+  runAsProgram,
 } from '../../context/session_context.ts'
 import { namespaceViewOf } from '../executor/command/run.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { makeVar, VarAttr } from '../../shell/variable.ts'
+import { enoent } from '../../utils/errors.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
 import type { BridgeDispatchFn } from '../../runtime/types.ts'
 import { MontyUnavailableError } from '../../runtime/python/monty/index.ts'
@@ -106,7 +116,7 @@ import type { ResolvedSource } from '../../secrets/types.ts'
 import { DEFAULT_PROFILE } from '../session/constants.ts'
 import { SessionManager } from '../session/manager.ts'
 import type { WorkspaceFields, WorkspaceStateStore } from '../store/base.ts'
-import { varsFromEntries, type SessionState } from '../session/session.ts'
+import { varsFromEnv, varsFromEntries, type SessionState } from '../session/session.ts'
 import {
   parseProfileMounts,
   parseProfilePolicy,
@@ -124,7 +134,7 @@ import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
 import { Router } from './routing.ts'
 import { Runtimes } from './runtimes.ts'
 import { Session } from './handle.ts'
-import type { ExecuteResult } from './types.ts'
+import { ExecuteResult } from './types.ts'
 import { type ExecuteOptions, type MountSpec, type WorkspaceOptions } from './types.ts'
 import { commandName, forkForCall } from './utils.ts'
 import { WatchManager } from './watch.ts'
@@ -154,6 +164,7 @@ export class Workspace {
   private shellParserPromise: Promise<ShellParser> | null = null
   private readonly opened = new Set<VFS>()
   private readonly openOrder: VFS[] = []
+  readonly processes = new ProcessSupervisor()
   readonly jobTable: JobTable
   readonly agentId: string | null
   readonly cache: FileCache & VFS
@@ -218,8 +229,9 @@ export class Workspace {
         vfs.setIndex?.(options.index)
       }
     }
+    this.registry.processView = (session) => this.processView(session)
     this.wsId = options.workspaceId ?? newWorkspaceId()
-    this.jobTable = new JobTable(options.consoleFactory ?? null)
+    this.jobTable = new JobTable(options.consoleFactory ?? null, this.processes)
     const stores = resolveControlStores(this.wsId, options)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
@@ -552,11 +564,130 @@ export class Workspace {
       {
         ns: namespaceViewOf(this.registry, this.namespace, this.dispatcher.dispatch),
         sessionView: sessionView(session, this.policies),
+        processes: this.processView(session),
         cwd: PathSpec.fromStrPath(session.cwd),
         env: envSnapshot(session),
       },
       scope,
     )
+  }
+
+  /** Spawn argv in an isolated session fork through the normal admission gate. */
+  spawn(request: SpawnRequest, sessionId?: string): ChildProcess {
+    return this.spawnForSession(
+      request,
+      sessionId === undefined ? this.opSession() : this.sessionManager.get(sessionId),
+    )
+  }
+
+  private processView(session: SessionState): ProcessView {
+    const parentPid = session.processId
+    const view = this.processes.view(session.sessionId, () => session.processes)
+    return Object.freeze({
+      ...view,
+      depth: session.processDepth,
+      spawn: (request: SpawnRequest) => {
+        view.checkSpawn()
+        const child = session.fork()
+        child.processId = parentPid
+        return this.spawnForSession(request, child)
+      },
+    })
+  }
+
+  private spawnForSession(request: SpawnRequest, session: SessionState): ChildProcess {
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    if (!session.processes.spawn)
+      throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
+    if (session.processDepth >= 16) throw new Error('process nesting limit (16) reached')
+    const argv = [...request.argv]
+    literalTree(argv)
+    const head = argv[0] ?? ''
+    const name = head.startsWith(`${BIN_PREFIX}/`) ? head.slice(BIN_PREFIX.length + 1) : head
+    if (!name.includes('/')) {
+      if (
+        program(name, session, this.registry) === null &&
+        lookup(name, session, this.registry) !== Consumer.EXTERNAL
+      )
+        throw enoent(head)
+      argv[0] = name
+    }
+    const cwd = request.cwd ?? PathSpec.fromStrPath(session.cwd)
+    const inheritedEnv = request.replaceEnv === true ? {} : envSnapshot(session)
+    const child = session.fork({
+      cwd: cwd.virtual,
+      processDepth: session.processDepth + 1,
+      vars: varsFromEnv(inheritedEnv),
+      functions: {},
+    })
+    if (!Object.hasOwn(inheritedEnv, 'PWD')) child.vars.PWD = makeVar(cwd.virtual, new Set())
+    child.aliases = {}
+    // The child's stdout is its handle's result, as a typed line's is the
+    // terminal, so the command limits bound what it hands back wherever
+    // the parent's own output goes.
+    child.terminalOutput = true
+    const scope = new ContextScope([
+      ...captureSessionContext(child, this.sessionManager),
+      ...captureRecordingContext(),
+    ])
+    const input = new ProcessInput(),
+      output = new ProcessOutput(request.mergeStderr),
+      abort = new AbortController()
+    const env = request.env === undefined ? undefined : { ...request.env }
+    const owner = this.sessionManager.get(session.sessionId)
+    const admission = this.processes.view(session.sessionId, () => owner.processes)
+    const process = this.processes.start({
+      sessionId: session.sessionId,
+      command: shellJoin(argv),
+      cwd,
+      parentPid: session.processId,
+      cancel: () => {
+        abort.abort()
+        input.stop()
+        output.stop()
+      },
+      run: async () => {
+        try {
+          await this.ensureSessionsLoaded()
+          if (this.sessionManager.get(session.sessionId) !== owner)
+            throw new Error(
+              'session changed during hydration; retry spawn after ensureSessionsLoaded',
+            )
+          admission.checkSpawn()
+          const result = await scope.run(async () => {
+            const view = sessionView(child, this.policies)
+            for (const [name, value] of Object.entries(env ?? {})) {
+              await view.set(name, value)
+              await view.mark(name, VarAttr.Export, true)
+            }
+            return runAsProgram(child, () =>
+              executeLine(
+                this.executeEnv(),
+                shellJoin(argv),
+                {
+                  sessionId: session.sessionId,
+                  stdin: input.stream(),
+                  sink: output,
+                  signal: abort.signal,
+                },
+                argv,
+              ),
+            )
+          })
+          if (!(result instanceof ExecuteResult)) throw new Error('spawn returned a provision plan')
+          return result.exitCode
+        } finally {
+          input.stop()
+          output.end()
+        }
+      },
+    })
+    child.processId = process.info.pid
+    child.shellPid = process.info.pid
+    return new ChildProcess(process, input, output, () => {
+      process.terminate()
+      this.processes.terminateChildren(process.info.pid)
+    })
   }
 
   // The sandboxed runtimes' sole data path (quickjs, pyodide, monty).
@@ -857,7 +988,9 @@ export class Workspace {
     await this.ensureSessionsLoaded()
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     if (wasDefault) sessionId = this.defaultSessionId
-    return this.sessionManager.setProfile(sessionId, compiled)
+    const session = await this.sessionManager.setProfile(sessionId, compiled)
+    this.processes.revokeSession(sessionId)
+    return session
   }
 
   listSessions(): SessionState[] {

@@ -381,6 +381,10 @@ export class MirageFs {
     return ['.', '..', ...this.tree.childNames(node)]
   }
 
+  invalidate(): void {
+    this.tree.invalidate()
+  }
+
   private readThrough<T>(read: () => T): T {
     try {
       this.sync?.flush(this.journal.takeMutations())

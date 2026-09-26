@@ -28,6 +28,7 @@ import { abortable, mergeSignals } from '../abort.ts'
 import type { SessionView } from '../../ops/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
+import type { ProcessView } from '../../process/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
 import { scanOptions } from './builtins/getopt.ts'
@@ -200,6 +201,7 @@ export async function handleBackground(
       cwd: bgSession.cwd,
       agent: agentId ?? '',
       sessionId: session.sessionId,
+      parentPid: session.processId,
     })
   } catch (err) {
     // A submission that fails (a console the table cannot build) starts
@@ -211,7 +213,8 @@ export async function handleBackground(
     }
     throw err
   }
-  session.lastBgJobId = job.id
+  bgSession.processId = job.process?.info.pid ?? null
+  session.lastBgJobId = job.pid
 
   if (right === null) {
     const tree = new ExecutionNode({
@@ -287,13 +290,6 @@ function jobResult(cmdStr: string, msg: string, code: number): JobHandlerResult 
 }
 
 /**
- * The job a `wait`/`disown` operand names, or bash's refusal. A `%N`
- * spec naming no job is `no such job`; a bare number is a pid in bash,
- * and mirage's `$!` yields the job id, so an unknown one is bash's `pid
- * N is not a child of this shell`. Anything else is `not a pid or valid
- * job spec`.
- */
-/**
  * The job list a builtin reads: the calling session's, or the shared
  * empty id when it runs with no session (a bare table in a test).
  */
@@ -301,14 +297,51 @@ function sessionOf(session: SessionState | null): string {
   return session?.sessionId ?? ''
 }
 
-function resolveSpec(jobTable: JobTable, spec: string, sessionId: string): [Job | null, string] {
+/** The managed runners `ps` and numeric `kill` reach, scoped by the session's profile. */
+function processView(jobTable: JobTable, session: SessionState | null): ProcessView {
+  return session === null
+    ? jobTable.processes.view('')
+    : jobTable.processes.view(session.sessionId, () => session.processes)
+}
+
+/**
+ * The jobs a builtin may name or list. A profile that grants no process
+ * metadata (`processes.metadata: none`) sees none, whichever builtin
+ * asks, so `jobs`, `fg`, `disown`, `kill %N` and `wait` with operands all
+ * answer as for an empty table. Bare `wait` still joins every job: it
+ * names none, and it is how a job's output reaches the line.
+ */
+function visibleJobs(jobTable: JobTable, session: SessionState | null): Job[] {
+  return session?.processes.metadata === 'none' ? [] : jobTable.listJobs(sessionOf(session))
+}
+
+/** The job whose number is `jobId`, the one `%N` names. */
+function jobNumbered(jobs: readonly Job[], jobId: number): Job | null {
+  return jobs.find((j) => j.id === jobId) ?? null
+}
+
+/**
+ * The command line a builtin prints for a job, `[hidden]` when the
+ * profile grants no process details (`processes.details: none`).
+ */
+function commandOf(job: Job, session: SessionState | null): string {
+  return session?.processes.details === 'none' ? '[hidden]' : job.command
+}
+
+/**
+ * The job a `wait`/`disown` operand names, or bash's refusal. A `%N`
+ * spec naming no job is `no such job`; a bare number is a managed PID,
+ * also returned by `$!`, so an unknown one is `pid N is not a child of
+ * this shell`. Anything else is `not a pid or valid job spec`.
+ */
+function resolveSpec(jobs: readonly Job[], spec: string): [Job | null, string] {
   if (spec.startsWith('%')) {
     const raw = spec.slice(1)
-    const job = /^[0-9]+$/.test(raw) ? jobTable.get(Number(raw), sessionId) : null
+    const job = /^[0-9]+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
     return [job, job !== null ? '' : `${spec}: no such job`]
   }
   if (/^[0-9]+$/.test(spec)) {
-    const job = jobTable.get(Number(spec), sessionId)
+    const job = jobs.find((j) => j.pid === Number(spec)) ?? null
     return [job, job !== null ? '' : `pid ${spec} is not a child of this shell`]
   }
   return [null, `\`${spec}': not a pid or valid job spec`]
@@ -348,9 +381,7 @@ async function adopt(jobTable: JobTable, job: Job, cmdStr: string): Promise<JobH
  * none is (which is the bare form, since it reports no one job); `-f` is
  * accepted, since a mirage job cannot stop, only end.
  *
- * Deliberate divergence: bash stores a PID in `-p`'s variable. A mirage
- * job is a coroutine with no OS process, so what goes there is the job
- * id, the same number `%N` and `jobs` already name.
+ * `-p` stores the managed PID, matching `$!` and `jobs -p`.
  */
 export async function handleWait(
   jobTable: JobTable,
@@ -419,8 +450,9 @@ export async function handleWait(
   }
   const errors: string[] = []
   const picked: Job[] = []
+  const visible = visibleJobs(jobTable, session)
   for (const spec of specs) {
-    const [job, refusal] = resolveSpec(jobTable, spec, sid)
+    const [job, refusal] = resolveSpec(visible, spec)
     if (job === null) {
       errors.push(`bash: wait: ${refusal}`)
       continue
@@ -430,7 +462,7 @@ export async function handleWait(
   const errText = errors.length > 0 ? errors.join('\n') + '\n' : ''
   const errBytes = errText !== '' ? new TextEncoder().encode(errText) : null
   if (nextJob) {
-    const candidates = specs.length > 0 ? picked : jobTable.listJobs(sid)
+    const candidates = specs.length > 0 ? picked : visible
     if (candidates.length === 0) {
       return [
         null,
@@ -439,7 +471,7 @@ export async function handleWait(
       ]
     }
     const job = await abortable(waitFirst(jobTable, candidates), signal)
-    if (varName !== null && view !== null) await view.set(varName, String(job.id))
+    if (varName !== null && view !== null) await view.set(varName, String(job.pid))
     const [stdout, io, node] = await adopt(jobTable, job, cmdStr)
     if (errBytes !== null) {
       const prior = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
@@ -494,7 +526,7 @@ export async function handleWait(
   // same job however many were waited for. Only the no-operand form
   // leaves the variable unset, since it reports no one job.
   if (varName !== null && view !== null && lastJob !== null) {
-    await view.set(varName, String(lastJob.id))
+    await view.set(varName, String(lastJob.pid))
   }
   const out = concat(outs)
   const err = concat(errs)
@@ -530,9 +562,10 @@ export function handleDisown(
   const specs = scan.operands
   let targets: Job[] = []
   const errors: string[] = []
+  const jobs = visibleJobs(jobTable, session)
   if (specs.length > 0) {
     for (const spec of specs) {
-      const [job] = resolveSpec(jobTable, spec, sid)
+      const [job] = resolveSpec(jobs, spec)
       if (job === null) {
         errors.push(`bash: disown: ${spec}: no such job`)
         continue
@@ -540,9 +573,8 @@ export function handleDisown(
       targets.push(job)
     }
   } else if (allJobs || runningOnly) {
-    targets = runningOnly ? jobTable.runningJobs(sid) : jobTable.listJobs(sid)
+    targets = runningOnly ? jobs.filter((j) => j.status === JobStatus.RUNNING) : jobs
   } else {
-    const jobs = jobTable.listJobs(sid)
     const current = jobs[jobs.length - 1]
     if (current === undefined) {
       return jobResult(cmdStr, 'bash: disown: current: no such job\n', 1)
@@ -578,9 +610,10 @@ export async function handleFg(
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
+  const jobs = visibleJobs(jobTable, session)
   let jobId: number
   if (parts.length <= 1) {
-    const running = jobTable.runningJobs(sid)
+    const running = jobs.filter((j) => j.status === JobStatus.RUNNING)
     const current = running[running.length - 1]
     if (current === undefined) {
       const err = new TextEncoder().encode('fg: current: no such job\n')
@@ -594,7 +627,7 @@ export async function handleFg(
   } else {
     const raw = (parts[1] ?? '').replace(/^%+/, '')
     jobId = Number(raw)
-    if (!Number.isInteger(jobId) || jobTable.get(jobId, sid) === null) {
+    if (!Number.isInteger(jobId) || jobNumbered(jobs, jobId) === null) {
       const err = new TextEncoder().encode(`fg: ${parts[1] ?? ''}: no such job\n`)
       return [
         null,
@@ -604,7 +637,7 @@ export async function handleFg(
     }
   }
   const job = await abortable(jobTable.wait(jobId, sid), signal)
-  const header = new TextEncoder().encode(job.command + '\n')
+  const header = new TextEncoder().encode(commandOf(job, session) + '\n')
   const body = await job.console.snapshot(Channel.STDOUT)
   const stderr = await job.console.snapshot(Channel.STDERR)
   jobTable.reap(jobId, sid)
@@ -644,7 +677,16 @@ export async function handleKill(
       new ExecutionNode({ command: cmdStr, exitCode: 1, stderr: err }),
     ]
   }
-  const killed = await jobTable.kill(jobId, sid)
+  let killed: boolean
+  if ((parts[1] ?? '').startsWith('%')) {
+    const job = jobNumbered(visibleJobs(jobTable, session), jobId)
+    const controlled = session?.processes.control !== 'none'
+    killed = job !== null && controlled && (await jobTable.kill(jobId, sid))
+  } else {
+    killed = processView(jobTable, session).terminate(jobId)
+    const job = jobTable.listJobs(sid).find((j) => j.pid === jobId)
+    if (killed && job !== undefined) await jobTable.kill(job.id, sid)
+  }
   if (!killed) {
     const err = new TextEncoder().encode(`kill: no such job: ${jobId.toString()}\n`)
     return [
@@ -660,24 +702,21 @@ const JOBS_FLAGS: ReadonlySet<string> = new Set('lnprs')
 const JOBS_USAGE = 'jobs: usage: jobs [-lnprs] [jobspec ...] or jobs -x command [args]'
 
 /**
- * One `jobs` line in mirage's own row shape. `-l` inserts the id a
- * second time where GNU prints the process id; mirage jobs have no pid,
- * so the job id stands in and the row stays parseable.
+ * One `jobs` line; `-l` includes the managed PID, independently of detail access.
  */
-function jobRow(job: Job, long: boolean): string {
+function jobRow(job: Job, long: boolean, session: SessionState | null): string {
   const id = job.id.toString()
+  const command = commandOf(job, session)
   return long
-    ? `[${id}] ${id} ${job.status} ${job.command}`
-    : `[${id}] ${job.status} ${job.command}`
+    ? `[${id}] ${String(job.pid)} ${job.status} ${command}`
+    : `[${id}] ${job.status} ${command}`
 }
 
 /**
  * List jobs, with bash's flags applied to mirage's row shape.
  *
- * Mirage jobs are identified by table id, not pid, and never stop, so
- * two of GNU's flags map onto that model rather than reproducing it:
- * `-p` prints the job id (GNU's pid), and `-s` (stopped only) lists
- * nothing. `-r` keeps the running ones, `-l` adds the id column, and
+ * `-p` prints the managed PID; `-s` lists nothing because suspended
+ * processes are unsupported. `-r` keeps running jobs, `-l` adds the PID, and
  * `-n` lists only the jobs whose status changed since the last `jobs`
  * (which is every completed one not yet reaped, since reaping is what a
  * listing does). A jobspec operand (`%2` or `2`) filters to that job;
@@ -711,12 +750,12 @@ export function handleJobs(
       specs.push(word)
     }
   }
-  let jobs = jobTable.listJobs(sid)
+  let jobs = visibleJobs(jobTable, session)
   if (specs.length > 0) {
     const picked: Job[] = []
     for (const spec of specs) {
       const raw = spec.replace(/^%+/, '')
-      const job = /^\d+$/.test(raw) ? jobTable.get(Number(raw), sid) : null
+      const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
       if (job === null) {
         const err = new TextEncoder().encode(`bash: jobs: ${spec}: no such job\n`)
         return [
@@ -733,8 +772,8 @@ export function handleJobs(
   if (flags.has('s')) jobs = []
   if (flags.has('n')) jobs = jobs.filter((j) => j.status !== JobStatus.RUNNING)
   const lines = flags.has('p')
-    ? jobs.map((j) => j.id.toString())
-    : jobs.map((j) => jobRow(j, flags.has('l')))
+    ? jobs.map((j) => String(j.pid))
+    : jobs.map((j) => jobRow(j, flags.has('l'), session))
   jobTable.popCompleted(sid)
   const out =
     lines.length > 0 ? new TextEncoder().encode(`${lines.join('\n')}\n`) : new Uint8Array()
@@ -748,10 +787,12 @@ export function handlePs(
   _view: SessionView | null = null,
 ): JobHandlerResult {
   const cmdStr = parts.join(' ')
-  const sid = sessionOf(session)
   const lines: string[] = []
-  for (const job of jobTable.runningJobs(sid)) {
-    lines.push(`${job.id.toString()}\t${job.command}`)
+  if (parts.length > 2 || (parts.length === 2 && !['aux', '-ef', '-e'].includes(parts[1] ?? ''))) {
+    return jobResult(cmdStr, 'ps: supported forms: ps, ps aux, ps -e, ps -ef\n', 2)
+  }
+  for (const info of processView(jobTable, session).list()) {
+    lines.push(`${String(info.pid)}\t${info.command ?? '[hidden]'}`)
   }
   const out =
     lines.length > 0 ? new TextEncoder().encode(`${lines.join('\n')}\n`) : new Uint8Array()

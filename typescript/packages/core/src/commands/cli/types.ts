@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessView } from '../../process/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { Limit, PathSpec } from '../../types.ts'
 import type { NamespaceView, SessionView, StatPath } from '../../ops/types.ts'
@@ -71,6 +72,7 @@ export interface CLIDoors {
    * CLI may read it without breaking the tier rule.
    */
   sessionView?: SessionView
+  processes?: ProcessView
 }
 
 /**

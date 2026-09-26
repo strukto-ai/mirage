@@ -39,6 +39,7 @@ console.warn = (...messages: unknown[]) => {
   post({ kind: 'notice', message: messages.map(String).join(' ') })
 }
 const sync: SyncVFS = {
+  process: (payload) => call({ op: 'process', path: '', payload }) as string,
   read: (path) => call({ op: 'read', path }) as Uint8Array,
   stat: (path) => call({ op: 'stat', path }) as VFSStat,
   readdir: (path) => call({ op: 'readdir', path }) as VFSEntry[],

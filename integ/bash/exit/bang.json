@@ -113,10 +113,10 @@
         "nextcloud",
         "box"
       ],
-      "command": "sleep 0.05 & echo bg=$! && wait $!",
+      "command": "sleep 0.05 & p=$!; test \"$p\" -gt 0 && echo bg=pid; wait \"$p\"",
       "expect": {
         "exit": 0,
-        "stdout": "bg=1\n",
+        "stdout": "bg=pid\n",
         "stderr": ""
       }
     }

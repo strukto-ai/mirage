@@ -20,6 +20,7 @@ export default defineConfig({
     'src/plugin/service.ts',
     'src/plugin/fs.ts',
     'src/plugin/shell.ts',
+    'src/plugin/subprocess.ts',
     'src/plugin/spill-store.ts',
   ],
   format: ['esm'],
@@ -35,6 +36,7 @@ export default defineConfig({
     '@deepseek-ai/cordis',
     '@deepseek-ai/dsh-fs',
     '@deepseek-ai/dsh-shell',
+    '@deepseek-ai/dsh-subprocess',
     '@deepseek-ai/dsh-spill',
   ],
 })

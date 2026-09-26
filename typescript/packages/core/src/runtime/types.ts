@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessView } from '../process/types.ts'
+
 import type { IOResult, OpReport } from '../io/types.ts'
 import type { PathSpec, SetAttrFields } from '../types.ts'
 import type { RuntimeConfig } from './config.ts'
@@ -229,6 +231,7 @@ export interface RuntimeContext {
   readonly cwd: PathSpec
   readonly env: Readonly<Record<string, string>>
   readonly scope: ContextScope
+  readonly processes: ProcessView | null
 }
 
 /**

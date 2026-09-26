@@ -54,10 +54,6 @@ import { decodeAnsiC } from '../../shell/escapes.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { escapeGlob } from '../../utils/glob_walk.ts'
 
-// $$ reports the host process id where one exists (Node); browsers have
-// no process, so a fixed positive placeholder keeps the expansion usable.
-const REALM_PID: number = (globalThis as { process?: { pid?: number } }).process?.pid ?? 1
-
 export type ExpandChild = (node: TSNodeLike) => Promise<string>
 
 const PARAM_OPS: ReadonlySet<string> = new Set([
@@ -181,11 +177,9 @@ export function lookupVar(
     return String(lastExitCode)
   }
   if (name === '$') {
-    return String(REALM_PID)
+    return String(session.shellPid ?? session.processId ?? 0)
   }
   if (name === '!') {
-    // Deliberate divergence from bash: jobs are identified by job
-    // table id, not OS pid, so $! yields the id `wait`/`kill` accept.
     return session.lastBgJobId !== null ? String(session.lastBgJobId) : ''
   }
   if (/^\d+$/.test(name)) {

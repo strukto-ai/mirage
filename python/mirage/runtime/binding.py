@@ -19,6 +19,7 @@ from dataclasses import replace
 from types import MappingProxyType
 
 from mirage.ops.types import NamespaceView, SessionView
+from mirage.process.types import ProcessView
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, RuntimeContext
 from mirage.types import PathSpec
@@ -51,6 +52,7 @@ def capture_binding(binding: WorkspaceBinding,
                     *,
                     ns: NamespaceView | None = None,
                     session_view: SessionView | None = None,
+                    processes: ProcessView | None = None,
                     cwd: PathSpec | None = None,
                     env: dict[str, str] | None = None) -> RuntimeContext:
     """Capture callback context while reading live workspace state."""
@@ -98,7 +100,8 @@ def capture_binding(binding: WorkspaceBinding,
                           session_view=session_view,
                           cwd=cwd or PathSpec.from_str_path("/"),
                           env=MappingProxyType(dict(env or {})),
-                          scope=scope)
+                          scope=scope,
+                          processes=processes)
 
 
 class ScopedResolver:

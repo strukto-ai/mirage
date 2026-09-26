@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessHandle } from '../../process/handle.ts'
 import type { IOResult } from '../../io/types.ts'
 import type { ExecutionNode } from '../../workspace/types.ts'
 import { JobConsole } from '../console/index.ts'
@@ -43,6 +44,7 @@ export class Job {
   readonly command: string
   // null for jobs restored from a snapshot (already finished, no live task).
   task: Promise<void> | null
+  process: ProcessHandle | null = null
   readonly abort: AbortController | null
   readonly cwd: string
   readonly agent: string
@@ -79,5 +81,13 @@ export class Job {
     this.console = init.console ?? new JobConsole()
     if (init.status !== undefined) this.status = init.status
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
+  }
+
+  /**
+   * The managed PID `$!`, `jobs -p` and `wait -p` report. A job restored
+   * from a snapshot has no runner, so its job number stands in.
+   */
+  get pid(): number {
+    return this.process?.info.pid ?? this.id
   }
 }
