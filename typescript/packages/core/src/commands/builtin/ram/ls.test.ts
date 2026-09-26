@@ -79,7 +79,8 @@ describe('ls', () => {
     const vfs = new RAMVFS()
     seed(vfs, ['/tmp'], { '/tmp/file.txt': 'hello' })
     const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { args_l: true })
-    const line = out.split('\n')[0] ?? ''
+    expect(out.split('\n')[0]).toBe('total ?')
+    const line = out.split('\n')[1] ?? ''
     const parts = line.split(/\s+/)
     expect(parts[0]).toBe('-rw-r--r--')
     expect(parts).toContain('5')
@@ -103,7 +104,7 @@ describe('ls', () => {
       '/tmp/visible.txt': 'hi',
     })
     const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { all: true })
-    expect(out.trimEnd().split('\n').sort()).toEqual(['.hidden', 'visible.txt'])
+    expect(out.trimEnd().split('\n').sort()).toEqual(['.', '..', '.hidden', 'visible.txt'])
   })
 
   it('-r reverses name sort', async () => {
@@ -147,7 +148,7 @@ describe('ls', () => {
       '/tmp/m.txt': 'm',
     })
     const out = await runLs(vfs, [PathSpec.fromStrPath('/tmp')], { all: true, reverse: true })
-    expect(out.trimEnd().split('\n')).toEqual(['m.txt', 'a.txt', '.z_hidden'])
+    expect(out.trimEnd().split('\n')).toEqual(['m.txt', 'a.txt', '.z_hidden', '..', '.'])
   })
 
   it('recursive listing (-R) walks subdirectories with headers', async () => {

@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+from contextlib import aclosing
+
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mongodb._schema_json import (build_collection_schema_json,
@@ -26,7 +29,6 @@ from mirage.types import PathSpec
 
 async def _read_documents(accessor: MongoDBAccessor, match: ScopeMatch,
                           path: PathSpec, index: IndexCacheStore) -> bytes:
-    await entity_guard(accessor, match, path.virtual)
     chunks: list[bytes] = []
     async for chunk in read_stream(accessor, path, index):
         chunks.append(chunk)
@@ -57,3 +59,22 @@ read = make_read(
         "database_json": _read_database_json,
     },
 )
+
+
+async def stream_any(
+        accessor: MongoDBAccessor,
+        path: PathSpec,
+        index: IndexCacheStore = NULL_INDEX) -> AsyncIterator[bytes]:
+    """Serve every readable leaf through the same streaming interface.
+
+    Args:
+        accessor (MongoDBAccessor): backend handle.
+        path (PathSpec): resolved file.
+        index (IndexCacheStore): command-scoped listing cache.
+    """
+    if detect_scope(path).kind == "documents":
+        async with aclosing(read_stream(accessor, path, index)) as stream:
+            async for chunk in stream:
+                yield chunk
+    else:
+        yield await read(accessor, path, index)

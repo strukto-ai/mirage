@@ -181,7 +181,7 @@ describe('formatLsLong', () => {
       modified: null,
     })
     const [line] = formatLsLong([stat])
-    expect(line).toContain('Jan  1 00:00')
+    expect(line).toBe('-rw-r--r-- 1 - - 0 - x')
   })
 })
 

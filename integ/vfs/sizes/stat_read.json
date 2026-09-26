@@ -1273,7 +1273,7 @@
       "command": "f=/board/workspaces/Strukto__org_strukto/boards/Roadmap_Q3__brd_roadmap/lists/In_Progress__lst_doing/cards/Fix_login_redirect_loop__crd_login/comments.jsonl; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
       "expect": {
         "exit": 0,
-        "stdout": "cold=0\nread=186\nwarm=186\n",
+        "stdout": "cold=-\nread=186\nwarm=186\n",
         "stderr": ""
       }
     },
@@ -1351,7 +1351,7 @@
       "command": "f=/notion/pages/Notes__bbbb2222-3333-4444-5555-666677778888/page.json; echo \"cold=$(stat -c %s \"$f\")\"; echo \"read=$(cat \"$f\" | wc -c)\"; echo \"warm=$(stat -c %s \"$f\")\"",
       "expect": {
         "exit": 0,
-        "stdout": "cold=0\nread=1466\nwarm=1466\n",
+        "stdout": "cold=-\nread=1466\nwarm=1466\n",
         "stderr": ""
       },
       "clear_cache": true

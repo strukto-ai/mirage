@@ -57,7 +57,7 @@ async def test_ls_stat_and_find_render_user_and_profile():
              profiles={"admin": SessionProfile()},
              profile="admin")
     _, ls_out = await _run(ws, "ls -l /data/f.txt")
-    assert ls_out == "-rw-r--r-- 1 alice admin 5 Jan  1 00:00 /data/f.txt\n"
+    assert ls_out == "-rw-r--r-- 1 alice admin 5 - /data/f.txt\n"
     _, stat_out = await _run(ws, 'stat -c "%U %G" /data/f.txt')
     assert stat_out == "alice admin\n"
     _, find_out = await _run(ws, "find /data -type f -printf '%u %g %p\\n'")
@@ -70,7 +70,7 @@ async def test_ls_stat_and_find_render_user_and_profile():
 async def test_missing_user_or_profile_renders_as_dash():
     ws = _ws()
     _, ls_out = await _run(ws, "ls -l /data/f.txt")
-    assert ls_out == "-rw-r--r-- 1 - - 5 Jan  1 00:00 /data/f.txt\n"
+    assert ls_out == "-rw-r--r-- 1 - - 5 - /data/f.txt\n"
     _, stat_out = await _run(ws, 'stat -c "%U %G" /data/f.txt')
     assert stat_out == "- -\n"
 

@@ -38,7 +38,7 @@
       ]
     },
     {
-      "id": "ls_almost_all_matches_all",
+      "id": "ls_almost_all_omits_dot_entries",
       "seq": 960061,
       "targets": [
         "ram",
@@ -64,7 +64,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "[ \"$(ls -A /data/sub)\" = \"$(ls -a /data/sub)\" ] && echo same",
+      "command": "[ \"$(ls -A /data/sub)\" = \"$(ls -a /data/sub | tail -n +3)\" ] && echo same",
       "expect": {
         "exit": 0,
         "stdout": "same\n",

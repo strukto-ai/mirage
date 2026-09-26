@@ -141,7 +141,7 @@ describe('stat -c directive formatting', () => {
     expect(await render('%n', fs())).toBe('/data/f.txt')
     expect(await render('%N', fs())).toBe("'/data/f.txt'")
     expect(await render('%s', fs({ size: 42 }))).toBe('42')
-    expect(await render('%s', fs({ size: null }))).toBe('0')
+    expect(await render('%s', fs({ size: null }))).toBe('-')
     expect(await render('%F', fs())).toBe('regular file')
     expect(await render('%F', fs({ type: FileType.DIRECTORY }))).toBe('directory')
   })

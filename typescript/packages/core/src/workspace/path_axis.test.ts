@@ -530,7 +530,7 @@ describe('subtree mutations against hides', () => {
     // The session sees an empty directory; a not-empty refusal would
     // leak that something invisible exists, so the remnants go with it.
     const ws = await boxed({ paths: { hide: ['/repo/only/h'] } })
-    const empty = await ws.shell('ls -a /repo/only', { sessionId: 'rev' })
+    const empty = await ws.shell('ls -A /repo/only', { sessionId: 'rev' })
     expect(stdoutStr(empty)).toBe('')
     const removed = await ws.shell('rmdir /repo/only', { sessionId: 'rev' })
     expect(removed.exitCode).toBe(0)

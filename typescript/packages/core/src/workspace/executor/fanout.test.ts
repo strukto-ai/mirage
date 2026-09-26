@@ -658,7 +658,7 @@ describe('ls -R across a mount boundary', () => {
     const out = await runLine(mounts, 'ls -aRF /')
     expect(
       out.startsWith(
-        '/:\n.bash_history\ndev/\ntop.txt\nusr/\n\n/usr:\nbin/\n\n/dev:\nnull\nzero\n\n',
+        '/:\n./\n../\n.bash_history\ndev/\ntop.txt\nusr/\n\n/usr:\n./\n../\nbin/\n\n/dev:\n./\n../\nnull\nzero\n\n',
       ),
     ).toBe(true)
     expect(out.split('.bash_history').length).toBe(2)

@@ -86,7 +86,19 @@ async function wgetCommand(
       new IOResult({ stderr: q ? new Uint8Array() : ENC.encode('Remote file exists.\n') }),
     ]
   }
-  const dest = argsO ?? paths[0]?.virtual ?? url.slice(url.lastIndexOf('/') + 1)
+  if (argsO === '-' || (isHttpError(resp) && argsO === null)) {
+    return [
+      isHttpError(resp) ? null : resp.body,
+      new IOResult({
+        exitCode: isHttpError(resp) ? EXIT_SERVER_ERROR : 0,
+        stderr:
+          !q && isHttpError(resp)
+            ? ENC.encode(`ERROR ${String(resp.status)}: ${resp.reason}.\n`)
+            : new Uint8Array(),
+      }),
+    ]
+  }
+  const dest = argsO ?? paths[0]?.virtual ?? (url.slice(url.lastIndexOf('/') + 1) || 'index.html')
   // An error status still creates the destination, empty, the way GNU wget
   // truncates the -O target before it learns the response code.
   const data = isHttpError(resp) ? new Uint8Array() : resp.body

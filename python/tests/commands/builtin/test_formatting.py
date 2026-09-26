@@ -153,4 +153,4 @@ def test_format_ls_long_missing_modified():
                     content=ContentType.TEXT,
                     modified=None)
     [line] = format_ls_long([stat])
-    assert "Jan  1 00:00" in line
+    assert line == "-rw-r--r-- 1 - - 0 - x"

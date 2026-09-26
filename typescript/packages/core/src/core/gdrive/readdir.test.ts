@@ -17,7 +17,7 @@ import type * as DriveModule from '../google/drive.ts'
 
 vi.mock('../google/drive.ts', async () => {
   const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listFiles: vi.fn(), listSharedDrives: vi.fn() }
+  return { ...actual, listFiles: vi.fn(), listSharedDrives: vi.fn(), getFile: vi.fn() }
 })
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
@@ -414,4 +414,28 @@ describe('readdir sizes', () => {
     expect(doc?.size).toBeNull()
     expect(doc?.extra.source_size).toBe(9999)
   })
+})
+
+it.each([
+  ['0', 0],
+  ['42', 42],
+  [undefined, null],
+] as const)('preserves binary size %s independently of quota', async (size, expected) => {
+  const item = {
+    id: 'binary',
+    name: 'file.txt',
+    mimeType: 'text/plain',
+    quotaBytesUsed: '99',
+    ...(size === undefined ? {} : { size }),
+  }
+  vi.mocked(drive.listFiles).mockResolvedValue([item])
+  const accessor = makeAccessor()
+  const index = new RAMIndexCacheStore()
+  const rows = await readdir(accessor, PathSpec.fromStrPath('/drive', ''), index)
+  expect(rows).toEqual(['/drive/file.txt'])
+  const result = await stat(accessor, PathSpec.fromStrPath('/drive/file.txt', 'file.txt'), index)
+  expect(result.size).toBe(expected)
+  vi.mocked(drive.getFile).mockResolvedValue(item)
+  const uncached = await stat(accessor, PathSpec.fromStrPath('/drive/file.txt', 'file.txt'))
+  expect(uncached.size).toBe(expected)
 })

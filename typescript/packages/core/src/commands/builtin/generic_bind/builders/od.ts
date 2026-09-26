@@ -31,7 +31,7 @@ export const OD_BUILDER: Builder = {
       fl.asStr('address_radix') ?? 'o',
       skipValue !== undefined ? parseCount(skipValue, '-j') : 0,
       limitValue !== undefined ? parseCount(limitValue, '-N') : null,
-      fl.asList('format'),
+      fl.occurrences('format', 'c').map(([name, value]) => (name === 'c' ? 'c' : String(value))),
     )
   },
 }

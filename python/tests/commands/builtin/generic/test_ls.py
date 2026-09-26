@@ -390,7 +390,7 @@ async def test_ls_long_keeps_a_question_row_for_an_unstattable_entry():
                           stat=stat,
                           long=True)
     assert io.exit_code == LS_MINOR_PROBLEM
-    assert output.decode().splitlines()[1] == (
+    assert output.decode().splitlines()[2] == (
         "?????????? ? ? ? ?            ? b.txt")
     assert io.stderr == (
         b"ls: cannot access '/dir/b.txt': No such file or directory\n")
@@ -813,12 +813,12 @@ async def test_ls_long_widths_are_per_directory_block():
                          long=True)
     lines = output.decode().splitlines()
     assert lines[0] == "/a:"
-    assert " 1000 " in lines[1]
-    assert lines[2] == ""
-    assert lines[3] == "/b:"
+    assert " 1000 " in lines[2]
+    assert lines[3] == ""
+    assert lines[4] == "/b:"
     # GNU sizes its columns per block, so /b is not padded to /a's width.
-    assert " 1 " in lines[4]
-    assert "    1 " not in lines[4]
+    assert " 1 " in lines[6]
+    assert "    1 " not in lines[6]
 
 
 @pytest.mark.asyncio
@@ -1236,6 +1236,7 @@ async def test_access_time_sorts_and_shows_under_u():
                                            time_kind=LsTimeKind.ATIME,
                                            time_style="long-iso"))
     assert output.decode().splitlines() == [
+        "total ?",
         "-rw-r--r-- 1 1 2025-02-01 00:00 new.txt",
         "-rw-r--r-- 1 1 2025-06-01 00:00 old.txt",
     ]
@@ -1258,7 +1259,8 @@ async def test_long_columns_drop_owner_and_group_and_lead_with_question_marks(
                                            inode=True,
                                            context=True,
                                            time_style="long-iso"))
-    assert output.decode() == "? -rw-r--r-- 1 ? 42 2025-01-15 10:30 a.txt\n"
+    assert output.decode(
+    ) == "total ?\n? -rw-r--r-- 1 ? 42 2025-01-15 10:30 a.txt\n"
     output, _ = await ls([_spec("/d")],
                          readdir=readdir,
                          stat=stat,
@@ -1287,7 +1289,7 @@ async def test_time_styles_spell_an_old_time_as_gnu_does(style, expected):
                          columns=LsColumns(owner=False,
                                            group=False,
                                            time_style=style))
-    assert output.decode() == f"-rw-r--r-- 1 42 {expected} a.txt\n"
+    assert output.decode() == f"total ?\n-rw-r--r-- 1 42 {expected} a.txt\n"
 
 
 @pytest.mark.asyncio
@@ -1618,3 +1620,20 @@ def test_block_size_refusals_are_worded_as_gnu_words_them(value, message):
         parse_flags({"block_size": value})
     assert str(exc.value) == message
     assert exc.value.exit_code == 2
+
+
+@pytest.mark.asyncio
+async def test_empty_long_listing_and_dot_entries_do_not_recurse():
+    readdir, stat = _make_fs_backend({"/": _dir("/"), "/empty": _dir("empty")})
+    output, io = await ls([_spec("/empty")],
+                          readdir=readdir,
+                          stat=stat,
+                          long=True)
+    assert output == b"total 0\n"
+    output, io = await ls([_spec("/empty")],
+                          readdir=readdir,
+                          stat=stat,
+                          show_dot_entries=True,
+                          recursive=True)
+    assert output == b"/empty:\n.\n..\n"
+    assert io.exit_code == 0

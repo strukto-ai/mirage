@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
 from bson.json_util import RELAXED_JSON_OPTIONS, dumps
@@ -116,7 +117,7 @@ async def read_stream(
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
     batch_size: int = 100,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     scope = detect_scope(path)
     if scope.kind != "documents":
         raise enoent(path)
@@ -127,16 +128,18 @@ async def read_stream(
     await entity_guard(accessor, scope, path.virtual)
     elide = _elision_paths(accessor.config, scope.slots["database"],
                            scope.slots["name"])
-    async for doc in iter_documents(
-            accessor.client,
-            scope.slots["database"],
-            scope.slots["name"],
-            sort=[(PRIMARY_KEY, 1)],
-            batch_size=batch_size,
-    ):
-        if elide:
-            doc = _apply_elision(doc, elide)
-        yield (render_doc(doc) + "\n").encode()
+    async with aclosing(
+            iter_documents(
+                accessor.client,
+                scope.slots["database"],
+                scope.slots["name"],
+                sort=[(PRIMARY_KEY, 1)],
+                batch_size=batch_size,
+            )) as documents:
+        async for doc in documents:
+            if elide:
+                doc = _apply_elision(doc, elide)
+            yield (render_doc(doc) + "\n").encode()
 
 
 async def watch_stream(

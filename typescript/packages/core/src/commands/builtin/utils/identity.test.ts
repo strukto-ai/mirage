@@ -58,7 +58,7 @@ describe('identity in a workspace', () => {
       profile: 'admin',
     })
     expect((await run(ws, 'ls -l /data/f.txt'))[1]).toBe(
-      '-rw-r--r-- 1 alice admin 5 Jan  1 00:00 /data/f.txt\n',
+      '-rw-r--r-- 1 alice admin 5 - /data/f.txt\n',
     )
     expect((await run(ws, 'stat -c "%U %G" /data/f.txt'))[1]).toBe('alice admin\n')
     expect((await run(ws, "find /data -type f -printf '%u %g %p\\n'"))[1]).toBe(
@@ -70,9 +70,7 @@ describe('identity in a workspace', () => {
 
   it('renders a missing user or profile as "-"', async () => {
     const ws = await makeWs()
-    expect((await run(ws, 'ls -l /data/f.txt'))[1]).toBe(
-      '-rw-r--r-- 1 - - 5 Jan  1 00:00 /data/f.txt\n',
-    )
+    expect((await run(ws, 'ls -l /data/f.txt'))[1]).toBe('-rw-r--r-- 1 - - 5 - /data/f.txt\n')
     expect((await run(ws, 'stat -c "%U %G" /data/f.txt'))[1]).toBe('- -\n')
     await ws.close()
   })

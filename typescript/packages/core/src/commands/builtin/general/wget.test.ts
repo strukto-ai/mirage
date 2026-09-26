@@ -142,3 +142,20 @@ describe('wget', () => {
     expect(r.err).toContain('failed: Connection refused.')
   })
 })
+
+it('writes -O - to stdout without recording a file write', async () => {
+  const original = globalThis.fetch
+  try {
+    mockFetch('page')
+    const result = await runWget(['http://x.test/'], { args_O: '-', q: true })
+    expect(result.out).toBe('page')
+    expect(result.exitCode).toBe(0)
+    expect(result.writes).toEqual({})
+    mockFetch('missing', 404)
+    const failed = await runWget(['http://x.test/index.html'], { q: true })
+    expect(failed.exitCode).toBe(8)
+    expect(failed.writes).toEqual({})
+  } finally {
+    globalThis.fetch = original
+  }
+})

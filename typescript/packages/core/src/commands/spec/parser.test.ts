@@ -1754,3 +1754,17 @@ describe('ParsedArgs helpers', () => {
     expect(parsed.flag('--missing', 'def')).toBe('def')
   })
 })
+
+it.each([['-O', '-'], ['-O-']])('keeps wget stdout out of path operands', (...argv) => {
+  const parsed = parseCommand(specOf('wget'), [...argv, 'https://example.test/'], '/data', 'wget')
+  expect(parsed.flags['-O']).toBe('-')
+  expect(parsed.pathFlagValues).toEqual([])
+  const literal = parseCommand(
+    specOf('wget'),
+    ['-O', './-', 'https://example.test/'],
+    '/data',
+    'wget',
+  )
+  expect(literal.flags['-O']).toBe('/data/-')
+  expect(literal.pathFlagValues).toEqual(['/data/-'])
+})

@@ -41,7 +41,7 @@ model. The database directory always appears in the path, even when
 ```text
 /mongodb/
   <database>/
-    database.json                  # collections + views + counts
+    database.json                  # collection and view names
     collections/
       <collection>/
         schema.json                # sampled types + indexes + validator
@@ -71,6 +71,12 @@ Example:
         documents.jsonl
 ```
 
+Discovery lists databases, collections, views, and their fixed file names.
+It does not enumerate one filesystem entry per document. Schema inspection
+is separate from bulk document reads, so discovering a collection does not
+require exporting it. These paths and read contracts are shared by Python
+and TypeScript.
+
 ### documents.jsonl
 
 One JSON object per line, encoded with BSON
@@ -81,28 +87,44 @@ BSON-specific types round-trip through their canonical `$` wrappers:
 {"_id":{"$oid":"573a1390f29313caabcd4135"},"title":"Casablanca","released":{"$date":"1943-01-23T00:00:00Z"},"runtime":102}
 ```
 
-`cat` / `head` / `tail` / `grep` / `jq` all stream from this file; nothing
-materializes the full collection in memory.
+`cat` / `head` / `tail` / `grep` / `jq` can read this file through the same
+streaming interface. The cursor fetches documents in batches; `head` can stop
+after a prefix. Commands that need the whole input, such as `sort` or `jq -s`,
+can still buffer it. Use bounded reads when exploring a large collection.
 
 Because the file is rendered on demand, `stat` / `ls -l` report no size and
 `du` returns `0` for it (computing the real size would require rendering the
 whole collection). Use `wc -c documents.jsonl` for the actual rendered byte
-count; `stat` still exposes `document_count` for the number of documents.
+count, or `wc -l documents.jsonl` for an exact document count (which can scan
+the collection). `stat -c %s` prints `-` for an unknown size and `0` only for
+a known empty file. Missing dates also display as `-`.
+
+Long directory listings include a `total` row. GNU `ls` reports allocated disk
+blocks there; the VFS does not expose allocation metadata, so Mirage prints
+`total ?` for nonempty listings and `total 0` for empty listings. This is an
+intentional divergence from GNU output, not a sum of rendered file sizes.
+
+`stat` checks existence and type without counting documents, sampling fields,
+or fetching indexes. This keeps `ls`, `find`, and opening a stream independent
+of the collection size. The same unknown-size convention applies to Postgres
+row exports and other rendered VFS files.
 
 ### schema.json
 
-Generated from a 100-document `$sample`. Includes:
+Generated from the first 100 documents in `_id` order. Includes:
 
 - field path → observed BSON type frequencies (nested paths unioned across the sample)
-- indexes from `listIndexes` plus access counts from `$indexStats`
+- index definitions from `listIndexes`, without volatile access counters
 - the `$jsonSchema` validator if one is registered
 
-Views skip the index and validator sections.
+Repeated reads of unchanged data produce identical bytes. Schema reads do
+not include document counts or `$indexStats`, so reading a schema cannot
+change its own content. Views skip indexes.
 
 ### database.json
 
-Lists every collection and view under the database with their document
-counts. Useful for `cat /mongodb/<db>/database.json` to get an overview
+Lists collection and view names using two catalog listings, without a
+per-collection count. Useful for `cat /mongodb/<db>/database.json` to get an overview
 without recursing into each entity.
 
 ### Elided fields
@@ -142,7 +164,7 @@ memory ahead of the consumer.
 | `grep` (collection/db level) | Every file under the directory, each read as `cat` renders it; no result cap |
 | `jq`                         | Inherits the streaming `cat` source                               |
 | `wc`                         | Uses `countDocuments()` server-side; zero download                |
-| `stat`                       | Metadata only (doc count, indexes; views skip the index lookup)   |
+| `stat`                       | Existence and type only; no counts or index queries   |
 
 ## Smart Commands
 
@@ -346,6 +368,6 @@ Standard commands available on the mounted MongoDB tree:
 | `grep` / `rg`   | A directory operand searches every file under it (documents, schema.json, database.json, views); a file streams |
 | `jq`            | Query JSON; use `.[]` prefix when iterating JSONL files                 |
 | `wc`            | Smart: uses `countDocuments()` server-side                              |
-| `stat`          | Metadata (doc count, indexes; views skip the index lookup)              |
+| `stat`          | Existence and type only; no counts or index queries              |
 | `find`          | List databases/collections/views with `-name`, `-maxdepth`              |
 | `tree`          | Directory tree view                                                     |

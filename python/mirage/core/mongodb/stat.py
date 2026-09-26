@@ -12,17 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
-from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.cache.index import IndexCacheStore
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import make_stat
-from mirage.core.mongodb.client import count_documents, get_indexes, is_view
 from mirage.core.mongodb.readdir import database_guard, entity_guard, readdir
 from mirage.core.mongodb.scope import detect_scope, entity_kind
-from mirage.core.mongodb.types import EntityKind
-from mirage.types import ContentType, FileStat, FileType, PathSpec
 
 
 def _database_extra(match: ScopeMatch) -> dict[str, str]:
@@ -44,54 +37,6 @@ def _entity_extra(match: ScopeMatch) -> dict[str, str]:
     }
 
 
-async def _entity_stat(accessor: MongoDBAccessor, match: ScopeMatch,
-                       path: PathSpec, index: IndexCacheStore) -> FileStat:
-    await entity_guard(accessor, match, path.virtual)
-    database = match.slots["database"]
-    name = match.slots["name"]
-    doc_count = await count_documents(accessor.client, database, name)
-    return FileStat(
-        name=name,
-        type=FileType.DIRECTORY,
-        extra={
-            "database": database,
-            "kind": entity_kind(match),
-            "name": name,
-            "document_count": doc_count,
-        },
-    )
-
-
-async def _documents_stat(accessor: MongoDBAccessor, match: ScopeMatch,
-                          path: PathSpec, index: IndexCacheStore) -> FileStat:
-    await entity_guard(accessor, match, path.virtual)
-    database = match.slots["database"]
-    name = match.slots["name"]
-    view = (entity_kind(match) == EntityKind.VIEW
-            or await is_view(accessor.client, database, name))
-    doc_count = await count_documents(accessor.client, database, name)
-    if view:
-        index_info: list[dict[str, Any]] = []
-    else:
-        indexes = await get_indexes(accessor.client, database, name)
-        index_info = [{
-            "name": idx.get("name"),
-            "keys": dict(idx.get("key", {}))
-        } for idx in indexes]
-    return FileStat(
-        name="documents.jsonl",
-        type=FileType.FILE,
-        content=ContentType.TEXT,
-        extra={
-            "database": database,
-            "name": name,
-            "kind": EntityKind.VIEW if view else EntityKind.COLLECTION,
-            "document_count": doc_count,
-            "indexes": index_info,
-        },
-    )
-
-
 stat = make_stat(
     detect_scope,
     readdir,
@@ -100,15 +45,15 @@ stat = make_stat(
         "kind_dir": database_guard,
         "database_json": database_guard,
         "schema_json": entity_guard,
+        "entity": entity_guard,
+        "documents": entity_guard,
     },
     extras={
         "database": _database_extra,
         "kind_dir": _kind_dir_extra,
         "database_json": _database_extra,
         "schema_json": _entity_extra,
-    },
-    overrides={
-        "entity": _entity_stat,
-        "documents": _documents_stat,
+        "entity": _entity_extra,
+        "documents": _entity_extra,
     },
 )
