@@ -58,3 +58,5 @@ class SpawnRequest:
     argv: tuple[str, ...]
     cwd: PathSpec | None = None
     env: dict[str, str] | None = None
+    replace_env: bool = False
+    merge_stderr: bool = False

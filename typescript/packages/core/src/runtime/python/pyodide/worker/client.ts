@@ -1,5 +1,3 @@
-import { PathSpec } from '../../../../types.ts'
-import { decodeBase64, encodeBase64 } from '../../../../utils/base64.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +20,7 @@ import { RuntimeVFS } from '../../../vfs.ts'
 import { applyMutation } from '../vfs/journal.ts'
 import type { FlushFailure } from '../vfs/types.ts'
 import { respond } from './transport.ts'
+import { GuestProcessTable } from './process.ts'
 import type {
   ExecuteRequest,
   VfsRequest,
@@ -144,6 +143,9 @@ export class PyodideWorkerClient {
     const vfs = new RuntimeVFS(context.dispatch, context.resolver)
     const { dispatch, scope } = context
     const responses = new Set<Promise<void>>()
+    const processes = new GuestProcessTable(
+      request.method === 'run' ? context : { ...context, processes: null },
+    )
     const cells = new Int32Array(this.interruptBuffer)
     Atomics.store(cells, 3, 0)
     const abort = (): void => {
@@ -163,15 +165,7 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = respond(message.buffer, () =>
-            scope.run(() =>
-              this.operation(
-                message,
-                vfs,
-                dispatch,
-                request.method === 'run' ? context : { ...context, processes: null },
-                signal,
-              ),
-            ),
+            scope.run(() => this.operation(message, vfs, dispatch, processes)),
           )
           responses.add(response)
           void response.then(() => {
@@ -193,6 +187,7 @@ export class PyodideWorkerClient {
       signal?.removeEventListener('abort', abort)
       // An interrupted guest can finish while a backend mutation is still pending.
       // Keep the runtime queue closed until every response has finished.
+      await processes.close()
       await Promise.all(responses)
     }
   }
@@ -229,43 +224,11 @@ export class PyodideWorkerClient {
     request: VfsRequest,
     vfs: RuntimeVFS,
     dispatch: BridgeDispatchFn,
-    context: RuntimeContext,
-    signal?: AbortSignal,
+    processes: GuestProcessTable,
   ): Promise<unknown> {
     switch (request.op) {
-      case 'process': {
-        if (context.processes?.spawn === undefined)
-          throw new Error('runtime has no process spawn door')
-        const data = JSON.parse(request.payload ?? '{}') as {
-          argv: string[]
-          input: string
-          cwd: string
-          env?: Record<string, string>
-        }
-        if (!Array.isArray(data.argv) || !data.argv.every((arg) => typeof arg === 'string'))
-          throw new Error('invalid argv')
-        signal?.throwIfAborted()
-        const child = context.processes.spawn({
-          argv: data.argv,
-          cwd: PathSpec.fromStrPath(data.cwd),
-          ...(data.env === undefined ? {} : { env: data.env }),
-        })
-        const abort = () => {
-          child.terminate()
-        }
-        signal?.addEventListener('abort', abort, { once: true })
-        try {
-          if (signal?.aborted) abort()
-          const result = await child.communicate(decodeBase64(data.input))
-          return JSON.stringify({
-            stdout: encodeBase64(result.stdout),
-            stderr: encodeBase64(result.stderr),
-            returncode: result.exitCode,
-          })
-        } finally {
-          signal?.removeEventListener('abort', abort)
-        }
-      }
+      case 'process':
+        return processes.call(request.payload ?? '{}')
       case 'read':
         return vfs.read(request.path)
       case 'stat':

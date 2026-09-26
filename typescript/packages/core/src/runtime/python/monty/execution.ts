@@ -1,5 +1,3 @@
-import { GuestProcesses } from '../../../process/bridge.ts'
-import type { ProcessView } from '../../../process/types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -82,11 +80,7 @@ export class MontyExecution {
   private poolPromise: Promise<MontyPoolLike> | null = null
   private readonly evalSessions = new Map<string, MontySessionLike>()
 
-  async run(
-    args: RunArgs,
-    vfs: MontyVFS | null,
-    processes: ProcessView | null = null,
-  ): Promise<RunResult> {
+  async run(args: RunArgs, vfs: MontyVFS | null): Promise<RunResult> {
     const pool = await this.ensurePool()
     const session = await pool.checkout()
     // Monty executes on its own worker process, so the event loop stays
@@ -96,7 +90,7 @@ export class MontyExecution {
     const workerPid = session.workerPid
     const interruption = this.installInterruption(args.signal, args.timeoutSeconds)
     try {
-      const run = this.feedOne(session, args.code, args, vfs, processes)
+      const run = this.feedOne(session, args.code, args, vfs)
       const winner = await Promise.race([run, interruption.promise])
       if (winner !== INTERRUPTED) return winner
       run.catch(() => undefined)
@@ -296,7 +290,6 @@ export class MontyExecution {
     code: string,
     args: RunArgs,
     vfs: MontyVFS | null,
-    processes: ProcessView | null,
   ): Promise<RunResult> {
     const module = await this.loadModule()
     const out: string[] = []
@@ -304,10 +297,6 @@ export class MontyExecution {
     const options: Record<string, unknown> = {
       // argv[0] is the program's own name when the caller has one (a
       // CLI install's head word), else the interpreter's placeholder.
-      externalLookup: {
-        mirage_run: (argv: string[], input?: string, cwd?: string) =>
-          new GuestProcesses(processes).run(argv, input, cwd),
-      },
       inputs: { argv: [args.prog ?? DEFAULT_PROG, ...args.args], stdin: args.stdin },
       cwd: args.cwd?.virtual,
       printCallback: (stream: 'stdout' | 'stderr', text: string) => {

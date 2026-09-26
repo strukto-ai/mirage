@@ -35,4 +35,6 @@ export interface SpawnRequest {
   readonly argv: readonly string[]
   readonly cwd?: PathSpec
   readonly env?: Readonly<Record<string, string>>
+  readonly replaceEnv?: boolean
+  readonly mergeStderr?: boolean
 }

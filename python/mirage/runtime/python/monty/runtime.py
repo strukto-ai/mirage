@@ -100,9 +100,7 @@ class MontyRuntime(PythonRuntime, EvaluatorMixin):
                   and context.processes.depth > 0)
         execution = MontyExecution() if nested else self._execution
         try:
-            result = await execution.run(
-                args, self._bridge(args.env, context),
-                context.processes if context is not None else None)
+            result = await execution.run(args, self._bridge(args.env, context))
         finally:
             if execution is not self._execution:
                 await execution.close()

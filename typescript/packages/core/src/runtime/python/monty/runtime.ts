@@ -92,7 +92,6 @@ export class MontyRuntime extends PythonRuntime implements Evaluator {
       .run(
         args.cwd === undefined && context !== undefined ? { ...args, cwd: context.cwd } : args,
         this.perRunVfs(context),
-        context?.processes ?? null,
       )
       .finally(async () => {
         if (execution !== this.execution) await execution.close()

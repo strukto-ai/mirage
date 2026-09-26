@@ -25,8 +25,9 @@ import { type OpKwargs, OpsRegistry } from '../../ops/registry.ts'
 import type { VFS } from '../../vfs/base.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
+import { Consumer } from '../lookup/types.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
-import { programNote, programs } from '../lookup/lookup.ts'
+import { lookup, program, programNote, programs } from '../lookup/lookup.ts'
 import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { cliSpecFor } from '../../commands/cli/specs.ts'
@@ -87,9 +88,12 @@ import {
   captureSessionContext,
   getCurrentSessionUnlessForeign,
   runWithSession,
+  runAsProgram,
 } from '../../context/session_context.ts'
 import { namespaceViewOf } from '../executor/command/run.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { makeVar, VarAttr } from '../../shell/variable.ts'
+import { enoent } from '../../utils/errors.ts'
 import { sessionView, envSnapshot } from '../session/state.ts'
 import type { BridgeDispatchFn } from '../../runtime/types.ts'
 import { MontyUnavailableError } from '../../runtime/python/monty/index.ts'
@@ -112,7 +116,7 @@ import type { ResolvedSource } from '../../secrets/types.ts'
 import { DEFAULT_PROFILE } from '../session/constants.ts'
 import { SessionManager } from '../session/manager.ts'
 import type { WorkspaceFields, WorkspaceStateStore } from '../store/base.ts'
-import { varsFromEntries, type SessionState } from '../session/session.ts'
+import { varsFromEnv, varsFromEntries, type SessionState } from '../session/session.ts'
 import {
   parseProfileMounts,
   parseProfilePolicy,
@@ -611,18 +615,37 @@ export class Workspace {
 
   private spawnForSession(request: SpawnRequest, session: SessionState): ChildProcess {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    if (!session.processes.spawn) throw new Error('process spawn is not permitted')
+    if (!session.processes.spawn)
+      throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
     if (session.processDepth >= 16) throw new Error('process nesting limit (16) reached')
     const argv = [...request.argv]
     literalTree(argv)
+    const head = argv[0] ?? ''
+    const name = head.startsWith(`${BIN_PREFIX}/`) ? head.slice(BIN_PREFIX.length + 1) : head
+    if (!name.includes('/')) {
+      if (
+        program(name, session, this.registry) === null &&
+        lookup(name, session, this.registry) !== Consumer.EXTERNAL
+      )
+        throw enoent(head)
+      argv[0] = name
+    }
     const cwd = request.cwd ?? PathSpec.fromStrPath(session.cwd)
-    const child = session.fork({ cwd: cwd.virtual, processDepth: session.processDepth + 1 })
+    const inheritedEnv = request.replaceEnv === true ? {} : envSnapshot(session)
+    const child = session.fork({
+      cwd: cwd.virtual,
+      processDepth: session.processDepth + 1,
+      vars: varsFromEnv(inheritedEnv),
+      functions: {},
+    })
+    if (!Object.hasOwn(inheritedEnv, 'PWD')) child.vars.PWD = makeVar(cwd.virtual, new Set())
+    child.aliases = {}
     const scope = new ContextScope([
       ...captureSessionContext(child, this.sessionManager),
       ...captureRecordingContext(),
     ])
     const input = new ProcessInput(),
-      output = new ProcessOutput(),
+      output = new ProcessOutput(request.mergeStderr),
       abort = new AbortController()
     const env = request.env === undefined ? undefined : { ...request.env }
     const owner = this.sessionManager.get(session.sessionId)
@@ -645,21 +668,26 @@ export class Workspace {
               'session changed during hydration; retry spawn after ensureSessionsLoaded',
             )
           admission.checkSpawn()
-          const result = await scope.run(() =>
-            executeLine(
-              this.executeEnv(),
-              shellJoin(argv),
-              {
-                sessionId: session.sessionId,
-                cwd: cwd.virtual,
-                ...(env === undefined ? {} : { env }),
-                stdin: input.stream(),
-                sink: output,
-                signal: abort.signal,
-              },
-              argv,
-            ),
-          )
+          const result = await scope.run(async () => {
+            const view = sessionView(child, this.policies)
+            for (const [name, value] of Object.entries(env ?? {})) {
+              await view.set(name, value)
+              await view.mark(name, VarAttr.Export, true)
+            }
+            return runAsProgram(child, () =>
+              executeLine(
+                this.executeEnv(),
+                shellJoin(argv),
+                {
+                  sessionId: session.sessionId,
+                  stdin: input.stream(),
+                  sink: output,
+                  signal: abort.signal,
+                },
+                argv,
+              ),
+            )
+          })
           if (!(result instanceof ExecuteResult)) throw new Error('spawn returned a provision plan')
           return result.exitCode
         } finally {
@@ -673,7 +701,8 @@ export class Workspace {
     return new ChildProcess(process, input, output, () => {
       process.terminate()
       for (const child of this.processes.live())
-        if (child.info.groupId === process.info.pid) child.terminate()
+        if (child.info.groupId === process.info.pid || child.info.parentPid === process.info.pid)
+          child.terminate()
     })
   }
 

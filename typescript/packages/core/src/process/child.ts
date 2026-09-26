@@ -17,7 +17,7 @@ export class ChildProcess {
   constructor(
     private readonly process: ProcessHandle,
     readonly stdin: ProcessInput,
-    output: ProcessOutput,
+    private readonly output: ProcessOutput,
     private readonly cancel: () => void,
   ) {
     void process.join().then(() => {
@@ -29,6 +29,12 @@ export class ChildProcess {
   }
   get pid(): number {
     return this.process.info.pid
+  }
+  closeOutput(stream: 'stdout' | 'stderr'): void {
+    this.output[stream].stop()
+  }
+  poll(): number | null {
+    return this.process.info.exitCode
   }
   terminate(): void {
     this.cancel()

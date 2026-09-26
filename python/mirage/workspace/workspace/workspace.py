@@ -30,7 +30,8 @@ from mirage.commands.cli import CLISpec
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.context import (get_current_session_for,
                             get_current_session_unless_foreign,
-                            reset_current_session, set_current_session)
+                            reset_current_session, reset_program_invocation,
+                            set_current_session, set_program_invocation)
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -61,6 +62,7 @@ from mirage.shell.console import Channel
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.shell.literal import literal_tree
+from mirage.shell.variable import VarAttr
 from mirage.types import (CacheFacts, DriftPolicy, FileEvent, FileStat,
                           JsonValue, MountBackend, MountMode, PathSpec,
                           ReadSpec, parse_mount_mode)
@@ -73,7 +75,8 @@ from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher import Dispatcher
 from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.file_prompt import build_file_prompt
-from mirage.workspace.lookup import program_note, programs
+from mirage.workspace.lookup import lookup, program, program_note, programs
+from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.store import NamespaceStore
@@ -83,7 +86,7 @@ from mirage.workspace.session import SessionManager, SessionState, SessionStore
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (apply_profile, compile_profile,
                                               resolve_profile, with_inline)
-from mirage.workspace.session.session import vars_from_entries
+from mirage.workspace.session.session import vars_from_entries, vars_from_env
 from mirage.workspace.session.state import env_snapshot, session_view
 from mirage.workspace.session.validate import check_cli_verbs
 from mirage.workspace.snapshot import (DriftQueue, apply_state_dict,
@@ -739,10 +742,25 @@ class Workspace:
             raise RuntimeError("process nesting limit (16) reached")
         argv = tuple(request.argv)
         literal_tree(argv)
+        head = argv[0]
+        name = head[len(BIN_PREFIX) + 1:] if head.startswith(BIN_PREFIX +
+                                                             "/") else head
+        if "/" not in name:
+            if (program(name, session, self._registry) is None and lookup(
+                    name, session, self._registry) != Consumer.EXTERNAL):
+                raise FileNotFoundError(2, "No such file or directory", head)
+            argv = (name, *argv[1:])
         cwd = request.cwd or PathSpec.from_str_path(session.cwd)
+        inherited_env = {} if request.replace_env else env_snapshot(session)
         child = session.fork(cwd=cwd.virtual,
+                             vars=vars_from_env(inherited_env),
+                             functions={},
                              process_depth=session.process_depth + 1)
-        input_stream, output = ProcessInput(), ProcessOutput()
+        if "PWD" not in inherited_env:
+            child.vars["PWD"] = replace(child.vars["PWD"], attrs=frozenset())
+        child.aliases = {}
+        input_stream, output = ProcessInput(), ProcessOutput(
+            request.merge_stderr)
         env = dict(request.env) if request.env is not None else None
         owner = self._session_mgr.get(session.session_id)
         admission = self.processes.view(session.session_id,
@@ -756,15 +774,20 @@ class Workspace:
                     "ensure_sessions_loaded")
             admission.check_spawn()
             token = set_current_session(child, self._session_mgr)
+            program_token = set_program_invocation(child)
             try:
+                view = session_view(child, self.policies)
+                for name, value in (env or {}).items():
+                    await view.set(name, value)
+                    await view.mark(name, VarAttr.EXPORT, True)
                 result = await execute_line(self,
                                             shell_join(argv),
                                             child.session_id,
                                             input_stream.stream(),
                                             False,
                                             None,
-                                            cwd.virtual,
-                                            env,
+                                            None,
+                                            None,
                                             None,
                                             True,
                                             None,
@@ -779,6 +802,7 @@ class Workspace:
                                   materialize(result.stderr))
                 return result.exit_code
             finally:
+                reset_program_invocation(program_token)
                 reset_current_session(token)
                 input_stream.stop()
                 output.end()
@@ -794,7 +818,8 @@ class Workspace:
         def cancel() -> None:
             process.terminate()
             for child_process in self.processes.live():
-                if child_process.info.group_id == process.info.pid:
+                if (child_process.info.group_id == process.info.pid
+                        or child_process.info.parent_pid == process.info.pid):
                     child_process.terminate()
             input_stream.stop()
             output.stop()

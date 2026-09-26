@@ -72,20 +72,50 @@ async def test_profile_process_views_and_revocation():
 
 
 @pytest.mark.asyncio
-async def test_monty_guest_nested_process_uses_same_admission():
+async def test_monty_keeps_unsupported_subprocess_import():
     ws = Workspace({}, runtimes=[MontyRuntime()], mode=MountMode.EXEC)
     try:
-        code = ('r = await mirage_run(["printf", "%s", "$(literal)"]); '
-                'print(r["stdout"])')
         result = await asyncio.wait_for(
-            ws.spawn(SpawnRequest(('python', '-c', code))).communicate(), 20)
-        assert result.exit_code == 0, result.stderr
-        assert result.stdout == b'$(literal)\n'
-        nested = ('print((await mirage_run(["python", "-c", "print(42)"]))'
-                  '["stdout"])')
-        result = await asyncio.wait_for(
-            ws.spawn(SpawnRequest(('python', '-c', nested))).communicate(), 20)
-        assert result.exit_code == 0, result.stderr
-        assert result.stdout == b'42\n\n'
+            ws.spawn(SpawnRequest(
+                ('python', '-c', 'import subprocess'))).communicate(), 20)
+        assert result.exit_code == 1
+        assert b"ModuleNotFoundError" in result.stderr
+        result = await ws.spawn(
+            SpawnRequest(('python', '-c', 'mirage_run([])'))).communicate()
+        assert result.exit_code == 1
+        assert b"NameError" in result.stderr
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_spawn_uses_programs_and_exported_environment():
+    ws = Workspace({}, runtimes=[])
+    try:
+        await ws.shell('LOCAL=private; export PARENT=outer; '
+                       'f() { echo wrong; }; printf() { echo wrong; }')
+        for name in ('f', 'cd', 'missing'):
+            with pytest.raises(FileNotFoundError):
+                ws.spawn(SpawnRequest((name, )))
+        result = await ws.spawn(SpawnRequest(
+            ('printf', '-v', 'name', 'value'))).communicate()
+        assert result.stdout == b'-v'
+        result = await ws.spawn(SpawnRequest(
+            ('printenv', 'LOCAL'))).communicate()
+        assert result.exit_code == 1
+        result = await ws.spawn(
+            SpawnRequest(('printenv', 'PARENT'), env={},
+                         replace_env=True)).communicate()
+        assert result.exit_code == 1
+        result = await ws.spawn(
+            SpawnRequest(('printenv', 'PARENT'), env={'PARENT':
+                                                      'child'})).communicate()
+        assert result.stdout == b'child\n'
+        assert (await ws.shell('printf %s "$PARENT"')).stdout == b'outer'
+        result = await ws.spawn(
+            SpawnRequest(('sh', '-c', 'printf out; printf err >&2'),
+                         merge_stderr=True)).communicate()
+        assert result.stdout == b'outerr'
+        assert result.stderr == b''
     finally:
         await ws.close()

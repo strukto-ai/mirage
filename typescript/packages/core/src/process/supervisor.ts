@@ -101,7 +101,8 @@ export class ProcessSupervisor {
         return entry === undefined ? null : visible(entry.handle)
       },
       checkSpawn: () => {
-        if (!valid() || !permissions().spawn) throw new Error('process spawn is not permitted')
+        if (!valid() || !permissions().spawn)
+          throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
       },
       terminate: (pid: number) => {
         const entry = this.runners.get(pid)

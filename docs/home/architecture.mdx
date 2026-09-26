@@ -127,8 +127,8 @@ by hydration fails a pending spawn instead of executing with stale permissions.
 | Runtime or entry point | Managed execution | Guest child execution |
 | --- | --- | --- |
 | Builtins, commands, registered CLIs | Shared supervisor and admission | Scoped process door for handlers |
-| Monty, both SDKs | Managed worker execution | `await mirage_run(argv, input, cwd)`; returns text stdout, stderr and returncode |
-| Pyodide, TypeScript | Managed execution | `subprocess.run(argv, ...)` in a shared-memory worker |
+| Monty, both SDKs | Managed worker execution | No subprocess module; import fails normally |
+| Pyodide, TypeScript | Managed execution | `subprocess.Popen` and standard helpers in a shared-memory worker |
 | QuickJS and WASI | Managed execution | No subprocess ABI supplied by Mirage |
 | Local Python and process runtimes | Tracks the admitted invocation | Native subprocess APIs retain native reach and bypass the guest bridge |
 | SSH, Docker, E2B, Daytona, SmolVM, Sandlock | Existing runtime routing, where that SDK provides the adapter | Native provider behavior; no generic descendant-control guarantee |
@@ -139,8 +139,18 @@ maximum nesting depth of 16. A parent never waits for a child queued behind its
 own interpreter. Pyodide blocks only its worker for the synchronous Python API;
 the host answers asynchronously. Guest mutations flush before spawning and guest
 file caches invalidate afterward. A host without shared-memory worker support
-gets an explicit unsupported error. Pyodide supports `run` with argv, input,
-PIPE/DEVNULL/inherited output, text conversion, cwd and check; it does not supply
-`Popen`, PTYs, shell=True, or the remaining Popen options. Its explicit env follows
-Mirage's environment-overlay convention. Provider adapters may buffer their output;
+gets an explicit unsupported error. Pyodide supplies `Popen`, so standard `run`,
+`call` and `check_output` remain ordinary Python code. Live pipes, polling, waits,
+communication, timeout retry, `shell=True`, merged stderr, and text conversion
+use the supervisor. An explicit Python `env` replaces the inherited environment.
+Program lookup uses the profile-visible executable view; shell functions and
+shell-only builtins do not participate. Host `spawn` retains environment overlay
+by default and exposes `replace_env` / `replaceEnv` for adapters.
+
+Unfinished Pyodide children are cancelled and joined when their guest invocation
+ends. Stdin inheritance transfers buffered unread input, not a shared kernel
+descriptor. Native descriptor passing, PTYs, signal handlers, and Python's
+`asyncio` subprocess transport are not implemented. TERM and KILL both request
+managed cancellation; their negative return codes identify the request, not a
+native OS signal delivery. Provider adapters may buffer their output;
 the byte-pipe API does not turn a buffered provider into an incremental one.

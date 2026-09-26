@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from mirage.io.stream import materialize
 from mirage.process.handle import ProcessHandle
@@ -30,6 +31,7 @@ class ChildProcess:
             output.end()
 
         process.task.add_done_callback(finished)
+        self._output = output
         self._process = process
         self.stdin = stdin
         self.stdout: AsyncIterator[bytes] = output.stdout.stream()
@@ -39,6 +41,13 @@ class ChildProcess:
     @property
     def pid(self) -> int:
         return self._process.info.pid
+
+    def close_output(self, stream: Literal["stdout", "stderr"]) -> None:
+        (self._output.stdout
+         if stream == "stdout" else self._output.stderr).stop()
+
+    def poll(self) -> int | None:
+        return self._process.info.exit_code
 
     def terminate(self) -> None:
         self._cancel()

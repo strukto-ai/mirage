@@ -10,6 +10,7 @@ class ProcessInput:
     def __init__(self) -> None:
         self.pipe = PipeConsole()
         self.closed = False
+        self.bytes_read = 0
 
     async def write(self, data: bytes) -> None:
         if not data:
@@ -27,19 +28,23 @@ class ProcessInput:
         self.close()
         self.pipe.close_reader()
 
-    def stream(self) -> AsyncIterator[bytes]:
-        return self.pipe.stream()
+    async def stream(self) -> AsyncIterator[bytes]:
+        async for chunk in self.pipe.stream():
+            self.bytes_read += len(chunk)
+            yield chunk
 
 
 class ProcessOutput(JobConsole):
 
-    def __init__(self) -> None:
+    def __init__(self, merge_stderr: bool = False) -> None:
         super().__init__()
+        self.merge_stderr = merge_stderr
         self.stdout = ProcessInput()
         self.stderr = ProcessInput()
 
     async def emit(self, channel: Channel, data: bytes) -> None:
-        target = self.stderr if channel == Channel.STDERR else self.stdout
+        target = (self.stderr if channel == Channel.STDERR
+                  and not self.merge_stderr else self.stdout)
         await target.write(data)
 
     def end(self) -> None:

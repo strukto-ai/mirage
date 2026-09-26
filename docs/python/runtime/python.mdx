@@ -259,16 +259,11 @@ not left burning in the background.
 
 ## Managed child commands
 
-Monty exposes an asynchronous host callback; it does not import CPython's native
-`subprocess` implementation:
+Monty keeps its normal module boundary: `import subprocess` raises
+`ModuleNotFoundError`. Mirage tracks the Monty invocation, but does not inject a
+replacement guest API. The TypeScript SDK's Pyodide runtime wires ordinary
+Python `subprocess.Popen` and its standard helpers into the workspace.
 
-```python
-result = await mirage_run(["printf", "%s", "hello"])
-print(result["stdout"])
-```
-
-The child crosses the workspace's command admission gate and inherits the
-calling session's confinement. Nested Python calls use separate worker capacity.
 See [managed execution](/home/architecture#managed-execution) for process views,
 lifetimes and provider limits.
 

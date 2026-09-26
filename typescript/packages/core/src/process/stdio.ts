@@ -5,6 +5,7 @@ import { PipeClosed } from '../shell/errors.ts'
 export class ProcessInput {
   private readonly pipe = new PipeConsole()
   private closed = false
+  bytesRead = 0
 
   async write(data: Uint8Array): Promise<void> {
     if (data.byteLength === 0) return
@@ -21,8 +22,11 @@ export class ProcessInput {
     this.close()
     this.pipe.closeReader()
   }
-  stream(): AsyncIterable<Uint8Array> {
-    return this.pipe.stream()
+  async *stream(): AsyncIterable<Uint8Array> {
+    for await (const chunk of this.pipe.stream()) {
+      this.bytesRead += chunk.byteLength
+      yield chunk
+    }
   }
 }
 
@@ -30,8 +34,12 @@ export class ProcessOutput extends JobConsole {
   readonly stdout = new ProcessInput()
   readonly stderr = new ProcessInput()
 
+  constructor(private readonly mergeStderr = false) {
+    super()
+  }
+
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    await (channel === Channel.STDERR ? this.stderr : this.stdout).write(data)
+    await (channel === Channel.STDERR && !this.mergeStderr ? this.stderr : this.stdout).write(data)
   }
 
   end(): void {
