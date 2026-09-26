@@ -51,6 +51,11 @@
     "_test_util": "The FakeAirtable fetch fake shared by the client, readdir, stat, read, vfs and head tests. TypeScript colocates tests with sources, so a shared test helper lands in the source directory; python keeps the same fake in tests/fixtures/airtable_api.py, which this gate does not scan."
    }
   },
+  "core/github": {
+   "typescript_only": {
+    "_test_util": "The FakeGitHub fetch fake shared by the lookup, tree, read and vfs read_fresh tests. TypeScript colocates tests with sources, so a shared test helper lands in the source directory; python keeps the same fake in tests/fixtures/github_api.py, which this gate does not scan."
+   }
+  },
   "core/hf_hub": {
    "typescript_only": {
     "_test_util": "The FakeHub node:http server shared by the read-token contract, the read-fresh workspace tests and the hf_hub unit tests; it has to be a real server because resolve answers a redirect whose two hops carry different ETags, which a stubbed fetch cannot follow. TypeScript colocates tests with sources, so a shared test helper lands in the source directory; python keeps the same fake in tests/fixtures/hf_hub_api.py, which this gate does not scan."

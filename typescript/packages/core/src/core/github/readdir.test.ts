@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GitHubAccessor } from '../../accessor/github.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { RedisIndexCacheStore } from '../../cache/index/redis.ts'
@@ -22,7 +22,8 @@ import { populateIndex } from './tree.ts'
 import { readdir } from './readdir.ts'
 import { read } from './read.ts'
 import { stat } from './stat.ts'
-import type { GitHubTransport } from './client.ts'
+import { GitHubApiError, HttpGitHubTransport, type GitHubTransport } from './client.ts'
+import { BASE, FakeGitHub } from './_test_util.ts'
 
 const TREE = [
   { path: 'README.md', type: 'blob' as const, sha: 'eee', size: 50 },
@@ -313,3 +314,64 @@ for (const backend of ['ram', 'redis']) {
     },
   )
 }
+
+describe('the truncated walk', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('counts each listing it writes', async () => {
+    const gh = new FakeGitHub({ 'top.txt': 't', 'docs/sub/b.txt': 'b' })
+    gh.truncatedRecursive = true
+    vi.stubGlobal('fetch', gh.fetch)
+    const accessor = new GitHubAccessor({
+      transport: new HttpGitHubTransport({ token: 't', baseUrl: BASE }),
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      defaultBranch: 'main',
+      truncated: true,
+      tree: {},
+    })
+    const path = new PathSpec({
+      virtual: '/gh/docs/sub',
+      directory: '/gh/docs/sub',
+      resolved: false,
+      vfsPath: 'docs/sub',
+    })
+    expect(await readdir(accessor, path, new RAMIndexCacheStore())).toEqual(['/gh/docs/sub/b.txt'])
+    // The root and docs listings on the way down, then docs/sub itself: each
+    // is a listing written into the index, which is what arms the point route
+    // on a mount that never runs a whole-tree refill.
+    expect(accessor.refills).toBe(3)
+    expect(gh.count('recursive')).toBe(0)
+  })
+
+  it('refuses a directory GitHub cut short', async () => {
+    const gh = new FakeGitHub({ 'top.txt': 't', 'big/a.txt': 'a', 'big/b.txt': 'b' })
+    gh.truncatedRecursive = true
+    gh.truncatedDirs.set('big', 1)
+    vi.stubGlobal('fetch', gh.fetch)
+    const accessor = new GitHubAccessor({
+      transport: new HttpGitHubTransport({ token: 't', baseUrl: BASE }),
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      defaultBranch: 'main',
+      truncated: true,
+      tree: {},
+    })
+    const index = new RAMIndexCacheStore()
+    const path = new PathSpec({
+      virtual: '/gh/big',
+      directory: '/gh/big',
+      resolved: false,
+      vfsPath: 'big',
+    })
+    const err = await readdir(accessor, path, index).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(GitHubApiError)
+    expect((err as GitHubApiError).message).toContain('truncated the tree listing')
+    // Nothing partial was cached as the directory's whole listing.
+    expect((await index.listDir('/gh/big')).entries ?? null).toBeNull()
+  })
+})

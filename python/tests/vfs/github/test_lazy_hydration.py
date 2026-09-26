@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from urllib.parse import unquote
+
 import pytest
 
 from mirage.cache.index.ram import RAMIndexCacheStore
@@ -41,6 +43,28 @@ def tree_calls(monkeypatch):
         return dict(TREE), False
 
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", _fetch_tree)
+    return calls
+
+
+@pytest.fixture
+def dir_calls(monkeypatch):
+    calls = []
+
+    async def _fetch_dir_page(config, owner, repo, tree_sha, session=None):
+        calls.append(tree_sha)
+        at = unquote(tree_sha).partition(":")[2]
+        prefix = at + "/" if at else ""
+        rows = [
+            TreeEntry(path=path[len(prefix):],
+                      type=entry.type,
+                      sha=entry.sha,
+                      size=entry.size) for path, entry in TREE.items()
+            if path.startswith(prefix) and "/" not in path[len(prefix):]
+        ]
+        return rows, False
+
+    monkeypatch.setattr("mirage.core.github.tree.fetch_dir_page",
+                        _fetch_dir_page)
     return calls
 
 
@@ -122,12 +146,11 @@ async def test_an_unpinned_mount_is_on_the_default_branch_before_any_fetch(
 
 
 @pytest.mark.asyncio
-async def test_reconcile_private_index_can_resolve_github_ids(tree_calls):
-    # The subject is the reconciler's github-id resolution, not github's
-    # place on the revalidatable roster: the instance declares the
-    # capability so the mount can legally carry `read: fresh`.
+async def test_reconcile_private_index_can_resolve_github_ids(
+        tree_calls, dir_calls):
+    # The subject is the reconciler's github-id resolution: the private
+    # index it stats through holds nothing, and the id still resolves.
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    vfs.READ_REVALIDATABLE = True
     ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     try:
         path = "/gh/src/main.py"
@@ -140,7 +163,10 @@ async def test_reconcile_private_index_can_resolve_github_ids(tree_calls):
         await rec.reconcile_read(mount, path)
         assert await ws.cache.exists(path)
         assert ws.namespace.meta_for(path) is not None
-        assert len(tree_calls) == 2
+        # The mount's own stat walked the tree once; the probe's private
+        # index is answered by one listing of the parent, not a second walk.
+        assert len(tree_calls) == 1
+        assert [unquote(c) for c in dir_calls] == ["main:src"]
     finally:
         await ws.close()
 
@@ -156,13 +182,17 @@ async def test_always_reads_current_github_blob_after_probe(
             "f.txt": TreeEntry(path="f.txt", type="blob", sha=sha, size=2)
         }, False
 
+    async def fetch_dir_page(*args, **kwargs):
+        return [TreeEntry(path="f.txt", type="blob", sha=sha, size=2)], False
+
     async def read_bytes(config, owner, repo, blob_sha, session=None):
         return blob_sha.encode()
 
     monkeypatch.setattr("mirage.core.github.tree.fetch_tree", fetch_tree)
+    monkeypatch.setattr("mirage.core.github.tree.fetch_dir_page",
+                        fetch_dir_page)
     monkeypatch.setattr("mirage.core.github.read.read_bytes", read_bytes)
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    vfs.READ_REVALIDATABLE = True
     ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
     try:
         assert (await ws.shell("cat /gh/f.txt")).stdout == b"v1"

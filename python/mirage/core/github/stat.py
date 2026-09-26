@@ -12,18 +12,34 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-
 from mirage.accessor.github import GitHubAccessor
-from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.cache.index.lock import index_lock
-from mirage.core.github.readdir import _readdir
+from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexEntry
+from mirage.core.github.lookup import lookup_retrying, point_lookup
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.errors import enoent
 from mirage.utils.filetype import content_type_for_path
-from mirage.utils.key_prefix import mount_key, mount_prefix_of
+from mirage.utils.key_prefix import mount_prefix_of
 
-logger = logging.getLogger(__name__)
+
+def stat_of(entry: IndexEntry) -> FileStat:
+    """Render one tree row as a FileStat, the same from either route.
+
+    Args:
+        entry (IndexEntry): the row for the path.
+
+    Returns:
+        FileStat: the rendered stat.
+    """
+    if entry.resource_type == "folder":
+        return FileStat(name=entry.name, type=FileType.DIRECTORY)
+    return FileStat(
+        name=entry.name,
+        size=entry.size,
+        type=FileType.FILE,
+        content=content_type_for_path(entry.name),
+        fingerprint=entry.id,
+        extra={"sha": entry.id},
+    )
 
 
 async def stat(
@@ -31,42 +47,30 @@ async def stat(
     path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> FileStat:
+    """Stat one path in the repository.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        path_spec (PathSpec): the path to stat.
+        index (IndexCacheStore): the mount's index.
+
+    Returns:
+        FileStat: the rendered stat.
+
+    Raises:
+        FileNotFoundError: nothing exists at the path.
+    """
     virtual = path_spec.virtual
     prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
     rel = path_spec.mount_path.strip("/")
     if not rel:
         return FileStat(name="/", type=FileType.DIRECTORY)
     key = prefix + "/" + rel if prefix else "/" + rel
-    async with index_lock(index, prefix.rstrip("/") or "/"):
-        # Entries survive invalidation and replacement listings. Only the
-        # parent's current listing establishes freshness and membership.
-        parent_path = key.rsplit("/", 1)[0] or "/"
-        try:
-            children = await _readdir(
-                accessor,
-                PathSpec(virtual=parent_path,
-                         directory=parent_path,
-                         vfs_path=mount_key(parent_path, prefix)),
-                index=index,
-            )
-        except FileNotFoundError as exc:
-            logger.debug("stat populate failed for %s: %s", key, exc)
-            raise enoent(virtual) from exc
-        if key not in children:
-            raise enoent(virtual)
-        result = await index.get(key)
-        if result.entry is not None:
-            if result.entry.resource_type == "folder":
-                return FileStat(
-                    name=result.entry.name,
-                    type=FileType.DIRECTORY,
-                )
-            return FileStat(
-                name=result.entry.name,
-                size=result.entry.size,
-                type=FileType.FILE,
-                content=content_type_for_path(result.entry.name),
-                fingerprint=result.entry.id,
-                extra={"sha": result.entry.id},
-            )
+    # A probe through a throwaway index asks for this one path; everything
+    # else answers from the mount's listing, filling it if need be.
+    found = await point_lookup(accessor, index, prefix, rel)
+    if found is None:
+        found = await lookup_retrying(accessor, index, prefix, key)
+    if found.entry is None:
         raise enoent(virtual)
+    return stat_of(found.entry)

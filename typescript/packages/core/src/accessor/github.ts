@@ -26,6 +26,8 @@ export class GitHubAccessor extends Accessor {
   // listing, so a refetch after a write replaces it wholesale.
   truncated: boolean
   tree: Record<string, TreeEntry>
+  // Listings written into any index; nonzero means the mount listed.
+  refills = 0
 
   constructor(opts: {
     transport: GitHubTransport

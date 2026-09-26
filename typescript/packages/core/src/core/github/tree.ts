@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
-import { fetchTree } from './client.ts'
+import { fetchDirTreePage, fetchTree, GitHubApiError } from './client.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { LookupStatus } from '../../cache/index/config.ts'
 import type { IndexEntry } from '../../cache/index/config.ts'
 import type { GitHubTreeItem } from './client.ts'
 import { indexEntryFromTree, makeTreeEntry, type TreeEntry } from './tree_entry.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { DEFER_STATUSES } from './constants.ts'
 
 export function buildTreeMap(tree: GitHubTreeItem[]): Record<string, TreeEntry> {
   const map: Record<string, TreeEntry> = {}
@@ -107,6 +108,7 @@ export async function refillIndex(
   )
   accessor.truncated = truncated
   accessor.tree = buildTreeMap(tree)
+  accessor.refills += 1
   // A refill replaces this mount's snapshot, including paths now absent.
   await index.invalidatePrefix(rstripSlash(prefix) || '/')
   await seedIndex(accessor, index, prefix)
@@ -162,4 +164,50 @@ export async function ensureLiveIndex(
   // on does not hold and readdir's per-directory fallback owns the miss.
   if (accessor.truncated) return false
   return refillIndex(accessor, index, prefix)
+}
+
+/**
+ * Look one path up in its parent directory's listing, with one request.
+ *
+ * Asks `git/trees/{ref}:{parent}`, whose rows are exactly the recursive
+ * tree's for that directory: the same sha, and a symlink's own length rather
+ * than its target's, which the contents API reports instead. The expression
+ * is encoded as a single segment: Octokit reads an unencoded `:src` in a
+ * path as a template placeholder and drops it, which asked for the root
+ * tree instead, and a `/` in the parent or the ref would split the segment.
+ *
+ * Mirrors Python's `point_row`.
+ *
+ * Args:
+ *   accessor (GitHubAccessor): the mount's accessor.
+ *   rel (string): the path as the mount sees it.
+ *
+ * Returns:
+ *   { entry, truncated } | null: the row (null when the listing has no such
+ *   name) and whether GitHub truncated the listing, or null when the parent
+ *   could not be seen and the whole tree has to answer.
+ */
+export async function pointRow(
+  accessor: GitHubAccessor,
+  rel: string,
+): Promise<{ entry: TreeEntry | null; truncated: boolean } | null> {
+  const trimmed = stripSlash(rel)
+  const cut = trimmed.lastIndexOf('/')
+  const parent = cut < 0 ? '' : trimmed.slice(0, cut)
+  const name = cut < 0 ? trimmed : trimmed.slice(cut + 1)
+  const expression = parent === '' ? accessor.ref : `${accessor.ref}:${parent}`
+  let page: { tree: GitHubTreeItem[]; truncated: boolean }
+  try {
+    page = await fetchDirTreePage(
+      accessor.transport,
+      accessor.owner,
+      accessor.repo,
+      encodeURIComponent(expression),
+    )
+  } catch (err) {
+    if (err instanceof GitHubApiError && DEFER_STATUSES.has(err.status)) return null
+    throw err
+  }
+  const row = page.tree.find((item) => item.path === name)
+  return { entry: row === undefined ? null : makeTreeEntry(row), truncated: page.truncated }
 }

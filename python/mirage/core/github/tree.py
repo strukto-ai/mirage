@@ -16,14 +16,18 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import quote
+
+import aiohttp
 
 from mirage.accessor.github import GitHubAccessor
 from mirage.cache.index import (NULL_INDEX, IndexCacheStore, IndexEntry,
                                 LookupStatus)
 from mirage.cache.index.lock import index_lock
 from mirage.core.api.client import SessionArg
-from mirage.core.github.client import github_get
+from mirage.core.github.client import GitHubApiError, github_get
 from mirage.core.github.config import GitHubConfig
+from mirage.core.github.constants import DEFER_STATUSES
 from mirage.core.github.repo import ensure_ref
 from mirage.core.github.tree_entry import TreeEntry
 
@@ -75,16 +79,30 @@ async def fetch_tree(
     return _parse_tree_response(data, owner, repo, ref)
 
 
-async def fetch_dir_tree(
+async def fetch_dir_page(
     config: GitHubConfig,
     owner: str,
     repo: str,
     tree_sha: str,
     session: SessionArg = None,
-) -> list[TreeEntry]:
-    """Fetch a single directory's tree (non-recursive).
+) -> tuple[list[TreeEntry], bool]:
+    """Fetch one directory's tree (non-recursive), and whether GitHub cut it.
 
-    Used as fallback when the recursive tree was truncated.
+    Args:
+        config (GitHubConfig): token and base URL.
+        owner (str): repository owner.
+        repo (str): repository name.
+        tree_sha (str): a tree sha, or a ``{ref}:{dir}`` expression the
+            caller has already percent-encoded as one path segment.
+        session (SessionArg): pool or live session to ride.
+
+    Returns:
+        tuple[list[TreeEntry], bool]: the rows, submodule gitlinks
+        excluded, and GitHub's ``truncated`` flag.
+
+    Raises:
+        GitHubApiError: the response carries no tree, which must not read
+            as an empty directory.
     """
     data = await github_get(
         config.token,
@@ -95,8 +113,12 @@ async def fetch_dir_tree(
         repo=repo,
         tree_sha=tree_sha,
     )
+    if "tree" not in data:
+        raise GitHubApiError(
+            f"GitHub tree response for {owner}/{repo} {tree_sha} carries "
+            "no tree", 0)
     result: list[TreeEntry] = []
-    for item in data.get("tree", []):
+    for item in data["tree"]:
         if item["type"] == "commit":
             continue
         result.append(
@@ -106,7 +128,98 @@ async def fetch_dir_tree(
                 sha=item["sha"],
                 size=item.get("size"),
             ))
-    return result
+    return result, bool(data.get("truncated"))
+
+
+async def fetch_dir_tree(
+    config: GitHubConfig,
+    owner: str,
+    repo: str,
+    tree_sha: str,
+    session: SessionArg = None,
+) -> list[TreeEntry]:
+    """Fetch a single directory's whole tree (non-recursive).
+
+    Used as fallback when the recursive tree was truncated, where the
+    listing is cached as complete, so a directory GitHub cut short is
+    refused rather than returned: a name past the cut would otherwise read
+    as absent, which a ``read: fresh`` probe or a drift check takes as gone.
+
+    Args:
+        config (GitHubConfig): token and base URL.
+        owner (str): repository owner.
+        repo (str): repository name.
+        tree_sha (str): the directory's tree sha, or a ref for the root.
+        session (SessionArg): pool or live session to ride.
+
+    Returns:
+        list[TreeEntry]: the rows, submodule gitlinks excluded.
+
+    Raises:
+        GitHubApiError: GitHub truncated the listing, or sent no tree.
+    """
+    entries, truncated = await fetch_dir_page(config, owner, repo, tree_sha,
+                                              session)
+    if truncated:
+        raise GitHubApiError(
+            f"GitHub truncated the tree listing of {owner}/{repo} "
+            f"{tree_sha}", 0)
+    return entries
+
+
+async def point_row(accessor: GitHubAccessor,
+                    rel: str) -> tuple[TreeEntry | None, bool] | None:
+    """Look one path up in its parent directory's listing, with one request.
+
+    Asks ``git/trees/{ref}:{parent}``, whose rows are exactly the recursive
+    tree's for that directory: the same sha, and a symlink's own length
+    rather than its target's, which the contents API reports instead. The
+    expression is encoded as a single segment, so a ``/`` in the parent or
+    the ref, or a ``:`` or ``#`` in a name, cannot change what is asked.
+
+    Args:
+        accessor (GitHubAccessor): the mount's accessor.
+        rel (str): the path as the mount sees it.
+
+    Returns:
+        tuple[TreeEntry | None, bool] | None: the row (None when the
+        listing has no such name) and whether GitHub truncated the
+        listing, or None when the parent could not be seen and the whole
+        tree has to answer.
+    """
+    ref = await ensure_ref(accessor)
+    parent, _, name = rel.strip("/").rpartition("/")
+    expression = f"{ref}:{parent}" if parent else ref
+    try:
+        rows, truncated = await fetch_dir_page(accessor.config, accessor.owner,
+                                               accessor.repo,
+                                               quote(expression,
+                                                     safe=""), accessor.pool)
+    except aiohttp.ClientResponseError as exc:
+        if exc.status not in DEFER_STATUSES:
+            raise
+        log.debug("point lookup of %s deferred: %s", rel, exc)
+        return None
+    row = next((entry for entry in rows if entry.path == name), None)
+    return row, truncated
+
+
+def index_entry(entry: TreeEntry, name: str) -> IndexEntry:
+    """The index row for one tree row, the same from every route.
+
+    Args:
+        entry (TreeEntry): the git tree row.
+        name (str): the row's last path segment.
+
+    Returns:
+        IndexEntry: the row, its id the blob or tree sha.
+    """
+    return IndexEntry(
+        id=entry.sha,
+        name=name,
+        resource_type=("folder" if entry.type == "tree" else "file"),
+        size=entry.size,
+    )
 
 
 def index_rows(
@@ -146,14 +259,7 @@ def index_rows(
             parent, name = stem + "/" + parts[0], parts[1]
         else:
             parent, name = stem or "/", parts[0]
-        dirs[parent].append(
-            (name,
-             IndexEntry(
-                 id=entry.sha,
-                 name=name,
-                 resource_type=("folder" if entry.type == "tree" else "file"),
-                 size=entry.size,
-             )))
+        dirs[parent].append((name, index_entry(entry, name)))
     entries = {
         (parent.rstrip("/") + "/" + name): entry
         for parent, rows in dirs.items()
@@ -220,6 +326,7 @@ async def refill_index(
     accessor.truncated = truncated
     accessor.tree = tree
     accessor.tree_loaded = True
+    accessor.refills += 1
     # A refill replaces this mount's snapshot, including paths now absent.
     await index.invalidate_prefix(prefix.rstrip("/") or "/")
     seed_index(accessor, index, prefix)

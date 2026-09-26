@@ -92,7 +92,9 @@ async function fallbackReaddir(
   const parentSha = await resolveDirSha(accessor, key, index, prefix)
   if (parentSha === null) throw enoent(key)
   const entries = await fetchDirTree(accessor.transport, accessor.owner, accessor.repo, parentSha)
-  return cacheDir(index, key, entries)
+  const listed = await cacheDir(index, key, entries)
+  accessor.refills += 1
+  return listed
 }
 
 // Cache one complete tree listing, including each traversed parent.
@@ -153,6 +155,7 @@ async function resolveDirSha(
       await index.invalidatePrefix(childPath)
     }
     await cacheDir(index, currentPath, entries)
+    accessor.refills += 1
     if (found?.type !== 'tree') return null
     currentSha = found.sha
     currentPath = childPath

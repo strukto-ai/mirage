@@ -92,7 +92,9 @@ async def _fallback_readdir(
         raise enoent(virtual)
     entries = await fetch_dir_tree(accessor.config, accessor.owner,
                                    accessor.repo, parent_sha, accessor.pool)
-    return await _cache_dir(index, virtual_key, entries)
+    listed = await _cache_dir(index, virtual_key, entries)
+    accessor.refills += 1
+    return listed
 
 
 async def _cache_dir(index: IndexCacheStore, virtual_key: str,
@@ -151,6 +153,7 @@ async def _resolve_dir_sha(
             # Remove the former directory before caching a replacement blob.
             await index.invalidate_prefix(child_path)
         await _cache_dir(index, current_path, entries)
+        accessor.refills += 1
         if found is None or found.type != "tree":
             return None
         current_sha = found.sha

@@ -280,7 +280,8 @@ def test_bounded_is_allowed_on_a_backend_that_cannot_revalidate():
 REVALIDATABLE = {
     "s3", "aliyun", "backblaze", "ceph", "digitalocean", "gcs", "minio", "oci",
     "qingstor", "r2", "scaleway", "seaweedfs", "supabase", "tencent", "wasabi",
-    "gridfs", "hf_models", "hf_datasets", "hf_spaces", "onedrive", "sharepoint"
+    "gridfs", "hf_models", "hf_datasets", "hf_spaces", "onedrive",
+    "sharepoint", "github"
 }
 
 
@@ -314,7 +315,7 @@ def test_the_typescript_roster_is_the_same_list(host):
         if caps and caps.get("read_revalidatable") is True
     }
     # gridfs and the Hugging Face Hub repos have no browser implementation;
-    # nothing else differs.
+    # github's VFS is core, so the browser declares it too.
     assert declared == {n for n in REVALIDATABLE if n in spec["capabilities"]}
 
 

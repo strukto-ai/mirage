@@ -154,8 +154,8 @@ class Reconciler:
         ``SUPPORTS_SNAPSHOT`` deliberately does not appear here. It used
         to short-circuit this function, dropping every cached copy on a
         resource that declares it False. That is a proxy for "the stat
-        carries no content token", and it is the wrong one: box, dropbox,
-        ssh and github all stamp a fingerprint without setting the flag,
+        carries no content token", and it is the wrong one: box, dropbox
+        and ssh all stamp a fingerprint without setting the flag,
         so the shortcut threw away entries this probe can verify. The
         backends that really cannot be checked are answered by
         ``_probe``'s own UNKNOWN arm, one stat later.

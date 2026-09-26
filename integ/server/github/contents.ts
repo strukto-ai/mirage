@@ -310,6 +310,26 @@ const oneCommit = withRepo(async (ctx, repo) => {
 const gitTree = withRepo(async (ctx, repo) => {
   const ref = param(ctx, 'ref')
   const subs = await submodulesOf(ctx.db, ctx.tenant, repo)
+  // `{ref}:{dir}` names one directory of a ref, the way git's rev syntax does:
+  // the point lookup asks for a file's parent this way. A branch name cannot
+  // hold a colon, so the first one splits it. Measured against GitHub
+  // (2026-09-25): a missing directory or ref is 404, and a path through a
+  // file is 422.
+  const colon = ref.indexOf(':')
+  if (colon >= 0) {
+    const files = await treeOf(ctx.db, ctx.tenant, repo, ref.slice(0, colon))
+    if (files === null) return fail(404, 'Not Found')
+    const at = ref.slice(colon + 1).replace(/^\/+|\/+$/g, '')
+    const parts = at === '' ? [] : at.split('/')
+    for (let depth = 1; depth <= parts.length; depth += 1) {
+      if (files.has(parts.slice(0, depth).join('/'))) {
+        return fail(422, 'Invalid object requested. SHA must identify a commit or a tree.')
+      }
+    }
+    if (at !== '' && !directoriesOf(files).has(at)) return fail(404, 'Not Found')
+    const shallow = treeItems(files, subs, at).filter((it) => !it.path.includes('/'))
+    return { status: 200, body: { sha: treeSha(at), tree: shallow, truncated: false } }
+  }
   const files = await treeOf(ctx.db, ctx.tenant, repo, ref)
   if (files === null) {
     // Not a ref, so it may be one directory's tree sha. A per-sha tree GET is
@@ -319,6 +339,15 @@ const gitTree = withRepo(async (ctx, repo) => {
     if (at === undefined) return fail(404, 'Not Found')
     const shallow = treeItems(whole, subs, at).filter((it) => !it.path.includes('/'))
     return { status: 200, body: { sha: treeSha(at), tree: shallow, truncated: false } }
+  }
+  // Without recursive a ref names only its root directory's own rows, and
+  // a listing that small is never cut short: the per-directory walk asks for
+  // the root this way, and reading the recursive answer's truncation onto it
+  // refused a listing GitHub would have served whole.
+  // GitHub recurses for any value of the parameter, 0 and false included.
+  if (!ctx.query.has('recursive')) {
+    const shallow = treeItems(files, subs).filter((it) => !it.path.includes('/'))
+    return { status: 200, body: { sha: treeSha(''), tree: shallow, truncated: false } }
   }
   // A truncated recursive tree keeps only the top-level entries, the way git
   // drops deep paths past its entry cap.

@@ -32,6 +32,9 @@ import { ONEDRIVE_IO } from '@struktoai/mirage-core/commands/builtin/onedrive/io
 import { SHAREPOINT_IO } from '@struktoai/mirage-core/commands/builtin/sharepoint/io'
 import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
 import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
+import { GITHUB_IO } from '@struktoai/mirage-core/commands/builtin/github/io'
+import { stream as githubStream } from '@struktoai/mirage-core/core/github/read'
+import type { GitHubAccessor } from '@struktoai/mirage-core/accessor/github'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive, runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -300,13 +303,20 @@ const HF_FAMILY: Record<string, string> = {
   hf_spaces: 'spaces',
 }
 
-const HARNESSES: Record<string, 's3' | 'gridfs' | 'hf_models' | 'onedrive' | 'sharepoint'> = {
+const HARNESSES: Record<
+  string,
+  's3' | 'gridfs' | 'hf_models' | 'onedrive' | 'sharepoint' | 'github'
+> = {
   ...Object.fromEntries(S3_FAMILY.map((name) => [name, 's3' as const])),
   gridfs: 'gridfs',
   ...Object.fromEntries(Object.keys(HF_FAMILY).map((name) => [name, 'hf_models' as const])),
   onedrive: 'onedrive',
   sharepoint: 'sharepoint',
+  github: 'github',
 }
+
+// github has no key_prefix, so the prefixed shape has nothing to test there.
+const SHAPES: Record<string, Shape[]> = { github: ['root', 'nested'] }
 
 // The drive each Graph backend addresses in the fake: OneDrive the signed-in
 // user's own, SharePoint one library of one site, mounted scoped so the keys
@@ -366,6 +376,87 @@ interface Fake {
   readBytes: (path: PathSpec) => Promise<Uint8Array>
   readStream: (path: PathSpec) => AsyncIterable<Uint8Array>
   stat: (path: PathSpec) => Promise<FileStat>
+  // The slot a stream read records in: github's stream delegates to its
+  // whole read, which records through `record`.
+  streamSlot: 'stream' | 'bytes'
+}
+
+function slotOf(fake: Fake, row: Row): string {
+  return row === 'bytes' ? SLOTS[row] : fake.streamSlot
+}
+
+function sha1Blob(data: Uint8Array): string {
+  return createHash('sha1')
+    .update(Buffer.concat([Buffer.from(`blob ${String(data.byteLength)}\0`), data]))
+    .digest('hex')
+}
+
+// A github repository behind a fetch router: the recursive tree, one
+// directory's tree by `{ref}:{dir}` (or the ref itself for the root), and
+// blobs by sha. Inlined because core's FakeGitHub (_test_util.ts) is left out
+// of core's build and so cannot be imported from node.
+class InlineGitHub {
+  readonly files = new Map<string, Uint8Array>()
+  readonly blobs = new Map<string, Uint8Array>()
+  readonly log: string[] = []
+
+  private row(path: string, name: string): Record<string, unknown> {
+    const data = this.files.get(path)
+    if (data === undefined) return { path: name, type: 'tree', sha: `tree-${path}` }
+    const sha = sha1Blob(data)
+    this.blobs.set(sha, data)
+    return { path: name, type: 'blob', sha, size: data.byteLength }
+  }
+
+  private dirs(): Set<string> {
+    const out = new Set<string>()
+    for (const path of this.files.keys()) {
+      const parts = path.split('/').slice(0, -1)
+      for (let i = 1; i <= parts.length; i += 1) out.add(parts.slice(0, i).join('/'))
+    }
+    return out
+  }
+
+  readonly fetch = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const url = new URL(new Request(input, init).url)
+    const reply = (body: unknown, status = 200): Promise<Response> =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+    const tree = /\/git\/trees\/([^/]+)$/.exec(url.pathname)
+    if (tree !== null) {
+      const segment = decodeURIComponent(tree[1] ?? '')
+      if (url.searchParams.get('recursive') === '1') {
+        this.log.push('recursive')
+        const paths = [...this.files.keys(), ...this.dirs()].sort()
+        return reply({ tree: paths.map((p) => this.row(p, p)), truncated: false })
+      }
+      this.log.push('dir')
+      const at = segment.includes(':') ? segment.slice(segment.indexOf(':') + 1) : ''
+      const prefix = at === '' ? '' : `${at}/`
+      const names = new Set<string>()
+      for (const p of [...this.files.keys(), ...this.dirs()]) {
+        if (p.startsWith(prefix) && p !== at) names.add(p.slice(prefix.length).split('/')[0] ?? '')
+      }
+      return reply({
+        tree: [...names].sort().map((n) => this.row(prefix + n, n)),
+        truncated: false,
+      })
+    }
+    const blob = /\/git\/blobs\/([^/]+)$/.exec(url.pathname)
+    if (blob !== null) {
+      this.log.push('blob')
+      for (const data of this.files.values()) this.blobs.set(sha1Blob(data), data)
+      const data = this.blobs.get(blob[1] ?? '')
+      if (data === undefined) return reply({ message: 'Not Found' }, 404)
+      return reply({ content: Buffer.from(data).toString('base64'), encoding: 'base64' })
+    }
+    if (/^\/repos\/[^/]+\/[^/]+$/.test(url.pathname)) return reply({ default_branch: 'main' })
+    throw new Error(`InlineGitHub: unrouted ${url.pathname}`)
+  }
 }
 
 function chunked(data: Uint8Array): Uint8Array[] {
@@ -393,6 +484,53 @@ let hubs: FakeHub[] = []
 let graphs: FakeGraph[] = []
 
 async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<Fake> {
+  if (HARNESSES[name] === 'github') {
+    // The nested key's parent is two or more lowercase letters, the spelling
+    // Octokit rewrites when the point request goes unencoded; the python twin
+    // keeps the same key.
+    const key = shape === 'nested' ? 'docs/a.txt' : 'a.txt'
+    const gh = new InlineGitHub()
+    gh.files.set(key, data)
+    gh.files.set('other.txt', DECOY)
+    vi.stubGlobal('fetch', gh.fetch)
+    const vfs = await buildVfs('github', {
+      token: 't',
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      base_url: 'http://github.test',
+    })
+    const accessor = vfs.accessor as GitHubAccessor
+    expect(readRevalidatable(vfs)).toBe(true)
+    const invalidate = Object.getOwnPropertyDescriptor(
+      RAMIndexCacheStore.prototype,
+      'invalidatePrefix',
+    )?.value as (this: RAMIndexCacheStore, path: string) => Promise<void>
+    vi.spyOn(RAMIndexCacheStore.prototype, 'invalidatePrefix').mockImplementation(function (
+      this: RAMIndexCacheStore,
+      path: string,
+    ) {
+      if (this !== vfs.index) H.reach.push('tree walk on a throwaway index')
+      return invalidate.call(this, path)
+    })
+    const blobs = (): number => gh.log.filter((r) => r === 'blob').length
+    const before = blobs()
+    // github's stat has nothing to answer from without an index, so the
+    // direct calls pass the mount's.
+    return {
+      vfs,
+      accessor,
+      key,
+      fetches: () => blobs() - before,
+      rewrite: (next) => {
+        gh.files.set(key, next)
+      },
+      readBytes: (p) => GITHUB_IO.readBytes(accessor, p, vfs.index),
+      readStream: (p) => GITHUB_IO.readStream(accessor, p, vfs.index),
+      stat: (p) => GITHUB_IO.stat(accessor, p, vfs.index),
+      streamSlot: 'bytes',
+    }
+  }
   const key = KEYS[shape]
   const prefix = shape === 'prefixed' ? PREFIX : null
   const stored = (prefix ?? '') + key
@@ -428,6 +566,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
         readBytes: (p) => ONEDRIVE_IO.readBytes(accessor, p),
         readStream: (p) => ONEDRIVE_IO.readStream(accessor, p),
         stat: (p) => ONEDRIVE_IO.stat(accessor, p),
+        streamSlot: 'stream',
       }
     }
     const accessor = vfs.accessor as SharePointAccessor
@@ -441,6 +580,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       readBytes: (p) => SHAREPOINT_IO.readBytes(accessor, p),
       readStream: (p) => SHAREPOINT_IO.readStream(accessor, p),
       stat: (p) => SHAREPOINT_IO.stat(accessor, p),
+      streamSlot: 'stream',
     }
   }
   if (HARNESSES[name] === 'hf_models') {
@@ -489,6 +629,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       readBytes: (p) => HF_HUB_IO.readBytes(accessor, p),
       readStream: (p) => HF_HUB_IO.readStream(accessor, p),
       stat: (p) => HF_HUB_IO.stat(accessor, p),
+      streamSlot: 'stream',
     }
   }
   if (HARNESSES[name] === 'gridfs') {
@@ -515,6 +656,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       readBytes: (p) => GRIDFS_IO.readBytes(accessor, p),
       readStream: (p) => GRIDFS_IO.readStream(accessor, p),
       stat: (p) => GRIDFS_IO.stat(accessor, p),
+      streamSlot: 'stream',
     }
   }
   s3.store.set('b', stored, data)
@@ -539,6 +681,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     readBytes: (p) => S3_IO.readBytes(accessor, p),
     readStream: (p) => S3_IO.readStream(accessor, p),
     stat: (p) => S3_IO.stat(accessor, p),
+    streamSlot: 'stream',
   }
 }
 
@@ -553,7 +696,8 @@ function cases(rows: readonly Row[]): Case[] {
   for (const [name, family] of Object.entries(HARNESSES)) {
     // The aliases share every read and stat path with s3, so the key
     // shapes run once per family.
-    const shapes: Shape[] = name === family ? ['root', 'nested', 'prefixed'] : ['root']
+    const shapes: Shape[] =
+      name === family ? (SHAPES[name] ?? ['root', 'nested', 'prefixed']) : ['root']
     for (const shape of shapes) for (const row of rows) out.push({ name, shape, row })
   }
   return out
@@ -660,6 +804,7 @@ describe('the read-token contract', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     await Promise.all(hubs.map((hub) => hub.close()))
     hubs = []
     await Promise.all(graphs.map((graph) => graph.close()))
@@ -706,7 +851,7 @@ describe('the read-token contract', () => {
         // Only the background drain fills through `add`; the synchronous
         // fills use `set`.
         expect(add).toHaveBeenCalledTimes(row === 'drain' ? 1 : 0)
-        expect(readsOnMount()).toEqual([[SLOTS[row], virtual]])
+        expect(readsOnMount()).toEqual([[slotOf(fake, row), virtual]])
         expect(fake.fetches()).toBe(1)
         if (row === 'bytes') first = await line(ws, 'cat /r/a.txt')
         expect(first).toEqual(row === 'drain' ? data.slice(0, 1) : data)
@@ -737,7 +882,7 @@ describe('the read-token contract', () => {
       try {
         expect(await line(ws, `cat ${virtual} | head -c 1`)).toEqual(BIG.slice(0, 1))
         await Promise.all([...(ws.cache.drainTasks?.values() ?? [])])
-        expect(readsOnMount()).toEqual([[SLOTS[row], virtual]])
+        expect(readsOnMount()).toEqual([[slotOf(fake, row), virtual]])
         expect(fake.fetches()).toBe(1)
         const cached = await ws.cache.get(virtual)
         if (cached !== null) expect(cached).toEqual(BIG)
@@ -877,6 +1022,30 @@ describe('the read-token contract', () => {
       expect(await ws.cache.isFresh(virtual, 'e1')).toBe(true)
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe('c1')
+      expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("github's stream is its read, so it records through record", () => {
+    // Its expected stream slot is "bytes" for that reason. A native stream
+    // that forgot to record would otherwise hide behind that slot.
+    expect(GITHUB_IO.readStream).toBe(githubStream)
+  })
+
+  it('the contract goes red on github stamping another kind', async () => {
+    // github forced to stamp an md5 of the bytes while stat reports the blob
+    // sha: both tokens exist and differ.
+    const fake = await makeFake('github', 'root', SEED)
+    H.stampOverride = md5Hex(SEED)
+    const virtual = '/m/a.txt'
+    const ws = freshWorkspace(fake.vfs)
+    try {
+      await line(ws, `cat ${virtual}`)
+      expect(await ws.cache.isFresh(virtual, md5Hex(SEED))).toBe(true)
+      const stat = await reconcileStat(ws, fake, virtual)
+      expect(stat.fingerprint).toBe(sha1Blob(SEED))
       expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
     } finally {
       await ws.close()

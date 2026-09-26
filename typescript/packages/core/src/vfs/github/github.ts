@@ -56,9 +56,9 @@ export class GitHubVFS extends BoundVFS<GitHubAccessor> implements VFS {
   // blob read returns those same bytes, and submodule gitlinks (which
   // have no size and no blob) are excluded from the tree.
   readonly sizesAlwaysKnown: boolean = true
-  // Blob shas are stable per-path markers, so cached reads can be
-  // probe-verified under ALWAYS and snapshots carry drift fingerprints.
+  // stat and a read both stamp the content-addressed blob sha.
   readonly supportsSnapshot: boolean = true
+  readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
   readonly prompt: string = GITHUB_PROMPT
   readonly config: GitHubConfig

@@ -14,20 +14,46 @@
 
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { FileType, type PathSpec } from '../../types.ts'
-import { stat } from './stat.ts'
-import { fetchBlob } from './client.ts'
+import { record, startOp } from '../../observe/context.ts'
+import { type PathSpec, VFSName } from '../../types.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
+import { mountPrefixOf } from '../../utils/key_prefix.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { fetchBlob } from './client.ts'
+import { lookupRetrying } from './lookup.ts'
 
+/**
+ * Read a file's blob and record the sha it was fetched by.
+ *
+ * The sha comes from the mount's listing, filling it if a verdict cleared
+ * it, never from a one-directory probe: a read reseeds the listing so the
+ * stats after it answer from the index again. The blob endpoint is
+ * content-addressed, so the recorded sha names exactly the bytes returned
+ * however old the listing is. That is also the documented limit of
+ * `read: fresh` here: a file read for the first time comes from the
+ * listing, and the next read's probe corrects it.
+ *
+ * Mirrors Python's `read`.
+ */
 export async function read(
   accessor: GitHubAccessor,
   path: PathSpec,
   index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  const result = await stat(accessor, path, index)
-  if (result.type === FileType.DIRECTORY) throw eisdir(path.virtual)
-  if (result.fingerprint === null) throw enoent(path)
-  return fetchBlob(accessor.transport, accessor.owner, accessor.repo, result.fingerprint)
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  let rel = path.virtual
+  if (prefix !== '' && rel.startsWith(prefix)) rel = rel.slice(prefix.length) || '/'
+  const trimmed = stripSlash(rel)
+  if (trimmed === '') throw eisdir(path.virtual)
+  if (index === undefined) throw enoent(path)
+  const key = `${rstripSlash(prefix)}/${trimmed}`
+  const { entry } = await lookupRetrying(accessor, index, prefix, key)
+  if (entry === null) throw enoent(path)
+  if (entry.resourceType === 'folder') throw eisdir(path.virtual)
+  const timer = startOp()
+  const data = await fetchBlob(accessor.transport, accessor.owner, accessor.repo, entry.id)
+  record('read', path.virtual, VFSName.GITHUB, data.length, timer, { fingerprint: entry.id })
+  return data
 }
 
 export async function* stream(

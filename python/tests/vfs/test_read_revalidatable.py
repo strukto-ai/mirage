@@ -14,6 +14,7 @@
 
 import asyncio
 import datetime
+import functools
 import hashlib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -27,6 +28,7 @@ from bson import ObjectId
 from moto.server import ThreadedMotoServer
 
 import mirage.cache.file.io as cache_io
+import mirage.core.github.read as github_read
 import mirage.core.gridfs.client as gridfs_client
 import mirage.core.gridfs.driver as gridfs_driver
 import mirage.core.gridfs.read as gridfs_read
@@ -37,13 +39,15 @@ import mirage.core.hf_hub.stream as hf_stream
 import mirage.core.msgraph.drive_ops as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
-from mirage.cache.index import RAMIndexCacheStore
+from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
+from mirage.commands.builtin.github.io import IO as GITHUB_IO
 from mirage.commands.builtin.gridfs.io import IO as GRIDFS_IO
 from mirage.commands.builtin.hf_hub.io import IO as HF_IO
 from mirage.commands.builtin.onedrive.io import IO as ONEDRIVE_IO
 from mirage.commands.builtin.s3.io import IO as S3_IO
 from mirage.commands.builtin.sharepoint.io import IO as SHAREPOINT_IO
+from mirage.commands.builtin.utils.wrap import stream_from_bytes
 from mirage.core.hf_hub.client import etag_value
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import IOResult
@@ -59,6 +63,8 @@ from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
+from tests.fixtures.github_api import FakeGitHub, blob_sha
+from tests.fixtures.github_api import serve as serve_github
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
 from tests.fixtures.msgraph_api import (DRIVE_ID, DRIVE_NAME, ME, SITE_NAME,
                                         FakeGraph)
@@ -86,7 +92,11 @@ HARNESSES = {
     },
     "onedrive": "onedrive",
     "sharepoint": "sharepoint",
+    "github": "github",
 }
+
+# github has no key_prefix, so the prefixed shape has nothing to test there.
+SHAPES = {"github": ("root", "nested")}
 
 # The drive each Graph backend addresses in the fake: OneDrive the signed-in
 # user's own, SharePoint one library of one site, mounted scoped so the keys
@@ -144,7 +154,18 @@ class Fake:
     reach: list[str]
     io: CommandIO
     read_mod: ModuleType
-    stream_mod: ModuleType
+    # None when the stream is synthesized from the whole read, which then
+    # records through read_mod's record; the slot it lands in is "bytes".
+    stream_mod: ModuleType | None
+    # Passed to direct IO calls when the backend resolves through its index;
+    # github's stat has nothing to answer from without one.
+    index: IndexCacheStore | None = None
+
+    def slot(self, row: str) -> str:
+        return SLOTS[row] if self.stream_mod is not None else "bytes"
+
+    def args(self) -> tuple:
+        return () if self.index is None else (self.index, )
 
 
 class _Download:
@@ -354,8 +375,53 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
 
 
 @contextmanager
+def _github_fake(shape: str, data: bytes,
+                 monkeypatch: pytest.MonkeyPatch) -> Iterator[Fake]:
+    # The nested key's parent is two or more lowercase letters, the spelling
+    # Octokit rewrites when the point request goes unencoded; the python
+    # twin keeps the same key so both hosts test one shape.
+    key = {"root": "a.txt", "nested": "docs/a.txt"}[shape]
+    hub = FakeGitHub(files={key: data, "other.txt": DECOY})
+    with serve_github(hub):
+        vfs = build_vfs(
+            "github", {
+                "token": "t",
+                "owner": "o",
+                "repo": "r",
+                "ref": "main",
+                "base_url": hub.url
+            })
+        reach: list[str] = []
+        invalidate = RAMIndexCacheStore.invalidate_prefix
+
+        async def watched(store, prefix_: str) -> None:
+            if store is not vfs.index:
+                reach.append("tree walk on a throwaway index")
+            await invalidate(store, prefix_)
+
+        monkeypatch.setattr(RAMIndexCacheStore, "invalidate_prefix", watched)
+
+        def rewrite(new: bytes) -> None:
+            hub.files[key] = new
+
+        yield Fake(vfs=vfs,
+                   key=key,
+                   fetches=lambda: hub.count("blob"),
+                   rewrite=rewrite,
+                   reach=reach,
+                   io=GITHUB_IO,
+                   read_mod=github_read,
+                   stream_mod=None,
+                   index=vfs.index)
+
+
+@contextmanager
 def _fake(name: str, shape: str, data: bytes,
           monkeypatch: pytest.MonkeyPatch) -> Iterator[Fake]:
+    if HARNESSES[name] == "github":
+        with _github_fake(shape, data, monkeypatch) as fake:
+            yield fake
+        return
     if HARNESSES[name] in GRAPH:
         with _graph_fake(name, shape, data) as fake:
             yield fake
@@ -377,8 +443,9 @@ def _cases(rows: tuple[str, ...]) -> list:
     for name, family in HARNESSES.items():
         # The aliases share every read and stat path with s3, so the key
         # shapes run once per family.
-        shapes = ("root", "nested",
-                  "prefixed") if name == family else ("root", )
+        shapes = SHAPES.get(name,
+                            ("root", "nested",
+                             "prefixed")) if name == family else ("root", )
         for shape in shapes:
             for row in rows:
                 cases.append(
@@ -419,7 +486,7 @@ async def _partial_read(ws: Workspace, fake: Fake, virtual: str) -> bytes:
     scope = RecordingScope()
     try:
         source = CachableAsyncIterator(
-            fake.io.read_stream(fake.vfs.accessor, spec))
+            fake.io.read_stream(fake.vfs.accessor, spec, *fake.args()))
         first = await anext(source)
         assert not source.exhausted
         await ws.apply_io(IOResult(reads={virtual: source}, cache=[virtual]),
@@ -441,7 +508,6 @@ def _spy_slots(fake: Fake,
                monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     slots: list[tuple[str, str]] = []
     record = fake.read_mod.record
-    record_stream = fake.stream_mod.record_stream
 
     def spy_record(op, path, *args, **kwargs):
         slots.append(("bytes", path))
@@ -452,8 +518,10 @@ def _spy_slots(fake: Fake,
         return record_stream(op, path, *args, **kwargs)
 
     monkeypatch.setitem(vars(fake.read_mod), "record", spy_record)
-    monkeypatch.setitem(vars(fake.stream_mod), "record_stream",
-                        spy_record_stream)
+    if fake.stream_mod is not None:
+        record_stream = fake.stream_mod.record_stream
+        monkeypatch.setitem(vars(fake.stream_mod), "record_stream",
+                            spy_record_stream)
     return slots
 
 
@@ -550,7 +618,7 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(name, shape, row,
          second) = asyncio.run(run())
 
     assert cached_before is False
-    assert taken == [(SLOTS[row], virtual)]
+    assert taken == [(fake.slot(row), virtual)]
     assert drained == (1 if row == "drain" else 0)
     assert fetched == 1
     assert first == (data[:1] if row == "drain" else data)
@@ -576,7 +644,7 @@ def test_early_pipe_exit_never_caches_a_prefix(name, shape, row, monkeypatch):
                 assert await _line(ws, f"cat {virtual} | head -c 1") == BIG[:1]
                 for done in drains:
                     await done.wait()
-                assert slots == [(SLOTS[row], virtual)]
+                assert slots == [(fake.slot(row), virtual)]
                 assert fake.fetches() - before == 1
                 cached = await ws.cache.get(virtual)
                 assert cached is None or cached == BIG
@@ -628,8 +696,9 @@ def test_an_unrecorded_read_stamps_the_stat_token(name, shape, row,
 
     with _fake(name, shape, SEED, monkeypatch) as fake:
         monkeypatch.setitem(vars(fake.read_mod), "record", capture)
-        monkeypatch.setitem(vars(fake.stream_mod), "record_stream",
-                            capture_stream)
+        if fake.stream_mod is not None:
+            monkeypatch.setitem(vars(fake.stream_mod), "record_stream",
+                                capture_stream)
         virtual = "/m/" + fake.key
         spec = PathSpec(virtual=virtual,
                         directory=virtual.rsplit("/", 1)[0] + "/",
@@ -640,11 +709,14 @@ def test_an_unrecorded_read_stamps_the_stat_token(name, shape, row,
             unrecorded = active_recorder() is None
             try:
                 if row == "bytes":
-                    data = await fake.io.read_bytes(accessor, spec)
+                    data = await fake.io.read_bytes(accessor, spec,
+                                                    *fake.args())
                 else:
-                    data = b"".join(
-                        [c async for c in fake.io.read_stream(accessor, spec)])
-                stat = await fake.io.stat(accessor, spec)
+                    data = b"".join([
+                        c async for c in fake.io.read_stream(
+                            accessor, spec, *fake.args())
+                    ])
+                stat = await fake.io.stat(accessor, spec, *fake.args())
             finally:
                 await accessor.close()
             return unrecorded, data, stat
@@ -906,4 +978,59 @@ def test_the_contract_goes_red_on_msgraph_stamping_another_kind(monkeypatch):
 
     assert holds_read_token
     assert fingerprint == "c1"
+    assert not fresh
+
+
+def test_a_synthesized_stream_is_the_read_it_records_through():
+    # github's stream slot is filled from its whole read, which is why its
+    # expected slot is "bytes". A native stream that forgot to record would
+    # otherwise hide behind stream_mod=None.
+    stream = GITHUB_IO.read_stream
+    assert isinstance(stream, functools.partial)
+    assert stream.func is stream_from_bytes
+    assert stream.args == (github_read.read, )
+
+
+def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
+    # github forced to stamp an md5 of the bytes while stat reports the blob
+    # sha: both tokens exist and differ.
+    record = github_read.record
+
+    def md5_record(op,
+                   path,
+                   source,
+                   nbytes,
+                   timer,
+                   fingerprint=None,
+                   revision=None):
+        del fingerprint
+        return record(op,
+                      path,
+                      source,
+                      nbytes,
+                      timer,
+                      fingerprint=hashlib.md5(SEED).hexdigest(),
+                      revision=revision)
+
+    with _fake("github", "root", SEED, monkeypatch) as fake:
+        monkeypatch.setitem(vars(github_read), "record", md5_record)
+        virtual = "/m/" + fake.key
+
+        async def run():
+            ws = _fresh_workspace(fake.vfs)
+            try:
+                await _line(ws, f"cat {virtual}")
+                holds_read_token = await ws.cache.is_fresh(
+                    virtual,
+                    hashlib.md5(SEED).hexdigest())
+                stat = await _reconcile_stat(ws, virtual)
+                fresh = await ws.cache.is_fresh(virtual, stat.fingerprint)
+                return holds_read_token, stat.fingerprint, fresh
+            finally:
+                await ws.close()
+
+        holds_read_token, fingerprint, fresh = asyncio.run(run())
+
+    assert holds_read_token
+    assert fingerprint == blob_sha(SEED)
     assert not fresh

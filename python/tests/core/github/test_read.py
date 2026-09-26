@@ -20,12 +20,18 @@ import pytest
 
 import mirage.core.github.read
 import mirage.core.github.tree
-from mirage.cache.index import IndexEntry
+from mirage.accessor.github import GitHubAccessor
+from mirage.cache.index import IndexEntry, LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.commands.builtin.github.io import IO
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.read import read, read_bytes
+from mirage.core.github.stat import stat
+from mirage.core.github.tree import refill_index
 from mirage.core.github.tree_entry import TreeEntry
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from tests.fixtures.github_api import FakeGitHub, blob_sha, race_index, serve
 
 
 @pytest.fixture
@@ -121,3 +127,113 @@ async def test_read_does_not_refill_on_a_real_miss(monkeypatch):
                      virtual="/src/gone.py",
                      directory="/src"), index)
     assert calls == []
+
+
+def _served(gh: FakeGitHub) -> GitHubAccessor:
+    return GitHubAccessor(GitHubConfig(token="t", base_url=gh.url), "o", "r",
+                          "main")
+
+
+def _at(rel: str, prefix: str) -> PathSpec:
+    virtual = (prefix.rstrip("/") + "/" + rel) if prefix != "/" else "/" + rel
+    return PathSpec(virtual=virtual,
+                    directory=virtual.rsplit("/", 1)[0] or "/",
+                    vfs_path=rel)
+
+
+# A mount at the root, one at /gh, and one named like a directory inside the
+# repository, so a record labelled with anything but the virtual path lands
+# on a key the cache never asks for.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["/", "/gh", "/src"])
+async def test_a_read_records_the_blob_sha_under_the_virtual_path(prefix):
+    data = b"payload"
+    with serve(FakeGitHub(files={"src/a.txt": data})) as gh:
+        path = _at("src/a.txt", prefix)
+        scope = RecordingScope()
+        try:
+            assert await read(_served(gh), path, RAMIndexCacheStore()) == data
+        finally:
+            scope.close()
+        (rec, ) = scope.records
+        assert (rec.op, rec.path, rec.source, rec.bytes,
+                rec.fingerprint) == ("read", path.virtual, "github", len(data),
+                                     blob_sha(data))
+        # The stamped token is the sha the blob was fetched by.
+        assert ("blob", rec.fingerprint) in gh.log
+
+
+@pytest.mark.asyncio
+async def test_the_synthesized_stream_records_once():
+    data = b"streamed"
+    with serve(FakeGitHub(files={"a.txt": data})) as gh:
+        scope = RecordingScope()
+        try:
+            chunks = [
+                c async for c in IO.read_stream(_served(gh), _at(
+                    "a.txt", "/gh"), RAMIndexCacheStore())
+            ]
+        finally:
+            scope.close()
+        assert b"".join(chunks) == data
+        assert [(r.op, r.fingerprint)
+                for r in scope.records] == [("read", blob_sha(data))]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["list", "stale", "get", "reseed"])
+async def test_a_read_retries_when_the_index_changes_under_it(kind):
+    with serve(FakeGitHub(files={"docs/sub/b.txt": b"bravo"})) as gh:
+        index = race_index(kind)
+        accessor = _served(gh)
+        await refill_index(accessor, index, "/gh")
+        index.accessor = accessor
+        index.fired = False
+        gh.log.clear()
+        assert await read(accessor, _at("docs/sub/b.txt", "/gh"),
+                          index) == b"bravo"
+        assert gh.counts() == (0, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_read_after_a_clear_refills_the_mount_index():
+    with serve(FakeGitHub(files={"docs/a.txt": b"alpha"})) as gh:
+        index = RAMIndexCacheStore()
+        accessor = _served(gh)
+        await refill_index(accessor, index, "/gh")
+        await index.clear()
+        gh.log.clear()
+        assert await read(accessor, _at("docs/a.txt", "/gh"),
+                          index) == b"alpha"
+        # A read reseeds the listing rather than asking one directory, so
+        # the stats after it are answered from the index again.
+        assert gh.counts() == (0, 1, 1)
+        assert (await index.list_dir("/gh")).status != LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_a_read_stamps_the_sha_it_fetched_not_a_newer_one():
+    old, reseated, live = b"old", b"reseated", b"live"
+    with serve(FakeGitHub(files={"a.txt": old})) as gh:
+        accessor = _served(gh)
+        index = RAMIndexCacheStore()
+        await refill_index(accessor, index, "/gh")
+        gh.files["a.txt"] = reseated
+        # A refill on some other index reseats the accessor's tree only.
+        await refill_index(accessor, RAMIndexCacheStore(), "/gh")
+        assert accessor.tree["a.txt"].sha == blob_sha(reseated)
+        gh.files["a.txt"] = live
+        scope = RecordingScope()
+        try:
+            data = await read(accessor, _at("a.txt", "/gh"), index)
+        finally:
+            scope.close()
+        # Three shas are in play: the mount index's, the accessor tree's and
+        # the live one. Only the first names the bytes this read returned.
+        assert data == old
+        assert [r.fingerprint for r in scope.records] == [blob_sha(old)]
+        # The probe that follows sees the live sha, which is not the one the
+        # read stamped, so the copy it left is stale rather than fresh.
+        probe = await stat(accessor, _at("a.txt", "/gh"), RAMIndexCacheStore())
+        assert probe.fingerprint == blob_sha(live)
+        assert probe.fingerprint != scope.records[0].fingerprint

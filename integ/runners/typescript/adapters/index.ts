@@ -1848,7 +1848,7 @@ const GH_CLI_REPO = 'integ/repo-cli'
 // have to be out of process for the python host, whose GitHubVFS
 // fetched the repo tree with a blocking urlopen from its constructor; that
 // fetch is awaited now, so being shared is the only reason left.
-async function openGitHub(target: Target): Promise<Open> {
+async function openGitHub(target: Target, options?: OpenOptions): Promise<Open> {
   let base = process.env.GITHUB_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('github target requires GITHUB_URL')
@@ -1858,31 +1858,84 @@ async function openGitHub(target: Target): Promise<Open> {
     const reset = await fetch(`${base}/reset`, { method: 'POST' })
     if (!reset.ok) throw new Error(`github /reset failed: ${String(reset.status)}`)
   }
-  const mounts: Record<string, GitHubVFS | RAMVFS | [GitHubVFS, MountMode]> = {}
-  for (const m of target.mounts) {
-    if (m.vfs === 'ram') {
-      mounts[m.path] = new RAMVFS()
-      continue
-    }
+  const create = async (m: Mount): Promise<GitHubVFS> => {
     const [owner, repo] = String(m.repo).split('/')
-    const vfs = await GitHubVFS.create({
+    return GitHubVFS.create({
       token: 'ghp-integ',
       owner: owner ?? '',
       repo: repo ?? '',
       baseUrl: base,
     })
-    mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
-  if (target.clis?.includes('gh') === true) {
-    ws.registerCli('gh', GH, {
+  // create fetches the tree, so it is async and the maps are built up front:
+  // one for the workspace the case reads, one for the shadow a consistency
+  // scenario is handed.
+  const buildMounts = async (): Promise<MountMap> => {
+    const mounts: Record<string, GitHubVFS | RAMVFS | [GitHubVFS, MountMode]> = {}
+    for (const m of target.mounts) {
+      if (m.vfs === 'ram') {
+        mounts[m.path] = new RAMVFS()
+        continue
+      }
+      const vfs = await create(m)
+      mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
+    }
+    return mounts
+  }
+  const register = (ws: ExecWorkspace): void => {
+    if (target.clis?.includes('gh') !== true) return
+    ;(ws as unknown as Workspace).registerCli('gh', GH, {
       token: 'ghp-integ',
       base_url: base,
       repo: GH_CLI_REPO,
       branch: 'main',
     })
   }
-  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+  if (options === undefined) {
+    const ws = new Workspace(await buildMounts(), { mode: MountMode.WRITE })
+    register(ws as unknown as ExecWorkspace)
+    return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+  }
+  const maps = [await buildMounts(), await buildMounts()]
+  const opened = openWorkspaces(() => {
+    const next = maps.shift()
+    if (next === undefined) throw new Error('github: no mount map left for another workspace')
+    return next
+  }, options)
+  register(opened.ws)
+  // A github mount is read-only, so a scenario's out-of-band change is a
+  // contents PUT, create or update, against the repository the read side
+  // mounts; a scenario then runs the same on a fresh fake and a reused one.
+  const mutate = async (path: string, content: Uint8Array): Promise<void> => {
+    const m = target.mounts
+      .filter((x) => path === x.path || path.startsWith(`${x.path.replace(/\/+$/, '')}/`))
+      .sort((a, b) => b.path.length - a.path.length)[0]
+    if (m === undefined || m.vfs === 'ram') throw new Error(`github cannot change ${path}`)
+    const rel = path.slice(m.path.replace(/\/+$/, '').length).replace(/^\/+/, '')
+    const [owner, repo] = String(m.repo).split('/')
+    // Each segment encoded as python's quote encodes it, so a `?` or `#` in a
+    // name cannot end the path on one host only.
+    const encoded = rel.split('/').map(encodeURIComponent).join('/')
+    const endpoint = `/repos/${owner ?? ''}/${repo ?? ''}/contents/${encoded}`
+    const body: Record<string, string> = {
+      message: `integ: change ${rel}`,
+      content: Buffer.from(content).toString('base64'),
+    }
+    const vfs = await create(m)
+    try {
+      try {
+        const current = (await vfs.accessor.transport.get(endpoint)) as { sha?: string }
+        if (current.sha !== undefined) body.sha = current.sha
+      } catch (err) {
+        // Absent: create it. GitHub refuses a sha for a new file.
+        if ((err as { status?: number }).status !== 404) throw err
+      }
+      await vfs.accessor.transport.request('PUT', endpoint, body)
+    } finally {
+      await vfs.close()
+    }
+  }
+  return { ws: opened.ws, shadow: opened.shadow, mutate, cleanup: opened.closeAll }
 }
 
 // In-process for the reason openMem0 is: the fake is a kit fake and this host

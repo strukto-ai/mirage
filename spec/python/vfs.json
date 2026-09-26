@@ -192,11 +192,11 @@
       "has_prompt": true,
       "has_write_prompt": false,
       "index_ttl": 86400,
-      "read_revalidatable": false,
+      "read_revalidatable": true,
       "sizes_always_known": true,
       "statfs": false,
       "storage_id": false,
-      "supports_snapshot": false
+      "supports_snapshot": true
     },
     "gmail": {
       "caches_reads": true,
