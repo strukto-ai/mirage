@@ -39,15 +39,14 @@ async function buildWs(): Promise<Workspace> {
   reg.registerVfs(a)
   reg.registerVfs(b)
   const ws = new Workspace(
-    { '/a/': a, '/b/': b },
+    {
+      '/a/': [a, MountMode.WRITE, { cat: new Limit({ maxLines: 4 }) }],
+      '/b/': [b, MountMode.WRITE, { cat: new Limit({ maxLines: 2, onExceed: OnExceed.ERROR }) }],
+    },
     {
       mode: MountMode.WRITE,
       ops: reg,
       shellParser: parser,
-      commandLimits: {
-        '/a/': { cat: new Limit({ maxLines: 4, onExceed: OnExceed.TRUNCATE }) },
-        '/b/': { cat: new Limit({ maxLines: 2, onExceed: OnExceed.ERROR }) },
-      },
     },
   )
   await ws.shell("printf '1\\n2\\n3\\n4\\n5\\n' > /a/f.txt")
@@ -64,11 +63,11 @@ describe('connection limit (src)', () => {
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 
-  it('semicolon: rightmost /a limit caps combined to 4', async () => {
+  it('semicolon: each command applies its own limit', async () => {
     const ws = await buildWs()
     const res = await ws.shell('cat /b/f.txt ; cat /a/f.txt')
     await ws.close()
-    expect(DEC.decode(res.stdout)).toBe('6\n7\n8\n9\n')
+    expect(DEC.decode(res.stdout)).toBe('1\n2\n3\n4\n')
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 
@@ -88,11 +87,11 @@ describe('connection limit (src)', () => {
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 
-  it('subshell: rightmost /a limit caps combined to 4', async () => {
+  it('subshell: each command applies its own limit', async () => {
     const ws = await buildWs()
     const res = await ws.shell('( cat /b/f.txt ; cat /a/f.txt )')
     await ws.close()
-    expect(DEC.decode(res.stdout)).toBe('6\n7\n8\n9\n')
+    expect(DEC.decode(res.stdout)).toBe('1\n2\n3\n4\n')
     expect(DEC.decode(res.stderr)).toContain('truncated')
   })
 

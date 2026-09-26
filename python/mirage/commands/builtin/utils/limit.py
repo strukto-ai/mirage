@@ -18,6 +18,7 @@ import time
 from collections.abc import AsyncIterator
 
 from mirage.commands.errors import CommandTimeoutError, LimitExceededError
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import Limit, OnExceed
 from mirage.utils.stream import ensure_stream
@@ -91,16 +92,6 @@ async def run_with_timeout(coro, seconds: float | None, name: str):
         raise CommandTimeoutError(name or "?", seconds) from exc
 
 
-def _trim_to_lines(buf: bytes, max_lines: int) -> bytes:
-    count = 0
-    for i, byte in enumerate(buf):
-        if byte == 0x0A:
-            count += 1
-            if count == max_lines:
-                return buf[:i + 1]
-    return buf
-
-
 def row_cap_notice(command: str, operand: str, count: int, unit: str,
                    knob: str) -> bytes:
     """What a row-pushing command says when a mount's ceiling cut it short.
@@ -157,39 +148,59 @@ def _build_notice(limit: Limit) -> bytes:
         parts.append(f"{limit.max_bytes} bytes")
     detail = " / ".join(parts)
     return (f"output truncated at limit ({detail}); "
-            "narrow with grep, or read more with head -n / tail -n / "
-            "a more specific path\n").encode()
+            "narrow the selection or raise command_limits for this command\n"
+            ).encode()
+
+
+async def _bounded_stream(src: ByteSource,
+                          io: IOResult,
+                          limit: Limit,
+                          command: str = "") -> AsyncIterator[bytes]:
+    total = lines = 0
+    src_stream = ensure_stream(src)
+    try:
+        async for chunk in src_stream:
+            end = len(chunk)
+            if limit.max_bytes is not None:
+                end = min(end, max(0, limit.max_bytes - total))
+            if limit.max_lines is not None:
+                remaining = limit.max_lines - lines
+                if remaining <= 0:
+                    end = 0
+                else:
+                    at = 0
+                    for _ in range(remaining):
+                        newline = chunk.find(b"\n", at, end)
+                        if newline < 0:
+                            break
+                        at = newline + 1
+                    else:
+                        end = at
+            kept = chunk[:end]
+            total += end
+            lines += kept.count(b"\n")
+            if kept:
+                yield kept
+            if end < len(chunk):
+                prefix = f"{command}: ".encode() if command else b""
+                io.stderr = await materialize(io.stderr
+                                              ) + prefix + _build_notice(limit)
+                if limit.on_exceed is OnExceed.ERROR:
+                    io.exit_code = 1
+                return
+    finally:
+        await close_quietly(src_stream)
+        await close_quietly(src)
 
 
 async def apply_limit(
-    src: ByteSource,
-    limit: Limit | None,
-) -> tuple[ByteSource | None, IOResult]:
-    if limit is None:
-        return src, IOResult()
-    max_lines = limit.max_lines
-    max_bytes = limit.max_bytes
-    if max_lines is None and max_bytes is None:
-        return src, IOResult()
-    buf = bytearray()
-    truncated = False
-    async for chunk in ensure_stream(src):
-        buf.extend(chunk)
-        if max_bytes is not None and len(buf) > max_bytes:
-            buf = bytearray(buf[:max_bytes])
-            truncated = True
-            break
-        if max_lines is not None and buf.count(b"\n") >= max_lines:
-            buf = bytearray(_trim_to_lines(bytes(buf), max_lines))
-            truncated = True
-            break
-    data = bytes(buf)
-    if not truncated:
-        return data, IOResult()
-    notice = _build_notice(limit)
-    if limit.on_exceed is OnExceed.ERROR:
-        return None, IOResult(exit_code=1, stderr=notice)
-    return data, IOResult(stderr=notice)
+        src: ByteSource,
+        limit: Limit | None) -> tuple[ByteSource | None, IOResult]:
+    io = IOResult()
+    if limit is None or (limit.max_lines is None and limit.max_bytes is None):
+        return src, io
+    data = await materialize(_bounded_stream(src, io, limit))
+    return (None if io.exit_code else data), io
 
 
 async def truncate_stream(
@@ -226,6 +237,39 @@ async def truncate_stream(
         return
 
 
+async def _error_stream(src: ByteSource, io: IOResult, limit: Limit,
+                        command: str) -> AsyncIterator[bytes]:
+    outcome = IOResult()
+    data = await materialize(_bounded_stream(src, outcome, limit, command))
+    if outcome.stderr is not None:
+        io.stderr = await materialize(io.stderr) + await materialize(
+            outcome.stderr)
+    if outcome.exit_code:
+        io.exit_code = outcome.exit_code
+    elif data:
+        yield data
+
+
+def guard_io(stdout: ByteSource | None,
+             io: IOResult,
+             limit: Limit | None,
+             command: str = "") -> ByteSource | None:
+    """Bound a terminal stream and settle its outcome as its owner consumes it.
+
+    Args:
+        stdout (ByteSource | None): the command's output stream.
+        io (IOResult): mutable outcome settled while stdout is consumed.
+        limit (Limit | None): resolved output bound.
+        command (str): command to identify in a truncation notice.
+    """
+    if stdout is None or limit is None or (limit.max_lines is None
+                                           and limit.max_bytes is None):
+        return stdout
+    if limit.on_exceed is OnExceed.ERROR:
+        return _error_stream(stdout, io, limit, command)
+    return _bounded_stream(stdout, io, limit, command)
+
+
 async def guard_output(
     stdout: ByteSource | None,
     stderr: ByteSource | None,
@@ -245,15 +289,10 @@ async def guard_output(
         exit_code (int): the run's exit code.
         limit (Limit | None): resolved limit.
     """
-    if stdout is None:
-        return stdout, stderr, exit_code
-    data, sg_io = await apply_limit(stdout, limit)
-    if sg_io.stderr is not None:
-        existing = (await materialize(stderr) if stderr is not None else b"")
-        stderr = existing + await materialize(sg_io.stderr)
-    if sg_io.exit_code != 0:
-        exit_code = sg_io.exit_code
-    return data, stderr, exit_code
+    io = IOResult(stderr=stderr, exit_code=exit_code)
+    guarded = guard_io(stdout, io, limit)
+    data = await materialize(guarded) if guarded is not None else None
+    return data, io.stderr, io.exit_code
 
 
 async def apply_op_limit(result, limit: Limit | None):

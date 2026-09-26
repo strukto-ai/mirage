@@ -63,6 +63,29 @@ def test_resolve_falls_back_to_central_default():
     assert resolve_limit("cat") is DEFAULT_COMMAND_LIMITS["cat"]
 
 
+def test_resolve_walks_profile_mount_workspace_declared_then_table():
+    profile = {"cat": Limit(max_lines=1)}
+    mount = Limit(max_lines=2)
+    workspace = {"cat": Limit(max_lines=3)}
+    declared = Limit(max_lines=4)
+    assert resolve_limit("cat", [], declared, mount, workspace,
+                         profile) is profile["cat"]
+    assert resolve_limit("cat", [], declared, mount, workspace, {}) is mount
+    assert resolve_limit("cat", [], declared, None, workspace,
+                         {}) is workspace["cat"]
+    assert resolve_limit("cat", [], declared, None, {}, {}) is declared
+    assert resolve_limit("cat", [], None, None, {},
+                         {}) is DEFAULT_COMMAND_LIMITS["cat"]
+    assert resolve_limit("cat", [], None, None, workspace,
+                         {"head": Limit()}) is workspace["cat"]
+
+
+def test_rejects_negative_or_infinite_timeouts():
+    for seconds in (-1, float("inf"), float("nan")):
+        with pytest.raises(ValidationError):
+            Limit(timeout_seconds=seconds)
+
+
 def test_resolve_unknown_command_returns_fallback_limit():
     from mirage.policy.builtin.output_cap import FALLBACK_LIMIT
     assert resolve_limit("nl") is FALLBACK_LIMIT

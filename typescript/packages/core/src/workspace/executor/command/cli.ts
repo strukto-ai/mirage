@@ -25,7 +25,7 @@ import { renderHelp } from '../../../commands/spec/help.ts'
 import { Operand, type FlagValue } from '../../../commands/spec/types.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { wordText, PathSpec } from '../../../types.ts'
+import { wordText, PathSpec, type Limit } from '../../../types.ts'
 import { concatBytes } from '../../../core/jq/format.ts'
 import { maybeWithTimeout, runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError } from '../../../commands/errors.ts'
@@ -163,6 +163,7 @@ async function scriptOutput(
  * `links` follows for mount commands).
  */
 export interface CLIContext {
+  commandLimits?: Readonly<Record<string, Limit>>
   /**
    * The workspace's ordered runtime world, which a script leaf selects
    * its interpreter from; absent (outside a workspace) refuses script
@@ -328,7 +329,14 @@ export async function handleCli(
   // The outer timer bounds the whole invocation; the runtime deadline
   // also interrupts engines that block their event loop. Unlike Python's
   // asyncio cancellation, racing a promise does not stop its work.
-  const limit = resolveLimit(prog, [], leaf.limit)
+  const limit = resolveLimit(
+    prog,
+    [],
+    leaf.limit,
+    null,
+    context.commandLimits,
+    session.commandLimits,
+  )
   const timeout = limit?.timeoutSeconds ?? null
   const abort = new AbortController()
   let body: Promise<[ByteSource | null, IOResult] | null>

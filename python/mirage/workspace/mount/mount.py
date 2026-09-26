@@ -695,7 +695,8 @@ class MountEntry:
                     resolved_limit = resolve_limit(
                         cmd_name,
                         command_default=cmd.limit,
-                        mount_override=self.command_limits.get(cmd_name))
+                        mount_override=context.limit_override
+                        or self.command_limits.get(cmd_name))
                     cmd_timeout = (resolved_limit.timeout_seconds
                                    if resolved_limit is not None else None)
                     with host_io():

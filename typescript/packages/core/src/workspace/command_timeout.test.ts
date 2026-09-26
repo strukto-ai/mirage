@@ -129,13 +129,12 @@ describe('python3 command timeout', () => {
     const registry = new OpsRegistry()
     registry.registerVfs(ram)
     return new Workspace(
-      { '/data': ram },
+      { '/data': [ram, MountMode.EXEC, limits?.['/data'] ?? {}] },
       {
         mode: MountMode.EXEC,
         ops: registry,
         shellParser: parser,
         runtimes: ['monty', 'quickjs', 'workspace'],
-        ...(limits !== undefined ? { commandLimits: limits } : {}),
       },
     )
   }
@@ -193,9 +192,7 @@ describe('python3 command timeout', () => {
         ops: registry,
         shellParser: parser,
         runtimes: [probe, 'workspace'],
-        commandLimits: {
-          '/data': { python3: new Limit({ timeoutSeconds: 0.1 }) },
-        },
+        commandLimits: { python3: new Limit({ timeoutSeconds: 0.1 }) },
       },
     )
     try {
@@ -218,9 +215,7 @@ describe('python3 command timeout', () => {
         ops: registry,
         shellParser: parser,
         runtimes: ['pyodide', 'workspace'],
-        commandLimits: {
-          '/data': { python3: new Limit({ timeoutSeconds: 0.5 }) },
-        },
+        commandLimits: { python3: new Limit({ timeoutSeconds: 0.5 }) },
       },
     )
     try {
@@ -259,9 +254,7 @@ describe('python3 command timeout', () => {
         ops: registry,
         shellParser: parser,
         runtimes: ['quickjs', 'workspace'],
-        commandLimits: {
-          '/data': { node: new Limit({ timeoutSeconds: 0.3 }) },
-        },
+        commandLimits: { node: new Limit({ timeoutSeconds: 0.3 }) },
       },
     )
     try {

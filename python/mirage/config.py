@@ -634,6 +634,7 @@ class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mounts: dict[str, MountBlock]
+    command_limits: dict[str, Limit] | None = None
     # Installed CLIs, fully separate from mounts: key = installed head
     # word, value names a registered CLISpec plus its own config.
     clis: dict[str, CLIBlock] | None = None
@@ -728,6 +729,7 @@ class WorkspaceConfig(BaseModel):
             )
         kwargs: dict[str, Any] = {
             "mounts": mounts,
+            "command_limits": self.command_limits,
             "mode": self.mode,
             "read": default_read,
             "session_id": self.default_session_id,

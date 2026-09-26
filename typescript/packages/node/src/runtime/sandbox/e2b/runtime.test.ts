@@ -320,7 +320,7 @@ describe('E2B cancellation and validation', () => {
         mode: MountMode.EXEC,
         runtimes: [runtime, 'workspace'],
         ...(kind === 'timeout'
-          ? { commandLimits: { '/data': { 'native-sleep': new Limit({ timeoutSeconds: 0.05 }) } } }
+          ? { commandLimits: { 'native-sleep': new Limit({ timeoutSeconds: 0.05 }) } }
           : {}),
       },
     )

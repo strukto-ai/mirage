@@ -325,6 +325,32 @@ def test_workspace_copy_preserves_max_drain_bytes():
     assert cp.max_drain_bytes == 1234
 
 
+@pytest.mark.asyncio
+async def test_copy_keeps_profiles_and_the_default_profile():
+    src = Workspace({"/data": RAMVFS()},
+                    mode=MountMode.WRITE,
+                    profiles={
+                        "ro": {
+                            "commands": {
+                                "deny": [{
+                                    "reason": "read-only",
+                                    "commands": ["rm"]
+                                }]
+                            }
+                        }
+                    },
+                    profile="ro")
+    cp = await src.copy()
+    try:
+        assert (await cp.shell("touch /data/a; rm /data/a")).exit_code == 126
+        cp.create_session("named", profile="ro")
+        assert (await cp.shell("rm /data/a",
+                               session_id="named")).exit_code == 126
+    finally:
+        await cp.close()
+        await src.close()
+
+
 # ── state dict shape ───────────────────────────────────────────────
 
 

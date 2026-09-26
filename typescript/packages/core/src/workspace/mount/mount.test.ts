@@ -413,11 +413,8 @@ describe('Mount.executeCmd', () => {
   })
 
   it('a null limitOverride does not shadow the mount own table', async () => {
-    // The override carries the origin mount's cap across a warm-cache
-    // redirect; a path-less command from an unmounted cwd resolves no
-    // origin and passes null, which must fall through to the serving
-    // mount's command_limits (python always reads the serving
-    // mount's own table).
+    // A caller with no profile, mount or workspace entry passes null,
+    // which must fall through to the serving mount's command_limits.
     const m = makeMount()
     m.commandLimits.set('cat', new Limit({ timeoutSeconds: 0.05 }))
     const [cmd] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: HANG_CMD })

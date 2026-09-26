@@ -42,7 +42,7 @@ import { NodeType as NT, ProcessSubDirection } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
-import { type ExecuteFn, expandNode } from '../expand/node.ts'
+import { type ExecuteFn, expandNode, childLine } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
@@ -50,8 +50,15 @@ import { handleCommand } from '../executor/command.ts'
 import type { ExecuteNodeOpts } from '../executor/jobs.ts'
 import { type AliasMark, aliasCommandText } from '../executor/builtins/alias/index.ts'
 import { findSyntaxError } from '../../shell/parse/index.ts'
-import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
-import { PolicyDenied, resolveLimit, type Claimant, type HandOff } from '../../policy/index.ts'
+import { INTERPRETER_NAMES } from '../lookup/constants.ts'
+import { guardIO, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import {
+  PolicyDenied,
+  resolveLimit,
+  resolveProducer,
+  type Claimant,
+  type HandOff,
+} from '../../policy/index.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
@@ -385,16 +392,11 @@ async function runCommandBody(
       }
       const [path, allocation] = dev.allocateInput()
       procSubInputs.push([path, allocation])
-      const saved = session.snapshot()
-      try {
-        const inner = getProcessSubBody(p)
-        if (inner !== '') {
-          const io = await executeFn(inner, { sessionId: session.sessionId, node: p })
-          dev.setInput(path, allocation, await materialize(io.stdout))
-          procSubStderr.push(await materialize(io.stderr))
-        }
-      } finally {
-        session.restore(saved)
+      const inner = getProcessSubBody(p)
+      if (inner !== '') {
+        const io = await childLine(session, executeFn, inner, p)
+        dev.setInput(path, allocation, await materialize(io.stdout))
+        procSubStderr.push(await materialize(io.stderr))
       }
       cleanParts.push({ type: NT.WORD, text: path, children: [], namedChildren: [] })
     }
@@ -412,16 +414,23 @@ async function runCommandBody(
 
     // Limits resolve against the expanded name, so `$CMD`-style
     // invocations get their real command's policy.
-    // External execution owns its mount-resolved deadline and cancellation.
-    const external =
+    // Mount, CLI and external dispatch own their resolved deadlines.
+    const consumer = lookup(argv.name, session, registry, routingDecision)
+    const ownsDeadline =
       !argv.name.includes('/') &&
-      lookup(argv.name, session, registry, routingDecision) === Consumer.EXTERNAL
-    const resolved = argv.name !== '' && !external ? resolveLimit(argv.name) : null
+      (consumer === Consumer.EXTERNAL ||
+        consumer === Consumer.MOUNT ||
+        consumer === Consumer.CLI ||
+        INTERPRETER_NAMES.has(argv.name))
+    const resolved =
+      argv.name !== '' && !ownsDeadline
+        ? resolveLimit(argv.name, [], null, null, registry.commandLimits, session.commandLimits)
+        : null
     const timeout = resolved !== null ? resolved.timeoutSeconds : null
     // Capture xtrace before the body runs so `set -x` itself is not
     // traced (bash enables tracing only for the following commands).
     const xtrace = session.shellOptions.xtrace === true
-    const [stdout, io, execNode] = await runWithTimeout(
+    const [rawStdout, io, execNode] = await runWithTimeout(
       runArgv(
         recurse,
         dispatch,
@@ -445,11 +454,29 @@ async function runCommandBody(
       timeout,
       argv.name !== '' ? argv.name : '?',
     )
+    let stdout = rawStdout
     if (io.producer === null && argv.name !== '') {
       // Builtins and other non-mount routes return no rider; stamp the
       // expanded name here so postExecute policies keyed on a command
       // (echo, printf, ...) still see it.
       io.producer = { command: argv.name, prefixes: [], declared: null }
+    }
+    if (!io.outputFinalized) {
+      io.outputFinalized = true
+      if (
+        session.terminalOutput &&
+        (session.execStdout === null || session.execStdout === '&1') &&
+        io.producer !== null
+      ) {
+        const bound = resolveProducer(
+          io.producer,
+          (prefix, name) => registry.limitOverride(prefix, name),
+          registry.commandLimits,
+          session.commandLimits,
+        )
+        stdout = guardIO(stdout, io, bound, io.producer.command)
+        execNode.exitCode = io.exitCode
+      }
     }
     if (procSubStderr.length > 0) {
       const stderr = await materialize(io.stderr)

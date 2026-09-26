@@ -89,6 +89,7 @@ export class MountRegistry {
   // which the bindings map cannot answer: an entry behind another
   // capturer never binds a command.
   runtimeEntries: readonly Runtime[] = []
+  commandLimits: Readonly<Record<string, Limit>> = {}
   // Command admission policies. Policies itself is a bare mechanism;
   // the registry seeds the POSIX mount-root rule (mount-root semantics
   // are mount semantics) and the document's deny rules, then user

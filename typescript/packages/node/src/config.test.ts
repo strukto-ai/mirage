@@ -461,11 +461,12 @@ describe('configToWorkspaceArgs', () => {
     expect(args.mounts['/']?.options.commandLimits).toEqual({})
   })
 
-  it('rejects an invalid on_exceed value', async () => {
-    const cfg = loadWorkspaceConfig({
-      mounts: { '/': { vfs: 'ram', command_limits: { cat: { on_exceed: 'boom' } } } },
-    })
-    await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/invalid onExceed/)
+  it('rejects an invalid on_exceed value at config load', () => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/': { vfs: 'ram', command_limits: { cat: { on_exceed: 'boom' } } } },
+      }),
+    ).toThrow(/on_exceed must be truncate or error/)
   })
 
   it('reads snake_case default_session_id / default_agent_id (Python YAML)', async () => {
@@ -1570,4 +1571,38 @@ describe('config interpolation', () => {
     expect(Object.hasOwn(out, '__proto__')).toBe(true)
     expect((out as Record<string, unknown>).__proto__).toBe('kept')
   })
+})
+
+it('loads global and profile command limits from config', async () => {
+  const cfg = loadWorkspaceConfig({
+    mounts: { '/data': { vfs: 'ram', mode: 'WRITE' } },
+    command_limits: { head: { max_lines: 2 } },
+    profiles: { research: { command_limits: { head: { max_lines: 4 } } } },
+  })
+  const args = await configToWorkspaceArgs(cfg)
+  const ws = new Workspace(args.mounts, args.options)
+  try {
+    ws.createSession('research', { profile: 'research' })
+    for (const [sessionId, expected] of [
+      [undefined, '1\n2\n'],
+      ['research', '1\n2\n3\n'],
+    ] as const) {
+      const result = await ws.shell(
+        'seq 1 5 | head -n 3',
+        sessionId === undefined ? {} : { sessionId },
+      )
+      expect(result.stdoutText).toBe(expected)
+    }
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([
+  { command_limits: { head: { max_line: 2 } } },
+  { command_limits: { sleep: { timeout_seconds: -1 } } },
+  { command_limits: { sleep: { timeout_seconds: Infinity } } },
+  { profiles: { research: { command_limits: { head: { max_line: 2 } } } } },
+])('rejects bad command limit fields', (block) => {
+  expect(() => loadWorkspaceConfig({ mounts: { '/data': { vfs: 'ram' } }, ...block })).toThrow()
 })

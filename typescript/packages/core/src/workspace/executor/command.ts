@@ -224,6 +224,7 @@ export async function handleCommand(
         session,
         stdin,
         {
+          commandLimits: registry.commandLimits,
           entries: registry.runtimeEntries,
           dispatch,
           statPath: (path: string) => pathStat(dispatch, path, null),
@@ -508,7 +509,15 @@ export async function handleCommand(
       declared: null,
     }
     csExec.paths = pathScopes
-    return [maybeWithTimeout(csStdout, resolveLimit(cmdName, mounts), cmdName), csIo, csExec]
+    return [
+      maybeWithTimeout(
+        csStdout,
+        resolveLimit(cmdName, mounts, null, null, registry.commandLimits, session.commandLimits),
+        cmdName,
+      ),
+      csIo,
+      csExec,
+    ]
   }
 
   // Path-flag targets count: a command bound to one mount cannot write its
@@ -679,7 +688,12 @@ export async function handleCommand(
   }
   const resolved =
     io.producer !== null
-      ? resolveProducer(io.producer, (prefix, name) => registry.limitOverride(prefix, name))
+      ? resolveProducer(
+          io.producer,
+          (prefix, name) => registry.limitOverride(prefix, name),
+          registry.commandLimits,
+          session.commandLimits,
+        )
       : null
   stdout = maybeWithTimeout(stdout, resolved, cmdName)
   io.stderr = maybeWithTimeout(io.stderr, resolved, cmdName)

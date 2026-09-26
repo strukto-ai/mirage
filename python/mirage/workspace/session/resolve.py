@@ -228,6 +228,9 @@ def with_inline(base: SessionProfile | None,
         return base
     refuse_allow(inline.commands)
     refuse_show(inline)
+    if inline.command_limits is not None:
+        raise PolicyError(
+            "command_limits belong on the profile, not inline permissions")
     if inline.policy is not None:
         raise PolicyError("inline permissions may add ask and deny rules, "
                           "not a policy; state one on the profile")
@@ -261,6 +264,7 @@ def with_inline(base: SessionProfile | None,
               (base.vars is not None or inline.vars is not None) else None),
         commands=_add_commands(base.commands, inline.commands),
         policy=base.policy,
+        command_limits=base.command_limits,
     )
 
 
@@ -478,6 +482,7 @@ def compile_profile(effective: SessionProfile | None,
         cwd=effective.cwd,
         commands=commands,
         script=compile_script(effective, name),
+        command_limits=effective.command_limits,
         shown_paths=_shown(effective),
         hide_reasons=_hide_reasons(effective),
         profile=name or None,
@@ -507,6 +512,7 @@ def narrow(session: SessionState, compiled: CompiledProfile) -> None:
     session.commands = compiled.commands
     session.script = compiled.script
     session.profile = compiled.profile
+    session.command_limits = dict(compiled.command_limits or {})
 
 
 def apply_profile(session: SessionState, compiled: CompiledProfile) -> None:

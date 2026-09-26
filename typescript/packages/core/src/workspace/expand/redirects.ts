@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { childLine } from './node.ts'
 import type { SessionView } from '../../ops/types.ts'
 import { materialize } from '../../io/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -88,10 +89,7 @@ export async function expandRedirects(
         const inner = getProcessSubBody(procSubNode)
         let innerData: Uint8Array = new Uint8Array()
         if (inner !== '') {
-          const ioPs = await executeFn(inner, {
-            sessionId: session.sessionId,
-            node: procSubNode,
-          })
+          const ioPs = await childLine(session, executeFn, inner, procSubNode)
           innerData = await materialize(ioPs.stdout)
         }
         expanded.push(

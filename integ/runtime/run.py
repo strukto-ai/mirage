@@ -501,6 +501,11 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
         kwargs["route_policy"] = ScriptSource(world["route_policy"])
     if "policies" in world:
         kwargs["policies"] = [_build_policy(s) for s in world["policies"]]
+    if "command_limits" in world:
+        kwargs["command_limits"] = {
+            name: Limit(**limit)
+            for name, limit in world["command_limits"].items()
+        }
     if "profiles" in world:
         kwargs["profiles"] = world["profiles"]
     if "profile" in world:

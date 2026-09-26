@@ -53,7 +53,7 @@ from mirage.shell import parse
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.types import (CacheFacts, DriftPolicy, FileEvent, FileStat,
-                          JsonValue, MountBackend, MountMode, PathSpec,
+                          JsonValue, Limit, MountBackend, MountMode, PathSpec,
                           ReadSpec, parse_mount_mode)
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.vfs.base import BaseVFS
@@ -123,6 +123,7 @@ class Workspace:
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
         read: ReadSpec | None = None,
+        command_limits: Mapping[str, Limit] | None = None,
         session_id: str | None = None,
         agent_id: str | None = None,
         workspace_id: str | None = None,
@@ -145,6 +146,7 @@ class Workspace:
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
     ) -> None:
         self._registry = MountRegistry()
+        self._registry.command_limits = dict(command_limits or {})
         # The permission profiles: one per name, and the one a session
         # gets when it names none. A profile is the whole document a
         # session runs under, so there is no workspace-wide block
@@ -962,11 +964,20 @@ class Workspace:
         # The declarations travel with the copy the way a live CLI
         # install does: an env pointer restores from state naming its
         # instance, and without the block the copy would answer the
-        # first read with "unknown secrets source".
-        return await type(self)._from_state(state,
-                                            mounts=mounts,
-                                            clis=reusable_clis(self),
-                                            secrets=self._declared_sources)
+        # first read with "unknown secrets source". Profiles and
+        # command limits are deployment config the state dict never
+        # carries; without them the copy runs every session unconfined.
+        # Policy instances and the route policy stay behind: a policy
+        # is a live host object whose state two workspaces must not
+        # share, and the route names runtimes the copy does not carry.
+        return await type(self)._from_state(
+            state,
+            mounts=mounts,
+            clis=reusable_clis(self),
+            secrets=self._declared_sources,
+            command_limits=self._registry.command_limits,
+            profiles=self._profiles,
+            profile=self._default_profile_name)
 
     @classmethod
     async def _from_state(
@@ -976,7 +987,10 @@ class Workspace:
         mounts: dict[str, Any] | None = None,
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]]
-        | None = None
+        | None = None,
+        command_limits: Mapping[str, Limit] | None = None,
+        profiles: Mapping[str, SessionProfile] | None = None,
+        profile: str | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
         # No read= here: each restored Mount carries its own spec, and
@@ -985,7 +999,10 @@ class Workspace:
                  session_id=args.default_session_id,
                  agent_id=args.default_agent_id,
                  clis=args.clis,
-                 secrets=secrets)
+                 secrets=secrets,
+                 command_limits=command_limits,
+                 profiles=profiles,
+                 profile=profile)
         if mounts:
             ws._shared_mounts = {id(r) for r in mounts.values()}
         await apply_state_dict(ws, state)

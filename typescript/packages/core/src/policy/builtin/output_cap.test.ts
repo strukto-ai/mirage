@@ -18,7 +18,6 @@ import {
   DEFAULT_COMMAND_LIMITS,
   FALLBACK_LIMIT,
   OutputCapPolicy,
-  resolveAcrossMounts,
   resolveProducer,
   resolveLimit,
 } from './output_cap.ts'
@@ -44,6 +43,12 @@ describe('Limit', () => {
   it('rejects non-integer limits', () => {
     expect(() => new Limit({ maxLines: 1.5 })).toThrow(TypeError)
   })
+
+  it('rejects negative or infinite timeouts', () => {
+    for (const seconds of [-1, Infinity, NaN]) {
+      expect(() => new Limit({ timeoutSeconds: seconds })).toThrow(TypeError)
+    }
+  })
 })
 
 describe('resolveLimit', () => {
@@ -60,6 +65,21 @@ describe('resolveLimit', () => {
 
   it('falls back to central default for known names', () => {
     expect(resolveLimit('cat')).toBe(DEFAULT_COMMAND_LIMITS.cat)
+  })
+
+  it('walks profile, mount, workspace, declared, then the table', () => {
+    const profile = { cat: new Limit({ maxLines: 1 }) }
+    const mount = new Limit({ maxLines: 2 })
+    const workspace = { cat: new Limit({ maxLines: 3 }) }
+    const declared = new Limit({ maxLines: 4 })
+    expect(resolveLimit('cat', [], declared, mount, workspace, profile)).toBe(profile.cat)
+    expect(resolveLimit('cat', [], declared, mount, workspace, {})).toBe(mount)
+    expect(resolveLimit('cat', [], declared, null, workspace, {})).toBe(workspace.cat)
+    expect(resolveLimit('cat', [], declared, null, {}, {})).toBe(declared)
+    expect(resolveLimit('cat', [], null, null, {}, {})).toBe(DEFAULT_COMMAND_LIMITS.cat)
+    expect(resolveLimit('cat', [], null, null, workspace, { head: new Limit() })).toBe(
+      workspace.cat,
+    )
   })
 
   it('returns FALLBACK_LIMIT for unknown command', () => {
@@ -95,11 +115,11 @@ describe('Limit.aggr', () => {
   })
 })
 
-describe('resolveAcrossMounts', () => {
+describe('resolveLimit across mounts', () => {
   it('aggregates per-mount overrides, falling back to command default', () => {
     const m1 = { commandLimits: new Map([['cat', new Limit({ maxLines: 10 })]]) }
     const m2 = { commandLimits: new Map<string, Limit>() }
-    const merged = resolveAcrossMounts('cat', [m1, m2])
+    const merged = resolveLimit('cat', [m1, m2])
     expect(merged?.maxLines).toBe(10)
   })
 })

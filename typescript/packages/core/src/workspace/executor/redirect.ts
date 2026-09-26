@@ -103,6 +103,16 @@ type FdDest = typeof TO_STDOUT | typeof TO_STDERR | typeof CLOSED | string
 // A descriptor a read cannot use: closed, or open for writing only.
 const UNREADABLE: unique symbol = Symbol('unreadable')
 
+function terminalStdout(redirects: readonly Redirect[], session: SessionState): boolean {
+  const fds = [session.execStdinIdentity === EXEC_TO_STDOUT, true, false]
+  for (const r of redirects) {
+    if (typeof r.target === 'number') fds[r.fd] = r.target !== FD_CLOSE && fds[r.target] === true
+    else if (r.fd === FD_BOTH) fds[FD_STDOUT] = fds[FD_STDERR] = false
+    else fds[r.fd] = false
+  }
+  return session.terminalOutput && fds[FD_STDOUT] === true
+}
+
 export async function handleRedirect(
   executeNode: ExecuteNodeFn,
   dispatch: DispatchFn,
@@ -242,9 +252,17 @@ export async function handleRedirect(
       .map((r) => ensureScope(r.target))
     const given = inputs[FD_STDIN] ?? null
     const commandStdin = given === UNREADABLE ? unreadableStdin() : given
-    const [stdout, execIo, execNode] = await runWithRedirectPaths(command, targets, () =>
-      executeNode(command, session, commandStdin, callStack),
-    )
+    const terminalOutput = session.terminalOutput
+    session.terminalOutput = terminalStdout(redirects, session)
+    let result: Result
+    try {
+      result = await runWithRedirectPaths(command, targets, () =>
+        executeNode(command, session, commandStdin, callStack),
+      )
+    } finally {
+      session.terminalOutput = terminalOutput
+    }
+    const [stdout, execIo, execNode] = result
     io = execIo
     refused = execNode.refused
     try {

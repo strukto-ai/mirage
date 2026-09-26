@@ -49,7 +49,10 @@ async def run_external(
                                                          stderr=err)
     cwd = PathSpec.from_str_path(session.cwd)
     env = env_snapshot(session)
-    guard = resolve_limit(argv.name, registry.mounts())
+    guard = resolve_limit(argv.name,
+                          registry.mounts(),
+                          workspace_limits=registry.command_limits,
+                          profile_limits=session.command_limits)
 
     async def execute() -> RunResult:
         data = await materialize(stdin) if stdin is not None else None

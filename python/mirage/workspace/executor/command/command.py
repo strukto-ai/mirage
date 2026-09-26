@@ -202,6 +202,7 @@ async def handle_command(
             session,
             stdin,
             CLIContext(
+                command_limits=registry.command_limits,
                 entries=registry.runtime_entries,
                 dispatch=dispatch,
                 stat_path=(functools.partial(path_stat, dispatch)
@@ -414,8 +415,12 @@ async def handle_command(
                 mounts.append(m)
         io.producer = Producer(command=cmd_name,
                                prefixes=tuple(m.prefix for m in mounts))
-        stdout = maybe_with_timeout(stdout, resolve_limit(cmd_name, mounts),
-                                    cmd_name)
+        stdout = maybe_with_timeout(
+            stdout,
+            resolve_limit(cmd_name,
+                          mounts,
+                          workspace_limits=registry.command_limits,
+                          profile_limits=session.command_limits), cmd_name)
         return stdout, io, await exec_node(cmd_str, io, path_scopes)
 
     # Reject unsupported cross-mount commands. Path-flag targets count: a
@@ -546,8 +551,9 @@ async def handle_command(
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn_bytes + existing
 
-    resolved = (resolve_producer(io.producer, registry.limit_override)
-                if io.producer is not None else None)
+    resolved = (resolve_producer(
+        io.producer, registry.limit_override, registry.command_limits,
+        session.command_limits) if io.producer is not None else None)
     stdout = maybe_with_timeout(stdout, resolved, cmd_name)
     io.stderr = maybe_with_timeout(io.stderr, resolved, cmd_name)
 

@@ -54,7 +54,11 @@ export interface WorkspaceOptions {
    * mount block, where it cannot be confused with `index: {ttl:}`.
    */
   read?: ReadSpec
-  commandLimits?: Record<string, Record<string, Limit>>
+  /**
+   * Workspace defaults keyed by command name. A session profile's
+   * `commandLimits` and a mount's own table take precedence.
+   */
+  commandLimits?: Record<string, Limit>
   /**
    * Behaviour for the post-load drift check on fingerprinted reads. Only
    * consulted by `Workspace.load` / `Workspace.fromState`; fresh

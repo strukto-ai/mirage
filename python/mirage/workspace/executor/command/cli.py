@@ -14,7 +14,7 @@
 
 import inspect
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -40,7 +40,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language
 from mirage.runtime.types import CodeExecution, DispatchFn, ScriptSource
-from mirage.types import PathSpec, Producer, word_text
+from mirage.types import Limit, PathSpec, Producer, word_text
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.run import exec_node
@@ -211,6 +211,7 @@ class CLIContext:
             gated handle; ``inv.env`` stays the frozen process view.
     """
 
+    command_limits: Mapping[str, Limit] | None = None
     entries: list[Runtime] | None = None
     dispatch: DispatchFn | None = None
     stat_path: StatPath | None = None
@@ -390,7 +391,10 @@ async def handle_cli(
 
     # asyncio's timeout cancels the runtime task as well as the caller;
     # TypeScript forwards an explicit deadline and abort signal instead.
-    limit = resolve_limit(prog, command_default=leaf.limit)
+    limit = resolve_limit(prog,
+                          command_default=leaf.limit,
+                          workspace_limits=context.command_limits,
+                          profile_limits=session.command_limits)
     timeout = limit.timeout_seconds if limit is not None else None
     if leaf.script is not None:
         runtime, refused = _select_runtime(prog, leaf, entries or [])

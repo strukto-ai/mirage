@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
@@ -32,10 +33,8 @@ import {
 import {
   type ReadSpec,
   KERNEL_BACKENDS,
-  Limit,
   MountBackend,
   MountMode,
-  OnExceed,
   ReadPolicy,
   parseMountMode,
 } from '@struktoai/mirage-core/types'
@@ -155,15 +154,6 @@ async function buildRuntimeEntries(entries: unknown[]): Promise<RuntimeEntry[]> 
   return out
 }
 
-const VALID_ON_EXCEED = new Set<string>([OnExceed.ERROR, OnExceed.TRUNCATE])
-
-function coerceOnExceed(value: string): OnExceed {
-  if (!VALID_ON_EXCEED.has(value.toLowerCase())) {
-    throw new Error(`invalid onExceed: ${value}`)
-  }
-  return value.toLowerCase() as OnExceed
-}
-
 function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) out[snakeToCamel(k)] = v
@@ -190,6 +180,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // tabled here like the rest.
 const TOP_LEVEL_KEYS = [
   'mounts',
+  'command_limits',
   'clis',
   'runtimes',
   'route_policy',
@@ -419,6 +410,7 @@ function validateReadBlock(prefix: string, block: Record<string, unknown>): void
  */
 function validateConfigKeys(raw: Record<string, unknown>): void {
   rejectUnknownKeys(raw, TOP_LEVEL_KEYS, 'config')
+  parseCommandLimits(raw.command_limits)
   // At the sync door, as Python's WorkspaceConfig validator is, so the CLI
   // refuses a bad value before it POSTs the document to the daemon.
   if (raw.read !== undefined && raw.read !== null) resolveReadSpec(raw.read, undefined)
@@ -427,6 +419,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
       if (!isPlainObject(block)) throw new Error(`mount \`${prefix}\` must be a mapping`)
       rejectUnknownKeys(block, MOUNT_KEYS, `mount \`${prefix}\``)
       validateReadBlock(prefix, block)
+      parseCommandLimits(block.command_limits)
     }
   }
   if (isPlainObject(raw.clis)) {
@@ -519,7 +512,7 @@ function validateEnvBlock(value: unknown): void {
 // normalize at the boundary: camelize the top-level keys plus the cache and
 // index blocks. Mounts are left untouched on purpose, their `config:` blocks
 // carry VFS credentials whose snake_case keys (aws_access_key_id, ...)
-// are consumed downstream as-is, and command_limits is camelized later.
+// are consumed downstream as-is, and command_limits is parsed separately.
 function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unknown> {
   const out = camelizeKeys(raw)
   if (isPlainObject(out.cache)) out.cache = camelizeKeys(out.cache)
@@ -548,25 +541,6 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
         normalized.config = camelizeKeys(normalized.config)
       }
       return normalized
-    })
-  }
-  return out
-}
-
-// Workspace YAML uses Python's snake_case keys (command_limits, max_lines,
-// on_exceed, ...). The in-memory config stays camelCase, so normalize each
-// block's keys at the boundary before constructing the limit.
-function parseLimits(
-  raw: Record<string, Record<string, unknown>> | undefined,
-): Record<string, Limit> {
-  const out: Record<string, Limit> = {}
-  for (const [cmd, rawBlock] of Object.entries(raw ?? {})) {
-    const block = camelizeKeys(rawBlock) as RawLimitBlock
-    out[cmd] = new Limit({
-      ...(block.maxBytes !== undefined ? { maxBytes: block.maxBytes } : {}),
-      ...(block.maxLines !== undefined ? { maxLines: block.maxLines } : {}),
-      ...(block.timeoutSeconds !== undefined ? { timeoutSeconds: block.timeoutSeconds } : {}),
-      ...(block.onExceed !== undefined ? { onExceed: coerceOnExceed(block.onExceed) } : {}),
     })
   }
   return out
@@ -654,13 +628,6 @@ export function interpolateEnv<T>(value: T, env: Record<string, string>): T {
     throw new Error(`missing environment variables: ${unique.join(', ')}`)
   }
   return out as T
-}
-
-interface RawLimitBlock {
-  maxBytes?: number | null
-  maxLines?: number | null
-  timeoutSeconds?: number | null
-  onExceed?: string
 }
 
 export interface MountBlock {
@@ -773,6 +740,7 @@ interface CLIBlock {
 }
 
 export interface WorkspaceConfigRaw {
+  commandLimits?: unknown
   mounts: Record<string, MountBlock>
   clis?: Record<string, CLIBlock> | null
   runtimes?: (string | Record<string, unknown>)[] | null
@@ -1111,7 +1079,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     mounts[prefix] = new Mount(r, {
       mode: m,
       read,
-      commandLimits: parseLimits(block.command_limits),
+      commandLimits: parseCommandLimits(block.command_limits),
     })
     const backend = (block.backend ?? MountBackend.WORKSPACE) as MountBackend
     if (KERNEL_BACKENDS.includes(backend)) kernelMounts[prefix] = [backend, block.mountpoint]
@@ -1131,6 +1099,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
     mounts,
     options: {
       mode: wsMode,
+      commandLimits: parseCommandLimits(cfg.commandLimits),
       read: defaultRead,
       ...(cfg.defaultSessionId !== undefined ? { sessionId: cfg.defaultSessionId } : {}),
       ...(cfg.defaultAgentId !== undefined ? { agentId: cfg.defaultAgentId } : {}),
