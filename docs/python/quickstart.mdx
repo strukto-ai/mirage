@@ -112,7 +112,9 @@ To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`, and
 seconds. When a cap fires, the agent sees the truncated output plus a stderr
 notice (`cat: output truncated at limit (2000 lines); ...`).
 
-Set your own limits per workspace, per mount, or per session profile:
+Set your own limits in three places. A mount's third tuple element covers
+commands that run on it, `command_limits` is the default for every session,
+and a profile's `command_limits` applies to sessions created with it:
 
 ```python
 from mirage import MountMode, Workspace
@@ -121,15 +123,12 @@ from mirage.vfs.ram import RAMVFS
 
 ws = Workspace(
     {
-        # Mount: commands that run on /data.
         "/data": (RAMVFS(), MountMode.WRITE, {
             "grep": Limit(max_lines=50, on_exceed=OnExceed.ERROR),
         }),
     },
     mode=MountMode.WRITE,
-    # Workspace: the default for every session.
     command_limits={"head": Limit(max_lines=500, timeout_seconds=30)},
-    # Profile: wins for sessions created with it.
     profiles={
         "researcher": {"command_limits": {"head": Limit(max_lines=5000)}},
     },

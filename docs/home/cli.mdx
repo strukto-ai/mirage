@@ -316,11 +316,12 @@ mirage workspace clone demo --at <version> --id demo_at_v1
 ## Command limits
 
 `cat`, `grep`, `rg`, `head`, and `tail` cap their output at 2000 lines, and
-every command stops after 600 seconds. Change that with `command_limits` for
-the workspace, a mount, or a session profile:
+every command stops after 600 seconds. Change that with `command_limits` in
+three places: at the top level for every session, on a mount for commands
+that run on it, and on a profile for sessions created with it:
 
 ```yaml
-command_limits:            # the default for every session
+command_limits:
   head:
     max_lines: 500
     timeout_seconds: 30
@@ -328,13 +329,13 @@ mounts:
   /data:
     vfs: ram
     mode: WRITE
-    command_limits:        # commands that run on /data
+    command_limits:
       grep:
         max_lines: 50
         on_exceed: error
 profiles:
   researcher:
-    command_limits:        # sessions created with this profile
+    command_limits:
       head:
         max_lines: 5000
 ```

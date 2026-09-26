@@ -97,14 +97,15 @@ To keep huge reads from flooding an agent, `cat`, `grep`, `rg`, `head`, and
 seconds. When a cap fires, the agent sees the truncated output plus a stderr
 notice (`cat: output truncated at limit (2000 lines); ...`).
 
-Set your own limits per workspace, per mount, or per session profile:
+Set your own limits in three places. A mount's third tuple element covers
+commands that run on it, `commandLimits` is the default for every session,
+and a profile's `commandLimits` applies to sessions created with it:
 
 ```ts
 import { Limit, MountMode, OnExceed, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   {
-    // Mount: commands that run on /data.
     '/data': [
       new RAMVFS(),
       MountMode.WRITE,
@@ -113,9 +114,7 @@ const ws = new Workspace(
   },
   {
     mode: MountMode.WRITE,
-    // Workspace: the default for every session.
     commandLimits: { head: new Limit({ maxLines: 500, timeoutSeconds: 30 }) },
-    // Profile: wins for sessions created with it.
     profiles: { researcher: { commandLimits: { head: new Limit({ maxLines: 5000 }) } } },
   },
 )
