@@ -190,6 +190,7 @@ def load_cases(root: Path) -> list[dict]:
     for path in discover_case_files(root):
         data = json.loads(path.read_text())
         for case in data["cases"]:
+            case = {"targets": data.get("targets", []), **case}
             case["_source"] = str(path.relative_to(root))
             cases.append(case)
     cases.sort(key=lambda c: c.get("seq", 1 << 30))
@@ -214,6 +215,11 @@ def validate_cases(root: Path, cases: list[dict]) -> None:
     duplicates: list[str] = []
     unknown: list[str] = []
     for case in cases:
+        targets = case.get("targets")
+        if not isinstance(targets, list) or not targets or any(
+                not isinstance(target, str) for target in targets):
+            raise ValueError(
+                f"case {case['id']}: targets must be a nonempty string list")
         first = seen.get(case["id"])
         if first is not None:
             duplicates.append(f"{case['id']} ({first} and {case['_source']})")

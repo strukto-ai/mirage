@@ -136,7 +136,10 @@ def feature_facet(case: dict, prefix_len: int) -> str:
 
 def plan_file(path: Path) -> tuple[str, list[tuple[str, dict, list[str]]]]:
     data = json.loads(path.read_text())
-    cases = data["cases"]
+    cases = [{
+        "targets": data.get("targets", []),
+        **case
+    } for case in data["cases"]]
     name = path.stem
     category = path.parent.name
     rows: list[tuple[str, dict, list[str]]] = []

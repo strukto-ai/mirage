@@ -24,14 +24,14 @@ from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
 from mirage.commands.config import CommandFnResult, CommandOpts, ProvisionFn
-from mirage.context import (effective_path_mode, get_admission,
-                            get_current_session, get_mount_gate,
+from mirage.context import (get_admission, get_current_session, get_mount_gate,
                             get_op_policies, hidden_paths_intersect,
-                            hidden_refusal, path_allowed, readonly_below)
+                            hidden_refusal, path_allowed)
+from mirage.context.session_context import require_paths_writable
 from mirage.ops.types import ChildMounts, LinkTargetStat, StatOverlay
 from mirage.policy.policies import Policies, pre_ops_gate
-from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.errors import MISS_ERRORS, ReadOnlyError, eisdir, enotsup
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.errors import MISS_ERRORS, eisdir, enotsup
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import move_reveals
 from mirage.utils.path import norm, parent
@@ -436,17 +436,8 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
                                  self.glob_target_stat)
 
     def operation(self, op: Operation) -> OperationFn | None:
-        operations = {
-            Operation.WRITE: self.write,
-            Operation.EXISTS: self.exists,
-            Operation.MKDIR: self.mkdir,
-            Operation.UNLINK: self.unlink,
-            Operation.RMDIR: self.rmdir,
-            Operation.RENAME: self.rename,
-            Operation.COPY: self.copy,
-            Operation.TRUNCATE: self.truncate,
-        }
-        return operations[op]
+        fn: OperationFn | None = getattr(self, op.value)
+        return fn
 
     def require(self, op: Operation) -> OperationFn:
         """Return a backend op, or one that refuses when the backend
@@ -466,7 +457,8 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
         """
         fn = self.operation(op)
         if fn is None:
-            return functools.partial(_refuse_missing, op)
+            return _with_operation_guards(
+                functools.partial(_refuse_missing, op), op.value)
         return fn
 
 
@@ -484,17 +476,56 @@ async def _refuse_missing(op: Operation, *args: Any,
         **kwargs: ignored.
     """
     specs = [arg for arg in args if isinstance(arg, PathSpec)]
+    access = _MUTATIONS.get(op)
     raise enotsup("backend", op.value,
-                  specs[-1] if op is Operation.COPY else specs[0])
+                  specs[1] if access and access.first_source else specs[0])
 
 
-_GUARD_ENOENT_SLOTS = ("read_bytes", "read_stream", "stat", "read_range",
-                       "set_attrs", "unlink", "rm_r", "copy", "find")
+@dataclass(frozen=True)
+class Mutation:
+    create: bool = False
+    first_source: bool = False
+    subtree: bool = False
 
-# The slots that create the path they name, truncate among them: a
-# missing file is created at the requested length, the way
-# truncate(1) does without -c.
-_GUARD_EACCES_SLOTS = ("write", "mkdir", "append", "create", "truncate")
+
+_MUTATIONS = {
+    "write": Mutation(create=True),
+    "mkdir": Mutation(create=True),
+    "append": Mutation(create=True),
+    "create": Mutation(create=True),
+    "truncate": Mutation(create=True),
+    "unlink": Mutation(),
+    "rmdir": Mutation(),
+    "set_attrs": Mutation(),
+    "rm_r": Mutation(subtree=True),
+    "rename": Mutation(subtree=True),
+    "copy": Mutation(first_source=True),
+    "dir_copy": Mutation(first_source=True, subtree=True),
+}
+
+_GUARD_ENOENT_SLOTS = (
+    "read_bytes", "read_stream", "stat", "read_range", "find",
+    *(slot for slot, access in _MUTATIONS.items()
+      if not access.create and slot not in ("rename", "dir_copy", "rmdir")))
+_GUARD_EACCES_SLOTS = tuple(slot for slot, access in _MUTATIONS.items()
+                            if access.create)
+
+
+def _with_operation_guards(fn: OperationFn, slot: str) -> OperationFn:
+    """Guard bare writes and capability failures with the slot contract.
+
+    Args:
+        fn (OperationFn): a bare op or missing-capability fallback.
+        slot (str): operation name in the shared contract.
+    """
+    access = _MUTATIONS.get(slot)
+    if access is None:
+        return functools.partial(_guarded_call, fn, False)
+    fn = functools.partial(_mode_call, fn, access.first_source, access.subtree)
+    fn = functools.partial(_rule_call, fn)
+    fn = functools.partial(_guarded_call, fn, access.create)
+    return functools.partial(_policy_call, _op_policy_scope(), fn, slot, True,
+                             access.first_source)
 
 
 def with_hidden_guard(ops: CommandIO) -> CommandIO:
@@ -538,9 +569,7 @@ def with_hidden_guard(ops: CommandIO) -> CommandIO:
     return replace(ops, **changes)
 
 
-_RULE_SLOTS = ("read_bytes", "read_stream", "read_range", "write", "append",
-               "create", "truncate", "set_attrs", "mkdir", "unlink", "rmdir",
-               "rm_r", "rename", "copy", "dir_copy")
+_RULE_SLOTS = ("read_bytes", "read_stream", "read_range", *_MUTATIONS)
 
 
 def _rule_call(fn: OperationFn, *args: Any, **kwargs: Any) -> Any:
@@ -564,25 +593,6 @@ def _rule_call(fn: OperationFn, *args: Any, **kwargs: Any) -> Any:
             if isinstance(arg, PathSpec):
                 gate.check(arg.virtual)
     return fn(*args, **kwargs)
-
-
-# slot -> (skip_first, subtree): whether the leading PathSpec is a
-# read-only source (the copy slots), and whether the op mutates the
-# whole subtree under its written paths in one backend call.
-_MODE_SLOTS: dict[str, tuple[bool, bool]] = {
-    "write": (False, False),
-    "mkdir": (False, False),
-    "append": (False, False),
-    "create": (False, False),
-    "truncate": (False, False),
-    "unlink": (False, False),
-    "rmdir": (False, False),
-    "set_attrs": (False, False),
-    "rm_r": (False, True),
-    "rename": (False, True),
-    "copy": (True, False),
-    "dir_copy": (True, True),
-}
 
 
 def _mode_call(fn: OperationFn, skip_first: bool, subtree: bool, *args: Any,
@@ -617,16 +627,10 @@ def _mode_call(fn: OperationFn, skip_first: bool, subtree: bool, *args: Any,
     if gate is not None:
         prefix, mode = gate
         specs = [arg for arg in args if isinstance(arg, PathSpec)]
-        for spec in (specs[1:] if skip_first else specs):
-            if effective_path_mode(spec.virtual, prefix,
-                                   mode) == MountMode.READ:
-                raise ReadOnlyError(errno.EROFS, "Read-only file system",
-                                    spec.virtual)
-            if subtree:
-                blame = readonly_below(spec.virtual, prefix, mode)
-                if blame is not None:
-                    raise ReadOnlyError(errno.EROFS, "Read-only file system",
-                                        blame)
+        require_paths_writable(specs[1:] if skip_first else specs,
+                               prefix,
+                               mode,
+                               subtree=subtree)
     return fn(*args, **kwargs)
 
 
@@ -644,11 +648,12 @@ def with_mode_guard(ops: CommandIO) -> CommandIO:
         ops (CommandIO): the backend's IO adapter.
     """
     changes: dict[str, Any] = {}
-    for slot, (skip_first, subtree) in _MODE_SLOTS.items():
+    for slot, access in _MUTATIONS.items():
         fn = getattr(ops, slot)
         if fn is not None:
-            changes[slot] = functools.partial(_mode_call, fn, skip_first,
-                                              subtree)
+            changes[slot] = functools.partial(_mode_call, fn,
+                                              access.first_source,
+                                              access.subtree)
     return replace(ops, **changes)
 
 
@@ -711,35 +716,8 @@ def with_write_guards(fn: OperationFn) -> OperationFn:
     Args:
         fn (OperationFn): the raw backend write.
     """
-    guarded: OperationFn = functools.partial(_mode_call, fn, False, False)
-    guarded = functools.partial(_rule_call, guarded)
-    guarded = functools.partial(_guarded_call, guarded, False)
-    return functools.partial(_policy_call, _UNBOUND_SCOPE, guarded, "unlink",
-                             True, False)
+    return _with_operation_guards(fn, "unlink")
 
-
-# slot -> (write, first_is_source): whether the op mutates its PathSpec
-# positionals, and whether the leading one is a read-only source (the
-# copy slots), mirroring _MODE_SLOTS' skip_first. The surface is the
-# rule guard's (_RULE_SLOTS); stat/exists and the native find/du slots
-# stay unguarded as presence facts, and readdir/read_stream have their
-# own wrappers below.
-_POLICY_SLOTS: dict[str, tuple[bool, bool]] = {
-    "read_bytes": (False, False),
-    "read_range": (False, False),
-    "write": (True, False),
-    "append": (True, False),
-    "create": (True, False),
-    "truncate": (True, False),
-    "set_attrs": (True, False),
-    "mkdir": (True, False),
-    "unlink": (True, False),
-    "rmdir": (True, False),
-    "rm_r": (True, False),
-    "rename": (True, False),
-    "copy": (True, True),
-    "dir_copy": (True, True),
-}
 
 # (policies, mount prefix, session id); the unbound spelling for a
 # registration-time wrap, which reads the live context per call.
@@ -930,11 +908,13 @@ def with_policy_guard(ops: CommandIO) -> CommandIO:
         "read_stream": functools.partial(_policy_stream, scope,
                                          ops.read_stream),
     }
-    for slot, (write, first_source) in _POLICY_SLOTS.items():
+    for slot in ("read_bytes", "read_range", *_MUTATIONS):
+        access = _MUTATIONS.get(slot)
         fn = getattr(ops, slot)
         if fn is not None:
-            changes[slot] = functools.partial(_policy_call, scope, fn, slot,
-                                              write, first_source)
+            changes[slot] = functools.partial(
+                _policy_call, scope, fn, slot, access is not None,
+                access.first_source if access else False)
     return replace(ops, **changes)
 
 

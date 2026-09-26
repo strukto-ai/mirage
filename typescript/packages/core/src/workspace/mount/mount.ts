@@ -60,12 +60,11 @@ import {
   MountMode,
   PathSpec,
 } from '../../types.ts'
-import { ebusy, enotsup, erofsReadOnly } from '../../utils/errors.ts'
+import { ebusy, enotsup } from '../../utils/errors.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   effectiveMountMode,
-  effectivePathMode,
-  readonlyBelow,
+  requirePathsWritable,
   runWithMountGate,
   strongestModeUnder,
 } from '../../context/session_context.ts'
@@ -685,31 +684,11 @@ export class MountEntry {
       if (levels.length === 0) {
         throw enotsup(this.vfs.kind, opName, path)
       }
-      // Per path, not per mount: a show entry can hold one subtree below
-      // `w` on a writable mount, or one writable region on a read mount.
-      // A rename mutates its destination too, so both endpoints answer,
-      // and it relocates whole subtrees in one call, so a read-only
-      // region below either endpoint refuses it too.
       if (levels.some((o) => o.write)) {
-        if (effectivePathMode(path, this.prefix, this.mode) === MountMode.READ) {
-          throw erofsReadOnly(`mount ${this.prefix} is read-only`, path)
-        }
         const dst = kwargs.dst
-        if (
-          dst instanceof PathSpec &&
-          effectivePathMode(dst.virtual, this.prefix, this.mode) === MountMode.READ
-        ) {
-          throw erofsReadOnly(`mount ${this.prefix} is read-only`, dst.virtual)
-        }
-        if (SUBTREE_OPS.has(opName)) {
-          const endpoints = dst instanceof PathSpec ? [path, dst.virtual] : [path]
-          for (const endpoint of endpoints) {
-            const blame = readonlyBelow(endpoint, this.prefix, this.mode)
-            if (blame !== null) {
-              throw erofsReadOnly(`mount ${this.prefix} is read-only`, blame)
-            }
-          }
-        }
+        const endpoints = [PathSpec.fromStrPath(path)]
+        if (dst instanceof PathSpec) endpoints.push(dst)
+        requirePathsWritable(endpoints, this.prefix, this.mode, SUBTREE_OPS.has(opName))
       }
       const mountPrefix = rstripSlash(this.prefix)
       const lastSlash = path.lastIndexOf('/')

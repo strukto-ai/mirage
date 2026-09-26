@@ -1,16 +1,16 @@
 {
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "s3",
+    "s3-prefix",
+    "gridfs"
+  ],
   "cases": [
     {
       "id": "sro_prep",
       "seq": 1231020,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "command": "mkdir -p /res/sro && printf 'hello\\n' > /res/sro/f.txt && cd /res/sro && gzip -k f.txt && tar -cf a.tar f.txt && zip -q a.zip f.txt",
       "expect": {
         "exit": 0,
@@ -21,14 +21,6 @@
     {
       "id": "sro_gunzip_c_reads_a_read_only_archive",
       "seq": 1231021,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "gunzip -c /res/sro/f.txt.gz",
       "expect": {
@@ -43,14 +35,6 @@
     {
       "id": "sro_gunzip_t_tests_a_read_only_archive",
       "seq": 1231022,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "gunzip -t /res/sro/f.txt.gz && echo ok",
       "expect": {
@@ -65,14 +49,6 @@
     {
       "id": "sro_gzip_c_compresses_to_stdout",
       "seq": 1231023,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "gzip -c /res/sro/f.txt | gunzip",
       "expect": {
@@ -87,14 +63,6 @@
     {
       "id": "sro_gzip_filters_stdin_in_a_read_only_cwd",
       "seq": 1231024,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "cd /res/sro && printf 'x\\n' | gzip | gunzip",
       "expect": {
@@ -106,14 +74,6 @@
     {
       "id": "sro_tar_lists_a_read_only_archive",
       "seq": 1231025,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "tar -tf /res/sro/a.tar",
       "expect": {
@@ -129,14 +89,6 @@
     {
       "id": "sro_tar_extracts_to_stdout",
       "seq": 1231026,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "tar -xOf /res/sro/a.tar",
       "expect": {
@@ -153,14 +105,6 @@
     {
       "id": "sro_unzip_pipes_a_member",
       "seq": 1231027,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "unzip -p /res/sro/a.zip f.txt",
       "expect": {
@@ -175,14 +119,6 @@
     {
       "id": "sro_unzip_lists_member_names",
       "seq": 1231028,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "unzip -Z1 /res/sro/a.zip",
       "expect": {
@@ -198,14 +134,6 @@
     {
       "id": "sro_iconv_converts_to_stdout",
       "seq": 1231029,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "iconv -f utf-8 -t utf-8 /res/sro/f.txt",
       "expect": {
@@ -221,14 +149,6 @@
     {
       "id": "sro_mktemp_dry_run_names_a_file",
       "seq": 1231030,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "cd /res/sro && mktemp -u > /dev/null && echo ok",
       "expect": {
@@ -243,14 +163,6 @@
     {
       "id": "sro_gzip_in_place_is_still_refused",
       "seq": 1231031,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "gzip /res/sro/f.txt",
       "expect": {
@@ -262,14 +174,6 @@
     {
       "id": "sro_tar_extract_to_files_is_still_refused",
       "seq": 1231032,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "tar -xf /res/sro/a.tar -C /res/sro",
       "expect": {
@@ -286,14 +190,6 @@
     {
       "id": "sro_unzip_extract_is_still_refused",
       "seq": 1231033,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "unzip -o /res/sro/a.zip -d /res/sro",
       "expect": {
@@ -309,14 +205,6 @@
     {
       "id": "sro_split_n_reads_one_chunk",
       "seq": 1231050,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "split -n 1/2 /res/sro/f.txt",
       "expect": {
@@ -331,14 +219,6 @@
     {
       "id": "sro_split_n_reads_the_last_chunk",
       "seq": 1231051,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "split -n 2/2 /res/sro/f.txt",
       "expect": {
@@ -353,14 +233,6 @@
     {
       "id": "sro_split_n_reads_a_line_chunk",
       "seq": 1231052,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "split -n l/1/2 /res/sro/f.txt",
       "expect": {
@@ -375,14 +247,6 @@
     {
       "id": "sro_split_n_reads_a_round_robin_chunk",
       "seq": 1231053,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "split -n r/1/2 /res/sro/f.txt",
       "expect": {
@@ -397,14 +261,6 @@
     {
       "id": "sro_split_n_filters_stdin_in_a_read_only_cwd",
       "seq": 1231054,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "(cd /res/sro && printf 'a\\nb\\n' | split -n 1/2)",
       "expect": {
@@ -419,14 +275,6 @@
     {
       "id": "sro_tee_copies_stdin_and_refuses_the_file",
       "seq": 1231055,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "echo x | tee /res/sro/t.txt",
       "expect": {
@@ -438,14 +286,6 @@
     {
       "id": "sro_tar_create_is_refused",
       "seq": 1231056,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "tar -cf /res/sro/b.tar /res/sro/f.txt",
       "expect": {
@@ -461,14 +301,6 @@
     {
       "id": "sro_rm_is_refused",
       "seq": 1231057,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "rm /res/sro/f.txt",
       "expect": {
@@ -480,14 +312,6 @@
     {
       "id": "sro_mkdir_is_refused",
       "seq": 1231058,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "mkdir /res/sro/n",
       "expect": {
@@ -499,14 +323,6 @@
     {
       "id": "sro_cp_is_refused",
       "seq": 1231059,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "cp /res/sro/f.txt /res/sro/g.txt",
       "expect": {
@@ -518,14 +334,6 @@
     {
       "id": "sro_mv_is_refused",
       "seq": 1231060,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "mv /res/sro/f.txt /res/sro/g.txt",
       "expect": {
@@ -537,14 +345,6 @@
     {
       "id": "sro_truncate_is_refused",
       "seq": 1231061,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "truncate -s 0 /res/sro/f.txt",
       "expect": {
@@ -559,14 +359,6 @@
     {
       "id": "sro_unlink_is_refused",
       "seq": 1231062,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "unlink /res/sro/f.txt",
       "expect": {
@@ -578,14 +370,6 @@
     {
       "id": "sro_refusals_wrote_nothing",
       "seq": 1231064,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "command": "ls /res/sro",
       "expect": {
         "exit": 0,
@@ -596,14 +380,6 @@
     {
       "id": "sro_cleanup",
       "seq": 1231065,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "command": "rm -r /res/sro",
       "expect": {
         "exit": 0,
@@ -614,14 +390,6 @@
     {
       "id": "sro_gzip_and_gunzip_filter_a_dash_in_a_read_only_cwd",
       "seq": 1231036,
-      "targets": [
-        "ram",
-        "disk",
-        "redis",
-        "s3",
-        "s3-prefix",
-        "gridfs"
-      ],
       "session": "narrowed",
       "command": "(cd /res && printf 'x\\n' | gzip - | gunzip -)",
       "expect": {

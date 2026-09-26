@@ -641,6 +641,32 @@ def readonly_below(virtual: str, mount_prefix: str,
     return None
 
 
+def require_paths_writable(paths: list[PathSpec],
+                           mount_prefix: str,
+                           mount_mode: MountMode,
+                           *,
+                           subtree: bool = False) -> None:
+    """Apply the same mode ceiling to command, dispatcher and namespace writes.
+
+    Args:
+        paths (list[PathSpec]): written endpoints, excluding copy sources.
+        mount_prefix (str): the governing mount prefix.
+        mount_mode (MountMode): the configured authorization ceiling.
+        subtree (bool): whether each endpoint's descendants are mutated.
+    """
+    for path in paths:
+        if effective_path_mode(path.virtual, mount_prefix,
+                               mount_mode) == MountMode.READ:
+            raise ReadOnlyError(errno.EROFS, "Read-only file system",
+                                path.virtual)
+    if subtree:
+        for path in paths:
+            blame = readonly_below(path.virtual, mount_prefix, mount_mode)
+            if blame is not None:
+                raise ReadOnlyError(errno.EROFS, "Read-only file system",
+                                    blame)
+
+
 def require_mount_writable() -> None:
     """Refuse a service-addressed write unless the whole mount's
     effective mode grants writes.

@@ -680,6 +680,26 @@ export function readonlyBelow(
   return null
 }
 
+/** Apply the same mode ceiling to command, dispatcher and namespace writes. */
+export function requirePathsWritable(
+  paths: readonly PathSpec[],
+  mountPrefix: string,
+  mountMode: MountMode,
+  subtree = false,
+): void {
+  for (const path of paths) {
+    if (effectivePathMode(path.virtual, mountPrefix, mountMode) === MountMode.READ) {
+      throw erofsReadOnly(`mount ${mountPrefix} is read-only`, path)
+    }
+  }
+  if (subtree) {
+    for (const path of paths) {
+      const blame = readonlyBelow(path.virtual, mountPrefix, mountMode)
+      if (blame !== null) throw erofsReadOnly(`mount ${mountPrefix} is read-only`, blame)
+    }
+  }
+}
+
 /**
  * Refuse a service-addressed write unless the whole mount's effective
  * mode grants writes.

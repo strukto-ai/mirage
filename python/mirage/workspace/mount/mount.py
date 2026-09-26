@@ -14,7 +14,6 @@
 
 import asyncio
 import dataclasses
-import errno
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Iterable
 from contextlib import asynccontextmanager
@@ -30,8 +29,8 @@ from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue
-from mirage.context import (effective_mount_mode, effective_path_mode,
-                            readonly_below, reset_mount_gate, set_mount_gate,
+from mirage.context import (effective_mount_mode, require_paths_writable,
+                            reset_mount_gate, set_mount_gate,
                             strongest_mode_under)
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
@@ -44,7 +43,7 @@ from mirage.policy import resolve_limit
 from mirage.types import (FileType, Limit, MountMode, PathSpec, Producer,
                           ReadSpec)
 from mirage.utils.context_scope import ContextScope
-from mirage.utils.errors import ReadOnlyError, ebusy, enotsup
+from mirage.utils.errors import ebusy, enotsup
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.base import BaseVFS
@@ -763,34 +762,14 @@ class MountEntry:
                 raise enotsup(str(self.vfs.name), op_name, path)
 
             if any(o.write for o in levels):
-                # GNU reports the operand, not the guard's own wording, so
-                # stamp errno + filename and let format_fs_error render
-                # "<cmd>: <path>: Read-only file system" (mirrors the
-                # TypeScript erofsReadOnly stamp). Per path, not per mount:
-                # a show entry can hold one subtree below `w` on a writable
-                # mount, or one writable region on a read mount. A rename
-                # mutates its destination too, so both endpoints answer,
-                # and it relocates whole subtrees in one call, so a
-                # read-only region below either endpoint refuses it too.
-                if effective_path_mode(path, self.prefix,
-                                       self.mode) == MountMode.READ:
-                    raise ReadOnlyError(errno.EROFS, "Read-only file system",
-                                        path)
                 dst = kwargs.get("dst")
-                if isinstance(dst, PathSpec) and effective_path_mode(
-                        dst.virtual, self.prefix, self.mode) == MountMode.READ:
-                    raise ReadOnlyError(errno.EROFS, "Read-only file system",
-                                        dst.virtual)
-                if op_name in _SUBTREE_OPS:
-                    endpoints = [path]
-                    if isinstance(dst, PathSpec):
-                        endpoints.append(dst.virtual)
-                    for endpoint in endpoints:
-                        blame = readonly_below(endpoint, self.prefix,
-                                               self.mode)
-                        if blame is not None:
-                            raise ReadOnlyError(errno.EROFS,
-                                                "Read-only file system", blame)
+                endpoints = [PathSpec.from_str_path(path)]
+                if isinstance(dst, PathSpec):
+                    endpoints.append(dst)
+                require_paths_writable(endpoints,
+                                       self.prefix,
+                                       self.mode,
+                                       subtree=op_name in _SUBTREE_OPS)
 
             mount_prefix = self.prefix.rstrip("/")
             scope = PathSpec(

@@ -44,7 +44,7 @@ export function makeRm<A extends Accessor>(vfs: string, io: CommandIO<A>): Regis
   const resolveGlob = resolveGlobOf(io)
   const unlink = requireOp(io.unlink, 'unlink')
   const rmdir = requireOp(io.rmdir, 'rmdir')
-  const rmR = requireOp(io.rmR, 'rm_r')
+  const rmR = requireOp(io.rmR, 'rmR')
 
   // Remove one operand, returning a GNU stderr line on failure (null when
   // removed, or skipped under -f) alongside the verbose lines.
