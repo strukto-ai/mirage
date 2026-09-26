@@ -232,7 +232,8 @@ def _row(info: zipfile.ZipInfo) -> ZipRow:
                   host_version=info.create_version,
                   date_time=info.date_time,
                   has_extra=bool(info.extra),
-                  crc=info.CRC)
+                  crc=info.CRC,
+                  comment=info.comment.decode("utf-8", errors="replace"))
 
 
 def _zipinfo(archive: str, zip_size: int, infos: list[zipfile.ZipInfo],
@@ -451,9 +452,9 @@ async def _run(
     # and -v widens -l's columns into the verbose table.
     if (args_l or v) and not (t or p):
         if v:
-            listing = render_verbose(archive_path.virtual,
-                                     [_row(info) for info in selected],
-                                     q).encode()
+            listing = render_verbose(
+                archive_path.virtual, [_row(info) for info in selected], q,
+                zf.comment.decode("utf-8", errors="replace")).encode()
         else:
             lines = ["  Length      Name", "---------  ----"]
             for info in selected:

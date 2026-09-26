@@ -100,6 +100,7 @@ class ZipRow:
             and day left at 0 when the stamp is 0.
         has_extra (bool): whether the central entry carries an extra field.
         crc (int): the CRC-32 the central entry records.
+        comment (str): the central entry comment.
     """
     name: str
     size: int
@@ -113,6 +114,7 @@ class ZipRow:
     date_time: tuple[int, int, int, int, int, int]
     has_extra: bool
     crc: int
+    comment: str
 
 
 ZipinfoRows = Literal["none", "names", "short", "medium", "long"]
@@ -382,19 +384,31 @@ def _saved(uncompressed: int, compressed: int) -> str:
     return f"{'-' if ratio < 0 else ' '}{percent}%"
 
 
-def render_verbose(archive: str, rows: list[ZipRow], quiet: bool) -> str:
+def _comment(text: str) -> str:
+    """Info-ZIP comments stop at NUL, omit CR and end on a new line.
+
+    Args:
+        text (str): the archive or entry comment.
+    """
+    text = text.split("\0", 1)[0].replace("\r", "")
+    return text + "\n" if text and not text.endswith("\n") else text
+
+
+def render_verbose(archive: str, rows: list[ZipRow], quiet: bool,
+                   comment: str) -> str:
     """``unzip -v`` with an archive: Info-ZIP's verbose listing (list.c).
 
     The ``-l`` columns plus the method, compressed size, percent saved
     and CRC-32 of each entry, dated from its DOS stamp, and a totals
-    line. ``-q`` drops the ``Archive:`` line.
+    line. ``-q`` drops the ``Archive:`` line and all comments.
 
     Args:
         archive (str): the archive operand.
         rows (list[ZipRow]): the entries to list.
         quiet (bool): ``-q``.
+        comment (str): the archive comment.
     """
-    lines = [] if quiet else [f"Archive:  {archive}\n"]
+    lines = [] if quiet else [f"Archive:  {archive}\n", _comment(comment)]
     lines.append(VERBOSE_HEADER)
     for row in rows:
         year, month, day, hour, minute, _ = row.date_time
@@ -403,6 +417,8 @@ def render_verbose(archive: str, rows: list[ZipRow], quiet: bool) -> str:
                      f"{_saved(row.size, csize):>4} {year:04d}-{month:02d}-"
                      f"{day:02d} {hour:02d}:{minute:02d} {row.crc:08x}  "
                      f"{row.name}\n")
+        if not quiet:
+            lines.append(_comment(row.comment))
     size = sum(r.size for r in rows)
     csize = sum(_compressed(r) for r in rows)
     plural = "" if len(rows) == 1 else "s"

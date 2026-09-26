@@ -16,8 +16,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import { gunzipChecked, hasGzipMagic } from '../../../utils/compress.ts'
-import { GzipDataError } from '../../../utils/errors.ts'
+import { gunzipPartial, hasGzipMagic } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { compilePattern, resolvePattern } from '../grep_pattern.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
@@ -164,13 +163,11 @@ export async function zgrepGeneric(
     const raw = await materialize(read(p))
     // zgrep decompresses with `gzip -cdfq`, which passes an input with no
     // gzip header through as it is; a bad archive is an error.
-    let data: Uint8Array
-    try {
-      data = hasGzipMagic(raw) ? await gunzipChecked(raw) : raw
-    } catch (err) {
-      if (!(err instanceof GzipDataError)) throw err
-      errors += err.render('zgrep', operandLabel(p, 'stdin'))
-      continue
+    let data = raw
+    if (hasGzipMagic(raw)) {
+      const [decoded, failure] = await gunzipPartial(raw)
+      data = decoded
+      if (failure !== null) errors += failure.render('zgrep', operandLabel(p, 'stdin'))
     }
     // zgrep hands grep a stdin operand as `-`, so -l and -L list it as `-`
     // while its lines are labelled `(standard input)` (gzip 1.13);

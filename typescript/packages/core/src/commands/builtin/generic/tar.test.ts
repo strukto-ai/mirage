@@ -130,16 +130,23 @@ it('extracts complete tar members despite a truncated gzip trailer', async () =>
 })
 
 it.each(['-tzf', '-xzf', '-xOzf'])(
-  'preserves the gzip failure when tar cannot parse its output: %s',
+  'preserves both gzip and tar diagnostics when parsing fails: %s',
   async (flags) => {
-    const bad = await gzip(ENC.encode('not a tar\n'))
-    bad.fill(0, bad.length - 8)
-    expect(await shell(`tar ${flags} /data/bad.tgz`, { '/data/bad.tgz': bad })).toEqual([
-      2,
-      '',
-      'gzip: stdin: invalid compressed data--crc error\n' +
-        'gzip: stdin: invalid compressed data--length error\n' +
-        CHILD_FAILED,
-    ])
+    for (const size of [9, 512, 1024]) {
+      const bad = await gzip(new Uint8Array(size).fill(120))
+      bad.fill(0, bad.length - 8)
+      const notices =
+        size >= 512
+          ? 'tar: This does not look like a tar archive\ntar: Skipping to next header\n'
+          : ''
+      expect(await shell(`tar ${flags} /data/bad.tgz`, { '/data/bad.tgz': bad })).toEqual([
+        2,
+        '',
+        'gzip: stdin: invalid compressed data--crc error\n' +
+          'gzip: stdin: invalid compressed data--length error\n' +
+          notices +
+          CHILD_FAILED,
+      ])
+    }
   },
 )

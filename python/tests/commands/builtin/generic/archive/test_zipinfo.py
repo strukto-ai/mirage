@@ -31,7 +31,8 @@ def _row(**over) -> zipinfo.ZipRow:
                 host_version=20,
                 date_time=STAMP,
                 has_extra=False,
-                crc=0)
+                crc=0,
+                comment="")
     base.update(over)
     return zipinfo.ZipRow(**base)
 
@@ -179,7 +180,7 @@ def test_verbose_listing_matches_info_zip():
         _row(name="dir/a.txt", size=200, csize=6, method=8, crc=0x599AF058),
         _row(name="b.txt", size=1, csize=3, method=8, crc=0x71BEEFF9),
     ]
-    assert zipinfo.render_verbose("m.zip", rows, False) == (
+    assert zipinfo.render_verbose("m.zip", rows, False, "") == (
         "Archive:  m.zip\n"
         " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n"
         "--------  ------  ------- ---- ---------- ----- --------  ----\n"
@@ -200,11 +201,28 @@ def test_verbose_listing_matches_info_zip():
 ])
 def test_verbose_method_names_follow_list_c(method, flags, label):
     row = _row(method=method, flags=flags)
-    line = zipinfo.render_verbose("a", [row], True).splitlines()[2]
+    line = zipinfo.render_verbose("a", [row], True, "").splitlines()[2]
     assert line.split()[1] == label
 
 
 def test_verbose_prints_a_full_growth_as_a_bare_hundred():
     row = _row(size=1, csize=2)
-    line = zipinfo.render_verbose("a", [row], True).splitlines()[2]
+    line = zipinfo.render_verbose("a", [row], True, "").splitlines()[2]
     assert line.split()[3] == "100%"
+
+
+@pytest.mark.parametrize("comment,rendered", [
+    ("note", "note\n"),
+    ("note\n", "note\n"),
+    ("note\r\nnext", "note\nnext\n"),
+    ("note\0hidden", "note\n"),
+])
+def test_verbose_comments_follow_info_zip_and_quiet_suppresses_them(
+        comment, rendered):
+    row = _row(comment=comment)
+    listing = zipinfo.render_verbose("a.zip", [row], False, comment)
+    assert listing.startswith("Archive:  a.zip\n" + rendered)
+    assert "document.txt\n" + rendered in listing
+    quiet = zipinfo.render_verbose("a.zip", [row], True, comment)
+    assert "note" not in quiet
+    assert "Archive:" not in quiet

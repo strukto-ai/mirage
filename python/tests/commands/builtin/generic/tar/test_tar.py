@@ -107,9 +107,12 @@ async def test_a_truncated_gzip_trailer_still_extracts_to_disk():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("flags", ["-tzf", "-xzf", "-xOzf"])
-async def test_a_tar_parse_error_does_not_mask_the_gzip_failure(flags):
-    bad = gzip.compress(b"not a tar\n", mtime=0)[:-8] + b"\0" * 8
+@pytest.mark.parametrize("size", [9, 512, 1024])
+async def test_a_tar_parse_error_does_not_mask_the_gzip_failure(flags, size):
+    bad = gzip.compress(b"x" * size, mtime=0)[:-8] + b"\0" * 8
+    notices = (b"tar: This does not look like a tar archive\n"
+               b"tar: Skipping to next header\n") if size >= 512 else b""
     r = await _shell(f"tar {flags} /data/bad.tgz", {"/data/bad.tgz": bad})
     assert r == (2, b"", b"gzip: stdin: invalid compressed data--crc error\n"
                  b"gzip: stdin: invalid compressed data--length error\n" +
-                 CHILD_FAILED)
+                 notices + CHILD_FAILED)

@@ -281,7 +281,12 @@ function dosDateTime(date: number, time: number): ZipRow['dateTime'] {
 // over, is a corrupt directory. Info-ZIP and zipfile read the truncated
 // entry anyway (Info-ZIP lists it and exits 1 or 51; a short count makes
 // Info-ZIP exit 3 after listing); mirage refuses up front on both hosts.
-function readZipEntries(data: Uint8Array): { entries: ZipEntry[]; count: number; slack: number } {
+function readZipEntries(data: Uint8Array): {
+  entries: ZipEntry[]
+  count: number
+  slack: number
+  comment: string
+} {
   const eocd = findEocd(data)
   if (eocd === -1) throw new ZipFormatError('no_eocd')
   const count = readU16LE(data, eocd + 10)
@@ -329,12 +334,16 @@ function readZipEntries(data: Uint8Array): { entries: ZipEntry[]; count: number;
       dateTime: dosDateTime(date, time),
       hasExtra: extraLen > 0,
       crc,
+      comment: DEC.decode(data.subarray(offset + 46 + nameLen + extraLen, next)),
       content,
     })
     offset = next
   }
   if (offset !== eocd) throw new ZipFormatError('corrupt_cdir')
-  return { entries, count, slack: shift }
+  const comment = DEC.decode(
+    data.subarray(eocd + EOCD_LEN, eocd + EOCD_LEN + readU16LE(data, eocd + 20)),
+  )
+  return { entries, count, slack: shift, comment }
 }
 
 async function entryContent(
@@ -434,8 +443,9 @@ export async function unzipGeneric(
   let entries: ZipEntry[]
   let count: number
   let slack: number
+  let comment: string
   try {
-    ;({ entries, count, slack } = readZipEntries(data))
+    ;({ entries, count, slack, comment } = readZipEntries(data))
   } catch (err) {
     if (err instanceof ZipFormatError) {
       return [null, refusal(err.fault, archivePath.virtual, zipinfoMode, pipeMode)]
@@ -488,7 +498,7 @@ export async function unzipGeneric(
     if ((listMode || verbose) && !(testMode || pipeMode)) {
       let out: ByteSource
       if (verbose) {
-        out = ENC.encode(renderVerbose(archivePath.virtual, selected, quiet))
+        out = ENC.encode(renderVerbose(archivePath.virtual, selected, quiet, comment))
       } else {
         const lines = ['  Length      Name', '---------  ----']
         for (const e of selected) {

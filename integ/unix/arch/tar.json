@@ -1026,6 +1026,60 @@
         "stdout": "",
         "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
       }
+    },
+    {
+      "id": "arch_tar_invalid_header_and_bad_gzip_list",
+      "seq": 962400,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -tzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_invalid_header_and_bad_gzip_extract",
+      "seq": 962401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -xzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
+    },
+    {
+      "id": "arch_tar_invalid_header_and_bad_gzip_stdout",
+      "seq": 962402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix"
+      ],
+      "command": "(mkdir -p /data/tar-invalid-gzip && printf '%s' 'H4sIAAAAAAACE6uoGAUjGQAAAAAAAAAAAAA=' | base64 -d > /data/tar-invalid-gzip/input.tgz && cd /data/tar-invalid-gzip && tar -xOzf input.tgz)",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "gzip: stdin: invalid compressed data--crc error\ngzip: stdin: invalid compressed data--length error\ntar: This does not look like a tar archive\ntar: Skipping to next header\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      }
     }
   ]
 }

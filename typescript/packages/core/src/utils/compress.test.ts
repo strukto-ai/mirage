@@ -281,7 +281,11 @@ it.each([0x08, 0x10])('consumes long header field %i without growing copies', as
           fatal: true,
           reasons: ['{}: unexpected end of file'],
         })
-      expect(copies.mock.contexts.every((bytes) => bytes.byteLength <= GZIP_CHUNK_SIZE)).toBe(true)
+      expect(
+        copies.mock.contexts.every(
+          (bytes) => bytes instanceof Uint8Array && bytes.byteLength <= GZIP_CHUNK_SIZE,
+        ),
+      ).toBe(true)
     } finally {
       copies.mockRestore()
     }

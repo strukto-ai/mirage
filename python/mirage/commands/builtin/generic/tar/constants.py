@@ -22,6 +22,8 @@ EMPTY_ARCHIVE = "tar: Cowardly refusing to create an empty archive"
 FATAL_TRAILER = "tar: Error is not recoverable: exiting now"
 # What tar adds when its gzip -d child fails, after gzip's own lines.
 CHILD_STATUS = "tar: Child returned status {}"
+INVALID_ARCHIVE = ("tar: This does not look like a tar archive",
+                   "tar: Skipping to next header")
 ERROR_TRAILER = "tar: Exiting with failure status due to previous errors"
 SELF_DUMP = "archive cannot contain itself; not dumped"
 # The exit GNU gives an operand it could not read, and a -C it could not

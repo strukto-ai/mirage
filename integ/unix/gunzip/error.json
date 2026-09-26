@@ -318,7 +318,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gunzip1269 && cd /data/gunzip1269 && echo 'H4sIAAAAAAACE8tIzcnJ5wIAIDA6NgY=' | base64 -d > cut.gz && echo later > later && gzip later && gunzip cut.gz later.gz; status=$?; ls; exit $status)",
+      "command": "(mkdir -p /data/gunzip1269 && echo 'H4sIAAAAAAACE8tIzcnJ5wIAIDA6NgY=' | base64 -d > /data/gunzip1269/cut.gz && cd /data/gunzip1269 && echo later > later && gzip later && gunzip cut.gz later.gz; status=$?; ls; exit $status)",
       "expect": {
         "exit": 1,
         "stdout": "cut.gz\nlater.gz\n",

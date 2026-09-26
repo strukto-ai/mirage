@@ -147,6 +147,8 @@ export interface ZipRow {
   hasExtra: boolean
   /** The CRC-32 the central entry records. */
   crc: number
+  /** The central entry comment. */
+  comment: string
 }
 
 export type ZipinfoRows = 'none' | 'names' | 'short' | 'medium' | 'long'
@@ -389,15 +391,26 @@ function saved(uncompressed: number, compressed: number): string {
   return `${ratio < 0 ? '-' : ' '}${String(percent)}%`
 }
 
+/** Info-ZIP comments stop at NUL, omit CR and end on a new line. */
+function renderComment(text: string): string {
+  const comment = (text.split('\0', 1)[0] ?? '').replaceAll('\r', '')
+  return comment !== '' && !comment.endsWith('\n') ? comment + '\n' : comment
+}
+
 /**
  * `unzip -v` with an archive: Info-ZIP's verbose listing (list.c).
  *
  * The `-l` columns plus the method, compressed size, percent saved and
  * CRC-32 of each entry, dated from its DOS stamp, and a totals line. `-q`
- * drops the `Archive:` line.
+ * drops the `Archive:` line and all comments.
  */
-export function renderVerbose(archive: string, rows: readonly ZipRow[], quiet: boolean): string {
-  const lines = quiet ? [] : [`Archive:  ${archive}\n`]
+export function renderVerbose(
+  archive: string,
+  rows: readonly ZipRow[],
+  quiet: boolean,
+  comment: string,
+): string {
+  const lines = quiet ? [] : [`Archive:  ${archive}\n`, renderComment(comment)]
   lines.push(VERBOSE_HEADER)
   for (const row of rows) {
     const [year, month, day, hour, minute] = row.dateTime
@@ -407,6 +420,7 @@ export function renderVerbose(archive: string, rows: readonly ZipRow[], quiet: b
       `${String(row.size).padStart(8, ' ')}  ${listMethod(row).padEnd(7, ' ')}${String(csize).padStart(8, ' ')} ` +
         `${saved(row.size, csize).padStart(4, ' ')} ${date} ${row.crc.toString(16).padStart(8, '0')}  ${row.name}\n`,
     )
+    if (!quiet) lines.push(renderComment(row.comment))
   }
   let size = 0
   let csize = 0

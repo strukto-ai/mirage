@@ -216,6 +216,130 @@
         "stdout": "unzip (Mirage)\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "unzip_v_comments_shown",
+      "seq": 601407,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-comments && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzip-comments/a.zip && unzip -v /data/unzip-comments/a.zip)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzip-comments/a.zip\narchive comment\nsecond line\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\nentry comment\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  b.txt\nother comment\n--------          -------  ---                            -------\n       6                6   0%                            2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comments_quiet",
+      "seq": 601408,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-comments && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzip-comments/a.zip && unzip -vq /data/unzip-comments/a.zip)",
+      "expect": {
+        "exit": 0,
+        "stdout": " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  b.txt\n--------          -------  ---                            -------\n       6                6   0%                            2 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comments_include",
+      "seq": 601409,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-comments && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzip-comments/a.zip && unzip -v /data/unzip-comments/a.zip a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzip-comments/a.zip\narchive comment\nsecond line\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\nentry comment\n--------          -------  ---                            -------\n       3                3   0%                            1 file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_comments_exclude",
+      "seq": 601410,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzip-comments && printf '%s' 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzip-comments/a.zip && unzip -v /data/unzip-comments/a.zip -x a.txt)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzip-comments/a.zip\narchive comment\nsecond line\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  b.txt\nother comment\n--------          -------  ---                            -------\n       3                3   0%                            1 file\n",
+        "stderr": ""
+      }
     }
   ]
 }

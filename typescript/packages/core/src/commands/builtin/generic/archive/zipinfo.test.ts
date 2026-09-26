@@ -41,6 +41,7 @@ function row(over: Partial<ZipRow> = {}): ZipRow {
     dateTime: STAMP,
     hasExtra: false,
     crc: 0,
+    comment: '',
     ...over,
   }
 }
@@ -209,7 +210,7 @@ describe('unzip -v rows', () => {
       row({ name: 'dir/a.txt', size: 200, csize: 6, method: 8, crc: 0x599af058 }),
       row({ name: 'b.txt', size: 1, csize: 3, method: 8, crc: 0x71beeff9 }),
     ]
-    expect(renderVerbose('m.zip', rows, false)).toBe(
+    expect(renderVerbose('m.zip', rows, false, '')).toBe(
       'Archive:  m.zip\n' +
         ' Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n' +
         '--------  ------  ------- ---- ---------- ----- --------  ----\n' +
@@ -229,12 +230,27 @@ describe('unzip -v rows', () => {
     [12, 0, 'BZip2'],
     [99, 0, 'Unk:099'],
   ] as const)('name method %i (flags %i) as list.c does', (method, flags, label) => {
-    const line = renderVerbose('a', [row({ method, flags })], true).split('\n')[2] ?? ''
+    const line = renderVerbose('a', [row({ method, flags })], true, '').split('\n')[2] ?? ''
     expect(line.split(/ +/)[2]).toBe(label)
   })
 
   it('print a full growth as a bare hundred', () => {
-    const line = renderVerbose('a', [row({ size: 1, csize: 2 })], true).split('\n')[2] ?? ''
+    const line = renderVerbose('a', [row({ size: 1, csize: 2 })], true, '').split('\n')[2] ?? ''
     expect(line.split(/ +/)[4]).toBe('100%')
   })
+})
+
+it.each([
+  ['note', 'note\n'],
+  ['note\n', 'note\n'],
+  ['note\r\nnext', 'note\nnext\n'],
+  ['note\0hidden', 'note\n'],
+])('renders comments as Info-ZIP does and suppresses them under -q: %j', (comment, rendered) => {
+  const rows = [row({ comment })]
+  const listing = renderVerbose('a.zip', rows, false, comment)
+  expect(listing.startsWith('Archive:  a.zip\n' + rendered)).toBe(true)
+  expect(listing).toContain('document.txt\n' + rendered)
+  const quiet = renderVerbose('a.zip', rows, true, comment)
+  expect(quiet).not.toContain('note')
+  expect(quiet).not.toContain('Archive:')
 })

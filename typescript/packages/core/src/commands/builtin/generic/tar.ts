@@ -27,11 +27,12 @@ import {
   CREATE_ERROR_EXIT,
   ERROR_TRAILER,
   FATAL_TRAILER,
+  INVALID_ARCHIVE,
 } from './tar/constants.ts'
 import { planCreate, type DirProbe, type StatFn, type WalkFn } from './tar/create.ts'
 import { fsStrerror, isEacces, type GzipDataError } from '../../../utils/errors.ts'
 import { ensureDir, extractDest } from './archive/extract.ts'
-import type { Compression, CompressionKind, CreateResult } from './tar/types.ts'
+import type { Compression, CompressionKind, CreateResult, ReadResult } from './tar/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -169,20 +170,23 @@ function unsupportedKind(compression: Compression, create: boolean): Compression
  * cut off inside a body is still discarded; GNU tar can recover partial
  * entries there. Mirrors Python's _open_archive for listing and extraction.
  */
-async function readArchive(
-  data: Uint8Array,
-  kind: Compression,
-): Promise<[TarEntry[], GzipDataError | null]> {
+async function readArchive(data: Uint8Array, kind: Compression): Promise<ReadResult> {
   const detected = kind ?? detectCompression(data)
   let failure: GzipDataError | null = null
   if (detected === 'gzip') {
     ;[data, failure] = await gunzipPartial(data)
-    if (failure !== null && (!failure.keepsOutput || data.byteLength === 0)) return [[], failure]
+    if (failure !== null && (!failure.keepsOutput || data.byteLength === 0))
+      return { entries: [], failure, notices: [] }
   } else if (detected !== null) {
     const codec = getCompressionCodec(detected)
     if (codec !== undefined) data = await codec.decompress(data)
   }
-  return [await readTar(data), failure]
+  try {
+    return { entries: await readTar(data), failure, notices: [] }
+  } catch (err) {
+    if (failure === null) throw err
+    return { entries: [], failure, notices: data.byteLength >= 512 ? [...INVALID_ARCHIVE] : [] }
+  }
 }
 
 /**
@@ -333,13 +337,13 @@ export async function tarGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
     const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
-    const [entries, failure] = await readArchive(raw, compression)
+    const { entries, failure, notices } = await readArchive(raw, compression)
     const names = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
     const { keep, misses } = selectedMembers(names, selectors)
     const shown = names.filter((_, index) => keep.has(index))
     const out: ByteSource | null = shown.length > 0 ? ENC.encode(shown.join('\n') + '\n') : null
     if (failure !== null) {
-      return [out, new IOResult({ exitCode: 2, stderr: childFailure(failure, []) })]
+      return [out, new IOResult({ exitCode: 2, stderr: childFailure(failure, notices) })]
     }
     if (misses.length > 0) {
       const missStderr = stderrOf([...misses, ERROR_TRAILER])
@@ -359,11 +363,10 @@ export async function tarGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
     const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
-    const [entries, failure] = await readArchive(raw, compression)
+    const { entries, failure, notices } = await readArchive(raw, compression)
     const writes: Record<string, Uint8Array> = {}
     const listed = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
     const { keep, misses } = selectedMembers(listed, selectors)
-    const notices: string[] = []
     const made = new Set<string>()
     const chunks: Uint8Array[] = []
     const toSpec = (virtual: string): PathSpec => makePathSpec(virtual, mountPrefix)

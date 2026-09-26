@@ -10,12 +10,13 @@ from mirage.commands.builtin.generic.archive.extract import (ensure_dir,
 from mirage.commands.builtin.generic.archive.walk import (DirProbe, StatFn,
                                                           WalkFn)
 from mirage.commands.builtin.generic.tar.constants import (  # yapf: disable
-    CHILD_STATUS, CREATE_ERROR_EXIT, ERROR_TRAILER, FATAL_TRAILER, READ_MODES,
-    WRITE_MODES)
+    CHILD_STATUS, CREATE_ERROR_EXIT, ERROR_TRAILER, FATAL_TRAILER,
+    INVALID_ARCHIVE, READ_MODES, WRITE_MODES)
 from mirage.commands.builtin.generic.tar.create import plan_create
 from mirage.commands.builtin.generic.tar.types import (CompressionSuffix,
                                                        CreateResult, Member,
-                                                       ReadMode, WriteMode)
+                                                       ReadMode, ReadResult,
+                                                       WriteMode)
 from mirage.commands.config import CommandOpts
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -52,9 +53,8 @@ def _stderr(lines: list[str]) -> bytes:
 
 
 @contextmanager
-def _open_archive(
-    data: bytes, suffix: CompressionSuffix
-) -> Iterator[tuple[tarfile.TarFile | None, GzipDataError | None]]:
+def _open_archive(data: bytes,
+                  suffix: CompressionSuffix) -> Iterator[ReadResult]:
     """Open tar's input while preserving its gzip child's failure.
 
     GNU tar 1.35 reads complete decoded members even when their gzip
@@ -72,8 +72,9 @@ def _open_archive(
         data, failure = gunzip_partial(data)
         mode = "r:"
     if failure is not None and (not failure.keeps_output or not data):
-        yield None, failure
+        yield ReadResult(None, failure)
         return
+    notices: tuple[str, ...] = ()
     with ExitStack() as stack:
         tf: tarfile.TarFile | None
         try:
@@ -85,7 +86,9 @@ def _open_archive(
                 raise
             logger.debug("tar: failed to parse gzip output: %s", exc)
             tf = None
-        yield tf, failure
+            if len(data) >= tarfile.BLOCKSIZE:
+                notices = INVALID_ARCHIVE
+        yield ReadResult(tf, failure, notices)
 
 
 def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
@@ -240,8 +243,8 @@ async def _list_archive(
     read_bytes: Callable[..., Awaitable[bytes]],
 ) -> tuple[ByteSource | None, IOResult]:
     names: list[str] = []
-    with _open_archive(await read_bytes(archive_path),
-                       mode_suffix) as (tf, failure):
+    with _open_archive(await read_bytes(archive_path), mode_suffix) as result:
+        tf, failure = result.archive, result.failure
         if tf is not None:
             names = [
                 member.name + "/" if member.isdir() else member.name
@@ -252,7 +255,8 @@ async def _list_archive(
     stdout = ("\n".join(shown) + "\n").encode() if shown else None
     if failure is not None:
         return stdout, IOResult(exit_code=2,
-                                stderr=_child_failure(failure, []))
+                                stderr=_child_failure(failure,
+                                                      list(result.notices)))
     if misses:
         return stdout, IOResult(exit_code=2,
                                 stderr=_stderr(misses + [ERROR_TRAILER]))
@@ -279,8 +283,8 @@ async def _extract_archive(
     made: set[str] = set()
     extracted_bytes: list[bytes] = []
     misses: list[str] = []
-    with _open_archive(await read_bytes(archive_path),
-                       mode_suffix) as (tf, failure):
+    with _open_archive(await read_bytes(archive_path), mode_suffix) as result:
+        tf, failure = result.archive, result.failure
         if tf is not None:
             members = tf.getmembers()
             listed = [
@@ -333,6 +337,7 @@ async def _extract_archive(
                     # would have the runner prefix them onto this mount.
                     writes[out_path] = content
                 names.append(member.name)
+    notices[:0] = result.notices
     if to_stdout:
         # GNU moves the verbose listing to stderr when stdout carries
         # the member bytes.
