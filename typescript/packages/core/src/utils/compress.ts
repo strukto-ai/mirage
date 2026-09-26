@@ -101,6 +101,7 @@ export function hasGzipMagic(bytes: Uint8Array): boolean {
 
 // Which part of a gzip member the decoder is reading.
 type MemberPart = 'header' | 'body' | 'trailer'
+type HeaderPart = 'fixed' | 'extraLength' | 'extra' | 'name' | 'comment' | 'crc' | 'done'
 
 /**
  * Incremental member decoder with bounded decompressed chunks.
@@ -121,6 +122,10 @@ class GzipDecoder {
   private seen = false
   private pending: Uint8Array = new Uint8Array()
   private padding = false
+  private headerPart: HeaderPart = 'fixed'
+  private headerFlags = 0
+  private headerCrc = 0
+  private extraRemaining = 0
 
   constructor(private readonly test = false) {}
 
@@ -129,48 +134,84 @@ class GzipDecoder {
     return new GzipDataError([reason], false, exitCode, this.seen)
   }
 
-  // How many bytes the member header at the start of `data` spans, or null
-  // while it is incomplete. Read in gzip 1.13's order (get_method), so a
-  // method or flag gzip does not support is refused as soon as the byte
-  // naming it arrives, even when the rest of the header never does.
-  private headerLength(data: Uint8Array): number | null {
-    if (data.byteLength < 3) return null
-    const method = data[2] ?? 0
-    if (method !== GZIP_DEFLATED) {
-      throw this.refusal(`{}: unknown method ${String(method)} -- not supported`)
-    }
-    if (data.byteLength < 4) return null
-    const flags = data[3] ?? 0
-    if (flags & GZIP_ENCRYPTED_FLAG) throw this.refusal(GZIP_ENCRYPTED)
-    if (flags & GZIP_RESERVED) {
-      throw this.refusal(`{} has flags 0x${flags.toString(16)} -- not supported`)
-    }
-    let end = GZIP_FIXED_HEADER
-    if (flags & GZIP_EXTRA_FIELD) {
-      if (data.byteLength < end + 2) return null
-      end += 2 + littleEndian(data, end, 2)
-    }
-    for (const field of [GZIP_ORIG_NAME, GZIP_COMMENT]) {
-      if (flags & field) {
-        const nul = data.indexOf(0, end)
-        if (nul === -1) return null
-        end = nul + 1
+  // Consume variable fields as they arrive, retaining only incomplete fixed
+  // fields. The running CRC includes every header byte except its own field.
+  private readHeader(data: Uint8Array): number | null {
+    let offset = 0
+    while (this.headerPart !== 'done') {
+      const start = offset
+      const available = data.byteLength - offset
+      const part = this.headerPart
+      if (part === 'fixed') {
+        if (available >= 2 && !hasGzipMagic(data)) {
+          throw this.seen ? this.refusal(GZIP_TRAILING, 2) : this.refusal(GZIP_NOT_GZIP)
+        }
+        const method = data[2] ?? 0
+        if (available >= 3 && method !== GZIP_DEFLATED) {
+          throw this.refusal(`{}: unknown method ${String(method)} -- not supported`)
+        }
+        if (available >= 4) {
+          this.headerFlags = data[3] ?? 0
+          if (this.headerFlags & GZIP_ENCRYPTED_FLAG) throw this.refusal(GZIP_ENCRYPTED)
+          if (this.headerFlags & GZIP_RESERVED) {
+            throw this.refusal(`{} has flags 0x${this.headerFlags.toString(16)} -- not supported`)
+          }
+        }
+        if (available < GZIP_FIXED_HEADER) {
+          this.pending = data.slice(offset)
+          return null
+        }
+        offset += GZIP_FIXED_HEADER
+        this.headerPart = 'extraLength'
+      } else if (part === 'extraLength') {
+        if (this.headerFlags & GZIP_EXTRA_FIELD) {
+          if (available < 2) {
+            this.pending = data.slice(offset)
+            return null
+          }
+          this.extraRemaining = littleEndian(data, offset, 2)
+          offset += 2
+        }
+        this.headerPart = 'extra'
+      } else if (part === 'extra') {
+        const count = Math.min(available, this.extraRemaining)
+        offset += count
+        this.extraRemaining -= count
+        if (this.extraRemaining === 0) this.headerPart = 'name'
+      } else if (part === 'name' || part === 'comment') {
+        const flag = part === 'name' ? GZIP_ORIG_NAME : GZIP_COMMENT
+        if (this.headerFlags & flag) {
+          const nul = data.indexOf(0, offset)
+          offset = nul === -1 ? data.byteLength : nul + 1
+          if (nul === -1) {
+            this.headerCrc = crc32(data.subarray(start, offset), this.headerCrc)
+            return null
+          }
+        }
+        this.headerPart = part === 'name' ? 'comment' : 'crc'
+      } else {
+        if (this.headerFlags & GZIP_HEADER_CRC) {
+          if (available < 2) {
+            this.pending = data.slice(offset)
+            return null
+          }
+          const stored = littleEndian(data, offset, 2)
+          const computed = this.headerCrc & 0xffff
+          if (stored !== computed) {
+            const storedHex = stored.toString(16).padStart(4, '0')
+            const computedHex = computed.toString(16).padStart(4, '0')
+            throw this.refusal(
+              `{}: header checksum 0x${storedHex} != computed checksum 0x${computedHex}`,
+            )
+          }
+          offset += 2
+        }
+        this.headerPart = 'done'
       }
+      if (part !== 'crc') this.headerCrc = crc32(data.subarray(start, offset), this.headerCrc)
+      if (this.headerPart === part) return null
     }
-    if (flags & GZIP_HEADER_CRC) {
-      if (data.byteLength < end + 2) return null
-      const stored = littleEndian(data, end, 2)
-      const computed = crc32(data.subarray(0, end)) & 0xffff
-      if (stored !== computed) {
-        const storedHex = stored.toString(16).padStart(4, '0')
-        const computedHex = computed.toString(16).padStart(4, '0')
-        throw this.refusal(
-          `{}: header checksum 0x${storedHex} != computed checksum 0x${computedHex}`,
-        )
-      }
-      end += 2
-    }
-    return data.byteLength >= end ? end : null
+    return offset
   }
 
   *feed(input: Uint8Array): Generator<Uint8Array> {
@@ -178,23 +219,13 @@ class GzipDecoder {
     this.pending = new Uint8Array()
     while (data.byteLength > 0) {
       if (this.part === 'header') {
-        if (this.seen && (this.padding || data[0] === 0)) {
+        if (this.headerPart === 'fixed' && this.seen && (this.padding || data[0] === 0)) {
           this.padding = true
           if (data.some((byte) => byte !== 0)) throw this.refusal(GZIP_TRAILING, 2)
           return
         }
-        if (data.byteLength < 2) {
-          this.pending = data.slice()
-          return
-        }
-        if (!hasGzipMagic(data)) {
-          throw this.seen ? this.refusal(GZIP_TRAILING, 2) : this.refusal(GZIP_NOT_GZIP)
-        }
-        const end = this.headerLength(data)
-        if (end === null) {
-          this.pending = data.slice()
-          return
-        }
+        const end = this.readHeader(data)
+        if (end === null) return
         data = data.subarray(end)
         this.inflater = new ZStream()
         if (zlibInflateInit2(this.inflater, -15) !== Z_OK)
@@ -213,6 +244,8 @@ class GzipDecoder {
         data = data.subarray(GZIP_TRAILER)
         this.seen = true
         this.part = 'header'
+        this.headerPart = 'fixed'
+        this.headerCrc = 0
       }
     }
   }
@@ -259,7 +292,12 @@ class GzipDecoder {
   // the trailing-garbage warning requires at least two bytes. Missing trailers
   // or partial next headers leave complete bodies for tar, but stay fatal.
   finish(): void {
-    if (!this.seen || this.part !== 'header' || this.pending.byteLength > 0) {
+    if (
+      !this.seen ||
+      this.part !== 'header' ||
+      this.pending.byteLength > 0 ||
+      this.headerPart !== 'fixed'
+    ) {
       const whole = this.part === 'trailer' || (this.part === 'header' && this.seen)
       throw new GzipDataError([GZIP_EOF], true, 1, whole)
     }

@@ -74,6 +74,18 @@ class MemberPart(Enum):
     TRAILER = 2
 
 
+class HeaderPart(Enum):
+    """Optional header fields consumed without retaining their contents."""
+
+    FIXED = 0
+    EXTRA_LENGTH = 1
+    EXTRA = 2
+    NAME = 3
+    COMMENT = 4
+    CRC = 5
+    DONE = 6
+
+
 class GzipDecoder:
     """Incremental member decoder with bounded decompressed chunks.
 
@@ -98,6 +110,10 @@ class GzipDecoder:
         self._seen = False
         self._pending = b""
         self._padding = False
+        self._header_part = HeaderPart.FIXED
+        self._header_flags = 0
+        self._header_crc = 0
+        self._extra_remaining = 0
 
     def _refusal(self, reason: str, exit_code: int = 1) -> GzipDataError:
         """A refusal that skips the input, keeping any complete member.
@@ -108,53 +124,87 @@ class GzipDecoder:
         """
         return GzipDataError((reason, ), False, exit_code, self._seen)
 
-    def _header_length(self, data: bytes) -> int | None:
-        """How many bytes the member header at the start of ``data`` spans.
-
-        Read in gzip 1.13's order (get_method), so a method or flag gzip
-        does not support is refused as soon as the byte naming it
-        arrives, even when the rest of the header never does.
+    def _read_header(self, data: bytes) -> int | None:
+        """Consume header fields incrementally, retaining only fixed fields.
 
         Args:
-            data (bytes): buffered input that opens with the gzip magic.
+            data (bytes): the next header bytes, possibly followed by a body.
 
         Returns:
-            int | None: the header's length, or None while it is
-            incomplete.
+            int | None: bytes consumed when complete, or None when more
+            input is needed. Only incomplete fixed fields are buffered.
         """
-        if len(data) < 3:
-            return None
-        if data[2] != GZIP_DEFLATED:
-            raise self._refusal(
-                f"{{}}: unknown method {data[2]} -- not supported")
-        if len(data) < 4:
-            return None
-        flags = data[3]
-        if flags & GZIP_ENCRYPTED_FLAG:
-            raise self._refusal(GZIP_ENCRYPTED)
-        if flags & GZIP_RESERVED:
-            raise self._refusal(f"{{}} has flags 0x{flags:x} -- not supported")
-        end = GZIP_FIXED_HEADER
-        if flags & GZIP_EXTRA_FIELD:
-            if len(data) < end + 2:
-                return None
-            end += 2 + int.from_bytes(data[end:end + 2], "little")
-        for field in (GZIP_ORIG_NAME, GZIP_COMMENT):
-            if flags & field:
-                nul = data.find(b"\0", end)
-                if nul == -1:
+        offset = 0
+        while self._header_part is not HeaderPart.DONE:
+            start = offset
+            available = len(data) - offset
+            part = self._header_part
+            if part is HeaderPart.FIXED:
+                if available >= 2 and not data.startswith(GZIP_MAGIC):
+                    raise (self._refusal(GZIP_TRAILING, 2)
+                           if self._seen else self._refusal(GZIP_NOT_GZIP))
+                if available >= 3 and data[2] != GZIP_DEFLATED:
+                    raise self._refusal(
+                        f"{{}}: unknown method {data[2]} -- not supported")
+                if available >= 4:
+                    self._header_flags = data[3]
+                    if self._header_flags & GZIP_ENCRYPTED_FLAG:
+                        raise self._refusal(GZIP_ENCRYPTED)
+                    if self._header_flags & GZIP_RESERVED:
+                        raise self._refusal(
+                            f"{{}} has flags 0x{self._header_flags:x} "
+                            "-- not supported")
+                if available < GZIP_FIXED_HEADER:
+                    self._pending = data[offset:]
                     return None
-                end = nul + 1
-        if flags & GZIP_HEADER_CRC:
-            if len(data) < end + 2:
+                offset += GZIP_FIXED_HEADER
+                self._header_part = HeaderPart.EXTRA_LENGTH
+            elif part is HeaderPart.EXTRA_LENGTH:
+                if self._header_flags & GZIP_EXTRA_FIELD:
+                    if available < 2:
+                        self._pending = data[offset:]
+                        return None
+                    self._extra_remaining = int.from_bytes(
+                        data[offset:offset + 2], "little")
+                    offset += 2
+                self._header_part = HeaderPart.EXTRA
+            elif part is HeaderPart.EXTRA:
+                count = min(available, self._extra_remaining)
+                offset += count
+                self._extra_remaining -= count
+                if not self._extra_remaining:
+                    self._header_part = HeaderPart.NAME
+            elif part in (HeaderPart.NAME, HeaderPart.COMMENT):
+                flag = (GZIP_ORIG_NAME
+                        if part is HeaderPart.NAME else GZIP_COMMENT)
+                if self._header_flags & flag:
+                    nul = data.find(b"\0", offset)
+                    offset = len(data) if nul == -1 else nul + 1
+                    if nul == -1:
+                        self._header_crc = zlib.crc32(data[start:offset],
+                                                      self._header_crc)
+                        return None
+                self._header_part = (HeaderPart.COMMENT if part
+                                     is HeaderPart.NAME else HeaderPart.CRC)
+            else:
+                if self._header_flags & GZIP_HEADER_CRC:
+                    if available < 2:
+                        self._pending = data[offset:]
+                        return None
+                    stored = int.from_bytes(data[offset:offset + 2], "little")
+                    computed = self._header_crc & 0xFFFF
+                    if stored != computed:
+                        raise self._refusal(
+                            f"{{}}: header checksum 0x{stored:04x} "
+                            f"!= computed checksum 0x{computed:04x}")
+                    offset += 2
+                self._header_part = HeaderPart.DONE
+            if part is not HeaderPart.CRC:
+                self._header_crc = zlib.crc32(data[start:offset],
+                                              self._header_crc)
+            if self._header_part is part:
                 return None
-            stored = int.from_bytes(data[end:end + 2], "little")
-            computed = zlib.crc32(data[:end]) & 0xFFFF
-            if stored != computed:
-                raise self._refusal(f"{{}}: header checksum 0x{stored:04x} "
-                                    f"!= computed checksum 0x{computed:04x}")
-            end += 2
-        return end if len(data) >= end else None
+        return offset
 
     def feed(self, data: bytes) -> Iterator[bytes]:
         """Decode one input chunk without collecting its expansion.
@@ -166,20 +216,14 @@ class GzipDecoder:
         self._pending = b""
         while data:
             if self._part is MemberPart.HEADER:
-                if self._seen and (self._padding or data[0] == 0):
+                if (self._header_part is HeaderPart.FIXED and self._seen
+                        and (self._padding or data[0] == 0)):
                     self._padding = True
                     if any(data):
                         raise self._refusal(GZIP_TRAILING, 2)
                     return
-                if len(data) < 2:
-                    self._pending = data
-                    return
-                if not data.startswith(GZIP_MAGIC):
-                    raise (self._refusal(GZIP_TRAILING, 2)
-                           if self._seen else self._refusal(GZIP_NOT_GZIP))
-                end = self._header_length(data)
+                end = self._read_header(data)
                 if end is None:
-                    self._pending = data
                     return
                 data = data[end:]
                 self._inflater = zlib.decompressobj(-zlib.MAX_WBITS)
@@ -196,6 +240,8 @@ class GzipDecoder:
                 data = data[GZIP_TRAILER:]
                 self._seen = True
                 self._part = MemberPart.HEADER
+                self._header_part = HeaderPart.FIXED
+                self._header_crc = 0
 
     def _inflate(self, data: bytes) -> Generator[bytes, None, bytes]:
         """Inflate body bytes, yielding bounded chunks as they decode.
@@ -248,7 +294,7 @@ class GzipDecoder:
         bodies for tar, but remains fatal for in-place gzip.
         """
         if (not self._seen or self._part is not MemberPart.HEADER
-                or self._pending):
+                or self._pending or self._header_part is not HeaderPart.FIXED):
             whole = (self._part is MemberPart.TRAILER
                      or self._part is MemberPart.HEADER and self._seen)
             raise GzipDataError((GZIP_EOF, ), True, keeps_output=whole)

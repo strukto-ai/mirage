@@ -324,6 +324,130 @@
         "stdout": "cut.gz\nlater.gz\n",
         "stderr": "gunzip: cut.gz: unexpected end of file\n"
       }
+    },
+    {
+      "id": "gunzip_long_header_name_truncated",
+      "seq": 962327,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(printf '\\x1f\\x8b\\x08\\x0a\\x00\\x00\\x00\\x00\\x00\\x03'; printf '%70000s' '') | gunzip",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gunzip: stdin: unexpected end of file\n"
+      }
+    },
+    {
+      "id": "gunzip_long_header_name_complete",
+      "seq": 962328,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(printf '\\x1f\\x8b\\x08\\x0a\\x00\\x00\\x00\\x00\\x00\\x03'; printf '%70000s' ''; printf '\\x00\\x01\\x3a\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00') | gunzip",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gunzip_long_header_comment_truncated",
+      "seq": 962329,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(printf '\\x1f\\x8b\\x08\\x12\\x00\\x00\\x00\\x00\\x00\\x03'; printf '%70000s' '') | gunzip",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gunzip: stdin: unexpected end of file\n"
+      }
+    },
+    {
+      "id": "gunzip_long_header_comment_complete",
+      "seq": 962330,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(printf '\\x1f\\x8b\\x08\\x12\\x00\\x00\\x00\\x00\\x00\\x03'; printf '%70000s' ''; printf '\\x00\\x00\\x6a\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00') | gunzip",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      }
     }
   ]
 }

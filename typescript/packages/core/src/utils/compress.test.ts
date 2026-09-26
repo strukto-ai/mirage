@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Mirrors python/tests/utils/test_compress.py.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { materialize } from '../io/types.ts'
 import { yieldBytes } from '../io/stream.ts'
 import {
@@ -227,3 +227,63 @@ it.each([1, 7, 65536])(
     }
   },
 )
+
+it.each([1, 7, 65536])('reads optional fields and header CRC at width %i', async (width) => {
+  for (const fields of [
+    new Uint8Array(4),
+    cat(new Uint8Array([3, 0]), ENC.encode('abcname\0comment\0')),
+  ]) {
+    const head = cat(HELLO.subarray(0, 3), new Uint8Array([0x1e]), HELLO.subarray(4, 10), fields)
+    const crc = crc32(head) & 0xffff
+    const member = cat(head, new Uint8Array([crc & 0xff, crc >> 8]), HELLO.subarray(10))
+    const data = cat(member, member)
+    async function* source(): AsyncIterable<Uint8Array> {
+      for (let offset = 0; offset < data.length; offset += width)
+        yield* yieldBytes(data.subarray(offset, offset + width))
+    }
+    expect(DEC.decode(await materialize(gunzipStream(source())))).toBe('hello\nhello\n')
+  }
+})
+
+it.each([0x04, 0x08, 0x10, 0x02])('rejects EOF in consumed optional field %i', async (flag) => {
+  for (const prefix of [new Uint8Array(), HELLO]) {
+    const head = cat(HELLO.subarray(0, 3), new Uint8Array([flag]), HELLO.subarray(4, 10))
+    const extra = flag === 0x04 ? new Uint8Array([255, 255, 97, 98, 99]) : new Uint8Array()
+    await expect(gunzipChecked(cat(prefix, head, extra))).rejects.toMatchObject({
+      fatal: true,
+      keepsOutput: prefix.length > 0,
+    })
+  }
+})
+
+it.each([0x08, 0x10])('consumes long header field %i without growing copies', async (flag) => {
+  for (const terminated of [false, true]) {
+    const head = cat(HELLO.subarray(0, 3), new Uint8Array([flag | 0x02]), HELLO.subarray(4, 10))
+    const chunk = new Uint8Array(GZIP_CHUNK_SIZE).fill(120)
+    const copies = vi.spyOn(Uint8Array.prototype, 'slice')
+    async function* source(): AsyncIterable<Uint8Array> {
+      yield* yieldBytes(head)
+      let crc = crc32(head)
+      for (let i = 0; i < 128; i++) {
+        yield* yieldBytes(chunk)
+        crc = crc32(chunk, crc)
+      }
+      if (terminated) {
+        crc = crc32(new Uint8Array(1), crc) & 0xffff
+        yield* yieldBytes(cat(new Uint8Array([0, crc & 0xff, crc >> 8]), HELLO.subarray(10)))
+      }
+    }
+    try {
+      const decoded = materialize(gunzipStream(source()))
+      if (terminated) expect(DEC.decode(await decoded)).toBe('hello\n')
+      else
+        await expect(decoded).rejects.toMatchObject({
+          fatal: true,
+          reasons: ['{}: unexpected end of file'],
+        })
+      expect(copies.mock.contexts.every((bytes) => bytes.byteLength <= GZIP_CHUNK_SIZE)).toBe(true)
+    } finally {
+      copies.mockRestore()
+    }
+  }
+})

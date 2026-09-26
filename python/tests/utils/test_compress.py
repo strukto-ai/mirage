@@ -178,3 +178,53 @@ def test_eof_distinguishes_complete_bodies_from_partial_ones(
         decoder.finish()
     assert exc.value.fatal
     assert exc.value.keeps_output is keeps
+
+
+@pytest.mark.parametrize("width", [1, 7, 65536])
+@pytest.mark.parametrize("fields", [b"\0\0\0\0", b"\x03\0abcname\0comment\0"])
+def test_optional_fields_and_header_crc_across_chunks(width, fields):
+    head = HELLO[:3] + b"\x1e" + HELLO[4:10] + fields
+    member = head + (zlib.crc32(head) & 0xFFFF).to_bytes(2,
+                                                         "little") + HELLO[10:]
+    decoder = GzipDecoder()
+    data = member + member
+    output = []
+    for offset in range(0, len(data), width):
+        output.extend(decoder.feed(data[offset:offset + width]))
+    decoder.finish()
+    assert b"".join(output) == b"hello\nhello\n"
+
+
+@pytest.mark.parametrize("flag", [0x04, 0x08, 0x10, 0x02])
+@pytest.mark.parametrize("prefix", [b"", HELLO])
+def test_eof_in_consumed_optional_fields_is_still_fatal(flag, prefix):
+    decoder = GzipDecoder()
+    head = HELLO[:3] + bytes([flag]) + HELLO[4:10]
+    extra = b"\xff\xffabc" if flag == 0x04 else b""
+    list(decoder.feed(prefix + head + extra))
+    with pytest.raises(GzipDataError) as exc:
+        decoder.finish()
+    assert exc.value.fatal
+    assert exc.value.keeps_output is bool(prefix)
+
+
+@pytest.mark.parametrize("flag", [0x08, 0x10])
+@pytest.mark.parametrize("terminated", [False, True])
+def test_long_header_fields_use_bounded_memory(flag, terminated):
+    decoder = GzipDecoder()
+    head = HELLO[:3] + bytes([flag | 0x02]) + HELLO[4:10]
+    list(decoder.feed(head))
+    crc = zlib.crc32(head)
+    chunk = b"x" * GZIP_CHUNK_SIZE
+    for _ in range(128):
+        assert list(decoder.feed(chunk)) == []
+        assert len(decoder._pending) <= 9
+        crc = zlib.crc32(chunk, crc)
+    if terminated:
+        crc = zlib.crc32(b"\0", crc) & 0xFFFF
+        tail = b"\0" + crc.to_bytes(2, "little") + HELLO[10:]
+        assert b"".join(decoder.feed(tail)) == b"hello\n"
+        decoder.finish()
+    else:
+        with pytest.raises(GzipDataError, match="unexpected end of file"):
+            decoder.finish()
