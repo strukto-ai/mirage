@@ -41,7 +41,9 @@ async def list_collections(
 ) -> list[str]:
     db = client[database]
     filter_arg: dict[str, Any] | None = None
-    if kind is not None:
+    if kind == EntityKind.COLLECTION:
+        filter_arg = {"type": {"$ne": EntityKind.VIEW.value}}
+    elif kind is not None:
         filter_arg = {"type": kind.value}
     return sorted(await db.list_collection_names(filter=filter_arg))
 

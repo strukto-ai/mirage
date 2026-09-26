@@ -19,7 +19,7 @@ import type {
   MongoIndexAccess,
   MongoIterOptions,
 } from '@struktoai/mirage-core/core/mongodb/_driver'
-import type { EntityKind } from '@struktoai/mirage-core/core/mongodb/types'
+import { EntityKind } from '@struktoai/mirage-core/core/mongodb/types'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { VERSION } from '../../version.ts'
@@ -92,7 +92,10 @@ export class MongoDBStore implements MongoDriver {
 
   async listCollections(database: string, kind: EntityKind | null = null): Promise<string[]> {
     const c = await this._client()
-    const filter = kind === null ? undefined : { type: kind }
+    const filter =
+      kind === null
+        ? undefined
+        : { type: kind === EntityKind.COLLECTION ? { $ne: EntityKind.VIEW } : kind }
     const cols = await c.db(database).listCollections(filter).toArray()
     return cols.map((col) => col.name as string).sort(compareCodePoints)
   }

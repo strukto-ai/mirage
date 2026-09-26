@@ -66,12 +66,23 @@ const ClientCtor = vi.fn(function (_uri: string) {
   const profilesCollection = makeColl(profilesDocs)
   const sessionsCollection = makeColl([])
   const db = {
-    listCollections: vi.fn(() => ({
+    listCollections: vi.fn((filter: { name?: string; type?: string | { $ne: string } } = {}) => ({
       toArray: () =>
-        Promise.resolve([
-          { name: 'profiles', type: 'collection' },
-          { name: 'sessions', type: 'collection' },
-        ]),
+        Promise.resolve(
+          [
+            { name: 'profiles', type: 'collection' },
+            { name: 'sessions', type: 'collection' },
+            { name: 'measurements', type: 'timeseries' },
+            { name: 'daily', type: 'view' },
+          ].filter(
+            (spec) =>
+              (filter.name === undefined || spec.name === filter.name) &&
+              (filter.type === undefined ||
+                (typeof filter.type === 'string'
+                  ? spec.type === filter.type
+                  : spec.type !== filter.type.$ne)),
+          ),
+        ),
     })),
     collection: vi.fn((name: string) =>
       name === 'profiles' ? profilesCollection : sessionsCollection,
@@ -148,6 +159,26 @@ describe('MongoDBVFS mount integration', () => {
     const r = await ws.shell('head -n 2 /mongo/app/collections/profiles/documents.jsonl')
     const lines = new TextDecoder().decode(r.stdout).trim().split('\n')
     expect(lines).toHaveLength(2)
+  })
+
+  it('lists and opens time-series collections without admitting views as collections', async () => {
+    const listing = await ws.shell('ls /mongo/app/collections')
+    expect(new TextDecoder().decode(listing.stdout).split('\n')).toContain('measurements')
+    expect(new TextDecoder().decode(listing.stdout).split('\n')).not.toContain('daily')
+    for (const filename of ['schema.json', 'documents.jsonl']) {
+      const path = `/mongo/app/collections/measurements/${filename}`
+      const info = await ws.shell(`stat -c %F ${path}`)
+      expect(info.exitCode).toBe(0)
+      const result = await ws.shell(`cat ${path}`)
+      expect(result.exitCode).toBe(0)
+      if (filename === 'schema.json')
+        expect(JSON.parse(new TextDecoder().decode(result.stdout))).toMatchObject({
+          name: 'measurements',
+          kind: 'collection',
+        })
+    }
+    const wrongNamespace = await ws.shell('stat /mongo/app/collections/daily/schema.json')
+    expect(wrongNamespace.exitCode).not.toBe(0)
   })
 
   it('wc -l pushes down to countDocuments', async () => {

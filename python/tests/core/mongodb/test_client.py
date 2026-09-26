@@ -18,7 +18,8 @@ import pytest
 
 from mirage.core.mongodb.client import (get_index_stats, get_indexes,
                                         get_validator, is_view, iter_documents,
-                                        iter_inserts)
+                                        iter_inserts, list_collections)
+from mirage.core.mongodb.types import EntityKind
 
 
 class _AsyncIter:
@@ -349,3 +350,24 @@ async def test_iter_documents_closes_cursor_on_early_stop():
     assert await anext(stream) == {"_id": 1}
     await stream.aclose()
     cursor.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind, expected", [
+    (None, None),
+    (EntityKind.COLLECTION, {
+        "type": {
+            "$ne": "view"
+        }
+    }),
+    (EntityKind.VIEW, {
+        "type": "view"
+    }),
+])
+async def test_collection_namespace_includes_non_view_types(kind, expected):
+    db = MagicMock()
+    db.list_collection_names = AsyncMock(return_value=["measurements"])
+    client = MagicMock()
+    client.__getitem__.return_value = db
+    assert await list_collections(client, "db", kind) == ["measurements"]
+    db.list_collection_names.assert_awaited_once_with(filter=expected)

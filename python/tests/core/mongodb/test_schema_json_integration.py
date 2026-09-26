@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -22,6 +24,10 @@ from dotenv import load_dotenv
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb._schema_json import (build_collection_schema_json,
                                               build_database_json)
+from mirage.core.mongodb.read import read
+from mirage.core.mongodb.readdir import readdir
+from mirage.core.mongodb.stat import stat
+from mirage.types import FileType, PathSpec
 from mirage.vfs.mongodb.config import MongoDBConfig
 
 pytestmark = pytest.mark.skipif(
@@ -106,10 +112,34 @@ async def test_database_catalog_keeps_timeseries_and_separates_views(accessor):
         await db.create_collection("ordinary_view",
                                    viewOn="ordinary",
                                    pipeline=[])
+        await db["measurements"].insert_one({
+            "_id":
+            1,
+            "time":
+            datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "temperature":
+            21
+        })
         result = await build_database_json(accessor, database)
         collections = {entry["name"] for entry in result["collections"]}
         assert {"ordinary", "measurements"} <= collections
         assert "ordinary_view" not in collections
         assert result["views"] == [{"name": "ordinary_view"}]
+        key = f"{database}/collections"
+        listing = await readdir(accessor,
+                                PathSpec.from_str_path(f"/mongo/{key}", key))
+        assert f"/mongo/{key}/measurements" in listing
+        assert f"/mongo/{key}/ordinary_view" not in listing
+        for filename in ("documents.jsonl", "schema.json"):
+            relative = f"{key}/measurements/{filename}"
+            path = PathSpec.from_str_path(f"/mongo/{relative}", relative)
+            row = await stat(accessor, path)
+            assert row.type == FileType.FILE
+            value = json.loads(await read(accessor, path))
+            if filename == "documents.jsonl":
+                assert value["temperature"] == 21
+            else:
+                assert value["kind"] == "collection"
+
     finally:
         await accessor.client.drop_database(database)

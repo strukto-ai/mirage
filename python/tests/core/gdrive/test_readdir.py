@@ -531,8 +531,12 @@ async def test_binary_size_preserves_zero_and_never_uses_quota(
     }
     if reported_size is not None:
         item["size"] = reported_size
-    with patch("mirage.core.gdrive.readdir.list_files", new=AsyncMock(return_value=[item])), \
-         patch("mirage.core.gdrive.readdir.list_shared_drives", new=AsyncMock(return_value=[])):
+    with (
+            patch("mirage.core.gdrive.readdir.list_files",
+                  new=AsyncMock(return_value=[item])),
+            patch("mirage.core.gdrive.readdir.list_shared_drives",
+                  new=AsyncMock(return_value=[])),
+    ):
         rows = await readdir(accessor, PathSpec.from_str_path("/drive", ""),
                              index)
         assert rows == ["/drive/file.txt"]
@@ -540,7 +544,11 @@ async def test_binary_size_preserves_zero_and_never_uses_quota(
             accessor, PathSpec.from_str_path("/drive/file.txt", "file.txt"),
             index)
         assert result.size == expected
-    with patch("mirage.core.gdrive.resolve.list_files", new=AsyncMock(return_value=[item])), \
-         patch("mirage.core.gdrive.stat.get_file", new=AsyncMock(return_value=item)):
+    with (
+            patch("mirage.core.gdrive.resolve.list_files",
+                  new=AsyncMock(return_value=[item])),
+            patch("mirage.core.gdrive.stat.get_file",
+                  new=AsyncMock(return_value=item)),
+    ):
         result = await stat_from_api(accessor, "file.txt", "/drive/file.txt")
         assert result.size == expected
