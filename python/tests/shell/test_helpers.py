@@ -24,9 +24,10 @@ from mirage.shell.helpers import (  # isort: skip
     get_command_name, get_declaration_keyword, get_for_parts,
     get_function_body, get_function_name, get_heredoc_meta, get_heredoc_parts,
     get_if_branches, get_list_parts, get_negated_command, get_parts,
-    get_pipeline_commands, get_process_sub_body, get_redirects,
-    get_subshell_body, get_text, get_while_parts, is_backgrounded,
-    literal_word, normalize_heredoc_body, split_env_prefix, take_continuation)
+    get_pipeline_commands, get_pipeline_stages, get_process_sub_body,
+    get_redirects, get_subshell_body, get_text, get_while_parts,
+    is_backgrounded, literal_word, normalize_heredoc_body, split_env_prefix,
+    take_continuation)
 
 _LANG = tree_sitter.Language(tree_sitter_bash.language())
 _PARSER = tree_sitter.Parser(_LANG)
@@ -80,6 +81,56 @@ def test_get_pipeline_three():
     cmds, stderr = get_pipeline_commands(_first("a | b |& c"))
     assert len(cmds) == 3
     assert stderr == [False, True]
+
+
+def _stages_shape(cmd: str, redirected: bool = False):
+    node = _first(cmd)
+    if redirected:
+        body, redirects = get_redirects(node)
+        stages = get_pipeline_stages(body, redirects)
+    else:
+        stages = get_pipeline_stages(node)
+    lead = None
+    if stages.lead is not None:
+        left, op, right = stages.lead
+        lead = (get_text(left), str(op), get_text(right))
+    return ([get_text(c) for c in stages.commands], list(stages.stderr_flags),
+            [[str(r.target) for r in rs]
+             for rs in stages.redirects], stages.negated, lead)
+
+
+@pytest.mark.parametrize(
+    "cmd,redirected,shape",
+    [
+        ("a | b", False, (["a", "b"], [False], [[], []], False, None)),
+        ("! a | b", False, (["a", "b"], [False], [[], []], True, None)),
+        # tree-sitter reads these as pipeline(redirected(<chain>, r), ...).
+        ("a | b < f | c", False,
+         (["a", "b", "c"], [False, False], [[], ["f"], []], False, None)),
+        ("a | b < f |& c", False,
+         (["a", "b", "c"], [False, True], [[], ["f"], []], False, None)),
+        ("! a < f | b", False, (["a", "b"], [False], [["f"], []], True, None)),
+        ("a && b < f | c", False, (["b", "c"], [False], [["f"], []], False,
+                                   ("a", "&&", "b"))),
+        ("a && b | c < f | d", False,
+         (["b", "c", "d"], [False, False], [[], ["f"], []], False,
+          ("a", "&&", "b | c"))),
+        ("a || ! b < f | c", False, (["b", "c"], [False], [["f"], []], True,
+                                     ("a", "||", "! b"))),
+        ("a && b | c < f | d > g | e", False,
+         (["b", "c", "d", "e"], [False, False, False], [[], ["f"], ["g"], []],
+          False, ("a", "&&", "b | c"))),
+        # A stage holding its own redirect runs as the node it is.
+        ("a < f | b", False, (["a < f", "b"], [False], [[], []], False, None)),
+        ("{ a; } < f | b", False,
+         (["{ a; } < f", "b"], [False], [[], []], False, None)),
+        # Redirects hoisted over the whole pipeline bind to its last stage.
+        ("a | b > g", True, (["a", "b"], [False], [[], ["g"]], False, None)),
+        ("! a | b < f > g", True,
+         (["a", "b"], [False], [[], ["f", "g"]], True, None)),
+    ])
+def test_get_pipeline_stages(cmd, redirected, shape):
+    assert _stages_shape(cmd, redirected) == shape
 
 
 def test_get_while_parts():

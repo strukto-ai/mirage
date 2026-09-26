@@ -103,6 +103,70 @@ async def test_stdin_redirect_binds_last_command():
     assert out == "lead\n2\n"
 
 
+# A trailing redirect binds to the command it follows, whatever the
+# parse wrapped it around: a pipeline in an &&/|| list, a list the parse
+# pulled into a pipeline's first stage, a pipeline pulled in the same way,
+# and a `!`. Every row is GNU bash 5.2 in debian:stable-slim (redirect
+# errors without bash's `bash: line N:` prefix); PS prints $? and
+# PIPESTATUS.
+PS = '; echo "rc=$? ps=${PIPESTATUS[*]}"'
+BINDS = [
+    ("true && printf 'x\\n' | cat < /data/b.txt", "1\n2\n3\n", "", 0),
+    ("true && printf 'x\\n' | wc -l < /dev/null", "0\n", "", 0),
+    ("false || printf 'x\\n' | cat < /dev/null", "", "", 0),
+    ("(cd /data && printf 'x\\n' | cat < b.txt)", "1\n2\n3\n", "", 0),
+    ("true && printf 'x\\n' | cat | cat < /data/b.txt", "1\n2\n3\n", "", 0),
+    ("false && true || printf 'x\\n' | cat < /data/b.txt", "1\n2\n3\n", "", 0),
+    ("true && printf 'x\\n' | cat < /nonexistent" + PS, "rc=1 ps=0 1\n",
+     "/nonexistent: No such file or directory\n", 0),
+    ("true && printf 'x\\n' | cat < /data/b.txt && echo after",
+     "1\n2\n3\nafter\n", "", 0),
+    ("f() { true && printf 'x\\n' | cat < /data/b.txt; }; f", "1\n2\n3\n", "",
+     0),
+    ("true && { echo e1 >&2; echo o; } | { cat; echo e2 >&2; } 2> /data/e;"
+     " echo ---; cat /data/e", "o\n---\ne2\n", "e1\n", 0),
+    ("false || { echo e1 >&2; echo o; } | { cat; echo e2 >&2; } 2>&1",
+     "o\ne2\n", "e1\n", 0),
+    ("true && printf 'x\\n' | cat <<EOF\nH\nEOF", "H\n", "", 0),
+    ("true && { printf 'x\\n' | cat; } < /data/b.txt", "x\n", "", 0),
+    ("true && (printf 'x\\n' | cat) < /data/b.txt", "x\n", "", 0),
+    ("true && printf 'x\\n' | cat < /data/b.txt | tr 3 Z" + PS,
+     "1\n2\nZ\nrc=0 ps=0 0 0\n", "", 0),
+    ("false && printf 'x\\n' | cat < /data/b.txt | cat" + PS, "rc=1 ps=1\n",
+     "", 0),
+    ("false && cat <<EOF | tr a-z A-Z\nhi\nEOF\n" + PS[2:], "rc=1 ps=1\n", "",
+     0),
+    ("printf 'x\\n' | false && cat < /data/b.txt | tr 1 X" + PS,
+     "rc=1 ps=0 1\n", "", 0),
+    ("(set -e; false && cat < /data/b.txt | tr 1 X; echo survived)",
+     "survived\n", "", 0),
+    ("printf 'x\\n' | cat < /data/b.txt | cat" + PS,
+     "1\n2\n3\nrc=0 ps=0 0 0\n", "", 0),
+    ("! printf 'x\\n' | cat < /data/b.txt | cat" + PS,
+     "1\n2\n3\nrc=1 ps=0 0 0\n", "", 0),
+    ("! cat < /data/b.txt | tr 1 X" + PS, "X\n2\n3\nrc=1 ps=0 0\n", "", 0),
+    ("! false | true > /dev/null" + PS, "rc=1 ps=1 0\n", "", 0),
+    ("! cat < /nonexistent" + PS, "rc=0 ps=1\n",
+     "/nonexistent: No such file or directory\n", 0),
+    ("true && { echo e >&2; echo o; } |& cat > /data/p; cat /data/p", "e\no\n",
+     "", 0),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line,stdout,stderr,code", BINDS)
+async def test_trailing_redirect_binds_to_the_command_it_follows(
+        line, stdout, stderr, code):
+    ws = await _workspace()
+    try:
+        await ws.shell("printf '1\\n2\\n3\\n' > /data/b.txt")
+        io = await ws.shell(line)
+        assert (await io.stdout_str(), await
+                io.stderr_str(), io.exit_code) == (stdout, stderr, code)
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_fd_table_file_then_merge():
     # `> f 2>&1` — fd2 follows fd1 into the file (canonical idiom).

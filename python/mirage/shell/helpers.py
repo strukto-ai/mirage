@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import shlex
+from collections.abc import Sequence
+from dataclasses import replace
 
 from mirage.shell.constants import (FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN,
                                     FD_STDOUT)
@@ -22,8 +24,8 @@ from mirage.shell.parse.heredoc import (body_prefix, clean_delimiter,
                                         delimiter_quoted)
 from mirage.shell.types import FunctionBody
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import (ProcessSubDirection, Redirect, RedirectKind,
-                                TSNodeLike)
+from mirage.shell.types import (PipelineStages, ProcessSubDirection, Redirect,
+                                RedirectKind, TSNodeLike)
 from mirage.utils.path import expand_tilde
 
 
@@ -242,6 +244,97 @@ def get_pipeline_commands(
         elif c.type in (NT.PIPE, NT.PIPE_STDERR):
             stderr_flags.append(c.type == NT.PIPE_STDERR)
     return commands, stderr_flags
+
+
+def get_pipeline_stages(
+        node: TSNodeLike,
+        redirects: Sequence[Redirect] = (),
+) -> PipelineStages:
+    """A pipeline's stages as bash reads them, whatever shape the parse
+    gave them.
+
+    tree-sitter-bash lets a redirect close over everything to its left
+    up to the next pipe, so ``a && b | c < f | d`` parses as a pipeline
+    whose first stage is ``redirected(a && b | c, < f)``, and ``! a < f
+    | b`` as one whose first stage is ``redirected(! a, < f)``. Bash
+    reads them as ``a && (b | c <f | d)`` and ``! (a <f | b)``: the
+    redirect binds to the command it follows, the stages on both sides
+    of it are one pipeline, a ``!`` negates all of it, and a list the
+    parse pulled into the first stage runs ahead of the pipeline and
+    decides whether it runs at all. This is the last-command chain the
+    admission gate climbs for a redirect's target
+    (``statement_redirects``), read in the direction the executor walks.
+
+    Args:
+        node (TSNodeLike): the pipeline node.
+        redirects (Sequence[Redirect]): redirects hoisted over the whole
+            pipeline, which bind to its last stage.
+    """
+    commands, stderr_flags = get_pipeline_commands(node)
+    head = _pipeline_head(commands[0])
+    stages = PipelineStages(
+        commands=head.commands + tuple(commands[1:]),
+        stderr_flags=head.stderr_flags + tuple(stderr_flags),
+        redirects=head.redirects + tuple(() for _ in commands[1:]),
+        negated=head.negated,
+        lead=head.lead)
+    return _bind_last(stages, redirects)
+
+
+def _bind_last(stages: PipelineStages,
+               redirects: Sequence[Redirect]) -> PipelineStages:
+    """``stages`` with ``redirects`` bound to the last stage, after any it
+    already carries (the inner ones come first in the source).
+
+    Args:
+        stages (PipelineStages): the stages to extend.
+        redirects (Sequence[Redirect]): the redirects to bind.
+    """
+    if not redirects:
+        return stages
+    last = stages.redirects[-1] + tuple(redirects)
+    return replace(stages, redirects=stages.redirects[:-1] + (last, ))
+
+
+def _pipeline_head(stage: TSNodeLike) -> PipelineStages:
+    """The stages a pipeline's first element stands for.
+
+    Only a redirected statement over a pipeline, a list or a negation is
+    re-read; every other stage, a redirected command included, is one
+    stage that runs as the node it is.
+
+    Args:
+        stage (TSNodeLike): the pipeline's first element.
+    """
+    single = PipelineStages(commands=(stage, ),
+                            stderr_flags=(),
+                            redirects=((), ))
+    body = stage
+    hoisted: tuple[Redirect, ...] = ()
+    if stage.type == NT.REDIRECTED_STATEMENT:
+        found, parsed = get_redirects(stage)
+        # A heredoc's `&&`/`||` tail wraps the whole statement, which only
+        # the statement's own arm folds in.
+        if found is None or any(r.continuation for r in parsed):
+            return single
+        body, hoisted = found, tuple(parsed)
+    if body.type == NT.NEGATED_COMMAND:
+        return PipelineStages(commands=(get_negated_command(body), ),
+                              stderr_flags=(),
+                              redirects=(hoisted, ),
+                              negated=True)
+    if not hoisted:
+        return single
+    if body.type == NT.PIPELINE:
+        return get_pipeline_stages(body, hoisted)
+    if body.type == NT.LIST:
+        left, op, right = get_list_parts(body)
+        inner = (get_pipeline_stages(right, hoisted)
+                 if right.type == NT.PIPELINE else _bind_last(
+                     _pipeline_head(right), hoisted))
+        if inner.lead is None:
+            return replace(inner, lead=(left, op, right))
+    return single
 
 
 def get_while_parts(node: TSNodeLike, ) -> tuple[TSNodeLike, list[TSNodeLike]]:

@@ -316,6 +316,50 @@ async def test_admit_line_reads_redirect_targets_as_words_of_the_command():
         await ws.close()
 
 
+# The parse hoists a trailing redirect over whatever precedes it, a `!`
+# included (`! cat < f` is redirected(negated(cat), < f)), and every
+# shape still names the command bash opens the file for.
+HOISTED = [
+    "! cat < /data/secret",
+    "echo a && ! cat < /data/secret",
+    "! cat < /data/secret | cat",
+    "echo x | cat < /data/secret",
+    "echo a && echo x | cat < /data/secret",
+    "echo a && cat < /data/secret | cat",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", HOISTED)
+async def test_admit_line_binds_a_hoisted_redirect_to_its_command(text):
+    ws = _ws()
+    try:
+        session = ws._session_mgr.get(ws._session_mgr.default_id)
+        refusal = await admit_line(parse(text), session, ws._registry,
+                                   ws._namespace)
+        assert refusal is not None
+        assert (refusal.exit_code,
+                _voiced(refusal)) == (1, "cat: /data/secret: sealed\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", HOISTED)
+async def test_a_hoisted_redirect_is_judged_with_its_command_on_the_run(text):
+    # The run hands a redirect's targets to the gate of the node it
+    # runs under them, so a redirect left on a `!` (or a pipeline) never
+    # reached `cat`'s gate and `! cat < /data/secret` printed the file.
+    ws = _ws()
+    try:
+        await ws.shell("echo TOPSECRET > /data/secret")
+        io = await ws.shell(text)
+        assert "TOPSECRET" not in await io.stdout_str()
+        assert "cat: /data/secret: sealed" in await io.stderr_str()
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_hidden_path_is_no_path_to_any_policy():
     # A session that cannot see a path must not learn of it from a

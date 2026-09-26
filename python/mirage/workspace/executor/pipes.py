@@ -52,6 +52,10 @@ async def handle_pipe(
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Connect commands via pipes: stdout -> stdin."""
+    # Reassociated pipelines can enter here without execute_node resetting
+    # the parent. An exemption belongs to the preceding statement only;
+    # the caller applies this pipeline's own negation after it finishes.
+    session.errexit_immune = False
     pipes = [
         PipeConsole(i < len(stderr_flags) and stderr_flags[i])
         for i in range(len(commands))

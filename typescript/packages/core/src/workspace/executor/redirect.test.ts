@@ -290,6 +290,62 @@ describe('handleRedirect accepts PathSpec targets', () => {
   })
 })
 
+// A trailing redirect binds to the command it follows, whatever the parse
+// wrapped it around: a pipeline in an &&/|| list, a list the parse pulled
+// into a pipeline's first stage, a pipeline pulled in the same way, and a
+// `!`. Every row is GNU bash 5.2 in debian:stable-slim (redirect errors
+// without bash's `bash: line N:` prefix); PS prints $? and PIPESTATUS.
+const PS = '; echo "rc=$? ps=${PIPESTATUS[*]}"'
+const BINDS: [string, string, string, number][] = [
+  ["true && printf 'x\\n' | cat < /data/b.txt", '1\n2\n3\n', '', 0],
+  ["true && printf 'x\\n' | wc -l < /dev/null", '0\n', '', 0],
+  ["false || printf 'x\\n' | cat < /dev/null", '', '', 0],
+  ["(cd /data && printf 'x\\n' | cat < b.txt)", '1\n2\n3\n', '', 0],
+  ["true && printf 'x\\n' | cat | cat < /data/b.txt", '1\n2\n3\n', '', 0],
+  ["false && true || printf 'x\\n' | cat < /data/b.txt", '1\n2\n3\n', '', 0],
+  [
+    "true && printf 'x\\n' | cat < /nonexistent" + PS,
+    'rc=1 ps=0 1\n',
+    '/nonexistent: No such file or directory\n',
+    0,
+  ],
+  ["true && printf 'x\\n' | cat < /data/b.txt && echo after", '1\n2\n3\nafter\n', '', 0],
+  ["f() { true && printf 'x\\n' | cat < /data/b.txt; }; f", '1\n2\n3\n', '', 0],
+  [
+    'true && { echo e1 >&2; echo o; } | { cat; echo e2 >&2; } 2> /data/e; echo ---; cat /data/e',
+    'o\n---\ne2\n',
+    'e1\n',
+    0,
+  ],
+  ['false || { echo e1 >&2; echo o; } | { cat; echo e2 >&2; } 2>&1', 'o\ne2\n', 'e1\n', 0],
+  ["true && printf 'x\\n' | cat <<EOF\nH\nEOF", 'H\n', '', 0],
+  ["true && { printf 'x\\n' | cat; } < /data/b.txt", 'x\n', '', 0],
+  ["true && (printf 'x\\n' | cat) < /data/b.txt", 'x\n', '', 0],
+  ["true && printf 'x\\n' | cat < /data/b.txt | tr 3 Z" + PS, '1\n2\nZ\nrc=0 ps=0 0 0\n', '', 0],
+  ["false && printf 'x\\n' | cat < /data/b.txt | cat" + PS, 'rc=1 ps=1\n', '', 0],
+  ['false && cat <<EOF | tr a-z A-Z\nhi\nEOF\n' + PS.slice(2), 'rc=1 ps=1\n', '', 0],
+  ["printf 'x\\n' | false && cat < /data/b.txt | tr 1 X" + PS, 'rc=1 ps=0 1\n', '', 0],
+  ['(set -e; false && cat < /data/b.txt | tr 1 X; echo survived)', 'survived\n', '', 0],
+  ["printf 'x\\n' | cat < /data/b.txt | cat" + PS, '1\n2\n3\nrc=0 ps=0 0 0\n', '', 0],
+  ["! printf 'x\\n' | cat < /data/b.txt | cat" + PS, '1\n2\n3\nrc=1 ps=0 0 0\n', '', 0],
+  ['! cat < /data/b.txt | tr 1 X' + PS, 'X\n2\n3\nrc=1 ps=0 0\n', '', 0],
+  ['! false | true > /dev/null' + PS, 'rc=1 ps=1 0\n', '', 0],
+  ['! cat < /nonexistent' + PS, 'rc=0 ps=1\n', '/nonexistent: No such file or directory\n', 0],
+  ['true && { echo e >&2; echo o; } |& cat > /data/p; cat /data/p', 'e\no\n', '', 0],
+]
+
+describe('a trailing redirect binds to the command it follows', () => {
+  it.each(BINDS)('%s', async (line, stdout, stderr, code) => {
+    const { ws } = await makeIntegrationWS({ 'b.txt': '1\n2\n3\n' })
+    try {
+      const [exit, out, err] = await runResult(ws, line)
+      expect([out, err, exit]).toEqual([stdout, stderr, code])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('fd-table routing end-to-end', () => {
   it('bare > file creates an empty file', async () => {
     const { ws } = await makeIntegrationWS()

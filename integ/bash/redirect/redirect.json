@@ -219,10 +219,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo one && echo two > captured && cat captured",
+      "command": "echo one && echo two > captured && cat captured; true && true && printf 'x\\n' | cat | cat < captured",
       "expect": {
         "exit": 0,
-        "stdout": "one\ntwo\n",
+        "stdout": "one\ntwo\ntwo\n",
         "stderr": ""
       }
     },
@@ -372,11 +372,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo out; echo err >&2; } 2> ELOG && cat ELOG",
+      "command": "{ echo out; echo err >&2; } 2> ELOG && cat ELOG; true && { echo e1 >&2; echo o; } | { cat; echo e2 >&2; } 2> ELOG2; cat ELOG2",
       "expect": {
         "exit": 0,
-        "stdout": "out\nerr\n",
-        "stderr": ""
+        "stdout": "out\nerr\no\ne2\n",
+        "stderr": "e1\n"
       }
     },
     {
@@ -488,11 +488,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo out; echo err >&2; } &> BOTH && cat BOTH",
+      "command": "{ echo out; echo err >&2; } &> BOTH && cat BOTH; true && { echo e1 >&2; echo o; } | { cat; echo e2 >&2; } &> BOTH2; cat BOTH2",
       "expect": {
         "exit": 0,
-        "stdout": "out\nerr\n",
-        "stderr": ""
+        "stdout": "out\nerr\no\ne2\n",
+        "stderr": "e1\n"
       }
     },
     {
@@ -546,10 +546,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo a; echo b >&2; echo c; } |& wc -l",
+      "command": "{ echo a; echo b >&2; echo c; } |& wc -l; printf 'x\\n' | { cat; echo e >&2; } < /dev/null |& wc -l",
       "expect": {
         "exit": 0,
-        "stdout": "3\n",
+        "stdout": "3\n1\n",
         "stderr": ""
       }
     },
@@ -778,10 +778,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf 'b\\na\\n' > RI && sort < RI > RO && cat RO",
+      "command": "printf 'b\\na\\n' > RI && sort < RI > RO && cat RO; false && sort < RI | cat; echo rc=$?; true && sort < RI | tr a-z A-Z; echo \"${PIPESTATUS[@]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "a\nb\n",
+        "stdout": "a\nb\nrc=1\nA\nB\n0 0\n",
         "stderr": ""
       }
     },
@@ -981,11 +981,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo z; echo a >&2; } 2>&1 | sort",
+      "command": "{ echo z; echo a >&2; } 2>&1 | sort; false || { echo e1 >&2; echo o; } | { cat; echo e2 >&2; } 2>&1",
       "expect": {
         "exit": 0,
-        "stdout": "a\nz\n",
-        "stderr": ""
+        "stdout": "a\nz\no\ne2\n",
+        "stderr": "e1\n"
       }
     },
     {
@@ -1010,10 +1010,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "(echo sub1; echo sub2) > SUB && cat SUB",
+      "command": "(echo sub1; echo sub2) > SUB && cat SUB; true && (printf 'x\\n' | cat) < SUB; true && { printf 'y\\n' | cat; } < SUB",
       "expect": {
         "exit": 0,
-        "stdout": "sub1\nsub2\n",
+        "stdout": "sub1\nsub2\nx\ny\n",
         "stderr": ""
       }
     },
@@ -1068,10 +1068,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf 'file\\n' > RP; printf 'pipe\\n' | cat < RP",
+      "command": "printf 'file\\n' > RP; printf 'pipe\\n' | cat < RP; true && printf 'pipe\\n' | cat < RP; false || printf 'pipe\\n' | cat | cat < RP; true && printf 'pipe\\n' | wc -l < /dev/null; (cd .. && true && printf 'pipe\\n' | cat < r5/RP); true && { printf 'pipe\\n' | cat; } < RP",
       "expect": {
         "exit": 0,
-        "stdout": "file\n",
+        "stdout": "file\nfile\nfile\n0\nfile\npipe\n",
         "stderr": ""
       }
     },
@@ -1097,10 +1097,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf 'pipe\\n' | cat > RPR; cat RPR",
+      "command": "printf 'pipe\\n' | cat > RPR; cat RPR; true && printf 'a\\n' | cat > RPR; false || printf 'b\\n' | cat >> RPR; cat RPR; true && printf 'c\\n' | cat < RPR > RPR2; cat RPR2",
       "expect": {
         "exit": 0,
-        "stdout": "pipe\n",
+        "stdout": "pipe\na\nb\na\nb\n",
         "stderr": ""
       }
     },
@@ -1126,10 +1126,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf 'left\\n' > RPL | cat; cat RPL",
+      "command": "printf 'left\\n' > RPL | cat; cat RPL; ! false | true > RPL; echo rc=$?; ! printf 'x\\n' | cat < RPL | cat; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "left\n",
+        "stdout": "left\nrc=1\nrc=1\n",
         "stderr": ""
       }
     },
@@ -1358,11 +1358,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "echo hi < NOPE; echo next",
+      "command": "echo hi < NOPE; echo next; true && printf 'x\\n' | cat < NOPE; echo \"${PIPESTATUS[@]}\"; ! cat < NOPE; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "next\n",
-        "stderr": "NOPE: No such file or directory\n"
+        "stdout": "next\n0 1\nrc=0\n",
+        "stderr": "NOPE: No such file or directory\nNOPE: No such file or directory\nNOPE: No such file or directory\n"
       }
     },
     {

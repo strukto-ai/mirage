@@ -49,6 +49,10 @@ export async function handlePipe(
   callStack: CallStack | null = null,
   signal?: AbortSignal,
 ): Promise<Result> {
+  // Reassociated pipelines can enter here without executeNode resetting
+  // the parent. An exemption belongs to the preceding statement only;
+  // the caller applies this pipeline's own negation after it finishes.
+  session.errexitImmune = false
   const pipes = commands.map((_, i) => new PipeConsole(stderrFlags[i] === true))
   const ios: IOResult[] = commands.map(() => new IOResult())
   const childNodes: ExecutionNode[] = commands.map(() => new ExecutionNode())

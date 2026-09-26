@@ -23,7 +23,7 @@ import {
   getListParts,
   getNegatedCommand,
   getParts,
-  getPipelineCommands,
+  getPipelineStages,
   getRedirects,
   takeContinuation,
   getSubshellBody,
@@ -35,6 +35,7 @@ import {
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import {
   NodeType as NT,
+  type PipelineStages,
   type Redirect,
   RedirectKind,
   ShellBuiltin as SB,
@@ -271,6 +272,82 @@ async function provisionRedirected(
   return result
 }
 
+// Plan a redirected statement with its redirects bound where the executor
+// binds them (`runRedirected`): past a list to its right operand, past a
+// pipeline to its last stage, inside a `!` to the command it negates. The
+// command they reach is gated with their targets, so a plan never prices a
+// read the run would refuse.
+async function provisionBound(
+  ctx: ProvisionContext,
+  recurse: (n: TSNodeLike, s: SessionState) => Promise<ProvisionResult>,
+  recurseUnknown: (n: unknown, s: SessionState) => Promise<ProvisionResult>,
+  planScope: PlanScope,
+  command: TSNodeLike | null,
+  redirects: Redirect[],
+  session: SessionState,
+): Promise<ProvisionResult> {
+  if (command !== null && command.type === NT.LIST) {
+    const [left, op, right] = getListParts(command)
+    const wrapped = (n: unknown, s: SessionState): Promise<ProvisionResult> =>
+      n === right
+        ? provisionBound(ctx, recurse, recurseUnknown, planScope, right, redirects, s)
+        : recurseUnknown(n, s)
+    return handleConnectionProvision(wrapped, left, op ?? '&&', right, session)
+  }
+  if (command !== null && command.type === NT.PIPELINE) {
+    return provisionPipeline(
+      ctx,
+      recurse,
+      recurseUnknown,
+      planScope,
+      getPipelineStages(command, redirects),
+      session,
+    )
+  }
+  if (command !== null && command.type === NT.NEGATED_COMMAND) {
+    return provisionBound(
+      ctx,
+      recurse,
+      recurseUnknown,
+      planScope,
+      getNegatedCommand(command),
+      redirects,
+      session,
+    )
+  }
+  return provisionRedirected(ctx, recurse, recurseUnknown, planScope, command, redirects, session)
+}
+
+// Plan a pipeline as the executor runs it (`runPipeline`): a list the parse
+// pulled into the first stage plans as that list, and a stage the parse
+// hoisted redirects off plans under them.
+async function provisionPipeline(
+  ctx: ProvisionContext,
+  recurse: (n: TSNodeLike, s: SessionState) => Promise<ProvisionResult>,
+  recurseUnknown: (n: unknown, s: SessionState) => Promise<ProvisionResult>,
+  planScope: PlanScope,
+  stages: PipelineStages,
+  session: SessionState,
+): Promise<ProvisionResult> {
+  if (stages.lead !== null) {
+    const [left, op, right] = stages.lead
+    const rest: PipelineStages = { ...stages, lead: null }
+    const wrapped = (n: unknown, s: SessionState): Promise<ProvisionResult> =>
+      n === right
+        ? provisionPipeline(ctx, recurse, recurseUnknown, planScope, rest, s)
+        : recurseUnknown(n, s)
+    return handleConnectionProvision(wrapped, left, op ?? '&&', right, session)
+  }
+  const stage = (n: unknown, s: SessionState): Promise<ProvisionResult> => {
+    const index = stages.commands.indexOf(n as TSNodeLike)
+    const hoisted = index < 0 ? [] : (stages.redirects[index] ?? [])
+    return hoisted.length > 0
+      ? provisionBound(ctx, recurse, recurseUnknown, planScope, n as TSNodeLike, [...hoisted], s)
+      : recurseUnknown(n, s)
+  }
+  return handlePipeProvision(stage, stages.commands, session)
+}
+
 /**
  * Walk tree-sitter AST and estimate execution cost.
  *
@@ -353,8 +430,16 @@ export async function provisionNode(
   }
 
   if (kind === NodeKind.PIPELINE) {
-    const [commands] = getPipelineCommands(node)
-    return handlePipeProvision(recurseUnknown, commands, session)
+    // Mirror the executor: stages are read the way bash reads them (see
+    // getPipelineStages).
+    return provisionPipeline(
+      ctx,
+      recurse,
+      recurseUnknown,
+      planScope,
+      getPipelineStages(node),
+      session,
+    )
   }
 
   if (kind === NodeKind.LIST) {
@@ -365,27 +450,17 @@ export async function provisionNode(
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
     const continuation = takeContinuation(redirects)
-    let plan: ProvisionResult
-    if (command !== null && (command as TSNodeLike & { type: string }).type === NT.LIST) {
-      // Mirror the executor: a trailing redirect hoisted over an
-      // &&/|| list binds to the last command.
-      const [left, op, right] = getListParts(command)
-      const wrapped = (n: unknown, s: SessionState): Promise<ProvisionResult> =>
-        n === right
-          ? provisionRedirected(ctx, recurse, recurseUnknown, planScope, right, redirects, s)
-          : recurseUnknown(n, s)
-      plan = await handleConnectionProvision(wrapped, left, op ?? '&&', right, session)
-    } else {
-      plan = await provisionRedirected(
-        ctx,
-        recurse,
-        recurseUnknown,
-        planScope,
-        command,
-        redirects,
-        session,
-      )
-    }
+    // Mirror the executor: a trailing redirect hoisted over a list, a
+    // pipeline or a `!` binds to the command it follows.
+    let plan = await provisionBound(
+      ctx,
+      recurse,
+      recurseUnknown,
+      planScope,
+      command,
+      redirects,
+      session,
+    )
     // Mirror the executor again: the `&&`/`||` steps a heredoc's operator
     // line carried wrap the whole statement, so each one joins the plan
     // so far to its right operand.

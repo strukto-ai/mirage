@@ -331,6 +331,32 @@ class Redirect:
     continuation: tuple[tuple[str, Any], ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class PipelineStages:
+    """A pipeline as bash reads it, whatever shape the parse gave it.
+
+    Args:
+        commands (tuple[Any, ...]): the stages in order, a leading
+            ``!`` unwrapped.
+        stderr_flags (tuple[bool, ...]): per stage, whether ``|&``
+            follows it.
+        redirects (tuple[tuple[Redirect, ...], ...]): per stage, the
+            redirects the parse hoisted off it, in source order; empty
+            for a stage that holds its own.
+        negated (bool): a leading ``!`` negates the pipeline's status.
+        lead (tuple[Any, str, Any] | None): the ``left, op, right`` of a
+            list the parse pulled into the first stage. Its left side
+            runs first and its operator decides whether the pipeline
+            runs at all; its right operand is where the pipeline starts
+            and stands for it in the connection.
+    """
+    commands: tuple[Any, ...]
+    stderr_flags: tuple[bool, ...]
+    redirects: tuple[tuple[Redirect, ...], ...]
+    negated: bool = False
+    lead: tuple[Any, str, Any] | None = None
+
+
 class ProcessSubDirection(StrEnum):
     """Which way a process substitution carries bytes.
 

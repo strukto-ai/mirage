@@ -218,6 +218,30 @@ async def test_provision_gates_a_builtin_before_pricing_its_redirect():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "printf 'x\\n' | read y < /data/a.txt",
+    "true && printf 'x\\n' | read y < /data/a.txt",
+    "true && read y < /data/a.txt | cat",
+    "! read y < /data/a.txt",
+    "true && ! read y < /data/a.txt",
+])
+async def test_provision_gates_a_hoisted_redirect_with_its_command(line):
+    # The parse hoists the redirect over the pipeline, list or `!` it
+    # trails; the plan binds it back to `read`, as the run does, so the
+    # refused command is gated with its source and nothing is priced.
+    ws = Workspace({"/data": RAMVFS()},
+                   mode=MountMode.WRITE,
+                   policies=[_NoRead()])
+    try:
+        await ws.shell("tee /data/a.txt > /dev/null", stdin=b"x" * 24)
+        result = await ws.shell(line, provision=True)
+        assert result.precision is Precision.UNKNOWN
+        assert result.network_read == "0"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_provision_gates_a_function_before_walking_its_body():
     # A denied shell function must not have its body walked: the body's
     # own reads are byte counts the refusal is protecting.

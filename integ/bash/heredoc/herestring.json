@@ -365,10 +365,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf 'pipe\\n' | cat <<< here",
+      "command": "printf 'pipe\\n' | cat <<< here; true && printf 'pipe\\n' | cat <<< here; false || printf 'pipe\\n' | cat <<< here",
       "expect": {
         "exit": 0,
-        "stdout": "here\n",
+        "stdout": "here\nhere\nhere\n",
         "stderr": ""
       }
     },

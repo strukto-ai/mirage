@@ -66,6 +66,19 @@
       }
     },
     {
+      "id": "cmd_negated_redirect_target_is_judged_with_the_line",
+      "seq": 923105,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "echo a && ! cat < /scratch/private/k",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /scratch/private/k: private\n"
+      }
+    },
+    {
       "id": "cmd_mount_rule_by_cwd",
       "seq": 923021,
       "targets": [

@@ -179,10 +179,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "cat <<EOF | tr a-z A-Z && echo done\nabc\nEOF",
+      "command": "cat <<EOF | tr a-z A-Z && echo done\nabc\nEOF\ntrue && printf 'x\\n' | cat <<EOF\nH\nEOF\nfalse && cat <<EOF | tr a-z A-Z\nhi\nEOF\necho rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "ABC\ndone\n",
+        "stdout": "ABC\ndone\nH\nrc=1\n",
         "stderr": ""
       }
     },

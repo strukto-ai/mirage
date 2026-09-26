@@ -350,6 +350,27 @@ describe('provision clears the command gate first', () => {
     }
   })
 
+  it.each([
+    "printf 'x\\n' | read y < /data/a.txt",
+    "true && printf 'x\\n' | read y < /data/a.txt",
+    'true && read y < /data/a.txt | cat',
+    '! read y < /data/a.txt',
+    'true && ! read y < /data/a.txt',
+  ])('a hoisted redirect is gated with its command: %s', async (line) => {
+    // The parse hoists the redirect over the pipeline, list or `!` it
+    // trails; the plan binds it back to `read`, as the run does, so the
+    // refused command is gated with its source and nothing is priced.
+    const ws = buildWorkspace([new NoRead()])
+    try {
+      await ws.shell('tee /data/a.txt > /dev/null', { stdin: ENC.encode('x'.repeat(24)) })
+      const result = await ws.shell(line, { provision: true })
+      expect(result.precision).toBe(Precision.UNKNOWN)
+      expect(result.networkRead).toBe('0')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a denied shell function does not have its body walked', async () => {
     // The body's own reads are byte counts the refusal is protecting.
     const ws = buildWorkspace([new NoF()])

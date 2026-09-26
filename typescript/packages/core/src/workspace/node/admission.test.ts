@@ -14,6 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { materialize } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
@@ -339,6 +340,42 @@ describe('admission', () => {
     ])
     expect(await line('echo hi > $F')).toBeNull()
     expect(await line("cat /data/open <<< 'body'")).toBeNull()
+  })
+
+  // The parse hoists a trailing redirect over whatever precedes it, a `!`
+  // included (`! cat < f` is redirected(negated(cat), < f)), and every
+  // shape still names the command bash opens the file for.
+  const HOISTED = [
+    '! cat < /data/secret',
+    'echo a && ! cat < /data/secret',
+    '! cat < /data/secret | cat',
+    'echo x | cat < /data/secret',
+    'echo a && echo x | cat < /data/secret',
+    'echo a && cat < /data/secret | cat',
+  ]
+
+  it.each(HOISTED)('admitLine binds a hoisted redirect to its command: %s', async (text) => {
+    const w = await ws()
+    const parser = await getTestParser()
+    const session = w.sessionManager.get(w.sessionManager.defaultId)
+    const refusal = await admitLine(parser.parse(text), session, w.registry, w.namespace, '', (t) =>
+      parser.parse(t),
+    )
+    expect(refusal === null ? null : [refusal.exitCode, voicedStderr(refusal)]).toEqual([
+      1,
+      'cat: /data/secret: sealed\n',
+    ])
+  })
+
+  it.each(HOISTED)('the run judges a hoisted redirect with its command: %s', async (text) => {
+    // The run hands a redirect's targets to the gate of the node it runs
+    // under them, so a redirect left on a `!` (or a pipeline) never
+    // reached `cat`'s gate and `! cat < /data/secret` printed the file.
+    const w = await ws()
+    await w.shell('echo TOPSECRET > /data/secret')
+    const io = await w.shell(text)
+    expect(DEC.decode(io.stdout)).not.toContain('TOPSECRET')
+    expect(DEC.decode(await materialize(io.stderr))).toContain('cat: /data/secret: sealed')
   })
   it('the admitted gate judges what the line did not name', () => {
     const deny: CommandRule = { reason: 'sealed', paths: ['/data/sealed'] }

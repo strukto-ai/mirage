@@ -17,7 +17,7 @@ import { encodeText } from './bytes.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
 import { bodyPrefix, cleanDelimiter, delimiterQuoted } from './parse/heredoc/index.ts'
-import type { TSNodeLike } from './types.ts'
+import type { PipelineStages, TSNodeLike } from './types.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './types.ts'
 
 export function getText(node: TSNodeLike): string {
@@ -215,6 +215,98 @@ export function getPipelineCommands(node: TSNodeLike): [TSNodeLike[], boolean[]]
     }
   }
   return [commands, stderrFlags]
+}
+
+/**
+ * A pipeline's stages as bash reads them, whatever shape the parse gave
+ * them.
+ *
+ * tree-sitter-bash lets a redirect close over everything to its left up
+ * to the next pipe, so `a && b | c < f | d` parses as a pipeline whose
+ * first stage is `redirected(a && b | c, < f)`, and `! a < f | b` as one
+ * whose first stage is `redirected(! a, < f)`. Bash reads them as
+ * `a && (b | c <f | d)` and `! (a <f | b)`: the redirect binds to the
+ * command it follows, the stages on both sides of it are one pipeline, a
+ * `!` negates all of it, and a list the parse pulled into the first
+ * stage runs ahead of the pipeline and decides whether it runs at all.
+ * This is the last-command chain the admission gate climbs for a
+ * redirect's target (`statementRedirects`), read in the direction the
+ * executor walks. `redirects` are hoisted over the whole pipeline and
+ * bind to its last stage.
+ */
+export function getPipelineStages(
+  node: TSNodeLike,
+  redirects: readonly Redirect[] = [],
+): PipelineStages {
+  const [commands, stderrFlags] = getPipelineCommands(node)
+  const [first, ...rest] = commands
+  if (first === undefined) throw new Error('pipeline: missing command')
+  const head = pipelineHead(first)
+  return bindLast(
+    {
+      commands: [...head.commands, ...rest],
+      stderrFlags: [...head.stderrFlags, ...stderrFlags],
+      redirects: [...head.redirects, ...rest.map(() => [])],
+      negated: head.negated,
+      lead: head.lead,
+    },
+    redirects,
+  )
+}
+
+// `stages` with `redirects` bound to the last stage, after any it already
+// carries (the inner ones come first in the source).
+function bindLast(stages: PipelineStages, redirects: readonly Redirect[]): PipelineStages {
+  if (redirects.length === 0) return stages
+  const last = stages.redirects[stages.redirects.length - 1] ?? []
+  return {
+    ...stages,
+    redirects: [...stages.redirects.slice(0, -1), [...last, ...redirects]],
+  }
+}
+
+// The stages a pipeline's first element stands for. Only a redirected
+// statement over a pipeline, a list or a negation is re-read; every other
+// stage, a redirected command included, is one stage that runs as the
+// node it is.
+function pipelineHead(stage: TSNodeLike): PipelineStages {
+  const single: PipelineStages = {
+    commands: [stage],
+    stderrFlags: [],
+    redirects: [[]],
+    negated: false,
+    lead: null,
+  }
+  let body = stage
+  let hoisted: readonly Redirect[] = []
+  if (stage.type === NT.REDIRECTED_STATEMENT) {
+    const [found, parsed] = getRedirects(stage)
+    // A heredoc's `&&`/`||` tail wraps the whole statement, which only
+    // the statement's own arm folds in.
+    if (found === null || parsed.some((r) => r.continuation.length > 0)) return single
+    body = found
+    hoisted = parsed
+  }
+  if (body.type === NT.NEGATED_COMMAND) {
+    return {
+      commands: [getNegatedCommand(body)],
+      stderrFlags: [],
+      redirects: [hoisted],
+      negated: true,
+      lead: null,
+    }
+  }
+  if (hoisted.length === 0) return single
+  if (body.type === NT.PIPELINE) return getPipelineStages(body, hoisted)
+  if (body.type === NT.LIST) {
+    const [left, op, right] = getListParts(body)
+    const inner =
+      right.type === NT.PIPELINE
+        ? getPipelineStages(right, hoisted)
+        : bindLast(pipelineHead(right), hoisted)
+    if (inner.lead === null) return { ...inner, lead: [left, op, right] }
+  }
+  return single
 }
 
 export function getWhileParts(node: TSNodeLike): [TSNodeLike, TSNodeLike[]] {

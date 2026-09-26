@@ -255,6 +255,24 @@ export class Redirect {
   }
 }
 
+/** A pipeline as bash reads it, whatever shape the parse gave it. */
+export interface PipelineStages {
+  // The stages in order, a leading `!` unwrapped.
+  readonly commands: readonly TSNodeLike[]
+  // Per stage, whether `|&` follows it.
+  readonly stderrFlags: readonly boolean[]
+  // Per stage, the redirects the parse hoisted off it, in source order;
+  // empty for a stage that holds its own.
+  readonly redirects: readonly (readonly Redirect[])[]
+  // A leading `!` negates the pipeline's status.
+  readonly negated: boolean
+  // The `left, op, right` of a list the parse pulled into the first
+  // stage. Its left side runs first and its operator decides whether the
+  // pipeline runs at all; its right operand is where the pipeline starts
+  // and stands for it in the connection.
+  readonly lead: readonly [TSNodeLike, string | null, TSNodeLike] | null
+}
+
 // Shell builtin command names: commands that don't touch the
 // filesystem, handled by the executor and never dispatched to a mount.
 // Listed by tier and group; BUILTIN_GROUP below is the source of truth.

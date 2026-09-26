@@ -124,9 +124,14 @@ function norm(virtual: string): string {
 
 /**
  * The nodes a redirected statement may wrap whose last command is the
- * one the redirect binds to.
+ * one the redirect binds to. A `!` wraps one command, so it is its own
+ * last one: `! cat < f` parses as redirected(negated(cat), < f).
  */
-const REDIRECT_CHAIN: ReadonlySet<string> = new Set([NodeType.LIST, NodeType.PIPELINE])
+const REDIRECT_CHAIN: ReadonlySet<string> = new Set([
+  NodeType.LIST,
+  NodeType.PIPELINE,
+  NodeType.NEGATED_COMMAND,
+])
 
 /**
  * A command the gate let through, and what its own I/O may touch.
@@ -696,8 +701,8 @@ export async function admitLine(
  * parse as a redirected_statement wrapping the whole list, so reading
  * only its first child answered `a` and left `b`, the command bash
  * actually opens the file for, with no target at all. The walk climbs
- * the last-command chain instead, which is bash's own rule for a list
- * and a pipeline. A compound (`{ }`, a loop, a subshell) redirects
+ * the last-command chain instead, which is bash's own rule for a list,
+ * a pipeline and a `!`. A compound (`{ }`, a loop, a subshell) redirects
  * every command inside it, which is not a chain, so none is claimed
  * here and the op door judges the write.
  */

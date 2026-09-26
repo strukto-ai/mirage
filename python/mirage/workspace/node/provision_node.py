@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any, Callable
 
@@ -23,7 +23,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import FunctionBody
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import RedirectKind
+from mirage.shell.types import PipelineStages, RedirectKind
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.types import PathSpec
 from mirage.workspace.expand import (classify_parts, expand_and_classify,
@@ -44,7 +44,7 @@ from mirage.workspace.session import SessionState
 from mirage.shell.helpers import (  # isort: skip
     get_case_items, get_cfor_parts, get_command_name, get_for_parts,
     get_function_body, get_function_name, get_if_branches, get_list_parts,
-    get_negated_command, get_parts, get_pipeline_commands, get_redirects,
+    get_negated_command, get_parts, get_pipeline_stages, get_redirects,
     get_subshell_body, get_text, get_while_parts, has_command_substitution,
     split_env_prefix, take_continuation)
 
@@ -289,8 +289,9 @@ async def _provision_reassociated(
 ) -> ProvisionResult:
     """Provision recurse wrapper for a re-associated trailing redirect.
 
-    Mirrors the executor: the list's last command carries the hoisted
-    redirects; every other node provisions normally.
+    Mirrors the executor: the list's right operand carries the hoisted
+    redirects, bound by the same rule in turn (``_provision_bound``);
+    every other node provisions normally.
 
     Args:
         recurse (Callable): the provision recursion.
@@ -300,15 +301,167 @@ async def _provision_reassociated(
         plan_scope (PlanScope): walk-local planner state.
         agent_id (str): the agent the plan is attributed to.
         redirects (list): parsed redirects hoisted off the list.
-        right (Any): the list's last command node.
+        right (Any): the list's right operand.
         node (Any): node being provisioned by the connection handler.
         session (SessionState): shell session state.
     """
     if node is not right:
         return await recurse(node, session)
+    return await _provision_bound(recurse, registry, namespace, execute_fn,
+                                  plan_scope, agent_id, right, redirects,
+                                  session)
+
+
+async def _provision_bound(
+    recurse: Callable[..., Any],
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    execute_fn: Callable[..., Any],
+    plan_scope: PlanScope,
+    agent_id: str,
+    command: Any,
+    redirects: list[Any],
+    session: SessionState,
+) -> ProvisionResult:
+    """Plan a redirected statement with its redirects bound where the
+    executor binds them (``_run_redirected``): past a list to its right
+    operand, past a pipeline to its last stage, inside a ``!`` to the
+    command it negates. The command they reach is gated with their
+    targets, so a plan never prices a read the run would refuse.
+
+    Args:
+        recurse (Callable): the provision recursion.
+        registry (MountRegistry): mount registry.
+        namespace (Namespace | None): addressing authority.
+        execute_fn (Callable): recursive execute (for expansions).
+        plan_scope (PlanScope): walk-local planner state.
+        agent_id (str): the agent the plan is attributed to.
+        command (Any): the redirected node, None for a bare redirect.
+        redirects (list): the statement's parsed redirects.
+        session (SessionState): shell session state.
+    """
+    if command is not None and command.type == NT.LIST:
+        left, op, right = get_list_parts(command)
+        wrapped = partial(_provision_reassociated, recurse, registry,
+                          namespace, execute_fn, plan_scope, agent_id,
+                          redirects, right)
+        return await handle_connection_provision(wrapped, left, op, right,
+                                                 session)
+    if command is not None and command.type == NT.PIPELINE:
+        return await _provision_pipeline(
+            recurse, registry, namespace, execute_fn, plan_scope, agent_id,
+            get_pipeline_stages(command, redirects), session)
+    if command is not None and command.type == NT.NEGATED_COMMAND:
+        return await _provision_bound(recurse, registry, namespace, execute_fn,
+                                      plan_scope, agent_id,
+                                      get_negated_command(command), redirects,
+                                      session)
     return await _provision_redirected(recurse, registry, namespace,
-                                       execute_fn, plan_scope, agent_id, right,
-                                       redirects, session)
+                                       execute_fn, plan_scope, agent_id,
+                                       command, redirects, session)
+
+
+async def _provision_pipeline(
+    recurse: Callable[..., Any],
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    execute_fn: Callable[..., Any],
+    plan_scope: PlanScope,
+    agent_id: str,
+    stages: PipelineStages,
+    session: SessionState,
+) -> ProvisionResult:
+    """Plan a pipeline as the executor runs it (``_run_pipeline``): a list
+    the parse pulled into the first stage plans as that list, and a stage
+    the parse hoisted redirects off plans under them.
+
+    Args:
+        recurse (Callable): the provision recursion.
+        registry (MountRegistry): mount registry.
+        namespace (Namespace | None): addressing authority.
+        execute_fn (Callable): recursive execute (for expansions).
+        plan_scope (PlanScope): walk-local planner state.
+        agent_id (str): the agent the plan is attributed to.
+        stages (PipelineStages): the pipeline's stages.
+        session (SessionState): shell session state.
+    """
+    if stages.lead is not None:
+        left, op, right = stages.lead
+        wrapped = partial(_provision_lifted, recurse, registry, namespace,
+                          execute_fn, plan_scope, agent_id,
+                          replace(stages, lead=None), right)
+        return await handle_connection_provision(wrapped, left, op, right,
+                                                 session)
+    stage = partial(_provision_stage, recurse, registry, namespace, execute_fn,
+                    plan_scope, agent_id, stages)
+    return await handle_pipe_provision(stage, list(stages.commands), session)
+
+
+async def _provision_lifted(
+    recurse: Callable[..., Any],
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    execute_fn: Callable[..., Any],
+    plan_scope: PlanScope,
+    agent_id: str,
+    stages: PipelineStages,
+    right: Any,
+    node: Any,
+    session: SessionState,
+) -> ProvisionResult:
+    """Provision recurse wrapper for a list the parse pulled into a
+    pipeline's first stage: its right operand plans the pipeline.
+
+    Args:
+        recurse (Callable): the provision recursion.
+        registry (MountRegistry): mount registry.
+        namespace (Namespace | None): addressing authority.
+        execute_fn (Callable): recursive execute (for expansions).
+        plan_scope (PlanScope): walk-local planner state.
+        agent_id (str): the agent the plan is attributed to.
+        stages (PipelineStages): the pipeline, its lead already taken.
+        right (Any): the list's right operand.
+        node (Any): node being provisioned by the connection handler.
+        session (SessionState): shell session state.
+    """
+    if node is not right:
+        return await recurse(node, session)
+    return await _provision_pipeline(recurse, registry, namespace, execute_fn,
+                                     plan_scope, agent_id, stages, session)
+
+
+async def _provision_stage(
+    recurse: Callable[..., Any],
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    execute_fn: Callable[..., Any],
+    plan_scope: PlanScope,
+    agent_id: str,
+    stages: PipelineStages,
+    node: Any,
+    session: SessionState,
+) -> ProvisionResult:
+    """Provision recurse wrapper for one pipeline stage: a stage the parse
+    hoisted redirects off plans under them; every other stage provisions
+    normally.
+
+    Args:
+        recurse (Callable): the provision recursion.
+        registry (MountRegistry): mount registry.
+        namespace (Namespace | None): addressing authority.
+        execute_fn (Callable): recursive execute (for expansions).
+        plan_scope (PlanScope): walk-local planner state.
+        agent_id (str): the agent the plan is attributed to.
+        stages (PipelineStages): the pipeline being planned.
+        node (Any): the stage being provisioned.
+        session (SessionState): shell session state.
+    """
+    for command, hoisted in zip(stages.commands, stages.redirects):
+        if command is node and hoisted:
+            return await _provision_bound(recurse, registry, namespace,
+                                          execute_fn, plan_scope, agent_id,
+                                          node, list(hoisted), session)
+    return await recurse(node, session)
 
 
 async def provision_node(
@@ -403,8 +556,11 @@ async def provision_node(
         return result
 
     if kind == NodeKind.PIPELINE:
-        commands, _ = get_pipeline_commands(node)
-        return await handle_pipe_provision(recurse, commands, session)
+        # Mirror the executor: stages are read the way bash reads them
+        # (see get_pipeline_stages).
+        return await _provision_pipeline(recurse, registry, namespace,
+                                         execute_fn, plan_scope, agent_id,
+                                         get_pipeline_stages(node), session)
 
     if kind == NodeKind.LIST:
         left, op, right = get_list_parts(node)
@@ -414,20 +570,11 @@ async def provision_node(
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
         continuation = take_continuation(redirects)
-        if command is not None and command.type == NT.LIST:
-            # Mirror the executor: a trailing redirect hoisted over an
-            # &&/|| list binds to the last command.
-            left, op, right = get_list_parts(command)
-            wrapped = partial(_provision_reassociated, recurse, registry,
-                              namespace, execute_fn, plan_scope, agent_id,
-                              redirects, right)
-            plan = await handle_connection_provision(wrapped, left, op, right,
-                                                     session)
-        else:
-            plan = await _provision_redirected(recurse, registry, namespace,
-                                               execute_fn, plan_scope,
-                                               agent_id, command, redirects,
-                                               session)
+        # Mirror the executor: a trailing redirect hoisted over a list, a
+        # pipeline or a `!` binds to the command it follows.
+        plan = await _provision_bound(recurse, registry, namespace, execute_fn,
+                                      plan_scope, agent_id, command, redirects,
+                                      session)
         # Mirror the executor again: the `&&`/`||` steps a heredoc's
         # operator line carried wrap the whole statement, so each one
         # joins the plan so far to its right operand.
