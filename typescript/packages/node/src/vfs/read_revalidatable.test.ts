@@ -28,6 +28,10 @@ import { CachableAsyncIterator } from '@struktoai/mirage-core/io/cachable_iterat
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { S3_IO } from '@struktoai/mirage-core/commands/builtin/s3/io'
+import { ONEDRIVE_IO } from '@struktoai/mirage-core/commands/builtin/onedrive/io'
+import { SHAREPOINT_IO } from '@struktoai/mirage-core/commands/builtin/sharepoint/io'
+import type { OneDriveAccessor } from '@struktoai/mirage-core/accessor/onedrive'
+import type { SharePointAccessor } from '@struktoai/mirage-core/accessor/sharepoint'
 import { DRIVER as S3_DRIVER } from '@struktoai/mirage-core/core/s3/driver'
 import { recordingActive, runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types'
@@ -37,6 +41,14 @@ import type { GridFSAccessor } from '../accessor/gridfs.ts'
 import type { HfHubAccessor } from '../accessor/hf_hub.ts'
 import { HF_HUB_IO } from '../commands/builtin/hf_hub/io.ts'
 import { FakeHub, blobOid, serveHub, xetHash } from '../core/hf_hub/_test_util.ts'
+import {
+  DRIVE_ID,
+  DRIVE_NAME,
+  FakeGraph,
+  ME,
+  SITE_NAME,
+  serveGraph,
+} from '../core/msgraph/_test_util.ts'
 import { GRIDFS_IO } from '../commands/builtin/gridfs/io.ts'
 import { Workspace } from '../workspace.ts'
 import { buildVfs, knownVfsNames } from './registry.ts'
@@ -288,11 +300,18 @@ const HF_FAMILY: Record<string, string> = {
   hf_spaces: 'spaces',
 }
 
-const HARNESSES: Record<string, 's3' | 'gridfs' | 'hf_models'> = {
+const HARNESSES: Record<string, 's3' | 'gridfs' | 'hf_models' | 'onedrive' | 'sharepoint'> = {
   ...Object.fromEntries(S3_FAMILY.map((name) => [name, 's3' as const])),
   gridfs: 'gridfs',
   ...Object.fromEntries(Object.keys(HF_FAMILY).map((name) => [name, 'hf_models' as const])),
+  onedrive: 'onedrive',
+  sharepoint: 'sharepoint',
 }
+
+// The drive each Graph backend addresses in the fake: OneDrive the signed-in
+// user's own, SharePoint one library of one site, mounted scoped so the keys
+// stay drive-relative (unscoped, `a.txt` would name a site).
+const GRAPH: Record<string, string> = { onedrive: ME, sharepoint: DRIVE_ID }
 
 // One document per family, identical in the python twin. oci is the one
 // alias with a required field beyond these; every other one-of (r2's
@@ -371,11 +390,59 @@ function md5Hex(data: Uint8Array): string {
 
 let s3: S3Mock
 let hubs: FakeHub[] = []
+let graphs: FakeGraph[] = []
 
 async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<Fake> {
   const key = KEYS[shape]
   const prefix = shape === 'prefixed' ? PREFIX : null
   const stored = (prefix ?? '') + key
+  const drive = GRAPH[name]
+  if (drive !== undefined) {
+    const files: Record<string, Uint8Array> = { [stored]: data }
+    if (prefix !== null) files[key] = DECOY
+    // A children listing is a walk no read or stat should make; the listed
+    // shape's own `ls` is the one allowed.
+    const graph = await serveGraph(new FakeGraph({ [drive]: files }, H.reach))
+    graph.childrenAllowed = shape === 'listed' ? 1 : 0
+    graphs.push(graph)
+    const vfs = await buildVfs(name, {
+      access_token: 't',
+      graph_base_url: graph.url,
+      ...(name === 'sharepoint' ? { site: SITE_NAME, drive: DRIVE_NAME } : {}),
+      ...(prefix === null ? {} : { key_prefix: prefix }),
+    })
+    expect(readRevalidatable(vfs)).toBe(true)
+    const before = graph.fetches()
+    const rewrite = (next: Uint8Array): void => {
+      graph.write(drive, stored, next)
+    }
+    if (name === 'onedrive') {
+      const accessor = vfs.accessor as OneDriveAccessor
+      expect(accessor.config.keyPrefix).toBe(prefix === null ? '' : 'pfx')
+      return {
+        vfs,
+        accessor,
+        key,
+        fetches: () => graph.fetches() - before,
+        rewrite,
+        readBytes: (p) => ONEDRIVE_IO.readBytes(accessor, p),
+        readStream: (p) => ONEDRIVE_IO.readStream(accessor, p),
+        stat: (p) => ONEDRIVE_IO.stat(accessor, p),
+      }
+    }
+    const accessor = vfs.accessor as SharePointAccessor
+    expect(accessor.config.keyPrefix).toBe(prefix === null ? '' : 'pfx')
+    return {
+      vfs,
+      accessor,
+      key,
+      fetches: () => graph.fetches() - before,
+      rewrite,
+      readBytes: (p) => SHAREPOINT_IO.readBytes(accessor, p),
+      readStream: (p) => SHAREPOINT_IO.readStream(accessor, p),
+      stat: (p) => SHAREPOINT_IO.stat(accessor, p),
+    }
+  }
   if (HARNESSES[name] === 'hf_models') {
     // Files are served Xet-shaped, so the download's ETag is the xet hash, not
     // the oid stat stamps: a read that trusted only the oid would stamp
@@ -494,7 +561,21 @@ function cases(rows: readonly Row[]): Case[] {
 
 const A_CASES = [
   ...cases(['bytes', 'stream', 'drain']),
-  { name: 's3', shape: 'listed' as const, row: 'stream' as const },
+  ...['s3', ...Object.keys(GRAPH)].map((name) => ({
+    name,
+    shape: 'listed' as const,
+    row: 'stream' as const,
+  })),
+]
+
+// A Graph listing leaves each file's cTag in the mount index, so the listed
+// rows put a token-bearing row in front of the probe: only a probe that stats
+// through a throwaway index sees the rewrite.
+const CHANGED_CASES: { name: string; shape: Shape }[] = [
+  ...[...new Set(Object.values(HARNESSES))]
+    .sort()
+    .map((name) => ({ name, shape: 'root' as const })),
+  ...Object.keys(GRAPH).map((name) => ({ name, shape: 'listed' as const })),
 ]
 const B_CASES = cases(['bytes', 'stream'])
 
@@ -581,6 +662,8 @@ describe('the read-token contract', () => {
     vi.restoreAllMocks()
     await Promise.all(hubs.map((hub) => hub.close()))
     hubs = []
+    await Promise.all(graphs.map((graph) => graph.close()))
+    graphs = []
   })
 
   /**
@@ -694,15 +777,17 @@ describe('the read-token contract', () => {
     })
   }
 
-  for (const name of [...new Set(Object.values(HARNESSES))].sort()) {
-    it(`a changed object is refetched: ${name}-changed-stream`, async () => {
+  for (const { name, shape } of CHANGED_CASES) {
+    const id = shape === 'listed' ? `${name}-listed-changed-stream` : `${name}-changed-stream`
+    it(`a changed object is refetched: ${id}`, async () => {
       // The rows above prove stat and read agree; this proves what they agree
       // on is the content. A backend stamping a constant, or the key, on both
       // sides passes every other row and serves stale bytes here.
-      const fake = await makeFake(name, 'root', SEED)
+      const fake = await makeFake(name, shape, SEED)
       const virtual = `/m/${fake.key}`
       const ws = freshWorkspace(fake.vfs)
       try {
+        if (shape === 'listed') await line(ws, 'ls /m')
         await line(ws, `cat ${virtual}`)
         fake.rewrite(CHANGED)
         const stat = await reconcileStat(ws, fake, virtual)
@@ -772,6 +857,26 @@ describe('the read-token contract', () => {
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe(blobOid(SEED))
       expect(stat.fingerprint).not.toBe(xetHash(SEED))
+      expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('the contract goes red on msgraph stamping another kind', async () => {
+    // onedrive forced to stamp the item's eTag on the read while stat reports
+    // its cTag: both tokens exist and differ as strings on every write, so the
+    // contract must call the entry stale. A bytes read, because the override
+    // replaces only what `record` stamps.
+    const fake = await makeFake('onedrive', 'root', SEED)
+    H.stampOverride = 'e1'
+    const virtual = '/m/a.txt'
+    const ws = freshWorkspace(fake.vfs)
+    try {
+      await line(ws, `cp ${virtual} /r/a.txt`)
+      expect(await ws.cache.isFresh(virtual, 'e1')).toBe(true)
+      const stat = await reconcileStat(ws, fake, virtual)
+      expect(stat.fingerprint).toBe('c1')
       expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
     } finally {
       await ws.close()

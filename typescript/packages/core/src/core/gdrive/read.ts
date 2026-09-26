@@ -31,8 +31,9 @@ import { sliceWindow, windowFor } from '../../utils/ranges.ts'
 
 // Download a binary file honouring snapshot revision pins. A pinned path
 // reads that revision's content; an actively recorded read captures
-// (fingerprint, revision) so snapshots can pin it later, mirroring the
-// msgraph read_item.
+// (fingerprint, revision) so snapshots can pin it later. An unrecorded read
+// captures nothing, which is one reason gdrive does not declare
+// readRevalidatable.
 export async function readFileVersioned(
   tm: TokenManager,
   fileId: string,

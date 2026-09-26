@@ -129,6 +129,57 @@ async def test_stat_from_index_returns_modified():
 
 
 @pytest.mark.asyncio
+async def test_stat_from_index_carries_the_ctag():
+    # A listing already names each file's cTag, so a stat served from it
+    # carries the same token a network stat does; a watch walk stats this
+    # way and fingerprints on what it returns.
+    index = RAMIndexCacheStore()
+    with aioresponses() as m:
+        m.get("https://graph.microsoft.com/v1.0/me/drive/root/children",
+              payload={
+                  "value": [{
+                      "id": "1",
+                      "name": "notes.txt",
+                      "size": 42,
+                      "file": {},
+                      "cTag": "c1",
+                      "eTag": "e1",
+                      "lastModifiedDateTime": "2026-06-19T09:28:00Z",
+                  }]
+              })
+        await readdir(_accessor(), PathSpec.from_str_path("/"), index)
+    result = await stat(_accessor(), PathSpec.from_str_path("/notes.txt"),
+                        index)
+    assert result.fingerprint == "c1"
+    assert (result.extra["ctag"], result.extra["etag"]) == ("c1", "e1")
+
+
+@pytest.mark.asyncio
+async def test_stat_folder_from_index_has_no_fingerprint():
+    # A folder's cTag describes no bytes anyone reads, and a network stat
+    # gives a folder none either.
+    index = RAMIndexCacheStore()
+    with aioresponses() as m:
+        m.get("https://graph.microsoft.com/v1.0/me/drive/root/children",
+              payload={
+                  "value": [{
+                      "id": "2",
+                      "name": "Docs",
+                      "folder": {
+                          "childCount": 1
+                      },
+                      "cTag": "cf",
+                      "eTag": "ef",
+                      "lastModifiedDateTime": "2026-06-19T09:28:00Z",
+                  }]
+              })
+        await readdir(_accessor(), PathSpec.from_str_path("/"), index)
+    result = await stat(_accessor(), PathSpec.from_str_path("/Docs"), index)
+    assert result.type == FileType.DIRECTORY
+    assert result.fingerprint is None
+
+
+@pytest.mark.asyncio
 async def test_stat_size_matches_read_for_every_file():
     # The fskit invariant behind SIZES_ALWAYS_KNOWN: the size stat reports
     # from the listing must equal the byte length a read delivers, for
@@ -180,7 +231,10 @@ async def test_stat_size_matches_read_for_every_file():
                   }]
               })
         for path, body in contents.items():
-            m.get(base + f"/root:{path}:/content", body=body)
+            download = f"https://download.example{path}"
+            m.get(base + f"/root:{path}",
+                  payload={"@microsoft.graph.downloadUrl": download})
+            m.get(download, body=body)
         files: list[str] = []
         stack = ["/"]
         while stack:
