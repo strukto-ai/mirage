@@ -12,7 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.accessor.hf_buckets import HfBucketsAccessor
+from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hf_buckets.driver import DRIVER
+from mirage.core.hf_hub.lookup import refusals_denied
 from mirage.core.object_store.stat import make_stat
+from mirage.types import FileStat, PathSpec
 
-stat = make_stat(DRIVER)
+_stat = make_stat(DRIVER)
+
+
+async def stat(accessor: HfBucketsAccessor,
+               path_spec: PathSpec,
+               index: IndexCacheStore = NULL_INDEX) -> FileStat:
+    """Stat one path, a refused bucket reading as permission denied.
+
+    paths-info answers a missing path with an empty list, never an error,
+    so a 401, 403 or 404 from it is about the bucket: an anonymous caller
+    asking for one that does not exist gets 401. Answering that as "no
+    such file" would let reconcile delete what a refreshed token can see.
+
+    Args:
+        accessor (HfBucketsAccessor): bucket accessor.
+        path_spec (PathSpec): the path to stat.
+        index (IndexCacheStore): the mount's index.
+
+    Returns:
+        FileStat: the entry, fingerprinted with the file's xet hash.
+    """
+    with refusals_denied(path_spec):
+        return await _stat(accessor, path_spec, index)

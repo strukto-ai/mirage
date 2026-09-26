@@ -38,18 +38,6 @@ export async function objectAt(
   return db.hfObject.findUnique({ where: objectKey(tenant, bucket, path) })
 }
 
-export async function hasPrefix(
-  db: C,
-  tenant: string,
-  bucket: string,
-  path: string,
-): Promise<boolean> {
-  const under = await db.hfObject.findFirst({
-    where: { tenant, bucket, path: { startsWith: `${path}/` } },
-  })
-  return under !== null
-}
-
 /**
  * Bind a path to content already in the CAS.
  *

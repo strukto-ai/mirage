@@ -13,4 +13,3 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const SCOPE_ERROR = 10000
-export const DEFAULT_CHUNK_SIZE = 8192

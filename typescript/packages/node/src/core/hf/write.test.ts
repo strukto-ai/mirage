@@ -23,13 +23,13 @@ import { mkdir } from './mkdir.ts'
 import { unlink } from './unlink.ts'
 import { write } from './write.ts'
 
-function setup(files: Record<string, string | Buffer> = {}): {
+async function setup(files: Record<string, string | Buffer> = {}): Promise<{
   accessor: HfBucketsAccessor
   fake: ReturnType<typeof fakeHfOperator>
-} {
+}> {
   const accessor = new HfBucketsAccessor({ bucket: 'ns/store' })
   const fake = fakeHfOperator(files)
-  installFakeOperator(accessor, fake)
+  await installFakeOperator(accessor, fake)
   return { accessor, fake }
 }
 
@@ -52,13 +52,13 @@ async function caught(fn: () => Promise<void>): Promise<unknown> {
 
 describe('hf write', () => {
   it('writes bytes to the backend key', async () => {
-    const { accessor, fake } = setup()
+    const { accessor, fake } = await setup()
     await write(accessor, PathSpec.fromStrPath('/out.txt'), new TextEncoder().encode('hello'))
     expect(fake.files.get('out.txt')?.toString()).toBe('hello')
   })
 
   it('strips the mount prefix from the key', async () => {
-    const { accessor, fake } = setup()
+    const { accessor, fake } = await setup()
     await write(
       accessor,
       PathSpec.fromStrPath('/m/sub/out.txt', mountKey('/m/sub/out.txt', '/m')),
@@ -70,7 +70,7 @@ describe('hf write', () => {
 
 describe('hf create', () => {
   it('creates an empty file', async () => {
-    const { accessor, fake } = setup()
+    const { accessor, fake } = await setup()
     await create(accessor, PathSpec.fromStrPath('/empty.txt'))
     expect(fake.files.get('empty.txt')?.byteLength).toBe(0)
   })
@@ -78,7 +78,7 @@ describe('hf create', () => {
 
 describe('hf unlink', () => {
   it('deletes an existing file', async () => {
-    const { accessor, fake } = setup({ 'a.txt': 'x' })
+    const { accessor, fake } = await setup({ 'a.txt': 'x' })
     await unlink(accessor, PathSpec.fromStrPath('/a.txt'))
     expect(fake.files.has('a.txt')).toBe(false)
   })
@@ -87,7 +87,7 @@ describe('hf unlink', () => {
     // The op is a blind single-key delete; the "Is a directory" refusal
     // lives in the generic rm builder, which stats before unlinking. A
     // directory owns no key of its own, so this must touch nothing.
-    const { accessor, fake } = setup({ 'dir/a.txt': 'x' })
+    const { accessor, fake } = await setup({ 'dir/a.txt': 'x' })
     await expect(unlink(accessor, PathSpec.fromStrPath('/dir'))).resolves.toBeUndefined()
     expect(fake.files.has('dir/a.txt')).toBe(true)
   })
@@ -95,14 +95,14 @@ describe('hf unlink', () => {
   it('is silent on a missing key', async () => {
     // Per the driver contract; the "No such file or directory" refusal
     // is the rm builder's, from the stat it takes before unlinking.
-    const { accessor } = setup()
+    const { accessor } = await setup()
     await expect(unlink(accessor, PathSpec.fromStrPath('/nope'))).resolves.toBeUndefined()
   })
 })
 
 describe('hf mkdir', () => {
   it('is a no-op', async () => {
-    const { accessor } = setup()
+    const { accessor } = await setup()
     await expect(mkdir(accessor, PathSpec.fromStrPath('/newdir'))).resolves.toBeUndefined()
   })
 })
@@ -113,7 +113,7 @@ describe('hf write on a missing repo', () => {
     // through would put a backend key in a user-facing message; the kit's
     // write factory restates it on the path the user typed.
     const accessor = new HfBucketsAccessor({ bucket: 'ns/store' })
-    installFakeOperator(accessor, missingRepo())
+    await installFakeOperator(accessor, missingRepo())
     const err = await caught(() =>
       write(accessor, PathSpec.fromStrPath('/out.txt'), new TextEncoder().encode('hi')),
     )
@@ -123,7 +123,7 @@ describe('hf write on a missing repo', () => {
 
   it('a create names the virtual path', async () => {
     const accessor = new HfBucketsAccessor({ bucket: 'ns/store' })
-    installFakeOperator(accessor, missingRepo())
+    await installFakeOperator(accessor, missingRepo())
     const err = await caught(() => create(accessor, PathSpec.fromStrPath('/new.txt')))
     expect(errorVirtualPath(err)).toBe('/new.txt')
   })

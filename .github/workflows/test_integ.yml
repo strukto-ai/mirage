@@ -541,6 +541,15 @@ jobs:
         working-directory: integ
         run: pnpm run hf-hub:selftest
 
+      # The buckets fake's read wire. mirage reads a bucket file over
+      # paths-info and resolve and stamps the download's ETag as the token
+      # stat reports, so a fake whose CDN answer lost that ETag, or whose
+      # paths-info normalised a path the Hub matches exactly, would let every
+      # `read: fresh` case pass by refetching each time.
+      - name: Assert the hf fake (bucket paths-info, resolve ETag, 416)
+        working-directory: integ
+        run: pnpm run hf:selftest
+
       # And one fake further. Nothing inside mirage speaks to Cloud Storage at
       # all, so this fake has no corpus case of any kind: its three consumers
       # are a CLI, a python seeder and the BigQuery emulator's Go client, and

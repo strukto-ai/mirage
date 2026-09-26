@@ -51,9 +51,48 @@ class HfBucketsConfig(BaseModel):
 
 
 class HfBucketsAccessor(_HfAccessor):
+    """A mount onto one Hugging Face bucket.
+
+    Listing and writes go through the opendal operator; stat's point lookup
+    and every read go to the Hub over the pool, because the bucket's
+    content token (its xet hash) comes from paths-info and the resolve
+    download, neither of which the binding exposes.
+    """
+
     REPO_TYPE = "bucket"
     VFS_NAME = "hf_buckets"
+    config: HfBucketsConfig
 
     @property
     def bucket_uri(self) -> str:
         return f"hf://buckets/{self.config.bucket}"
+
+    @property
+    def endpoint(self) -> str:
+        return self.config.endpoint
+
+    @property
+    def token(self) -> SecretStr | None:
+        return self.config.token
+
+    @property
+    def key_prefix(self) -> str:
+        return self.config.key_prefix or ""
+
+    def bucket_path(self, rel: str) -> str:
+        """Lift a mount-relative path to its bucket-relative spelling.
+
+        opendal applies the key prefix as its operator root; a Hub call
+        made directly has to apply it here instead.
+
+        Args:
+            rel (str): the path as the mount sees it.
+
+        Returns:
+            str: the path the Hub knows it by.
+        """
+        # Empty segments are dropped: opendal normalizes its root the same
+        # way, and the Hub matches paths exactly, so `a//b/x` would name a
+        # file the listing shows as `a/b/x` and answer it absent.
+        parts = [p for p in f"{self.key_prefix}/{rel}".split("/") if p]
+        return "/".join(parts)

@@ -14,17 +14,18 @@
 
 import opendal
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import SessionAccessor
 from mirage.vfs.secrets import reveal_secret
 
 HF_VFS_NAMES = ["hf_buckets", "hf_datasets", "hf_models", "hf_spaces"]
 
 
-class _HfAccessor(Accessor):
+class _HfAccessor(SessionAccessor):
     REPO_TYPE: str = ""
     VFS_NAME: str = ""
 
     def __init__(self, config) -> None:
+        super().__init__()
         self.config = config
 
     def operator(self):

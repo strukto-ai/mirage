@@ -12,6 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from tests.core.hf_buckets.conftest import make_acc
+from tests.core.hf_buckets.conftest import fake_hub, make_acc
 
-__all__ = ["make_acc"]
+__all__ = ["fake_hub", "make_acc"]

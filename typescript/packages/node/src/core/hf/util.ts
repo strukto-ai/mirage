@@ -12,22 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { mountPrefixOf } from '@struktoai/mirage-core/utils/key_prefix'
-
-export function rawPathOf(path: PathSpec): string {
-  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
-  return prefix !== '' && path.virtual.startsWith(prefix)
-    ? path.virtual.slice(prefix.length) || '/'
-    : path.virtual
-}
-
-export function hfKey(rawPath: string): string {
-  let start = 0
-  while (start < rawPath.length && rawPath[start] === '/') start += 1
-  return rawPath.slice(start)
-}
-
 export function isNotFound(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith('NotFound')
 }

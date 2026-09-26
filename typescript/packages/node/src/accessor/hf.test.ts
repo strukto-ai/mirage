@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { HF_ENDPOINT } from '../vfs/hf_buckets/config.ts'
 import { HfBucketsAccessor, HfDatasetsAccessor, HfModelsAccessor, HfSpacesAccessor } from './hf.ts'
 
 describe('HfAccessor.operatorOptions', () => {
@@ -56,6 +57,31 @@ describe('HfAccessor.operatorOptions', () => {
     expect(new HfDatasetsAccessor({ repoId: 'a/b' }).bucketUri).toBe('hf://datasets/a/b')
     expect(new HfModelsAccessor({ repoId: 'a/b' }).bucketUri).toBe('hf://models/a/b')
     expect(new HfSpacesAccessor({ repoId: 'a/b' }).bucketUri).toBe('hf://spaces/a/b')
+  })
+
+  it('reaches the Hub at the default endpoint unless one is configured', () => {
+    // A partial override: the endpoint is the only field that changes.
+    const plain = new HfBucketsAccessor({ bucket: 'ns/store', token: 't' })
+    expect([plain.endpoint, plain.token]).toEqual([HF_ENDPOINT, 't'])
+    const custom = new HfBucketsAccessor({ bucket: 'ns/store', endpoint: 'http://x' })
+    expect([custom.endpoint, custom.token]).toEqual(['http://x', undefined])
+  })
+
+  it('applies the key prefix to a bucket path once', () => {
+    // A directly built accessor gets keyPrefix unnormalised; the VFS is not
+    // there to strip it.
+    const accessor = new HfBucketsAccessor({ bucket: 'ns/store', keyPrefix: '/lead/trail/' })
+    expect(accessor.bucketPath('a.txt')).toBe('lead/trail/a.txt')
+    expect(accessor.bucketPath('/sub/a.txt')).toBe('lead/trail/sub/a.txt')
+    expect(new HfBucketsAccessor({ bucket: 'ns/store' }).bucketPath('/a.txt')).toBe('a.txt')
+    // opendal normalizes its root's empty segments away and the Hub matches
+    // paths exactly, so the direct calls have to agree with the listing.
+    expect(
+      new HfBucketsAccessor({ bucket: 'ns/store', keyPrefix: 'a//b' }).bucketPath('/x.txt'),
+    ).toBe('a/b/x.txt')
+    expect(new HfBucketsAccessor({ bucket: 'ns/store', keyPrefix: '/' }).bucketPath('/x.txt')).toBe(
+      'x.txt',
+    )
   })
 
   it('builds a real opendal operator lazily and caches it', async () => {

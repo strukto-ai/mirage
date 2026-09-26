@@ -97,28 +97,39 @@ async def test_find_empty_matches_zero_length_file(make_acc):
 @pytest.mark.parametrize("warmup", ["find", "du"])
 async def test_recursive_warmup_preserves_modification_times(make_acc, warmup):
     acc = make_acc({"source.txt": b"old", "dest.txt": b"new"})
-    acc._fake.metas["source.txt"].last_modified = datetime(2025,
-                                                           1,
-                                                           1,
-                                                           tzinfo=timezone.utc)
-    acc._fake.metas["dest.txt"].last_modified = datetime(2026,
-                                                         1,
-                                                         1,
-                                                         tzinfo=timezone.utc)
-    cold = {
-        key: await stat(acc, PathSpec.from_str_path("/" + key))
-        for key in acc._fake.files
+    listed = {
+        "source.txt": datetime(2025, 1, 1, tzinfo=timezone.utc),
+        "dest.txt": datetime(2026, 1, 1, tzinfo=timezone.utc),
     }
+    acc._fake.modified.update(listed)
     index = RAMIndexCacheStore()
     root = PathSpec.from_str_path("/")
     if warmup == "find":
         await find(acc, root, index=index)
     else:
         await size(acc, root, index=index)
-    for key, expected in cold.items():
+    for key, when in listed.items():
         path = PathSpec.from_str_path("/" + key)
         cached = await index.get(path.virtual)
         assert cached.entry is not None
-        assert cached.entry.remote_time == expected.modified
+        assert cached.entry.remote_time == when.isoformat()
+        # A warm stat answers from the listing's row; a cold one asks
+        # paths-info, which is the token's source and not an mtime's, so
+        # it reports none, as stat does against the live Hub today.
         assert (await stat(acc, path,
-                           index=index)).modified == expected.modified
+                           index=index)).modified == when.isoformat()
+        assert (await stat(acc, path)).modified is None
+
+
+@pytest.mark.asyncio
+async def test_find_under_a_key_prefix_names_paths_mount_relative(make_acc):
+    acc = make_acc(
+        {
+            "pfx/a.txt": b"a",
+            "pfx/sub/b.txt": b"b",
+            "a.txt": b"decoy",
+            "other/c.txt": b"c",
+        },
+        key_prefix="pfx/")
+    out = await find(acc, PathSpec.from_str_path("/"))
+    assert out == ["/", "/a.txt", "/sub", "/sub/b.txt"]

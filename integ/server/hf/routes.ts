@@ -19,7 +19,6 @@ import type { C } from './config.ts'
 import {
   deleteFolder,
   deleteObject,
-  hasPrefix,
   objectAt,
   objects,
   putXorb,
@@ -27,7 +26,7 @@ import {
   writeObject,
   xetFile,
 } from './store.ts'
-import { clampedReply, dirEntry, fileEntry, notFound, selfUrl, strip, treeEntries } from './wire.ts'
+import { clampedReply, fileEntry, notFound, selfUrl, strip, treeEntries } from './wire.ts'
 import { SERVE_CHUNK_SIZE, serializeChunks, serializedOffsetOf, serveHash } from './xet.ts'
 
 const BOOT = randomUUID().replace(/-/g, '').slice(0, 12)
@@ -92,10 +91,23 @@ async function resolveGet(ctx: Ctx<C>): Promise<Reply> {
   }
 }
 
+// The CDN answers with the file's xet hash as its strong ETag, whole or
+// ranged, and a window starting at or past EOF is 416 with no ETag (both
+// measured against huggingface.co, 2026-09-25). mirage reads a bucket file
+// here and stamps that ETag as the content token stat reports, so an answer
+// without it would pass every case by refetching each time. The clamp below
+// is for the rest of the window: a range running past EOF comes back short.
 async function cdn(ctx: Ctx<C>): Promise<Reply> {
-  const content = await xetFile(ctx.db, ctx.params.hash ?? '')
+  const hash = ctx.params.hash ?? ''
+  const content = await xetFile(ctx.db, hash)
   if (content === null) return { status: 404 }
-  return clampedReply(ctx.headers, content, true)
+  const header = rangeHeaderOf(ctx.headers)
+  if (header?.startsWith('bytes=') === true) {
+    const first = header.slice('bytes='.length).split('-')[0] ?? ''
+    if (first !== '' && Number(first) >= content.length) return { status: 416 }
+  }
+  const reply = clampedReply(ctx.headers, content, true)
+  return { ...reply, headers: { ...reply.headers, ETag: `"${hash}"` } }
 }
 
 /**
@@ -127,12 +139,12 @@ function requestedPaths(ctx: Ctx<C>): string[] {
 async function pathsInfo(ctx: Ctx<C>): Promise<Reply> {
   const bucket = bucketOf(ctx)
   const entries: Record<string, JsonValue>[] = []
+  // Exact names only, and files only: the Hub answers `[]` for a directory
+  // and for a leading-slash spelling of a file (measured 2026-09-25), and a
+  // fake that normalised either would pass a key production never finds.
   for (const raw of requestedPaths(ctx)) {
-    const key = strip(raw)
-    const row = await objectAt(ctx.db, ctx.tenant, bucket, key)
+    const row = await objectAt(ctx.db, ctx.tenant, bucket, raw)
     if (row !== null) entries.push(fileEntry(row))
-    else if (await hasPrefix(ctx.db, ctx.tenant, bucket, key))
-      entries.push(dirEntry(key, stamp(ctx)))
   }
   return { status: 200, body: entries }
 }

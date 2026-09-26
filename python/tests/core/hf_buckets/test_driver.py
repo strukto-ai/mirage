@@ -20,13 +20,18 @@ from opendal import AsyncOperator
 from opendal.exceptions import NotFound
 from opendal.types import EntryMode
 
-from mirage.core.hf_buckets.driver import DRIVER
+import mirage.core.hf_buckets.hub as hub_mod
+from mirage.core.hf_buckets.driver import DRIVER, HfConn
+from mirage.core.hf_hub.client import HfHubError
 from tests.core.hf_buckets.conftest import (FakeAsyncOperator, _FakeEntry,
                                             _FakeMetadata, make_accessor)
+from tests.fixtures.hf_hub_api import FakeHub, xet_hash
 
 
-def _op(fake: FakeAsyncOperator) -> AsyncOperator:
-    return cast(AsyncOperator, fake)
+def _op(fake: FakeAsyncOperator) -> HfConn:
+    # The listing primitives read only the operator; the accessor points
+    # at a dead port so a primitive that reached the Hub fails loudly.
+    return HfConn(accessor=make_accessor({}), op=cast(AsyncOperator, fake))
 
 
 async def _with_self_entry(path, inner):
@@ -79,8 +84,9 @@ def test_key_prefix_rides_the_operator_root():
 @pytest.mark.asyncio
 async def test_connect_yields_the_accessor_operator():
     acc = make_accessor({"a.txt": b"x"})
-    async with DRIVER.connect(acc) as op:
-        assert op is acc.operator()
+    async with DRIVER.connect(acc) as conn:
+        assert conn.op is acc.operator()
+        assert conn.accessor is acc
 
 
 @pytest.mark.asyncio
@@ -151,17 +157,52 @@ async def test_list_subtree_does_not_match_sibling_name_prefixes():
 
 
 @pytest.mark.asyncio
-async def test_head_returns_meta_for_a_file_and_none_otherwise():
-    op = _op(FakeAsyncOperator(files={"a.txt": b"12345", "d/x.txt": b"x"}))
-    meta = await DRIVER.head(op, "a.txt")
+async def test_head_returns_meta_for_a_file_and_none_otherwise(make_acc):
+    acc = make_acc({"a.txt": b"12345", "d/x.txt": b"x"})
+    conn = HfConn(accessor=acc, op=cast(AsyncOperator, acc._fake))
+    meta = await DRIVER.head(conn, "a.txt")
     assert meta is not None
-    assert (meta.size, meta.fingerprint) == (5, "etag-a.txt")
-    assert meta.modified == "2026-01-01T00:00:00+00:00"
-    assert meta.extra == {"etag": "etag-a.txt"}
-    assert await DRIVER.head(op, "missing.txt") is None
-    # The Hub stats a directory as EntryMode.Dir; head must classify it
-    # as "no such object" so the kit's probe ladder keeps going.
-    assert await DRIVER.head(op, "d/") is None
+    # The token is the paths-info xetHash, the value the download's ETag
+    # carries (measured 2026-09-25); opendal's stat reports none at all.
+    assert (meta.size, meta.fingerprint) == (5, xet_hash(b"12345"))
+    assert meta.extra == {"etag": xet_hash(b"12345")}
+    # The row carries uploadedAt, and stat still reports no mtime, as it
+    # does against the live Hub today.
+    assert meta.modified is None
+    assert await DRIVER.head(conn, "missing.txt") is None
+    # paths-info answers [] for a directory, so head reports no object
+    # and the kit's probe ladder keeps going.
+    assert await DRIVER.head(conn, "d") is None
+    assert acc._fake.stat_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_head_stamps_nothing_for_a_row_without_a_hash(
+        monkeypatch, fake_hub: FakeHub):
+    acc = make_accessor({"a.txt": b"12345"}, hub=fake_hub)
+
+    async def rows(*_args, **_kwargs):
+        return [{"type": "file", "path": "a.txt", "size": 5}]
+
+    monkeypatch.setitem(vars(hub_mod), "hub_post", rows)
+    meta = await DRIVER.head(HfConn(accessor=acc, op=acc._fake), "a.txt")
+    assert meta is not None
+    assert (meta.fingerprint, meta.extra) == (None, {})
+
+
+@pytest.mark.asyncio
+async def test_head_refuses_a_row_without_a_size(monkeypatch,
+                                                 fake_hub: FakeHub):
+    # A zero it made up would be a confident wrong size on a mount that
+    # declares every size known.
+    acc = make_accessor({"a.txt": b"12345"}, hub=fake_hub)
+
+    async def rows(*_args, **_kwargs):
+        return [{"type": "file", "path": "a.txt", "xetHash": "h"}]
+
+    monkeypatch.setitem(vars(hub_mod), "hub_post", rows)
+    with pytest.raises(HfHubError):
+        await DRIVER.head(HfConn(accessor=acc, op=acc._fake), "a.txt")
 
 
 @pytest.mark.asyncio
@@ -211,7 +252,8 @@ def test_is_not_found_matches_only_opendal_not_found():
 async def test_recursive_rows_preserve_modification_time(
         method, path, modified):
     fake = FakeAsyncOperator(files={"data/a.txt": b"old"})
-    fake.metas["data/a.txt"].last_modified = modified
+    if modified is not None:
+        fake.modified["data/a.txt"] = modified
     scan = DRIVER.list_tree if method == "list_tree" else DRIVER.list_subtree
     rows = [row async for row in scan(_op(fake), path)]
     assert len(rows) == 1

@@ -28,8 +28,14 @@ export function strip(path: string): string {
   return path.replace(/^\/+/, '').replace(/\/+$/, '')
 }
 
+// The Hub names a missing file EntryNotFound, and that code is what tells
+// it apart from a 404 about the bucket or a CDN hop.
 export function notFound(): Reply {
-  return { status: 404, body: { error: 'Entry not found' } }
+  return {
+    status: 404,
+    body: { error: 'Entry not found' },
+    headers: { 'X-Error-Code': 'EntryNotFound', 'X-Error-Message': 'File not found' },
+  }
 }
 
 /**

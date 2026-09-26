@@ -15,8 +15,9 @@
 import type { Operator } from 'opendal'
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
 import { VFSName } from '@struktoai/mirage-core/types'
+import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { loadOptionalPeer } from '../optional_peer.ts'
-import type { HfBucketsConfig, HfRepoConfig } from '../vfs/hf_buckets/config.ts'
+import { HF_ENDPOINT, type HfBucketsConfig, type HfRepoConfig } from '../vfs/hf_buckets/config.ts'
 
 export const HF_VFS_NAMES = [
   VFSName.HF_BUCKETS,
@@ -91,6 +92,34 @@ export class HfBucketsAccessor extends HfAccessor {
 
   get bucketUri(): string {
     return `hf://buckets/${this.repoId}`
+  }
+
+  get endpoint(): string {
+    return this.config.endpoint ?? HF_ENDPOINT
+  }
+
+  get token(): string | undefined {
+    return this.config.token
+  }
+
+  get keyPrefix(): string {
+    return kp.normalize(this.config.keyPrefix)
+  }
+
+  /**
+   * Lift a mount-relative path to its bucket-relative spelling.
+   *
+   * opendal applies the key prefix as its operator root; a Hub call made
+   * directly has to apply it here instead. Empty segments are dropped:
+   * opendal normalizes its root the same way, and the Hub matches paths
+   * exactly, so `a//b/x` would name a file the listing shows as `a/b/x` and
+   * answer it absent.
+   */
+  bucketPath(rel: string): string {
+    return `${this.keyPrefix}/${rel}`
+      .split('/')
+      .filter((part) => part !== '')
+      .join('/')
   }
 }
 

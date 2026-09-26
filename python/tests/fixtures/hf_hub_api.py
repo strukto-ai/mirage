@@ -31,6 +31,13 @@ INVALID_PATHS = "✖ Invalid input\n  → at paths"
 
 SEGMENTS = {"models": "", "datasets": "datasets/", "spaces": "spaces/"}
 
+BUCKETS = "buckets"
+
+UPLOADED_AT = "2026-07-15T14:26:59.811Z"
+
+# An `etags` value that makes a bucket's CDN answer send no ETag at all.
+NO_ETAG = "<no etag>"
+
 
 def blob_oid(data: bytes) -> str:
     return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
@@ -70,6 +77,18 @@ class FakeHub:
         fail (dict): route name to ``(status, error code)`` it answers.
         log (list): ``(route, path)`` for every Hub-facing request.
         posts (list): each paths-info request's content type and body.
+        auth (dict): bucket route name to the ``Authorization`` header of
+            each request it answered, "" when none was sent.
+        statuses (list): ``(route, status)`` of every bucket CDN answer.
+
+    Buckets live under ``repos[("buckets", id)]`` and speak the bucket
+    wire, measured against huggingface.co on 2026-09-25: routes carry no
+    revision, paths-info matches paths exactly and answers only file rows
+    (a directory or a leading-slash path is ``[]``), rows are
+    ``{type, path, size, xetHash, uploadedAt}``, the CDN's strong ETag is
+    the xet hash whatever ``xet`` says, and a range starting at or past
+    EOF is 416 with no ETag. A bucket's ``etags`` override is sent
+    verbatim, and ``NO_ETAG`` omits the header.
     """
 
     repos: dict[tuple[str, str], dict[str,
@@ -80,6 +99,8 @@ class FakeHub:
     fail: dict[str, tuple[int, str]] = field(default_factory=dict)
     log: list[tuple[str, str]] = field(default_factory=list)
     posts: list[dict[str, Any]] = field(default_factory=list)
+    auth: dict[str, list[str]] = field(default_factory=dict)
+    statuses: list[tuple[str, int]] = field(default_factory=list)
     url: str = ""
 
     def count(self, route: str) -> int:
@@ -183,8 +204,81 @@ class FakeHub:
         raise web.HTTPFound(
             target, headers={"X-Linked-Etag": f'"{lfs_oid(files[path])}"'})
 
+    def _bucket(self, request: web.Request) -> dict[str, bytes] | None:
+        info = request.match_info
+        return self.repos.get((BUCKETS, f"{info['ns']}/{info['name']}"))
+
+    def _heard(self, route: str, request: web.Request) -> None:
+        self.auth.setdefault(route, []).append(
+            request.headers.get("Authorization", ""))
+
+    async def bucket_paths_info(self, request: web.Request) -> web.Response:
+        body = await request.read()
+        kind = request.headers.get("Content-Type", "")
+        self.posts.append({"content_type": kind, "body": body})
+        self.log.append(("bucket_paths_info", body.decode(errors="replace")))
+        self._heard("bucket_paths_info", request)
+        refused = self._failure("bucket_paths_info")
+        if refused is not None:
+            return refused
+        if "json" not in kind:
+            return web.json_response({"error": INVALID_PATHS}, status=400)
+        files = self._bucket(request)
+        if files is None:
+            return _error(404, "RepoNotFound", "Repository not found")
+        rows = [{
+            "type": "file",
+            "path": path,
+            "size": len(files[path]),
+            "xetHash": xet_hash(files[path]),
+            "uploadedAt": UPLOADED_AT,
+        } for path in json.loads(body).get("paths", []) if path in files]
+        return web.json_response(rows)
+
+    async def bucket_resolve(self, request: web.Request) -> web.Response:
+        info = request.match_info
+        path = info["path"]
+        self.log.append(("bucket_resolve", path))
+        self._heard("bucket_resolve", request)
+        refused = self._failure("bucket_resolve")
+        if refused is not None:
+            return refused
+        files = self._bucket(request)
+        if files is None or path not in files:
+            return _error(404, "EntryNotFound", "File not found")
+        # Only ever a path on this same server, built from the quoted names
+        # of a bucket and file that exist.
+        target = "/cdn/" + "/".join(
+            quote(part, safe="")
+            for part in (BUCKETS, info["ns"],
+                         info["name"])) + "/" + quote(path)
+        raise web.HTTPFound(
+            target, headers={"X-Linked-Etag": f'"{xet_hash(files[path])}"'})
+
+    def _bucket_cdn(self, request: web.Request, data: bytes) -> web.Response:
+        path = request.match_info["path"]
+        etag = self.etags.get(path, f'"{xet_hash(data)}"')
+        headers = {} if etag == NO_ETAG else {"ETag": etag}
+        span = request.headers.get("Range", "")
+        if span.startswith("bytes="):
+            first, _, last = span[len("bytes="):].partition("-")
+            start = int(first)
+            if start >= len(data):
+                self.statuses.append(("bucket_cdn", 416))
+                return web.Response(status=416)
+            end = min(int(last) + 1 if last else len(data), len(data))
+            self.statuses.append(("bucket_cdn", 206))
+            return web.Response(status=206,
+                                body=data[start:end],
+                                headers=headers)
+        self.statuses.append(("bucket_cdn", 200))
+        return web.Response(body=data, headers=headers)
+
     async def cdn(self, request: web.Request) -> web.Response:
         files = self._files(request)
+        if request.match_info["seg"] == BUCKETS:
+            return self._bucket_cdn(request,
+                                    (files or {})[request.match_info["path"]])
         path = request.match_info["path"]
         data = (files or {})[path]
         headers = {"ETag": f'"{self.etag(path, data)}"'}
@@ -226,6 +320,10 @@ def _app(hub: FakeHub) -> web.Application:
 
         app.router.add_get("/" + route + "{ns}/{name}/resolve/{rev}/{path:.*}",
                            resolve)
+    bucket = "/api/buckets/{ns}/{name}"
+    app.router.add_post(bucket + "/paths-info", hub.bucket_paths_info)
+    app.router.add_get("/buckets/{ns}/{name}/resolve/{path:.*}",
+                       hub.bucket_resolve)
     return app
 
 

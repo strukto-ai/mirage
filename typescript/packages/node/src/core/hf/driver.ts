@@ -21,18 +21,31 @@ import type {
 } from '@struktoai/mirage-core/core/object_store/driver'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Metadata, Operator } from 'opendal'
-import type { HfAccessor } from '../../accessor/hf.ts'
+import type { HfBucketsAccessor } from '../../accessor/hf.ts'
 import { SCOPE_ERROR } from './constants.ts'
+import { HfHubError } from '../hf_hub/client.ts'
+import { fetchRow } from './hub.ts'
 import { isNotFound } from './util.ts'
 
-function keyPrefixOf(_accessor: HfAccessor): string {
+/**
+ * One op's handle on a bucket: the operator and the Hub behind it.
+ *
+ * Listing and mutation go through opendal; the point lookup goes to the Hub
+ * directly, because opendal drops the bucket's content token.
+ */
+export interface HfConn {
+  accessor: HfBucketsAccessor
+  op: Operator
+}
+
+function keyPrefixOf(_accessor: HfBucketsAccessor): string {
   // key_prefix is applied as the operator's root (see HfAccessor), so
   // every key the driver sees is already prefix-relative.
   return ''
 }
 
-async function connect(accessor: HfAccessor): Promise<ObjectStoreConnection<Operator>> {
-  return { conn: await accessor.operator(), close: () => Promise.resolve() }
+async function connect(accessor: HfBucketsAccessor): Promise<ObjectStoreConnection<HfConn>> {
+  return { conn: { accessor, op: await accessor.operator() }, close: () => Promise.resolve() }
 }
 
 function dirPath(pfx: string): string {
@@ -43,11 +56,11 @@ function sizeOf(md: Metadata): number | null {
   return md.contentLength !== null ? Number(md.contentLength) : null
 }
 
-async function* listChildren(op: Operator, pfx: string): AsyncIterable<ChildEntry> {
+async function* listChildren(conn: HfConn, pfx: string): AsyncIterable<ChildEntry> {
   const path = dirPath(pfx)
   let entries
   try {
-    entries = await op.list(path)
+    entries = await conn.op.list(path)
   } catch (err) {
     // The Hub answers a missing subpath with 200 and [] more often than
     // with an error; either way an empty yield is what lets the kit's
@@ -72,16 +85,16 @@ async function* listChildren(op: Operator, pfx: string): AsyncIterable<ChildEntr
     // the object size, not the pointer's); when the lister omits the
     // metadata, one stat per affected file fills the gap so the index
     // never caches an unknown size.
-    const size = sizeOf(entry.metadata()) ?? sizeOf(await op.stat(rel))
+    const size = sizeOf(entry.metadata()) ?? sizeOf(await conn.op.stat(rel))
     yield { key: rel, kind: 'f', size }
   }
 }
 
-async function* listTree(op: Operator, pfx: string): AsyncIterable<TreeEntry> {
+async function* listTree(conn: HfConn, pfx: string): AsyncIterable<TreeEntry> {
   const path = dirPath(pfx)
   let entries
   try {
-    entries = await op.list(path, { recursive: true })
+    entries = await conn.op.list(path, { recursive: true })
   } catch (err) {
     if (isNotFound(err)) return
     throw err
@@ -106,11 +119,11 @@ async function* listTree(op: Operator, pfx: string): AsyncIterable<TreeEntry> {
   }
 }
 
-async function* listSubtree(op: Operator, stem: string): AsyncIterable<TreeEntry> {
+async function* listSubtree(conn: HfConn, stem: string): AsyncIterable<TreeEntry> {
   if (stem !== '') {
     let md: Metadata | null = null
     try {
-      md = await op.stat(stem)
+      md = await conn.op.stat(stem)
     } catch (err) {
       if (!isNotFound(err)) throw err
     }
@@ -126,7 +139,7 @@ async function* listSubtree(op: Operator, stem: string): AsyncIterable<TreeEntry
   const base = stem !== '' ? `${stem}/` : '/'
   let entries
   try {
-    entries = await op.list(base, { recursive: true })
+    entries = await conn.op.list(base, { recursive: true })
   } catch (err) {
     if (isNotFound(err)) return
     throw err
@@ -141,56 +154,64 @@ async function* listSubtree(op: Operator, stem: string): AsyncIterable<TreeEntry
   }
 }
 
-async function head(op: Operator, key: string): Promise<ObjectMeta | null> {
-  let md: Metadata
-  try {
-    md = await op.stat(key)
-  } catch (err) {
-    if (isNotFound(err)) return null
-    throw err
+async function head(conn: HfConn, key: string): Promise<ObjectMeta | null> {
+  // paths-info, not opendal's stat: the binding reads the bucket's xet hash
+  // for nothing but the size and drops it, so a bucket stat through it
+  // carries no token. A Hub refusal propagates; the stat door names the path
+  // it was asked about, which a key cannot.
+  const row = await fetchRow(conn.accessor, key)
+  if (row === null) return null
+  const token = typeof row.xetHash === 'string' && row.xetHash !== '' ? row.xetHash : null
+  // A file row always carries its size; one that does not is an answer the
+  // client cannot read, not a zero-byte file.
+  if (typeof row.size !== 'number') {
+    throw new HfHubError(`paths-info answered no size for ${key}`, 0, 'InvalidResponse')
   }
-  if (md.isDirectory()) return null
-  const etag = md.etag
+  // No mtime, though the row carries uploadedAt: a listing reads its times
+  // through opendal, and a stat that disagreed with the listing about one
+  // file would be the worse answer.
   return {
-    size: sizeOf(md),
-    modified: md.lastModified,
-    fingerprint: etag,
-    extra: etag !== null && etag !== '' ? { etag } : {},
+    size: row.size,
+    modified: null,
+    fingerprint: token,
+    extra: token !== null ? { etag: token } : {},
   }
 }
 
-async function get(op: Operator, key: string): Promise<Uint8Array | null> {
+async function get(conn: HfConn, key: string): Promise<Uint8Array | null> {
   try {
-    return await op.read(key)
+    return await conn.op.read(key)
   } catch (err) {
     if (isNotFound(err)) return null
     throw err
   }
 }
 
-async function put(op: Operator, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
+async function put(conn: HfConn, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
   // A missing repo or revision answers NotFound; it propagates so the
   // write factory can name the path the user typed, not this key.
   // No token: opendal's write does return Metadata here, but the python
   // binding's returns nothing, so it is discarded to keep an hf write
-  // stamping the same absence in both languages.
-  await op.write(key, Buffer.from(data))
+  // stamping the same absence in both languages. The written entry then
+  // verifies against nothing, so the next fresh read refetches once and
+  // stamps the download's token (#1138).
+  await conn.op.write(key, Buffer.from(data))
   return null
 }
 
-async function deleteFile(op: Operator, key: string): Promise<void> {
+async function deleteFile(conn: HfConn, key: string): Promise<void> {
   try {
-    await op.delete(key)
+    await conn.op.delete(key)
   } catch (err) {
     // Deleting a missing key is silent, per the driver contract.
     if (!isNotFound(err)) throw err
   }
 }
 
-async function deletePrefix(op: Operator, pfx: string): Promise<void> {
+async function deletePrefix(conn: HfConn, pfx: string): Promise<void> {
   let entries
   try {
-    entries = await op.list(dirPath(pfx), { recursive: true })
+    entries = await conn.op.list(dirPath(pfx), { recursive: true })
   } catch (err) {
     if (isNotFound(err)) return
     throw err
@@ -199,20 +220,20 @@ async function deletePrefix(op: Operator, pfx: string): Promise<void> {
   for (const entry of entries) {
     const key = entry.path()
     if (key.endsWith('/')) continue
-    await op.delete(key)
+    await conn.op.delete(key)
   }
 }
 
-async function probePrefix(op: Operator, pfx: string): Promise<boolean> {
+async function probePrefix(conn: HfConn, pfx: string): Promise<boolean> {
   try {
-    return (await op.list(dirPath(pfx))).length > 0
+    return (await conn.op.list(dirPath(pfx))).length > 0
   } catch (err) {
     if (isNotFound(err)) return false
     throw err
   }
 }
 
-export const DRIVER: ObjectStoreDriver<HfAccessor, Operator> = {
+export const DRIVER: ObjectStoreDriver<HfBucketsAccessor, HfConn> = {
   vfs: 'hf',
   scopeError: SCOPE_ERROR,
   keyPrefixOf,

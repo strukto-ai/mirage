@@ -12,17 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
-from opendal.exceptions import NotFound
+from collections.abc import AsyncIterator, Mapping
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.hf_buckets.constants import DEFAULT_CHUNK_SIZE
-from mirage.core.hf_buckets.read import read_bytes
+from mirage.core.hf_buckets.hub import read_token, resolve_url
+from mirage.core.hf_buckets.read import is_missing, read_bytes
+from mirage.core.hf_hub.client import HfHubError, hub_stream
+from mirage.core.hf_hub.constants import REFUSED_STATUSES
+from mirage.core.hf_hub.lookup import refusals_denied
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-from mirage.utils.errors import enoent
+from mirage.utils.errors import eisdir, enoent
 
 
 async def range_read(accessor: HfBucketsAccessor, path: PathSpec, start: int,
@@ -44,19 +46,37 @@ async def read_stream(
     index: IndexCacheStore = NULL_INDEX,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> AsyncIterator[bytes]:
-    raw = path.mount_path
-    key = raw.lstrip("/")
-    op = accessor.operator()
+    """Stream a bucket file from the Hub, stamped with its ETag.
+
+    Args:
+        accessor (HfBucketsAccessor): bucket accessor.
+        path (PathSpec): the file to read.
+        index (IndexCacheStore): the mount's index.
+        chunk_size (int): bytes per yielded chunk.
+
+    Yields:
+        bytes: the next chunk of content.
+    """
+    rel = path.mount_path
+    if not rel.strip("/"):
+        raise eisdir(path)
     rec = record_stream("read", path.virtual, accessor.VFS_NAME)
+
+    def stamp(headers: Mapping[str, str]) -> None:
+        if rec is not None:
+            rec.fingerprint = read_token(headers.get("etag", ""))
+
     try:
-        async with await op.open(key, "rb") as f:
-            while True:
-                chunk = await f.read(chunk_size)
-                if not chunk:
-                    break
-                chunk_bytes = bytes(chunk)
+        with refusals_denied(path, REFUSED_STATUSES):
+            async for chunk in hub_stream(accessor.token,
+                                          resolve_url(accessor, rel),
+                                          chunk_size,
+                                          session=accessor.pool,
+                                          on_response=stamp):
                 if rec is not None:
-                    rec.bytes += len(chunk_bytes)
-                yield chunk_bytes
-    except NotFound as exc:
-        raise enoent(path) from exc
+                    rec.bytes += len(chunk)
+                yield chunk
+    except HfHubError as exc:
+        if is_missing(exc):
+            raise enoent(path) from exc
+        raise

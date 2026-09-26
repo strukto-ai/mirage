@@ -32,6 +32,8 @@ import mirage.core.gridfs.driver as gridfs_driver
 import mirage.core.gridfs.read as gridfs_read
 import mirage.core.gridfs.stream as gridfs_stream
 import mirage.core.gridfs.watch as gridfs_watch
+import mirage.core.hf_buckets.read as hf_buckets_read
+import mirage.core.hf_buckets.stream as hf_buckets_stream
 import mirage.core.hf_hub.read as hf_read
 import mirage.core.hf_hub.stream as hf_stream
 import mirage.core.msgraph.drive_ops as drive_ops
@@ -40,6 +42,7 @@ import mirage.core.s3.stream as s3_stream
 from mirage.cache.index import RAMIndexCacheStore
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.gridfs.io import IO as GRIDFS_IO
+from mirage.commands.builtin.hf_buckets.io import IO as HF_BUCKETS_IO
 from mirage.commands.builtin.hf_hub.io import IO as HF_IO
 from mirage.commands.builtin.onedrive.io import IO as ONEDRIVE_IO
 from mirage.commands.builtin.s3.io import IO as S3_IO
@@ -59,6 +62,7 @@ from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
+from tests.fixtures.hf_buckets_opendal import FakeAsyncOperator
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
 from tests.fixtures.msgraph_api import (DRIVE_ID, DRIVE_NAME, ME, SITE_NAME,
                                         FakeGraph)
@@ -86,6 +90,7 @@ HARNESSES = {
     },
     "onedrive": "onedrive",
     "sharepoint": "sharepoint",
+    "hf_buckets": "hf_buckets",
 }
 
 # The drive each Graph backend addresses in the fake: OneDrive the signed-in
@@ -354,8 +359,48 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
 
 
 @contextmanager
+def _hf_buckets_fake(shape: str, data: bytes) -> Iterator[Fake]:
+    key = KEYS[shape]
+    prefix = PREFIX if shape == "prefixed" else None
+    stored = (prefix or "") + key
+    files = {stored: data}
+    config: dict[str, str] = {"bucket": "acme/bkt"}
+    if prefix is not None:
+        files[key] = DECOY
+        config["key_prefix"] = prefix
+    # One dict behind both doors: the Hub serves it over HTTP and the
+    # opendal fake lists and writes it. The opendal fake refuses every read,
+    # so a stat or read that fell back to opendal fails here.
+    hub = FakeHub(repos={("buckets", "acme/bkt"): files})
+    with serve(hub):
+        vfs = build_vfs("hf_buckets", {**config, "endpoint": hub.url})
+        assert vfs.accessor.config.key_prefix == prefix
+        reach: list[str] = []
+        op = FakeAsyncOperator(files=files,
+                               root=vfs.accessor._root() or "",
+                               reach=reach)
+        vfs.accessor.operator = lambda: op
+
+        def rewrite(new: bytes) -> None:
+            files[stored] = new
+
+        yield Fake(vfs=vfs,
+                   key=key,
+                   fetches=lambda: hub.count("bucket_resolve"),
+                   rewrite=rewrite,
+                   reach=reach,
+                   io=HF_BUCKETS_IO,
+                   read_mod=hf_buckets_read,
+                   stream_mod=hf_buckets_stream)
+
+
+@contextmanager
 def _fake(name: str, shape: str, data: bytes,
           monkeypatch: pytest.MonkeyPatch) -> Iterator[Fake]:
+    if HARNESSES[name] == "hf_buckets":
+        with _hf_buckets_fake(shape, data) as fake:
+            yield fake
+        return
     if HARNESSES[name] in GRAPH:
         with _graph_fake(name, shape, data) as fake:
             yield fake
@@ -907,3 +952,40 @@ def test_the_contract_goes_red_on_msgraph_stamping_another_kind(monkeypatch):
     assert holds_read_token
     assert fingerprint == "c1"
     assert not fresh
+
+
+def test_the_contract_goes_red_on_hf_buckets_stamping_another_kind(
+        monkeypatch):
+    # hf_buckets forced to stamp a hash of the header rather than the token
+    # stat reports: both exist and differ, so the entry must never be
+    # called fresh, and the warm read refetches exactly once.
+    def other_kind(raw: str) -> str:
+        return hashlib.sha1(raw.encode()).hexdigest()
+
+    with _fake("hf_buckets", "root", SEED, monkeypatch) as fake:
+        monkeypatch.setitem(vars(hf_buckets_read), "read_token", other_kind)
+        monkeypatch.setitem(vars(hf_buckets_stream), "read_token", other_kind)
+        virtual = "/m/" + fake.key
+        served = f'"{xet_hash(SEED)}"'
+
+        async def run():
+            ws = _fresh_workspace(fake.vfs)
+            try:
+                await _line(ws, f"cat {virtual}")
+                holds_read_token = await ws.cache.is_fresh(
+                    virtual, other_kind(served))
+                stat = await _reconcile_stat(ws, virtual)
+                fresh = await ws.cache.is_fresh(virtual, stat.fingerprint)
+                before = fake.fetches()
+                await _line(ws, f"cat {virtual}")
+                return (holds_read_token, stat.fingerprint, fresh,
+                        fake.fetches() - before)
+            finally:
+                await ws.close()
+
+        holds_read_token, fingerprint, fresh, refetched = asyncio.run(run())
+
+    assert holds_read_token
+    assert fingerprint == xet_hash(SEED)
+    assert not fresh
+    assert refetched == 1

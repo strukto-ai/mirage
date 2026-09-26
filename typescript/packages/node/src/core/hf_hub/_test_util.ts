@@ -23,6 +23,13 @@ export const INVALID_PATHS = '✖ Invalid input\n  → at paths'
 
 const ENC = new TextEncoder()
 
+export const BUCKETS = 'buckets'
+
+/** An `etags` value that makes a bucket's CDN answer send no ETag at all. */
+export const NO_ETAG = '<no etag>'
+
+export const UPLOADED_AT = '2026-07-15T14:26:59.811Z'
+
 function concat(...parts: Uint8Array[]): Uint8Array {
   return Buffer.concat(parts.map((p) => Buffer.from(p)))
 }
@@ -63,6 +70,14 @@ function dirRow(path: string): Row {
  * rather than a stubbed fetch, because only a real one makes fetch follow a
  * 302. Files are Xet-shaped unless `xet` is off, so the final ETag is the xet
  * hash rather than the git oid.
+ *
+ * Buckets live under `files('buckets', id)` and speak the bucket wire,
+ * measured against huggingface.co on 2026-09-25: routes carry no revision,
+ * paths-info matches paths exactly and answers only file rows (a directory or
+ * a leading-slash path is `[]`), rows are `{type, path, size, xetHash,
+ * uploadedAt}`, the CDN's strong ETag is the xet hash whatever `xet` says, and
+ * a range starting at or past EOF is 416 with no ETag. A bucket's `etags`
+ * override is sent verbatim, and `NO_ETAG` omits the header.
  */
 export class FakeHub {
   /** `${api segment}|${repo id}` to path to bytes. */
@@ -76,6 +91,12 @@ export class FakeHub {
   readonly fail = new Map<string, [number, string]>()
   readonly log: [string, string][] = []
   readonly posts: { contentType: string; body: string }[] = []
+  /** Bucket route name to the `Authorization` header of each request, '' if none. */
+  readonly auth = new Map<string, string[]>()
+  /** When set, bucket paths-info answers this body verbatim instead. */
+  bucketAnswer: unknown = undefined
+  /** `[route, status]` of every bucket CDN answer. */
+  readonly statuses: [string, number][] = []
   url = ''
   private server: Server | null = null
 
@@ -139,6 +160,18 @@ export class FakeHub {
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://x')
     const parts = url.pathname.split('/').slice(1).map(decodeURIComponent)
+    if (parts[0] === 'api' && parts[1] === BUCKETS && parts[4] === 'paths-info') {
+      await this.bucketPathsInfo(parts, req, res)
+      return
+    }
+    if (parts[0] === BUCKETS && parts[3] === 'resolve') {
+      this.bucketResolve(parts, req, res)
+      return
+    }
+    if (parts[0] === 'cdn' && parts[1] === BUCKETS) {
+      this.bucketCdn(parts, req, res)
+      return
+    }
     if (parts[0] === 'api' && parts[4] === 'tree') {
       this.tree(parts, res)
       return
@@ -238,6 +271,98 @@ export class FakeHub {
       'X-Linked-Etag': `"${lfsOid(data)}"`,
     })
     res.end()
+  }
+
+  private heard(route: string, req: IncomingMessage): void {
+    const seen = this.auth.get(route) ?? []
+    seen.push(req.headers.authorization ?? '')
+    this.auth.set(route, seen)
+  }
+
+  private async bucketPathsInfo(
+    parts: string[],
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    const chunks: Buffer[] = []
+    for await (const chunk of req) chunks.push(chunk as Buffer)
+    const body = Buffer.concat(chunks).toString()
+    const kind = req.headers['content-type'] ?? ''
+    this.posts.push({ contentType: kind, body })
+    this.log.push(['bucket_paths_info', body])
+    this.heard('bucket_paths_info', req)
+    if (this.refused('bucket_paths_info', res)) return
+    if (!kind.includes('json')) {
+      json(res, 400, { error: INVALID_PATHS })
+      return
+    }
+    if (this.bucketAnswer !== undefined) {
+      json(res, 200, this.bucketAnswer)
+      return
+    }
+    const files = this.repo(BUCKETS, parts[2], parts[3])
+    if (files === undefined) {
+      error(res, 404, 'RepoNotFound', 'Repository not found')
+      return
+    }
+    const rows: Row[] = []
+    for (const path of (JSON.parse(body) as { paths?: string[] }).paths ?? []) {
+      const data = files.get(path)
+      if (data === undefined) continue
+      rows.push({
+        type: 'file',
+        path,
+        size: data.byteLength,
+        xetHash: xetHash(data),
+        uploadedAt: UPLOADED_AT,
+      })
+    }
+    json(res, 200, rows)
+  }
+
+  private bucketResolve(parts: string[], req: IncomingMessage, res: ServerResponse): void {
+    const [, ns, name] = parts
+    const rest = parts.slice(4)
+    const path = rest.join('/')
+    this.log.push(['bucket_resolve', path])
+    this.heard('bucket_resolve', req)
+    if (this.refused('bucket_resolve', res)) return
+    const data = this.repo(BUCKETS, ns, name)?.get(path)
+    if (data === undefined) {
+      error(res, 404, 'EntryNotFound', 'File not found')
+      return
+    }
+    res.writeHead(302, {
+      Location: `/cdn/${BUCKETS}/${ns ?? ''}/${name ?? ''}/${rest.map(encodeURIComponent).join('/')}`,
+      'X-Linked-Etag': `"${xetHash(data)}"`,
+    })
+    res.end()
+  }
+
+  private bucketCdn(parts: string[], req: IncomingMessage, res: ServerResponse): void {
+    const path = parts.slice(4).join('/')
+    const data = this.repo(BUCKETS, parts[2], parts[3])?.get(path) ?? new Uint8Array()
+    const etag = this.etags.get(path) ?? `"${xetHash(data)}"`
+    const headers: Record<string, string> = etag === NO_ETAG ? {} : { ETag: etag }
+    const span = req.headers.range ?? ''
+    if (span.startsWith('bytes=')) {
+      const [first = '', last = ''] = span.slice('bytes='.length).split('-')
+      const start = Number(first)
+      if (start >= data.byteLength) {
+        this.statuses.push(['bucket_cdn', 416])
+        res.writeHead(416)
+        res.end()
+        return
+      }
+      const end = Math.min(last === '' ? data.byteLength : Number(last) + 1, data.byteLength)
+      this.statuses.push(['bucket_cdn', 206])
+      res.writeHead(206, headers)
+      res.end(Buffer.from(data.slice(start, end)))
+      return
+    }
+    this.statuses.push(['bucket_cdn', 200])
+    res.writeHead(200, headers)
+    res.end(Buffer.from(data))
   }
 
   private cdn(parts: string[], req: IncomingMessage, res: ServerResponse): void {

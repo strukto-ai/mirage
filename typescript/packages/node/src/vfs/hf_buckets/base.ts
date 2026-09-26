@@ -21,14 +21,14 @@ import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
 import type { FindOptions, VFS, VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 
-import type { HfAccessor } from '../../accessor/hf.ts'
+import type { HfBucketsAccessor } from '../../accessor/hf.ts'
 import { HF_COMMANDS } from '../../commands/builtin/hf/index.ts'
 
 import { HF_OPS } from '../../ops/hf/index.ts'
 import { type DeltaHook } from '@struktoai/mirage-core/watch/index'
 import { buildDeltaHook } from '../../core/hf/watch.ts'
 
-export abstract class HfVFS extends BoundVFS<HfAccessor> implements VFS {
+export abstract class HfVFS extends BoundVFS<HfBucketsAccessor> implements VFS {
   declare writeFile: (p: PathSpec, data: Uint8Array) => Promise<void>
 
   declare exists: (p: PathSpec) => Promise<boolean>
@@ -46,7 +46,7 @@ export abstract class HfVFS extends BoundVFS<HfAccessor> implements VFS {
   }
 
   abstract readonly prompt: string
-  abstract override readonly accessor: HfAccessor
+  abstract override readonly accessor: HfBucketsAccessor
   // Narrowed back to abstract, so BaseVFS's bare `{type}` cannot reach
   // a Hub VFS: all four carry a config and so owe their own redaction,
   // and inheriting the default would drop it and read back as an empty
@@ -59,6 +59,10 @@ export abstract class HfVFS extends BoundVFS<HfAccessor> implements VFS {
   // size with one stat.
   readonly sizesAlwaysKnown: boolean = true
   readonly supportsSnapshot: boolean = true
+  // stat stamps the paths-info xet hash and a read stamps its download's
+  // strong ETag, which is that same hash, so a `fresh` probe compares like
+  // with like.
+  readonly readRevalidatable: boolean = true
 
   commands(): readonly RegisteredCommand[] {
     return HF_COMMANDS

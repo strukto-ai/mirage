@@ -38,7 +38,10 @@ import { type FileStat, MountMode, PathSpec } from '@struktoai/mirage-core/types
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { GridFSAccessor } from '../accessor/gridfs.ts'
+import type { HfBucketsAccessor } from '../accessor/hf.ts'
 import type { HfHubAccessor } from '../accessor/hf_hub.ts'
+import { HF_IO } from '../commands/builtin/hf/io.ts'
+import { fakeHfOperator } from '../core/hf/mock.ts'
 import { HF_HUB_IO } from '../commands/builtin/hf_hub/io.ts'
 import { FakeHub, blobOid, serveHub, xetHash } from '../core/hf_hub/_test_util.ts'
 import {
@@ -300,12 +303,16 @@ const HF_FAMILY: Record<string, string> = {
   hf_spaces: 'spaces',
 }
 
-const HARNESSES: Record<string, 's3' | 'gridfs' | 'hf_models' | 'onedrive' | 'sharepoint'> = {
+const HARNESSES: Record<
+  string,
+  's3' | 'gridfs' | 'hf_models' | 'onedrive' | 'sharepoint' | 'hf_buckets'
+> = {
   ...Object.fromEntries(S3_FAMILY.map((name) => [name, 's3' as const])),
   gridfs: 'gridfs',
   ...Object.fromEntries(Object.keys(HF_FAMILY).map((name) => [name, 'hf_models' as const])),
   onedrive: 'onedrive',
   sharepoint: 'sharepoint',
+  hf_buckets: 'hf_buckets',
 }
 
 // The drive each Graph backend addresses in the fake: OneDrive the signed-in
@@ -441,6 +448,41 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       readBytes: (p) => SHAREPOINT_IO.readBytes(accessor, p),
       readStream: (p) => SHAREPOINT_IO.readStream(accessor, p),
       stat: (p) => SHAREPOINT_IO.stat(accessor, p),
+    }
+  }
+  if (HARNESSES[name] === 'hf_buckets') {
+    // One Map behind both doors: the Hub serves it over HTTP and the opendal
+    // fake lists and writes it. The opendal fake refuses every read, so a
+    // stat or read that fell back to opendal fails here.
+    const op = fakeHfOperator()
+    const hub = new FakeHub()
+    hub.repos.set('buckets|acme/bkt', op.files)
+    await serveHub(hub)
+    hubs.push(hub)
+    op.files.set(stored, Buffer.from(data))
+    if (prefix !== null) op.files.set(key, Buffer.from(DECOY))
+    const vfs = await buildVfs('hf_buckets', {
+      bucket: 'acme/bkt',
+      endpoint: hub.url,
+      ...(prefix === null ? {} : { key_prefix: prefix }),
+    })
+    const accessor = vfs.accessor as HfBucketsAccessor
+    expect(readRevalidatable(vfs)).toBe(true)
+    op.root = accessor.operatorOptions().root ?? ''
+    op.reach = H.reach
+    vi.spyOn(accessor, 'operator').mockResolvedValue(op as never)
+    const before = hub.count('bucket_resolve')
+    return {
+      vfs,
+      accessor,
+      key,
+      fetches: () => hub.count('bucket_resolve') - before,
+      rewrite: (next) => {
+        op.files.set(stored, Buffer.from(next))
+      },
+      readBytes: (p) => HF_IO.readBytes(accessor, p),
+      readStream: (p) => HF_IO.readStream(accessor, p),
+      stat: (p) => HF_IO.stat(accessor, p),
     }
   }
   if (HARNESSES[name] === 'hf_models') {
@@ -878,6 +920,32 @@ describe('the read-token contract', () => {
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe('c1')
       expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('the contract goes red on hf_buckets stamping another kind', async () => {
+    // hf_buckets forced to stamp a hash of the header rather than the token
+    // stat reports: both exist and differ, so the entry must never be called
+    // fresh, and the warm read refetches exactly once. The override sits on
+    // the bytes slot, so the line is a cp.
+    const fake = await makeFake('hf_buckets', 'root', SEED)
+    const otherKind = createHash('sha1')
+      .update(`"${xetHash(SEED)}"`)
+      .digest('hex')
+    H.stampOverride = otherKind
+    const virtual = '/m/a.txt'
+    const ws = freshWorkspace(fake.vfs)
+    try {
+      await line(ws, `cp ${virtual} /r/a.txt`)
+      expect(await ws.cache.isFresh(virtual, otherKind)).toBe(true)
+      const stat = await reconcileStat(ws, fake, virtual)
+      expect(stat.fingerprint).toBe(xetHash(SEED))
+      expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
+      const before = fake.fetches()
+      await line(ws, `cp ${virtual} /r/b.txt`)
+      expect(fake.fetches() - before).toBe(1)
     } finally {
       await ws.close()
     }

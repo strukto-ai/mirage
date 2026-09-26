@@ -16,7 +16,7 @@ import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { resolveGlobOf } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
-import { HfModelsAccessor } from '../../accessor/hf.ts'
+import { HfBucketsAccessor } from '../../accessor/hf.ts'
 import { HF_IO } from '../../commands/builtin/hf/io.ts'
 import { size, entries } from './du/index.ts'
 import { DRIVER } from './driver.ts'
@@ -27,9 +27,14 @@ import { stat } from './stat.ts'
 
 const resolveGlob = resolveGlobOf(HF_IO)
 
-function accessorWith(files: Record<string, string | Buffer>): HfModelsAccessor {
-  const accessor = new HfModelsAccessor({ repoId: 'ns/model' })
-  installFakeOperator(accessor, fakeHfOperator(files))
+async function accessorWith(
+  files: Record<string, string | Buffer>,
+  keyPrefix?: string,
+): Promise<HfBucketsAccessor> {
+  const accessor = new HfBucketsAccessor(
+    keyPrefix === undefined ? { bucket: 'ns/model' } : { bucket: 'ns/model', keyPrefix },
+  )
+  await installFakeOperator(accessor, fakeHfOperator(files))
   return accessor
 }
 
@@ -42,32 +47,28 @@ const FILES = {
 
 describe('hf find', () => {
   it.each(['find', 'du'])('%s warmup preserves modification times', async (warmup) => {
-    const accessor = new HfModelsAccessor({ repoId: 'ns/model' })
+    const accessor = new HfBucketsAccessor({ bucket: 'ns/model' })
     const fake = fakeHfOperator({ 'source.txt': 'old', 'dest.txt': 'new' })
-    const modified = (key: string): string =>
-      key === 'source.txt' ? '2025-01-01T00:00:00Z' : '2026-01-01T00:00:00Z'
-    const realList = fake.list.bind(fake)
-    const realStat = fake.stat.bind(fake)
-    fake.list = async (path, options) =>
-      (await realList(path, options)).map((entry) => ({
-        ...entry,
-        metadata: () => ({ ...entry.metadata(), lastModified: modified(entry.path()) }),
-      }))
-    fake.stat = async (key) => ({ ...(await realStat(key)), lastModified: modified(key) })
-    installFakeOperator(accessor, fake)
+    fake.modified.set('source.txt', '2025-01-01T00:00:00Z')
+    fake.modified.set('dest.txt', '2026-01-01T00:00:00Z')
+    await installFakeOperator(accessor, fake)
     const index = new RAMIndexCacheStore()
     const root = PathSpec.fromStrPath('/')
     if (warmup === 'find') await find(accessor, root, {}, index)
     else await size(accessor, root, index)
-    for (const key of fake.files.keys()) {
+    for (const [key, when] of fake.modified) {
       const path = PathSpec.fromStrPath('/' + key)
-      expect((await index.get(path.virtual)).entry?.remoteTime).toBe(modified(key))
-      expect((await stat(accessor, path, index)).modified).toBe(modified(key))
+      expect((await index.get(path.virtual)).entry?.remoteTime).toBe(when)
+      // A warm stat answers from the listing's row; a cold one asks paths-info,
+      // which is the token's source and not an mtime's, so it reports none, as
+      // stat does against the live Hub today.
+      expect((await stat(accessor, path, index)).modified).toBe(when)
+      expect((await stat(accessor, path)).modified ?? null).toBeNull()
     }
   })
 
   it.each(['find', 'du'])('%s does not cache an omitted listing size as zero', async (command) => {
-    const accessor = new HfModelsAccessor({ repoId: 'ns/model' })
+    const accessor = new HfBucketsAccessor({ bucket: 'ns/model' })
     const fake = fakeHfOperator({ 'config.json': '{"a":1}' })
     const realList = fake.list.bind(fake)
     fake.list = async (path, options) => {
@@ -77,7 +78,7 @@ describe('hf find', () => {
         metadata: () => ({ ...entry.metadata(), contentLength: null }),
       }))
     }
-    installFakeOperator(accessor, fake)
+    await installFakeOperator(accessor, fake)
     const index = new RAMIndexCacheStore()
     const root = PathSpec.fromStrPath('/')
     if (command === 'find') await find(accessor, root, {}, index)
@@ -87,7 +88,7 @@ describe('hf find', () => {
   })
 
   it('finds everything under root, including synthesized dirs', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     const results = await find(accessor, PathSpec.fromStrPath('/'))
     expect(results).toEqual([
       '/',
@@ -101,7 +102,7 @@ describe('hf find', () => {
   })
 
   it('filters by name pattern and type', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     expect(await find(accessor, PathSpec.fromStrPath('/'), { name: '*.json' })).toEqual([
       '/config.json',
     ])
@@ -113,7 +114,7 @@ describe('hf find', () => {
   })
 
   it('filters by size and depth', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     expect(await find(accessor, PathSpec.fromStrPath('/'), { type: 'f', minSize: 5 })).toEqual([
       '/config.json',
       '/model.safetensors',
@@ -127,7 +128,7 @@ describe('hf find', () => {
   })
 
   it('scopes to a subdirectory and returns [] for missing dirs', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     expect(await find(accessor, PathSpec.fromStrPath('/onnx'))).toEqual([
       '/onnx',
       '/onnx/model.onnx',
@@ -136,31 +137,45 @@ describe('hf find', () => {
     ])
     expect(await find(accessor, PathSpec.fromStrPath('/missing'))).toEqual([])
   })
+
+  it('names paths mount-relative under a key prefix', async () => {
+    const accessor = await accessorWith(
+      { 'pfx/a.txt': 'a', 'pfx/sub/b.txt': 'b', 'a.txt': 'decoy', 'other/c.txt': 'c' },
+      'pfx/',
+    )
+    expect(await find(accessor, PathSpec.fromStrPath('/'))).toEqual([
+      '/',
+      '/a.txt',
+      '/sub',
+      '/sub/b.txt',
+    ])
+  })
 })
 
 describe('hf du', () => {
   it.each(['2021-09-15T21:24:22Z', null])('keeps a file-stem timestamp of %s', async (modified) => {
-    const accessor = new HfModelsAccessor({ repoId: 'ns/model' })
+    const accessor = new HfBucketsAccessor({ bucket: 'ns/model' })
     const fake = fakeHfOperator({ 'config.json': '{}' })
     const realStat = fake.stat.bind(fake)
     fake.stat = async (key) => ({ ...(await realStat(key)), lastModified: modified })
-    installFakeOperator(accessor, fake)
+    await installFakeOperator(accessor, fake)
     const rows = []
-    for await (const row of DRIVER.listSubtree(await accessor.operator(), 'config.json')) {
+    const conn = { accessor, op: await accessor.operator() }
+    for await (const row of DRIVER.listSubtree(conn, 'config.json')) {
       rows.push(row)
     }
     expect(rows).toEqual([{ key: 'config.json', size: 2, modified: modified ?? '' }])
   })
 
   it('sums file sizes recursively', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     expect(await size(accessor, PathSpec.fromStrPath('/'))).toBe(20)
     expect(await size(accessor, PathSpec.fromStrPath('/onnx'))).toBe(3)
     expect(await size(accessor, PathSpec.fromStrPath('/missing'))).toBe(0)
   })
 
   it('duEntries lists per-file sizes plus a total', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     const [rows, total] = await entries(accessor, PathSpec.fromStrPath('/onnx'))
     expect(rows).toEqual([
       ['/onnx/model.onnx', 2],
@@ -172,16 +187,30 @@ describe('hf du', () => {
 
 describe('hf exists', () => {
   it('reports files, dirs, and missing paths', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     expect(await exists(accessor, PathSpec.fromStrPath('/config.json'))).toBe(true)
     expect(await exists(accessor, PathSpec.fromStrPath('/onnx'))).toBe(true)
     expect(await exists(accessor, PathSpec.fromStrPath('/nope'))).toBe(false)
+  })
+
+  it.each([
+    [401, ''],
+    [404, 'RepoNotFound'],
+  ])('raises on a refused bucket (%i %s)', async (status, code) => {
+    // A bucket the Hub will not show is not a missing file: false here would
+    // let a caller conclude it can create the path.
+    const accessor = new HfBucketsAccessor({ bucket: 'ns/model' })
+    const hub = await installFakeOperator(accessor, fakeHfOperator({ 'a.txt': 'x' }))
+    hub.fail.set('bucket_paths_info', [status, code])
+    await expect(exists(accessor, PathSpec.fromStrPath('/a.txt'))).rejects.toMatchObject({
+      code: 'EACCES',
+    })
   })
 })
 
 describe('hf resolveGlob', () => {
   it('expands patterns against readdir entries', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     const spec = new PathSpec({
       vfsPath: '*.json',
       virtual: '/*.json',
@@ -194,7 +223,7 @@ describe('hf resolveGlob', () => {
   })
 
   it('passes through resolved and pattern-free specs', async () => {
-    const accessor = accessorWith(FILES)
+    const accessor = await accessorWith(FILES)
     const plain = PathSpec.fromStrPath('/config.json')
     const resolved = await resolveGlob(accessor, [plain])
     expect(resolved).toEqual([plain])

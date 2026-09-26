@@ -65,3 +65,31 @@ def test_bucket_uri():
 def test_key_prefix_normalized():
     cfg = HfBucketsConfig(bucket="myorg/mybkt", key_prefix="/data/sub/")
     assert cfg.key_prefix == "data/sub/"
+
+
+@pytest.mark.asyncio
+async def test_the_accessor_owns_a_pool_that_close_drains():
+    acc = HfBucketsAccessor(HfBucketsConfig(bucket="org/b"))
+    session = acc.pool.get()
+    assert not session.closed
+    await acc.close()
+    assert session.closed
+    # A VFS closes its accessor once; a CLI verb may close one it built
+    # again, which must be harmless.
+    await acc.close()
+
+
+def test_bucket_path_applies_the_key_prefix_once():
+    acc = HfBucketsAccessor(
+        HfBucketsConfig(bucket="org/b", key_prefix="/lead/trail/"))
+    assert acc.bucket_path("a.txt") == "lead/trail/a.txt"
+    assert acc.bucket_path("/sub/a.txt") == "lead/trail/sub/a.txt"
+    assert HfBucketsAccessor(
+        HfBucketsConfig(bucket="org/b")).bucket_path("/a.txt") == "a.txt"
+    # opendal normalizes its root's empty segments away and the Hub matches
+    # paths exactly, so the direct calls have to agree with the listing.
+    assert HfBucketsAccessor(HfBucketsConfig(
+        bucket="org/b",
+        key_prefix="a//b")).bucket_path("/x.txt") == "a/b/x.txt"
+    assert HfBucketsAccessor(HfBucketsConfig(
+        bucket="org/b", key_prefix="/")).bucket_path("/x.txt") == "x.txt"

@@ -15,50 +15,81 @@
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/utils/errors'
-import type { HfAccessor } from '../../accessor/hf.ts'
-import { hfKey, isNotFound, rawPathOf } from './util.ts'
-import { isShortRangeRefusal, sliceWindow } from '@struktoai/mirage-core/utils/ranges'
+import { eisdir, enoent } from '@struktoai/mirage-core/utils/errors'
+import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
+import type { HfBucketsAccessor } from '../../accessor/hf.ts'
+import { HfHubError, hubBytesTagged } from '../hf_hub/client.ts'
+import { REFUSED_STATUSES } from '../hf_hub/constants.ts'
+import { refusalsDenied } from '../hf_hub/lookup.ts'
+import { readToken, resolveUrl } from './hub.ts'
+
+const MISSING_ENTRY = 'EntryNotFound'
+
+const UNSATISFIABLE = 416
 
 export interface HfReadOptions {
   offset?: number
   size?: number
 }
 
+/**
+ * Whether a download refusal says the file does not exist.
+ *
+ * Only a 404 carrying `EntryNotFound` does. A 404 without it (a CDN hop, a
+ * bucket the token cannot see) is a failed read of a file that may well exist,
+ * and reading it as absence would let reconcile drop the path's overlay.
+ */
+export function isMissing(err: unknown): boolean {
+  return err instanceof HfHubError && err.status === 404 && err.errorCode === MISSING_ENTRY
+}
+
+/**
+ * Read a bucket file, or a byte window of it, from the Hub.
+ *
+ * Not through opendal: its read returns bare bytes, and the ETag the download
+ * carries is the file's xet hash, the token stat reports, so it is stamped on
+ * the read record as it comes.
+ */
 export async function read(
-  accessor: HfAccessor,
+  accessor: HfBucketsAccessor,
   path: PathSpec,
   _index?: IndexCacheStore,
   options: HfReadOptions = {},
 ): Promise<Uint8Array> {
-  const virtual = path.virtual
-  const rawPath = rawPathOf(path)
-  const key = hfKey(rawPath)
-  const op = await accessor.operator()
-  const readOptions: { offset?: bigint; size?: bigint } = {}
-  if (options.offset !== undefined && options.offset > 0) {
-    readOptions.offset = BigInt(options.offset)
-  }
-  if (options.size !== undefined) {
-    readOptions.offset ??= 0n
-    readOptions.size = BigInt(options.size)
-  }
+  const rel = path.mountPath
+  if (rel.replace(/^\/+|\/+$/g, '') === '') throw eisdir(path)
+  // `size: null` is the window's own spelling for "the rest of the file",
+  // which is not the same as asking for no window at all.
+  const hasWindow = (options.offset ?? 0) > 0 || options.size !== undefined
+  // A zero-length Range header is not one the client can build, so a
+  // zero-length window asks for one byte and discards it: the request still
+  // answers whether the file exists, which an empty return would skip.
+  const window: ByteWindow | undefined = hasWindow
+    ? { offset: options.offset ?? 0, size: options.size === 0 ? 1 : (options.size ?? null) }
+    : undefined
   const timer = startOp()
-  const windowed = readOptions.offset !== undefined || readOptions.size !== undefined
-  let data: Buffer
+  let data: Uint8Array
+  let etag: string
   try {
-    data = windowed ? await op.read(key, readOptions) : await op.read(key)
+    ;[data, etag] = await refusalsDenied(
+      path,
+      () => hubBytesTagged(accessor.token, resolveUrl(accessor, rel), window),
+      REFUSED_STATUSES,
+    )
   } catch (err) {
-    if (isNotFound(err)) throw enoent(path)
-    // OpenDAL's node binding refuses to return fewer bytes than the range
-    // asked for, where a POSIX read comes back short, so a window that runs
-    // past EOF has to be read unbounded and trimmed here. Python's binding
-    // reads through a file object and is short naturally.
-    if (!windowed || !isShortRangeRefusal(err)) throw err
-    const whole = await op.read(key, { offset: readOptions.offset ?? 0n })
-    data = Buffer.from(sliceWindow(new Uint8Array(whole), 0, options.size ?? null))
+    if (isMissing(err)) throw enoent(path)
+    if (!(err instanceof HfHubError) || err.status !== UNSATISFIABLE || window === undefined) {
+      throw err
+    }
+    // A window starting at or past EOF: the Hub answers 416 where a POSIX read
+    // returns nothing. Folded here rather than left to the ops factory,
+    // because a caller reading the range door directly has no fold of its own.
+    data = new Uint8Array()
+    etag = ''
   }
-  const bytes = new Uint8Array(data)
-  record('read', virtual, accessor.vfsName, bytes.byteLength, timer)
-  return bytes
+  if (options.size === 0) data = new Uint8Array()
+  record('read', path.virtual, accessor.vfsName, data.byteLength, timer, {
+    fingerprint: readToken(etag),
+  })
+  return data
 }
