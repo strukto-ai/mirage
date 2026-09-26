@@ -18,6 +18,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel } from '../../shell/console/index.ts'
 import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
+import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser, stdoutStr, stderrStr } from '../fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -401,6 +402,39 @@ describe('jobs are scoped to the session that launched them', () => {
       expect(new Set([stdoutStr(firstA), stdoutStr(firstB), stdoutStr(secondA)]).size).toBe(3)
       expect(ws.jobTable.listJobs('a').map((j) => j.id)).toEqual([1, 2])
       expect(ws.jobTable.listJobs('b').map((j) => j.id)).toEqual([1])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('job builtins honor the process profile', () => {
+  it('no job builtin names a job the profile hides', async () => {
+    const ws = buildWs()
+    ws.createSession('hidden', {
+      profile: { processes: { ...DEFAULT_PROCESS_PERMISSIONS, metadata: 'none' } },
+    })
+    try {
+      const io = await ws.shell(
+        'sleep 30 & jobs; fg %1; echo rc=$?; disown %1; echo rc=$?; ' +
+          'disown -a; wait %1; echo rc=$?; kill %1; echo rc=$?',
+        { sessionId: 'hidden' },
+      )
+      expect(stdoutStr(io)).toBe('rc=1\nrc=1\nrc=127\nrc=1\n')
+      expect(ws.jobTable.listJobs('hidden').map((j) => j.id)).toEqual([1])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('fg prints no command line the profile hides', async () => {
+    const ws = buildWs()
+    ws.createSession('redacted', {
+      profile: { processes: { ...DEFAULT_PROCESS_PERMISSIONS, details: 'none' } },
+    })
+    try {
+      const io = await ws.shell('echo hi & fg %1', { sessionId: 'redacted' })
+      expect(stdoutStr(io)).toBe('[hidden]\nhi\n')
     } finally {
       await ws.close()
     }

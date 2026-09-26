@@ -654,3 +654,29 @@ async def test_a_job_evaluating_a_nested_line_survives_the_line_cancel():
     assert job is not None
     assert job.exit_code == 0
     assert (await job.console.snapshot(Channel.STDOUT)) == b"inner\n"
+
+
+@pytest.mark.asyncio
+async def test_no_job_builtin_names_a_job_the_profile_hides():
+    ws = _workspace()
+    ws.create_session("hidden", profile={"processes": {"metadata": "none"}})
+    try:
+        io = await ws.shell(
+            "sleep 30 & jobs; fg %1; echo rc=$?; disown %1; echo rc=$?; "
+            "disown -a; wait %1; echo rc=$?; kill %1; echo rc=$?",
+            session_id="hidden")
+        assert io.stdout == b"rc=1\nrc=1\nrc=127\nrc=1\n"
+        assert [j.id for j in ws.job_table.list_jobs("hidden")] == [1]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_fg_prints_no_command_line_the_profile_hides():
+    ws = _workspace()
+    ws.create_session("redacted", profile={"processes": {"details": "none"}})
+    try:
+        io = await ws.shell("echo hi & fg %1", session_id="redacted")
+        assert io.stdout == b"[hidden]\nhi\n"
+    finally:
+        await ws.close()

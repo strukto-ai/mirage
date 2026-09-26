@@ -124,9 +124,9 @@ class JobTable:
     within the session that launched it, numbering restarts at 1 once
     that session's list empties (GNU bash), and ``jobs``, ``wait``,
     ``fg``, ``kill`` and ``disown`` only ever see the calling session's
-    list, exactly as one bash never lists another bash's jobs. Mirage
-    now tracks runner PIDs separately; ``$!`` and ``jobs -l`` still answer
-    with the job number until shell process-addressing is wired. A job's
+    list, exactly as one bash never lists another bash's jobs. Runner
+    PIDs are tracked separately: ``$!`` and ``jobs -l`` report the
+    managed PID, while ``%N`` names a session-local job number. A job's
     KILLED outcome ends its console, while ``job.process`` stays STOPPING
     until the runner actually finishes.
 
@@ -332,9 +332,6 @@ class JobTable:
         for job in running:
             await self.kill(job.id, session_id)
         self.processes.revoke_session(session_id)
-        for process in self.processes.live():
-            if process.info.session_id == session_id:
-                process.terminate()
         self._jobs.pop(session_id, None)
         self._next_ids.pop(session_id, None)
         return running

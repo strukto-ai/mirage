@@ -82,4 +82,12 @@ export class Job {
     if (init.status !== undefined) this.status = init.status
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
   }
+
+  /**
+   * The managed PID `$!`, `jobs -p` and `wait -p` report. A job restored
+   * from a snapshot has no runner, so its job number stands in.
+   */
+  get pid(): number {
+    return this.process?.info.pid ?? this.id
+  }
 }

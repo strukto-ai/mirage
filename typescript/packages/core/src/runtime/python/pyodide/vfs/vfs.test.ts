@@ -75,7 +75,7 @@ describe('MirageFs', () => {
   // The worker shape: nothing is seeded, and every lookup, listing and
   // read goes through a synchronous channel, here a double over the rows
   // and stats a test hands it.
-  function mountOver(prefix: string, sync: SyncVFS): void {
+  function mountOver(prefix: string, sync: SyncVFS): MirageFs {
     mounts.push(prefix)
     const mountpoint = prefix.slice(0, -1)
     const fs = new MirageFs(
@@ -88,6 +88,7 @@ describe('MirageFs', () => {
     )
     py.FS.mkdirTree(mountpoint)
     py.FS.mount(fs.type, {}, mountpoint)
+    return fs
   }
 
   function syncOver(
@@ -570,6 +571,35 @@ _inner = ','.join(os.listdir('${p}sub'))
 `)
     expect(py.globals.get('_isdir')).toBe(true)
     expect(py.globals.get('_inner')).toBe('x.json')
+  })
+
+  // A child process may change anything the tree served, so the runtime
+  // forgets every node once one returns. A handle the guest still holds
+  // keeps the bytes it was reading, as a descriptor keeps its inode: a
+  // read through it returns them and a write ships them whole.
+  it('keeps an open handle whole across an invalidation', async () => {
+    const p = prefix()
+    const row = { size: 11, isDir: false, mode: FILE_MODE, mtimeMs: 0 }
+    store.set(`${p}held.txt`, enc.encode('hello world'))
+    const fs = mountOver(
+      p,
+      syncOver({ [p]: [{ path: `${p}held.txt`, ...row }] }, { [`${p}held.txt`]: row }, []),
+    )
+    await py.runPythonAsync(`
+_held = open('${p}held.txt', 'r+b', buffering=0)
+_head = _held.read(5).decode()
+`)
+    fs.invalidate()
+    await py.runPythonAsync(`
+_tail = _held.read().decode()
+_held.seek(0)
+_held.write(b'HELLO')
+_held.close()
+`)
+    await drain()
+    expect(py.globals.get('_head')).toBe('hello')
+    expect(py.globals.get('_tail')).toBe(' world')
+    expect(dec.decode(store.get(`${p}held.txt`))).toBe('HELLO world')
   })
 
   // Filenames are the mount's to choose, so the child table is keyed by a

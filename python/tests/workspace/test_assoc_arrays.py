@@ -331,9 +331,11 @@ FUNC_JOB_CASES = [
      "declare -f h\nrc=0\nrc=1\n", "", 0),
     ("jobs_r_running_only", "sleep 5 & echo hi & sleep 0.3; jobs -r",
      "[1] running sleep 5\n", "", 0),
-    ("jobs_p_ids_only", "sleep 5 & sleep 5 & jobs -p", "1\n2\n", "", 0),
-    ("jobs_l_id_column", "sleep 5 & jobs -l", "[1] 1 running sleep 5\n", "",
-     0),
+    ("jobs_p_pids_only", "sleep 5 & a=$!; sleep 5 & b=$!; set -- $(jobs -p); "
+     'echo $#; [ "$1 $2" = "$a $b" ] && echo pids', "2\npids\n", "", 0),
+    ("jobs_l_pid_column",
+     'sleep 5 & p=$!; [ "$(jobs -l)" = "[1] $p running sleep 5" ] && echo row',
+     "row\n", "", 0),
     ("jobs_s_lists_nothing", "sleep 5 & jobs -s; echo rc=$?", "rc=0\n", "", 0),
     ("jobs_n_changed_then_none",
      "sleep 5 & echo hi & sleep 0.3; jobs -n; echo ---; jobs -n",
@@ -346,7 +348,8 @@ FUNC_JOB_CASES = [
      "bash: jobs: -q: invalid option\n"
      "jobs: usage: jobs [-lnprs] [jobspec ...] or jobs -x command [args]\n",
      0),
-    ("jobs_lp_combined", "sleep 5 & sleep 5 & jobs -lp", "1\n2\n", "", 0),
+    ("jobs_lp_combined", "sleep 5 & a=$!; sleep 5 & b=$!; set -- $(jobs -lp); "
+     '[ "$1 $2" = "$a $b" ] && echo pids', "pids\n", "", 0),
 ]
 
 # The review round, pinned the same way: a parameter default lands on

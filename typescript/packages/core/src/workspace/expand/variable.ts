@@ -54,9 +54,6 @@ import { decodeAnsiC } from '../../shell/escapes.ts'
 import { fnmatch } from '../../utils/fnmatch.ts'
 import { escapeGlob } from '../../utils/glob_walk.ts'
 
-// $$ reports the host process id where one exists (Node); browsers have
-// no process, so a fixed positive placeholder keeps the expansion usable.
-
 export type ExpandChild = (node: TSNodeLike) => Promise<string>
 
 const PARAM_OPS: ReadonlySet<string> = new Set([

@@ -2396,11 +2396,11 @@
       "steps": [
         {
           "op": "exec",
-          "command": "sleep 30 & echo $!",
+          "command": "sleep 30 & jobs | tail -n 1 | cut -d ' ' -f 1",
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "1\n",
+              "stdout": "[1]\n",
               "stderr": ""
             }
           }
@@ -2411,11 +2411,11 @@
         },
         {
           "op": "exec",
-          "command": "sleep 30 & sleep 30 & echo $!",
+          "command": "sleep 30 & sleep 30 & jobs | tail -n 1 | cut -d ' ' -f 1",
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "2\n",
+              "stdout": "[2]\n",
               "stderr": ""
             }
           },
@@ -2455,11 +2455,11 @@
         },
         {
           "op": "exec",
-          "command": "sleep 30 & echo $!",
+          "command": "sleep 30 & jobs | tail -n 1 | cut -d ' ' -f 1",
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "1\n",
+              "stdout": "[1]\n",
               "stderr": ""
             }
           },

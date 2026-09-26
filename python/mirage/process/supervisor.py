@@ -59,11 +59,20 @@ class ProcessSupervisor:
                             time.time(),
                             parent_pid=parent_pid,
                             group_id=group_id), run, self._retire,
-                lambda: self._cancel_children(pid))
+                lambda: self.terminate_children(pid))
             self._live[pid] = (self._generations.get(session_id, 0), handle)
             return handle
 
-    def _cancel_children(self, pid: int) -> None:
+    def terminate_children(self, pid: int) -> None:
+        """Request cancellation of every live runner under ``pid``.
+
+        A runner is under ``pid`` when ``pid`` is its parent or started
+        its execution group, so grandchildren are reached after an
+        intermediate runner has exited.
+
+        Args:
+            pid (int): the parent or group leader.
+        """
         for child in self.live():
             if child.info.parent_pid == pid or (child.info.group_id == pid
                                                 and child.info.pid != pid):
@@ -138,14 +147,21 @@ class ProcessSupervisor:
                            wait=wait)
 
     def revoke_session(self, session_id: str) -> None:
-        """Revoke old views before a session ID can be reused.
+        """Revoke the session's views and cancel its runners.
+
+        A closed session's ID can be reused and a replaced profile grants
+        a new view, so neither may keep a door, or a runner admitted
+        under the old grants.
 
         Args:
-            session_id (str): session being closed.
+            session_id (str): session being closed or re-profiled.
         """
         with self._lock:
             self._generations[session_id] = self._generations.get(
                 session_id, 0) + 1
+        for process in self.live():
+            if process.info.session_id == session_id:
+                process.terminate()
 
     def live(self) -> tuple[ProcessHandle, ...]:
         """Host-only inventory, including disowned and stopping runners."""

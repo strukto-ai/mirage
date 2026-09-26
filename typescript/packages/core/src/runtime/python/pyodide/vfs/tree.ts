@@ -180,6 +180,14 @@ export class NodeTree {
     return parent.children?.get(name)
   }
 
+  /**
+   * Forget every node below the root, so the next lookup asks the mount.
+   *
+   * A child process may have changed anything the tree served. A node an
+   * open handle still holds keeps its bytes, as a descriptor keeps its
+   * inode: emptying it would hand a later read stale lengths over no
+   * content, and a later write would ship that empty buffer whole.
+   */
   invalidate(): void {
     if (this.root === null) return
     const pending = [...(this.root.children?.values() ?? [])]
@@ -187,8 +195,6 @@ export class NodeTree {
       const node = pending.pop()
       if (node === undefined) break
       pending.push(...(node.children?.values() ?? []))
-      node.loaded = false
-      delete node.contents
       this.host.destroyNode?.(node)
     }
     this.root.children?.clear()

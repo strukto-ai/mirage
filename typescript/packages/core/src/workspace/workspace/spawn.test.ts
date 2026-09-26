@@ -5,7 +5,10 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { beforeAll, expect, it } from 'vitest'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
-import { PathSpec, MountMode } from '../../types.ts'
+import { Limit, PathSpec, MountMode } from '../../types.ts'
+import type { ChildProcess } from '../../process/child.ts'
+import type { SpawnRequest } from '../../process/types.ts'
+import type { SessionState } from '../session/session.ts'
 import { Workspace } from './workspace.ts'
 
 let parser: ShellParser
@@ -219,6 +222,28 @@ it('spawn uses programs and exported environment', async () => {
       .communicate()
     expect(new TextDecoder().decode(merged.stdout)).toBe('outerr')
     expect(merged.stderr).toHaveLength(0)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('spawn output obeys the command limit wherever the parent writes', async () => {
+  const ws = new Workspace({}, { runtimes: [], shellParser: parser })
+  try {
+    const session = ws.createSession('capped', {
+      profile: { commandLimits: { cat: new Limit({ maxBytes: 4 }) } },
+    })
+    const piped = session.fork()
+    piped.terminalOutput = false
+    const spawn = (
+      ws as unknown as {
+        spawnForSession(request: SpawnRequest, session: SessionState): ChildProcess
+      }
+    ).spawnForSession.bind(ws)
+    const result = await spawn({ argv: ['cat'] }, piped).communicate(
+      new TextEncoder().encode('0123456789'),
+    )
+    expect(new TextDecoder().decode(result.stdout)).toBe('0123')
   } finally {
     await ws.close()
   }

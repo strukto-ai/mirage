@@ -53,6 +53,15 @@ class Job:
     session_id: str = ""
     process: ProcessHandle | None = None
 
+    @property
+    def pid(self) -> int:
+        """The managed PID `$!`, `jobs -p` and `wait -p` report.
+
+        A job restored from a snapshot has no runner, so its job number
+        stands in.
+        """
+        return self.process.info.pid if self.process is not None else self.id
+
 
 JobRunner = Callable[[Job], Coroutine[Any, Any, tuple[IOResult,
                                                       ExecutionNode]]]

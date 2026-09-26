@@ -332,7 +332,7 @@ async function runLine(
     targetSession.processId = process.info.pid
     targetSession.shellPid ??= process.info.pid
     try {
-      await abortable(process.task, combined)
+      await process.task
       if (result === undefined) throw new Error('process completed without a result')
       return result
     } finally {

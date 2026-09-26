@@ -1,4 +1,3 @@
-import { withProcessCleanup } from './cleanup.ts'
 import type { ProcessInfo, ProcessRunner } from './types.ts'
 
 /** Host-side runner lifecycle; cancellation and actual completion are separate.
@@ -17,7 +16,7 @@ export class ProcessHandle {
   ) {
     this.current = Object.freeze(info)
     // Register identity before executing even a synchronous runner prelude.
-    this.task = Promise.resolve().then(() => withProcessCleanup(run))
+    this.task = Promise.resolve().then(run)
     this.completion = this.task.then(
       (code) => this.settle(code, null, finished),
       (error: unknown) => {

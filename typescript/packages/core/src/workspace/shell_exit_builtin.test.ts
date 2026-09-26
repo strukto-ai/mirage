@@ -115,9 +115,14 @@ describe('special pid variables', () => {
     })
   })
 
-  it('$! is the last background job id', async () => {
+  it("$! is the last background job's managed PID", async () => {
     await withWS(async (ws) => {
-      expect(await run(ws, 'sleep 0.05 & echo bg=$!')).toBe('bg=1\n')
+      expect(
+        await run(
+          ws,
+          'sleep 0.05 & p=$!; [ "$p" -gt 0 ] && [ "$p" = "$(jobs -p)" ] && echo bg=pid',
+        ),
+      ).toBe('bg=pid\n')
     })
   })
 

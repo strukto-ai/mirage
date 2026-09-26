@@ -5,7 +5,6 @@ from concurrent.futures import Future
 from dataclasses import replace
 from threading import RLock
 
-from mirage.process.cleanup import with_process_cleanup
 from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
 
 logger = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ class ProcessHandle:
         self._finished = finished
         self._cancel_children = cancel_children
         self._completion: Future[ProcessInfo] = Future()
-        self.task = asyncio.create_task(with_process_cleanup(run))
+        self.task = asyncio.create_task(run())
         self.task.add_done_callback(self._settle)
 
     @property

@@ -50,12 +50,7 @@ export class ProcessSupervisor {
       },
       init.run,
       () => {
-        for (const child of this.live())
-          if (
-            child.info.parentPid === pid ||
-            (child.info.groupId === pid && child.info.pid !== pid)
-          )
-            child.terminate()
+        this.terminateChildren(pid)
         init.cancel()
       },
       (id) => {
@@ -64,6 +59,17 @@ export class ProcessSupervisor {
     )
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
     return handle
+  }
+
+  /**
+   * Request cancellation of every live runner whose parent is `pid` or
+   * whose execution group `pid` started, so grandchildren are reached
+   * after an intermediate runner has exited.
+   */
+  terminateChildren(pid: number): void {
+    for (const child of this.live())
+      if (child.info.parentPid === pid || (child.info.groupId === pid && child.info.pid !== pid))
+        child.terminate()
   }
 
   view(
@@ -122,8 +128,14 @@ export class ProcessSupervisor {
     })
   }
 
+  /**
+   * Revoke the session's views and cancel its runners. A closed session's
+   * ID can be reused and a replaced profile grants a new view, so neither
+   * may keep a door, or a runner admitted under the old grants.
+   */
   revokeSession(sessionId: string): void {
     this.generations.set(sessionId, (this.generations.get(sessionId) ?? 0) + 1)
+    for (const process of this.live()) if (process.info.sessionId === sessionId) process.terminate()
   }
 
   /** Host-only inventory, including disowned and stopping runners. */

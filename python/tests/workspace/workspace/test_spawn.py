@@ -119,3 +119,23 @@ async def test_spawn_uses_programs_and_exported_environment():
         assert result.stderr == b''
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_spawn_output_obeys_the_command_limit_wherever_the_parent_writes(
+):
+    ws = Workspace({}, runtimes=[])
+    try:
+        session = ws.create_session(
+            'capped', profile={'command_limits': {
+                'cat': {
+                    'max_bytes': 4
+                }
+            }})
+        piped = session.fork()
+        piped.terminal_output = False
+        result = await ws._spawn_for_session(SpawnRequest(('cat', )),
+                                             piped).communicate(b'0123456789')
+        assert result.stdout == b'0123'
+    finally:
+        await ws.close()

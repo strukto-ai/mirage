@@ -622,6 +622,10 @@ export class Workspace {
     })
     if (!Object.hasOwn(inheritedEnv, 'PWD')) child.vars.PWD = makeVar(cwd.virtual, new Set())
     child.aliases = {}
+    // The child's stdout is its handle's result, as a typed line's is the
+    // terminal, so the command limits bound what it hands back wherever
+    // the parent's own output goes.
+    child.terminalOutput = true
     const scope = new ContextScope([
       ...captureSessionContext(child, this.sessionManager),
       ...captureRecordingContext(),
@@ -682,9 +686,7 @@ export class Workspace {
     child.shellPid = process.info.pid
     return new ChildProcess(process, input, output, () => {
       process.terminate()
-      for (const child of this.processes.live())
-        if (child.info.groupId === process.info.pid || child.info.parentPid === process.info.pid)
-          child.terminate()
+      this.processes.terminateChildren(process.info.pid)
     })
   }
 
@@ -988,8 +990,6 @@ export class Workspace {
     if (wasDefault) sessionId = this.defaultSessionId
     const session = await this.sessionManager.setProfile(sessionId, compiled)
     this.processes.revokeSession(sessionId)
-    for (const process of this.processes.live())
-      if (process.info.sessionId === sessionId) process.terminate()
     return session
   }
 

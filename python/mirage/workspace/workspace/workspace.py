@@ -761,6 +761,10 @@ class Workspace:
         if "PWD" not in inherited_env:
             child.vars["PWD"] = replace(child.vars["PWD"], attrs=frozenset())
         child.aliases = {}
+        # The child's stdout is its handle's result, as a typed line's is
+        # the terminal, so the command limits bound what it hands back
+        # wherever the parent's own output goes.
+        child.terminal_output = True
         input_stream, output = ProcessInput(), ProcessOutput(
             request.merge_stderr)
         env = dict(request.env) if request.env is not None else None
@@ -786,14 +790,14 @@ class Workspace:
                                             shell_join(argv),
                                             child.session_id,
                                             input_stream.stream(),
-                                            False,
-                                            None,
-                                            None,
-                                            None,
-                                            None,
-                                            True,
-                                            None,
-                                            None,
+                                            provision=False,
+                                            agent_id=None,
+                                            cwd=None,
+                                            env=None,
+                                            cancel=None,
+                                            record=True,
+                                            runtime=None,
+                                            routing_decision=None,
                                             argv=argv,
                                             sink=output)
                 if not isinstance(result, IOResult):
@@ -819,10 +823,7 @@ class Workspace:
 
         def cancel() -> None:
             process.terminate()
-            for child_process in self.processes.live():
-                if (child_process.info.group_id == process.info.pid
-                        or child_process.info.parent_pid == process.info.pid):
-                    child_process.terminate()
+            self.processes.terminate_children(process.info.pid)
             input_stream.stop()
             output.stop()
 
@@ -1336,9 +1337,6 @@ class Workspace:
             session_id = self.default_session_id
         session = await self._session_mgr.set_profile(session_id, compiled)
         self.processes.revoke_session(session_id)
-        for process in self.processes.live():
-            if process.info.session_id == session_id:
-                process.terminate()
         return session
 
     def list_sessions(self) -> list[SessionState]:

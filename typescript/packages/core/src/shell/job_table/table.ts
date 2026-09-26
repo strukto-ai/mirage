@@ -77,10 +77,10 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
  * within the session that launched it, numbering restarts at 1 once that
  * session's list empties (GNU bash), and `jobs`, `wait`, `fg`, `kill` and
  * `disown` only ever see the calling session's list, exactly as one bash
- * never lists another bash's jobs. Runner PIDs are tracked separately;
- * `$!` and `jobs -l` still answer with the job number until shell process
- * addressing is wired. A KILLED job ends its console; its process remains
- * stopping until the runner actually finishes.
+ * never lists another bash's jobs. Runner PIDs are tracked separately:
+ * `$!` and `jobs -l` report the managed PID, while `%N` names a
+ * session-local job number. A KILLED job ends its console; its process
+ * remains stopping until the runner actually finishes.
  *
  * The table is still owned by the workspace rather than by a session,
  * because the workspace owns the tasks: teardown must stop every job in
@@ -282,8 +282,6 @@ export class JobTable {
     const running = this.runningJobs(sessionId)
     for (const job of running) await this.kill(job.id, sessionId)
     this.processes.revokeSession(sessionId)
-    for (const process of this.processes.live())
-      if (process.info.sessionId === sessionId) process.terminate()
     this.jobs.delete(sessionId)
     this.nextIds.delete(sessionId)
     return running

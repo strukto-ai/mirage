@@ -310,24 +310,25 @@ async def test_agent_pattern_one_aborts_while_siblings_complete():
 
 
 @pytest.mark.asyncio
-async def test_an_aborted_line_does_not_erase_a_concurrent_lines_status():
-    # Two `execute()` calls share the default session. A snapshots `$?`
-    # and blocks, B finishes and stamps its own, then A is cancelled.
-    # A's snapshot is older than B's result, so putting it back would
-    # resurrect a status the shell had already moved past.
+async def test_a_queued_line_runs_after_the_aborted_one_and_keeps_its_status():
+    # One session runs one line at a time (#1144): B waits for A, so A's
+    # abort restores the `$?` it found before B ever stamps its own, and
+    # the shell ends on B's status, never on a resurrected older one.
     ws = _make_ws()
     await ws.shell("true")
 
     cancel = asyncio.Event()
     blocked = asyncio.create_task(ws.shell("sleep 5", cancel=cancel))
-    # Let the blocked line reach its snapshot before the other one runs.
+    # Let the blocked line reach its snapshot before the other queues.
     await asyncio.sleep(0.05)
 
-    await ws.shell("false")
+    queued = asyncio.create_task(ws.shell("false"))
+    await asyncio.sleep(0)
 
     cancel.set()
     with pytest.raises(Exception):
         await blocked
+    await queued
 
     r = await ws.shell("echo $?")
     assert r.stdout.decode().strip() == "1"

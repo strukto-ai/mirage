@@ -147,9 +147,6 @@ export class MirageSubprocess extends SubprocessRuntime {
     const terminate = () => {
       cancelled = true
       child?.terminate()
-      if (child !== undefined && workspace !== undefined)
-        for (const process of workspace.processes.live())
-          if (process.info.groupId === child.pid) process.terminate()
       stdin?.destroy()
       stdout?.destroy()
       stderr?.destroy()

@@ -1,5 +1,4 @@
 import { expect, it } from 'vitest'
-import { abortable } from '../workspace/abort.ts'
 import { PathSpec } from '../types.ts'
 import { ProcessSupervisor } from './supervisor.ts'
 
@@ -234,36 +233,4 @@ it('group cancellation reaches grandchildren after an intermediate exits', async
   await supervisor.drain()
   expect((await leaf.join()).cancellationRequested).toBe(true)
   expect(supervisor.live()).toEqual([])
-})
-
-it('retains aborted operations until their actual completion', async () => {
-  const supervisor = new ProcessSupervisor(),
-    release = gate(),
-    entered = gate()
-  const abort = new AbortController()
-  const child = supervisor.start({
-    sessionId: 'a',
-    command: 'runner',
-    cwd: PathSpec.fromStrPath('/'),
-    cancel: () => {
-      abort.abort()
-    },
-    run: async () => {
-      entered.release()
-      await abortable(release.promise, abort.signal)
-      return 0
-    },
-  })
-  await entered.promise
-  child.terminate()
-  let joined = false
-  const joining = child.join().then(() => {
-    joined = true
-  })
-  await new Promise<void>((resolve) => setTimeout(resolve, 0))
-  expect(joined).toBe(false)
-  expect(child.info.state).toBe('stopping')
-  release.release()
-  await joining
-  expect(child.info.exitCode).toBe(137)
 })

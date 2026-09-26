@@ -222,7 +222,6 @@ async def execute_line(
     frame: LineFrame | None = None,
     argv: tuple[str, ...] | None = None,
     sink: JobConsole | None = None,
-    tracked: bool = False,
 ) -> IOResult | ProvisionResult:
     """The body of ``Workspace.shell``; see its docstring for the
     argument contract.
@@ -269,7 +268,7 @@ async def execute_line(
         if session_id is None:
             session_id = ws._session_mgr.default_id
         session = ws._session_mgr.get(session_id)
-    if not tracked and not provision and session.process_id is None:
+    if not provision and session.process_id is None:
         results: list[IOResult | ProvisionResult] = []
 
         async def run() -> int:
@@ -279,7 +278,7 @@ async def execute_line(
                                             provision, agent_id, cwd, env,
                                             cancel, record, runtime,
                                             routing_decision, handed, frame,
-                                            argv, sink, True)
+                                            argv, sink)
                 results.append(result)
                 return result.exit_code if isinstance(result, IOResult) else 0
             finally:

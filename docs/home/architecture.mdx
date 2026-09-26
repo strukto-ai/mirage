@@ -80,7 +80,7 @@ flowchart LR
 Use `communicate(input)` to send input and drain both output pipes concurrently.
 Calling `wait` without consuming a piped output can apply backpressure, just as
 with a native pipe. Termination requests cancellation; the process remains
-`stopping` until its runner and tracked cleanup settle. Parent cancellation
+`stopping` until its runner settles. Parent cancellation
 reaches its live managed children. Workspace shutdown awaits tracked runners before closing their mounts;
 a runner that ignores cancellation keeps shutdown pending. Metadata includes
 parent and execution-group IDs. A provider's native descendants are not inferred from these IDs.
@@ -111,8 +111,12 @@ profiles:
 
 `metadata`, `details` and `control` each accept `none`, `session` or `workspace`.
 Defaults are `session`; spawn defaults to true and still passes command
-admission. `details: none` redacts command text, cwd and failure details. Control
-also requires metadata visibility. Inline permissions only narrow these grants.
+admission. `details: none` redacts command text, cwd and failure details; `jobs`,
+`fg` and `ps` print `[hidden]` in its place. `metadata: none` hides the session's
+own jobs from `jobs`, `fg`, `disown`, `kill %N` and `wait` with operands; a bare
+`wait` still joins them, since it names none. Control also requires metadata
+visibility. A spawned child's output is its handle's result, so the command limits
+bound it as they bound a typed line's, wherever the parent's own output goes. Inline permissions only narrow these grants.
 Two sessions using the same profile do not thereby share their processes.
 Replacing a profile revokes captured doors and requests cancellation of that
 session's executions; closing the session also cancels its managed work.
