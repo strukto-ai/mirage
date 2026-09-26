@@ -244,10 +244,14 @@ class GzipDecoder:
         GNU gzip 1.13 also treats exactly one trailing nonzero byte as
         fatal EOF, even when it cannot start a member. Two junk bytes
         instead trigger the nonfatal trailing-garbage warning in feed.
+        A missing trailer or a partial next header leaves complete decoded
+        bodies for tar, but remains fatal for in-place gzip.
         """
         if (not self._seen or self._part is not MemberPart.HEADER
                 or self._pending):
-            raise GzipDataError((GZIP_EOF, ), True)
+            whole = (self._part is MemberPart.TRAILER
+                     or self._part is MemberPart.HEADER and self._seen)
+            raise GzipDataError((GZIP_EOF, ), True, keeps_output=whole)
 
 
 async def gunzip_stream(source: AsyncIterator[bytes],

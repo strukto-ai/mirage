@@ -91,7 +91,7 @@ def test_trailer_mismatch_only_skips_the_input_under_test():
 @pytest.mark.parametrize("data,decoded,keeps", [
     (HELLO + b"junk", b"hello\n", True),
     (HELLO[:-8] + b"\0" * 8, b"hello\n", True),
-    (HELLO + HELLO[:-3], b"hello\nhello\n", False),
+    (HELLO + HELLO[:-3], b"hello\nhello\n", True),
 ])
 def test_partial_keeps_what_gzip_wrote_before_it_stopped(data, decoded, keeps):
     out, failure = gunzip_partial(data)
@@ -158,3 +158,23 @@ async def test_trailing_warning_follows_valid_output():
 def test_large_member_preserves_buffered_output():
     data = b"x" * (GZIP_CHUNK_SIZE * 20 + 13)
     assert gunzip_checked(gzip.compress(data)) == data
+
+
+@pytest.mark.parametrize("data,keeps", [
+    (HELLO[:-8], True),
+    (HELLO[:-3], True),
+    (HELLO + HELLO[:2], True),
+    (HELLO[:2], False),
+    (HELLO + HELLO[:10], False),
+    (HELLO[:-9], False),
+])
+@pytest.mark.parametrize("width", [1, 7, 65536])
+def test_eof_distinguishes_complete_bodies_from_partial_ones(
+        data, keeps, width):
+    decoder = GzipDecoder()
+    for offset in range(0, len(data), width):
+        list(decoder.feed(data[offset:offset + width]))
+    with pytest.raises(GzipDataError) as exc:
+        decoder.finish()
+    assert exc.value.fatal
+    assert exc.value.keeps_output is keeps

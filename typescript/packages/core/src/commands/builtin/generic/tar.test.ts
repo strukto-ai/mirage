@@ -26,7 +26,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const CHILD_FAILED = 'tar: Child returned status 1\ntar: Error is not recoverable: exiting now\n'
 
-let OK = new Uint8Array()
+let OK: Uint8Array = new Uint8Array()
 // The same archive with its CRC-32 and length trailer zeroed.
 let DAMAGED = new Uint8Array()
 
@@ -102,3 +102,44 @@ describe('tar over a gzip child that fails', () => {
     expect(r).toEqual([2, '', 'gzip: stdin: unexpected end of file\n' + CHILD_FAILED])
   })
 })
+
+it.each(['-tzf', '-tf', '-xOzf'])(
+  'keeps complete tar members with a truncated gzip wrapper: %s',
+  async (flags) => {
+    for (const data of [
+      OK.subarray(0, -8),
+      OK.subarray(0, -3),
+      new Uint8Array([...OK, ...OK.subarray(0, 2)]),
+    ]) {
+      const out = flags === '-xOzf' ? 'hello\nbee\n' : 'd/a.txt\nd/b.txt\n'
+      expect(await shell(`tar ${flags} /data/cut.tgz`, { '/data/cut.tgz': data })).toEqual([
+        2,
+        out,
+        'gzip: stdin: unexpected end of file\n' + CHILD_FAILED,
+      ])
+    }
+  },
+)
+
+it('extracts complete tar members despite a truncated gzip trailer', async () => {
+  expect(
+    await shell('tar -xzf /data/cut.tgz -C /data; cat /data/d/*', {
+      '/data/cut.tgz': OK.subarray(0, -3),
+    }),
+  ).toEqual([0, 'hello\nbee\n', 'gzip: stdin: unexpected end of file\n' + CHILD_FAILED])
+})
+
+it.each(['-tzf', '-xzf', '-xOzf'])(
+  'preserves the gzip failure when tar cannot parse its output: %s',
+  async (flags) => {
+    const bad = await gzip(ENC.encode('not a tar\n'))
+    bad.fill(0, bad.length - 8)
+    expect(await shell(`tar ${flags} /data/bad.tgz`, { '/data/bad.tgz': bad })).toEqual([
+      2,
+      '',
+      'gzip: stdin: invalid compressed data--crc error\n' +
+        'gzip: stdin: invalid compressed data--length error\n' +
+        CHILD_FAILED,
+    ])
+  },
+)

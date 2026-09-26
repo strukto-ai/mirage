@@ -84,3 +84,32 @@ async def test_a_member_cut_short_yields_nothing():
     r = await _shell("tar -tzf /data/cut.tgz", {"/data/cut.tgz": OK[:-40]})
     assert r == (2, b"",
                  b"gzip: stdin: unexpected end of file\n" + CHILD_FAILED)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [OK[:-8], OK[:-3], OK + OK[:2]])
+@pytest.mark.parametrize("flags", ["-tzf", "-tf", "-xOzf"])
+async def test_a_truncated_gzip_wrapper_keeps_complete_tar_members(
+        data, flags):
+    out = b"hello\nbee\n" if flags == "-xOzf" else b"d/a.txt\nd/b.txt\n"
+    r = await _shell(f"tar {flags} /data/cut.tgz", {"/data/cut.tgz": data})
+    assert r == (2, out,
+                 b"gzip: stdin: unexpected end of file\n" + CHILD_FAILED)
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_gzip_trailer_still_extracts_to_disk():
+    r = await _shell("tar -xzf /data/cut.tgz -C /data; cat /data/d/*",
+                     {"/data/cut.tgz": OK[:-3]})
+    assert r == (0, b"hello\nbee\n",
+                 b"gzip: stdin: unexpected end of file\n" + CHILD_FAILED)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags", ["-tzf", "-xzf", "-xOzf"])
+async def test_a_tar_parse_error_does_not_mask_the_gzip_failure(flags):
+    bad = gzip.compress(b"not a tar\n", mtime=0)[:-8] + b"\0" * 8
+    r = await _shell(f"tar {flags} /data/bad.tgz", {"/data/bad.tgz": bad})
+    assert r == (2, b"", b"gzip: stdin: invalid compressed data--crc error\n"
+                 b"gzip: stdin: invalid compressed data--length error\n" +
+                 CHILD_FAILED)

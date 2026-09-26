@@ -163,28 +163,26 @@ function unsupportedKind(compression: Compression, create: boolean): Compression
 }
 
 /**
- * The archive tar reads from `data`, and gzip's failure, if any.
+ * Read tar entries while retaining a failed gzip child's diagnostic.
  *
- * GNU tar hands gzip to a `gzip -d` child, under -z or when the bytes open
- * with the gzip magic, and reads whatever the child writes: all of it when
- * the failure leaves whole members (a damaged trailer, trailing garbage),
- * nothing when the child stopped inside a member, since mirage does not read
- * a cut archive. Mirrors Python's _unpacked.
+ * Complete deflate bodies survive a damaged or missing gzip trailer. Data
+ * cut off inside a body is still discarded; GNU tar can recover partial
+ * entries there. Mirrors Python's _open_archive for listing and extraction.
  */
-async function decompress(
+async function readArchive(
   data: Uint8Array,
   kind: Compression,
-): Promise<[Uint8Array, GzipDataError | null]> {
+): Promise<[TarEntry[], GzipDataError | null]> {
   const detected = kind ?? detectCompression(data)
-  if (detected === null) return [data, null]
+  let failure: GzipDataError | null = null
   if (detected === 'gzip') {
-    const [decoded, failure] = await gunzipPartial(data)
-    const whole = failure === null || failure.keepsOutput
-    return [whole ? decoded : new Uint8Array(), failure]
+    ;[data, failure] = await gunzipPartial(data)
+    if (failure !== null && (!failure.keepsOutput || data.byteLength === 0)) return [[], failure]
+  } else if (detected !== null) {
+    const codec = getCompressionCodec(detected)
+    if (codec !== undefined) data = await codec.decompress(data)
   }
-  const codec = getCompressionCodec(detected)
-  if (codec === undefined) return [data, null]
-  return [await codec.decompress(data), null]
+  return [await readTar(data), failure]
 }
 
 /**
@@ -335,8 +333,7 @@ export async function tarGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
     const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
-    const [data, failure] = await decompress(raw, compression)
-    const entries = data.byteLength > 0 || failure === null ? await readTar(data) : []
+    const [entries, failure] = await readArchive(raw, compression)
     const names = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
     const { keep, misses } = selectedMembers(names, selectors)
     const shown = names.filter((_, index) => keep.has(index))
@@ -362,9 +359,8 @@ export async function tarGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
     const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
-    const [data, failure] = await decompress(raw, compression)
+    const [entries, failure] = await readArchive(raw, compression)
     const writes: Record<string, Uint8Array> = {}
-    const entries = data.byteLength > 0 || failure === null ? await readTar(data) : []
     const listed = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
     const { keep, misses } = selectedMembers(listed, selectors)
     const notices: string[] = []

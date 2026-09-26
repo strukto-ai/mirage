@@ -143,7 +143,7 @@ describe('gunzipChecked', () => {
   it.each([
     ['trailing garbage', cat(HELLO, ENC.encode('junk')), 'hello\n', true],
     ['a zeroed trailer', cat(HELLO.subarray(0, -8), new Uint8Array(8)), 'hello\n', true],
-    ['a cut trailer', cat(HELLO, HELLO.subarray(0, -3)), 'hello\nhello\n', false],
+    ['a cut trailer', cat(HELLO, HELLO.subarray(0, -3)), 'hello\nhello\n', true],
   ] as const)('keeps what gzip wrote before %s', async (_name, data, decoded, keeps) => {
     const [out, failure] = await gunzipPartial(data)
     expect([DEC.decode(out), failure?.keepsOutput]).toEqual([decoded, keeps])
@@ -204,3 +204,26 @@ it('preserves buffered output in a large member', async () => {
   const text = 'x'.repeat(GZIP_CHUNK_SIZE * 20 + 13)
   expect(DEC.decode(await gunzipChecked(await gzip(ENC.encode(text))))).toBe(text)
 })
+
+it.each([1, 7, 65536])(
+  'distinguishes complete bodies at EOF with chunk width %i',
+  async (width) => {
+    for (const [data, keepsOutput] of [
+      [HELLO.subarray(0, -8), true],
+      [HELLO.subarray(0, -3), true],
+      [cat(HELLO, HELLO.subarray(0, 2)), true],
+      [HELLO.subarray(0, 2), false],
+      [cat(HELLO, HELLO.subarray(0, 10)), false],
+      [HELLO.subarray(0, -9), false],
+    ] as const) {
+      async function* source(): AsyncIterable<Uint8Array> {
+        for (let offset = 0; offset < data.length; offset += width)
+          yield* yieldBytes(data.subarray(offset, offset + width))
+      }
+      await expect(materialize(gunzipStream(source()))).rejects.toMatchObject({
+        fatal: true,
+        keepsOutput,
+      })
+    }
+  },
+)

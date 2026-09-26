@@ -162,9 +162,10 @@ class GzipDecoder {
       const stored = littleEndian(data, end, 2)
       const computed = crc32(data.subarray(0, end)) & 0xffff
       if (stored !== computed) {
-        const hex = (n: number): string => n.toString(16).padStart(4, '0')
+        const storedHex = stored.toString(16).padStart(4, '0')
+        const computedHex = computed.toString(16).padStart(4, '0')
         throw this.refusal(
-          `{}: header checksum 0x${hex(stored)} != computed checksum 0x${hex(computed)}`,
+          `{}: header checksum 0x${storedHex} != computed checksum 0x${computedHex}`,
         )
       }
       end += 2
@@ -255,10 +256,13 @@ class GzipDecoder {
   }
 
   // GNU gzip 1.13 treats a single trailing nonzero byte as fatal EOF;
-  // the trailing-garbage warning requires at least two bytes.
+  // the trailing-garbage warning requires at least two bytes. Missing trailers
+  // or partial next headers leave complete bodies for tar, but stay fatal.
   finish(): void {
-    if (!this.seen || this.part !== 'header' || this.pending.byteLength > 0)
-      throw new GzipDataError([GZIP_EOF], true)
+    if (!this.seen || this.part !== 'header' || this.pending.byteLength > 0) {
+      const whole = this.part === 'trailer' || (this.part === 'header' && this.seen)
+      throw new GzipDataError([GZIP_EOF], true, 1, whole)
+    }
   }
 
   close(): void {

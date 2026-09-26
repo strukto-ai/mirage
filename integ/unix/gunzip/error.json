@@ -290,6 +290,40 @@
         "stdout": "gutwo\nhello\n",
         "stderr": "gunzip: gutwo.gz: unknown method 7 -- not supported\n"
       }
+    },
+    {
+      "id": "gunzip_truncated_trailer_preserves_input_and_stops",
+      "seq": 962326,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/gunzip1269 && cd /data/gunzip1269 && echo 'H4sIAAAAAAACE8tIzcnJ5wIAIDA6NgY=' | base64 -d > cut.gz && echo later > later && gzip later && gunzip cut.gz later.gz; status=$?; ls; exit $status)",
+      "expect": {
+        "exit": 1,
+        "stdout": "cut.gz\nlater.gz\n",
+        "stderr": "gunzip: cut.gz: unexpected end of file\n"
+      }
     }
   ]
 }

@@ -1,6 +1,8 @@
 import io
+import logging
 import tarfile
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 
 from mirage.commands.builtin.generic.archive.extract import (ensure_dir,
@@ -23,6 +25,8 @@ from mirage.ops.types import LinkView, MountView
 from mirage.types import PathSpec
 from mirage.utils.compress import GZIP_MAGIC, gunzip_partial
 from mirage.utils.errors import GzipDataError, fs_strerror
+
+logger = logging.getLogger(__name__)
 
 
 def _compression_suffix(z: bool, j: bool, J: bool) -> CompressionSuffix:
@@ -47,28 +51,41 @@ def _stderr(lines: list[str]) -> bytes:
     return ("\n".join(lines) + "\n").encode() if lines else b""
 
 
-def _unpacked(
-        data: bytes, suffix: CompressionSuffix
-) -> tuple[bytes, ReadMode, GzipDataError | None]:
-    """The archive tar reads from ``data``, how to read it, and gzip's
-    failure, if any.
+@contextmanager
+def _open_archive(
+    data: bytes, suffix: CompressionSuffix
+) -> Iterator[tuple[tarfile.TarFile | None, GzipDataError | None]]:
+    """Open tar's input while preserving its gzip child's failure.
 
-    GNU tar hands gzip to a ``gzip -d`` child, under -z or when the
-    bytes open with the gzip magic, and reads whatever the child writes:
-    all of it when the failure leaves whole members (a damaged trailer,
-    trailing garbage), nothing when the child stopped inside a member,
-    since mirage does not read a cut archive. bzip2 and xz stay with
-    tarfile.
+    GNU tar 1.35 reads complete decoded members even when their gzip
+    trailer is damaged or missing. A tar parsing error must not mask the
+    child's diagnostic and exit status. Mirage still discards data when
+    gzip stops inside a deflate body; GNU can recover partial tar entries.
 
     Args:
         data (bytes): the archive file's bytes.
         suffix (CompressionSuffix): the compression the flags asked for.
     """
+    failure = None
+    mode = _read_mode(suffix)
     if suffix == ":gz" or (suffix == "" and data.startswith(GZIP_MAGIC)):
-        decoded, failure = gunzip_partial(data)
-        whole = failure is None or failure.keeps_output
-        return decoded if whole else b"", "r:", failure
-    return data, _read_mode(suffix), None
+        data, failure = gunzip_partial(data)
+        mode = "r:"
+    if failure is not None and (not failure.keeps_output or not data):
+        yield None, failure
+        return
+    with ExitStack() as stack:
+        tf: tarfile.TarFile | None
+        try:
+            tf = stack.enter_context(
+                tarfile.open(fileobj=io.BytesIO(data), mode=mode))
+            tf.getmembers()
+        except tarfile.TarError as exc:
+            if failure is None:
+                raise
+            logger.debug("tar: failed to parse gzip output: %s", exc)
+            tf = None
+        yield tf, failure
 
 
 def _child_failure(failure: GzipDataError, lines: list[str]) -> bytes:
@@ -222,11 +239,10 @@ async def _list_archive(
     selectors: list[str],
     read_bytes: Callable[..., Awaitable[bytes]],
 ) -> tuple[ByteSource | None, IOResult]:
-    data, mode, failure = _unpacked(await read_bytes(archive_path),
-                                    mode_suffix)
     names: list[str] = []
-    if data or failure is None:
-        with tarfile.open(fileobj=io.BytesIO(data), mode=mode) as tf:
+    with _open_archive(await read_bytes(archive_path),
+                       mode_suffix) as (tf, failure):
+        if tf is not None:
             names = [
                 member.name + "/" if member.isdir() else member.name
                 for member in tf.getmembers()
@@ -257,16 +273,15 @@ async def _extract_archive(
     mkdir_fn: Callable[..., Awaitable[None]],
     stat: StatFn,
 ) -> tuple[ByteSource | None, IOResult]:
-    data, mode, failure = _unpacked(await read_bytes(archive_path),
-                                    mode_suffix)
     writes: dict[str, ByteSource] = {}
     names: list[str] = []
     notices: list[str] = []
     made: set[str] = set()
     extracted_bytes: list[bytes] = []
     misses: list[str] = []
-    if data or failure is None:
-        with tarfile.open(fileobj=io.BytesIO(data), mode=mode) as tf:
+    with _open_archive(await read_bytes(archive_path),
+                       mode_suffix) as (tf, failure):
+        if tf is not None:
             members = tf.getmembers()
             listed = [
                 member.name + "/" if member.isdir() else member.name
