@@ -139,8 +139,10 @@ async def point_lookup(
     """Answer one path with one directory listing, where a walk would be waste.
 
     Taken only when the index holds no listing at all while the mount has
-    listed before: the throwaway store reconcile and the drift check stat
-    through, or a mount index a verdict just cleared. A mount that never
+    listed before, which is what a nonzero ``accessor.refills`` records
+    (every listing written into any index counts): the throwaway store
+    reconcile and the drift check stat through, or a mount index a verdict
+    just cleared. A mount that never
     listed seeds through its tree as it always has, and a live or expired
     index keeps its own answer. The root is read before the accessor, so a
     live index answers without the accessor being consulted.

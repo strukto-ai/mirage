@@ -62,10 +62,5 @@ class GitHubAccessor(SessionAccessor):
         # once an index was wired.
         self.tree_loaded: bool = tree is not None
         self.truncated = truncated
-        # How many listings this accessor has written into an index, any
-        # index: a whole-tree refill or one directory of the truncated
-        # walk. Nonzero means the mount has listed, which is what lets a
-        # probe on an empty throwaway index ask for one directory instead
-        # of walking the repository; a lookup that sees it move also
-        # knows an index was reseeded under it.
+        # Listings written into any index; nonzero means the mount listed.
         self.refills: int = 0
