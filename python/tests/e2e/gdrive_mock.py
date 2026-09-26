@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
+from collections import Counter
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -21,6 +22,21 @@ _FAKE_EXPIRES_IN = 9999999999
 
 _FOLDER_MIME = "application/vnd.google-apps.folder"
 _FILE_MIME = "application/octet-stream"
+_NATIVE_MIMES = frozenset({
+    "application/vnd.google-apps.document",
+    "application/vnd.google-apps.spreadsheet",
+    "application/vnd.google-apps.presentation",
+})
+
+
+def _is_native(mime: str) -> bool:
+    """Whether Drive renders this type rather than storing bytes for it.
+
+    Args:
+        mime (str): the item's MIME type.
+    """
+    return mime in _NATIVE_MIMES
+
 
 _PATCH_TARGETS = {
     # Every module that imports the function by value needs its own
@@ -48,6 +64,22 @@ _PATCH_TARGETS = {
     "capture_file_metadata": [
         "mirage.core.gdrive.read.capture_file_metadata",
     ],
+    # `stat_from_api` answers a stat made with no index, which is how the
+    # read-token contract's unrecorded rows stat. The guard below catches
+    # only a target that no longer resolves, so an unlisted binding would
+    # keep pointing at the real Drive API (#684's shape).
+    "get_file": [
+        "mirage.core.gdrive.stat.get_file",
+        "mirage.core.gdrive.resolve.get_file",
+    ],
+    # A native file's bytes do not exist until Docs, Sheets or Slides
+    # renders them, so the fake stands in for the renderer and counts each
+    # render as the cost a warm native read avoids.
+    "render": [
+        "mirage.core.gdrive.read.read_doc",
+        "mirage.core.gdrive.read.read_spreadsheet",
+        "mirage.core.gdrive.read.read_presentation",
+    ],
 }
 
 
@@ -57,8 +89,15 @@ class FakeGDrive:
         self._next_id: int = 1
         self._children: dict[str, list[dict]] = {"root": []}
         self._bytes: dict[str, bytes] = {}
+        # One entry per Drive call the fake answered, so a test can pin
+        # what a warm read costs rather than inferring it from output.
+        # Mirrors `tests/e2e/s3_mock.py`'s `MultiBucketS3Client.calls`.
+        self.calls: Counter[str] = Counter()
 
-    def add_file(self, path: str, content: bytes) -> str:
+    def add_file(self,
+                 path: str,
+                 content: bytes,
+                 mime: str = _FILE_MIME) -> str:
         parts = [p for p in path.strip("/").split("/") if p]
         if not parts:
             raise ValueError(f"invalid file path: {path}")
@@ -74,7 +113,7 @@ class FakeGDrive:
         entry = {
             "id": file_id,
             "name": name,
-            "mimeType": _FILE_MIME,
+            "mimeType": mime,
             "size": str(len(content)),
             "modifiedTime": "2026-04-16T00:00:00Z",
             "parents": [parent_id],
@@ -82,6 +121,25 @@ class FakeGDrive:
         self._children[parent_id].append(entry)
         self._bytes[file_id] = content
         return file_id
+
+    def set_modified(self, path: str, stamp: str) -> None:
+        """Set an item's modifiedTime, as an edit made outside mirage does.
+
+        A native file's only token is its modifiedTime, and
+        ``_next_modified_time`` repeats across overwrites, so a test that
+        needs the stamp to move sets it here.
+
+        Args:
+            path (str): the item's path under the fake's root.
+            stamp (str): the new modifiedTime.
+        """
+        parts = [p for p in path.strip("/").split("/") if p]
+        parent_id = self._lookup_dirs(parts[:-1])
+        entry = (None if parent_id is None else self._find_child(
+            parent_id, parts[-1]))
+        if entry is None:
+            raise FileNotFoundError(path)
+        entry["modifiedTime"] = stamp
 
     def remove_file(self, path: str) -> None:
         parts = [p for p in path.strip("/").split("/") if p]
@@ -98,15 +156,45 @@ class FakeGDrive:
                 children.pop(i)
                 return
 
+    def public(self, entry: dict) -> dict:
+        """Serve an entry the way Drive serves a file resource.
+
+        The two content tokens are computed here rather than stored,
+        because ``add_file`` overwrites bytes in place and a stored md5
+        would then describe the previous content.
+
+        Drive's own guards apply (integ/server/gws/drive/item.ts):
+        neither a folder nor a native google-apps file carries either
+        field. Handing a gdoc an md5 Drive never returns is the fidelity
+        trap the unit fakes' guards exist to avoid.
+
+        Args:
+            entry (dict): the stored child record.
+        """
+        out = dict(entry)
+        if entry["mimeType"] != _FOLDER_MIME and not _is_native(
+                entry["mimeType"]):
+            data = self._bytes.get(entry["id"], b"")
+            out["md5Checksum"] = hashlib.md5(data).hexdigest()
+            out["headRevisionId"] = f"{entry['id']}-r1"
+        return out
+
     def list_children(self, folder_id: str) -> list[dict]:
-        return list(self._children.get(folder_id, []))
+        return [self.public(c) for c in self._children.get(folder_id, [])]
+
+    def find_entry(self, file_id: str) -> dict | None:
+        for children in self._children.values():
+            for c in children:
+                if c["id"] == file_id:
+                    return self.public(c)
+        return None
 
     def all_files(self) -> list[dict]:
         result: list[dict] = []
         for children in self._children.values():
             for c in children:
                 if c["mimeType"] != _FOLDER_MIME:
-                    result.append(c)
+                    result.append(self.public(c))
         return result
 
     def get_bytes(self, file_id: str) -> bytes:
@@ -180,6 +268,25 @@ def _sliced(data: bytes, range_header: str | None) -> bytes:
     return data[start:int(end_text) + 1] if end_text else data[start:]
 
 
+def _bytes_for(fake, registry, file_id: str) -> bytes:
+    """The stored bytes for ``file_id``, from any registered fake.
+
+    A cross-mount read reaches a file another fake owns, so the lookup
+    falls through the registry before giving up.
+
+    Args:
+        fake (FakeGDrive): the fake the caller's token resolved to.
+        registry (list): every (token_manager, FakeGDrive) pair.
+        file_id (str): the Drive file id.
+    """
+    if fake.has_id(file_id):
+        return fake.get_bytes(file_id)
+    for _, other in registry:
+        if other.has_id(file_id):
+            return other.get_bytes(file_id)
+    raise FileNotFoundError(file_id)
+
+
 def _resolve_fake(token_manager, registry):
     if not registry:
         return None
@@ -214,6 +321,7 @@ def _build_fakes(registry):
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
             return []
+        fake.calls["list_files"] += 1
         children = fake.list_children(folder_id)
         if name is not None:
             children = [c for c in children if c.get("name") == name]
@@ -243,31 +351,50 @@ def _build_fakes(registry):
         fake = _resolve_fake(token_manager, registry)
         if fake is None:
             raise FileNotFoundError(file_id)
-        data = None
-        if fake.has_id(file_id):
-            data = fake.get_bytes(file_id)
-        else:
-            for _, other in registry:
-                if other.has_id(file_id):
-                    data = other.get_bytes(file_id)
-                    break
-        if data is None:
+        fake.calls["download_file"] += 1
+        return _sliced(_bytes_for(fake, registry, file_id), range_header)
+
+    async def fake_get_file(token_manager, file_id: str) -> dict:
+        fake = _resolve_fake(token_manager, registry)
+        if fake is None:
             raise FileNotFoundError(file_id)
-        return _sliced(data, range_header)
+        fake.calls["get_file"] += 1
+        entry = fake.find_entry(file_id)
+        if entry is None:
+            raise FileNotFoundError(file_id)
+        return entry
 
     async def fake_capture_file_metadata(
-            token_manager, file_id: str) -> tuple[str | None, str | None]:
-        data = await fake_download_file(token_manager, file_id)
-        digest = hashlib.md5(data).hexdigest()
-        return digest, f"rev-{digest}"
+            token_manager,
+            file_id: str) -> tuple[str | None, str | None, str | None]:
+        # Reads the bytes directly rather than through `fake_download_file`,
+        # so the download counter stays honest: the real call is a metadata
+        # GET and must not read as a download.
+        fake = _resolve_fake(token_manager, registry)
+        if fake is None:
+            raise FileNotFoundError(file_id)
+        fake.calls["capture_file_metadata"] += 1
+        digest = hashlib.md5(_bytes_for(fake, registry, file_id)).hexdigest()
+        entry = fake.find_entry(file_id)
+        modified = None if entry is None else entry.get("modifiedTime")
+        return digest, f"rev-{digest}", modified
+
+    async def fake_render(token_manager, file_id: str) -> bytes:
+        fake = _resolve_fake(token_manager, registry)
+        if fake is None:
+            raise FileNotFoundError(file_id)
+        fake.calls["render"] += 1
+        return _bytes_for(fake, registry, file_id)
 
     return {
         "refresh": fake_refresh,
+        "render": fake_render,
         "list_files": fake_list_files,
         "list_shared_drives": fake_list_shared_drives,
         "list_all_files": fake_list_all_files,
         "download_file": fake_download_file,
         "capture_file_metadata": fake_capture_file_metadata,
+        "get_file": fake_get_file,
     }
 
 

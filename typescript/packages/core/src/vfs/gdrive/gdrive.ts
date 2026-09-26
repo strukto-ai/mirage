@@ -40,6 +40,7 @@ export class GDriveVFS extends BoundVFS<GDriveAccessor> implements VFS {
   readonly kind: string = VFSName.GDRIVE
   readonly cachesReads: boolean = true
   readonly supportsSnapshot: boolean = true
+  readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
   readonly prompt: string = GDRIVE_PROMPT
   readonly config: GDriveConfig

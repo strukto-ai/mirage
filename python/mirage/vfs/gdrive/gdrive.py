@@ -38,6 +38,7 @@ class GoogleDriveVFS(BoundVFS):
     index_ttl: float = 86_400
     PROMPT: str = PROMPT
     SUPPORTS_SNAPSHOT: bool = True
+    READ_REVALIDATABLE: bool = True
 
     def __init__(self, config: GoogleDriveConfig) -> None:
         super().__init__(io=IO)

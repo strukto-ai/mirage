@@ -1699,7 +1699,7 @@ function gwsNativeVfs(
   return new GSlidesVFS(config)
 }
 
-async function openGws(target: Target): Promise<Open> {
+async function openGws(target: Target, options?: OpenOptions): Promise<Open> {
   let base = process.env.GWS_URL ?? ''
   while (base.endsWith('/')) base = base.slice(0, -1)
   if (base === '') throw new Error('gdrive target requires GWS_URL')
@@ -1734,19 +1734,10 @@ async function openGws(target: Target): Promise<Open> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(reset),
   })
-  const mounts: Record<string, GDriveVFS | GDocsVFS | GSheetsVFS | GSlidesVFS | GmailVFS | RAMVFS> =
-    {}
   const driveIds: Record<string, string> = {}
   const folderIds: Record<string, string> = {}
   for (const m of target.mounts) {
-    if (m.vfs === 'ram') {
-      mounts[m.path] = new RAMVFS()
-      continue
-    }
-    if (m.vfs !== 'gdrive') {
-      mounts[m.path] = gwsNativeVfs(m.vfs, base)
-      continue
-    }
+    if (m.vfs !== 'gdrive') continue
     // A mount may live inside a Shared Drive: the drive is created once
     // per name and its id is the walk's start.
     const drive = m.drive
@@ -1762,26 +1753,41 @@ async function openGws(target: Target): Promise<Open> {
     for (const segment of String(m.root).split('/')) {
       parent = await gwsFolder(base, segment, parent)
     }
-    mounts[m.path] = new GDriveVFS({
-      clientId: 'integ',
-      clientSecret: 'integ',
-      refreshToken: 'integ',
-      apiBase: base,
-      folderId: parent,
-    })
     folderIds[m.path] = parent
+  }
+  // The drives and folders exist once; building the mounts over them is
+  // then pure, so a shadow workspace gets its own instances over the same
+  // world.
+  const build = (): MountMap => {
+    const mounts: Record<
+      string,
+      GDriveVFS | GDocsVFS | GSheetsVFS | GSlidesVFS | GmailVFS | RAMVFS
+    > = {}
+    for (const m of target.mounts) {
+      if (m.vfs === 'ram') mounts[m.path] = new RAMVFS()
+      else if (m.vfs !== 'gdrive') mounts[m.path] = gwsNativeVfs(m.vfs, base)
+      else
+        mounts[m.path] = new GDriveVFS({
+          clientId: 'integ',
+          clientSecret: 'integ',
+          refreshToken: 'integ',
+          apiBase: base,
+          folderId: folderIds[m.path] as string,
+        })
+    }
+    return mounts
   }
   const apps = gwsManifest<GwsAppEntry[]>(target.apps)
   if (apps !== undefined) await seedGwsApps(base, apps)
   const mail = gwsManifest<MailEntry[]>(target.mail)
   if (mail !== undefined) await seedGwsMail(base, mail)
   if (calendar !== undefined) await seedGwsCalendar(base, calendar.events)
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  const opened = openWorkspaces(build, options)
   if (target.clis?.includes('gws') === true) {
     // A target may scope the gws install to one mount's folder, the
     // configuration where the CLI and the mount are the same folder.
     const scope = target.cli_scope
-    ws.registerCli('gws', GWS, {
+    ;(opened.ws as unknown as Workspace).registerCli('gws', GWS, {
       client_id: 'integ',
       client_secret: 'integ',
       refresh_token: 'integ',
@@ -1790,9 +1796,9 @@ async function openGws(target: Target): Promise<Open> {
     })
   }
   const cleanup = async (): Promise<void> => {
-    await ws.close()
+    await opened.closeAll()
   }
-  return { ws: ws as unknown as ExecWorkspace, cleanup }
+  return { ws: opened.ws, shadow: opened.shadow, cleanup }
 }
 
 // The fake Slack Web API server is external and shared across both hosts;

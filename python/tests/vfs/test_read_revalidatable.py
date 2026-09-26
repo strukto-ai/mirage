@@ -27,6 +27,7 @@ from bson import ObjectId
 from moto.server import ThreadedMotoServer
 
 import mirage.cache.file.io as cache_io
+import mirage.core.gdrive.read as gdrive_read
 import mirage.core.gridfs.client as gridfs_client
 import mirage.core.gridfs.driver as gridfs_driver
 import mirage.core.gridfs.read as gridfs_read
@@ -37,7 +38,8 @@ import mirage.core.hf_hub.stream as hf_stream
 import mirage.core.msgraph.drive_ops as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
-from mirage.cache.index import RAMIndexCacheStore
+from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
+from mirage.commands.builtin.gdrive.io import IO as GDRIVE_IO
 from mirage.commands.builtin.generic_bind.adapter import CommandIO
 from mirage.commands.builtin.gridfs.io import IO as GRIDFS_IO
 from mirage.commands.builtin.hf_hub.io import IO as HF_IO
@@ -51,7 +53,6 @@ from mirage.observe.context import OpTimer, RecordingScope, active_recorder
 from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.vfs.loader import load_attr
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import REGISTRY, build_vfs, known_vfs_names
@@ -86,6 +87,7 @@ HARNESSES = {
     },
     "onedrive": "onedrive",
     "sharepoint": "sharepoint",
+    "gdrive": "gdrive",
 }
 
 # The drive each Graph backend addresses in the fake: OneDrive the signed-in
@@ -95,6 +97,15 @@ GRAPH = {
     "onedrive": (ME, ONEDRIVE_IO),
     "sharepoint": (DRIVE_ID, SHAREPOINT_IO)
 }
+
+ALL_SHAPES = ("root", "nested", "prefixed")
+ALL_ROWS = ("bytes", "stream", "drain")
+
+# What each family can run, fixed at collection. gdrive has no key_prefix
+# (its config forbids unknown fields), and its stream is its read handed
+# over whole, one chunk, so a drain row would pass without draining anything.
+FAMILY_SHAPES = {"gdrive": ("root", "nested")}
+FAMILY_ROWS = {"gdrive": ("bytes", "stream")}
 
 # One document per family, identical in the TypeScript twin. oci is the one
 # alias with a required field beyond these; every other one-of (r2's
@@ -106,6 +117,7 @@ S3_CONFIG = {
 }
 S3_EXTRA = {"oci": {"namespace": "ns"}}
 GRIDFS_CONFIG = {"uri": "mongodb://127.0.0.1:27017", "database": "d"}
+GDRIVE_CONFIG = {"client_id": "i", "client_secret": "s", "refresh_token": "r"}
 
 PREFIX = "pfx/"
 
@@ -144,7 +156,13 @@ class Fake:
     reach: list[str]
     io: CommandIO
     read_mod: ModuleType
-    stream_mod: ModuleType
+    # None where the backend has no stream of its own: its read_stream is
+    # its read handed over whole, so a stream row lands in the bytes slot.
+    stream_mod: ModuleType | None
+    stream_slot: str = "stream"
+    # An id-addressed backend resolves a path only through an index, so its
+    # raw reads need one; the others take none.
+    read_index: IndexCacheStore | None = None
 
 
 class _Download:
@@ -354,10 +372,35 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
 
 
 @contextmanager
+def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
+    key = KEYS[shape]
+    drive = FakeGDrive()
+    drive.add_file(key, data)
+    with patch_gdrive(drive):
+        vfs = build_vfs("gdrive", GDRIVE_CONFIG)
+        # No stray reach to refuse: stat has no download to fall into, and
+        # a no-index stat reaching get_file is its legitimate API door.
+        yield Fake(vfs=vfs,
+                   key=key,
+                   fetches=lambda: drive.calls["download_file"],
+                   rewrite=lambda new: drive.add_file(key, new),
+                   reach=[],
+                   io=GDRIVE_IO,
+                   read_mod=gdrive_read,
+                   stream_mod=None,
+                   stream_slot="bytes",
+                   read_index=RAMIndexCacheStore())
+
+
+@contextmanager
 def _fake(name: str, shape: str, data: bytes,
           monkeypatch: pytest.MonkeyPatch) -> Iterator[Fake]:
     if HARNESSES[name] in GRAPH:
         with _graph_fake(name, shape, data) as fake:
+            yield fake
+        return
+    if HARNESSES[name] == "gdrive":
+        with _gdrive_fake(shape, data) as fake:
             yield fake
         return
     if HARNESSES[name] == "hf_models":
@@ -377,10 +420,12 @@ def _cases(rows: tuple[str, ...]) -> list:
     for name, family in HARNESSES.items():
         # The aliases share every read and stat path with s3, so the key
         # shapes run once per family.
-        shapes = ("root", "nested",
-                  "prefixed") if name == family else ("root", )
+        shapes = FAMILY_SHAPES.get(
+            family, ALL_SHAPES) if name == family else ("root", )
         for shape in shapes:
             for row in rows:
+                if row not in FAMILY_ROWS.get(family, ALL_ROWS):
+                    continue
                 cases.append(
                     pytest.param(name, shape, row, id=f"{name}-{shape}-{row}"))
     return cases
@@ -441,17 +486,20 @@ def _spy_slots(fake: Fake,
                monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
     slots: list[tuple[str, str]] = []
     record = fake.read_mod.record
-    record_stream = fake.stream_mod.record_stream
 
     def spy_record(op, path, *args, **kwargs):
         slots.append(("bytes", path))
         return record(op, path, *args, **kwargs)
 
+    monkeypatch.setitem(vars(fake.read_mod), "record", spy_record)
+    if fake.stream_mod is None:
+        return slots
+    record_stream = fake.stream_mod.record_stream
+
     def spy_record_stream(op, path, *args, **kwargs):
         slots.append(("stream", path))
         return record_stream(op, path, *args, **kwargs)
 
-    monkeypatch.setitem(vars(fake.read_mod), "record", spy_record)
     monkeypatch.setitem(vars(fake.stream_mod), "record_stream",
                         spy_record_stream)
     return slots
@@ -488,6 +536,40 @@ def _declared() -> set[str]:
         if getattr(load_attr(entry.vfs_path), "READ_REVALIDATABLE", False):
             declared.add(name)
     return declared
+
+
+def test_each_family_runs_exactly_its_rows():
+    # The per-family table is filtered at collection, so a filter bug drops
+    # a row silently or hands gdrive a drain row that passes without
+    # draining. Pin the ids outright rather than the count.
+    aliases = [n
+               for n in S3_FAMILY if n != "s3"] + ["hf_datasets", "hf_spaces"]
+    # Literals, not ALL_SHAPES / ALL_ROWS: the expectation must not move
+    # with the tables it checks.
+    shapes = ("root", "nested", "prefixed")
+    rows = ("bytes", "stream", "drain")
+    expected_a = {
+        f"{family}-{shape}-{row}"
+        for family in ("s3", "gridfs", "hf_models", "onedrive", "sharepoint")
+        for shape in shapes
+        for row in rows
+    } | {f"{n}-root-{row}"
+         for n in aliases
+         for row in rows
+         } | {f"{n}-listed-stream"
+              for n in ("s3", "onedrive", "sharepoint")} | {
+                  f"gdrive-{shape}-{row}"
+                  for shape in ("root", "nested")
+                  for row in ("bytes", "stream")
+              }
+    expected_b = {
+        i
+        for i in expected_a
+        if not i.endswith("-drain") and not i.endswith("-listed-stream")
+    }
+    assert {c.id for c in A_CASES} == expected_a
+    assert {c.id for c in B_CASES} == expected_b
+    assert not any(c.id.startswith("gdrive-") for c in _cases(("drain", )))
 
 
 def test_every_declaring_backend_has_a_harness():
@@ -550,7 +632,8 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(name, shape, row,
          second) = asyncio.run(run())
 
     assert cached_before is False
-    assert taken == [(SLOTS[row], virtual)]
+    slot = fake.stream_slot if SLOTS[row] == "stream" else "bytes"
+    assert taken == [(slot, virtual)]
     assert drained == (1 if row == "drain" else 0)
     assert fetched == 1
     assert first == (data[:1] if row == "drain" else data)
@@ -628,8 +711,9 @@ def test_an_unrecorded_read_stamps_the_stat_token(name, shape, row,
 
     with _fake(name, shape, SEED, monkeypatch) as fake:
         monkeypatch.setitem(vars(fake.read_mod), "record", capture)
-        monkeypatch.setitem(vars(fake.stream_mod), "record_stream",
-                            capture_stream)
+        if fake.stream_mod is not None:
+            monkeypatch.setitem(vars(fake.stream_mod), "record_stream",
+                                capture_stream)
         virtual = "/m/" + fake.key
         spec = PathSpec(virtual=virtual,
                         directory=virtual.rsplit("/", 1)[0] + "/",
@@ -639,11 +723,16 @@ def test_an_unrecorded_read_stamps_the_stat_token(name, shape, row,
         async def run():
             unrecorded = active_recorder() is None
             try:
+                index = () if fake.read_index is None else (fake.read_index, )
                 if row == "bytes":
-                    data = await fake.io.read_bytes(accessor, spec)
+                    data = await fake.io.read_bytes(accessor, spec, *index)
                 else:
-                    data = b"".join(
-                        [c async for c in fake.io.read_stream(accessor, spec)])
+                    data = b"".join([
+                        c async for c in fake.io.read_stream(
+                            accessor, spec, *index)
+                    ])
+                # No index on purpose: stat answers from its own request, so
+                # the equality compares two independent reads of the object.
                 stat = await fake.io.stat(accessor, spec)
             finally:
                 await accessor.close()
@@ -794,42 +883,38 @@ def test_moto_agrees_that_stat_and_read_stamp_one_token(
 
 
 def test_the_contract_goes_red_on_a_backend_with_two_token_kinds(monkeypatch):
-    # gdrive stats a modifiedTime and reads an md5. Forced to claim the flag,
-    # it must fail the same checks the declaring backends pass, or the
-    # contract could not tell a backend that keeps the promise from one that
-    # only makes it.
-    fake = FakeGDrive()
-    fake.add_file("a.txt", SEED)
-    fetched: list[str] = []
-    get_bytes = fake.get_bytes
+    # s3 forced to stat a timestamp while its read stamps the ETag: both
+    # tokens exist and differ. The contract must fail it, or it could not
+    # tell a backend that keeps the promise from one that only makes it.
+    objects = {"a.txt": SEED}
+    session = MultiBucketSession({"b": objects}, etag_suffix=SUFFIX)
+    head_object = session._client.head_object
 
-    def counting(file_id: str) -> bytes:
-        fetched.append(file_id)
-        return get_bytes(file_id)
+    async def timestamped(**kwargs):
+        resp = await head_object(**kwargs)
+        return {**resp, "ETag": '"2026-04-16T00:00:00Z"'}
 
-    monkeypatch.setattr(fake, "get_bytes", counting)
-    vfs = GoogleDriveVFS(
-        GoogleDriveConfig(client_id="i", client_secret="s", refresh_token="r"))
-    monkeypatch.setattr(vfs, "READ_REVALIDATABLE", True)
+    monkeypatch.setattr(session._client, "head_object", timestamped)
     virtual = "/m/a.txt"
 
     async def run():
         ws = _fresh_workspace(vfs)
         try:
             await _line(ws, f"cat {virtual}")
-            before = len(fetched)
-            read_token = hashlib.md5(SEED).hexdigest()
+            before = session._client.calls["get_object"]
+            read_token = hashlib.md5(SEED).hexdigest() + SUFFIX
             holds_read_token = await ws.cache.is_fresh(virtual, read_token)
             stat = await _reconcile_stat(ws, virtual)
             assert stat.fingerprint is not None
             fresh = await ws.cache.is_fresh(virtual, stat.fingerprint)
             await _line(ws, f"cat {virtual}")
-            return (holds_read_token, stat.fingerprint
-                    != read_token, fresh, len(fetched) - before)
+            return (holds_read_token, stat.fingerprint != read_token, fresh,
+                    session._client.calls["get_object"] - before)
         finally:
             await ws.close()
 
-    with patch_gdrive(fake):
+    with patch_s3_session(session):
+        vfs = build_vfs("s3", S3_CONFIG)
         holds_read_token, kinds_differ, fresh, refetched = asyncio.run(run())
 
     # The entry does hold the read's token, so a helper that compared the

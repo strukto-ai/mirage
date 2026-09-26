@@ -44,10 +44,24 @@ describe('gdrive versions', () => {
     expect(call?.[1]).toContain('/files/f1/revisions/r1?alt=media')
   })
 
-  it('captureFileMetadata prefers md5, falls back to head revision', async () => {
+  it('captureFileMetadata returns the three slots raw', async () => {
+    // The coalescing that used to happen here now happens in the caller,
+    // through driveFingerprint: the caller verifies an md5 against the bytes
+    // it downloaded, and a token it could not tell apart from a revision
+    // would be dropped for every file Drive gives no md5 for.
     vi.mocked(googleGet).mockResolvedValueOnce({ headRevisionId: 'r9', md5Checksum: 'abc' })
-    expect(await captureFileMetadata(TM, 'f1')).toEqual(['abc', 'r9'])
+    expect(await captureFileMetadata(TM, 'f1')).toEqual(['abc', 'r9', null])
     vi.mocked(googleGet).mockResolvedValueOnce({ headRevisionId: 'r9' })
-    expect(await captureFileMetadata(TM, 'f1')).toEqual(['r9', 'r9'])
+    expect(await captureFileMetadata(TM, 'f1')).toEqual([null, 'r9', null])
+  })
+
+  it('captureFileMetadata asks for the stamp and returns it', async () => {
+    // The third slot is what keeps a token-less file matching: a Drive
+    // shortcut has no md5 and no revision, and without the stamp the read
+    // would answer null while stat answered one.
+    vi.mocked(googleGet).mockResolvedValueOnce({ modifiedTime: '2026-04-01T00:00:00.000Z' })
+    expect(await captureFileMetadata(TM, 'f1')).toEqual([null, null, '2026-04-01T00:00:00.000Z'])
+    const params = vi.mocked(googleGet).mock.calls.at(-1)?.[2] as Record<string, unknown>
+    expect(String(params.fields)).toContain('modifiedTime')
   })
 })

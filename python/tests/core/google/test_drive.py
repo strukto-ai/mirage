@@ -18,7 +18,7 @@ import pytest
 
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.core.google.drive import (delete_file, download_file,
+from mirage.core.google.drive import (delete_file, download_file, get_file,
                                       list_all_files, list_files,
                                       list_shared_drives)
 
@@ -315,3 +315,55 @@ async def test_list_files_with_full_modified_range(token_manager):
     assert "'root' in parents" in q
     assert "modifiedTime >= '2026-05-01T00:00:00Z'" in q
     assert "modifiedTime < '2026-06-01T00:00:00Z'" in q
+
+
+@pytest.mark.asyncio
+async def test_list_files_asks_for_both_content_tokens(token_manager):
+    """The listing is where the freshness probe gets its token.
+
+    `_probe` stats with an empty index, so stat misses and warms through the
+    parent readdir, which is this call. Without these two fields the probe's
+    stat falls to modifiedTime while the read stamps an md5, and a `fresh`
+    gdrive mount evicts and refetches on every read.
+
+    Asserted against the literal `files(...)` segment rather than the
+    constant, because a constant-identity assertion moves with the constant
+    and none of this repo's four gdrive fakes honours a `fields` mask -- so
+    this is the only thing that catches a reverted FIELDS.
+    """
+    captured = {}
+
+    async def fake_get(token_manager, url, params=None):
+        captured["params"] = params
+        return {"files": []}
+
+    with patch("mirage.core.google.drive.google_get", new=fake_get):
+        await list_files(token_manager=token_manager, folder_id="root")
+
+    fields = captured["params"]["fields"]
+    inner = fields[fields.index("files(") + len("files("):]
+    assert "md5Checksum" in inner
+    assert "headRevisionId" in inner
+
+
+@pytest.mark.asyncio
+async def test_get_file_asks_for_both_content_tokens_unwrapped(token_manager):
+    """`stat_from_api`'s door needs the same two fields, shaped differently.
+
+    A files.get response is a bare File resource, so its mask is top-level:
+    wrapping these in `files(...)` here would ask for a field the response
+    has no room for and Drive would return neither, silently.
+    """
+    captured = {}
+
+    async def fake_get(token_manager, url, params=None):
+        captured["params"] = params
+        return {"id": "f1"}
+
+    with patch("mirage.core.google.drive.google_get", new=fake_get):
+        await get_file(token_manager, "f1")
+
+    fields = captured["params"]["fields"]
+    assert "md5Checksum" in fields
+    assert "headRevisionId" in fields
+    assert "files(" not in fields

@@ -104,6 +104,14 @@ async def readdir(
             rt = "gdrive/file"
         source_size = int(f.get("size") or f.get("quotaBytesUsed") or 0)
         extra = {"drive_id": f.get("driveId")} if f.get("driveId") else {}
+        # Carried so stat can answer the same token the read stamps without
+        # a second request. Omitted when Drive omits them, as `drive_id` is:
+        # a folder and a native google-apps file have neither, and the
+        # absence is what sends `drive_fingerprint` on to the stamp.
+        if f.get("md5Checksum"):
+            extra["md5_checksum"] = f["md5Checksum"]
+        if f.get("headRevisionId"):
+            extra["head_revision_id"] = f["headRevisionId"]
         # Binary files download raw, so Drive's size is the rendered byte
         # length and stays. Google-apps files (gdoc/gsheet/gslide) render to
         # JSON, so Drive's source size must not become FileStat.size

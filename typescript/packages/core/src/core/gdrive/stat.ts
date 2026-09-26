@@ -17,6 +17,7 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { driveFingerprint } from './fingerprint.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir as coreReaddir } from './readdir.ts'
 import { enoent } from '../../utils/errors.ts'
 import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
@@ -59,7 +60,7 @@ async function statFromApi(
     type: FileType.FILE,
     content: contentTypeForPath(vfsName),
     modified,
-    fingerprint: modified !== '' ? modified : null,
+    fingerprint: driveFingerprint(item.md5Checksum, item.headRevisionId, modified),
     extra: {
       file_id: node.id,
       resource_type: MIME_TO_RT[node.mimeType] ?? 'gdrive/file',
@@ -111,7 +112,11 @@ export async function stat(
     type: FileType.FILE,
     content: contentTypeForPath(entry.vfsName),
     modified: entry.remoteTime,
-    fingerprint: entry.remoteTime !== '' ? entry.remoteTime : null,
+    fingerprint: driveFingerprint(
+      entry.extra.md5_checksum,
+      entry.extra.head_revision_id,
+      entry.remoteTime,
+    ),
     extra: {
       file_id: entry.id,
       resource_type: entry.resourceType,

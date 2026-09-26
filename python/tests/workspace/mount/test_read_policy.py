@@ -24,6 +24,7 @@ from mirage.vfs.ceph.ceph import CephVFS
 from mirage.vfs.digitalocean.digitalocean import DigitalOceanVFS
 from mirage.vfs.disk.disk import DiskVFS
 from mirage.vfs.gcs.gcs import GCSVFS
+from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.vfs.gridfs import GridFSConfig
 from mirage.vfs.gridfs.gridfs import GridFSVFS
 from mirage.vfs.hf_buckets import HfBucketsConfig, HfBucketsVFS
@@ -267,6 +268,18 @@ def test_gridfs_is_allowed_fresh_on_a_constructed_instance():
     assert check_read_capability("/g/", vfs, FRESH) is None
 
 
+def test_gdrive_is_allowed_fresh_on_a_constructed_instance():
+    # The flag on the class is one line asserting itself; running the
+    # verdict on an instance is what proves gdrive can declare `fresh`. The
+    # token behind the claim is pinned by the read-token contract,
+    # tests/vfs/test_read_revalidatable.py.
+    assert GoogleDriveVFS.READ_REVALIDATABLE is True
+    vfs = GoogleDriveVFS(
+        GoogleDriveConfig(client_id="c", client_secret="s", refresh_token="r"))
+    assert vfs.caches_reads is True
+    assert check_read_capability("/gd/", vfs, FRESH) is None
+
+
 def test_bounded_is_allowed_on_a_backend_that_cannot_revalidate():
     assert check_read_capability("/d/", RAMVFS(), ReadSpec()) is None
 
@@ -280,7 +293,8 @@ def test_bounded_is_allowed_on_a_backend_that_cannot_revalidate():
 REVALIDATABLE = {
     "s3", "aliyun", "backblaze", "ceph", "digitalocean", "gcs", "minio", "oci",
     "qingstor", "r2", "scaleway", "seaweedfs", "supabase", "tencent", "wasabi",
-    "gridfs", "hf_models", "hf_datasets", "hf_spaces", "onedrive", "sharepoint"
+    "gridfs", "gdrive", "hf_models", "hf_datasets", "hf_spaces", "onedrive",
+    "sharepoint"
 }
 
 

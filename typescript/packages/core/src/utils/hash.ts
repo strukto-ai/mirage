@@ -133,3 +133,37 @@ export function md5Hex(bytes: Uint8Array): string {
   while (!result.done) result = blocks.next()
   return toHex(result.value)
 }
+
+// The yielding twin of md5Hex, for hashing bytes a caller just received.
+//
+// md5Hex is synchronous and this is a pure-JS MD5 -- WebCrypto has no MD5 and
+// core cannot import node:crypto, because it must run in a browser -- so
+// hashing a large payload in one go blocks the event loop. A TypeScript FUSE
+// mount is served by the loop of the process that created it, so a multi-second
+// stall makes the kernel time out and every later op fail with `Device not
+// configured`. Driving the same generator in batches and handing the loop back
+// between them keeps that from happening.
+//
+// Python needs no twin: hashlib is C and its FUSE loop runs on a thread.
+//
+// md5Blocks yields once per 16 KiB, so this hands the loop back roughly every
+// megabyte. It has to be small enough that a realistic payload reaches it at
+// all: a threshold above the total number of yields means the generator
+// finishes without ever awaiting, and the hash is synchronous again with
+// nothing to show for it.
+const MD5_SLICES_PER_YIELD = 64
+
+export async function md5HexAsync(bytes: Uint8Array): Promise<string> {
+  const blocks = md5Blocks(bytes)
+  let result = blocks.next()
+  let sinceYield = 0
+  while (!result.done) {
+    result = blocks.next()
+    sinceYield += 1
+    if (sinceYield >= MD5_SLICES_PER_YIELD) {
+      sinceYield = 0
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+  }
+  return toHex(result.value)
+}

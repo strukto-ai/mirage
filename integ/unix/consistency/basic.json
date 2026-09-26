@@ -12,7 +12,8 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "hf-hub"
+        "hf-hub",
+        "gdrive"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -51,7 +52,8 @@
         "onedrive",
         "sharepoint",
         "sharepoint-prefix",
-        "hf-hub"
+        "hf-hub",
+        "gdrive"
       ],
       "read": "fresh",
       "scenario": [
@@ -79,7 +81,7 @@
         "stdout": "v1\nv2\n",
         "stderr": ""
       },
-      "note": "Narrowed to the backends that may declare `read: fresh` (the S3 family, OneDrive and SharePoint, and the Hugging Face Hub repos, whose hf-hub target changes the file by commit): the other three cache reads but stamp no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list."
+      "note": "Narrowed to the backends that may declare `read: fresh` (the S3 family, OneDrive and SharePoint, the Hugging Face Hub repos, whose hf-hub target changes the file by commit, and Google Drive, whose token is the file's md5): the other three cache reads but stamp no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list."
     }
   ]
 }

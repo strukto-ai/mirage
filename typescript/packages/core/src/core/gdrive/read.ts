@@ -14,6 +14,7 @@
 
 import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import type { IndexEntry } from '../../cache/index/config.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { entryOrWarm } from '../../cache/index/warm.ts'
 import { PathSpec } from '../../types.ts'
@@ -24,20 +25,85 @@ import { captureFileMetadata, downloadRevision } from './versions.ts'
 import { readSpreadsheet } from '../gsheets/read.ts'
 import { readPresentation } from '../gslides/read.ts'
 import type { TokenManager } from '../google/client.ts'
+import { driveFingerprint } from './fingerprint.ts'
+import { md5HexAsync } from '../../utils/hash.ts'
 import { DIRECTORY_RESOURCE_TYPES, readdir } from './readdir.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { eisdir, enoent } from '../../utils/errors.ts'
 import { sliceWindow, windowFor } from '../../utils/ranges.ts'
 
+const NATIVE_RESOURCE_TYPES = new Set(['gdrive/gdoc', 'gdrive/gsheet', 'gdrive/gslide'])
+
+// Whether a read returned the entire object rather than a window. A token
+// describes the whole object, and latestFingerprint's byte-identity guard
+// applies only to writes, so a windowed body stamped with one would read as
+// fresh for the life of the entry. Both read paths ask this before stamping;
+// a guard written twice is a guard the two paths can drift apart on.
+function wholeFile(offset: number, size: number | null): boolean {
+  return offset === 0 && size === null
+}
+
+// The [fingerprint, revision] pair that describes bytes we just read.
+//
+// The capture and the download are two separate requests, so the metadata
+// describes the object as of the first and the bytes come from the second.
+// Drive's md5Checksum is the md5 of the content and the content is already in
+// memory, so the two are compared rather than trusted -- no extra request.
+//
+// The three answers are three different states of evidence, and they are not
+// interchangeable:
+//
+//   - A window proves nothing about either token. The fingerprint is dropped
+//     because it describes the whole object and a partial body under it would
+//     read as fresh for the life of the entry, but the revision still names
+//     the object the window came from, so it stays.
+//   - A disagreeing md5 is positive proof that the capture predates these
+//     bytes -- and the revision came from that same capture, so it describes
+//     the old content too. Both are dropped. Keeping the revision would be
+//     worse than useless: a revision pin REPLACES the drift check rather than
+//     supplementing it, so replay would serve the pre-change bytes and report
+//     success with the one mechanism that would have surfaced it switched off.
+//   - Otherwise the capture is trusted. A capture with no md5 cannot be
+//     checked, so its token is stamped as it arrived -- dropping it would
+//     leave the read at null against stat's head revision, the mismatch this
+//     chain exists to remove.
+async function verifiedTokens(
+  md5: string | null,
+  headRevision: string | null,
+  modified: string | null,
+  data: Uint8Array,
+  offset: number,
+  size: number | null,
+): Promise<[string | null, string | null]> {
+  if (!wholeFile(offset, size)) return [null, headRevision]
+  if (md5 !== null && (await md5HexAsync(data)) !== md5) return [null, null]
+  return [driveFingerprint(md5, headRevision, modified), headRevision]
+}
+
+// One version field off an index entry, or null when it is unusable.
+// `IndexEntry.extra` is untyped: a listing that omitted the field leaves it
+// absent, and a restored index can hold an empty string or a non-string. Any
+// of those reaching the md5 comparison would drop a token the next link of
+// the chain could have stamped.
+function entryToken(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
 // Download a binary file honouring snapshot revision pins. A pinned path
-// reads that revision's content; an actively recorded read captures
-// (fingerprint, revision) so snapshots can pin it later. An unrecorded read
-// captures nothing, which is one reason gdrive does not declare
-// readRevalidatable.
+// reads that revision's content; an actively recorded read captures the
+// version fields and verifies the md5 against the bytes it downloaded.
+//
+// An unrecorded read stamps from the index entry the caller resolved the file
+// through, checked the same way, so its token does not depend on a recorder
+// being bound and costs no request. The entry precedes the download, so a
+// stale md5 is caught by the check; the other two fields are unverified and
+// trusted, as an md5-less capture is. It pins no revision: the entry's can be
+// a TTL old, and a replay pinned to it could serve bytes this read never saw.
 export async function readFileVersioned(
   tm: TokenManager,
   fileId: string,
   virtual: string,
+  entry: IndexEntry,
   offset = 0,
   size: number | null = null,
 ): Promise<Uint8Array> {
@@ -50,10 +116,20 @@ export async function readFileVersioned(
   if (pinned !== null) {
     data = await downloadRevision(tm, fileId, pinned, window)
   } else if (recordingActive()) {
-    ;[fingerprint, revision] = await captureFileMetadata(tm, fileId)
+    const [md5, captured, modified] = await captureFileMetadata(tm, fileId)
+    revision = captured
     data = await downloadFile(tm, fileId, window)
+    ;[fingerprint, revision] = await verifiedTokens(md5, captured, modified, data, offset, size)
   } else {
     data = await downloadFile(tm, fileId, window)
+    ;[fingerprint] = await verifiedTokens(
+      entryToken(entry.extra.md5_checksum),
+      entryToken(entry.extra.head_revision_id),
+      entryToken(entry.remoteTime),
+      data,
+      offset,
+      size,
+    )
   }
   record('read', virtual, 'gdrive', data.length, timer, { fingerprint, revision })
   return data
@@ -95,13 +171,25 @@ export async function read(
   if (entry === null) throw enoent(path.virtual)
   const rt = entry.resourceType
   if (DIRECTORY_RESOURCE_TYPES.has(rt)) throw eisdir(path.virtual)
-  if (rt === 'gdrive/gdoc')
-    return sliceWindow(await readDoc(accessor.tokenManager, entry.id), offset, size)
-  if (rt === 'gdrive/gsheet')
-    return sliceWindow(await readSpreadsheet(accessor.tokenManager, entry.id), offset, size)
-  if (rt === 'gdrive/gslide')
-    return sliceWindow(await readPresentation(accessor.tokenManager, entry.id), offset, size)
-  return readFileVersioned(accessor.tokenManager, entry.id, path.virtual, offset, size)
+  if (!NATIVE_RESOURCE_TYPES.has(rt))
+    return readFileVersioned(accessor.tokenManager, entry.id, path.virtual, entry, offset, size)
+  const timer = startOp()
+  let rendered: Uint8Array
+  if (rt === 'gdrive/gdoc') rendered = await readDoc(accessor.tokenManager, entry.id)
+  else if (rt === 'gdrive/gsheet') rendered = await readSpreadsheet(accessor.tokenManager, entry.id)
+  else rendered = await readPresentation(accessor.tokenManager, entry.id)
+  const sliced = sliceWindow(rendered, offset, size)
+  // The entry's token costs no request and is never newer than the render. It
+  // can be a TTL older: a wasted refetch, or a STRICT drift raise on an
+  // untouched file. No revision: a pin would replace the drift check, and this
+  // branch never consults one.
+  record('read', path.virtual, 'gdrive', sliced.length, timer, {
+    fingerprint: wholeFile(offset, size)
+      ? driveFingerprint(entry.extra.md5_checksum, entry.extra.head_revision_id, entry.remoteTime)
+      : null,
+    revision: null,
+  })
+  return sliced
 }
 
 export async function* stream(

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 import itertools
 
 import pytest
@@ -31,7 +32,7 @@ import mirage.core.gdrive.write as write_mod
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.core.google.drive import FOLDER_MIME
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 
 FILE_MIME = "application/octet-stream"
 
@@ -74,6 +75,15 @@ class FakeDrive:
         item = self.items[item_id]
         out = {k: v for k, v in item.items() if k != "content"}
         out["size"] = str(len(item["content"]))
+        mime = item["mimeType"]
+        # Drive's own guards, mirrored from integ/server/gws/drive/item.ts:
+        # a folder and a native google-apps file carry neither field. Emitting
+        # them flatly would give every fake item an md5, so steps 2 and 3 of
+        # `drive_fingerprint`'s chain would never execute and the tests that
+        # cover them would pass while proving nothing.
+        if mime != FOLDER_MIME and mime not in MIME_TO_EXT:
+            out["md5Checksum"] = hashlib.md5(item["content"]).hexdigest()
+            out["headRevisionId"] = f"{item_id}-r1"
         return out
 
     async def list_files(self,
