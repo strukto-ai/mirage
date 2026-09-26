@@ -12,10 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.commands.cli.refusal import (ARGPARSE_EXIT, clap_missing_operands,
                                          clap_supplied, git_unknown_option,
                                          leaf_refusal)
+from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.spec.types import CommandSpec, Operand, Option, UsageStyle
+from mirage.resource.ram import RAMResource
+from mirage.types import MountMode
+from mirage.workspace import Workspace
 from mirage.workspace.executor.command.types import ParsedCommand
 
 ARGPARSE_MESSAGE = b"gws gmail: unrecognized option '--nosuch'\n"
@@ -166,3 +172,81 @@ def test_clap_exits_two_like_argparse_but_for_its_own_reason():
     msg, code = leaf_refusal(UsageStyle.CLAP, ARGPARSE_MESSAGE, _parsed([]))
     assert msg == ARGPARSE_MESSAGE
     assert code == 2
+
+
+# Every CLI-tier option that declares `choices` renders through the same
+# gnulib ARGMATCH block a coreutils command does, because a leaf parses
+# with the ordinary spec machinery. What a CLI adds is the display path
+# in place of a command name, and its dialect's exit code. The
+# expectation is CHOSEN rather than measured: none of these is a GNU
+# program, so there is no host binary to pin the wording against.
+_CLI_CHOICE_REFUSALS = [
+    ("gh", {
+        "token": "t"
+    }, "gh issue list --state=x", "gh issue list", "--state", "x",
+     ("open", "closed", "all"), ARGPARSE_EXIT),
+    ("gh", {
+        "token": "t"
+    }, "gh pr list --state=x", "gh pr list", "--state", "x",
+     ("open", "closed", "merged", "all"), ARGPARSE_EXIT),
+    ("hf", {
+        "token": "t"
+    }, "hf download --repo-type=x owner/repo file", "hf download",
+     "--repo-type", "x", ("model", "dataset", "space"), ARGPARSE_EXIT),
+    ("hf", {
+        "token": "t"
+    }, "hf repo create --space_sdk=x owner/repo", "hf repo create",
+     "--space_sdk", "x", ("gradio", "streamlit", "docker",
+                          "static"), ARGPARSE_EXIT),
+    ("himalaya", {
+        "imap_host": "h",
+        "smtp_host": "h",
+        "username": "u",
+        "password": "p",
+    }, "himalaya message reply --posting-style=x 1", "himalaya message reply",
+     "--posting-style", "x", ("top", "bottom"), ARGPARSE_EXIT),
+    # git is the one GIT-dialect install, so it is also the one that
+    # answers the block with 129 rather than argparse's 2.
+    ("git", None, "git status --untracked-files=bogus", "git status",
+     "--untracked-files", "bogus", ("no", "normal", "all"), 129),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name,config,line,path,option,bad,choices,exit_code",
+                         _CLI_CHOICE_REFUSALS)
+async def test_a_cli_leaf_refuses_a_choice_in_the_argmatch_block(
+        name, config, line, path, option, bad, choices, exit_code):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws.register_cli(name, cli_spec_for(name), config=config)
+    result = await ws.execute(line)
+    valid = "\n".join(f"  - '{c}'" for c in choices)
+    assert (await result.materialize_stderr()).decode() == (
+        f"{path}: invalid argument '{bad}' for '{option}'\n"
+        f"Valid arguments are:\n{valid}\n"
+        f"Try '{path} --help' for more information.\n")
+    assert result.exit_code == exit_code
+
+
+# Pinned against git 2.47.3. git's parse-options runs the whole option
+# scan first and reports an unrecognized option from it, and only then
+# does the command validate a value it did accept, so under the GIT
+# dialect an unknown option outranks a bad value WHEREVER the two sit on
+# the line -- the opposite of the scan-order rule every coreutils
+# command follows. `git status --untracked-files=bogus --bogus` and the
+# same two words reversed both answer `unknown option`, and
+# `git status --untracked-files=bogus` alone answers the ARGMATCH block
+# above. Do not "fix" leaf_refusal to report the first error in line
+# order: that reads as consistency and is a divergence from git.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "git status --untracked-files=bogus --bogus",
+    "git status --bogus --untracked-files=bogus",
+])
+async def test_git_reports_an_unknown_option_over_an_earlier_bad_value(line):
+    ws = Workspace({"/": RAMResource()}, mode=MountMode.WRITE)
+    ws.register_cli("git", cli_spec_for("git"))
+    result = await ws.execute(line)
+    assert (await result.materialize_stderr()).decode() == (
+        "error: unknown option `bogus'\n")
+    assert result.exit_code == 129

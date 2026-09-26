@@ -19,6 +19,13 @@ from mirage.types import PathSpec
 from mirage.utils.compress import GZIP_MAGIC, gunzip_checked
 from mirage.utils.errors import GzipDataError
 
+# zgrep's hint takes the backtick form rather than the
+# ``Try '... --help' for more information.`` line usage_hint builds, so
+# it is a constant here rather than a call. A host zgrep prefixes a
+# script line number and an interpreter path; both are dropped, since
+# they name a file mirage does not have.
+ZGREP_NO_PATTERN = "zgrep: missing pattern; try `zgrep --help' for help"
+
 
 async def _read_plain(
     read_bytes: Callable[..., Awaitable[bytes]],
@@ -170,8 +177,7 @@ async def zgrep(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(flags, spec=SPECS["zgrep"])
     pattern, never_match = await resolve_pattern(
-        texts, fl, partial(_read_plain, read_bytes),
-        "zgrep: usage: zgrep [flags] pattern [path]")
+        texts, fl, partial(_read_plain, read_bytes), ZGREP_NO_PATTERN)
     f = parse_flags(fl, never_match)
     compiled = build_pattern_str(pattern, f.fixed, f.whole_word,
                                  f.basic_regexp)
