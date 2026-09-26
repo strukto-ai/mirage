@@ -21,7 +21,7 @@ import type { MongoDBAccessor } from '../../../accessor/mongodb.ts'
 import { read as mongodbRead } from '../../../core/mongodb/read.ts'
 import { readdir as mongodbReaddir } from '../../../core/mongodb/readdir.ts'
 import { stat as mongodbStat } from '../../../core/mongodb/stat.ts'
-import { readStream as mongodbStream } from '../../../core/mongodb/stream.ts'
+import { streamAny as mongodbStream } from '../../../core/mongodb/read.ts'
 import type { CommandIO } from '../generic_bind/index.ts'
 
 export const MONGODB_IO: CommandIO<MongoDBAccessor> = new VFSAdapter<MongoDBAccessor>({
@@ -30,7 +30,7 @@ export const MONGODB_IO: CommandIO<MongoDBAccessor> = new VFSAdapter<MongoDBAcce
     meta: { grep: { mode: 'regex', stream: true } },
   },
   read: { readdir: mongodbReaddir, readBytes: mongodbRead, stat: mongodbStat },
-  native: { readStream: (accessor, path) => mongodbStream(accessor, path) },
+  native: { readStream: mongodbStream },
   isMounted: () => true,
   local: false,
 }).toCommandIO()

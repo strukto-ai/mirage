@@ -530,6 +530,21 @@
       "databricks": "This case creates output files directly under /data. This target cannot serve arbitrary file creation there, as with the existing printf-based seeding cases. All 19 writable sibling targets exercise the dispatcher writes.",
       "databricks-prefix": "This case creates output files directly under /data. This target cannot serve arbitrary file creation there, as with the existing printf-based seeding cases. All 19 writable sibling targets exercise the dispatcher writes.",
       "sharepoint-prefix": "This case creates output files directly under /data. This target cannot serve arbitrary file creation there, as with the existing printf-based seeding cases. All 19 writable sibling targets exercise the dispatcher writes."
+    },
+    "integ/unix/ls/a.json :: ls_empty_all": {
+      "hf": "Hugging Face has no empty directory markers, so the mkdir-only fixture does not persist. Nonempty -a listings remain covered by ls_a.",
+      "hf-prefix": "Hugging Face has no empty directory markers, so the mkdir-only fixture does not persist. Nonempty -a listings remain covered by ls_a.",
+      "sharepoint-prefix": "This target mounts a file prefix that cannot create child directories; it is also excluded from the mkdir fixture cases. Nonempty -a listings remain covered by ls_a."
+    },
+    "integ/unix/ls/a.json :: ls_empty_long": {
+      "hf": "Hugging Face has no empty directory markers, so the mkdir-only fixture does not persist. Nonempty -a listings remain covered by ls_a.",
+      "hf-prefix": "Hugging Face has no empty directory markers, so the mkdir-only fixture does not persist. Nonempty -a listings remain covered by ls_a.",
+      "sharepoint-prefix": "This target mounts a file prefix that cannot create child directories; it is also excluded from the mkdir fixture cases. Nonempty -a listings remain covered by ls_a."
+    },
+    "integ/unix/ls/a.json :: ls_empty_almost_all": {
+      "hf": "Hugging Face has no empty directory markers, so the mkdir-only fixture does not persist. Nonempty -a listings remain covered by ls_a.",
+      "hf-prefix": "Hugging Face has no empty directory markers, so the mkdir-only fixture does not persist. Nonempty -a listings remain covered by ls_a.",
+      "sharepoint-prefix": "This target mounts a file prefix that cannot create child directories; it is also excluded from the mkdir fixture cases. Nonempty -a listings remain covered by ls_a."
     }
   }
 }

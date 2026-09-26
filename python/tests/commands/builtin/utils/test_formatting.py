@@ -122,3 +122,16 @@ def test_scaled_size_rounds_up_like_gnu():
                                   False) == "1.5K"
     assert formatting.scaled_size(1500, None, True) == "1.5K"
     assert formatting.scaled_size(1500, None, False) == "1500"
+
+
+@pytest.mark.parametrize("size,modified,expected", [
+    (None, "2020-01-02T03:04:00Z", "- Jan  2  2020"),
+    (0, None, "0 -"),
+    (None, None, "- -"),
+])
+def test_size_and_time_are_independently_unknown(size, modified, expected):
+    row = FileStat(name="file",
+                   type=FileType.FILE,
+                   size=size,
+                   modified=modified)
+    assert formatting.format_ls_long([row])[0].endswith(expected + " file")

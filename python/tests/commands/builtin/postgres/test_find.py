@@ -67,10 +67,8 @@ def _fake_client(mc) -> None:
 
 async def _run(paths: list[PathSpec], *texts: str, **flags) -> list[str]:
     find = _find_command()
-    with patch("mirage.core.postgres.readdir.client") as rd_client, \
-         patch("mirage.core.postgres.stat.client") as st_client:
+    with patch("mirage.core.postgres.readdir.client") as rd_client:
         _fake_client(rd_client)
-        _fake_client(st_client)
         stdout, _io = await find(
             _accessor(), paths, list(texts),
             CommandOpts(index=RAMIndexCacheStore(), flags={**flags}))
@@ -107,8 +105,7 @@ async def test_depth_window():
 
 @pytest.mark.asyncio
 async def test_size_filter_counts_rows_jsonl_as_size_zero():
-    # rows.jsonl is sizeless (table_size_bytes is storage, not the rendered
-    # JSONL length, and lives in extra), so -size treats it as 0.
+    # Unknown rendered sizes are treated as zero by find -size.
     hits = await _run([_spec(MOUNT)], type="f", size="+1k")
     assert hits == []
     kept = await _run([_spec(MOUNT)], type="f", size="-1k")

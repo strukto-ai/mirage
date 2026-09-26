@@ -201,7 +201,8 @@ def _directive_value(spec: str, s: FileStat, name: str,
     if spec == "n":
         return name
     if spec == "s":
-        return str(content_size(s))
+        return "-" if not is_dir(s) and s.size is None else str(
+            content_size(s))
     if spec == "F":
         return _type_label(s)
     if spec == "a":

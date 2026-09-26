@@ -41,7 +41,6 @@ async function readDocuments(
   path: PathSpec,
   _index?: IndexCacheStore,
 ): Promise<Uint8Array> {
-  await entityGuard(accessor, match, path.virtual)
   const chunks: Uint8Array[] = []
   let total = 0
   for await (const chunk of readStream(accessor, path)) {

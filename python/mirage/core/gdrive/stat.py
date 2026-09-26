@@ -58,7 +58,8 @@ async def stat_from_api(accessor: GDriveAccessor, key: str,
     ext = MIME_TO_EXT.get(node.mime_type)
     vfs_name = f"{node.name}{ext}" if ext else node.name
     # Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
-    size = None if ext else int(item.get("size") or 0)
+    size = int(
+        item["size"]) if not ext and item.get("size") is not None else None
     return FileStat(
         name=vfs_name,
         size=size,

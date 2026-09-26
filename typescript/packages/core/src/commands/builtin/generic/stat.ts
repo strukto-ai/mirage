@@ -179,7 +179,7 @@ function directiveValue(
 ): string {
   if (spec === '%') return '%'
   if (spec === 'n') return name
-  if (spec === 's') return String(contentSize(s))
+  if (spec === 's') return !isDir(s) && s.size === null ? '-' : String(contentSize(s))
   if (spec === 'F') return typeLabel(s)
   if (spec === 'a') return effectiveMode(s).toString(8)
   if (spec === 'A') return lsModeString(s)

@@ -74,7 +74,7 @@
       "command": "ls -a /",
       "expect": {
         "exit": 0,
-        "stdout": ".bash_history\ndata\ndev\nusr\n",
+        "stdout": ".\n..\n.bash_history\ndata\ndev\nusr\n",
         "stderr": ""
       }
     }

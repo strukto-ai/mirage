@@ -16,8 +16,7 @@ from typing import Any
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb._sampler import sample_field_types
-from mirage.core.mongodb.client import (count_documents, get_index_stats,
-                                        get_indexes, get_validator, is_view,
+from mirage.core.mongodb.client import (get_indexes, get_validator, is_view,
                                         list_collections)
 from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind, IndexType
 
@@ -32,22 +31,20 @@ async def build_database_json(
     accessor: MongoDBAccessor,
     database: str,
 ) -> dict[str, Any]:
-    all_names = await list_collections(accessor.client, database)
-    collections: list[dict[str, Any]] = []
-    views: list[dict[str, Any]] = []
-    for name in all_names:
-        if await is_view(accessor.client, database, name):
-            views.append({"name": name})
-        else:
-            doc_count = await count_documents(accessor.client, database, name)
-            collections.append({
-                "name": name,
-                "document_count": doc_count,
-            })
+    names = await list_collections(accessor.client, database)
+    views = await list_collections(accessor.client,
+                                   database,
+                                   kind=EntityKind.VIEW)
+    view_names = set(views)
+    collections = [name for name in names if name not in view_names]
     return {
         "database": database,
-        "collections": collections,
-        "views": views,
+        "collections": [{
+            "name": name
+        } for name in collections],
+        "views": [{
+            "name": name
+        } for name in views],
     }
 
 
@@ -61,17 +58,14 @@ async def build_collection_schema_json(
     view = await is_view(accessor.client, database, collection)
     validator = await get_validator(accessor.client, database, collection)
     fields = await sample_field_types(col, sample_size=sample_size)
-    doc_count = await count_documents(accessor.client, database, collection)
     if view:
         enriched_indexes: list[dict[str, Any]] = []
     else:
         indexes = await get_indexes(accessor.client, database, collection)
-        stats = await get_index_stats(accessor.client, database, collection)
         enriched_indexes = [{
             "name": idx.get("name"),
             "keys": dict(idx.get("key", {})),
             "type": _index_type(idx),
-            "stats": stats.get(idx["name"], {}),
         } for idx in indexes]
     return {
         "database": database,
@@ -81,6 +75,5 @@ async def build_collection_schema_json(
         "fields": fields,
         "primary_key": PRIMARY_KEY,
         "indexes": enriched_indexes,
-        "document_count": doc_count,
         "sampled": sample_size,
     }

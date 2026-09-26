@@ -1004,6 +1004,8 @@ def parse_command(
             flags[flag_name] = resolved_list
             path_flag_values.extend(resolved_list)
         elif isinstance(value, str):
+            if cmd_name == "wget" and flag_name == "-O" and value == "-":
+                continue
             resolved = resolve_path(value, cwd)
             flags[flag_name] = resolved
             path_flag_values.append(resolved)
@@ -1019,9 +1021,10 @@ def parse_command(
             text_flag_values.append(value)
 
     flags.occurrences = [
-        (name, resolve_path(value, cwd) if cs.kind_by_dest.get(name) == "path"
-         and isinstance(value, str) else value)
-        for name, value in flags.occurrences
+        (name, resolve_path(value, cwd)
+         if cs.kind_by_dest.get(name) == "path" and isinstance(value, str)
+         and not (cmd_name == "wget" and name == "-O" and value == "-") else
+         value) for name, value in flags.occurrences
     ]
     return ParsedArgs(
         flags=flags,

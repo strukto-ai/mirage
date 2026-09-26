@@ -37,7 +37,7 @@ import { identityOf, type Identity } from '../utils/identity.ts'
 import { gnuStrerror, isEacces, isWalkError } from '../../../utils/errors.ts'
 import { failureText } from '../../../errors/classify.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { CycleError, respellOne } from '../../../utils/path.ts'
+import { CycleError, respellOne, norm } from '../../../utils/path.ts'
 import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { contentSize } from '../../../utils/stat_view.ts'
@@ -659,6 +659,7 @@ async function sortOperands(
 export interface LsFlags {
   readonly long: boolean
   readonly all: boolean
+  readonly showDotEntries: boolean
   readonly human: boolean
   readonly reverse: boolean
   readonly classify: boolean
@@ -856,6 +857,7 @@ export function parseFlags(fl: FlagView): LsFlags {
   return Object.freeze({
     long,
     all: fl.asBool('all') || fl.asBool('almost_all'),
+    showDotEntries: fl.asBool('all'),
     human: fl.asBool('human_readable'),
     reverse: fl.asBool('reverse'),
     classify: fl.asBool('classify'),
@@ -1013,11 +1015,39 @@ export async function lsGeneric(
   appendListing(rows, render, lines, flags.hyperlink ? rowed.map((o) => o.path.virtual) : null)
   let printed = rows.length > 0
   for (const operand of operands) {
-    for (const [dirSpec, entries] of operand.groups) {
+    for (const [dirSpec, group] of operand.groups) {
+      let entries = group
+      if (flags.showDotEntries) {
+        const dots: FileStat[] = []
+        for (const name of ['.', '..']) {
+          const target = norm(`${dirSpec.virtual}/${name}`)
+          let row = new FileStat({ name, type: FileType.DIRECTORY })
+          if (statNeeded(flags)) {
+            try {
+              const found =
+                opts.statPath !== undefined
+                  ? await opts.statPath(target)
+                  : await stat(childSpec(target, mountPrefixOf(dirSpec.virtual, dirSpec.vfsPath)))
+              if (found !== null) row = found.with({ name })
+            } catch (err) {
+              if (!isWalkError(err)) throw err
+              row = statFailedRow(name)
+              warnings.push({
+                message: `ls: cannot access '${name}': ${errText(err)}`,
+                serious: false,
+              })
+            }
+          }
+          dots.push(row)
+        }
+        entries = sortStats([...dots, ...entries], sortBy, reverse, timeKind, groupDirsFirst)
+      }
       if (headed) {
         if (printed) lines.push('')
         lines.push(`${respellOne(dirSpec.virtual, operand.path.virtual, operand.path.rawPath)}:`)
       }
+      // GNU 9.7 prints allocated blocks; VFS has no allocation metadata.
+      if (long) lines.push(entries.length > 0 ? 'total ?' : 'total 0')
       appendListing(
         entries,
         render,

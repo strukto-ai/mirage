@@ -18,12 +18,12 @@ from mirage.commands.builtin.generic.tail import tail as generic_tail
 from mirage.commands.builtin.generic.tail import tail_generic
 from mirage.commands.builtin.generic_bind.adapter import (bound_op,
                                                           resolve_or_empty)
-from mirage.commands.builtin.mongodb.cat import stream_any
 from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.builtin.utils.limit import row_cap_notice
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
+from mirage.core.mongodb.read import stream_any
 from mirage.core.mongodb.readdir import documents_exist
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_tail, watch_stream

@@ -174,10 +174,9 @@ async def test_stat_entity_rows_jsonl(accessor, index, monkeypatch):
     assert result.content == ContentType.TEXT
     assert result.name == "rows.jsonl"
     assert result.size is None
-    assert result.fingerprint is not None
-    assert len(result.fingerprint) == 64
-    assert result.extra["row_count"] == 42
-    assert result.extra["size_bytes"] == 4096
+    assert result.fingerprint is None
+    assert "row_count" not in result.extra
+    assert "size_bytes" not in result.extra
     assert result.extra["schema"] == "public"
     assert result.extra["kind"] == "tables"
     assert result.extra["name"] == "users"
@@ -208,34 +207,19 @@ async def test_stat_view_entity_rows(accessor, index, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stat_fingerprint_changes_with_row_count(accessor, index,
-                                                       monkeypatch):
-    monkeypatch.setattr(
-        "mirage.core.postgres.client.fetch_columns",
-        AsyncMock(return_value=[
-            {
-                "name": "id",
-                "type": "uuid",
-                "nullable": False
-            },
-        ]))
-    monkeypatch.setattr("mirage.core.postgres.client.table_size_bytes",
-                        AsyncMock(return_value=100))
-    monkeypatch.setattr("mirage.core.postgres.client.estimated_row_count",
-                        AsyncMock(return_value=10))
-    first = await stat(
+async def test_stat_does_not_fetch_data_or_planner_statistics(
+        accessor, index, monkeypatch):
+    for name in ("fetch_columns", "estimated_row_count", "table_size_bytes",
+                 "fetch_rows"):
+        monkeypatch.setattr("mirage.core.postgres.client." + name,
+                            AsyncMock(side_effect=AssertionError(name)))
+    result = await stat(
         accessor,
         PathSpec(vfs_path="public/tables/users/rows.jsonl",
-                 virtual="/public/tables/users/rows.jsonl",
-                 directory="/public/tables/users/rows.jsonl"), index)
-    monkeypatch.setattr("mirage.core.postgres.client.estimated_row_count",
-                        AsyncMock(return_value=20))
-    second = await stat(
-        accessor,
-        PathSpec(vfs_path="public/tables/users/rows.jsonl",
-                 virtual="/public/tables/users/rows.jsonl",
-                 directory="/public/tables/users/rows.jsonl"), index)
-    assert first.fingerprint != second.fingerprint
+                 virtual="/pg/public/tables/users/rows.jsonl",
+                 directory="/pg/public/tables/users"), index)
+    assert result.size is None
+    assert result.fingerprint is None
 
 
 @pytest.mark.asyncio

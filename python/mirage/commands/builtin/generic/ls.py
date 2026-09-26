@@ -43,6 +43,7 @@ LS_FAILURE = 2
 class LsFlags:
     long: bool = False
     all_files: bool = False
+    show_dot_entries: bool = False
     human: bool = False
     sort_by: LsSortBy = LsSortBy.NAME
     reverse: bool = False
@@ -290,6 +291,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
     return LsFlags(
         long=long,
         all_files=fl.as_bool("all") or fl.as_bool("almost_all"),
+        show_dot_entries=fl.as_bool("all"),
         human=fl.as_bool("human_readable"),
         sort_by=sort_by,
         reverse=fl.as_bool("reverse"),
@@ -1266,6 +1268,7 @@ async def ls(
     stat: Stat,
     long: bool = False,
     all_files: bool = False,
+    show_dot_entries: bool = False,
     human: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
@@ -1376,12 +1379,49 @@ async def ls(
     printed = bool(rows)
     for operand in operands:
         for dir_spec, entries in operand.groups:
+            if show_dot_entries:
+                dots = []
+                for name in (".", ".."):
+                    target = posixpath.normpath(
+                        posixpath.join(dir_spec.virtual, name))
+                    row = FileStat(name=name, type=FileType.DIRECTORY)
+                    if needed:
+                        try:
+                            if stat_path is not None:
+                                found = await stat_path(target)
+                            else:
+                                found = await stat(
+                                    PathSpec(virtual=target,
+                                             directory=target,
+                                             vfs_path=rekey(
+                                                 dir_spec.virtual,
+                                                 dir_spec.vfs_path, target)),
+                                    index)
+                            if found is not None:
+                                row = found.model_copy(update={"name": name})
+                        except (OSError, ValueError) as exc:
+                            logger.debug("ls: stat %s: %r", target, exc)
+                            row = _stat_failed_row(name)
+                            warnings.append(
+                                LsWarning(
+                                    f"ls: cannot access '{name}': "
+                                    f"{fs_strerror(exc) or exc}", False))
+                    dots.append(row)
+                entries = sort_stats(dots + entries,
+                                     sort_by,
+                                     reverse,
+                                     time_kind=time_kind,
+                                     group_dirs_first=group_dirs_first)
             if headed:
                 if printed:
                     results.append("")
                 header = respell_one(dir_spec.virtual, operand.path.virtual,
                                      operand.path.raw_path)
                 results.append(f"{header}:")
+            # GNU 9.7 prints allocated blocks here; VFS has no allocation
+            # metadata, so report unknown instead of inventing a block count.
+            if long:
+                results.append("total ?" if entries else "total 0")
             _render_group(results,
                           entries,
                           long=long,

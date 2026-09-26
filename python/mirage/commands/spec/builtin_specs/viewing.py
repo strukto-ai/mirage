@@ -182,6 +182,7 @@ SPECS: dict[str, CommandSpec] = {
             Option(short="-j", long="--skip-bytes", type="str"),
             Option(short="-N", long="--read-bytes", type="str"),
             Option(short="-t", long="--format", type="str", multiple=True),
+            Option(short="-c", type="bool"),
         ),
         rest=Operand(type="path"),
     ),

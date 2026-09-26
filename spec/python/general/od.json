@@ -317,6 +317,10 @@
       "multiple": true,
       "short": "-t",
       "type": "str"
+    },
+    {
+      "short": "-c",
+      "type": "bool"
     }
   ],
   "rest": {

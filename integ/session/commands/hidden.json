@@ -197,7 +197,7 @@
       "targets": [
         "ram-commands"
       ],
-      "command": "ls -a /scratch/only && rmdir /scratch/only",
+      "command": "ls -A /scratch/only && rmdir /scratch/only",
       "expect": {
         "exit": 0,
         "stdout": "",

@@ -120,7 +120,7 @@ export async function readdir(
     const extra: Record<string, unknown> = f.driveId !== undefined ? { drive_id: f.driveId } : {}
     let size: number | null = null
     if (resourceType === 'gdrive/file') {
-      size = sourceSize
+      size = f.size !== undefined ? Number.parseInt(f.size, 10) : null
     } else if (sourceSize !== null) {
       extra.source_size = sourceSize
     }

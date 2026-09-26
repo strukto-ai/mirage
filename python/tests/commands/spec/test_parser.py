@@ -1412,3 +1412,19 @@ def test_the_two_reports_keep_scan_order(argv, kinds):
     """GNU stops at the first offending token, so order decides."""
     parsed = parse_command(SPECS["grep"], [*argv, "x"], "/")
     assert parsed.option_error_kinds == kinds
+
+
+@pytest.mark.parametrize("argv", [["-O", "-"], ["-O-"]])
+def test_wget_stdout_is_not_a_path_operand(argv):
+    parsed = parse_command(SPECS["wget"],
+                           argv + ["https://example.test/"],
+                           "/data",
+                           cmd_name="wget")
+    assert parsed.flags["-O"] == "-"
+    assert parsed.path_flag_values == []
+    literal = parse_command(SPECS["wget"],
+                            ["-O", "./-", "https://example.test/"],
+                            "/data",
+                            cmd_name="wget")
+    assert literal.flags["-O"] == "/data/-"
+    assert literal.path_flag_values == ["/data/-"]

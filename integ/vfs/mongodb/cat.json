@@ -9,7 +9,7 @@
       "command": "cat /mongodb/mirage_integ/database.json",
       "expect": {
         "exit": 0,
-        "stdout": "{\"database\": \"mirage_integ\", \"collections\": [{\"name\": \"authors\", \"document_count\": 3}, {\"name\": \"books\", \"document_count\": 5}, {\"name\": \"system.views\", \"document_count\": 1}], \"views\": [{\"name\": \"recent_books\"}]}\n",
+        "stdout": "{\"database\": \"mirage_integ\", \"collections\": [{\"name\": \"authors\"}, {\"name\": \"books\"}, {\"name\": \"system.views\"}], \"views\": [{\"name\": \"recent_books\"}]}\n",
         "stderr": ""
       }
     },

@@ -550,7 +550,7 @@ def test_rmdir_takes_hidden_remnants_with_the_directory():
     # The session sees an empty directory; a not-empty refusal would
     # leak that something invisible exists, so the remnants go with it.
     ws = _boxed({"paths": {"hide": ["/repo/only/h"]}})
-    empty = _run(ws, "ls -a /repo/only")
+    empty = _run(ws, "ls -A /repo/only")
     assert (empty.stdout or b"") == b""
     removed = _run(ws, "rmdir /repo/only")
     assert removed.exit_code == 0, removed.stderr

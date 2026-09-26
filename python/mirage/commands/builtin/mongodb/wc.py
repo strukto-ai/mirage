@@ -17,13 +17,13 @@ from mirage.commands.builtin.generic.wc import (WCCounts, format_count_rows,
                                                 parse_flags, wc_generic)
 from mirage.commands.builtin.generic_bind.adapter import (bound_op,
                                                           resolve_or_empty)
-from mirage.commands.builtin.mongodb.cat import stream_any
 from mirage.commands.builtin.mongodb.io import IO
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mongodb.client import count_documents
+from mirage.core.mongodb.read import stream_any
 from mirage.core.mongodb.readdir import documents_exist
 from mirage.core.mongodb.scope import detect_scope
 from mirage.io.types import ByteSource, IOResult

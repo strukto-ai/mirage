@@ -9,7 +9,7 @@
       "command": "stat -c '%s %n' /knowledge/guides/auth",
       "expect": {
         "exit": 0,
-        "stdout": "0 /knowledge/guides/auth\n",
+        "stdout": "- /knowledge/guides/auth\n",
         "stderr": ""
       }
     },

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from pymongo import AsyncMongoClient
@@ -41,7 +41,9 @@ async def list_collections(
 ) -> list[str]:
     db = client[database]
     filter_arg: dict[str, Any] | None = None
-    if kind is not None:
+    if kind == EntityKind.COLLECTION:
+        filter_arg = {"type": {"$ne": EntityKind.VIEW.value}}
+    elif kind is not None:
         filter_arg = {"type": kind.value}
     return sorted(await db.list_collection_names(filter=filter_arg))
 
@@ -110,15 +112,18 @@ async def iter_documents(
     projection: dict[str, Any] | None = None,
     sort: list[tuple[str, int]] | None = None,
     batch_size: int = 100,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any], None]:
     db = client[database]
     col = db[collection]
     cursor = col.find(filter or {}, projection)
     if sort:
         cursor = cursor.sort(sort)
     cursor = cursor.batch_size(batch_size)
-    async for doc in cursor:
-        yield doc
+    try:
+        async for doc in cursor:
+            yield doc
+    finally:
+        await cursor.close()
 
 
 async def count_documents(
