@@ -312,11 +312,6 @@ def make_generic_commands(
         # the session at call time. The raw adapter stays untouched for
         # the ops tables, whose door does its own enforcement.
         base_ops = with_path_guards(raw)
-        # A read-only backend (no write op) can't run the byte-mutation
-        # commands (cp/mv/tee/gunzip/...), so don't register a command that
-        # would crash when invoked.
-        if not base_ops.supports(b.requirements):
-            continue
         if b.read:
             finish = _read_wraps
         elif not b.write:
@@ -342,5 +337,5 @@ def make_generic_commands(
                     provision=provision,
                     aggregate=agg,
                     write=b.write,
-                    writes=b.writes)(bound))
+                    path_guarded=True)(bound))
     return commands

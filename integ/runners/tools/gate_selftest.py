@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import check_case_targets as case_targets
@@ -135,6 +136,78 @@ def selftest_case_validation() -> None:
     real = harness.load_cases(ROOT)
     check("cases: the shipped battery passes both gates",
           len(real) > 0, f"loaded {len(real)} cases")
+
+
+def selftest_case_target_defaults(typescript: bool = False) -> None:
+    """Both loaders preserve explicit overrides and reject untested cases.
+
+    Args:
+        typescript (bool): exercise the TypeScript loader when true.
+    """
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        (root / "targets.json").write_text((ROOT / "targets.json").read_text())
+        folder = root / "unix"
+        folder.mkdir()
+        path = folder / "targets.json"
+        inherited = {"id": "inherited", "seq": 2, "command": "echo inherited"}
+        explicit = {
+            "id": "explicit",
+            "seq": 1,
+            "targets": ["disk"],
+            "command": "echo explicit"
+        }
+        data = {"targets": ["ram"], "cases": [inherited, explicit]}
+        expected = [{
+            **explicit, "_source": "unix/targets.json"
+        }, {
+            **inherited, "targets": ["ram"],
+            "_source": "unix/targets.json"
+        }]
+        for label, block, valid in [
+            ("inherit and override", data, True),
+            ("empty override", {
+                **data, "cases": [{
+                    **inherited, "targets": []
+                }]
+            }, False),
+            ("missing targets", {
+                "cases": [inherited]
+            }, False),
+            ("invalid targets", {
+                **data, "targets": "ram"
+            }, False),
+        ]:
+            path.write_text(json.dumps(block))
+            host = "ts" if typescript else "py"
+            name = f"case targets ({host}): {label}"
+            if typescript:
+                proc = subprocess.run([
+                    str(TSX), "--eval",
+                    "import('./runners/typescript/harness.ts').then(m => "
+                    "console.log(JSON.stringify(m.loadCases(process.env.CASE_ROOT))))"
+                ],
+                                      cwd=ROOT,
+                                      env={
+                                          **os.environ, "CASE_ROOT": temp
+                                      },
+                                      capture_output=True,
+                                      text=True)
+                if valid:
+                    check(
+                        name, proc.returncode == 0
+                        and json.loads(proc.stdout) == expected, proc.stderr)
+                else:
+                    check(
+                        name, proc.returncode != 0
+                        and "nonempty string list" in proc.stderr, proc.stderr)
+            elif valid:
+                check(name, harness.load_cases(root) == expected)
+            else:
+                check(
+                    name,
+                    *raises(functools.partial(harness.load_cases, root),
+                            "nonempty string list"))
 
 
 def run_main(args: list[str], env: dict) -> int:
@@ -768,6 +841,7 @@ def selftest_typescript_gates(require: bool) -> None:
     code, err = run_typescript(["--target", "trello"], blanked)
     check("permissive (ts): the same run still exits 0", code == 0,
           f"exit {code}: {err}")
+    selftest_case_target_defaults(typescript=True)
     selftest_run_ids()
     selftest_plan_run()
     selftest_no_shadow_fails()
@@ -794,6 +868,7 @@ def selftest_typescript_gates(require: bool) -> None:
 def main() -> None:
     selftest_services_table()
     selftest_case_validation()
+    selftest_case_target_defaults()
     selftest_strict_exit()
     selftest_fake_ports()
     selftest_target_pool()

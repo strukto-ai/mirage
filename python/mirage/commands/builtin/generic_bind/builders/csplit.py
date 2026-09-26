@@ -49,7 +49,4 @@ async def csplit(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
         elide_empty=fl.as_bool("elide_empty_files"))
 
 
-BUILDER = Builder('csplit',
-                  csplit,
-                  write=True,
-                  requirements=frozenset({Operation.WRITE}))
+BUILDER = Builder('csplit', csplit, write=True)

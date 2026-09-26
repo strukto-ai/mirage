@@ -47,7 +47,4 @@ async def mv(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
         guard=refuse_reveal)
 
 
-BUILDER = Builder('mv',
-                  mv,
-                  write=True,
-                  requirements=frozenset({Operation.RENAME}))
+BUILDER = Builder('mv', mv, write=True)

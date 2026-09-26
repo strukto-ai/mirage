@@ -362,9 +362,10 @@ const mountGateStorage = createAsyncContext<readonly [string, MountMode]>()
  *
  * Bound by `Mount.executeCmd` around the handler, so the mode guard on
  * the command tier's I/O can resolve `effectivePathMode` for every path
- * a handler mutates: the write-command gate admits a command when any
- * shown subtree grants writes, and this binding is how each individual
- * write is then held to its own region's mode.
+ * a handler mutates: a path-guarded command is refused only at its
+ * writes, the write-command gate admits any other when a shown subtree
+ * grants writes, and this binding is how each individual write is then
+ * held to its own region's mode.
  */
 export function runWithMountGate<T>(
   prefix: string,
@@ -677,6 +678,26 @@ export function readonlyBelow(
     if (blame !== null) return blame
   }
   return null
+}
+
+/** Apply the same mode ceiling to command, dispatcher and namespace writes. */
+export function requirePathsWritable(
+  paths: readonly PathSpec[],
+  mountPrefix: string,
+  mountMode: MountMode,
+  subtree = false,
+): void {
+  for (const path of paths) {
+    if (effectivePathMode(path.virtual, mountPrefix, mountMode) === MountMode.READ) {
+      throw erofsReadOnly(`mount ${mountPrefix} is read-only`, path)
+    }
+  }
+  if (subtree) {
+    for (const path of paths) {
+      const blame = readonlyBelow(path.virtual, mountPrefix, mountMode)
+      if (blame !== null) throw erofsReadOnly(`mount ${mountPrefix} is read-only`, blame)
+    }
+  }
 }
 
 /**

@@ -129,14 +129,14 @@
       "seq": 960017,
       "targets": ["hf-hub"],
       "command": "mkdir /repo/dir1",
-      "expect": { "exit": 1, "stdout": "", "stderr": "mkdir: /repo/dir1: Operation not supported\n" }
+      "expect": { "exit": 1, "stdout": "", "stderr": "mkdir: cannot create directory '/repo/dir1': Operation not supported\n" }
     },
     {
       "id": "hf_hub_a_mount_rm_is_refused",
       "seq": 960018,
       "targets": ["hf-hub"],
       "command": "rm /repo/one_byte.txt",
-      "expect": { "exit": 1, "stdout": "", "stderr": "rm: /repo/one_byte.txt: Operation not supported\n" }
+      "expect": { "exit": 1, "stdout": "", "stderr": "rm: cannot remove '/repo/one_byte.txt': Operation not supported\n" }
     },
     {
       "id": "hf_hub_a_mount_cp_is_refused",
@@ -146,7 +146,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cp: /repo/one_byte.txt: Operation not supported\n"
+        "stderr": "cp: cannot create regular file '/repo/copy.txt': Operation not supported\n"
       }
     },
     {

@@ -15,7 +15,7 @@
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
 import { cpWalk } from '../../generic/cp.ts'
-import { rmWithoutOperands, rmWrites } from '../../generic/rm_cmd.ts'
+import { rmWithoutOperands } from '../../generic/rm_cmd.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { removalLines } from '../../utils/verbose.ts'
 import { specOf } from '../../../spec/builtins.ts'
@@ -27,13 +27,11 @@ import {
   isFsError,
   operandSpelling,
 } from '../../../../utils/errors.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 
 export const RM_BUILDER: Builder = {
   name: 'rm',
   write: true,
-  requirements: ['unlink'],
-  writes: rmWrites,
   fn: async (ops, accessor, paths, _texts, opts) => {
     const fl = new FlagView(opts.flags, specOf('rm'))
     const recursive = fl.asBool('r') || fl.asBool('R')
@@ -43,10 +41,8 @@ export const RM_BUILDER: Builder = {
     if (paths.length === 0) return rmWithoutOperands(force)
     const idx = opts.index ?? undefined
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
-    const { rmR, rmdir, unlink } = ops
-    if (unlink === undefined) {
-      throw new Error('rm: backend provides no remove op')
-    }
+    const { rmR, rmdir } = ops
+    const unlink = requireOp(ops.unlink, 'unlink')
     const lines: string[] = []
     const errors: string[] = []
     const links = opts.ns?.links ?? null

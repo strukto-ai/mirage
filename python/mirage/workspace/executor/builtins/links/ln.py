@@ -31,14 +31,13 @@ from mirage.context import path_allowed
 from mirage.io.stream import materialize
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec, word_text
-from mirage.utils.errors import FS_ERRORS, ReadOnlyError, fs_strerror
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.builtins.links.probe import (link_target_stat,
                                                             miss_strerror,
                                                             path_readdir,
                                                             path_stat)
-from mirage.workspace.executor.builtins.shared import (abs_path, fail,
-                                                       read_only_error, result)
+from mirage.workspace.executor.builtins.shared import abs_path, fail, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
@@ -542,7 +541,7 @@ async def make_link(
         if backup is not None:
             try:
                 await dispatch("rename", link_spec, dst=backup)
-            except (OSError, ReadOnlyError) as exc:
+            except OSError as exc:
                 errors.append(f"ln: cannot backup '{typed}': "
                               f"{fs_strerror(exc)}\n")
                 return
@@ -585,14 +584,9 @@ async def make_link(
         errors.append(f"ln: failed to create {kind} '{typed}'{arrow}: "
                       f"{fs_strerror(exc)}\n")
         return
-    except ReadOnlyError:
-        # The mount voice, as `touch` on the same read-only mount
-        # answers: the refusal is about the mount, and one grant must
-        # not describe itself two ways.
-        errors.append(read_only_error("ln", namespace, link_spec))
-        return
     except PermissionError as exc:
-        # A policy deny, which ln voices as its own per-operand line.
+        # A read-only region or a policy deny, which ln voices as its
+        # own per-operand line, as GNU does for EROFS.
         errors.append(f"ln: failed to create {kind} '{typed}': "
                       f"{fs_strerror(exc)}\n")
         return

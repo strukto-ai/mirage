@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { effectivePathMode } from '../../context/session_context.ts'
+import { requirePathsWritable } from '../../context/session_context.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
-import { erofsReadOnly } from '../../utils/errors.ts'
 import type { MountEntry } from '../mount/mount.ts'
 
 // The prefix governing a path no mount owns. Inside a workspace there is
@@ -55,8 +54,5 @@ export function turfOf(mount: MountEntry | null): string {
  * writes. Backend capabilities are resolved only after admission.
  */
 export function requireTurfWritable(mount: MountEntry | null, path: PathSpec): void {
-  const granted = effectivePathMode(path.virtual, turfOf(mount), mount?.mode ?? MountMode.WRITE)
-  if (granted === MountMode.READ) {
-    throw erofsReadOnly(`mount at '${path.virtual}' is read-only`, path)
-  }
+  requirePathsWritable([path], turfOf(mount), mount?.mode ?? MountMode.WRITE)
 }

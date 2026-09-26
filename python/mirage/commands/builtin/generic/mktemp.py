@@ -111,18 +111,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> MktempFlags:
     )
 
 
-def mktemp_writes(flags: Mapping[str, FlagValue],
-                  paths: list[PathSpec]) -> bool:
-    """Whether a mktemp invocation writes: ``-u`` only prints the name it
-    would have created.
-
-    Args:
-        flags (Mapping[str, FlagValue]): the parsed flag bag.
-        paths (list[PathSpec]): the operands the mount received.
-    """
-    return not parse_flags(flags).dry_run
-
-
 async def mktemp_generic(
     paths: list[PathSpec],
     texts: list[str],

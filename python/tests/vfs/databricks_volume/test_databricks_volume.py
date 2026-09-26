@@ -562,9 +562,11 @@ async def test_read_only_mount_rejects_file_write_commands():
     rm_io = await ws.shell("rm /dbx/created.txt")
 
     assert touch_io.exit_code == 1
-    assert b"read-only mount" in touch_io.stderr
+    assert touch_io.stderr == (b"touch: cannot touch '/dbx/created.txt': "
+                               b"Read-only file system\n")
     assert rm_io.exit_code == 1
-    assert b"read-only mount" in rm_io.stderr
+    assert rm_io.stderr == (b"rm: cannot remove '/dbx/created.txt': "
+                            b"No such file or directory\n")
 
 
 @pytest.mark.asyncio

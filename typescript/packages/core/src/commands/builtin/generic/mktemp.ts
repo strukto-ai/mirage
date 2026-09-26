@@ -16,7 +16,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts, WritesFn } from '../../config.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { extraOperandError } from '../../spec/usage.ts'
@@ -41,11 +41,6 @@ function makePathSpec(virtual: string, mountPrefix: string): PathSpec {
     resolved: true,
   })
 }
-
-// Whether a mktemp invocation writes: -u only prints the name it would have
-// created. Mirrors Python's mktemp_writes.
-export const mktempWrites: WritesFn = (flags) =>
-  !new FlagView(flags, specOf('mktemp')).asBool('dry_run')
 
 export async function mktempGeneric(
   texts: string[],

@@ -15,11 +15,10 @@
 
 import { describe, expect, it } from 'vitest'
 import { gzip } from '../../../utils/compress.ts'
-import { MountMode, PathSpec } from '../../../types.ts'
+import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { gzipWrites } from './gzip.ts'
 
 async function shell(
   line: string,
@@ -52,27 +51,6 @@ describe('gzip with a dash operand', () => {
       },
     )
     expect(r).toEqual(['hi\na.txt.gz\n', '', 0])
-  })
-})
-
-const operand = (raw: string): PathSpec =>
-  new PathSpec({ virtual: `/data/${raw}`, directory: '/data/', vfsPath: raw, rawPath: raw })
-
-describe('gzip on a dash operand', () => {
-  it('writes nothing, so a read-only mount runs it', async () => {
-    // A `-` has no file to replace: gzip compresses stdin to stdout.
-    expect(gzipWrites({}, [operand('-')])).toBe(false)
-    expect(gzipWrites({}, [operand('-'), operand('f.txt')])).toBe(true)
-    const ws = new Workspace(
-      { '/ro/': new RAMVFS() },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
-    try {
-      const io = await ws.shell("cd /ro && printf 'x\\n' | gzip - | gunzip -")
-      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'x\n'])
-    } finally {
-      await ws.close()
-    }
   })
 })
 

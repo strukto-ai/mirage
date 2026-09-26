@@ -25,10 +25,18 @@ from mirage.commands.builtin.generic_bind.adapter import (CommandIO, Operation,
                                                           dir_aware_stream,
                                                           with_dir_guard)
 from mirage.commands.config import CommandOpts
+from mirage.context import (reset_admission, reset_current_session,
+                            reset_mount_gate, reset_op_policies, set_admission,
+                            set_current_session, set_mount_gate,
+                            set_op_policies)
 from mirage.ops.types import NamespaceView
 from mirage.policy import Action, Deny, OpsContext, Policy
-from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.policy.policies import Policies
+from mirage.types import (ContentType, FileStat, FileType, HiddenPaths,
+                          MountMode, PathSpec, ShowEntry, ShownPaths)
+from mirage.utils.errors import OperationNotSupportedError, format_fs_error
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
+from mirage.workspace.session import SessionState
 
 TREE = {
     "/notion/pages": [
@@ -85,10 +93,22 @@ async def test_command_io_resolve_glob_honors_cap():
     assert len(result) == 1
 
 
-def test_command_io_require_missing_op():
+@pytest.mark.asyncio
+async def test_command_io_require_missing_op():
+    # A missing op is refused where it is called, not where it is
+    # required: a builder binds it up front and a line that never writes
+    # never calls it. The refusal names the path the op would have
+    # written, a copy's destination included.
     io = make_io()
-    with pytest.raises(NotImplementedError):
-        io.require(Operation.WRITE)
+    src = PathSpec.from_str_path("/a.txt")
+    dst = PathSpec.from_str_path("/b.txt")
+    with pytest.raises(OperationNotSupportedError) as write_exc:
+        await io.require(Operation.WRITE)(NOOPAccessor(), src, b"x")
+    assert (write_exc.value.errno, write_exc.value.filename) == (errno.ENOTSUP,
+                                                                 "/a.txt")
+    with pytest.raises(OperationNotSupportedError) as copy_exc:
+        await io.require(Operation.COPY)(NOOPAccessor(), src, dst)
+    assert copy_exc.value.filename == "/b.txt"
     assert make_io(write=fake_readdir).require(Operation.WRITE) is fake_readdir
 
 
@@ -941,3 +961,132 @@ async def test_resolve_or_empty_unmounted_means_stdin_mode():
 async def test_resolve_or_empty_no_paths():
     assert await adapter.resolve_or_empty(_glob_ops(True), None, [],
                                           None) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("available", [False, True])
+@pytest.mark.parametrize("operation", [
+    Operation.WRITE, Operation.MKDIR, Operation.UNLINK, Operation.RENAME,
+    Operation.COPY, Operation.TRUNCATE
+])
+@pytest.mark.parametrize("region,expected", [
+    ("locked", errno.EROFS),
+    ("hidden", errno.ENOENT),
+    ("build", errno.ENOTSUP),
+])
+async def test_capability_and_mode_share_path_guards(available, operation,
+                                                     region, expected):
+    calls = []
+
+    async def backend(*args, **kwargs):
+        calls.append(args)
+
+    session = SessionState(
+        session_id="guard-matrix",
+        mount_modes={"/data": MountMode.READ},
+        hidden_paths=HiddenPaths(paths=("/data/hidden", )),
+        shown_paths=ShownPaths(
+            entries=(ShowEntry("/data/build", MountMode.WRITE), )))
+    st = set_current_session(session)
+    mt = set_mount_gate("/data", MountMode.WRITE)
+    try:
+        ops = adapter.with_policy_guard(
+            adapter.with_path_guards(
+                make_io(**{operation.value: backend} if available else {})))
+        path = _spec(f"/data/{region}/f")
+        args = [NOOPAccessor(), path]
+        if operation in (Operation.COPY, Operation.RENAME):
+            args = [NOOPAccessor(), _spec("/data/build/src"), path]
+        if available and region == "build":
+            await ops.require(operation)(*args)
+            assert len(calls) == 1
+        else:
+            with pytest.raises(OSError) as error:
+                await ops.require(operation)(*args)
+            assert error.value.errno == expected
+            named = path
+            if operation == Operation.RENAME and region == "build":
+                named = args[1]
+            assert error.value.filename == named.virtual
+            if expected == errno.EROFS:
+                assert format_fs_error("probe", error.value) == (
+                    f"probe: {path.virtual}: Read-only file system\n"
+                ).encode()
+            assert calls == []
+    finally:
+        reset_mount_gate(mt)
+        reset_current_session(st)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("available", [False, True])
+async def test_copy_reads_source_but_rename_mutates_source_and_subtrees(
+        available):
+    calls = []
+
+    async def backend(*args, **kwargs):
+        calls.append(args)
+
+    session = SessionState(
+        session_id="pair-guards",
+        shown_paths=ShownPaths(
+            entries=(ShowEntry("/data/src", MountMode.READ),
+                     ShowEntry("/data/tree/locked", MountMode.READ))))
+    st = set_current_session(session)
+    mt = set_mount_gate("/data", MountMode.WRITE)
+    try:
+        ops = adapter.with_path_guards(
+            make_io(**{
+                "copy": backend,
+                "rename": backend
+            } if available else {}))
+        src, dst = _spec("/data/src"), _spec("/data/dst")
+        if available:
+            await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
+        else:
+            with pytest.raises(OperationNotSupportedError) as error:
+                await ops.require(Operation.COPY)(NOOPAccessor(), src, dst)
+            assert error.value.filename == dst.virtual
+        for source, blame in [(src, src.virtual),
+                              (_spec("/data/tree"), "/data/tree/locked")]:
+            with pytest.raises(OSError) as error:
+                await ops.require(Operation.RENAME)(NOOPAccessor(), source,
+                                                    dst)
+            assert (error.value.errno, error.value.filename) == (errno.EROFS,
+                                                                 blame)
+        assert len(calls) == int(available)
+    finally:
+        reset_mount_gate(mt)
+        reset_current_session(st)
+
+
+@pytest.mark.asyncio
+async def test_missing_capability_obeys_rule_before_mode():
+    path = _spec("/data/locked")
+    gate = _Gate(path.virtual)
+    at = set_admission(gate)
+    mt = set_mount_gate("/data", MountMode.READ)
+    try:
+        with pytest.raises(PermissionError) as error:
+            await make_io().require(Operation.WRITE)(NOOPAccessor(), path,
+                                                     b"x")
+        assert error.value.errno is None
+        assert gate.asked == [path.virtual]
+    finally:
+        reset_mount_gate(mt)
+        reset_admission(at)
+
+
+@pytest.mark.asyncio
+async def test_missing_copy_admits_source_as_read_before_capability_failure():
+    policy = _SealedRead("/data/secret")
+    token = set_op_policies(Policies([policy]))
+    try:
+        with pytest.raises(PermissionError) as error:
+            await make_io().require(Operation.COPY)(NOOPAccessor(),
+                                                    _spec("/data/secret"),
+                                                    _spec("/data/dst"))
+        assert error.value.errno == errno.EACCES
+        assert policy.asked == [("copy", "/data/secret", False)]
+    finally:
+        reset_op_policies(token)

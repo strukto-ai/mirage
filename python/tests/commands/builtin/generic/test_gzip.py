@@ -13,14 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import gzip
 import zlib
 
 import pytest
 
-from mirage.commands.builtin.generic.gzip import extract_level, gzip_writes
+from mirage.commands.builtin.generic.gzip import extract_level
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.types import MountMode, PathSpec
+from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.command.flags import parse_flags
@@ -51,37 +52,44 @@ def test_the_highest_digit_wins():
     assert _level(["-1", "-9"]) == 9
 
 
-@pytest.mark.parametrize("argv,writes", [
-    ([], False),
-    (["-d"], False),
-    (["-c", "f.txt"], False),
-    (["-dc", "f.txt.gz"], False),
-    (["f.txt"], True),
-    (["-k", "f.txt"], True),
-    (["-d", "f.txt.gz"], True),
-])
-def test_gzip_writes_only_the_files_it_replaces(argv: list[str], writes: bool):
-    parsed = parse_flags(argv, SPECS["gzip"], "gzip", "/data")
-    assert gzip_writes(parsed.flag_kwargs, parsed.paths) is writes
-
-
-def test_a_read_only_mount_runs_gzip_where_it_writes_nothing():
+def _read_only_gzip_mount() -> tuple[Workspace, RAMVFS]:
     vfs = RAMVFS()
     vfs._store.files["/f.txt"] = b"hello\n"
-    ws = Workspace({"/ro/": (vfs, MountMode.READ)})
+    vfs._store.files["/f.txt.gz"] = gzip.compress(b"hello\n")
+    return Workspace({"/ro/": (vfs, MountMode.READ)}), vfs
 
-    async def run():
-        return (await
-                ws.shell("cd /ro && printf 'x\\n' | gzip | gunzip"), await
-                ws.shell("gzip -c /ro/f.txt | gunzip"), await
-                ws.shell("gzip /ro/f.txt"))
 
-    piped, to_stdout, in_place = asyncio.run(run())
-    assert (piped.exit_code, piped.stdout, piped.stderr) == (0, b"x\n", None)
-    assert (to_stdout.exit_code, to_stdout.stdout) == (0, b"hello\n")
-    assert in_place.exit_code == 1
-    assert in_place.stderr == b"gzip: read-only mount at /ro/\n"
-    assert sorted(vfs._store.files) == ["/f.txt"]
+@pytest.mark.parametrize("line,stdout", [
+    ("cd /ro && printf 'x\\n' | gzip | gunzip", b"x\n"),
+    ("gzip -c /ro/f.txt | gunzip", b"hello\n"),
+    ("gzip -dc /ro/f.txt.gz", b"hello\n"),
+    ("cd /ro && printf 'x\\n' | gzip - | gunzip -", b"x\n"),
+])
+def test_a_read_only_mount_runs_gzip_where_it_writes_nothing(
+        line: str, stdout: bytes):
+    ws, vfs = _read_only_gzip_mount()
+    before = dict(vfs._store.files)
+    result = asyncio.run(ws.shell(line))
+    assert (result.exit_code, result.stdout) == (0, stdout)
+    assert vfs._store.files == before
+
+
+@pytest.mark.parametrize("line,refused", [
+    ("gzip /ro/f.txt", "/ro/f.txt.gz"),
+    ("gzip -k /ro/f.txt", "/ro/f.txt.gz"),
+    ("gzip -d /ro/f.txt.gz", "/ro/f.txt"),
+])
+def test_a_read_only_mount_refuses_gzip_at_the_write(line: str, refused: str):
+    # Nothing refuses the command before it runs: the write of the
+    # replacement file is what the mount refuses, in gzip's own voice,
+    # and the operand it would have replaced is left in place.
+    ws, vfs = _read_only_gzip_mount()
+    before = dict(vfs._store.files)
+    result = asyncio.run(ws.shell(line))
+    assert result.exit_code == 1
+    assert result.stderr == f"gzip: {refused}: Read-only file system\n".encode(
+    )
+    assert vfs._store.files == before
 
 
 @pytest.mark.asyncio
@@ -92,34 +100,3 @@ async def test_a_dash_goes_to_stdout_while_files_compress_in_place():
     r = await ws.shell("cd /data && gzip - a.txt | gzip -dc; ls",
                        stdin=b"hi\n")
     assert await r.materialize_stdout() == b"hi\na.txt.gz\n"
-
-
-def _operand(raw: str) -> PathSpec:
-    return PathSpec(virtual=f"/data/{raw}",
-                    directory="/data/",
-                    vfs_path=raw,
-                    resolved=True,
-                    raw_path=raw)
-
-
-def test_gzip_writes_nothing_for_a_dash_operand():
-    # A `-` has no file to replace: gzip compresses stdin to stdout.
-    flags = parse_flags([], SPECS["gzip"], "gzip", "/data").flag_kwargs
-    assert gzip_writes(flags, [_operand("-")]) is False
-    assert gzip_writes(flags, [_operand("-"), _operand("f.txt")]) is True
-
-
-def test_a_read_only_mount_runs_gzip_and_gunzip_on_a_dash():
-    ws = Workspace({"/ro/": (RAMVFS(), MountMode.READ)})
-    io = asyncio.run(ws.shell("cd /ro && printf 'x\\n' | gzip - | gunzip -"))
-    assert (io.exit_code, io.stdout, io.stderr) == (0, b"x\n", None)
-
-
-@pytest.mark.asyncio
-async def test_d_calls_a_truncated_stdin_an_unexpected_end():
-    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
-                   mode=MountMode.WRITE)
-    r = await ws.shell("gzip -dc", stdin=zlib.compress(b"hi\n", wbits=31)[:10])
-    assert r.exit_code == 1
-    assert await r.materialize_stderr() == (
-        b"gzip: stdin: unexpected end of file\n")

@@ -575,7 +575,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cp: /mail/INBOX/2026-01-05/Q2_Budget_Review__1/notes.txt: Operation not supported\n"
+        "stderr": "cp: cannot create regular file '/mail/x.txt': Operation not supported\n"
       }
     },
     {

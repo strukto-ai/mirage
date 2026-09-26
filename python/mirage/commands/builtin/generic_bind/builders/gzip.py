@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.gzip import gzip_generic, gzip_writes
+from mirage.commands.builtin.generic.gzip import gzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.config import CommandOpts
@@ -34,8 +34,4 @@ async def gzip(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                               partial(ops.require(Operation.UNLINK), accessor))
 
 
-BUILDER = Builder('gzip',
-                  gzip,
-                  write=True,
-                  writes=gzip_writes,
-                  requirements=frozenset({Operation.WRITE, Operation.UNLINK}))
+BUILDER = Builder('gzip', gzip, write=True)

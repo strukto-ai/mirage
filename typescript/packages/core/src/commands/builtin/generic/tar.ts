@@ -18,12 +18,17 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { gzip, gunzip, getCompressionCodec } from '../../../utils/compress.ts'
-import type { CommandFnResult, CommandOpts, WritesFn } from '../../config.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readTar, writeTar, type TarEntry } from '../tar_helper.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { COMPRESSION_SIGNATURES, CREATE_ERROR_EXIT, ERROR_TRAILER } from './tar/constants.ts'
+import {
+  COMPRESSION_SIGNATURES,
+  CREATE_ERROR_EXIT,
+  ERROR_TRAILER,
+  FATAL_TRAILER,
+} from './tar/constants.ts'
 import { planCreate, type DirProbe, type StatFn, type WalkFn } from './tar/create.ts'
-import { fsStrerror, isEacces } from '../../../utils/errors.ts'
+import { fsStrerror, isEacces, isFsError } from '../../../utils/errors.ts'
 import { ensureDir, extractDest } from './archive/extract.ts'
 import type { Compression, CompressionKind, CreateResult } from './tar/types.ts'
 
@@ -212,7 +217,21 @@ async function writeArchive(
   if (exitCode !== 0) notices.push(ERROR_TRAILER)
   const raw = await writeTar(entries)
   const archive = await compress(raw, compression)
-  await deps.write(makePathSpec(archivePath, mountPrefix), archive)
+  try {
+    await deps.write(makePathSpec(archivePath, mountPrefix), archive)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    // GNU opens the archive before it reads a member, so an archive it
+    // cannot create is the whole run's one fatal line.
+    const stderr = stderrOf([
+      `tar: ${archivePath}: Cannot open: ${String(fsStrerror(err))}`,
+      FATAL_TRAILER,
+    ])
+    return [
+      null,
+      new IOResult({ exitCode: CREATE_ERROR_EXIT, ...(stderr !== null ? { stderr } : {}) }),
+    ]
+  }
   const stderr = stderrOf(notices)
   const stdout = verbose && names.length > 0 ? ENC.encode(`${names.join('\n')}\n`) : null
   return [
@@ -223,15 +242,6 @@ async function writeArchive(
       ...(stderr !== null ? { stderr } : {}),
     }),
   ]
-}
-
-// Whether a tar invocation writes: -c writes the archive and -x its members,
-// while -t only lists them and -x -O extracts to stdout. The modes are read
-// in tar's own order, create before list before extract. Mirrors Python's
-// tar_writes.
-export const tarWrites: WritesFn = (flags) => {
-  const fl = new FlagView(flags, specOf('tar'))
-  return fl.asBool('c') || (fl.asBool('x') && !fl.asBool('t') && !fl.asBool('to_stdout'))
 }
 
 export async function tarGeneric(
@@ -332,6 +342,10 @@ export async function tarGeneric(
     const notices: string[] = []
     const made = new Set<string>()
     const chunks: Uint8Array[] = []
+    // A member GNU cannot create (a read-only region, a missing op) is
+    // reported by its own name and the run goes on to the next one,
+    // closing with the one trailer and exit 2.
+    let failed = false
     const toSpec = (virtual: string): PathSpec => makePathSpec(virtual, mountPrefix)
     for (const [index, entry] of entries.entries()) {
       if (!keep.has(index)) continue
@@ -350,7 +364,14 @@ export async function tarGeneric(
           const parts = outParts(entry.name, stripN, notices)
           if (parts.length > 0) {
             const outDir = `${rstripSlash(destPath)}/${parts.join('/')}`
-            await ensureDir(outDir, toSpec, deps.mkdir, deps.stat, made)
+            try {
+              await ensureDir(outDir, toSpec, deps.mkdir, deps.stat, made)
+            } catch (err) {
+              if (!isFsError(err)) throw err
+              notices.push(`tar: ${parts.join('/')}: Cannot mkdir: ${String(fsStrerror(err))}`)
+              failed = true
+              continue
+            }
             if (verbose) verboseLines.push(`${rstripSlash(entry.name)}/`)
           }
         }
@@ -365,8 +386,27 @@ export async function tarGeneric(
       if (parts.length === 0) continue
       const outPath = `${rstripSlash(destPath)}/${parts.join('/')}`
       const parent = outPath.slice(0, outPath.lastIndexOf('/')) || '/'
-      if (parent !== '/') await ensureDir(parent, toSpec, deps.mkdir, deps.stat, made)
-      await deps.write(makePathSpec(outPath, mountPrefix), entry.data)
+      if (parent !== '/') {
+        try {
+          await ensureDir(parent, toSpec, deps.mkdir, deps.stat, made)
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          notices.push(
+            `tar: ${parts.slice(0, -1).join('/')}: Cannot mkdir: ${String(fsStrerror(err))}`,
+            `tar: ${parts.join('/')}: Cannot open: No such file or directory`,
+          )
+          failed = true
+          continue
+        }
+      }
+      try {
+        await deps.write(makePathSpec(outPath, mountPrefix), entry.data)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        notices.push(`tar: ${parts.join('/')}: Cannot open: ${String(fsStrerror(err))}`)
+        failed = true
+        continue
+      }
       // Relay writes land on whichever mount owns each path and
       // invalidate through the dispatcher; keying them here would have
       // the runner prefix them onto this mount.
@@ -399,13 +439,16 @@ export async function tarGeneric(
     }
     const stdout =
       verbose && verboseLines.length > 0 ? ENC.encode(verboseLines.join('\n') + '\n') : null
-    const errLines = [...notices, ...(misses.length > 0 ? [...misses, ERROR_TRAILER] : [])]
+    const errLines = [
+      ...notices,
+      ...(misses.length > 0 || failed ? [...misses, ERROR_TRAILER] : []),
+    ]
     const stderr = stderrOf(errLines)
     return [
       stdout,
       new IOResult({
         writes,
-        exitCode: misses.length > 0 ? 2 : 0,
+        exitCode: misses.length > 0 || failed ? 2 : 0,
         ...(stderr !== null ? { stderr } : {}),
       }),
     ]

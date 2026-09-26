@@ -90,7 +90,4 @@ async def mkdir(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
     return output, IOResult(stderr=stderr, exit_code=1 if errors else 0)
 
 
-BUILDER = Builder('mkdir',
-                  mkdir,
-                  write=True,
-                  requirements=frozenset({Operation.MKDIR}))
+BUILDER = Builder('mkdir', mkdir, write=True)

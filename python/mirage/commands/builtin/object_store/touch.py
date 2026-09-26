@@ -59,5 +59,6 @@ def make_touch(vfs: str, io: CommandIO) -> Callable[..., Any]:
     wrapped: Callable[..., Any] = command("touch",
                                           vfs=vfs,
                                           spec=SPECS["touch"],
-                                          write=True)(touch)
+                                          write=True,
+                                          path_guarded=True)(touch)
     return wrapped

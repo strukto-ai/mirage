@@ -26,7 +26,6 @@ import { specOf } from '../../spec/builtins.ts'
 import {
   type CommandIO,
   resolveGlobOf,
-  supports,
   withAbortGuard,
   withDirGuard,
   withPathGuards,
@@ -223,10 +222,6 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
     // call time. The raw adapter stays untouched for the ops tables,
     // whose door does its own enforcement.
     const baseOps = withPathGuards(raw)
-    // A backend missing an op a command cannot run without (cp/mv/tee/
-    // gunzip/...) doesn't get the command registered, rather than getting
-    // one that crashes when invoked.
-    if (!supports(baseOps, b.requirements ?? [])) continue
     const finish = b.read === true ? readWraps : b.write === true ? writeWraps : statWraps
     // A nested mount's keys live in another VFS and no VFS
     // stores a symlink, so a glob resolved by one backend's readdir
@@ -293,7 +288,7 @@ export function makeGenericCommands<A extends Accessor = Accessor>(
         provision,
         aggregate,
         write: b.write === true,
-        writes: b.writes ?? null,
+        pathGuarded: true,
       }),
     )
   }

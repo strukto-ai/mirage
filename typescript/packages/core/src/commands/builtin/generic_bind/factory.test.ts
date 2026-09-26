@@ -16,7 +16,8 @@ import { materialize } from '../../../io/types.ts'
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { CommandIO } from './adapter.ts'
+import { type CommandIO, requireOp } from './adapter.ts'
+import { BUILDERS } from './builders/index.ts'
 import { makeGenericCommands, withSlashGuard } from './factory.ts'
 import { RAMIndexCacheStore } from '../../../cache/index/ram.ts'
 import { makeFind } from '../../../core/object_store/find.ts'
@@ -124,17 +125,30 @@ describe('makeGenericCommands', () => {
     expect(remote?.aggregate).toBeNull()
   })
 
-  it('skips a command whose required op the backend lacks', () => {
-    // A write op alone is not enough: rmdir needs rmdir, truncate needs
-    // truncate. Registering them anyway yields a command that can only throw.
-    const names = new Set(
-      makeGenericCommands('hf_buckets', makeOps({ write: () => Promise.resolve() })).map(
-        (c) => c.name,
-      ),
-    )
-    expect(names.has('tee')).toBe(true)
-    expect(names.has('rmdir')).toBe(false)
-    expect(names.has('truncate')).toBe(false)
+  it('registers every command whatever the backend lacks', () => {
+    // A backend without the write-side ops still gets the whole family:
+    // `gzip -c`, `tar -t` and `split -n 1/2` only read, and a line that
+    // writes is refused at the missing op instead of the command being
+    // absent.
+    const names = new Set(makeGenericCommands('hf_buckets', makeOps()).map((c) => c.name))
+    expect(names).toEqual(new Set(BUILDERS.map((b) => b.name)))
+  })
+
+  it('refuses a missing op where it is called, naming the written path', async () => {
+    // A builder binds the op up front and a line that never writes never
+    // calls it; a copy names its destination.
+    const src = PathSpec.fromStrPath('/a.txt')
+    const dst = PathSpec.fromStrPath('/b.txt')
+    const write = requireOp<NonNullable<CommandIO['write']>>(undefined, 'write')
+    await expect(write(new FakeAccessor(), src, new Uint8Array())).rejects.toMatchObject({
+      code: 'ENOTSUP',
+      virtualPath: '/a.txt',
+    })
+    const copy = requireOp<NonNullable<CommandIO['copy']>>(undefined, 'copy')
+    await expect(copy(new FakeAccessor(), src, dst)).rejects.toMatchObject({
+      code: 'ENOTSUP',
+      virtualPath: '/b.txt',
+    })
   })
 
   it('registers ops-gated commands once the backend supplies them', () => {

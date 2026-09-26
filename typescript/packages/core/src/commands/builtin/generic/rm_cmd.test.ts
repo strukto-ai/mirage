@@ -17,12 +17,12 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
-import { MountMode, PathSpec } from '../../../types.ts'
+import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { UsageError } from '../../errors.ts'
-import { rmWithoutOperands, rmWrites } from './rm_cmd.ts'
+import { rmWithoutOperands } from './rm_cmd.ts'
 
 const DEC = new TextDecoder()
 
@@ -45,11 +45,6 @@ describe('rm with no operand', () => {
       "rm: missing operand\nTry 'rm --help' for more information.",
     )
     expect((caught as UsageError).exitCode).toBe(1)
-  })
-
-  it('writes only when it has operands', () => {
-    expect(rmWrites({ f: true }, [])).toBe(false)
-    expect(rmWrites({}, [PathSpec.fromStrPath('/a.txt')])).toBe(true)
   })
 
   it.each([MountMode.WRITE, MountMode.READ])('answers like GNU on a %s mount', async (mode) => {

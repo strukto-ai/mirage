@@ -15,16 +15,15 @@
 import { UsageError } from '../../../errors.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
-import { isEnotdir } from '../../../../utils/errors.ts'
+import { fsStrerror, isEnotdir } from '../../../../utils/errors.ts'
 import { formatRecords } from '../../utils/output.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 
 export const RMDIR_BUILDER: Builder = {
   name: 'rmdir',
   write: true,
-  requirements: ['rmdir'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     if (paths.length === 0) {
       throw new UsageError("rmdir: missing operand\nTry 'rmdir --help' for more information.", 1)
@@ -32,10 +31,7 @@ export const RMDIR_BUILDER: Builder = {
     const idx = opts.index ?? undefined
     const resolved = await resolveGlobOf(ops)(accessor, paths, idx)
     const verbose = new FlagView(opts.flags, specOf('rmdir')).asBool('v')
-    const { rmdir } = ops
-    if (rmdir === undefined) {
-      throw new Error('rmdir: directory remove not supported on this backend')
-    }
+    const rmdir = requireOp(ops.rmdir, 'rmdir')
     const lines: string[] = []
     const errors: string[] = []
     const links = opts.ns?.links ?? null
@@ -75,10 +71,13 @@ export const RMDIR_BUILDER: Builder = {
         // the slot may still refuse not-empty: the hidden-remnant guard
         // re-raises the backend's refusal when its cascade cannot
         // finish (a mode-protected remnant, a visible entry appearing
-        // mid-walk). GNU's voice, not the raw error.
+        // mid-walk). A read-only region refuses here too. GNU's voice, not
+        // the raw error.
         const code = (exc as { code?: string }).code
-        if (code !== 'ENOTEMPTY' && code !== 'EEXIST') throw exc
-        errors.push(`rmdir: failed to remove '${p.rawPath}': Directory not empty`)
+        const detail =
+          code === 'ENOTEMPTY' || code === 'EEXIST' ? 'Directory not empty' : fsStrerror(exc)
+        if (detail === null) throw exc
+        errors.push(`rmdir: failed to remove '${p.rawPath}': ${detail}`)
         continue
       }
       if (verbose) lines.push(`rmdir: removing directory, '${p.rawPath}'`)

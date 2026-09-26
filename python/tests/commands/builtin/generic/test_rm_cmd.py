@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.generic.rm_cmd import make_rm, rm_writes
+from mirage.commands.builtin.generic.rm_cmd import make_rm
 from mirage.commands.config import CommandOpts
 from mirage.commands.errors import UsageError
 from mirage.context import (reset_current_session, reset_mount_gate,
@@ -71,11 +71,6 @@ async def test_rm_force_without_operands_does_nothing():
                            CommandOpts(flags={"f": True}))
     assert (out, result.exit_code, result.stderr) == (None, 0, None)
     assert calls == []
-
-
-def test_rm_writes_only_with_operands():
-    assert not rm_writes({"f": True}, [])
-    assert rm_writes({}, [PathSpec.from_str_path("/owned/a.json")])
 
 
 @pytest.mark.asyncio

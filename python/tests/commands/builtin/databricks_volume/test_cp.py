@@ -73,7 +73,8 @@ async def test_cp_read_only_mount_rejected(read_ws, dbx_files):
     io = await read_ws.shell("cp /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code != 0
-    assert b"read-only" in io.stderr
+    assert io.stderr == (b"cp: cannot create regular file '/dbx/dst.txt': "
+                         b"Read-only file system\n")
     assert f"{ROOT}/dst.txt" not in dbx_files.downloads
 
 

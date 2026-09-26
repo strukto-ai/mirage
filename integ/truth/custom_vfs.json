@@ -68,7 +68,7 @@
     "16 /feed/status.md",
     "",
     "$ rm /feed/status.md",
-    "rm: /feed/status.md: Operation not supported",
+    "rm: cannot remove '/feed/status.md': Operation not supported",
     "exit 1",
     "",
     "$ echo '# Runbook' > /wiki/runbook.md",

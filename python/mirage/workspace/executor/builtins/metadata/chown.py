@@ -56,8 +56,7 @@ async def handle_chown(
     errors: list[str] = []
     for target in await expand_operands(namespace, operands[1:]):
         if no_deref and namespace.is_link(target.virtual):
-            await apply_link_attrs(namespace,
-                                   dispatch,
+            await apply_link_attrs(dispatch,
                                    "chown",
                                    target,
                                    errors,
@@ -75,16 +74,14 @@ async def handle_chown(
         else:
             paths, links = [resolved], []
         for path in paths:
-            await apply_attrs(namespace,
-                              dispatch,
+            await apply_attrs(dispatch,
                               "chown",
                               path,
                               errors,
                               uid=uid,
                               gid=gid)
         for link in links:
-            await apply_link_attrs(namespace,
-                                   dispatch,
+            await apply_link_attrs(dispatch,
                                    "chown",
                                    PathSpec.from_str_path(link),
                                    errors,

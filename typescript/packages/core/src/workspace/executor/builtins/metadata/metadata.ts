@@ -17,6 +17,7 @@ import type { FileStat, SetAttrFields } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import { fsStrerror } from '../../../../utils/errors.ts'
 
 export function parseOwner(text: string): [number | string | null, number | string | null] {
   const sep = text.indexOf(':')
@@ -105,6 +106,14 @@ export function isReadOnlyError(err: unknown): boolean {
   // text happens to contain "read-only".
   if (err instanceof PolicyDenied) return false
   return err instanceof Error && err.message.includes('read-only')
+}
+
+// A refused attribute write in GNU's per-operand voice, `<cmd>: <action>
+// '<path>': Read-only file system`, the voice every other write refusal
+// uses. `action` is GNU's phrase for the write (`cannot touch`, `changing
+// permissions of`). Mirrors Python's `permission_error`.
+export function permissionError(cmd: string, action: string, path: PathSpec, err: unknown): string {
+  return `${cmd}: ${action} '${path.rawPath}': ${fsStrerror(err) ?? 'Read-only file system'}\n`
 }
 
 // Route one attribute write through the op door. The door applies what

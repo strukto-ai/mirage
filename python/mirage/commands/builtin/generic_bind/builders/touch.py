@@ -54,7 +54,4 @@ async def touch(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                           exit_code=1 if errors else 0)
 
 
-BUILDER = Builder('touch',
-                  touch,
-                  write=True,
-                  requirements=frozenset({Operation.EXISTS, Operation.WRITE}))
+BUILDER = Builder('touch', touch, write=True)

@@ -17,12 +17,12 @@ import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.t
 import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
-import { blamedPath, fsStrerror, isEacces, isEnoent, isErofs } from '../../../../utils/errors.ts'
+import { fsStrerror, isEacces, isEnoent, isErofs } from '../../../../utils/errors.ts'
 import { CycleError, gnuBasename } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import { fail, ok, readOnlyError, splitFlags } from '../shared.ts'
+import { fail, ok, splitFlags } from '../shared.ts'
 import { dispatchStat, statOrNull } from './probe.ts'
 import type { Result } from '../types.ts'
 
@@ -145,10 +145,8 @@ export function acceptsLine(
 // absent (a hidden link answers ENOENT, the no-name-leak rule).
 //
 // The refusal is voiced the way the same refusal on a backend file is
-// voiced, so one grant does not describe itself two ways: a mount-mode
-// refusal renders readOnlyError (naming the mount, deduplicated because
-// two operands on one mount are one fact), everything else renders GNU's
-// per-operand line.
+// voiced, so one grant does not describe itself two ways: GNU's
+// per-operand line, a read-only region's EROFS included.
 //
 // An operand typed with a trailing slash is deliberately kept: the slash
 // asked for a directory, and GNU refuses rather than removing the link
@@ -187,16 +185,6 @@ export async function stripLinkOperands(
         const suffix = fsStrerror(err)
         if (suffix === null) throw err
         if (isEnoent(err) && force) continue
-        if (isErofs(err)) {
-          // The mount voice, because the mount is what refused: a
-          // backend file on this operand's turf is answered by
-          // Mount.executeCmd with this exact line, and one grant must
-          // not describe itself two ways depending on whether the name
-          // it stopped was a link.
-          const line = readOnlyError(name, namespace, item)
-          if (!errors.includes(line)) errors.push(line)
-          continue
-        }
         errors.push(`${name}: cannot ${verb} '${item.rawPath}': ${suffix}\n`)
       }
       continue
@@ -333,18 +321,11 @@ export async function prepareMv(
     } catch (err) {
       const suffix = fsStrerror(err)
       if (suffix === null || (!isEacces(err) && !isErofs(err))) throw err
-      // Voiced as the same refusal on a backend file is: the mount
-      // voice when the source's own turf is what refused (the case
-      // Mount.executeCmd answers, since the command runs on the source
-      // mount), GNU's per-operand line when it was the destination --
-      // which is what a cross-mount `mv f /ro/f` already answers for a
-      // regular file. A policy deny is always per operand.
-      const blame = isErofs(err) ? (blamedPath(err) ?? src.virtual) : ''
+      // A read-only endpoint or a policy deny, which GNU voices per
+      // operand and which the backend mv path voices the same way.
       const early: Result = fail(
         'mv',
-        blame === src.virtual
-          ? readOnlyError('mv', namespace, src)
-          : `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${suffix}\n`,
+        `mv: cannot move '${src.rawPath}' to '${dst.rawPath}': ${suffix}\n`,
       )
       return { items, postUnlink: null, postRename: null, early }
     }

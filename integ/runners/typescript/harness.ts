@@ -225,7 +225,7 @@ export interface HarnessStat {
 }
 
 export interface ExecWorkspace {
-  execute(cmd: string, opts?: { stdin?: Uint8Array; sessionId?: string }): Promise<ExecResult>
+  shell(cmd: string, opts?: { stdin?: Uint8Array; sessionId?: string }): Promise<ExecResult>
   dispatch(
     opName: string,
     path: string,
@@ -374,10 +374,12 @@ export function loadCases(root: string): Case[] {
     }
     for (const file of files) {
       const rel = relative(root, file)
-      const data = JSON.parse(readFileSync(file, 'utf8')) as { cases: Case[] }
+      const data = JSON.parse(readFileSync(file, 'utf8')) as {
+        targets?: string[]
+        cases: (Omit<Case, 'targets'> & { targets?: string[] })[]
+      }
       for (const c of data.cases) {
-        c._source = rel
-        cases.push(c)
+        cases.push({ targets: data.targets ?? [], ...c, _source: rel })
       }
     }
   }
@@ -400,6 +402,13 @@ export function validateCases(root: string, cases: Case[]): void {
   const duplicates: string[] = []
   const unknown: string[] = []
   for (const c of cases) {
+    if (
+      !Array.isArray(c.targets) ||
+      c.targets.length === 0 ||
+      c.targets.some((t) => typeof t !== 'string')
+    ) {
+      throw new Error(`case ${c.id}: targets must be a nonempty string list`)
+    }
     const first = seen.get(c.id)
     if (first !== undefined) duplicates.push(`${c.id} (${first} and ${c._source ?? '?'})`)
     else seen.set(c.id, c._source ?? '?')
@@ -535,7 +544,7 @@ export async function runConsistencyCase(
     return {
       exitCode: NO_SHADOW_EXIT,
       out: '',
-      stderr: `[${target.id}] ${c.id}: ${target.mounts[0].vfs} adapter has no shadow workspace\n`,
+      stderr: `[${target.id}] ${c.id}: ${target.mounts[0]?.vfs ?? 'unknown'} adapter has no shadow workspace\n`,
     }
   }
   try {
@@ -819,7 +828,7 @@ export async function runCase(
     // and charging that to the dry run would fail every ask case.
     recorded = ws.decisions.pending().length - before
   }
-  const result = await ws.shell(c.command, { sessionId: c.session })
+  const result = await ws.shell(c.command, c.session === undefined ? {} : { sessionId: c.session })
   const elapsed = (performance.now() - start) / 1000
   const out = DEC.decode(result.stdout)
   const err = DEC.decode(result.stderr)

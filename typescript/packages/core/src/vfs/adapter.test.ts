@@ -4,7 +4,7 @@ import { RAM_IO } from '../commands/builtin/ram/io.ts'
 import { writeBytes } from '../core/ram/write.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { eacces } from '../utils/errors.ts'
-import { getTestParser, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
+import { getTestParser, stderrStr, stdoutStr } from '../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { VFSAdapter } from './adapter.ts'
 import { GenericVFS } from './generic.ts'
@@ -38,7 +38,11 @@ describe('VFSAdapter', () => {
       { mode: MountMode.READ, shellParser: await getTestParser() },
     )
     try {
-      for (const line of ['cat /nested/data/*.txt', 'grep hello /nested/data/a.txt']) {
+      for (const line of [
+        'cat /nested/data/*.txt',
+        'grep hello /nested/data/a.txt',
+        'gzip -c /nested/data/a.txt | gunzip',
+      ]) {
         const result = await ws.shell(line)
         expect(stdoutStr(result)).toBe('hello\n')
         expect(result.exitCode).toBe(0)
@@ -50,7 +54,11 @@ describe('VFSAdapter', () => {
       const chunks: Uint8Array[] = []
       for await (const chunk of vfs.io.readStream(accessor, PATH)) chunks.push(chunk)
       expect(chunks).toEqual([ENC.encode('hello\n')])
-      expect(vfs.commands().some((cmd) => cmd.name === 'tee')).toBe(false)
+      const refused = await ws.shell('rm /nested/data/a.txt')
+      expect(refused.exitCode).toBe(1)
+      expect(stderrStr(refused)).toBe(
+        "rm: cannot remove '/nested/data/a.txt': Operation not supported\n",
+      )
       expect(vfs.ops().some((op) => op.name === 'write')).toBe(false)
     } finally {
       await ws.close()
@@ -120,8 +128,10 @@ describe('VFSAdapter', () => {
         const result = await ws.shell('echo changed > /nested/data/a.txt')
         expect(result.exitCode === 0).toBe(mode === MountMode.WRITE)
         expect(write).toHaveBeenCalledTimes(mode === MountMode.WRITE ? 1 : 0)
-        expect(vfs.commands().some((cmd) => cmd.name === 'tee')).toBe(true)
-        expect(vfs.commands().some((cmd) => cmd.name === 'rm')).toBe(false)
+        const refused = await ws.shell('rm /nested/data/a.txt')
+        expect(stderrStr(refused)).toBe(
+          "rm: cannot remove '/nested/data/a.txt': Operation not supported\n",
+        )
         expect(vfs.ops().some((op) => op.name === 'write')).toBe(true)
         expect(vfs.ops().some((op) => op.name === 'unlink')).toBe(false)
       } finally {

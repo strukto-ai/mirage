@@ -172,18 +172,6 @@ async def tee(
                               append_bytes)
 
 
-def tee_writes(flags: Mapping[str, FlagValue], paths: list[PathSpec]) -> bool:
-    """Whether a tee invocation writes: its file operands, and with none
-    it only copies stdin to stdout, as GNU tee does.
-
-    Args:
-        flags (Mapping[str, FlagValue]): the parsed flag bag.
-        paths (list[PathSpec]): the operands the mount received.
-    """
-    return bool(paths)
-
-
 __all__ = [
-    "tee", "tee_writes", "parse_flags", "TeeFlags", "write_output",
-    "write_one", "error_line"
+    "tee", "parse_flags", "TeeFlags", "write_output", "write_one", "error_line"
 ]

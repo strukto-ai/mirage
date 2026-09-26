@@ -296,8 +296,6 @@ describe('Mount.executeCmd', () => {
     // stderr accumulates across a line, so an unterminated refusal ran
     // into the next one: `{ rm /ro/a; rm /ro/b; }` printed the single
     // line `rm: read-only mount at /ro/rm: read-only mount at /ro/`.
-    // It is also the line the node table renders for a refused symlink
-    // (shared.readOnlyError), which concatenates with this one.
     const m = makeMount(MountMode.READ)
     const [wcmd] = command({
       name: 'rm',
@@ -315,13 +313,18 @@ describe('Mount.executeCmd', () => {
   })
 
   it.each([
-    [MountMode.READ, 0],
-    [MountMode.READ, 1],
-    [MountMode.WRITE, 0],
-    [MountMode.WRITE, 1],
+    [MountMode.READ, false],
+    [MountMode.READ, true],
+    [MountMode.WRITE, false],
+    [MountMode.WRITE, true],
   ])(
-    'refuses a write command only where its invocation writes (%s, %i operands)',
-    async (mode, operands) => {
+    'refuses up front only a write command the door cannot see (%s, path guarded %s)',
+    async (mode, pathGuarded) => {
+      // A path-guarded command's writes go through the guarded op slots,
+      // which refuse each one where it happens, so a read-only mount runs
+      // it like a reader (`gzip -c`, `split -n 1/2`). A write command
+      // that reaches its service some other way has no door to refuse
+      // it, so the mount refuses it before it runs.
       const m = makeMount(mode)
       const calls: number[] = []
       const [cmd] = command({
@@ -329,7 +332,7 @@ describe('Mount.executeCmd', () => {
         vfs: 'ram',
         spec: BASIC_SPEC,
         write: true,
-        writes: (_flags, paths) => paths.length > 0,
+        pathGuarded,
         fn: (_accessor, paths) => {
           calls.push(paths.length)
           return [new TextEncoder().encode('ran\n'), new IOResult()]
@@ -337,9 +340,8 @@ describe('Mount.executeCmd', () => {
       })
       if (cmd === undefined) throw new Error('missing')
       m.register(cmd)
-      const paths = [PathSpec.fromStrPath('/a')].slice(0, operands)
-      const [stdout, io] = await m.executeCmd('filter', paths, [], {})
-      if (mode === MountMode.READ && operands > 0) {
+      const [stdout, io] = await m.executeCmd('filter', [PathSpec.fromStrPath('/a')], [], {})
+      if (mode === MountMode.READ && !pathGuarded) {
         expect(io.exitCode).toBe(1)
         expect(new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
           `filter: read-only mount at ${m.prefix}\n`,
@@ -348,7 +350,7 @@ describe('Mount.executeCmd', () => {
       } else {
         expect(io.exitCode).toBe(0)
         expect(new TextDecoder().decode(await materialize(stdout))).toBe('ran\n')
-        expect(calls).toEqual([operands])
+        expect(calls).toEqual([1])
       }
     },
   )
@@ -556,23 +558,14 @@ describe('ExecContext parity with CommandOpts', () => {
   })
 })
 
-it('a write predicate cannot bypass the path guard', async () => {
+it('a path-guarded command is still held at its write', async () => {
   const vfs = new RAMVFS()
   vfs.store.files.set('/a', new TextEncoder().encode('original'))
   const mount = new MountEntry({ prefix: '/ram/', vfs, mode: MountMode.READ })
   const cmd = vfs.commands().find((cmd) => cmd.name === 'gzip')
   if (cmd === undefined) throw new Error('missing gzip')
-  mount.register(
-    new RegisteredCommand({
-      name: cmd.name,
-      spec: cmd.spec,
-      vfs: cmd.vfs,
-      filetype: cmd.filetype,
-      fn: cmd.fn,
-      write: cmd.write,
-      writes: () => false,
-    }),
-  )
+  expect(cmd.pathGuarded).toBe(true)
+  mount.register(cmd)
   await expect(
     mount.executeCmd('gzip', [PathSpec.fromStrPath('/ram/a')], [], {}),
   ).rejects.toMatchObject({ code: 'EROFS' })

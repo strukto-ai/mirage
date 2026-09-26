@@ -77,7 +77,8 @@ async def test_mv_read_only_mount_rejected(read_ws, dbx_files):
     io = await read_ws.shell("mv /dbx/src.txt /dbx/dst.txt")
 
     assert io.exit_code != 0
-    assert b"read-only" in io.stderr
+    assert io.stderr == (b"mv: cannot move '/dbx/src.txt' to '/dbx/dst.txt': "
+                         b"Read-only file system\n")
     assert dbx_files.downloads[f"{ROOT}/src.txt"] == b"data"
 
 

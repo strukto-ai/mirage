@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.accessor.base import Accessor
@@ -23,21 +23,9 @@ from mirage.commands.errors import UsageError
 from mirage.commands.registry import command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.errors import FS_ERRORS, fs_strerror
-
-
-def rm_writes(flags: Mapping[str, FlagValue], paths: list[PathSpec]) -> bool:
-    """Whether an rm invocation writes: it removes its operands, and with
-    none it removes nothing.
-
-    Args:
-        flags (Mapping[str, FlagValue]): the parsed flag bag.
-        paths (list[PathSpec]): the operands the mount received.
-    """
-    return bool(paths)
 
 
 def rm_without_operands(force: bool) -> tuple[ByteSource | None, IOResult]:
@@ -80,7 +68,7 @@ def make_rm(
     """
     unlink = with_write_guards(unlink)
 
-    @command("rm", vfs=vfs, spec=SPECS["rm"], write=True, writes=rm_writes)
+    @command("rm", vfs=vfs, spec=SPECS["rm"], write=True, path_guarded=True)
     async def rm(
         accessor: Accessor,
         paths: list[PathSpec],

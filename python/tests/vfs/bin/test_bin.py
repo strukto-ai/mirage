@@ -23,8 +23,10 @@ from mirage.vfs.ram import RAMVFS
 def test_view_registers_reads_and_refuses_every_write_op():
     vfs = BinViewVFS(lambda: ["ls"], lambda n: "ls" if n == "ls" else None)
     names = {cmd.name for cmd in vfs.commands()}
-    assert {"cat", "ls", "stat"} <= names
-    assert not {"rm", "touch", "cp"} & names
+    # Every generic command registers, the writers included: `gzip -c`
+    # reads the view like any reader, and a line that writes is refused
+    # at the op the view does not have.
+    assert {"cat", "ls", "stat", "gzip", "rm", "cp"} <= names
     ops = {op.name: op for op in vfs.ops_list()}
     assert {"read", "readdir", "stat"} <= set(ops)
     for name in ("write", "append", "create", "mkdir", "unlink", "rmdir",
@@ -39,5 +41,10 @@ async def test_a_write_into_the_view_is_refused_as_read_only():
     assert io.exit_code == 1
     assert await io.stderr_str() == "/usr/bin/ls: Read-only file system\n"
     io = await ws.shell("chmod 644 /usr/bin/ls; stat -c %a /usr/bin/ls")
-    assert await io.stderr_str() == "chmod: read-only mount at /usr/bin/\n"
+    assert await io.stderr_str() == ("chmod: changing permissions of "
+                                     "'/usr/bin/ls': Read-only file system\n")
     assert await io.stdout_str() == "755\n"
+    io = await ws.shell("rm /usr/bin/ls; gzip -c /usr/bin/ls | gunzip | wc -l")
+    assert await io.stderr_str() == ("rm: cannot remove '/usr/bin/ls': "
+                                     "Operation not supported\n")
+    assert await io.stdout_str() != "0\n"

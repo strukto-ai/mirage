@@ -12,11 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import errno
-
-from mirage.context.session_context import effective_path_mode
+from mirage.context.session_context import require_paths_writable
 from mirage.types import MountMode, PathSpec
-from mirage.utils.errors import ReadOnlyError
 from mirage.workspace.mount.mount import MountEntry
 
 # The prefix governing a path no mount owns. Inside a workspace there
@@ -70,8 +67,6 @@ def require_turf_writable(mount: MountEntry | None, path: PathSpec) -> None:
     Raises:
         ReadOnlyError: the mount or session's mode is read-only.
     """
-    granted = effective_path_mode(
-        path.virtual, turf_of(mount),
+    require_paths_writable(
+        [path], turf_of(mount),
         mount.mode if mount is not None else MountMode.WRITE)
-    if granted == MountMode.READ:
-        raise ReadOnlyError(errno.EROFS, "Read-only file system", path.virtual)

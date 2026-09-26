@@ -237,7 +237,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "truncate: /data/guard/missing/: Is a directory\n"
+        "stderr": "truncate: cannot open '/data/guard/missing/' for writing: Is a directory\n"
       }
     },
     {
@@ -253,7 +253,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "truncate: /data/guard/g.txt/: Is a directory\n"
+        "stderr": "truncate: cannot open '/data/guard/g.txt/' for writing: Is a directory\n"
       }
     },
     {

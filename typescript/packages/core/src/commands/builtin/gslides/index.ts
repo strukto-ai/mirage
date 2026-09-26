@@ -27,6 +27,7 @@ import { GSLIDES_RM } from './rm.ts'
 // the filesystem surface.
 export const GSLIDES_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GSlidesAccessor>(VFSName.GSLIDES, GSLIDES_IO, {
+    overrides: new Set(['rm']),
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,

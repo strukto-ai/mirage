@@ -15,7 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.iconv import iconv_generic, iconv_writes
+from mirage.commands.builtin.generic.iconv import iconv_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op,
                                                           resolve_or_empty)
@@ -33,8 +33,4 @@ async def iconv(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                                partial(ops.require(Operation.WRITE), accessor))
 
 
-BUILDER = Builder('iconv',
-                  iconv,
-                  write=True,
-                  writes=iconv_writes,
-                  requirements=frozenset({Operation.WRITE}))
+BUILDER = Builder('iconv', iconv, write=True)

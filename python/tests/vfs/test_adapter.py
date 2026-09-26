@@ -35,6 +35,7 @@ async def test_minimal_reads_serve_shell_streams_and_dispatch(accessor):
         for line, expected in [
             ("cat /nested/data/*.txt", "hello\n"),
             ("grep hello /nested/data/a.txt", "hello\n"),
+            ("gzip -c /nested/data/a.txt | gunzip", "hello\n"),
         ]:
             result = await ws.shell(line)
             assert await result.stdout_str() == expected
@@ -45,7 +46,11 @@ async def test_minimal_reads_serve_shell_streams_and_dispatch(accessor):
         assert b"".join([
             chunk async for chunk in vfs.io.read_stream(accessor, PATH)
         ]) == b"hello\n"
-        assert "tee" not in {cmd.name for cmd in vfs.commands()}
+        refused = await ws.shell("rm /nested/data/a.txt")
+        assert refused.exit_code == 1
+        assert await refused.stderr_str() == (
+            "rm: cannot remove '/nested/data/a.txt': "
+            "Operation not supported\n")
         assert "write" not in {op.name for op in vfs.ops_list()}
     finally:
         await ws.close()
@@ -103,8 +108,10 @@ async def test_write_capability_obeys_mount_mode(accessor, mode):
         result = await ws.shell("echo changed > /nested/data/a.txt")
         assert (result.exit_code == 0) == (mode == MountMode.WRITE)
         assert write.await_count == (1 if mode == MountMode.WRITE else 0)
-        assert "tee" in {cmd.name for cmd in vfs.commands()}
-        assert "rm" not in {cmd.name for cmd in vfs.commands()}
+        refused = await ws.shell("rm /nested/data/a.txt")
+        assert await refused.stderr_str() == (
+            "rm: cannot remove '/nested/data/a.txt': "
+            "Operation not supported\n")
         assert "write" in {op.name for op in vfs.ops_list()}
         assert "unlink" not in {op.name for op in vfs.ops_list()}
     finally:

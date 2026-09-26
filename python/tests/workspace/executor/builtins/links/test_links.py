@@ -167,33 +167,36 @@ async def test_rm_of_a_link_goes_through_the_door():
 
 
 @pytest.mark.asyncio
-async def test_rm_of_a_link_on_read_turf_names_the_mount():
-    # The mount voice, byte for byte what `rm` of a backend file on the
-    # same grant answers, because one grant must not describe itself two
-    # ways depending on whether the name it stopped was a link.
+async def test_rm_of_a_link_on_read_turf_answers_like_a_backend_file():
+    # Byte for byte what `rm` of a backend file on the same grant
+    # answers, because one grant must not describe itself two ways
+    # depending on whether the name it stopped was a link.
     ws = _ws()
     await ws.shell("echo b > /data/f.txt; ln -s f.txt /data/lk")
     ws.create_session("agent", mounts={"/data/": "read"})
     r = await ws.shell("rm /data/lk", session_id="agent")
     assert r.exit_code == 1
-    assert r.stderr == b"rm: read-only mount at /data/\n"
+    assert r.stderr == (b"rm: cannot remove '/data/lk': "
+                        b"Read-only file system\n")
     assert ws.namespace.is_link("/data/lk")
 
 
 @pytest.mark.asyncio
-async def test_ln_and_mv_name_the_mount_too():
+async def test_ln_and_mv_answer_a_read_grant_per_operand():
     # Same rule for the other two verbs that write the node table: `ln`
     # answers as `touch` does on a read-only mount, and `mv` as `mv` of
-    # a backend file does.
+    # a backend file does, in GNU's per-operand voice.
     ws = _ws()
     await ws.shell("echo b > /data/f.txt; ln -s f.txt /data/lk")
     ws.create_session("agent", mounts={"/data/": "read"})
     ln = await ws.shell("ln -s f.txt /data/lk2", session_id="agent")
     mv = await ws.shell("mv /data/lk /data/lk3", session_id="agent")
     assert ln.exit_code == 1
-    assert ln.stderr == b"ln: read-only mount at /data/\n"
+    assert ln.stderr == (b"ln: failed to create symbolic link '/data/lk2': "
+                         b"Read-only file system\n")
     assert mv.exit_code == 1
-    assert mv.stderr == b"mv: read-only mount at /data/\n"
+    assert mv.stderr == (b"mv: cannot move '/data/lk' to '/data/lk3': "
+                         b"Read-only file system\n")
     assert ws.namespace.readlink("/data/lk") == "f.txt"
 
 
@@ -224,7 +227,8 @@ async def test_rm_f_still_reports_a_mode_refusal():
     ws.create_session("agent", mounts={"/data/": "read"})
     r = await ws.shell("rm -f /data/lk", session_id="agent")
     assert r.exit_code == 1
-    assert r.stderr == b"rm: read-only mount at /data/\n"
+    assert r.stderr == (b"rm: cannot remove '/data/lk': "
+                        b"Read-only file system\n")
 
 
 @pytest.mark.asyncio
@@ -245,19 +249,21 @@ async def test_rm_f_silences_a_hidden_link():
 
 
 @pytest.mark.asyncio
-async def test_one_read_only_mount_speaks_once():
-    # The refusal names the mount, not the operand, so it is one fact
-    # however many operands tripped it -- including the backend operands
-    # the command tier refuses separately, whose line is the same line.
+async def test_every_refused_operand_speaks_in_one_voice():
+    # GNU reports each operand it could not remove, so a read grant is
+    # one line per operand -- a link the node table refuses and a
+    # backend file the op door refuses say the same thing.
     ws = _ws()
     await ws.shell("echo b > /data/f.txt")
     await ws.shell("ln -s f.txt /data/l1; ln -s f.txt /data/l2")
     ws.create_session("agent", mounts={"/data/": "read"})
-    for line in ("rm /data/l1 /data/l2", "rm /data/l1 /data/f.txt",
-                 "rm /data/l1 /data/l2 /data/f.txt"):
+    for operands in (["l1", "l2"], ["l1", "f.txt"], ["l1", "l2", "f.txt"]):
+        line = "rm " + " ".join(f"/data/{name}" for name in operands)
         r = await ws.shell(line, session_id="agent")
         assert r.exit_code == 1, line
-        assert r.stderr == b"rm: read-only mount at /data/\n", line
+        assert r.stderr == b"".join(
+            f"rm: cannot remove '/data/{name}': Read-only file system\n".
+            encode() for name in operands), line
     assert ws.namespace.is_link("/data/l1")
     assert ws.namespace.is_link("/data/l2")
 

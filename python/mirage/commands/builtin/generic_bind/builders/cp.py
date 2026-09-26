@@ -127,7 +127,4 @@ async def cp(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                                              opts.index))
 
 
-BUILDER = Builder('cp',
-                  cp,
-                  write=True,
-                  requirements=frozenset({Operation.COPY}))
+BUILDER = Builder('cp', cp, write=True)

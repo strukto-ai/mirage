@@ -24,6 +24,8 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.errors import (FS_ERRORS, error_path, fs_strerror,
+                                 operand_spelling)
 
 
 def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
@@ -59,7 +61,16 @@ def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
                 if refusal is not None:
                     errors.append(refusal)
                 continue
-            await mkdir_impl(accessor, path, parents=parents)
+            try:
+                await mkdir_impl(accessor, path, parents=parents)
+            except FS_ERRORS as exc:
+                # GNU reports the operand (or, under -p, the component
+                # it tripped on) and still makes the rest, as the
+                # generic builder does.
+                named = operand_spelling(error_path(exc), path)
+                errors.append(f"mkdir: cannot create directory "
+                              f"'{named}': {fs_strerror(exc)}")
+                continue
             writes[path.mount_path] = b""
             if verbose:
                 lines.append(f"mkdir: created directory '{path.virtual}'")
@@ -72,5 +83,6 @@ def make_mkdir(vfs: str, io: CommandIO) -> Callable[..., Any]:
     wrapped: Callable[..., Any] = command("mkdir",
                                           vfs=vfs,
                                           spec=SPECS["mkdir"],
-                                          write=True)(mkdir)
+                                          write=True,
+                                          path_guarded=True)(mkdir)
     return wrapped

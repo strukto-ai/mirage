@@ -59,5 +59,6 @@ export function makeTouch<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
     spec: specOf('touch'),
     fn: touchCommand,
     write: true,
+    pathGuarded: true,
   })
 }

@@ -42,7 +42,8 @@ def test_vfs_accessor(config):
 
 def test_vfs_commands_registered(config):
     vfs = SlackVFS(config)
-    # 52 native (generic factory read set incl. find and sed + bespoke
-    # grep/rg + md5sum/sha1sum/sha384sum/sha512sum); acting on Slack
-    # moved to the slack CLI
-    assert len(vfs._commands) == 52
+    # 71 native (the whole generic factory set, whose writers answer
+    # ENOTSUP at the op Slack lacks, + bespoke grep/rg +
+    # md5sum/sha1sum/sha384sum/sha512sum); acting on Slack moved to the
+    # slack CLI
+    assert len(vfs._commands) == 71

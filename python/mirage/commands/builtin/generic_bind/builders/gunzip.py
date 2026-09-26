@@ -15,8 +15,7 @@
 from functools import partial
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.gunzip import (gunzip_generic,
-                                                    gunzip_writes)
+from mirage.commands.builtin.generic.gunzip import gunzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.config import CommandOpts
@@ -36,8 +35,4 @@ async def gunzip(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
         partial(ops.require(Operation.UNLINK), accessor))
 
 
-BUILDER = Builder('gunzip',
-                  gunzip,
-                  write=True,
-                  writes=gunzip_writes,
-                  requirements=frozenset({Operation.WRITE, Operation.UNLINK}))
+BUILDER = Builder('gunzip', gunzip, write=True)

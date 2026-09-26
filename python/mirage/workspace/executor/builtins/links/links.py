@@ -21,13 +21,11 @@ from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.errors import FS_ERRORS, ReadOnlyError, fs_strerror
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 from mirage.utils.path import CycleError
 from mirage.workspace.executor.builtins.links.probe import (dispatch_stat,
                                                             stat_or_none)
-from mirage.workspace.executor.builtins.shared import (fail, ok,
-                                                       read_only_error,
-                                                       split_flags)
+from mirage.workspace.executor.builtins.shared import fail, ok, split_flags
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 
@@ -171,10 +169,8 @@ async def strip_link_operands(
     no-name-leak rule).
 
     The refusal is voiced the way the same refusal on a backend file is
-    voiced, so one grant does not describe itself two ways: a mount-mode
-    refusal renders ``read_only_error`` (naming the mount, deduplicated
-    because two operands on one mount are one fact), everything else
-    renders GNU's per-operand line.
+    voiced, so one grant does not describe itself two ways: GNU's
+    per-operand line, a read-only region's EROFS included.
 
     An operand typed with a trailing slash is deliberately kept: the
     slash asked for a directory, and GNU refuses rather than removing
@@ -215,15 +211,6 @@ async def strip_link_operands(
                 if not force:
                     errors.append(f"{name}: cannot {verb} '{item.raw_path}': "
                                   f"{fs_strerror(exc)}\n")
-            except ReadOnlyError:
-                # The mount voice, because the mount is what refused:
-                # a backend file on this operand's turf is answered by
-                # `Mount.execute_cmd` with this exact line, and one
-                # grant must not describe itself two ways depending on
-                # whether the name it stopped was a link.
-                line = read_only_error(name, namespace, item)
-                if line not in errors:
-                    errors.append(line)
             except FS_ERRORS as exc:
                 errors.append(f"{name}: cannot {verb} '{item.raw_path}': "
                               f"{fs_strerror(exc)}\n")
@@ -377,23 +364,10 @@ async def prepare_mv(
             await dispatch("rename",
                            src,
                            dst=PathSpec.from_str_path(target_dst))
-        except ReadOnlyError as exc:
-            # Voiced as the same refusal on a backend file is: the mount
-            # voice when the source's own turf is what refused (the case
-            # `Mount.execute_cmd` answers, since the command runs on the
-            # source mount), GNU's per-operand line when it was the
-            # destination -- which is what a cross-mount `mv f /ro/f`
-            # already answers for a regular file.
-            blame = exc.filename or src.virtual
-            if blame == src.virtual:
-                return items, None, None, fail(
-                    "mv", read_only_error("mv", namespace, src))
-            return items, None, None, fail(
-                "mv", f"mv: cannot move '{src.raw_path}' to "
-                f"'{dst.raw_path}': {fs_strerror(exc)}\n")
         except PermissionError as exc:
-            # A policy deny, which GNU voices per operand and which the
-            # backend mv path voices the same way.
+            # A read-only endpoint or a policy deny, which GNU voices
+            # per operand and which the backend mv path voices the same
+            # way.
             return items, None, None, fail(
                 "mv", f"mv: cannot move '{src.raw_path}' to "
                 f"'{dst.raw_path}': {fs_strerror(exc)}\n")

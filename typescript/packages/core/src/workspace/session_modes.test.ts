@@ -81,7 +81,7 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.shell('rm /a/x.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toContain('read-only mount at /a/')
+    expect(stderrStr(denied)).toBe("rm: cannot remove '/a/x.txt': Read-only file system\n")
     expect(a.store.files.has('/x.txt')).toBe(true)
   })
 

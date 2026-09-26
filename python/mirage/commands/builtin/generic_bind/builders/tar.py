@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import \
     transfer_primitives
-from mirage.commands.builtin.generic.tar import tar_generic, tar_writes
+from mirage.commands.builtin.generic.tar import tar_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.builtin.generic_bind.archive_io import is_dir_of, walk_of
@@ -60,8 +60,4 @@ async def tar(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                              is_dir_of(ops, accessor, opts.index))
 
 
-BUILDER = Builder('tar',
-                  tar,
-                  write=True,
-                  writes=tar_writes,
-                  requirements=frozenset({Operation.WRITE, Operation.MKDIR}))
+BUILDER = Builder('tar', tar, write=True)

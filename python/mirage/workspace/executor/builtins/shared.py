@@ -240,37 +240,6 @@ def refusal(cmd: str, exc: PolicyDenied) -> Result:
                                                                   stderr=err)
 
 
-def read_only_error(cmd: str, namespace: Namespace, path: PathSpec) -> str:
-    """Render the mirage read-only refusal, naming the mount.
-
-    The voice ``Mount.execute_cmd`` uses when a command's own mount
-    region is unwritable, so a refusal reached from anywhere else says
-    the same thing: ``rm`` of a symlink is answered by the node table
-    rather than the mount, and rendering it in GNU's per-operand voice
-    made one read-only grant speak twice about the same mount.
-
-    It names the mount, not the operand, so two refused operands on one
-    mount produce one line and callers collecting several must drop the
-    duplicates. A refusal keyed to a *path* rather than a mount region
-    (a read-only rename destination on another mount) is not this
-    message: those keep GNU's per-operand wording, as the backend path
-    does.
-
-    A path no mount owns (an attr overlay or link above every mount,
-    gated on its ``/`` turf) has no prefix to blame, so the refusal
-    keeps GNU's own phrase instead of naming a mount that is not there.
-
-    Args:
-        cmd (str): command name.
-        namespace (Namespace): addressing authority (mount lookup).
-        path (PathSpec): the refused path.
-    """
-    mount = namespace.try_mount_for(path.virtual)
-    if mount is None:
-        return f"{cmd}: {path.virtual}: Read-only file system\n"
-    return f"{cmd}: read-only mount at {mount.prefix}\n"
-
-
 def readonly_refusal(cmd: str, name: str) -> Result:
     """Render the shell's own readonly refusal, checked before the door.
 

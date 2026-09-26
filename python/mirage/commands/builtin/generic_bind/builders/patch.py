@@ -32,7 +32,4 @@ async def patch(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                                ops.is_mounted(accessor))
 
 
-BUILDER = Builder('patch',
-                  patch,
-                  write=True,
-                  requirements=frozenset({Operation.WRITE}))
+BUILDER = Builder('patch', patch, write=True)

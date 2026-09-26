@@ -19,8 +19,8 @@ import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../../uti
 import { CycleError } from '../../../../utils/path.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import { expandOperands, fail, finish, readOnlyError, splitValueFlags } from '../shared.ts'
-import { isReadOnlyError, setattrVia, walkStats } from './metadata.ts'
+import { expandOperands, fail, finish, splitValueFlags } from '../shared.ts'
+import { isReadOnlyError, permissionError, setattrVia, walkStats } from './metadata.ts'
 import type { Result } from '../types.ts'
 
 // chmod MODE FILE...: set permission bits via setattr. Follows symlinks
@@ -87,7 +87,7 @@ export async function handleChmod(
         await setattrVia(dispatch, path, { mode: newMode })
       } catch (err) {
         if (!isReadOnlyError(err)) throw err
-        errors.push(readOnlyError('chmod', namespace, path))
+        errors.push(permissionError('chmod', 'changing permissions of', path, err))
       }
     }
   }

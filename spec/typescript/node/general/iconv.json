@@ -1,13 +1,43 @@
 {
   "_meta": {
     "by_vfs": {
+      "airtable": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "bin": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
       "box": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": true,
         "has_write": true
       },
+      "chroma": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
       "databricks_volume": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "dify": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "discord": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": true,
@@ -25,13 +55,55 @@
         "has_provision": true,
         "has_write": true
       },
+      "email": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gcal": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gdocs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
       "gdrive": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": true,
         "has_write": true
       },
+      "github": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gmail": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
       "gridfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gsheets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "gslides": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": true,
@@ -61,13 +133,67 @@
         "has_provision": true,
         "has_write": true
       },
+      "jaeger": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "lancedb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "langfuse": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "linear": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "mem0": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "mongodb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
       "nextcloud": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": true,
         "has_write": true
       },
+      "notion": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
       "onedrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "postgres": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "qdrant": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": true,
@@ -97,7 +223,25 @@
         "has_provision": true,
         "has_write": true
       },
+      "slack": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
       "ssh": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "trello": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": true,
+        "has_write": true
+      },
+      "wandb": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": true,
@@ -109,23 +253,47 @@
     "has_provision": true,
     "has_write": true,
     "vfs_names": [
+      "airtable",
+      "bin",
       "box",
+      "chroma",
       "databricks_volume",
+      "dify",
+      "discord",
       "disk",
       "dropbox",
+      "email",
+      "gcal",
+      "gdocs",
       "gdrive",
+      "github",
+      "gmail",
       "gridfs",
+      "gsheets",
+      "gslides",
       "hf_buckets",
       "hf_datasets",
       "hf_models",
       "hf_spaces",
+      "jaeger",
+      "lancedb",
+      "langfuse",
+      "linear",
+      "mem0",
+      "mongodb",
       "nextcloud",
+      "notion",
       "onedrive",
+      "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
       "sharepoint",
-      "ssh"
+      "slack",
+      "ssh",
+      "trello",
+      "wandb"
     ]
   },
   "options": [

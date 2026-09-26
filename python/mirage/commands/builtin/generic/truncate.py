@@ -5,6 +5,7 @@ from mirage.commands.builtin.utils.size_suffix import size_suffixes
 from mirage.commands.errors import UsageError
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, PathSpec
+from mirage.utils.errors import FS_ERRORS, fs_strerror
 
 # GNU truncate's letter set differs from split's and od's: lowercase
 # g/k/m/t are accepted, b is not (pinned against coreutils 9.7).
@@ -83,7 +84,9 @@ async def truncate(
     ``reg/`` are both ``Is a directory`` and nothing is created. The size
     is read first here only because a relative spec needs it, so for a
     slashed operand a stat that misses is not the verdict; the truncate
-    op answers, as the open would.
+    op answers, as the open would. An open that fails is GNU's
+    per-operand line, ``cannot open 'x' for writing`` (a read-only
+    region answers there), and the remaining operands still run.
 
     Args:
         paths (list[PathSpec]): the file operands.
@@ -93,6 +96,7 @@ async def truncate(
     """
     if not paths:
         raise ValueError("truncate: missing file operand")
+    errors: list[str] = []
     for path in paths:
         try:
             current = (await stat(path)).size or 0
@@ -100,8 +104,13 @@ async def truncate(
             if not path.raw_path.endswith("/"):
                 raise
             current = 0
-        await truncate_fn(path, parse_size(size, current))
-    return None, IOResult()
+        try:
+            await truncate_fn(path, parse_size(size, current))
+        except FS_ERRORS as exc:
+            errors.append(f"truncate: cannot open '{path.raw_path}' "
+                          f"for writing: {fs_strerror(exc)}\n")
+    return None, IOResult(stderr="".join(errors).encode() or None,
+                          exit_code=1 if errors else 0)
 
 
 __all__ = ["parse_size", "truncate"]

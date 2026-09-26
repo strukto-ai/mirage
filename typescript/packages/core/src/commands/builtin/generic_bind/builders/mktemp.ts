@@ -14,19 +14,15 @@
 
 import { resolvePath } from '../../../../utils/path.ts'
 import { PathSpec } from '../../../../types.ts'
-import { mktempGeneric, mktempWrites } from '../../generic/mktemp.ts'
-import type { Builder } from '../adapter.ts'
+import { mktempGeneric } from '../../generic/mktemp.ts'
+import { type Builder, requireOp } from '../adapter.ts'
 
 export const MKTEMP_BUILDER: Builder = {
   name: 'mktemp',
   write: true,
-  writes: mktempWrites,
-  requirements: ['mkdir', 'write'],
   fn: (ops, accessor, _paths, texts, opts) => {
-    const { mkdir, write } = ops
-    if (mkdir === undefined || write === undefined) {
-      throw new Error('mktemp: backend provides no write op')
-    }
+    const mkdir = requireOp(ops.mkdir, 'mkdir')
+    const write = requireOp(ops.write, 'write')
     return mktempGeneric(
       texts,
       opts,

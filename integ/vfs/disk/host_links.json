@@ -85,7 +85,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cp: /data/destination/plain.txt: No such file or directory\n"
+        "stderr": "cp: cannot create regular file '/data/destination/plain.txt': No such file or directory\n"
       }
     },
     {

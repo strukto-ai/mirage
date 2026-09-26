@@ -77,7 +77,4 @@ async def split(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
         mount_prefix=opts.mount_prefix)
 
 
-BUILDER = Builder('split',
-                  split,
-                  write=True,
-                  requirements=frozenset({Operation.WRITE}))
+BUILDER = Builder('split', split, write=True)

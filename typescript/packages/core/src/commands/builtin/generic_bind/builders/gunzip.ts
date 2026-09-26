@@ -12,20 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { gunzipGeneric, gunzipWrites } from '../../generic/gunzip.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { gunzipGeneric } from '../../generic/gunzip.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 
 export const GUNZIP_BUILDER: Builder = {
   name: 'gunzip',
   write: true,
-  writes: gunzipWrites,
-  requirements: ['write', 'unlink'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
-    const { write, unlink } = ops
-    if (write === undefined || unlink === undefined) {
-      throw new Error('gunzip: backend provides no write op')
-    }
+    const write = requireOp(ops.write, 'write')
+    const unlink = requireOp(ops.unlink, 'unlink')
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     return gunzipGeneric(
       resolved,

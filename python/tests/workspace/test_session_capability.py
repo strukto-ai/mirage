@@ -316,7 +316,8 @@ def test_read_grant_blocks_command_write():
     ok, denied = asyncio.run(run())
     assert ok.exit_code == 0 and b"hi" in (ok.stdout or b"")
     assert denied.exit_code != 0
-    assert b"read-only mount at /a/" in (denied.stderr or b"")
+    assert denied.stderr == (b"rm: cannot remove '/a/x.txt': "
+                             b"Read-only file system\n")
     assert a._store.files.get("/x.txt") == b"hi"
 
 

@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import type { Accessor } from '../../../accessor/base.ts'
 import type { CommandOpts } from '../../config.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
-import { eacces, eisdir, enoent } from '../../../utils/errors.ts'
+import { eacces, eisdir, enoent, formatFsError } from '../../../utils/errors.ts'
 import {
   dirAwareStat,
   dirAwareStream,
@@ -28,6 +28,8 @@ import {
   withAbortGuard,
   withPolicyGuard,
   withRuleGuard,
+  withPathGuards,
+  requireOp,
   type CommandIO,
 } from './adapter.ts'
 import {
@@ -846,4 +848,163 @@ describe('withAbortGuard', () => {
     const ops = recording([])
     expect(withAbortGuard(ops, undefined)).toBe(ops)
   })
+})
+
+function capabilityOps(backend?: () => Promise<void>): CommandIO {
+  return {
+    readdir: () => Promise.resolve([]),
+    readBytes: () => Promise.resolve(new Uint8Array()),
+    readStream: () => oneChunkStream(new Uint8Array()),
+    stat: () => Promise.resolve(new FileStat({ type: FileType.FILE, name: 'f' })),
+    isMounted: () => true,
+    ...(backend === undefined
+      ? {}
+      : {
+          write: backend,
+          mkdir: backend,
+          unlink: backend,
+          copy: backend,
+          rename: backend,
+          truncate: backend,
+        }),
+  }
+}
+
+const capabilityCases = [false, true].flatMap((available) =>
+  (['write', 'mkdir', 'unlink', 'rename', 'copy', 'truncate'] as const).flatMap((operation) =>
+    (['locked', 'hidden', 'build'] as const).map((region) => ({ available, operation, region })),
+  ),
+)
+
+it.each(capabilityCases)(
+  'guards $operation in $region, available=$available',
+  async ({ available, operation, region }) => {
+    let calls = 0
+    const backend = () => {
+      calls++
+      return Promise.resolve()
+    }
+    const session = new SessionState({
+      sessionId: 'guard-matrix',
+      mountModes: new Map([['/data', MountMode.READ]]),
+      hiddenPaths: { paths: ['/data/hidden'] },
+      shownPaths: { entries: [{ path: '/data/build', mode: MountMode.WRITE }] },
+    })
+    await runWithSession(session, () =>
+      runWithMountGate('/data', MountMode.WRITE, async () => {
+        const ops = withPolicyGuard(withPathGuards(capabilityOps(available ? backend : undefined)))
+        const path = PathSpec.fromStrPath(`/data/${region}/f`)
+        const invoke = () => {
+          if (operation === 'copy' || operation === 'rename') {
+            return requireOp(ops[operation], operation)(
+              accessor,
+              PathSpec.fromStrPath('/data/build/src'),
+              path,
+            )
+          }
+          if (operation === 'write')
+            return requireOp(ops.write, operation)(accessor, path, new Uint8Array())
+          if (operation === 'truncate') return requireOp(ops.truncate, operation)(accessor, path, 0)
+          return requireOp(ops[operation], operation)(accessor, path)
+        }
+        if (available && region === 'build') {
+          await invoke()
+          expect(calls).toBe(1)
+        } else {
+          const code = { locked: 'EROFS', hidden: 'ENOENT', build: 'ENOTSUP' }[region]
+          const named =
+            operation === 'rename' && region === 'build' ? '/data/build/src' : path.virtual
+          await expect(invoke()).rejects.toMatchObject({ code, virtualPath: named })
+          expect(calls).toBe(0)
+          if (region === 'locked') {
+            const err = await invoke().catch((e: unknown) => e)
+            expect(new TextDecoder().decode(formatFsError('probe', err))).toBe(
+              `probe: ${path.virtual}: Read-only file system\n`,
+            )
+          }
+        }
+      }),
+    )
+  },
+)
+
+it.each([false, true])(
+  'copy reads source; rename mutates source and subtree, available=%s',
+  async (available) => {
+    let calls = 0
+    const backend = () => {
+      calls++
+      return Promise.resolve()
+    }
+    const session = new SessionState({
+      sessionId: 'pair-guards',
+      shownPaths: {
+        entries: [
+          { path: '/data/src', mode: MountMode.READ },
+          { path: '/data/tree/locked', mode: MountMode.READ },
+        ],
+      },
+    })
+    await runWithSession(session, () =>
+      runWithMountGate('/data', MountMode.WRITE, async () => {
+        const ops = withPathGuards(capabilityOps(available ? backend : undefined))
+        const src = PathSpec.fromStrPath('/data/src'),
+          dst = PathSpec.fromStrPath('/data/dst')
+        const copy = requireOp(ops.copy, 'copy')
+        if (available) await copy(accessor, src, dst)
+        else
+          await expect(copy(accessor, src, dst)).rejects.toMatchObject({
+            code: 'ENOTSUP',
+            virtualPath: dst.virtual,
+          })
+        for (const [source, blame] of [
+          [src, src.virtual],
+          [PathSpec.fromStrPath('/data/tree'), '/data/tree/locked'],
+        ] as const) {
+          await expect(
+            Promise.resolve().then(() => requireOp(ops.rename, 'rename')(accessor, source, dst)),
+          ).rejects.toMatchObject({ code: 'EROFS', virtualPath: blame })
+        }
+        expect(calls).toBe(Number(available))
+      }),
+    )
+  },
+)
+
+it('a missing capability obeys the rule before the mode', async () => {
+  const asked: string[] = []
+  const gate = {
+    scoped: true,
+    granted: [],
+    check: (path: string) => {
+      asked.push(path)
+      throw eacces(path)
+    },
+  }
+  await runWithAdmission(gate, () =>
+    runWithMountGate('/data', MountMode.READ, async () => {
+      await expect(
+        requireOp(capabilityOps().write, 'write')(
+          accessor,
+          PathSpec.fromStrPath('/data/locked'),
+          new Uint8Array(),
+        ),
+      ).rejects.toMatchObject({ code: 'EACCES' })
+    }),
+  )
+  expect(asked).toEqual(['/data/locked'])
+})
+
+it('a missing copy admits its source as a read before capability failure', async () => {
+  const policy = new SealedRead('/data/secret')
+  await runWithOpPolicies(new Policies([policy]), async () => {
+    await expect(
+      requireOp(capabilityOps().copy, 'copy')(
+        accessor,
+        PathSpec.fromStrPath('/data/secret'),
+        PathSpec.fromStrPath('/data/dst'),
+      ),
+    ).rejects.toMatchObject({ code: 'EACCES' })
+  })
+  expect(policy.asked).toEqual([['copy', '/data/secret', false]])
 })

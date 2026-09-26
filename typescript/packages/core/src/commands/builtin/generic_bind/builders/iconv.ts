@@ -12,20 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { iconvGeneric, iconvWrites } from '../../generic/iconv.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { iconvGeneric } from '../../generic/iconv.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 
 export const ICONV_BUILDER: Builder = {
   name: 'iconv',
   write: true,
-  writes: iconvWrites,
-  requirements: ['write'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     const idx = opts.index ?? undefined
-    const { write } = ops
-    if (write === undefined) {
-      throw new Error('iconv: backend provides no write op')
-    }
+    const write = requireOp(ops.write, 'write')
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     return iconvGeneric(
       resolved,

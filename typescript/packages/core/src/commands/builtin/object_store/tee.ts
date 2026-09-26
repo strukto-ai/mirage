@@ -17,7 +17,7 @@ import type { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { teeGeneric, teeWrites } from '../generic/tee.ts'
+import { teeGeneric } from '../generic/tee.ts'
 import { requireOp } from '../generic_bind/adapter.ts'
 import { resolveGlobOf, type CommandIO } from '../generic_bind/index.ts'
 
@@ -52,6 +52,6 @@ export function makeTee<A extends Accessor>(vfs: string, io: CommandIO<A>): Regi
     spec: specOf('tee'),
     fn: teeCommand,
     write: true,
-    writes: teeWrites,
+    pathGuarded: true,
   })
 }

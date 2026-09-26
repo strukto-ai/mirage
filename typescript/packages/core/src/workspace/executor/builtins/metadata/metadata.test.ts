@@ -188,10 +188,17 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
 
   it('metadata commands refuse a read-only mount', async () => {
     const [ws] = await makeWs(MountMode.READ)
-    for (const cmd of ['chmod 644 /data/f.txt', 'chown alice /data/f.txt', 'touch /data/f.txt']) {
-      const [code, , err] = await run(ws, cmd)
+    for (const [cmd, action] of [
+      ['chmod 644', 'changing permissions of'],
+      ['chown alice', 'changing ownership of'],
+      ['touch', 'cannot touch'],
+      ['touch -c', 'setting times of'],
+    ] as const) {
+      const [code, , err] = await run(ws, `${cmd} /data/f.txt`)
       expect(code).toBe(1)
-      expect(err).toContain('read-only mount')
+      expect(err).toBe(
+        `${cmd.split(' ')[0] ?? ''}: ${action} '/data/f.txt': Read-only file system\n`,
+      )
     }
     await ws.close()
   })
@@ -368,7 +375,7 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     const [ws] = await makeWs(MountMode.READ)
     const [code, , err] = await run(ws, 'chgrp staff /data/f.txt')
     expect(code).toBe(1)
-    expect(err).toContain('read-only mount')
+    expect(err).toBe("chgrp: changing group of '/data/f.txt': Read-only file system\n")
     await ws.close()
   })
 })

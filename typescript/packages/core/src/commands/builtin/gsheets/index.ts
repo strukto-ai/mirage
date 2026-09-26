@@ -27,6 +27,7 @@ import { GSHEETS_RM } from './rm.ts'
 // the filesystem surface.
 export const GSHEETS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GSheetsAccessor>(VFSName.GSHEETS, GSHEETS_IO, {
+    overrides: new Set(['rm']),
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,

@@ -61,7 +61,7 @@ def case_targets(paths: list[Path]) -> dict[str, set[str]]:
             continue
         rel = str(path.relative_to(ROOT))
         for case in loaded["cases"]:
-            names = set(case.get("targets", []))
+            names = set(case.get("targets", loaded.get("targets", [])))
             if names:
                 out[f"{rel} :: {case['id']}"] = names
     return out

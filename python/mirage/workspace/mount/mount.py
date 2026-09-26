@@ -14,7 +14,6 @@
 
 import asyncio
 import dataclasses
-import errno
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Iterable
 from contextlib import asynccontextmanager
@@ -30,8 +29,8 @@ from mirage.commands.resolve import get_extension
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import FlagValue
-from mirage.context import (effective_mount_mode, effective_path_mode,
-                            readonly_below, reset_mount_gate, set_mount_gate,
+from mirage.context import (effective_mount_mode, require_paths_writable,
+                            reset_mount_gate, set_mount_gate,
                             strongest_mode_under)
 from mirage.io.cachable_iterator import CachableAsyncIterator
 from mirage.io.types import ByteSource, IOResult
@@ -44,7 +43,7 @@ from mirage.policy import resolve_limit
 from mirage.types import (FileType, Limit, MountMode, PathSpec, Producer,
                           ReadSpec)
 from mirage.utils.context_scope import ContextScope
-from mirage.utils.errors import ReadOnlyError, ebusy, enotsup
+from mirage.utils.errors import ebusy, enotsup
 from mirage.utils.ids import uuid7
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.base import BaseVFS
@@ -658,10 +657,8 @@ class MountEntry:
             recording_token = push_mount_context(self.mount_id)
             revs_token = push_revisions(self.revisions or None)
             prev_manager = push_cache_manager(self.cache_manager)
-            # What the command tier's mode guard reads: the write-command
-            # gate below admits a command when any shown subtree grants
-            # writes, and this binding is how each write the handler then
-            # makes is held to its own region's mode.
+            # What the command tier's mode guard reads: each write the
+            # handler makes is held to its own region's mode.
             gate_token = set_mount_gate(self.prefix, self.mode)
             try:
                 for cmd in handlers:
@@ -669,20 +666,22 @@ class MountEntry:
                     info_only = (flags.get("help") is True
                                  or (flags.get("version") is True
                                      and has_injected_version(cmd.spec)))
-                    # strongest_mode_under, not effective_mode: a mount
-                    # whose only writable region is a show entry still runs
-                    # the command, and the op door refuses per path. The
-                    # trailing newline is load-bearing: stderr accumulates
-                    # across a line, so two refusals in one list ran
-                    # together as `...at /ro/rm: read-only mount at /ro/`,
-                    # and the node table's twin of this refusal (a symlink
-                    # `rm`, rendered by shared.read_only_error) concatenates
-                    # with it. An invocation its generic says writes nothing
-                    # (`gzip -c`, `tar -t`) runs like a reader: it has no
-                    # write for the mount to refuse.
-                    if (cmd.write and not info_only and strongest_mode_under(
-                            self.prefix, self.mode) == MountMode.READ and
-                        (cmd.writes is None or cmd.writes(flags, paths))):
+                    # A command whose I/O runs under the path guards is
+                    # refused where it writes, because only the write
+                    # knows whether a line writes: `gzip -c`, `tar -t` and
+                    # `split -n 1/2` read a read-only mount like any
+                    # reader, and `gzip f` is refused at the write of
+                    # `f.gz`, in gzip's own GNU voice. A write command
+                    # that reaches its service some other way (trello's
+                    # id-addressed card writes, a custom backend's own
+                    # verb) is refused here, before it runs, because no
+                    # door would see its write. strongest_mode_under, not
+                    # effective_mode: a mount whose only writable region
+                    # is a show entry still runs it. The trailing newline
+                    # is load-bearing: stderr accumulates across a line.
+                    if (cmd.write and not cmd.path_guarded
+                            and not info_only and strongest_mode_under(
+                                self.prefix, self.mode) == MountMode.READ):
                         return None, IOResult(
                             exit_code=1,
                             stderr=(f"{cmd_name}: read-only mount "
@@ -763,34 +762,14 @@ class MountEntry:
                 raise enotsup(str(self.vfs.name), op_name, path)
 
             if any(o.write for o in levels):
-                # GNU reports the operand, not the guard's own wording, so
-                # stamp errno + filename and let format_fs_error render
-                # "<cmd>: <path>: Read-only file system" (mirrors the
-                # TypeScript erofsReadOnly stamp). Per path, not per mount:
-                # a show entry can hold one subtree below `w` on a writable
-                # mount, or one writable region on a read mount. A rename
-                # mutates its destination too, so both endpoints answer,
-                # and it relocates whole subtrees in one call, so a
-                # read-only region below either endpoint refuses it too.
-                if effective_path_mode(path, self.prefix,
-                                       self.mode) == MountMode.READ:
-                    raise ReadOnlyError(errno.EROFS, "Read-only file system",
-                                        path)
                 dst = kwargs.get("dst")
-                if isinstance(dst, PathSpec) and effective_path_mode(
-                        dst.virtual, self.prefix, self.mode) == MountMode.READ:
-                    raise ReadOnlyError(errno.EROFS, "Read-only file system",
-                                        dst.virtual)
-                if op_name in _SUBTREE_OPS:
-                    endpoints = [path]
-                    if isinstance(dst, PathSpec):
-                        endpoints.append(dst.virtual)
-                    for endpoint in endpoints:
-                        blame = readonly_below(endpoint, self.prefix,
-                                               self.mode)
-                        if blame is not None:
-                            raise ReadOnlyError(errno.EROFS,
-                                                "Read-only file system", blame)
+                endpoints = [PathSpec.from_str_path(path)]
+                if isinstance(dst, PathSpec):
+                    endpoints.append(dst)
+                require_paths_writable(endpoints,
+                                       self.prefix,
+                                       self.mode,
+                                       subtree=op_name in _SUBTREE_OPS)
 
             mount_prefix = self.prefix.rstrip("/")
             scope = PathSpec(

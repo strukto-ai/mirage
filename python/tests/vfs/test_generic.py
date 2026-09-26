@@ -132,10 +132,11 @@ def test_generic_commands_registered():
     assert {"ls", "cat", "grep", "find", "head", "wc"} <= names
 
 
-def test_write_commands_absent_without_write_op():
+def test_write_commands_register_without_write_op():
+    # Their read-only modes (`tee` with no operand, `gzip -c`) run on a
+    # backend without writes; a line that writes answers ENOTSUP there.
     names = command_names(make_vfs())
-    assert "tee" not in names
-    assert "rm" not in names
+    assert {"tee", "rm", "gzip", "tar"} <= names
 
 
 def test_overrides_suppress_generic():
