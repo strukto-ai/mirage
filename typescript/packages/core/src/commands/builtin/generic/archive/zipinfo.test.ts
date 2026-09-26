@@ -18,6 +18,7 @@ import {
   renderHeader,
   renderRow,
   renderTotals,
+  renderVerbose,
   zipinfoLayout,
   type ZipinfoLayout,
   type ZipinfoRequest,
@@ -39,6 +40,7 @@ function row(over: Partial<ZipRow> = {}): ZipRow {
     hostVersion: 20,
     dateTime: STAMP,
     hasExtra: false,
+    crc: 0,
     ...over,
   }
 }
@@ -197,5 +199,42 @@ describe('zipinfo layout', () => {
       header: false,
       totals: false,
     })
+  })
+})
+
+describe('unzip -v rows', () => {
+  it('match the verbose listing of Info-ZIP', () => {
+    const rows = [
+      row({ name: 'dir/', size: 0, csize: 2, method: 8 }),
+      row({ name: 'dir/a.txt', size: 200, csize: 6, method: 8, crc: 0x599af058 }),
+      row({ name: 'b.txt', size: 1, csize: 3, method: 8, crc: 0x71beeff9 }),
+    ]
+    expect(renderVerbose('m.zip', rows, false)).toBe(
+      'Archive:  m.zip\n' +
+        ' Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n' +
+        '--------  ------  ------- ---- ---------- ----- --------  ----\n' +
+        '       0  Defl:N        2   0% 2026-09-20 07:33 00000000  dir/\n' +
+        '     200  Defl:N        6  97% 2026-09-20 07:33 599af058  dir/a.txt\n' +
+        '       1  Defl:N        3 -200% 2026-09-20 07:33 71beeff9  b.txt\n' +
+        '--------          -------  ---                            -------\n' +
+        '     201               11  95%                            3 files\n',
+    )
+  })
+
+  it.each([
+    [0, 0, 'Stored'],
+    [6, 6, 'Implode'],
+    [8, 4, 'Defl:F'],
+    [9, 2, 'Def64X'],
+    [12, 0, 'BZip2'],
+    [99, 0, 'Unk:099'],
+  ] as const)('name method %i (flags %i) as list.c does', (method, flags, label) => {
+    const line = renderVerbose('a', [row({ method, flags })], true).split('\n')[2] ?? ''
+    expect(line.split(/ +/)[2]).toBe(label)
+  })
+
+  it('print a full growth as a bare hundred', () => {
+    const line = renderVerbose('a', [row({ size: 1, csize: 2 })], true).split('\n')[2] ?? ''
+    expect(line.split(/ +/)[4]).toBe('100%')
   })
 })

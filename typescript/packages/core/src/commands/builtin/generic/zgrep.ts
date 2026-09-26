@@ -169,7 +169,7 @@ export async function zgrepGeneric(
       data = hasGzipMagic(raw) ? await gunzipChecked(raw) : raw
     } catch (err) {
       if (!(err instanceof GzipDataError)) throw err
-      errors += `zgrep: ${operandLabel(p, 'stdin')}: ${err.message}\n`
+      errors += err.render('zgrep', operandLabel(p, 'stdin'))
       continue
     }
     // zgrep hands grep a stdin operand as `-`, so -l and -L list it as `-`

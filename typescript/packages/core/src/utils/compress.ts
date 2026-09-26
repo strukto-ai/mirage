@@ -26,10 +26,55 @@ import { yieldBytes } from '../io/stream.ts'
 import { concat } from '../io/cachable_iterator.ts'
 import { GzipDataError } from './errors.ts'
 
-// gzip 1.13's words for the inputs `gzip -d` refuses.
-const GZIP_NOT_GZIP = 'not in gzip format'
-const GZIP_EOF = 'unexpected end of file'
-const GZIP_CORRUPT = 'invalid compressed data--format violated'
+// gzip 1.13's words for the inputs `gzip -d` refuses, `{}` standing for the
+// input's name.
+const GZIP_NOT_GZIP = '{}: not in gzip format'
+const GZIP_EOF = '{}: unexpected end of file'
+const GZIP_CORRUPT = '{}: invalid compressed data--format violated'
+const GZIP_CRC = '{}: invalid compressed data--crc error'
+const GZIP_LENGTH = '{}: invalid compressed data--length error'
+const GZIP_ENCRYPTED = '{} is encrypted -- not supported'
+const GZIP_TRAILING = '{}: decompression OK, trailing garbage ignored'
+// The member layout of gzip.h: method 8 is deflate, the flag bits announce
+// the optional header fields, and the CRC-32 and the length modulo 2**32 of
+// the decoded bytes close the member.
+const GZIP_DEFLATED = 8
+const GZIP_HEADER_CRC = 0x02
+const GZIP_EXTRA_FIELD = 0x04
+const GZIP_ORIG_NAME = 0x08
+const GZIP_COMMENT = 0x10
+const GZIP_ENCRYPTED_FLAG = 0x20
+const GZIP_RESERVED = 0xc0
+const GZIP_FIXED_HEADER = 10
+const GZIP_TRAILER = 8
+export const GZIP_CHUNK_SIZE = 65536
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    }
+    table[n] = c >>> 0
+  }
+  return table
+})()
+
+/** The CRC-32 of `data`, continuing from the CRC of the bytes before it. */
+export function crc32(data: Uint8Array, crc = 0): number {
+  let c = (crc ^ 0xffffffff) >>> 0
+  for (let i = 0; i < data.byteLength; i++) {
+    c = (CRC_TABLE[((c ^ (data[i] ?? 0)) & 0xff) >>> 0] ?? 0) ^ (c >>> 8)
+  }
+  return (c ^ 0xffffffff) >>> 0
+}
+
+function littleEndian(bytes: Uint8Array, offset: number, width: number): number {
+  let value = 0
+  for (let i = width - 1; i >= 0; i--) value = value * 256 + (bytes[offset + i] ?? 0)
+  return value
+}
 
 async function runThrough(
   bytes: Uint8Array,
@@ -54,80 +99,180 @@ export function hasGzipMagic(bytes: Uint8Array): boolean {
   return bytes.byteLength >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b
 }
 
-const GZIP_TRAILING = 'decompression OK, trailing garbage ignored'
-export const GZIP_CHUNK_SIZE = 65536
+// Which part of a gzip member the decoder is reading.
+type MemberPart = 'header' | 'body' | 'trailer'
 
+/**
+ * Incremental member decoder with bounded decompressed chunks.
+ *
+ * Frames each member as gzip 1.13 does: it reads the header itself, inflates
+ * the body raw, and checks the CRC and length trailer only after handing out
+ * what it inflated, so a damaged trailer costs the diagnostic and not the
+ * data. gzip ends the run on a mismatch unless it is only testing
+ * (`gzip -t`), and then moves to the next input. A header gzip does not
+ * support skips the input, and keeps the members before it when it is not
+ * the first.
+ */
 class GzipDecoder {
-  private decoder: ZStream | null = null
+  private part: MemberPart = 'header'
+  private inflater: ZStream | null = null
+  private crc = 0
+  private size = 0
   private seen = false
-  private prefix: Uint8Array = new Uint8Array()
-  private padding = false;
+  private pending: Uint8Array = new Uint8Array()
+  private padding = false
+
+  constructor(private readonly test = false) {}
+
+  // A refusal that skips the input, keeping any complete member.
+  private refusal(reason: string, exitCode = 1): GzipDataError {
+    return new GzipDataError([reason], false, exitCode, this.seen)
+  }
+
+  // How many bytes the member header at the start of `data` spans, or null
+  // while it is incomplete. Read in gzip 1.13's order (get_method), so a
+  // method or flag gzip does not support is refused as soon as the byte
+  // naming it arrives, even when the rest of the header never does.
+  private headerLength(data: Uint8Array): number | null {
+    if (data.byteLength < 3) return null
+    const method = data[2] ?? 0
+    if (method !== GZIP_DEFLATED) {
+      throw this.refusal(`{}: unknown method ${String(method)} -- not supported`)
+    }
+    if (data.byteLength < 4) return null
+    const flags = data[3] ?? 0
+    if (flags & GZIP_ENCRYPTED_FLAG) throw this.refusal(GZIP_ENCRYPTED)
+    if (flags & GZIP_RESERVED) {
+      throw this.refusal(`{} has flags 0x${flags.toString(16)} -- not supported`)
+    }
+    let end = GZIP_FIXED_HEADER
+    if (flags & GZIP_EXTRA_FIELD) {
+      if (data.byteLength < end + 2) return null
+      end += 2 + littleEndian(data, end, 2)
+    }
+    for (const field of [GZIP_ORIG_NAME, GZIP_COMMENT]) {
+      if (flags & field) {
+        const nul = data.indexOf(0, end)
+        if (nul === -1) return null
+        end = nul + 1
+      }
+    }
+    if (flags & GZIP_HEADER_CRC) {
+      if (data.byteLength < end + 2) return null
+      const stored = littleEndian(data, end, 2)
+      const computed = crc32(data.subarray(0, end)) & 0xffff
+      if (stored !== computed) {
+        const hex = (n: number): string => n.toString(16).padStart(4, '0')
+        throw this.refusal(
+          `{}: header checksum 0x${hex(stored)} != computed checksum 0x${hex(computed)}`,
+        )
+      }
+      end += 2
+    }
+    return data.byteLength >= end ? end : null
+  }
 
   *feed(input: Uint8Array): Generator<Uint8Array> {
-    let data = input
+    let data = this.pending.byteLength > 0 ? concat([this.pending, input]) : input
+    this.pending = new Uint8Array()
     while (data.byteLength > 0) {
-      if (this.decoder === null) {
-        if (this.prefix.byteLength > 0) data = concat([this.prefix, data])
-        this.prefix = new Uint8Array()
+      if (this.part === 'header') {
         if (this.seen && (this.padding || data[0] === 0)) {
           this.padding = true
-          if (data.some((byte) => byte !== 0))
-            throw new GzipDataError(GZIP_TRAILING, false, undefined, 2)
+          if (data.some((byte) => byte !== 0)) throw this.refusal(GZIP_TRAILING, 2)
           return
         }
         if (data.byteLength < 2) {
-          this.prefix = data
+          this.pending = data.slice()
           return
         }
         if (!hasGzipMagic(data)) {
-          throw new GzipDataError(
-            this.seen ? GZIP_TRAILING : GZIP_NOT_GZIP,
-            false,
-            undefined,
-            this.seen ? 2 : 1,
-          )
+          throw this.seen ? this.refusal(GZIP_TRAILING, 2) : this.refusal(GZIP_NOT_GZIP)
         }
-        this.decoder = new ZStream()
-        if (zlibInflateInit2(this.decoder, 31) !== Z_OK)
+        const end = this.headerLength(data)
+        if (end === null) {
+          this.pending = data.slice()
+          return
+        }
+        data = data.subarray(end)
+        this.inflater = new ZStream()
+        if (zlibInflateInit2(this.inflater, -15) !== Z_OK)
           throw new Error('gzip decoder initialization failed')
-      }
-      const decoder = this.decoder
-      decoder.input = data
-      decoder.next_in = 0
-      decoder.avail_in = data.byteLength
-      do {
-        decoder.output = new Uint8Array(GZIP_CHUNK_SIZE)
-        decoder.next_out = 0
-        decoder.avail_out = GZIP_CHUNK_SIZE
-        const status = zlibInflate(decoder, Z_NO_FLUSH)
-        if (decoder.next_out > 0) yield decoder.output.subarray(0, decoder.next_out)
-        if (status === Z_STREAM_END) {
-          this.seen = true
-          this.close()
-          break
+        this.crc = 0
+        this.size = 0
+        this.part = 'body'
+      } else if (this.part === 'body') {
+        data = yield* this.inflate(data)
+      } else {
+        if (data.byteLength < GZIP_TRAILER) {
+          this.pending = data.slice()
+          return
         }
-        if (status !== Z_OK && status !== Z_BUF_ERROR) throw new GzipDataError(GZIP_CORRUPT, true)
-      } while (decoder.avail_in > 0 || decoder.avail_out === 0)
-      data = data.subarray(decoder.next_in)
+        this.check(data.subarray(0, GZIP_TRAILER))
+        data = data.subarray(GZIP_TRAILER)
+        this.seen = true
+        this.part = 'header'
+      }
     }
+  }
+
+  // Inflate body bytes, yielding bounded chunks as they decode; returns the
+  // input left over once the body ends, else nothing.
+  private *inflate(data: Uint8Array): Generator<Uint8Array, Uint8Array> {
+    const inflater = this.inflater
+    if (inflater === null) throw new Error('gzip body without a decoder')
+    inflater.input = data
+    inflater.next_in = 0
+    inflater.avail_in = data.byteLength
+    do {
+      inflater.output = new Uint8Array(GZIP_CHUNK_SIZE)
+      inflater.next_out = 0
+      inflater.avail_out = GZIP_CHUNK_SIZE
+      const status = zlibInflate(inflater, Z_NO_FLUSH)
+      if (inflater.next_out > 0) {
+        const out = inflater.output.subarray(0, inflater.next_out)
+        this.crc = crc32(out, this.crc)
+        this.size += out.byteLength
+        yield out
+      }
+      if (status === Z_STREAM_END) {
+        const rest = data.subarray(inflater.next_in)
+        this.close()
+        this.part = 'trailer'
+        return rest
+      }
+      if (status !== Z_OK && status !== Z_BUF_ERROR) throw new GzipDataError([GZIP_CORRUPT], true)
+    } while (inflater.avail_in > 0 || inflater.avail_out === 0)
+    return new Uint8Array()
+  }
+
+  // Compare a member's trailer with the bytes it decoded to.
+  private check(trailer: Uint8Array): void {
+    const reasons: string[] = []
+    if (littleEndian(trailer, 0, 4) !== this.crc) reasons.push(GZIP_CRC)
+    if (littleEndian(trailer, 4, 4) !== this.size % 2 ** 32) reasons.push(GZIP_LENGTH)
+    if (reasons.length > 0) throw new GzipDataError(reasons, !this.test, 1, true)
   }
 
   // GNU gzip 1.13 treats a single trailing nonzero byte as fatal EOF;
   // the trailing-garbage warning requires at least two bytes.
   finish(): void {
-    if (!this.seen || this.decoder !== null || this.prefix.byteLength > 0)
-      throw new GzipDataError(GZIP_EOF, true)
+    if (!this.seen || this.part !== 'header' || this.pending.byteLength > 0)
+      throw new GzipDataError([GZIP_EOF], true)
   }
 
   close(): void {
-    if (this.decoder !== null) zlibInflateEnd(this.decoder)
-    this.decoder = null
+    if (this.inflater !== null) zlibInflateEnd(this.inflater)
+    this.inflater = null
   }
 }
 
 /** Decode gzip members with bounded output chunks and consumer backpressure. */
-export async function* gunzipStream(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
-  const decoder = new GzipDecoder()
+export async function* gunzipStream(
+  source: AsyncIterable<Uint8Array>,
+  test = false,
+): AsyncIterable<Uint8Array> {
+  const decoder = new GzipDecoder(test)
   try {
     for await (const chunk of source) yield* decoder.feed(chunk)
     decoder.finish()
@@ -136,11 +281,25 @@ export async function* gunzipStream(source: AsyncIterable<Uint8Array>): AsyncIte
   }
 }
 
+/** What `gzip -d` writes from `bytes` before it stops, and why. */
+export async function gunzipPartial(
+  bytes: Uint8Array,
+): Promise<[Uint8Array, GzipDataError | null]> {
+  const parts: Uint8Array[] = []
+  try {
+    for await (const part of gunzipStream(yieldBytes(bytes))) parts.push(part)
+  } catch (err) {
+    if (!(err instanceof GzipDataError)) throw err
+    return [concat(parts), err]
+  }
+  return [concat(parts), null]
+}
+
 /** Materialize checked gzip for consumers that need the whole decoded file. */
 export async function gunzipChecked(bytes: Uint8Array): Promise<Uint8Array> {
-  const parts: Uint8Array[] = []
-  for await (const part of gunzipStream(yieldBytes(bytes))) parts.push(part)
-  return concat(parts)
+  const [decoded, failure] = await gunzipPartial(bytes)
+  if (failure !== null) throw failure
+  return decoded
 }
 
 export async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {

@@ -154,6 +154,10 @@
       "type": "bool"
     },
     {
+      "short": "-v",
+      "type": "bool"
+    },
+    {
       "multiple": true,
       "short": "-x",
       "type": "str"

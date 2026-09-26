@@ -189,7 +189,7 @@ async def zgrep(
         try:
             data = gunzip_checked(raw) if raw.startswith(GZIP_MAGIC) else raw
         except GzipDataError as exc:
-            errors.append(f"zgrep: {operand_label(p, 'stdin')}: {exc}\n")
+            errors.append(exc.render("zgrep", operand_label(p, "stdin")))
             continue
         # zgrep hands grep a stdin operand as `-`, so -l and -L list it
         # as `-` while its lines are labelled `(standard input)` (gzip

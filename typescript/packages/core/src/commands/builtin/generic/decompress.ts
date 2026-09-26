@@ -42,18 +42,18 @@ export async function decompressInputs(
       )
       const chunks: Uint8Array[] = []
       try {
-        for await (const chunk of gunzipStream(inPlace ? read(path) : stream(path))) {
+        for await (const chunk of gunzipStream(
+          inPlace ? read(path) : stream(path),
+          options.testOnly === true,
+        )) {
           if (inPlace) chunks.push(chunk)
           else if (!options.testOnly) yield chunk
         }
       } catch (err) {
         if (err instanceof GzipDataError) {
-          report(
-            `${options.command}: ${operandLabel(path, 'stdin')}: ${err.message}\n`,
-            err.exitCode,
-          )
+          report(err.render(options.command, operandLabel(path, 'stdin')), err.exitCode)
           if (err.fatal) return
-          if (err.exitCode !== 2) continue
+          if (!err.keepsOutput) continue
         } else {
           if (!isFsError(err)) throw err
           report(fsErrorLine(options.command, path, err), readFailExitCode(options.command, err))

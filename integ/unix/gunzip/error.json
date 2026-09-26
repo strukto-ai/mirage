@@ -197,6 +197,99 @@
         "stdout": "hello",
         "stderr": "zcat: stdin: decompression OK, trailing garbage ignored\n"
       }
+    },
+    {
+      "id": "gunzip_t_trailer_mismatch_moves_on_to_the_next_input",
+      "seq": 848,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\x57\\x28\\xcf\\x2f\\xca\\x49\\xe1\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' > gubad.gz && printf 'plain\\n' > guplain.gz && gunzip -t gubad.gz guplain.gz; rc=$?; rm -f gubad.gz guplain.gz; exit $rc)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gunzip: gubad.gz: invalid compressed data--crc error\ngunzip: gubad.gz: invalid compressed data--length error\ngunzip: guplain.gz: not in gzip format\n"
+      }
+    },
+    {
+      "id": "gunzip_leaves_an_archive_with_a_damaged_trailer",
+      "seq": 849,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\x57\\x28\\xcf\\x2f\\xca\\x49\\xe1\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' > gubad2.gz && gunzip gubad2.gz; rc=$?; ls gubad2*; rm -f gubad2.gz; exit $rc)",
+      "expect": {
+        "exit": 1,
+        "stdout": "gubad2.gz\n",
+        "stderr": "gunzip: gubad2.gz: invalid compressed data--crc error\ngunzip: gubad2.gz: invalid compressed data--length error\n"
+      }
+    },
+    {
+      "id": "gunzip_keeps_the_members_before_a_later_bad_header",
+      "seq": 850,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(cd /data && (printf 'hello\\n' | gzip; printf '\\x1f\\x8b\\x07\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x20\\x30\\x3a\\x36\\x06\\x00\\x00\\x00') > gutwo.gz && gunzip gutwo.gz; rc=$?; ls gutwo*; cat gutwo; rm -f gutwo gutwo.gz; exit $rc)",
+      "expect": {
+        "exit": 1,
+        "stdout": "gutwo\nhello\n",
+        "stderr": "gunzip: gutwo.gz: unknown method 7 -- not supported\n"
+      }
     }
   ]
 }

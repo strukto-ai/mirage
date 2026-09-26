@@ -178,24 +178,37 @@ export async function listingError(
 /**
  * Why `gzip -d` cannot decompress one input, in gzip's words.
  *
- * `fatal` is gzip 1.13's split: an input with no gzip header is reported and
- * the run moves on to the next operand, while a truncated or corrupt one ends
- * the run. The gzip front ends render the reason under their own name, where
- * GNU's (shell scripts over gzip) say `gzip:` and put a blank line before the
- * diagnostic. Mirrors Python's GzipDataError.
+ * `fatal` is gzip 1.13's split: an input with no gzip header, or with a
+ * header naming a method or flag gzip does not support, is reported and the
+ * run moves on to the next operand, while a truncated or corrupt one ends the
+ * run, as does a CRC or length mismatch unless `-t` is only testing. A
+ * mismatch in both carries both reasons, in gzip's order. Each reason holds
+ * `{}` where the input's name goes. `keepsOutput` says the bytes decoded
+ * before the failure are whole members: after a refusal of a later member, of
+ * trailing garbage, or of a trailer. An in-place run still writes them when
+ * the refusal is not fatal, and tar reads them whatever gzip does. The gzip front ends render the reasons under their own name, where GNU's
+ * (shell scripts over gzip) say `gzip:` and put a blank line before most
+ * diagnostics. Mirrors Python's GzipDataError.
  */
 export class GzipDataError extends Error {
+  readonly reasons: readonly string[]
   readonly fatal: boolean
 
   constructor(
-    reason: string,
+    reasons: readonly string[],
     fatal: boolean,
-    options?: ErrorOptions,
     readonly exitCode = 1,
+    readonly keepsOutput = false,
   ) {
-    super(reason, options)
+    super(reasons.join('\n'))
     this.name = 'GzipDataError'
+    this.reasons = reasons
     this.fatal = fatal
+  }
+
+  /** One `command: ...` line per reason, the input named `label`. */
+  render(command: string, label: string): string {
+    return this.reasons.map((reason) => `${command}: ${reason.split('{}').join(label)}\n`).join('')
   }
 }
 

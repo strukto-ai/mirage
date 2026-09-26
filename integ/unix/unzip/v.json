@@ -1,0 +1,221 @@
+{
+  "cases": [
+    {
+      "id": "unzip_v_lists_the_verbose_table",
+      "seq": 601400,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/punzv && echo 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/punzv/m.zip && unzip -v /data/punzv/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzv/m.zip\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       0  Defl:N        2   0% 2026-09-20 07:33 00000000  dir/\n     200  Defl:N        6  97% 2026-09-20 07:33 599af058  dir/a.txt\n       1  Defl:N        3 -200% 2026-09-20 07:33 71beeff9  b.txt\n--------          -------  ---                            -------\n     201               11  95%                            3 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_vq_drops_the_archive_line",
+      "seq": 601401,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -vq /data/punzv/m.zip",
+      "expect": {
+        "exit": 0,
+        "stdout": " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       0  Defl:N        2   0% 2026-09-20 07:33 00000000  dir/\n     200  Defl:N        6  97% 2026-09-20 07:33 599af058  dir/a.txt\n       1  Defl:N        3 -200% 2026-09-20 07:33 71beeff9  b.txt\n--------          -------  ---                            -------\n     201               11  95%                            3 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_member_filters_the_rows_and_totals",
+      "seq": 601402,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -v /data/punzv/m.zip b.txt nomatch",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/punzv/m.zip\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       1  Defl:N        3 -200% 2026-09-20 07:33 71beeff9  b.txt\n--------          -------  ---                            -------\n       1                3 -200%                            1 file\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_x_leaving_nothing_exits_11",
+      "seq": 601403,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -v /data/punzv/m.zip -x '*'",
+      "expect": {
+        "exit": 11,
+        "stdout": "Archive:  /data/punzv/m.zip\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n--------          -------  ---                            -------\n       0                0   0%                            0 files\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_lv_is_the_verbose_table",
+      "seq": 601404,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -lv /data/punzv/m.zip | sed -n 2p",
+      "expect": {
+        "exit": 0,
+        "stdout": " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_vp_pipes_instead_of_listing",
+      "seq": 601405,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -vp /data/punzv/m.zip b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "b",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "unzip_v_without_an_archive_prints_the_version_line",
+      "seq": 601406,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unzip -v | cut -d' ' -f1,2",
+      "expect": {
+        "exit": 0,
+        "stdout": "unzip (Mirage)\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

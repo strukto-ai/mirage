@@ -17,6 +17,7 @@ import zipfile
 
 import pytest
 
+from mirage.commands.config import version_line
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.types import PathSpec
@@ -429,6 +430,54 @@ async def test_z_default_prints_header_rows_and_totals():
 
 
 @pytest.mark.asyncio
+async def test_v_lists_the_verbose_table():
+    out, res, written = await _run((), data=_stored(MULTI), v=True)
+    assert out == (
+        b"Archive:  /a.zip\n"
+        b" Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n"
+        b"--------  ------  ------- ---- ---------- ----- --------  ----\n"
+        b"       0  Stored        0   0% 2026-09-20 07:33 00000000  dir/\n"
+        b"     200  Stored      200   0% 2026-09-20 07:33 599af058  "
+        b"dir/a.txt\n"
+        b"       1  Stored        1   0% 2026-09-20 07:33 71beeff9  b.txt\n"
+        b"--------          -------  ---                            -------\n"
+        b"     201              201   0%                            3 files\n")
+    assert (res.exit_code, res.stderr, written) == (0, None, {})
+
+
+@pytest.mark.asyncio
+async def test_vq_drops_the_archive_line_and_filters_like_l():
+    out, res, _ = await _run(("b.txt", "nomatch"),
+                             data=_stored(MULTI),
+                             v=True,
+                             q=True)
+    assert out.decode().splitlines()[0].startswith(" Length   Method")
+    assert out.decode().splitlines()[-1].endswith("1 file")
+    assert (res.exit_code, res.stderr) == (0, None)
+
+
+@pytest.mark.asyncio
+async def test_v_without_an_archive_prints_the_version_line():
+    out, res = await unzip([],
+                           read_bytes=_Reader(b""),
+                           write_bytes=_no_write,
+                           mkdir_fn=_no_mkdir,
+                           v=True)
+    assert out == version_line("unzip")
+    assert res.exit_code == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("listing", [{"args_l": True}, {"v": True}])
+async def test_t_and_p_outrank_the_listing_letters(listing):
+    # Info-ZIP lists only when neither -t nor -p picks another mode.
+    out, _, _ = await _run(("b.txt", ), data=_stored(MULTI), p=True, **listing)
+    assert out == b"b"
+    out, _, _ = await _run((), data=_stored(MULTI), t=True, **listing)
+    assert out == b"No errors detected in /a.zip\n"
+
+
+@pytest.mark.asyncio
 async def test_zl_adds_the_compressed_size_column():
     out, res, _ = await _run(("b.txt", ),
                              data=_stored(MULTI),
@@ -591,6 +640,8 @@ async def test_p_excludes_and_cautions_on_stderr():
     (["-o", "a.zip"], True),
     (["-d", "out", "a.zip"], True),
     (["-l", "a.zip"], False),
+    (["-v", "a.zip"], False),
+    (["-v"], False),
     (["-t", "a.zip"], False),
     (["-p", "a.zip", "f.txt"], False),
     (["-Z", "a.zip"], False),

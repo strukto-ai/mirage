@@ -17,13 +17,19 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import { gzip, gunzip, getCompressionCodec } from '../../../utils/compress.ts'
+import { gzip, gunzipPartial, getCompressionCodec } from '../../../utils/compress.ts'
 import type { CommandFnResult, CommandOpts, WritesFn } from '../../config.ts'
 import { readTar, writeTar, type TarEntry } from '../tar_helper.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { COMPRESSION_SIGNATURES, CREATE_ERROR_EXIT, ERROR_TRAILER } from './tar/constants.ts'
+import {
+  CHILD_STATUS,
+  COMPRESSION_SIGNATURES,
+  CREATE_ERROR_EXIT,
+  ERROR_TRAILER,
+  FATAL_TRAILER,
+} from './tar/constants.ts'
 import { planCreate, type DirProbe, type StatFn, type WalkFn } from './tar/create.ts'
-import { fsStrerror, isEacces } from '../../../utils/errors.ts'
+import { fsStrerror, isEacces, type GzipDataError } from '../../../utils/errors.ts'
 import { ensureDir, extractDest } from './archive/extract.ts'
 import type { Compression, CompressionKind, CreateResult } from './tar/types.ts'
 
@@ -156,13 +162,42 @@ function unsupportedKind(compression: Compression, create: boolean): Compression
   return create && codec.compress === undefined ? compression : null
 }
 
-async function decompress(data: Uint8Array, kind: Compression): Promise<Uint8Array> {
+/**
+ * The archive tar reads from `data`, and gzip's failure, if any.
+ *
+ * GNU tar hands gzip to a `gzip -d` child, under -z or when the bytes open
+ * with the gzip magic, and reads whatever the child writes: all of it when
+ * the failure leaves whole members (a damaged trailer, trailing garbage),
+ * nothing when the child stopped inside a member, since mirage does not read
+ * a cut archive. Mirrors Python's _unpacked.
+ */
+async function decompress(
+  data: Uint8Array,
+  kind: Compression,
+): Promise<[Uint8Array, GzipDataError | null]> {
   const detected = kind ?? detectCompression(data)
-  if (detected === null) return data
-  if (detected === 'gzip') return gunzip(data)
+  if (detected === null) return [data, null]
+  if (detected === 'gzip') {
+    const [decoded, failure] = await gunzipPartial(data)
+    const whole = failure === null || failure.keepsOutput
+    return [whole ? decoded : new Uint8Array(), failure]
+  }
   const codec = getCompressionCodec(detected)
-  if (codec === undefined) return data
-  return codec.decompress(data)
+  if (codec === undefined) return [data, null]
+  return [await codec.decompress(data), null]
+}
+
+/**
+ * tar's stderr when its gzip child fails: gzip's own lines, what tar printed
+ * meanwhile, then tar's two fatal lines. The run exits 2, and the child's
+ * failure outranks every member that was not found. Mirrors Python's
+ * _child_failure.
+ */
+function childFailure(failure: GzipDataError, lines: readonly string[]): Uint8Array {
+  const status = CHILD_STATUS.replace('{}', String(failure.exitCode))
+  return ENC.encode(
+    failure.render('gzip', 'stdin') + [...lines, status, FATAL_TRAILER].join('\n') + '\n',
+  )
 }
 
 function stderrOf(lines: readonly string[]): Uint8Array | null {
@@ -300,12 +335,15 @@ export async function tarGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
     const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
-    const data = await decompress(raw, compression)
-    const entries = await readTar(data)
+    const [data, failure] = await decompress(raw, compression)
+    const entries = data.byteLength > 0 || failure === null ? await readTar(data) : []
     const names = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
     const { keep, misses } = selectedMembers(names, selectors)
     const shown = names.filter((_, index) => keep.has(index))
     const out: ByteSource | null = shown.length > 0 ? ENC.encode(shown.join('\n') + '\n') : null
+    if (failure !== null) {
+      return [out, new IOResult({ exitCode: 2, stderr: childFailure(failure, []) })]
+    }
     if (misses.length > 0) {
       const missStderr = stderrOf([...misses, ERROR_TRAILER])
       return [
@@ -324,9 +362,9 @@ export async function tarGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('tar: -f is required\n') })]
     }
     const raw = await materialize(deps.stream(makePathSpec(archivePath, mountPrefix)))
-    const data = await decompress(raw, compression)
+    const [data, failure] = await decompress(raw, compression)
     const writes: Record<string, Uint8Array> = {}
-    const entries = await readTar(data)
+    const entries = data.byteLength > 0 || failure === null ? await readTar(data) : []
     const listed = entries.map((e) => (e.isDir === true ? `${rstripSlash(e.name)}/` : e.name))
     const { keep, misses } = selectedMembers(listed, selectors)
     const notices: string[] = []
@@ -383,11 +421,14 @@ export async function tarGeneric(
         merged.set(chunk, offset)
         offset += chunk.byteLength
       }
-      const errLines = [
-        ...notices,
-        ...(verbose ? verboseLines : []),
-        ...(misses.length > 0 ? [...misses, ERROR_TRAILER] : []),
-      ]
+      const errLines = [...notices, ...(verbose ? verboseLines : [])]
+      if (failure !== null) {
+        return [
+          merged.byteLength > 0 ? merged : null,
+          new IOResult({ exitCode: 2, stderr: childFailure(failure, errLines) }),
+        ]
+      }
+      if (misses.length > 0) errLines.push(...misses, ERROR_TRAILER)
       const stderr = stderrOf(errLines)
       return [
         merged.byteLength > 0 ? merged : null,
@@ -399,6 +440,9 @@ export async function tarGeneric(
     }
     const stdout =
       verbose && verboseLines.length > 0 ? ENC.encode(verboseLines.join('\n') + '\n') : null
+    if (failure !== null) {
+      return [stdout, new IOResult({ writes, exitCode: 2, stderr: childFailure(failure, notices) })]
+    }
     const errLines = [...notices, ...(misses.length > 0 ? [...misses, ERROR_TRAILER] : [])]
     const stderr = stderrOf(errLines)
     return [

@@ -78,3 +78,36 @@ async def test_plain_stdin_is_not_in_gzip_format():
     assert r.exit_code == 1
     assert await r.materialize_stderr(
     ) == b"gunzip: stdin: not in gzip format\n"
+
+
+# gzip -n of "hello\n" with its CRC-32 and length trailer zeroed.
+DAMAGED = gzip.compress(b"hello\n", mtime=0)[:-8] + b"\0" * 8
+
+
+@pytest.mark.asyncio
+async def test_a_damaged_trailer_keeps_the_inflated_bytes():
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.shell("tee /data/bad.gz > /dev/null", stdin=DAMAGED)
+    await ws.shell("tee /data/ok.gz > /dev/null", stdin=gzip.compress(b"x\n"))
+    r = await ws.shell("gunzip -c /data/bad.gz /data/ok.gz")
+    assert r.exit_code == 1
+    assert await r.materialize_stdout() == b"hello\n"
+    assert await r.materialize_stderr() == (
+        b"gunzip: /data/bad.gz: invalid compressed data--crc error\n"
+        b"gunzip: /data/bad.gz: invalid compressed data--length error\n")
+    r = await ws.shell("gunzip -t /data/bad.gz /data/ok.gz; ls /data")
+    assert await r.materialize_stdout() == b"bad.gz\nok.gz\n"
+
+
+@pytest.mark.asyncio
+async def test_a_later_members_bad_header_keeps_the_members_before_it():
+    good = gzip.compress(b"hello\n", mtime=0)
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)},
+                   mode=MountMode.WRITE)
+    await ws.shell("tee /data/two.gz > /dev/null",
+                   stdin=good + good[:2] + b"\x07" + good[3:])
+    r = await ws.shell("cd /data && gunzip two.gz; ls; cat two")
+    assert await r.materialize_stdout() == b"two\nhello\n"
+    assert await r.materialize_stderr() == (
+        b"gunzip: two.gz: unknown method 7 -- not supported\n")
