@@ -683,9 +683,19 @@ describe('shell mutations share read-only admission', () => {
   it.each([
     ['echo x >> /ro/file', '/ro/file: Read-only file system\n'],
     ['exec >> /ro/file', '/ro/file: Read-only file system\n'],
-    ['ln -s file /ro/link', 'ln: read-only mount at /ro/\n'],
-    ['chmod 600 /ro/file', 'chmod: read-only mount at /ro/\n'],
+    [
+      'ln -s file /ro/link',
+      "ln: failed to create symbolic link '/ro/link': Read-only file system\n",
+    ],
+    ['chmod 600 /ro/file', "chmod: changing permissions of '/ro/file': Read-only file system\n"],
     ['find /ro/file -delete', "find: cannot delete '/ro/file': Read-only file system\n"],
+    ['rm /ro/file', "rm: cannot remove '/ro/file': Read-only file system\n"],
+    ['mv /ro/file /ro/moved', "mv: cannot move '/ro/file' to '/ro/moved': Read-only file system\n"],
+    ['touch /ro/file', "touch: cannot touch '/ro/file': Read-only file system\n"],
+    [
+      'truncate -s 0 /ro/file',
+      "truncate: cannot open '/ro/file' for writing: Read-only file system\n",
+    ],
   ])('%s', async (command, diagnostic) => {
     const parser = await getTestParser()
     const ws = new Workspace(

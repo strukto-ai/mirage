@@ -39,7 +39,7 @@
     "                                                      deny at depth 2 outranks it",
     "oncall     cp /vault/aws.token /runbook/steps.md      [1] cp: /vault/aws.token: credentials are never read by hand",
     "                                                      every operand is judged: the source's deny wins",
-    "oncall     rm /repo/service.py                        [1] rm: read-only mount at /repo/",
+    "oncall     rm /repo/service.py                        [1] rm: cannot remove '/repo/service.py': Read-only file system",
     "                                                      the mount section narrowed the mode",
     "auditor    ls /vault                                  [2] ls: cannot access '/vault': No such file or directory",
     "                                                      hidden here, so the mount is not there at all",

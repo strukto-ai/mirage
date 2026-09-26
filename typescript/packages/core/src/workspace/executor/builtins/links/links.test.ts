@@ -178,27 +178,27 @@ describe('rm and unlink reach a link through the op door', () => {
     }
   })
 
-  it('rm of a link on read turf names the mount', async () => {
-    // The mount voice, byte for byte what `rm` of a backend file on the
-    // same grant answers, because one grant must not describe itself two
-    // ways depending on whether the name it stopped was a link.
+  it('rm of a link on read turf answers like a backend file', async () => {
+    // Byte for byte what `rm` of a backend file on the same grant
+    // answers, because one grant must not describe itself two ways
+    // depending on whether the name it stopped was a link.
     const ws = await makeWs()
     try {
       await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
       const r = await ws.shell('rm /data/lk', { sessionId: 'agent' })
       expect(r.exitCode).toBe(1)
-      expect(err(r)).toBe('rm: read-only mount at /data/\n')
+      expect(err(r)).toBe("rm: cannot remove '/data/lk': Read-only file system\n")
       expect(ws.namespace.isLink('/data/lk')).toBe(true)
     } finally {
       await ws.close()
     }
   })
 
-  it('ln and mv name the mount too', async () => {
+  it('ln and mv answer a read grant per operand', async () => {
     // Same rule for the other two verbs that write the node table: `ln`
     // answers as `touch` does on a read-only mount, and `mv` as `mv` of
-    // a backend file does.
+    // a backend file does, in GNU's per-operand voice.
     const ws = await makeWs()
     try {
       await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk')
@@ -206,9 +206,11 @@ describe('rm and unlink reach a link through the op door', () => {
       const ln = await ws.shell('ln -s f.txt /data/lk2', { sessionId: 'agent' })
       const mv = await ws.shell('mv /data/lk /data/lk3', { sessionId: 'agent' })
       expect(ln.exitCode).toBe(1)
-      expect(err(ln)).toBe('ln: read-only mount at /data/\n')
+      expect(err(ln)).toBe(
+        "ln: failed to create symbolic link '/data/lk2': Read-only file system\n",
+      )
       expect(mv.exitCode).toBe(1)
-      expect(err(mv)).toBe('mv: read-only mount at /data/\n')
+      expect(err(mv)).toBe("mv: cannot move '/data/lk' to '/data/lk3': Read-only file system\n")
       expect(ws.namespace.readlink('/data/lk')).toBe('f.txt')
     } finally {
       await ws.close()
@@ -243,7 +245,7 @@ describe('rm and unlink reach a link through the op door', () => {
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
       const r = await ws.shell('rm -f /data/lk', { sessionId: 'agent' })
       expect(r.exitCode).toBe(1)
-      expect(err(r)).toBe('rm: read-only mount at /data/\n')
+      expect(err(r)).toBe("rm: cannot remove '/data/lk': Read-only file system\n")
     } finally {
       await ws.close()
     }
@@ -267,23 +269,28 @@ describe('rm and unlink reach a link through the op door', () => {
       await ws.close()
     }
   })
-  it('one read-only mount speaks once', async () => {
-    // The refusal names the mount, not the operand, so it is one fact
-    // however many operands tripped it -- including the backend operands
-    // the command tier refuses separately, whose line is the same line.
+  it('every refused operand speaks in one voice', async () => {
+    // GNU reports each operand it could not remove, so a read grant is
+    // one line per operand -- a link the node table refuses and a
+    // backend file the op door refuses say the same thing.
     const ws = await makeWs()
     try {
       await ws.shell('echo b > /data/f.txt')
       await ws.shell('ln -s f.txt /data/l1; ln -s f.txt /data/l2')
       ws.createSession('agent', { mounts: { '/data/': 'read' } })
-      for (const line of [
-        'rm /data/l1 /data/l2',
-        'rm /data/l1 /data/f.txt',
-        'rm /data/l1 /data/l2 /data/f.txt',
+      for (const operands of [
+        ['l1', 'l2'],
+        ['l1', 'f.txt'],
+        ['l1', 'l2', 'f.txt'],
       ]) {
+        const line = `rm ${operands.map((name) => `/data/${name}`).join(' ')}`
         const r = await ws.shell(line, { sessionId: 'agent' })
         expect(r.exitCode, line).toBe(1)
-        expect(err(r), line).toBe('rm: read-only mount at /data/\n')
+        expect(err(r), line).toBe(
+          operands
+            .map((name) => `rm: cannot remove '/data/${name}': Read-only file system\n`)
+            .join(''),
+        )
       }
       expect(ws.namespace.isLink('/data/l1')).toBe(true)
       expect(ws.namespace.isLink('/data/l2')).toBe(true)

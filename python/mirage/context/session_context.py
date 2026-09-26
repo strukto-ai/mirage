@@ -358,9 +358,10 @@ def set_mount_gate(prefix: str, mode: MountMode) -> Token[Any]:
 
     Set by ``Mount.execute_cmd`` around the handler, so the mode guard
     on the command tier's I/O can resolve ``effective_path_mode`` for
-    every path a handler mutates: the write-command gate admits a
-    command when any shown subtree grants writes, and this binding is
-    how each individual write is then held to its own region's mode.
+    every path a handler mutates: a path-guarded command is refused only
+    at its writes, the write-command gate admits any other when a shown
+    subtree grants writes, and this binding is how each individual write
+    is then held to its own region's mode.
 
     Args:
         prefix (str): the mount's prefix.

@@ -29,7 +29,4 @@ async def truncate(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
     )
 
 
-BUILDER = Builder("truncate",
-                  truncate,
-                  write=True,
-                  requirements=frozenset({Operation.TRUNCATE}))
+BUILDER = Builder("truncate", truncate, write=True)

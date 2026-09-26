@@ -14,14 +14,9 @@
 
 import asyncio
 
-import pytest
-
-from mirage.commands.builtin.generic.iconv import iconv_writes
-from mirage.commands.spec import SPECS
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.executor.command.flags import parse_flags
 
 
 def _ws():
@@ -68,11 +63,15 @@ def test_iconv_output_path_writes_file():
     assert _bytes(stdout).strip() != b""
 
 
-@pytest.mark.parametrize("argv,writes", [
-    (["-f", "latin1", "-t", "utf-8"], False),
-    (["-f", "latin1", "-t", "utf-8", "in.txt"], False),
-    (["-f", "latin1", "-t", "utf-8", "-o", "out.txt", "in.txt"], True),
-])
-def test_iconv_writes_only_to_its_output_file(argv: list[str], writes: bool):
-    parsed = parse_flags(argv, SPECS["iconv"], "iconv", "/data")
-    assert iconv_writes(parsed.flag_kwargs, parsed.paths) is writes
+def test_a_read_only_mount_runs_iconv_to_stdout_and_refuses_its_output_file():
+    vfs = RAMVFS()
+    vfs._store.files["/in.txt"] = b"caf\xe9\n"
+    ws = Workspace({"/ro/": (vfs, MountMode.READ)})
+    stdout, io = _run_raw(ws, "iconv -f latin1 -t utf-8 /ro/in.txt")
+    assert (io.exit_code, _bytes(stdout)) == (0, "café\n".encode())
+    stdout, io = _run_raw(ws, "cd /ro && iconv -f latin1 -t utf-8 < in.txt")
+    assert (io.exit_code, _bytes(stdout)) == (0, "café\n".encode())
+    _, io = _run_raw(ws, "iconv -f latin1 -t utf-8 -o /ro/out.txt /ro/in.txt")
+    assert io.exit_code == 1
+    assert io.stderr == b"iconv: /ro/out.txt: Read-only file system\n"
+    assert sorted(vfs._store.files) == ["/in.txt"]

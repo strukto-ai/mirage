@@ -28,8 +28,12 @@ describe('BinViewVFS', () => {
       (name) => (name === 'ls' ? 'ls' : null),
     )
     const names = new Set(vfs.commands().map((cmd) => cmd.name))
-    for (const name of ['cat', 'ls', 'stat']) expect(names.has(name)).toBe(true)
-    for (const name of ['rm', 'touch', 'cp']) expect(names.has(name)).toBe(false)
+    // Every generic command registers, the writers included: `gzip -c`
+    // reads the view like any reader, and a line that writes is refused
+    // at the op the view does not have.
+    for (const name of ['cat', 'ls', 'stat', 'gzip', 'rm', 'cp']) {
+      expect(names.has(name)).toBe(true)
+    }
     const ops = new Map(vfs.ops().map((op) => [op.name, op]))
     for (const name of ['read', 'readdir', 'stat']) expect(ops.has(name)).toBe(true)
     for (const name of [
@@ -57,8 +61,15 @@ describe('BinViewVFS', () => {
       expect(io.exitCode).toBe(1)
       expect(DEC.decode(io.stderr)).toBe('/usr/bin/ls: Read-only file system\n')
       io = await ws.shell('chmod 644 /usr/bin/ls; stat -c %a /usr/bin/ls')
-      expect(DEC.decode(io.stderr)).toBe('chmod: read-only mount at /usr/bin/\n')
+      expect(DEC.decode(io.stderr)).toBe(
+        "chmod: changing permissions of '/usr/bin/ls': Read-only file system\n",
+      )
       expect(DEC.decode(io.stdout)).toBe('755\n')
+      io = await ws.shell('rm /usr/bin/ls; gzip -c /usr/bin/ls | gunzip | wc -l')
+      expect(DEC.decode(io.stderr)).toBe(
+        "rm: cannot remove '/usr/bin/ls': Operation not supported\n",
+      )
+      expect(DEC.decode(io.stdout)).not.toBe('0\n')
     } finally {
       await ws.close()
     }

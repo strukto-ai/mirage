@@ -208,22 +208,6 @@ class ProvisionFn(Protocol):
         ...
 
 
-class WritesFn(Protocol):
-    """Whether one invocation of a write command writes at all,
-    mirroring the TS ``WritesFn``.
-
-    A read-only mount refuses a write command before it runs. Some write
-    commands have modes that only read (gzip filtering stdin to stdout,
-    tar listing an archive), and those run there like any reader. The
-    command's generic answers from the parsed flags and the operands it
-    was given; a write command without one writes in every mode.
-    """
-
-    def __call__(self, flags: Mapping[str, FlagValue],
-                 paths: list[PathSpec]) -> bool:
-        ...
-
-
 def version_line(name: str) -> bytes:
     """Render the GNU-style version line for a command.
 
@@ -490,7 +474,7 @@ class RegisteredCommand:
     dst: str | None = None
     write: bool = False
     limit: Limit | None = None
-    writes: WritesFn | None = None
+    path_guarded: bool = False
 
     def with_overrides(
         self,
@@ -518,7 +502,7 @@ def command(
     aggregate: Callable[..., Any] | None = None,
     write: bool = False,
     limit: Limit | None = None,
-    writes: WritesFn | None = None,
+    path_guarded: bool = False,
 ) -> Callable[..., Any]:
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -540,7 +524,7 @@ def command(
                 aggregate=aggregate,
                 write=write,
                 limit=limit,
-                writes=writes,
+                path_guarded=path_guarded,
             )
             cmds.append(rc)
         setattr(wrapped_fn, "_registered_commands", cmds)

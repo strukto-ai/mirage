@@ -57,18 +57,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> IconvFlags:
     )
 
 
-def iconv_writes(flags: Mapping[str, FlagValue],
-                 paths: list[PathSpec]) -> bool:
-    """Whether an iconv invocation writes: only ``-o`` names a file, and
-    without it the converted text goes to stdout.
-
-    Args:
-        flags (Mapping[str, FlagValue]): the parsed flag bag.
-        paths (list[PathSpec]): the operands the mount received.
-    """
-    return parse_flags(flags).output_path is not None
-
-
 async def iconv_generic(
     paths: list[PathSpec],
     texts: list[str],

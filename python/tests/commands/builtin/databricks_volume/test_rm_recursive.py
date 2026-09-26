@@ -91,5 +91,5 @@ async def test_rm_recursive_read_only_rejected(read_ws, dbx_files):
     io = await read_ws.shell("rm -r /dbx/d")
 
     assert io.exit_code != 0
-    assert b"read-only" in io.stderr
+    assert io.stderr == b"rm: cannot remove '/dbx/d': Read-only file system\n"
     assert f"{ROOT}/d" in dbx_files.directory_metadata

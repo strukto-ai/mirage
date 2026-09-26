@@ -15,12 +15,6 @@
 from mirage.commands.builtin.generic_bind import make_generic_commands
 from mirage.commands.builtin.hf_buckets.io import IO as _IO
 
-_HF_BUCKETS_OVERRIDES = {"cp", "mv"}
-
 COMMANDS = [
-    *make_generic_commands(
-        "hf_buckets",
-        _IO,
-        overrides=_HF_BUCKETS_OVERRIDES,
-    ),
+    *make_generic_commands("hf_buckets", _IO),
 ]

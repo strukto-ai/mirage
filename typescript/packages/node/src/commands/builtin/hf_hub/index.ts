@@ -23,11 +23,6 @@ import { HF_HUB_IO } from './io.ts'
 // commits and no revisions) and keeps its own OpenDAL-backed commands.
 export const HF_HUB_VFS_NAMES = [VFSName.HF_MODELS, VFSName.HF_DATASETS, VFSName.HF_SPACES] as const
 
-// cp and mv are skipped because the Hub has no server-side copy or rename.
-const HF_HUB_OVERRIDES = new Set(['cp', 'mv'])
-
 export const HF_HUB_COMMANDS: readonly RegisteredCommand[] = HF_HUB_VFS_NAMES.flatMap((vfs) =>
-  makeGenericCommands<HfHubAccessor>(vfs, HF_HUB_IO, {
-    overrides: HF_HUB_OVERRIDES,
-  }),
+  makeGenericCommands<HfHubAccessor>(vfs, HF_HUB_IO),
 )

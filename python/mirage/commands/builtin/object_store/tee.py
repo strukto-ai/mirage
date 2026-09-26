@@ -18,7 +18,6 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tee import tee as generic_tee
-from mirage.commands.builtin.generic.tee import tee_writes
 from mirage.commands.builtin.generic_bind.adapter import CommandIO, Operation
 from mirage.commands.config import CommandOpts
 from mirage.commands.registry import command
@@ -57,5 +56,5 @@ def make_tee(vfs: str, io: CommandIO) -> Callable[..., Any]:
                                           vfs=vfs,
                                           spec=SPECS["tee"],
                                           write=True,
-                                          writes=tee_writes)(tee)
+                                          path_guarded=True)(tee)
     return wrapped

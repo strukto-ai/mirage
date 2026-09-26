@@ -22,6 +22,7 @@ COMMANDS = [
     *make_generic_commands(
         "gcal",
         _IO,
+        overrides={"rm"},
     ),
     *with_default_provisions([rm], _IO.stat, _IO.resolve_glob, _IO.readdir),
 ]

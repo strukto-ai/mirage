@@ -18,8 +18,15 @@ import { fsStrerror, isEnoent, isEnotdir } from '../../../../utils/errors.ts'
 import { CycleError } from '../../../../utils/path.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import { expandOperands, fail, finish, readOnlyError, splitValueFlags } from '../shared.ts'
-import { isReadOnlyError, parseGroup, setattrLink, setattrVia, walkOwned } from './metadata.ts'
+import { expandOperands, fail, finish, splitValueFlags } from '../shared.ts'
+import {
+  isReadOnlyError,
+  permissionError,
+  parseGroup,
+  setattrLink,
+  setattrVia,
+  walkOwned,
+} from './metadata.ts'
 import type { Result } from '../types.ts'
 
 // chgrp GROUP FILE...: set group ownership via setattr. The group half of
@@ -81,7 +88,7 @@ export async function handleChgrp(
         await setattrVia(dispatch, path, { gid })
       } catch (err) {
         if (!isReadOnlyError(err)) throw err
-        errors.push(readOnlyError('chgrp', namespace, path))
+        errors.push(permissionError('chgrp', 'changing group of', path, err))
       }
     }
     for (const link of links) {

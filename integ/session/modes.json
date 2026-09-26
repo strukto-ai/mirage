@@ -41,7 +41,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: read-only mount at /data/\n"
+        "stderr": "rm: cannot remove '/data/sess/a.txt': Read-only file system\n"
       }
     },
     {
@@ -286,7 +286,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: read-only mount at /data/\n"
+        "stderr": "rm: cannot remove '/data/sess/al': Read-only file system\n"
       }
     },
     {
@@ -301,7 +301,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: read-only mount at /data/\n"
+        "stderr": "rm: cannot remove '/data/sess/al': Read-only file system\n"
       }
     },
     {
@@ -316,7 +316,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "unlink: read-only mount at /data/\n"
+        "stderr": "unlink: cannot unlink '/data/sess/al': Read-only file system\n"
       }
     },
     {
@@ -331,7 +331,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ln: read-only mount at /data/\n"
+        "stderr": "ln: failed to create symbolic link '/data/sess/nl': Read-only file system\n"
       }
     },
     {
@@ -346,7 +346,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mv: read-only mount at /data/\n"
+        "stderr": "mv: cannot move '/data/sess/al' to '/data/sess/moved': Read-only file system\n"
       }
     },
     {
@@ -387,7 +387,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ln: read-only mount at /\n"
+        "stderr": "ln: failed to create symbolic link '/rootlk2': Read-only file system\n"
       }
     },
     {
@@ -401,7 +401,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: read-only mount at /\n"
+        "stderr": "rm: cannot remove '/rootlk': Read-only file system\n"
       }
     },
     {
@@ -415,7 +415,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mv: read-only mount at /\n"
+        "stderr": "mv: cannot move '/rootlk' to '/rootlk3': Read-only file system\n"
       }
     },
     {
@@ -457,7 +457,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "ln: read-only mount at /ro/\n"
+        "stderr": "ln: failed to create symbolic link '/ro/rolink': Read-only file system\n"
       }
     },
     {
@@ -545,7 +545,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "chmod: read-only mount at /data/\n"
+        "stderr": "chmod: changing permissions of '/data/sess/guard.txt': Read-only file system\n"
       },
       "session": "reader"
     },

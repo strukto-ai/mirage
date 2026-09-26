@@ -14,7 +14,6 @@
 
 import asyncio
 import errno
-from dataclasses import replace
 
 import pytest
 
@@ -90,7 +89,8 @@ def test_read_only_blocks_write_cmd():
                      resolved=True)
     stdout, io = _run(mount.execute_cmd("mkdir", [scope], [], {}))
     assert io.exit_code != 0
-    assert b"read-only" in io.stderr
+    assert io.stderr == (b"mkdir: cannot create directory '/ro/newdir': "
+                         b"Read-only file system\n")
 
 
 @pytest.mark.asyncio
@@ -134,32 +134,32 @@ async def test_only_wrapper_responses_bypass_the_write_guard(
         assert "/changed" not in vfs.accessor.store.files
 
 
-def test_the_read_only_refusal_is_newline_terminated():
+@pytest.mark.asyncio
+async def test_the_read_only_refusal_is_newline_terminated():
     # stderr accumulates across a line, so an unterminated refusal ran
-    # into the next one: `{ rm /ro/a; rm /ro/b; }` printed the single
-    # line `rm: read-only mount at /ro/rm: read-only mount at /ro/`.
-    # It is also the line the node table renders for a refused symlink
-    # (shared.read_only_error), which concatenates with this one.
-    reg = MountRegistry()
-    reg.mount("/ro/", RAMVFS(), MountMode.READ)
-    mount = reg.mount_for("/ro/file.txt")
-    scope = PathSpec(vfs_path="ro/newdir",
-                     virtual="/ro/newdir",
-                     directory="/ro/",
-                     resolved=True)
-    stdout, io = _run(mount.execute_cmd("mkdir", [scope], [], {}))
-    assert io.stderr == b"mkdir: read-only mount at /ro/\n"
+    # into the next one: `{ sync /ro/a; sync /ro/b; }` printed the single
+    # line `sync: read-only mount at /ro/sync: read-only mount at /ro/`.
+    mount = MountEntry("/ro/", RAMVFS(), MountMode.READ)
 
+    @command("sync", vfs="ram", spec=CommandSpec(), write=True)
+    async def sync(accessor: RAMAccessor, paths, texts, opts):
+        return None, IOResult()
 
-def _writes_its_operands(flags, paths) -> bool:
-    return bool(paths)
+    mount.register_fns([sync])
+    _, io = await mount.execute_cmd("sync", [], [], {})
+    assert io.stderr == b"sync: read-only mount at /ro/\n"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [MountMode.READ, MountMode.WRITE])
-@pytest.mark.parametrize("operands", [0, 1])
-async def test_a_write_command_is_refused_only_where_its_invocation_writes(
-        mode, operands):
+@pytest.mark.parametrize("path_guarded", [False, True])
+async def test_only_a_write_command_the_door_cannot_see_is_refused_up_front(
+        mode, path_guarded):
+    # A path-guarded command's writes go through the guarded op slots,
+    # which refuse each one where it happens, so a read-only mount runs
+    # it like a reader (`gzip -c`, `split -n 1/2`). A write command that
+    # reaches its service some other way has no door to refuse it, so
+    # the mount refuses it before it runs.
     vfs = RAMVFS()
     mount = MountEntry("/ram/", vfs, mode)
     calls: list[int] = []
@@ -168,22 +168,22 @@ async def test_a_write_command_is_refused_only_where_its_invocation_writes(
              vfs="ram",
              spec=CommandSpec(),
              write=True,
-             writes=_writes_its_operands)
+             path_guarded=path_guarded)
     async def filter_cmd(accessor: RAMAccessor, paths, texts, opts):
         calls.append(len(paths))
         return b"ran\n", IOResult()
 
     mount.register_fns([filter_cmd])
-    paths = [PathSpec.from_str_path("/ram/a")][:operands]
+    paths = [PathSpec.from_str_path("/ram/a")]
     stdout, io = await mount.execute_cmd("filter", paths, [], {})
-    if mode == MountMode.READ and operands:
+    if mode == MountMode.READ and not path_guarded:
         assert io.exit_code == 1
         assert io.stderr == b"filter: read-only mount at /ram/\n"
         assert not calls
     else:
         assert io.exit_code == 0
         assert await materialize(stdout) == b"ran\n"
-        assert calls == [operands]
+        assert calls == [1]
 
 
 def test_write_mode_allows_write_cmd():
@@ -302,17 +302,14 @@ def test_resolve_command_missing(registry):
     assert cmd is None
 
 
-def _never_writes(flags, paths) -> bool:
-    return False
-
-
 @pytest.mark.asyncio
-async def test_write_predicate_cannot_bypass_the_path_guard():
+async def test_a_path_guarded_command_is_still_held_at_its_write():
     vfs = RAMVFS()
     vfs._store.files["/a"] = b"original"
     mount = MountEntry("/ram/", vfs, MountMode.READ)
     cmd = next(cmd for cmd in vfs.commands() if cmd.name == "gzip")
-    mount.register(replace(cmd, writes=_never_writes))
+    assert cmd.path_guarded
+    mount.register(cmd)
     with pytest.raises(ReadOnlyError):
         await mount.execute_cmd("gzip", [PathSpec.from_str_path("/ram/a")], [],
                                 {})

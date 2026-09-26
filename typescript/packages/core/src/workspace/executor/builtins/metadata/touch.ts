@@ -27,8 +27,15 @@ import { CycleError, resolvePath } from '../../../../utils/path.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { expandOperands, fail, finish, readOnlyError, splitValueFlags } from '../shared.ts'
-import { isReadOnlyError, nowIso, parseTouchStamp, setattrLink, setattrVia } from './metadata.ts'
+import { expandOperands, fail, finish, splitValueFlags } from '../shared.ts'
+import {
+  isReadOnlyError,
+  nowIso,
+  permissionError,
+  parseTouchStamp,
+  setattrLink,
+  setattrVia,
+} from './metadata.ts'
 import type { Result } from '../types.ts'
 
 // touch: set access/modification times, creating missing files. GNU flags:
@@ -150,7 +157,8 @@ export async function handleTouch(
       await setattrVia(dispatch, resolved, fields)
     } catch (err) {
       if (isReadOnlyError(err)) {
-        errors.push(readOnlyError('touch', namespace, resolved))
+        const action = flags.has('c') ? 'setting times of' : 'cannot touch'
+        errors.push(permissionError('touch', action, target, err))
         continue
       }
       // A destination whose parent chain is not all directories is one

@@ -14,20 +14,16 @@
 
 import type { PathSpec } from '../../../../types.ts'
 import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
-import { unzipGeneric, unzipWrites } from '../../generic/unzip.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { unzipGeneric } from '../../generic/unzip.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 
 export const UNZIP_BUILDER: Builder = {
   name: 'unzip',
   write: true,
-  writes: unzipWrites,
-  requirements: ['write', 'mkdir'],
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
-    const { write, mkdir } = ops
-    if (write === undefined || mkdir === undefined) {
-      throw new Error('unzip: backend provides no write op')
-    }
+    const write = requireOp(ops.write, 'write')
+    const mkdir = requireOp(ops.mkdir, 'mkdir')
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     const dispatch = opts.dispatch
     if (dispatch !== undefined) {

@@ -17,7 +17,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts, WritesFn } from '../../config.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { readStdinAsync, stdinStream } from '../utils/stream.ts'
 
 const ENC = new TextEncoder()
@@ -106,11 +106,6 @@ function encodeText(text: string, enc: EncodingId): Uint8Array {
   if (enc === 'latin1') return encodeLatin1(text)
   return encodeAscii(text)
 }
-
-// Whether an iconv invocation writes: only -o names a file, and without it
-// the converted text goes to stdout. Mirrors Python's iconv_writes.
-export const iconvWrites: WritesFn = (flags) =>
-  new FlagView(flags, specOf('iconv')).asStr('o') !== undefined
 
 export async function iconvGeneric(
   paths: PathSpec[],

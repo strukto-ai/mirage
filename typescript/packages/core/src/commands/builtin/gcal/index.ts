@@ -25,6 +25,6 @@ import { GCAL_RM } from './rm.ts'
 // (commands/cli/builtin/gws), installed by name; the mount only serves the
 // filesystem surface, and rm is the one mutation a path can express.
 export const GCAL_COMMANDS: readonly RegisteredCommand[] = [
-  ...makeGenericCommands<GCalAccessor>(VFSName.GCAL, GCAL_IO),
+  ...makeGenericCommands<GCalAccessor>(VFSName.GCAL, GCAL_IO, { overrides: new Set(['rm']) }),
   ...withDefaultProvisions([...GCAL_RM], GCAL_IO.stat, resolveGlobOf(GCAL_IO), GCAL_IO.readdir),
 ]

@@ -175,7 +175,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mkdir: {mount}/__nf_dir__: Operation not supported\n"
+        "stderr": "mkdir: cannot create directory '{mount}/__nf_dir__': Operation not supported\n"
       }
     },
     {
@@ -689,7 +689,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "touch: read-only mount at {mount}/\n"
+        "stderr": "touch: cannot touch '{mount}/__nf_new__': Read-only file system\n"
       }
     },
     {
@@ -710,7 +710,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "rm: {mount}/__nf_missing__: Operation not supported\n"
+        "stderr": "rm: cannot remove '{mount}/__nf_missing__': No such file or directory\n"
       }
     },
     {
@@ -730,7 +730,7 @@
       "command": "echo x | tee {mount}/__nf_new__",
       "expect": {
         "exit": 1,
-        "stdout": "",
+        "stdout": "x\n",
         "stderr": "tee: {mount}/__nf_new__: Operation not supported\n"
       }
     },
@@ -775,6 +775,121 @@
         "stdout": "{mount}/__nf_missing__  [error opening dir]\n\n0 directories, 0 files\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "ro_gzip_c_missing",
+      "seq": 620072,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "gzip -c {mount}/__nf_missing__",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "gzip: {mount}/__nf_missing__: No such file or directory\n"
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "ro_gzip_filters_stdin_in_the_mount",
+      "seq": 620073,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "(cd {mount} && printf 'x\\n' | gzip | gunzip)",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ro_split_n_filters_stdin_in_the_mount",
+      "seq": 620074,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "(cd {mount} && printf 'a\\nb\\n' | split -n 1/2)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "ro_tee_without_operands_in_the_mount",
+      "seq": 620075,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "(cd {mount} && echo x | tee)",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ro_mktemp_dry_run_names_a_file",
+      "seq": 620076,
+      "targets": [
+        "langfuse",
+        "jaeger",
+        "dify",
+        "mem0",
+        "trello",
+        "linear",
+        "slack",
+        "gmail",
+        "email"
+      ],
+      "command": "mktemp -u -p {mount} > /dev/null && echo ok",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "p"
+      ]
     }
   ]
 }

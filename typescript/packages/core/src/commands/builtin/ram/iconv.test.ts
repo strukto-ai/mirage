@@ -17,20 +17,13 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { parseFlags } from '../../../workspace/executor/command/flags.ts'
-import { specOf } from '../../spec/builtins.ts'
+import { MountMode } from '../../../types.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 const RAM_ICONV = RAM_COMMANDS.filter((c) => c.name === 'iconv' && c.filetype == null)
 
 const ENC = new TextEncoder()
-
-// What a registered command's writes predicate answers for a typed line,
-// read through the same parse the executor hands the mount.
-function writesFor(cmd: RegisteredCommand | undefined, argv: string[]): boolean {
-  if (cmd?.writes == null) throw new Error('the command declares no writes predicate')
-  const parsed = parseFlags(argv, specOf(cmd.name), cmd.name, '/data')
-  return cmd.writes(parsed.flagKwargs, parsed.paths)
-}
+const DEC = new TextDecoder()
 
 async function runIconv(
   vfs: RAMVFS,
@@ -68,12 +61,48 @@ describe('iconv', () => {
   })
 })
 
-describe('iconv says which invocations write', () => {
-  it.each([
-    [['-f', 'latin1', '-t', 'utf-8'], false],
-    [['-f', 'latin1', '-t', 'utf-8', 'in.txt'], false],
-    [['-f', 'latin1', '-t', 'utf-8', '-o', 'out.txt', 'in.txt'], true],
-  ])('iconv %j writes: %s', (argv, writes) => {
-    expect(writesFor(RAM_ICONV[0], argv)).toBe(writes)
+async function readOnlyShell(
+  seed: string,
+  line: string,
+): Promise<[number, string, string, string[]]> {
+  const vfs = new RAMVFS()
+  const ws = new Workspace(
+    { '/ro/': [vfs, MountMode.WRITE] },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    const seeded = await ws.shell(seed)
+    if (seeded.exitCode !== 0) throw new Error(DEC.decode(seeded.stderr))
+    ws.setMountMode('/ro/', MountMode.READ)
+    const before = [...vfs.store.files.keys()].sort()
+    const r = await ws.shell(line)
+    const after = [...vfs.store.files.keys()].sort()
+    expect(after).toEqual(before)
+    return [r.exitCode, DEC.decode(r.stdout), DEC.decode(r.stderr), after]
+  } finally {
+    await ws.close()
+  }
+}
+
+describe('iconv on a read-only mount', () => {
+  const seed = "printf 'caf\\351\\n' > /ro/in.txt"
+
+  it('converts to stdout, which writes nothing', async () => {
+    expect(await readOnlyShell(seed, 'iconv -f latin1 -t utf-8 /ro/in.txt')).toEqual([
+      0,
+      'caf\u00e9\n',
+      '',
+      ['/in.txt'],
+    ])
+    const [exitCode, out] = await readOnlyShell(seed, 'cd /ro && iconv -f latin1 -t utf-8 < in.txt')
+    expect([exitCode, out]).toEqual([0, 'caf\u00e9\n'])
+  })
+
+  it('refuses its output file at the write', async () => {
+    const [exitCode, , stderr] = await readOnlyShell(
+      seed,
+      'iconv -f latin1 -t utf-8 -o /ro/out.txt /ro/in.txt',
+    )
+    expect([exitCode, stderr]).toEqual([1, 'iconv: /ro/out.txt: Read-only file system\n'])
   })
 })

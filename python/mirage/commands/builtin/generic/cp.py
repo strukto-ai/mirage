@@ -1060,7 +1060,12 @@ async def cp(
                 continue
             reads[src.virtual] = data
         else:
-            await strategy.copy(src, target)
+            try:
+                await strategy.copy(src, target)
+            except FS_ERRORS as exc:
+                errors.append(f"cp: cannot create regular file "
+                              f"'{target.virtual}': {fs_strerror(exc)}")
+                continue
         writes[target.mount_path] = b""
         if flags.verbose:
             lines.append(transfer_line(src, target, backup))

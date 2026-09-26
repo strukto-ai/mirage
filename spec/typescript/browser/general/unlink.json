@@ -1,7 +1,25 @@
 {
   "_meta": {
     "by_vfs": {
+      "airtable": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "bin": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
       "box": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "chroma": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": false,
@@ -13,13 +31,103 @@
         "has_provision": false,
         "has_write": true
       },
+      "dify": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "discord": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
       "dropbox": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": false,
         "has_write": true
       },
+      "gcal": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gdocs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
       "gdrive": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "github": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gmail": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gsheets": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "gslides": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "jaeger": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "lancedb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "langfuse": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "linear": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "mem0": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "mongodb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "notion": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": false,
@@ -32,6 +140,18 @@
         "has_write": true
       },
       "opfs": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "postgres": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "qdrant": {
         "filetypes": [],
         "has_aggregate": false,
         "has_provision": false,
@@ -60,6 +180,24 @@
         "has_aggregate": false,
         "has_provision": false,
         "has_write": true
+      },
+      "slack": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "trello": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
+      },
+      "wandb": {
+        "filetypes": [],
+        "has_aggregate": false,
+        "has_provision": false,
+        "has_write": true
       }
     },
     "filetypes": [],
@@ -67,16 +205,39 @@
     "has_provision": false,
     "has_write": true,
     "vfs_names": [
+      "airtable",
+      "bin",
       "box",
+      "chroma",
       "databricks_volume",
+      "dify",
+      "discord",
       "dropbox",
+      "gcal",
+      "gdocs",
       "gdrive",
+      "github",
+      "gmail",
+      "gsheets",
+      "gslides",
+      "jaeger",
+      "lancedb",
+      "langfuse",
+      "linear",
+      "mem0",
+      "mongodb",
+      "notion",
       "onedrive",
       "opfs",
+      "postgres",
+      "qdrant",
       "ram",
       "redis",
       "s3",
-      "sharepoint"
+      "sharepoint",
+      "slack",
+      "trello",
+      "wandb"
     ]
   },
   "rest": {

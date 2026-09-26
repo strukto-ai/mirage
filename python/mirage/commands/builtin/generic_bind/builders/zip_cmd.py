@@ -37,7 +37,4 @@ async def zip_cmd(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                              walk_of(ops, accessor, opts.index))
 
 
-BUILDER = Builder('zip',
-                  zip_cmd,
-                  write=True,
-                  requirements=frozenset({Operation.WRITE}))
+BUILDER = Builder('zip', zip_cmd, write=True)

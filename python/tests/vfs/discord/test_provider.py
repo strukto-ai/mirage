@@ -43,7 +43,8 @@ def test_vfs_accessor(config):
 
 def test_vfs_commands(config):
     vfs = DiscordVFS(config)
-    # 52 native (generic factory read set incl. find and sed + bespoke
-    # grep/rg/head + md5sum/sha1sum/sha384sum/sha512sum); acting on
-    # Discord moved to the discord CLI
-    assert len(vfs._commands) == 52
+    # 71 native (the whole generic factory set, whose writers answer
+    # ENOTSUP at the op Discord lacks, + bespoke grep/rg/head +
+    # md5sum/sha1sum/sha384sum/sha512sum); acting on Discord moved to the
+    # discord CLI
+    assert len(vfs._commands) == 71

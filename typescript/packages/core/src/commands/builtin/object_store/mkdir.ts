@@ -15,6 +15,7 @@
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
+import { errorVirtualPath, fsStrerror, isFsError, operandSpelling } from '../../../utils/errors.ts'
 import { command, type CommandFnResult, type CommandOpts } from '../../config.ts'
 import type { RegisteredCommand } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -55,7 +56,16 @@ export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
         if (collision.message !== null) errors.push(collision.message)
         continue
       }
-      await mkdirImpl(accessor, path, parents)
+      try {
+        await mkdirImpl(accessor, path, parents)
+      } catch (err) {
+        // GNU reports the operand (or, under -p, the component it tripped
+        // on) and still makes the rest, as the generic builder does.
+        if (!isFsError(err)) throw err
+        const named = operandSpelling(errorVirtualPath(err), path)
+        errors.push(`mkdir: cannot create directory '${named}': ${String(fsStrerror(err))}`)
+        continue
+      }
       writes[path.mountPath] = new Uint8Array()
       if (verbose) lines.push(`mkdir: created directory '${path.virtual}'`)
     }
@@ -77,5 +87,6 @@ export function makeMkdir<A extends Accessor>(vfs: string, io: CommandIO<A>): Re
     spec: specOf('mkdir'),
     fn: mkdirCommand,
     write: true,
+    pathGuarded: true,
   })
 }

@@ -24,12 +24,11 @@ import { DEFAULT_UMASK, sessionUmask } from '../../../../context/session_context
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { mkdirLinkRefusal } from '../../utils/slash_links.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 
 export const MKDIR_BUILDER: Builder = {
   name: 'mkdir',
   write: true,
-  requirements: ['mkdir'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     const fl = new FlagView(opts.flags, specOf('mkdir'))
     const parents = fl.asBool('parents')
@@ -45,10 +44,8 @@ export const MKDIR_BUILDER: Builder = {
       ]
     }
     const idx = opts.index ?? undefined
-    const { mkdir, setAttrs } = ops
-    if (mkdir === undefined) {
-      throw new Error('mkdir: backend provides no mkdir op')
-    }
+    const { setAttrs } = ops
+    const mkdir = requireOp(ops.mkdir, 'mkdir')
     let mode: number | null = null
     if (modeText !== null) {
       // Symbolic clauses build on what mirage renders for a new

@@ -44,7 +44,7 @@ import { pathAllowed } from '../../../../context/session_context.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { absPath, fail, readOnlyError, result } from '../shared.ts'
+import { absPath, fail, result } from '../shared.ts'
 import { posixRelative } from './links.ts'
 import { linkTargetStat, missStrerror, pathReaddir, resolvePathStat } from './probe.ts'
 import type { Result } from '../types.ts'
@@ -551,15 +551,9 @@ export async function makeLink(
       errors.push(`ln: failed to create ${kind} '${typed}'${arrow}: ${String(fsStrerror(err))}\n`)
       return
     }
-    if (isErofs(err)) {
-      // The mount voice, as `touch` on the same read-only mount answers:
-      // the refusal is about the mount, and one grant must not describe
-      // itself two ways.
-      errors.push(readOnlyError('ln', namespace, linkSpec))
-      return
-    }
-    if (err instanceof PolicyDenied || isEacces(err)) {
-      // A policy deny, which ln voices as its own per-operand line.
+    if (err instanceof PolicyDenied || isEacces(err) || isErofs(err)) {
+      // A read-only region or a policy deny, which ln voices as its own
+      // per-operand line, as GNU does for EROFS.
       errors.push(
         `ln: failed to create ${kind} '${typed}': ${fsStrerror(err) ?? 'Permission denied'}\n`,
       )

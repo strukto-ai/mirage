@@ -27,6 +27,7 @@ import { GDOCS_RM } from './rm.ts'
 // the filesystem surface.
 export const GDOCS_COMMANDS: readonly RegisteredCommand[] = [
   ...makeGenericCommands<GDocsAccessor>(VFSName.GDOCS, GDOCS_IO, {
+    overrides: new Set(['rm']),
     provisionOverrides: {
       grep: fileReadProvision as ProvisionFn,
       rg: fileReadProvision as ProvisionFn,

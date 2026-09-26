@@ -16,8 +16,7 @@ import functools
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.cp import walk
-from mirage.commands.builtin.generic.rm_cmd import (rm_without_operands,
-                                                    rm_writes)
+from mirage.commands.builtin.generic.rm_cmd import rm_without_operands
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation)
 from mirage.commands.builtin.utils.output import format_optional_records
@@ -128,8 +127,4 @@ async def rm(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                             exit_code=1 if errors else 0)
 
 
-BUILDER = Builder('rm',
-                  rm,
-                  write=True,
-                  requirements=frozenset({Operation.UNLINK}),
-                  writes=rm_writes)
+BUILDER = Builder('rm', rm, write=True)

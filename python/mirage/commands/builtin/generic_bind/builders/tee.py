@@ -16,7 +16,6 @@ from functools import partial
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.tee import tee as generic_tee
-from mirage.commands.builtin.generic.tee import tee_writes
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.config import CommandOpts
@@ -42,8 +41,4 @@ async def tee(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
         flags=opts.flags)
 
 
-BUILDER = Builder('tee',
-                  tee,
-                  write=True,
-                  requirements=frozenset({Operation.WRITE}),
-                  writes=tee_writes)
+BUILDER = Builder('tee', tee, write=True)

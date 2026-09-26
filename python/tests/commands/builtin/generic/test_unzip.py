@@ -18,13 +18,13 @@ import zipfile
 import pytest
 
 from mirage.commands.errors import UsageError
-from mirage.commands.spec import SPECS
-from mirage.types import PathSpec
-from mirage.workspace.executor.command.flags import parse_flags
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 from mirage.commands.builtin.generic.unzip import (  # isort: skip
     CORRUPT_CDIR, EXTRA_BYTES, MISSING_BYTES, NO_EOCD, UNZIP_NO_DIRECTORY,
-    ZERO_TESTED, ZIPINFO_NO_DIRECTORY, unzip, unzip_writes)
+    ZERO_TESTED, ZIPINFO_NO_DIRECTORY, unzip)
 
 WORKBOOK = b"WORKBOOK-CONTENT\n"
 SHEET = b"SHEET1-CONTENT\n"
@@ -585,17 +585,39 @@ async def test_p_excludes_and_cautions_on_stderr():
         "caution: excluded filename not matched:  nomatch\n")
 
 
-@pytest.mark.parametrize("argv,writes", [
-    ([], False),
-    (["a.zip"], True),
-    (["-o", "a.zip"], True),
-    (["-d", "out", "a.zip"], True),
-    (["-l", "a.zip"], False),
-    (["-t", "a.zip"], False),
-    (["-p", "a.zip", "f.txt"], False),
-    (["-Z", "a.zip"], False),
-    (["-Z", "-1", "a.zip"], False),
+def _read_only_unzip_mount() -> tuple[Workspace, RAMVFS]:
+    vfs = RAMVFS()
+    vfs._store.files["/a.zip"] = _zip_entries((("f.txt", b"hello\n"), ))
+    return Workspace({"/ro/": (vfs, MountMode.READ)}), vfs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "unzip -l /ro/a.zip",
+    "unzip -t /ro/a.zip",
+    "unzip -p /ro/a.zip f.txt",
+    "unzip -Z /ro/a.zip",
+    "unzip -Z -1 /ro/a.zip",
 ])
-def test_unzip_writes_only_when_it_extracts(argv: list[str], writes: bool):
-    parsed = parse_flags(argv, SPECS["unzip"], "unzip", "/data")
-    assert unzip_writes(parsed.flag_kwargs, parsed.paths) is writes
+async def test_a_read_only_mount_runs_unzip_where_it_writes_nothing(line: str):
+    ws, vfs = _read_only_unzip_mount()
+    before = dict(vfs._store.files)
+    result = await ws.shell(line)
+    await result.materialize_stdout()
+    assert result.exit_code == 0
+    assert vfs._store.files == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", [
+    "cd /ro && unzip a.zip",
+    "cd /ro && unzip -o a.zip",
+    "unzip -d /ro/out /ro/a.zip",
+])
+async def test_a_read_only_mount_refuses_unzip_at_the_write(line: str):
+    ws, vfs = _read_only_unzip_mount()
+    before = dict(vfs._store.files)
+    result = await ws.shell(line)
+    assert result.exit_code != 0
+    assert b"Read-only file system" in (result.stderr or b"")
+    assert vfs._store.files == before

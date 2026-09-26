@@ -16,21 +16,17 @@ import type { FileStat, PathSpec } from '../../../../types.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { readBytesOp, statOp } from '../../generic/crossmount/utils.ts'
-import { tarGeneric, tarWrites } from '../../generic/tar.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { tarGeneric } from '../../generic/tar.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 import { isDirOf, walkOf } from '../archive_io.ts'
 
 export const TAR_BUILDER: Builder = {
   name: 'tar',
   write: true,
-  writes: tarWrites,
-  requirements: ['write', 'mkdir'],
   fn: async (ops, accessor, paths, texts, opts) => {
     const idx = opts.index ?? undefined
-    const { write, mkdir } = ops
-    if (write === undefined || mkdir === undefined) {
-      throw new Error('tar: backend provides no write op')
-    }
+    const write = requireOp(ops.write, 'write')
+    const mkdir = requireOp(ops.mkdir, 'mkdir')
     const resolved = paths.length > 0 ? await resolveGlobOf(ops)(accessor, paths, idx) : []
     const stat = async (p: PathSpec): Promise<FileStat> => ops.stat(accessor, p, idx)
     const dispatch = opts.dispatch

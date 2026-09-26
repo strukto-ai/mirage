@@ -15,11 +15,10 @@
 
 import { describe, expect, it } from 'vitest'
 import { gzip } from '../../../utils/compress.ts'
-import { MountMode, PathSpec } from '../../../types.ts'
+import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { gunzipWrites } from './gunzip.ts'
 
 async function shell(
   line: string,
@@ -50,19 +49,6 @@ describe('gunzip with a dash operand', () => {
       { '/data/b.txt': 'file\n' },
     )
     expect(r).toEqual(['hi\nb.txt\nfile\n', '', 0])
-  })
-})
-
-describe('gunzip on a dash operand', () => {
-  it('writes nothing', () => {
-    // A `-` has no file to replace: gunzip decompresses stdin to stdout.
-    const dash = new PathSpec({
-      virtual: '/data/-',
-      directory: '/data/',
-      vfsPath: '-',
-      rawPath: '-',
-    })
-    expect(gunzipWrites({}, [dash])).toBe(false)
   })
 })
 

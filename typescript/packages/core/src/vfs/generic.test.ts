@@ -165,10 +165,11 @@ describe('GenericVFS wires a backend from one CommandIO table', () => {
     }
   })
 
-  it('leaves out write commands the table cannot serve', () => {
+  it('registers write commands the table cannot serve', () => {
+    // Their read-only modes (`tee` with no operand, `gzip -c`) run on a
+    // backend without writes; a line that writes answers ENOTSUP there.
     const names = commandNames(makeVfs())
-    expect(names).not.toContain('tee')
-    expect(names).not.toContain('rm')
+    for (const name of ['tee', 'rm', 'gzip', 'tar']) expect(names).toContain(name)
   })
 
   it('suppresses a generic the backend overrides', () => {

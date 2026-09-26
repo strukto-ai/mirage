@@ -76,10 +76,5 @@ async def handle_chmod(
             if new_mode is None:
                 return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n",
                             1)
-            await apply_attrs(namespace,
-                              dispatch,
-                              "chmod",
-                              path,
-                              errors,
-                              mode=new_mode)
+            await apply_attrs(dispatch, "chmod", path, errors, mode=new_mode)
     return finish("chmod", errors)

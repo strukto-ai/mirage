@@ -54,5 +54,4 @@ def test_vfs_registers_no_mutation_ops():
 def test_vfs_registers_commands():
     r = HfDatasetsVFS(HfDatasetsConfig(repo_id="org/dataset"))
     cmd_names = {c.name for c in r.commands()}
-    assert {"cat", "ls", "grep", "stat"} <= cmd_names
-    assert not {"touch", "rm", "cp", "mv", "mkdir"} & cmd_names
+    assert {"cat", "ls", "grep", "stat", "gzip", "tar"} <= cmd_names

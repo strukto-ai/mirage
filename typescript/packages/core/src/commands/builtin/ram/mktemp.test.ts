@@ -16,20 +16,12 @@ import { RAM_COMMANDS } from './index.ts'
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import type { RegisteredCommand } from '../../config.ts'
-import { parseFlags } from '../../../workspace/executor/command/flags.ts'
-import { specOf } from '../../spec/builtins.ts'
+import { MountMode } from '../../../types.ts'
+import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 const RAM_MKTEMP = RAM_COMMANDS.filter((c) => c.name === 'mktemp' && c.filetype == null)
 
 const DEC = new TextDecoder()
-
-// What a registered command's writes predicate answers for a typed line,
-// read through the same parse the executor hands the mount.
-function writesFor(cmd: RegisteredCommand | undefined, argv: string[]): boolean {
-  if (cmd?.writes == null) throw new Error('the command declares no writes predicate')
-  const parsed = parseFlags(argv, specOf(cmd.name), cmd.name, '/data')
-  return cmd.writes(parsed.flagKwargs, parsed.paths)
-}
 
 async function runMktemp(
   flags: Record<string, string | boolean | number | string[]>,
@@ -81,13 +73,41 @@ describe('mktemp', () => {
   })
 })
 
-describe('mktemp says which invocations write', () => {
-  it.each([
-    [[], true],
-    [['-d'], true],
-    [['-u'], false],
-    [['--dry-run', '-d'], false],
-  ])('mktemp %j writes: %s', (argv, writes) => {
-    expect(writesFor(RAM_MKTEMP[0], argv)).toBe(writes)
+async function readOnlyShell(
+  seed: string,
+  line: string,
+): Promise<[number, string, string, string[]]> {
+  const vfs = new RAMVFS()
+  const ws = new Workspace(
+    { '/ro/': [vfs, MountMode.WRITE] },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    const seeded = await ws.shell(seed)
+    if (seeded.exitCode !== 0) throw new Error(DEC.decode(seeded.stderr))
+    ws.setMountMode('/ro/', MountMode.READ)
+    const before = [...vfs.store.files.keys()].sort()
+    const r = await ws.shell(line)
+    const after = [...vfs.store.files.keys()].sort()
+    expect(after).toEqual(before)
+    return [r.exitCode, DEC.decode(r.stdout), DEC.decode(r.stderr), after]
+  } finally {
+    await ws.close()
+  }
+}
+
+describe('mktemp on a read-only mount', () => {
+  // -u only prints the name it would have created, so it runs on a
+  // read-only mount; a real create is refused at its write.
+  it.each(['mktemp -u -p /ro', 'mktemp --dry-run -d -p /ro'])('runs %s', async (line) => {
+    const [exitCode, out] = await readOnlyShell('true', line)
+    expect(exitCode).toBe(0)
+    expect(out.startsWith('/ro/tmp.')).toBe(true)
+  })
+
+  it.each(['mktemp -p /ro', 'mktemp -d -p /ro'])('refuses %s at its write', async (line) => {
+    const [exitCode, , stderr] = await readOnlyShell('true', line)
+    expect(exitCode).toBe(1)
+    expect(stderr).toContain('Read-only file system')
   })
 })

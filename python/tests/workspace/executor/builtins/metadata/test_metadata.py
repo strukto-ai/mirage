@@ -92,11 +92,14 @@ def test_parse_touch_stamp_invalid():
 @pytest.mark.asyncio
 async def test_metadata_commands_respect_read_only_mount():
     ws = _make_ws(MountMode.READ)
-    for cmd in ("chmod 644 /data/f.txt", "chown alice /data/f.txt",
-                "touch /data/f.txt"):
-        code, _, err = await _run(ws, cmd)
+    for cmd, action in (("chmod 644", "changing permissions of"),
+                        ("chown alice", "changing ownership of"),
+                        ("touch", "cannot touch"), ("touch -c",
+                                                    "setting times of")):
+        code, _, err = await _run(ws, f"{cmd} /data/f.txt")
         assert code == 1
-        assert "read-only mount" in err
+        assert err == f"{cmd.split()[0]}: {action} '/data/f.txt': " \
+            "Read-only file system\n"
 
 
 @pytest.mark.asyncio

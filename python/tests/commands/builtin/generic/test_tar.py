@@ -6,14 +6,14 @@ import pytest
 
 from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.commands.builtin.generic.tar import (excluded, member_name, pruned,
-                                                 strip_prefix, tar, tar_writes)
-from mirage.commands.spec import SPECS
+                                                 strip_prefix, tar)
 from mirage.ops.types import LinkView, MountView
 from mirage.types import (LINK_TARGET_KEY, ContentType, FileStat, FileType,
-                          PathSpec)
+                          MountMode, PathSpec)
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError
-from mirage.workspace.executor.command.flags import parse_flags
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 
 def _spec(path: str, prefix: str = "") -> PathSpec:
@@ -578,16 +578,62 @@ async def test_create_reports_what_it_may_not_open_and_exits_two():
     ]
 
 
-@pytest.mark.parametrize("argv,writes", [
-    (["-tf", "a.tar"], False),
-    (["tf", "a.tar"], False),
-    (["-xOf", "a.tar"], False),
-    (["-x", "--to-stdout", "-f", "a.tar"], False),
-    (["-xf", "a.tar"], True),
-    (["xf", "a.tar"], True),
-    (["-cf", "a.tar", "f.txt"], True),
+def _tar_bytes(name: str, data: bytes) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as archive:
+        info = tarfile.TarInfo(name)
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def _read_only_tar_mount() -> tuple[Workspace, RAMVFS]:
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt"] = b"hello\n"
+    vfs._store.files["/a.tar"] = _tar_bytes("g.txt", b"hello\n")
+    return Workspace({
+        "/ro/": (vfs, MountMode.READ),
+        "/rw/": (RAMVFS(), MountMode.WRITE),
+    }), vfs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line,stdout", [
+    ("tar -tf /ro/a.tar", b"g.txt\n"),
+    ("cd /ro && tar tf a.tar", b"g.txt\n"),
+    ("tar -xOf /ro/a.tar", b"hello\n"),
+    ("tar -x --to-stdout -f /ro/a.tar", b"hello\n"),
+    ("tar -xf /ro/a.tar -C /rw && cat /rw/g.txt", b"hello\n"),
 ])
-def test_tar_writes_only_when_its_mode_makes_files(argv: list[str],
-                                                   writes: bool):
-    parsed = parse_flags(argv, SPECS["tar"], "tar", "/data")
-    assert tar_writes(parsed.flag_kwargs, parsed.paths) is writes
+async def test_a_read_only_mount_runs_tar_where_it_writes_nothing(
+        line: str, stdout: bytes):
+    ws, vfs = _read_only_tar_mount()
+    before = dict(vfs._store.files)
+    result = await ws.shell(line)
+    assert (result.exit_code, await result.materialize_stdout()) == (0, stdout)
+    assert vfs._store.files == before
+
+
+_EXTRACT_REFUSED = (b"tar: g.txt: Cannot open: Read-only file system\n"
+                    b"tar: Exiting with failure status due to previous "
+                    b"errors\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line,stderr", [
+    ("cd /ro && tar -xf a.tar", _EXTRACT_REFUSED),
+    ("cd /ro && tar xf a.tar", _EXTRACT_REFUSED),
+    ("tar -cf /ro/b.tar /ro/f.txt",
+     b"tar: /ro/b.tar: Cannot open: Read-only file system\n"
+     b"tar: Error is not recoverable: exiting now\n"),
+])
+async def test_a_read_only_mount_refuses_tar_at_the_write(
+        line: str, stderr: bytes):
+    # GNU tar 1.35 on a read-only filesystem: each member it cannot
+    # create is its own line and the run goes on; an archive it cannot
+    # create is fatal before any member is read.
+    ws, vfs = _read_only_tar_mount()
+    before = dict(vfs._store.files)
+    result = await ws.shell(line)
+    assert (result.exit_code, result.stderr) == (2, stderr)
+    assert vfs._store.files == before

@@ -74,12 +74,13 @@ async def rmdir(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
             # but the slot may still refuse not-empty: the hidden-
             # remnant guard re-raises the backend's refusal when its
             # cascade cannot finish (a mode-protected remnant, a
-            # visible entry appearing mid-walk). GNU's voice, not the
-            # raw errno repr.
-            if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+            # visible entry appearing mid-walk). A read-only region
+            # refuses here too. GNU's voice, not the raw errno repr.
+            reason = ("Directory not empty" if exc.errno
+                      in (errno.ENOTEMPTY, errno.EEXIST) else fs_strerror(exc))
+            if reason is None:
                 raise
-            errors.append(f"rmdir: failed to remove '{p.raw_path}': "
-                          "Directory not empty")
+            errors.append(f"rmdir: failed to remove '{p.raw_path}': {reason}")
             continue
         removed[p.mount_path] = b""
         if v:
@@ -91,7 +92,4 @@ async def rmdir(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                             exit_code=1 if errors else 0)
 
 
-BUILDER = Builder('rmdir',
-                  rmdir,
-                  write=True,
-                  requirements=frozenset({Operation.RMDIR}))
+BUILDER = Builder('rmdir', rmdir, write=True)

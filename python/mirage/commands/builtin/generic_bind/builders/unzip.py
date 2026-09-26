@@ -17,7 +17,7 @@ from functools import partial
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import \
     transfer_primitives
-from mirage.commands.builtin.generic.unzip import unzip_generic, unzip_writes
+from mirage.commands.builtin.generic.unzip import unzip_generic
 from mirage.commands.builtin.generic_bind.adapter import (Builder, CommandIO,
                                                           Operation, bound_op)
 from mirage.commands.config import CommandOpts
@@ -50,8 +50,4 @@ async def unzip(ops: CommandIO, accessor: Accessor, paths: list[PathSpec],
                                partial(ops.require(Operation.MKDIR), accessor))
 
 
-BUILDER = Builder('unzip',
-                  unzip,
-                  write=True,
-                  writes=unzip_writes,
-                  requirements=frozenset({Operation.WRITE, Operation.MKDIR}))
+BUILDER = Builder('unzip', unzip, write=True)

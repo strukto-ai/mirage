@@ -10,8 +10,8 @@
       "command": "echo x | tee /ro/x.txt",
       "expect": {
         "exit": 1,
-        "stdout": "",
-        "stderr": "tee: read-only mount at /ro/\n"
+        "stdout": "x\n",
+        "stderr": "tee: /ro/x.txt: Read-only file system\n"
       }
     },
     {

@@ -14,7 +14,7 @@
 
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts, WritesFn } from '../../config.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { fsErrorLine, isEnoent, isFsError } from '../../../utils/errors.ts'
 import { readStdinAsync } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -57,10 +57,6 @@ export async function teeGeneric(
   if (paths.length === 0) return [raw, new IOResult()]
   return writeOutput(paths, raw, parsed, stream, write, append)
 }
-
-// Whether a tee invocation writes: its file operands, and with none it only
-// copies stdin to stdout, as GNU tee does. Mirrors Python's tee_writes.
-export const teeWrites: WritesFn = (_flags, paths) => paths.length > 0
 
 /**
  * Write one operand, returning its new content when that is known.

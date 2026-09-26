@@ -16,12 +16,9 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.generic.mktemp import mktemp_writes
-from mirage.commands.spec import SPECS
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.executor.command.flags import parse_flags
 
 
 def _ws():
@@ -82,12 +79,23 @@ def test_mktemp_d_explicit_path_template():
     assert io.exit_code == 0
 
 
-@pytest.mark.parametrize("argv,writes", [
-    ([], True),
-    (["-d"], True),
-    (["-u"], False),
-    (["--dry-run", "-d"], False),
+@pytest.mark.parametrize("line,created", [
+    ("mktemp -u -p /ro", False),
+    ("mktemp --dry-run -d -p /ro", False),
+    ("mktemp -p /ro", True),
+    ("mktemp -d -p /ro", True),
 ])
-def test_mktemp_writes_unless_it_is_a_dry_run(argv: list[str], writes: bool):
-    parsed = parse_flags(argv, SPECS["mktemp"], "mktemp", "/data")
-    assert mktemp_writes(parsed.flag_kwargs, parsed.paths) is writes
+def test_a_read_only_mount_refuses_mktemp_only_where_it_creates(
+        line: str, created: bool):
+    # -u only prints the name it would have created, so it runs on a
+    # read-only mount; a real create is refused at its write.
+    vfs = RAMVFS()
+    ws = Workspace({"/ro/": (vfs, MountMode.READ)})
+    stdout, io = _run_raw(ws, line)
+    if created:
+        assert io.exit_code == 1
+        assert b"Read-only file system" in (io.stderr or b"")
+    else:
+        assert io.exit_code == 0
+        assert _bytes(stdout).startswith(b"/ro/tmp.")
+    assert vfs._store.files == {}

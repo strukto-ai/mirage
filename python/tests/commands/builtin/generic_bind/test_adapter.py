@@ -28,6 +28,7 @@ from mirage.commands.config import CommandOpts
 from mirage.ops.types import NamespaceView
 from mirage.policy import Action, Deny, OpsContext, Policy
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.utils.errors import OperationNotSupportedError
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 
 TREE = {
@@ -85,10 +86,22 @@ async def test_command_io_resolve_glob_honors_cap():
     assert len(result) == 1
 
 
-def test_command_io_require_missing_op():
+@pytest.mark.asyncio
+async def test_command_io_require_missing_op():
+    # A missing op is refused where it is called, not where it is
+    # required: a builder binds it up front and a line that never writes
+    # never calls it. The refusal names the path the op would have
+    # written, a copy's destination included.
     io = make_io()
-    with pytest.raises(NotImplementedError):
-        io.require(Operation.WRITE)
+    src = PathSpec.from_str_path("/a.txt")
+    dst = PathSpec.from_str_path("/b.txt")
+    with pytest.raises(OperationNotSupportedError) as write_exc:
+        await io.require(Operation.WRITE)(NOOPAccessor(), src, b"x")
+    assert (write_exc.value.errno, write_exc.value.filename) == (errno.ENOTSUP,
+                                                                 "/a.txt")
+    with pytest.raises(OperationNotSupportedError) as copy_exc:
+        await io.require(Operation.COPY)(NOOPAccessor(), src, dst)
+    assert copy_exc.value.filename == "/b.txt"
     assert make_io(write=fake_readdir).require(Operation.WRITE) is fake_readdir
 
 

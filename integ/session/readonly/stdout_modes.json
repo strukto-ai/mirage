@@ -256,7 +256,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "gzip: read-only mount at /res/\n"
+        "stderr": "gzip: /res/sro/f.txt.gz: Read-only file system\n"
       }
     },
     {
@@ -273,9 +273,9 @@
       "session": "narrowed",
       "command": "tar -xf /res/sro/a.tar -C /res/sro",
       "expect": {
-        "exit": 1,
+        "exit": 2,
         "stdout": "",
-        "stderr": "tar: read-only mount at /res/\n"
+        "stderr": "tar: f.txt: Cannot open: Read-only file system\ntar: Exiting with failure status due to previous errors\n"
       },
       "flags": [
         "x",
@@ -299,7 +299,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "unzip: read-only mount at /res/\n"
+        "stderr": "unzip: /res/sro/f.txt: Read-only file system\n"
       },
       "flags": [
         "o",
@@ -307,8 +307,277 @@
       ]
     },
     {
+      "id": "sro_split_n_reads_one_chunk",
+      "seq": 1231050,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "split -n 1/2 /res/sro/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hel",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "sro_split_n_reads_the_last_chunk",
+      "seq": 1231051,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "split -n 2/2 /res/sro/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "lo\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "sro_split_n_reads_a_line_chunk",
+      "seq": 1231052,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "split -n l/1/2 /res/sro/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "sro_split_n_reads_a_round_robin_chunk",
+      "seq": 1231053,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "split -n r/1/2 /res/sro/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "sro_split_n_filters_stdin_in_a_read_only_cwd",
+      "seq": 1231054,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "(cd /res/sro && printf 'a\\nb\\n' | split -n 1/2)",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
+    },
+    {
+      "id": "sro_tee_copies_stdin_and_refuses_the_file",
+      "seq": 1231055,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "echo x | tee /res/sro/t.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "x\n",
+        "stderr": "tee: /res/sro/t.txt: Read-only file system\n"
+      }
+    },
+    {
+      "id": "sro_tar_create_is_refused",
+      "seq": 1231056,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "tar -cf /res/sro/b.tar /res/sro/f.txt",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: /res/sro/b.tar: Cannot open: Read-only file system\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "c",
+        "f"
+      ]
+    },
+    {
+      "id": "sro_rm_is_refused",
+      "seq": 1231057,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "rm /res/sro/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "rm: cannot remove '/res/sro/f.txt': Read-only file system\n"
+      }
+    },
+    {
+      "id": "sro_mkdir_is_refused",
+      "seq": 1231058,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "mkdir /res/sro/n",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mkdir: cannot create directory '/res/sro/n': Read-only file system\n"
+      }
+    },
+    {
+      "id": "sro_cp_is_refused",
+      "seq": 1231059,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "cp /res/sro/f.txt /res/sro/g.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot create regular file '/res/sro/g.txt': Read-only file system\n"
+      }
+    },
+    {
+      "id": "sro_mv_is_refused",
+      "seq": 1231060,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "mv /res/sro/f.txt /res/sro/g.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot move '/res/sro/f.txt' to '/res/sro/g.txt': Read-only file system\n"
+      }
+    },
+    {
+      "id": "sro_truncate_is_refused",
+      "seq": 1231061,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "truncate -s 0 /res/sro/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "truncate: cannot open '/res/sro/f.txt' for writing: Read-only file system\n"
+      },
+      "flags": [
+        "s"
+      ]
+    },
+    {
+      "id": "sro_unlink_is_refused",
+      "seq": 1231062,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "s3",
+        "s3-prefix",
+        "gridfs"
+      ],
+      "session": "narrowed",
+      "command": "unlink /res/sro/f.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "unlink: cannot unlink '/res/sro/f.txt': Read-only file system\n"
+      }
+    },
+    {
       "id": "sro_refusals_wrote_nothing",
-      "seq": 1231034,
+      "seq": 1231064,
       "targets": [
         "ram",
         "disk",
@@ -326,7 +595,7 @@
     },
     {
       "id": "sro_cleanup",
-      "seq": 1231035,
+      "seq": 1231065,
       "targets": [
         "ram",
         "disk",

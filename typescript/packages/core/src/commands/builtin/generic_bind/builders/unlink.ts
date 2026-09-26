@@ -16,12 +16,12 @@ import { UsageError } from '../../../errors.ts'
 import { extraOperandError } from '../../../spec/usage.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { FileType } from '../../../../types.ts'
-import { type Builder, resolveGlobOf } from '../adapter.ts'
+import { fsStrerror, isFsError } from '../../../../utils/errors.ts'
+import { type Builder, requireOp, resolveGlobOf } from '../adapter.ts'
 
 export const UNLINK_BUILDER: Builder = {
   name: 'unlink',
   write: true,
-  requirements: ['unlink'],
   fn: async (ops, accessor, paths, _texts, opts) => {
     if (paths.length === 0) {
       throw new UsageError("unlink: missing operand\nTry 'unlink --help' for more information.", 1)
@@ -34,10 +34,7 @@ export const UNLINK_BUILDER: Builder = {
     }
     const p = resolved[0]
     if (p === undefined) return [null, new IOResult()]
-    const { unlink } = ops
-    if (unlink === undefined) {
-      throw new Error('unlink: remove not supported on this backend')
-    }
+    const unlink = requireOp(ops.unlink, 'unlink')
     const enc = new TextEncoder()
     const links = opts.ns?.links ?? null
     // unlink(2) never follows, so a trailing slash on a link operand is
@@ -80,7 +77,18 @@ export const UNLINK_BUILDER: Builder = {
         }),
       ]
     }
-    await unlink(accessor, p)
+    try {
+      await unlink(accessor, p)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      return [
+        null,
+        new IOResult({
+          exitCode: 1,
+          stderr: enc.encode(`unlink: cannot unlink '${p.rawPath}': ${String(fsStrerror(err))}\n`),
+        }),
+      ]
+    }
     return [null, new IOResult()]
   },
 }

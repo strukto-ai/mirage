@@ -99,11 +99,11 @@ export interface GenericVFSOptions<A extends Accessor = Accessor> {
  * The one-file path for a custom backend: supply an accessor and the
  * three core functions on a VFSAdapter (readdir/readBytes/stat), and the
  * generic commands, glob resolution and VFS/FUSE ops arrive wired.
- * Optional fields on the table unlock
- * more surface (`write` enables the byte-mutation family, `find` and
- * `du` become native fast paths), and a command whose requirements the
- * table cannot meet is never registered rather than registered and
- * broken.
+ * Optional fields on the table unlock more surface (`write` enables the
+ * byte-mutation family's writes, `find` and `du` become native fast
+ * paths). A table without an op still gets every command: `gzip -c` and
+ * `tar -t` run as readers, and a line that needs the missing op answers
+ * ENOTSUP at that op.
  *
  * The escape hatches are the ones the builtins use, because this class
  * assembles exactly what they assemble by hand: `overrides` drops a

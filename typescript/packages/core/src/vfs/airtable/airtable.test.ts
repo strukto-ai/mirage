@@ -49,7 +49,11 @@ describe('AirtableVFS', () => {
     for (const name of ['cat', 'ls', 'find', 'grep', 'head', 'jq', 'wc']) {
       expect(names.has(name)).toBe(true)
     }
-    for (const name of ['rm', 'mv', 'cp', 'touch', 'tee']) expect(names.has(name)).toBe(false)
+    expect(
+      vfs(new FakeAirtable())
+        .ops()
+        .filter((op) => op.write),
+    ).toEqual([])
   })
 
   it('redacts the token from its state', () => {

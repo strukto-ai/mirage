@@ -956,7 +956,15 @@ export async function cpGeneric(
       }
       reads[src.virtual] = data
     } else {
-      await strategy.copy(src, target)
+      try {
+        await strategy.copy(src, target)
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        errors.push(
+          `cp: cannot create regular file '${target.virtual}': ${String(fsStrerror(err))}`,
+        )
+        continue
+      }
     }
     writes[target.mountPath] = new Uint8Array()
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))

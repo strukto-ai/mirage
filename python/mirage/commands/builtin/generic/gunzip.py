@@ -54,21 +54,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> GunzipFlags:
     )
 
 
-def gunzip_writes(flags: Mapping[str, FlagValue],
-                  paths: list[PathSpec]) -> bool:
-    """Whether a gunzip invocation writes: each file operand is replaced
-    by its content unless ``-c`` sends it to stdout or ``-t`` only tests
-    it, while a ``-`` operand, like no operand, filters stdin to stdout.
-
-    Args:
-        flags (Mapping[str, FlagValue]): the parsed flag bag.
-        paths (list[PathSpec]): the operands the mount received.
-    """
-    parsed = parse_flags(flags)
-    replaces = any(p.raw_path != "-" for p in paths)
-    return replaces and not (parsed.to_stdout or parsed.test_only)
-
-
 async def gunzip_generic(
     paths: list[PathSpec],
     texts: list[str],

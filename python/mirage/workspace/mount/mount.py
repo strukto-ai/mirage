@@ -658,10 +658,8 @@ class MountEntry:
             recording_token = push_mount_context(self.mount_id)
             revs_token = push_revisions(self.revisions or None)
             prev_manager = push_cache_manager(self.cache_manager)
-            # What the command tier's mode guard reads: the write-command
-            # gate below admits a command when any shown subtree grants
-            # writes, and this binding is how each write the handler then
-            # makes is held to its own region's mode.
+            # What the command tier's mode guard reads: each write the
+            # handler makes is held to its own region's mode.
             gate_token = set_mount_gate(self.prefix, self.mode)
             try:
                 for cmd in handlers:
@@ -669,20 +667,22 @@ class MountEntry:
                     info_only = (flags.get("help") is True
                                  or (flags.get("version") is True
                                      and has_injected_version(cmd.spec)))
-                    # strongest_mode_under, not effective_mode: a mount
-                    # whose only writable region is a show entry still runs
-                    # the command, and the op door refuses per path. The
-                    # trailing newline is load-bearing: stderr accumulates
-                    # across a line, so two refusals in one list ran
-                    # together as `...at /ro/rm: read-only mount at /ro/`,
-                    # and the node table's twin of this refusal (a symlink
-                    # `rm`, rendered by shared.read_only_error) concatenates
-                    # with it. An invocation its generic says writes nothing
-                    # (`gzip -c`, `tar -t`) runs like a reader: it has no
-                    # write for the mount to refuse.
-                    if (cmd.write and not info_only and strongest_mode_under(
-                            self.prefix, self.mode) == MountMode.READ and
-                        (cmd.writes is None or cmd.writes(flags, paths))):
+                    # A command whose I/O runs under the path guards is
+                    # refused where it writes, because only the write
+                    # knows whether a line writes: `gzip -c`, `tar -t` and
+                    # `split -n 1/2` read a read-only mount like any
+                    # reader, and `gzip f` is refused at the write of
+                    # `f.gz`, in gzip's own GNU voice. A write command
+                    # that reaches its service some other way (trello's
+                    # id-addressed card writes, a custom backend's own
+                    # verb) is refused here, before it runs, because no
+                    # door would see its write. strongest_mode_under, not
+                    # effective_mode: a mount whose only writable region
+                    # is a show entry still runs it. The trailing newline
+                    # is load-bearing: stderr accumulates across a line.
+                    if (cmd.write and not cmd.path_guarded
+                            and not info_only and strongest_mode_under(
+                                self.prefix, self.mode) == MountMode.READ):
                         return None, IOResult(
                             exit_code=1,
                             stderr=(f"{cmd_name}: read-only mount "

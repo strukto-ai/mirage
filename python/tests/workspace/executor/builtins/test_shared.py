@@ -26,10 +26,8 @@ from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
 from mirage.workspace.executor.builtins.shared import (  # yapf: disable
     abs_path, arith_refusal, expand_operands, fail, finish, is_count_word,
-    is_valid_name, ok, operand_text, read_only_error, readonly_refusal,
-    refusal, require_view, split_flags, split_value_flags)
-from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.mount.registry import MountRegistry
+    is_valid_name, ok, operand_text, readonly_refusal, refusal, require_view,
+    split_flags, split_value_flags)
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
 
@@ -184,29 +182,3 @@ def test_is_count_word():
     assert is_count_word("+3")
     assert not is_count_word("x")
     assert not is_count_word("-")
-
-
-def test_read_only_error_names_the_owning_mount():
-    # The one voice for a mode refusal, whichever tier reached it: the
-    # command tier renders this line for a backend operand and the node
-    # table renders it for a symlink, so `rm f.txt` and `rm lk` under one
-    # read grant answer identically.
-    ws = Workspace({
-        "/data": (RAMVFS(), MountMode.WRITE),
-    })
-    ns = ws.namespace
-    owned = PathSpec.from_str_path("/data/lk")
-    assert read_only_error("rm", ns,
-                           owned) == "rm: read-only mount at /data/\n"
-
-
-def test_read_only_error_falls_back_to_gnus_phrase_with_no_mount():
-    # No prefix to blame, so it does not invent one. Inside a workspace
-    # this is unreachable -- a "/" mount is always synthesized, and that
-    # root is what governs a path above every other mount -- so the
-    # branch belongs to a namespace built without one.
-    ns = Namespace(MountRegistry())
-    assert ns.try_mount_for("/top") is None
-    assert (read_only_error(
-        "ln", ns,
-        PathSpec.from_str_path("/top")) == "ln: /top: Read-only file system\n")

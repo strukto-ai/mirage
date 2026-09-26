@@ -15,25 +15,43 @@ import gzip
 
 import pytest
 
-from mirage.commands.builtin.generic.gunzip import gunzip_writes
-from mirage.commands.spec import SPECS
-from mirage.types import MountMode, PathSpec
+from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.executor.command.flags import parse_flags
 
 
-@pytest.mark.parametrize("argv,writes", [
-    ([], False),
-    (["-c", "f.txt.gz"], False),
-    (["-t", "f.txt.gz"], False),
-    (["f.txt.gz"], True),
-    (["-k", "f.txt.gz"], True),
+def _read_only_gunzip_mount() -> tuple[Workspace, RAMVFS]:
+    vfs = RAMVFS()
+    vfs._store.files["/f.txt.gz"] = gzip.compress(b"hello\n")
+    return Workspace({"/ro/": (vfs, MountMode.READ)}), vfs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line,stdout", [
+    ("gunzip -c /ro/f.txt.gz", b"hello\n"),
+    ("gunzip -t /ro/f.txt.gz && echo ok", b"ok\n"),
+    ("cd /ro && gunzip < f.txt.gz", b"hello\n"),
+    ("cd /ro && gunzip - < f.txt.gz", b"hello\n"),
 ])
-def test_gunzip_writes_only_the_files_it_replaces(argv: list[str],
-                                                  writes: bool):
-    parsed = parse_flags(argv, SPECS["gunzip"], "gunzip", "/data")
-    assert gunzip_writes(parsed.flag_kwargs, parsed.paths) is writes
+async def test_a_read_only_mount_runs_gunzip_where_it_writes_nothing(
+        line: str, stdout: bytes):
+    ws, vfs = _read_only_gunzip_mount()
+    before = dict(vfs._store.files)
+    result = await ws.shell(line)
+    assert (result.exit_code, await result.materialize_stdout()) == (0, stdout)
+    assert vfs._store.files == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line",
+                         ["gunzip /ro/f.txt.gz", "gunzip -k /ro/f.txt.gz"])
+async def test_a_read_only_mount_refuses_gunzip_at_the_write(line: str):
+    ws, vfs = _read_only_gunzip_mount()
+    before = dict(vfs._store.files)
+    result = await ws.shell(line)
+    assert result.exit_code == 1
+    assert result.stderr == b"gunzip: /ro/f.txt: Read-only file system\n"
+    assert vfs._store.files == before
 
 
 @pytest.mark.asyncio
@@ -45,17 +63,6 @@ async def test_a_dash_goes_to_stdout_while_files_decompress_in_place():
         "cd /data && gzip b.txt && gunzip - b.txt.gz; ls; cat b.txt",
         stdin=gzip.compress(b"hi\n"))
     assert await r.materialize_stdout() == b"hi\nb.txt\nfile\n"
-
-
-def test_gunzip_writes_nothing_for_a_dash_operand():
-    # A `-` has no file to replace: gunzip decompresses stdin to stdout.
-    dash = PathSpec(virtual="/data/-",
-                    directory="/data/",
-                    vfs_path="-",
-                    resolved=True,
-                    raw_path="-")
-    flags = parse_flags([], SPECS["gunzip"], "gunzip", "/data").flag_kwargs
-    assert gunzip_writes(flags, [dash]) is False
 
 
 @pytest.mark.asyncio

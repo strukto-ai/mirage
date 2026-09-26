@@ -44,7 +44,7 @@ import type { IndexCacheStore } from '../../../cache/index/store.ts'
 import type { StatOverlay } from '../../../ops/types.ts'
 
 import { FileType, MountMode, PathSpec, type FileStat } from '../../../types.ts'
-import { eacces, eisdir, erofsReadOnly, isMissError } from '../../../utils/errors.ts'
+import { eacces, eisdir, enotsup, erofsReadOnly, isMissError } from '../../../utils/errors.ts'
 import type { ChildMounts } from '../../../ops/types.ts'
 import {
   DEFAULT_MAX_GLOB_MATCHES,
@@ -54,13 +54,7 @@ import {
 import { norm, parent } from '../../../utils/path.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 
-import type {
-  AggregateFn,
-  CommandFnResult,
-  CommandOpts,
-  ProvisionFn,
-  WritesFn,
-} from '../../config.ts'
+import type { AggregateFn, CommandFnResult, CommandOpts, ProvisionFn } from '../../config.ts'
 
 export function makeResolveGlob<A extends Accessor = Accessor>(
   readdir: ReaddirOp<A>,
@@ -537,10 +531,13 @@ function subtreeModeCheck(...written: readonly PathSpec[]): void {
  * Return `ops` whose mutation slots hold each written path to its
  * region's effective mode.
  *
- * The per-path half of the mount's write gate, innermost of the three
- * guards: hides answer ENOENT first, rules refuse next, and only a path
- * both leave standing is judged for its mode, the same order the op
- * door applies. Reads are never wrapped, because `READ` allows them
+ * The one place a path-guarded command's write is refused for its mode:
+ * nothing refuses the command before it runs, so each individual write
+ * answers for its own path, whether the mount is read-only (`gzip f` refuses the
+ * write of `f.gz`, `gzip -c f` never writes) or only a region is.
+ * Innermost of the three guards: hides answer ENOENT first, rules refuse
+ * next, and only a path both leave standing is judged for its mode, the
+ * same order the op door applies. Reads are never wrapped, because `READ` allows them
  * everywhere the other guards do; a copy's source is a read too, so
  * only its destination answers, while a rename mutates both endpoints.
  */
@@ -1111,16 +1108,26 @@ export function overlaidStat(
   return async (p) => overlay(p.virtual, await stat(p))
 }
 
-// Return an optional backend op, throwing if the backend omits it.
-// Mirrors Python's `CommandIO.require`: factories wire write-side ops
-// (write/mkdir/unlink/...) that are absent on read-only backends into
-// commands that require them, and this surfaces the missing capability
-// as a clear error instead of an `undefined is not a function` crash.
-export function requireOp<T>(op: T | undefined, name: string): T {
-  if (op === undefined) {
-    throw new Error(`operation '${name}' is not supported on this backend`)
+// Return a backend op, or one that refuses when the backend omits it.
+// Mirrors Python's `CommandIO.require`: a backend without the write-side
+// ops (github, notion, a database) still runs every generic command,
+// because only the write itself knows whether a line writes. `gzip -c`,
+// `tar -t` and `split -n 1/2` never call the op, and a line that does is
+// refused at that call with ENOTSUP for the path it named (a copy's
+// destination, otherwise its first path), which the command renders in
+// its own GNU voice, as a filesystem that does not allow the operation
+// would.
+export function requireOp<T extends (...args: never[]) => Promise<unknown>>(
+  op: T | undefined,
+  name: string,
+): T {
+  if (op !== undefined) return op
+  const refuse = (...args: unknown[]): Promise<never> => {
+    const specs = args.filter((arg): arg is PathSpec => arg instanceof PathSpec)
+    const named = name === 'copy' ? specs[specs.length - 1] : specs[0]
+    return Promise.reject(enotsup('backend', name, named ?? ''))
   }
-  return op
+  return refuse as unknown as T
 }
 
 /**
@@ -1276,23 +1283,6 @@ export type BuilderFn<A extends Accessor = Accessor> = (
   opts: CommandOpts,
 ) => Promise<CommandFnResult> | CommandFnResult
 
-export type Operation =
-  | 'write'
-  | 'exists'
-  | 'mkdir'
-  | 'unlink'
-  | 'rmdir'
-  | 'rename'
-  | 'copy'
-  | 'truncate'
-
-export function supports<A extends Accessor = Accessor>(
-  ops: CommandIO<A>,
-  requirements: readonly Operation[],
-): boolean {
-  return requirements.every((op) => ops[op] !== undefined)
-}
-
 export interface Builder<A extends Accessor = Accessor> {
   name: string
   fn: BuilderFn<A>
@@ -1300,13 +1290,4 @@ export interface Builder<A extends Accessor = Accessor> {
   write?: boolean
   aggregate?: AggregateFn
   read?: boolean
-  /**
-   * Backend ops the command cannot run without. A backend missing any of
-   * them does not get the command registered at all, rather than getting a
-   * command that throws on every invocation. `write: true` is not enough on
-   * its own: rmdir needs `rmdir`, truncate needs `truncate`, and a backend
-   * can have `write` without either.
-   */
-  requirements?: readonly Operation[]
-  writes?: WritesFn
 }

@@ -1,7 +1,6 @@
 import pytest
 
-from mirage.commands.builtin.generic.tee import (TeeFlags, parse_flags, tee,
-                                                 tee_writes)
+from mirage.commands.builtin.generic.tee import TeeFlags, parse_flags, tee
 from mirage.commands.spec import SPECS, parse_command
 from mirage.io.stream import materialize
 from mirage.types import MountMode, PathSpec
@@ -288,9 +287,21 @@ async def test_without_a_native_append_it_reads_and_rewrites():
     assert io.cache == ["/n"]
 
 
-def test_tee_writes_only_with_operands():
-    assert not tee_writes({"append": True}, [])
-    assert tee_writes({}, [_spec("/out.txt")])
+@pytest.mark.asyncio
+async def test_a_read_only_mount_runs_tee_and_refuses_its_file_operand():
+    # With no operand tee only copies stdin to stdout, so a read-only cwd
+    # runs it like any reader. With one, the copy still reaches stdout and
+    # the file is refused at its write, as GNU tee reports it.
+    vfs = RAMVFS()
+    ws = Workspace({"/ro/": (vfs, MountMode.READ)})
+    bare = await ws.shell("cd /ro && tee", stdin=b"x\n")
+    assert (bare.exit_code, await
+            bare.materialize_stdout(), bare.stderr) == (0, b"x\n", None)
+    named = await ws.shell("tee /ro/out.txt", stdin=b"x\n")
+    assert (named.exit_code, await named.materialize_stdout(),
+            named.stderr) == (1, b"x\n",
+                              b"tee: /ro/out.txt: Read-only file system\n")
+    assert vfs._store.files == {}
 
 
 @pytest.mark.asyncio

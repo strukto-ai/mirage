@@ -22,7 +22,6 @@ import {
   type CommandFnResult,
   type CommandOpts,
   type RegisteredCommand,
-  type WritesFn,
 } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -33,10 +32,6 @@ import { formatRecords } from '../utils/output.ts'
 const ENC = new TextEncoder()
 
 type UnlinkFn<A> = (accessor: A, path: PathSpec, index?: IndexCacheStore) => Promise<void>
-
-// Whether an rm invocation writes: it removes its operands, and with none it
-// removes nothing. Mirrors Python's rm_writes.
-export const rmWrites: WritesFn = (_flags, paths) => paths.length > 0
 
 // rm's answer to a line with no operand, in GNU's words: nothing at all under
 // -f, and a missing-operand usage error otherwise (coreutils 9.7). Mirrors
@@ -67,7 +62,7 @@ export function makeRm<A extends Accessor>(
     vfs,
     spec: specOf('rm'),
     write: true,
-    writes: rmWrites,
+    pathGuarded: true,
     fn: async (
       accessor: A,
       paths: PathSpec[],

@@ -83,8 +83,7 @@ async def handle_touch(
                           f"Is a directory\n")
             continue
         if "h" in flags and namespace.is_link(target.virtual):
-            await apply_link_attrs(namespace,
-                                   dispatch,
+            await apply_link_attrs(dispatch,
                                    "touch",
                                    target,
                                    errors,
@@ -145,7 +144,8 @@ async def handle_touch(
                     continue
             await setattr_via(dispatch, resolved, atime=atime, mtime=mtime)
         except PermissionError as exc:
-            errors.append(permission_error("touch", namespace, resolved, exc))
+            action = "setting times of" if "c" in flags else "cannot touch"
+            errors.append(permission_error("touch", action, target, exc))
         except FS_ERRORS as exc:
             # A destination whose parent chain is not all directories is one
             # failed operand, not an aborted command: GNU reports it and

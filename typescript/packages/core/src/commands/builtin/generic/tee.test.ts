@@ -22,7 +22,7 @@ import { enoent } from '../../../utils/errors.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { parseFlags, teeGeneric, teeWrites, writeOutput } from './tee.ts'
+import { parseFlags, teeGeneric, writeOutput } from './tee.ts'
 
 const DEC = new TextDecoder()
 
@@ -212,11 +212,6 @@ describe('tee with no file operand', () => {
     expect(written).toEqual([])
   })
 
-  it('writes only when it has operands', () => {
-    expect(teeWrites({ append: true }, [])).toBe(false)
-    expect(teeWrites({}, [PathSpec.fromStrPath('/out.txt')])).toBe(true)
-  })
-
   it.each([MountMode.WRITE, MountMode.READ])('runs on a %s mount', async (mode) => {
     const ws = new Workspace(
       { '/m/': [new RAMVFS(), mode] },
@@ -225,6 +220,14 @@ describe('tee with no file operand', () => {
     try {
       const result = await ws.shell("cd /m && printf 'x\\n' | tee")
       expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'x\n'])
+      // With a file operand the copy still reaches stdout, and a read-only
+      // mount refuses the file at its write, as GNU tee reports it.
+      const named = await ws.shell("printf 'x\\n' | tee /m/out.txt")
+      expect([named.exitCode, DEC.decode(named.stdout), DEC.decode(named.stderr)]).toEqual(
+        mode === MountMode.READ
+          ? [1, 'x\n', 'tee: /m/out.txt: Read-only file system\n']
+          : [0, 'x\n', ''],
+      )
     } finally {
       await ws.close()
     }

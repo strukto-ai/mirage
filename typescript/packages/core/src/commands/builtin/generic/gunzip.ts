@@ -15,18 +15,8 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { PathSpec } from '../../../types.ts'
-import type { CommandFnResult, CommandOpts, WritesFn } from '../../config.ts'
+import type { CommandFnResult, CommandOpts } from '../../config.ts'
 import { decompressInputs } from './decompress.ts'
-
-// Whether a gunzip invocation writes: each file operand is replaced by its
-// content unless -c sends it to stdout or -t only tests it, while a `-`
-// operand, like no operand, filters stdin to stdout. Mirrors Python's
-// gunzip_writes.
-export const gunzipWrites: WritesFn = (flags, paths) => {
-  const fl = new FlagView(flags, specOf('gunzip'))
-  const replaces = paths.some((p) => p.rawPath !== '-')
-  return replaces && !(fl.asBool('c') || fl.asBool('t'))
-}
 
 export async function gunzipGeneric(
   paths: PathSpec[],

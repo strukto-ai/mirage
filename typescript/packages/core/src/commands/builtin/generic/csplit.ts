@@ -135,10 +135,7 @@ export async function csplitGeneric(
       sizes.push(String(data.byteLength))
     }
   } catch (err) {
-    if (!keep) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`csplit: ${msg}\n`) })]
-    }
+    if (!keep) throw err
   }
   const output = quiet || sizes.length === 0 ? '' : sizes.join('\n') + '\n'
   const result: ByteSource = ENC.encode(output)

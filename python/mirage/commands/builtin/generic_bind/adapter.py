@@ -18,13 +18,12 @@ import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Any, Protocol, overload
+from typing import Any, NoReturn, Protocol, overload
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.builtin.generic.du import DEFAULT_MAX_DU_ENTRIES
-from mirage.commands.config import (CommandFnResult, CommandOpts, ProvisionFn,
-                                    WritesFn)
+from mirage.commands.config import CommandFnResult, CommandOpts, ProvisionFn
 from mirage.context import (effective_path_mode, get_admission,
                             get_current_session, get_mount_gate,
                             get_op_policies, hidden_paths_intersect,
@@ -32,7 +31,7 @@ from mirage.context import (effective_path_mode, get_admission,
 from mirage.ops.types import ChildMounts, LinkTargetStat, StatOverlay
 from mirage.policy.policies import Policies, pre_ops_gate
 from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.utils.errors import MISS_ERRORS, ReadOnlyError, eisdir
+from mirage.utils.errors import MISS_ERRORS, ReadOnlyError, eisdir, enotsup
 from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, make_resolve_glob
 from mirage.utils.hidden import move_reveals
 from mirage.utils.path import norm, parent
@@ -408,8 +407,6 @@ class Builder:
     write: bool = False
     aggregate: AggregateFn | None = None
     read: bool = False
-    requirements: frozenset[Operation] = frozenset()
-    writes: WritesFn | None = None
 
 
 @dataclass(frozen=True)
@@ -451,25 +448,44 @@ class CommandIO(ReadOps, NativeReadOps, WriteOps):
         }
         return operations[op]
 
-    def supports(self, requirements: frozenset[Operation]) -> bool:
-        return all(self.operation(op) is not None for op in requirements)
-
     def require(self, op: Operation) -> OperationFn:
-        """Return an optional backend op, raising if the backend omits it.
+        """Return a backend op, or one that refuses when the backend
+        omits it.
 
-        Builders wire write-side ops (write/mkdir/unlink/rename/...) that
-        are ``None`` on read-only backends into generic commands that
-        require them. This surfaces the missing capability as a clear
-        error instead of a ``NoneType is not callable`` crash.
+        A backend without the write-side ops (github, notion, a
+        database) still runs every generic command, because only the
+        write itself knows whether a line writes: ``gzip -c``, ``tar
+        -t`` and ``split -n 1/2`` never call the op, and a line that
+        does is refused at that call with ENOTSUP for the path it
+        named, which the command renders in its own GNU voice, as a
+        filesystem that does not allow the operation would. Mirrors TS
+        ``requireOp``.
 
         Args:
             op (Operation): Required backend operation.
         """
         fn = self.operation(op)
         if fn is None:
-            raise NotImplementedError(
-                f"operation {op!r} is not supported on this backend")
+            return functools.partial(_refuse_missing, op)
         return fn
+
+
+async def _refuse_missing(op: Operation, *args: Any,
+                          **kwargs: Any) -> NoReturn:
+    """Refuse a call to an op the backend does not have.
+
+    The path it names is the one the op would have written: a copy's
+    destination, otherwise its first path.
+
+    Args:
+        op (Operation): the missing operation.
+        *args: the call's positionals, the accessor and PathSpecs among
+            them.
+        **kwargs: ignored.
+    """
+    specs = [arg for arg in args if isinstance(arg, PathSpec)]
+    raise enotsup("backend", op.value,
+                  specs[-1] if op is Operation.COPY else specs[0])
 
 
 _GUARD_ENOENT_SLOTS = ("read_bytes", "read_stream", "stat", "read_range",
@@ -574,17 +590,19 @@ def _mode_call(fn: OperationFn, skip_first: bool, subtree: bool, *args: Any,
     """Call a backend mutation op after holding each written path to
     its region's effective mode.
 
-    The write-command gate admits a command when any shown subtree
-    grants writes, so each individual write must still answer for its
-    own path: ``mkdir /repo/private/x`` on a mount whose only writable
-    region is ``/repo/build`` refuses here. A copy's source is a read,
-    so the first PathSpec is skipped for the copy slots; a rename
-    mutates both endpoints, so both are held. An op that covers a
-    whole subtree also answers for the regions below its operand
-    (``readonly_below``): a native ``rm -r`` would otherwise delete a
-    read-only carve-out in one backend call no per-path check ever
-    sees. Sync like ``_guarded_call``, and inert with no mount bound
-    (a generic invoked outside a mount's command).
+    The one place a path-guarded command's write is refused for its
+    mode: nothing refuses the command before it runs, so each
+    individual write answers for its own path, whether the mount is
+    read-only (``gzip f`` refuses the write of ``f.gz``, ``gzip -c f``
+    never writes) or only a region is (``mkdir /repo/private/x`` on a
+    mount whose only writable region is ``/repo/build``). A copy's
+    source is a read, so the first PathSpec is skipped for the copy
+    slots; a rename mutates both endpoints, so both are held. An op
+    that covers a whole subtree also answers for the regions below its
+    operand (``readonly_below``): a native ``rm -r`` would otherwise
+    delete a read-only carve-out in one backend call no per-path check
+    ever sees. Sync like ``_guarded_call``, and inert with no mount
+    bound (a generic invoked outside a mount's command).
 
     Args:
         fn (OperationFn): the raw backend op.
@@ -616,11 +634,11 @@ def with_mode_guard(ops: CommandIO) -> CommandIO:
     """Return ``ops`` whose mutation slots hold each written path to
     its region's effective mode.
 
-    The per-path half of the mount's write gate, innermost of the three
-    guards: hides answer ENOENT first, rules refuse next, and only a
-    path both leave standing is judged for its mode, the same order the
-    op door applies. Reads are never wrapped, because ``READ`` allows
-    them everywhere the other guards do.
+    The mount's write gate, innermost of the three guards: hides answer
+    ENOENT first, rules refuse next, and only a path both leave standing
+    is judged for its mode, the same order the op door applies. Reads
+    are never wrapped, because ``READ`` allows them everywhere the other
+    guards do.
 
     Args:
         ops (CommandIO): the backend's IO adapter.

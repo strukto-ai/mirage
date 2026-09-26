@@ -406,14 +406,6 @@ export function isErofs(err: unknown): boolean {
   return err instanceof Error && (err as Error & { code?: string }).code === 'EROFS'
 }
 
-// The path a stamped filesystem error blames (Python's `exc.filename`).
-// A rename refuses on whichever endpoint stopped it, and the two are
-// voiced differently, so the caller has to be able to tell them apart.
-export function blamedPath(err: unknown): string | null {
-  const virtual = (err as { virtualPath?: unknown }).virtualPath
-  return typeof virtual === 'string' ? virtual : null
-}
-
 // The per-entry swallow set for walk-and-warn commands (ls, tree, rg):
 // every stamped filesystem code plus the unstamped no-mount refusal.
 // Mirrors Python's `except (OSError, ValueError)`, where ValueError is

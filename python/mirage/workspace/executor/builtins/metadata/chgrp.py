@@ -56,12 +56,7 @@ async def handle_chgrp(
     errors: list[str] = []
     for target in await expand_operands(namespace, operands[1:]):
         if no_deref and namespace.is_link(target.virtual):
-            await apply_link_attrs(namespace,
-                                   dispatch,
-                                   "chgrp",
-                                   target,
-                                   errors,
-                                   gid=gid)
+            await apply_link_attrs(dispatch, "chgrp", target, errors, gid=gid)
             continue
         found = await resolve_operand(namespace, dispatch, "chgrp", target,
                                       errors)
@@ -74,15 +69,9 @@ async def handle_chgrp(
         else:
             paths, links = [resolved], []
         for path in paths:
-            await apply_attrs(namespace,
-                              dispatch,
-                              "chgrp",
-                              path,
-                              errors,
-                              gid=gid)
+            await apply_attrs(dispatch, "chgrp", path, errors, gid=gid)
         for link in links:
-            await apply_link_attrs(namespace,
-                                   dispatch,
+            await apply_link_attrs(dispatch,
                                    "chgrp",
                                    PathSpec.from_str_path(link),
                                    errors,

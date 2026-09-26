@@ -570,21 +570,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
     )
 
 
-def unzip_writes(flags: Mapping[str, FlagValue],
-                 paths: list[PathSpec]) -> bool:
-    """Whether an unzip invocation writes: it extracts the archive unless
-    ``-l``, ``-t``, ``-p`` or ``-Z`` asks it to list, test, pipe or
-    describe the members instead.
-
-    Args:
-        flags (Mapping[str, FlagValue]): the parsed flag bag.
-        paths (list[PathSpec]): the operands the mount received.
-    """
-    parsed = parse_flags(flags)
-    return bool(paths) and not (parsed.list_only or parsed.test_only
-                                or parsed.to_stdout or parsed.zipinfo)
-
-
 async def unzip_generic(
     paths: list[PathSpec],
     texts: list[str],
