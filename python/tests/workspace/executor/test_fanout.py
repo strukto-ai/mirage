@@ -701,8 +701,9 @@ def test_ls_r_renders_a_file_mount_as_one_row_and_no_group():
     root._store.files["/top.txt"] = b"T\n"
     ws = Workspace(mounts={"/": (root, MountMode.EXEC)})
     io = asyncio.run(ws.shell("ls -aRF /"))
-    assert _stdout(io).startswith("/:\n.bash_history\ndev/\ntop.txt\nusr/\n\n"
-                                  "/usr:\nbin/\n\n/dev:\nnull\nzero\n\n")
+    assert _stdout(io).startswith(
+        "/:\n./\n../\n.bash_history\ndev/\ntop.txt\nusr/\n\n"
+        "/usr:\n./\n../\nbin/\n\n/dev:\n./\n../\nnull\nzero\n\n")
     assert _stdout(io).count(".bash_history") == 1
 
 

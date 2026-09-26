@@ -14,12 +14,14 @@
 
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from dotenv import load_dotenv
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.core.mongodb._schema_json import build_collection_schema_json
+from mirage.core.mongodb._schema_json import (build_collection_schema_json,
+                                              build_database_json)
 from mirage.vfs.mongodb.config import MongoDBConfig
 
 pytestmark = pytest.mark.skipif(
@@ -61,12 +63,13 @@ async def test_schema_recognizes_fixed_length_embedding_array(accessor):
 
 
 @pytest.mark.asyncio
-async def test_schema_tags_text_index_and_returns_indexstats(accessor):
+async def test_schema_tags_text_index_without_volatile_stats(accessor):
     s = await build_collection_schema_json(accessor, "mirage_test",
                                            "text_indexed")
     by_name = {idx["name"]: idx for idx in s["indexes"]}
     assert by_name["title_body_text"]["type"] == "text"
-    assert "ops" in by_name["title_body_text"]["stats"]
+    assert all(set(idx) == {"name", "keys", "type"} for idx in s["indexes"])
+    assert "document_count" not in s
     assert by_name["_id_"]["type"] == "btree"
 
 
@@ -90,3 +93,23 @@ async def test_schema_heterogeneous_collection_surfaces_mixed_types(accessor):
     score = by_path["score"]
     assert set(score["types"].keys()).issubset({"string", "int", "null"})
     assert sum(score["types"].values()) == pytest.approx(score["presence"])
+
+
+@pytest.mark.asyncio
+async def test_database_catalog_keeps_timeseries_and_separates_views(accessor):
+    database = f"mirage_catalog_{uuid4().hex}"
+    db = accessor.client[database]
+    try:
+        await db.create_collection("ordinary")
+        await db.create_collection("measurements",
+                                   timeseries={"timeField": "time"})
+        await db.create_collection("ordinary_view",
+                                   viewOn="ordinary",
+                                   pipeline=[])
+        result = await build_database_json(accessor, database)
+        collections = {entry["name"] for entry in result["collections"]}
+        assert {"ordinary", "measurements"} <= collections
+        assert "ordinary_view" not in collections
+        assert result["views"] == [{"name": "ordinary_view"}]
+    finally:
+        await accessor.client.drop_database(database)

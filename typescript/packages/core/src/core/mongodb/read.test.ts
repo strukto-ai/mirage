@@ -55,7 +55,7 @@ describe('read', () => {
   it('returns database.json payload at database_json scope', async () => {
     const driver = stubMongoDriver({
       listDatabases: () => Promise.resolve(['app']),
-      listCollections: () => Promise.resolve(['users', 'orders']),
+      listCollections: (_db, kind) => Promise.resolve(kind === 'view' ? [] : ['users', 'orders']),
       listCollectionsDetailed: (_db, filter = {}) =>
         Promise.resolve([{ name: filter.name ?? 'users', type: 'collection' }]),
       countDocuments: () => Promise.resolve(7),
@@ -150,7 +150,9 @@ describe('registered read stream contract', () => {
 it('builds a database manifest with two catalog requests regardless of collection count', async () => {
   const names = Array.from({ length: 5000 }, (_, i) => `collection_${String(i)}`)
   const listCollections = vi.fn((_db: string, kind: string | null = null) =>
-    Promise.resolve(kind === 'view' ? ['view'] : names),
+    Promise.resolve(
+      kind === 'view' ? ['view'] : kind === null ? [...names, 'measurements', 'view'] : names,
+    ),
   )
   const accessor = new MongoDBAccessor(
     stubMongoDriver({
@@ -163,7 +165,11 @@ it('builds a database manifest with two catalog requests regardless of collectio
     collections: unknown[]
     views: { name: string }[]
   }
-  expect(result.collections).toHaveLength(5000)
+  expect(result.collections).toHaveLength(5001)
+  expect(result.collections).toContainEqual({ name: 'measurements' })
+  expect(result.collections).not.toContainEqual({ name: 'view' })
+  expect(listCollections).toHaveBeenNthCalledWith(1, 'app', null)
+  expect(listCollections).toHaveBeenNthCalledWith(2, 'app', 'view')
   expect(result.views).toEqual([{ name: 'view' }])
   expect(listCollections).toHaveBeenCalledTimes(2)
 })

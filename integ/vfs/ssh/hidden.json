@@ -19,7 +19,7 @@
       "targets": [
         "ssh"
       ],
-      "command": "ls -a /data/qsubh && rmdir /data/qsubh",
+      "command": "ls -A /data/qsubh && rmdir /data/qsubh",
       "expect": {
         "exit": 0,
         "stdout": "",

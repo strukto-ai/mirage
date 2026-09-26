@@ -40,12 +40,10 @@ export async function buildDatabaseJson(
   accessor: MongoDBAccessor,
   database: string,
 ): Promise<DatabaseJson> {
-  const collections = (await listCollections(accessor, database, EntityKind.COLLECTION)).map(
-    (name) => ({ name }),
-  )
-  const views = (await listCollections(accessor, database, EntityKind.VIEW)).map((name) => ({
-    name,
-  }))
+  const names = await listCollections(accessor, database)
+  const viewNames = new Set(await listCollections(accessor, database, EntityKind.VIEW))
+  const collections = names.filter((name) => !viewNames.has(name)).map((name) => ({ name }))
+  const views = [...viewNames].map((name) => ({ name }))
   return { database, collections, views }
 }
 

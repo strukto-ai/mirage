@@ -31,12 +31,12 @@ async def build_database_json(
     accessor: MongoDBAccessor,
     database: str,
 ) -> dict[str, Any]:
-    collections = await list_collections(accessor.client,
-                                         database,
-                                         kind=EntityKind.COLLECTION)
+    names = await list_collections(accessor.client, database)
     views = await list_collections(accessor.client,
                                    database,
                                    kind=EntityKind.VIEW)
+    view_names = set(views)
+    collections = [name for name in names if name not in view_names]
     return {
         "database": database,
         "collections": [{

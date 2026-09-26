@@ -110,7 +110,7 @@ async def readdir(
         # (render-derived or None, see the CLAUDE.md FUSE rules); it lives in
         # extra instead.
         if rt == "gdrive/file":
-            size = source_size or None
+            size = int(f["size"]) if f.get("size") is not None else None
         else:
             size = None
             if source_size:

@@ -42,7 +42,24 @@
       "seq": 910051,
       "targets": [
         "ram",
-        "disk"
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "mkdir -p /data/empty1267; ls -la /data/empty1267 | awk 'NR==1 {print} NR>1 {print $NF}'",
       "expect": {
@@ -56,7 +73,24 @@
       "seq": 910052,
       "targets": [
         "ram",
-        "disk"
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "ls -l /data/empty1267",
       "expect": {
@@ -70,7 +104,24 @@
       "seq": 910053,
       "targets": [
         "ram",
-        "disk"
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "ls -A /data/empty1267",
       "expect": {

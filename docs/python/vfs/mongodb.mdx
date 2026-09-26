@@ -99,6 +99,11 @@ count, or `wc -l documents.jsonl` for an exact document count (which can scan
 the collection). `stat -c %s` prints `-` for an unknown size and `0` only for
 a known empty file. Missing dates also display as `-`.
 
+Long directory listings include a `total` row. GNU `ls` reports allocated disk
+blocks there; the VFS does not expose allocation metadata, so Mirage prints
+`total ?` for nonempty listings and `total 0` for empty listings. This is an
+intentional divergence from GNU output, not a sum of rendered file sizes.
+
 `stat` checks existence and type without counting documents, sampling fields,
 or fetching indexes. This keeps `ls`, `find`, and opening a stream independent
 of the collection size. The same unknown-size convention applies to Postgres
@@ -159,7 +164,7 @@ memory ahead of the consumer.
 | `grep` (collection/db level) | Every file under the directory, each read as `cat` renders it; no result cap |
 | `jq`                         | Inherits the streaming `cat` source                               |
 | `wc`                         | Uses `countDocuments()` server-side; zero download                |
-| `stat`                       | Metadata only (doc count, indexes; views skip the index lookup)   |
+| `stat`                       | Existence and type only; no counts or index queries   |
 
 ## Smart Commands
 
@@ -363,6 +368,6 @@ Standard commands available on the mounted MongoDB tree:
 | `grep` / `rg`   | A directory operand searches every file under it (documents, schema.json, database.json, views); a file streams |
 | `jq`            | Query JSON; use `.[]` prefix when iterating JSONL files                 |
 | `wc`            | Smart: uses `countDocuments()` server-side                              |
-| `stat`          | Metadata (doc count, indexes; views skip the index lookup)              |
+| `stat`          | Existence and type only; no counts or index queries              |
 | `find`          | List databases/collections/views with `-name`, `-maxdepth`              |
 | `tree`          | Directory tree view                                                     |

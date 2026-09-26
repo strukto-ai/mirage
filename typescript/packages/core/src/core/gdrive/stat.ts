@@ -52,7 +52,7 @@ async function statFromApi(
   const ext = MIME_TO_EXT[node.mimeType]
   const vfsName = ext !== undefined ? `${node.name}${ext}` : node.name
   // Native renders are size-unknown (see the CLAUDE.md FileStat.size rule).
-  const size = ext !== undefined ? null : parseInt(item.size ?? '0', 10)
+  const size = ext === undefined && item.size !== undefined ? parseInt(item.size, 10) : null
   return new FileStat({
     name: vfsName,
     size,

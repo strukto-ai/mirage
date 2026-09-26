@@ -12,13 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb._schema_json import (build_collection_schema_json,
                                               build_database_json)
+from mirage.core.mongodb.types import EntityKind
 from mirage.vfs.mongodb.config import MongoDBConfig
 
 
@@ -123,9 +124,18 @@ async def test_build_collection_schema_json_view_skips_indexes(accessor):
 @pytest.mark.asyncio
 async def test_database_manifest_does_not_query_each_collection(accessor):
     names = [f"collection_{n}" for n in range(5000)]
-    with patch("mirage.core.mongodb._schema_json.list_collections",
-               new=AsyncMock(side_effect=[names, ["view"]])) as listing:
+    with patch(
+            "mirage.core.mongodb._schema_json.list_collections",
+            new=AsyncMock(
+                side_effect=[names +
+                             ["measurements", "view"], ["view"]])) as listing:
         result = await build_database_json(accessor, "db")
     assert listing.await_count == 2
-    assert len(result["collections"]) == 5000
+    assert len(result["collections"]) == 5001
+    assert {"name": "measurements"} in result["collections"]
+    assert {"name": "view"} not in result["collections"]
+    assert listing.await_args_list == [
+        call(accessor.client, "db"),
+        call(accessor.client, "db", kind=EntityKind.VIEW),
+    ]
     assert result["views"] == [{"name": "view"}]

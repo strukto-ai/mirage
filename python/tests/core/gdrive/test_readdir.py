@@ -23,7 +23,7 @@ from mirage.cache.index.config import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.core.gdrive.readdir import readdir
-from mirage.core.gdrive.stat import stat
+from mirage.core.gdrive.stat import stat, stat_from_api
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.types import PathSpec
@@ -516,3 +516,31 @@ async def test_readdir_scoped_mount_lists_folder_children(
         index=NULL_INDEX,
     )
     assert entries == ["/in.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reported_size, expected", [("0", 0), ("42", 42),
+                                                     (None, None)])
+async def test_binary_size_preserves_zero_and_never_uses_quota(
+        accessor, index, reported_size, expected):
+    item = {
+        "id": "binary",
+        "name": "file.txt",
+        "mimeType": "text/plain",
+        "quotaBytesUsed": "99"
+    }
+    if reported_size is not None:
+        item["size"] = reported_size
+    with patch("mirage.core.gdrive.readdir.list_files", new=AsyncMock(return_value=[item])), \
+         patch("mirage.core.gdrive.readdir.list_shared_drives", new=AsyncMock(return_value=[])):
+        rows = await readdir(accessor, PathSpec.from_str_path("/drive", ""),
+                             index)
+        assert rows == ["/drive/file.txt"]
+        result = await stat(
+            accessor, PathSpec.from_str_path("/drive/file.txt", "file.txt"),
+            index)
+        assert result.size == expected
+    with patch("mirage.core.gdrive.resolve.list_files", new=AsyncMock(return_value=[item])), \
+         patch("mirage.core.gdrive.stat.get_file", new=AsyncMock(return_value=item)):
+        result = await stat_from_api(accessor, "file.txt", "/drive/file.txt")
+        assert result.size == expected

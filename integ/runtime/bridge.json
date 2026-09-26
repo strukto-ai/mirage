@@ -83,10 +83,10 @@
           }
         },
         {
-          "command": "python3 -c \"import json; from pathlib import Path; s = json.loads(Path('/mongodb/mirage_integ_runtime/collections/books/schema.json').read_text()); print(s['name'], s['kind'], s['document_count'], [f['path'] for f in s['fields']])\"",
+          "command": "python3 -c \"import json; from pathlib import Path; s = json.loads(Path('/mongodb/mirage_integ_runtime/collections/books/schema.json').read_text()); print(s['name'], s['kind'], 'document_count' in s, [f['path'] for f in s['fields']])\"",
           "expect": {
             "exit": 0,
-            "stdout": "books collection 2 ['title']\n"
+            "stdout": "books collection False ['title']\n"
           }
         },
         {
