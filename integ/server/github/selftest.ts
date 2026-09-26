@@ -123,6 +123,51 @@ async function main(): Promise<void> {
       body: JSON.stringify({ tenants: [TENANT], fixture: 'v1' }),
     })
     check('/reset seeds the fixture', reset.status === 200, String(reset.status))
+
+    // ---- `{ref}:{dir}` lists one directory, as GitHub's rev syntax does; the
+    // point lookup sends it percent-encoded as one segment, and python's
+    // client sends the colon raw
+    const shallow = async (segment: string): Promise<{ status: number; body: JsonValue }> => {
+      const r = await fetch(`${at}/repos/${REPO}/git/trees/${segment}`, { headers: HEADERS })
+      return { status: r.status, body: (await r.json()) as JsonValue }
+    }
+    // docs/vendored is a submodule: GitHub lists a gitlink in a tree, and the
+    // client is what drops it.
+    const names = (body: JsonValue): JsonValue[] =>
+      (field(body, 'tree') as JsonValue[]).map((row) => field(row, 'path'))
+    const docs = await shallow('main%3Adocs')
+    eq('an encoded ref:dir lists that directory', names(docs.body), [
+      'architecture.md',
+      'contributing.md',
+      'release.md',
+      'vendored',
+    ])
+    eq('a raw colon lists the same rows', names((await shallow('main:docs')).body), [
+      'architecture.md',
+      'contributing.md',
+      'release.md',
+      'vendored',
+    ])
+    eq(
+      'an encoded slash reaches a nested directory',
+      names((await shallow('main%3Asrc%2Fcache')).body).length,
+      9,
+    )
+    eq('a path through a file is 422', (await shallow('main%3AREADME.md')).status, 422)
+    eq('a missing directory is 404', (await shallow('main%3Anope')).status, 404)
+    eq('an unknown ref is 404', (await shallow('gone%3Adocs')).status, 404)
+    const whole = await get(`${at}/repos/${REPO}/git/trees/main?recursive=1`)
+    const wholeRow = (field(whole, 'tree') as JsonValue[]).find(
+      (row) => field(row, 'path') === 'docs/release.md',
+    )
+    const pointRow = (field(docs.body, 'tree') as JsonValue[]).find(
+      (row) => field(row, 'path') === 'release.md',
+    )
+    eq(
+      "a listed row carries the recursive tree row's sha",
+      field(pointRow ?? null, 'sha'),
+      field(wholeRow ?? null, 'sha'),
+    )
     check('vanilla gh search matches Mirage', (await searchConformance(at)) > 0)
 
     // ---- an author the caller states is the author the fake keeps
@@ -897,6 +942,7 @@ async function main(): Promise<void> {
     }
 
     eq('`user:` lists that account and no other', await found('user:integ'), [
+      'integ/data-v1',
       'integ/repo-cli',
       'integ/repo-trunc',
       'integ/repo-v1',
@@ -1212,17 +1258,17 @@ async function main(): Promise<void> {
     eq(
       'repositories order by name ascending',
       await repositoryNames('integ', ', orderBy: { field: NAME, direction: ASC }'),
-      ['repo-cli', 'repo-trunc', 'repo-v1'],
+      ['data-v1', 'repo-cli', 'repo-trunc', 'repo-v1'],
     )
     eq(
       'repositories order by name descending',
       await repositoryNames('integ', ', orderBy: { field: NAME, direction: DESC }'),
-      ['repo-v1', 'repo-trunc', 'repo-cli'],
+      ['repo-v1', 'repo-trunc', 'repo-cli', 'data-v1'],
     )
     eq(
       'repositories a push order ties are listed by name',
       await repositoryNames('integ', ', orderBy: { field: PUSHED_AT, direction: DESC }'),
-      ['repo-cli', 'repo-trunc', 'repo-v1'],
+      ['data-v1', 'repo-cli', 'repo-trunc', 'repo-v1'],
     )
     const forked = await post(`${at}/repos/integ/repo-v1/forks`, { name: 'v1-fork' })
     check('the fork is created', forked.status < 300, String(forked.status))

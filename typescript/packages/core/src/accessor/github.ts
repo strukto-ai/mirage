@@ -26,6 +26,13 @@ export class GitHubAccessor extends Accessor {
   // listing, so a refetch after a write replaces it wholesale.
   truncated: boolean
   tree: Record<string, TreeEntry>
+  // How many listings this accessor has written into an index, any index:
+  // a whole-tree refill or one directory of the truncated walk. Nonzero
+  // means the mount has listed, which is what lets a probe on an empty
+  // throwaway index ask for one directory instead of walking the
+  // repository; a lookup that sees it move also knows an index was
+  // reseeded under it. Mirrors Python's `GitHubAccessor.refills`.
+  refills = 0
 
   constructor(opts: {
     transport: GitHubTransport

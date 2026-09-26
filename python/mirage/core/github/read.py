@@ -19,9 +19,11 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.api.client import SessionArg
 from mirage.core.github.client import github_get
 from mirage.core.github.config import GitHubConfig
-from mirage.core.github.stat import stat
-from mirage.types import FileType, PathSpec
+from mirage.core.github.lookup import lookup_retrying
+from mirage.observe.context import record, start_op
+from mirage.types import PathSpec, VFSName
 from mirage.utils.errors import enoent
+from mirage.utils.key_prefix import mount_prefix_of
 
 
 async def read_bytes(config: GitHubConfig,
@@ -46,10 +48,46 @@ async def read(
     path_spec: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
 ) -> bytes:
-    result = await stat(accessor, path_spec, index)
-    if result.type == FileType.DIRECTORY:
-        raise IsADirectoryError(path_spec.virtual)
-    if result.fingerprint is None:
-        raise enoent(path_spec.virtual)
-    return await read_bytes(accessor.config, accessor.owner, accessor.repo,
-                            result.fingerprint, accessor.pool)
+    """Read a file's blob and record the sha it was fetched by.
+
+    The sha comes from the mount's listing, filling it if a verdict cleared
+    it, never from a one-directory probe: a read reseeds the listing so the
+    stats after it answer from the index again. The blob endpoint is
+    content-addressed, so the recorded sha names exactly the bytes returned
+    however old the listing is. That is also the documented limit of
+    ``read: fresh`` here: a file read for the first time comes from the
+    listing, and the next read's probe corrects it.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        path_spec (PathSpec): the file to read.
+        index (IndexCacheStore): the mount's index.
+
+    Returns:
+        bytes: the blob's content.
+
+    Raises:
+        IsADirectoryError: the path is a directory.
+        FileNotFoundError: nothing exists at the path.
+    """
+    virtual = path_spec.virtual
+    prefix = mount_prefix_of(path_spec.virtual, path_spec.vfs_path)
+    rel = path_spec.mount_path.strip("/")
+    if not rel:
+        raise IsADirectoryError(virtual)
+    key = prefix + "/" + rel if prefix else "/" + rel
+    entry = (await lookup_retrying(accessor, index, prefix, key)).entry
+    if entry is None:
+        raise enoent(virtual)
+    if entry.resource_type == "folder":
+        raise IsADirectoryError(virtual)
+    timer = start_op()
+    data = await read_bytes(accessor.config, accessor.owner, accessor.repo,
+                            entry.id, accessor.pool)
+    record("read",
+           virtual,
+           VFSName.GITHUB,
+           len(data),
+           timer,
+           fingerprint=entry.id)
+    return data

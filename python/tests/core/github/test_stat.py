@@ -14,6 +14,7 @@
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,6 +29,10 @@ from mirage.core.github.stat import stat
 from mirage.core.github.tree import index_rows
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.types import ContentType, FileType, PathSpec
+
+# stat reads the refill count before an index lookup and nothing else of
+# the accessor while the index answers, so a bare stand-in carries it.
+ACCESSOR = SimpleNamespace(refills=0, truncated=False)
 
 
 def _index_from_tree(tree: dict[str, TreeEntry]) -> RAMIndexCacheStore:
@@ -78,7 +83,7 @@ def tree():
 async def test_stat_file(tree):
     index = _index_from_tree(tree)
     result = await stat(
-        None,
+        ACCESSOR,
         PathSpec(vfs_path="src/main.py",
                  virtual="/src/main.py",
                  directory="/src/main.py"), index)
@@ -92,7 +97,7 @@ async def test_stat_file(tree):
 async def test_stat_directory(tree):
     index = _index_from_tree(tree)
     result = await stat(
-        None, PathSpec(vfs_path="src", virtual="/src", directory="/src"),
+        ACCESSOR, PathSpec(vfs_path="src", virtual="/src", directory="/src"),
         index)
     assert result.name == "src"
     assert result.type == FileType.DIRECTORY
@@ -101,8 +106,9 @@ async def test_stat_directory(tree):
 @pytest.mark.asyncio
 async def test_stat_root(tree):
     index = _index_from_tree(tree)
-    result = await stat(None, PathSpec(vfs_path="", virtual="/",
-                                       directory="/"), index)
+    result = await stat(ACCESSOR,
+                        PathSpec(vfs_path="", virtual="/", directory="/"),
+                        index)
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
@@ -112,7 +118,7 @@ async def test_stat_not_found(tree):
     index = _index_from_tree(tree)
     with pytest.raises(FileNotFoundError):
         await stat(
-            None,
+            ACCESSOR,
             PathSpec(vfs_path="nonexistent.py",
                      virtual="/nonexistent.py",
                      directory="/nonexistent.py"), index)
@@ -122,7 +128,7 @@ async def test_stat_not_found(tree):
 async def test_stat_strip_slashes(tree):
     index = _index_from_tree(tree)
     result = await stat(
-        None,
+        ACCESSOR,
         PathSpec(vfs_path="README.md",
                  virtual="/README.md",
                  directory="/README.md"), index)
@@ -133,11 +139,11 @@ async def test_stat_strip_slashes(tree):
 @pytest.mark.asyncio
 async def test_stat_propagates_parent_refresh_failure():
     failure = RuntimeError("github unavailable")
-    with patch("mirage.core.github.stat._readdir",
+    with patch("mirage.core.github.lookup._readdir",
                new_callable=AsyncMock,
                side_effect=failure):
         with pytest.raises(RuntimeError, match="github unavailable"):
-            await stat(None, PathSpec.from_str_path("/missing.py"),
+            await stat(ACCESSOR, PathSpec.from_str_path("/missing.py"),
                        RAMIndexCacheStore())
 
 

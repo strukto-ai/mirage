@@ -12,7 +12,8 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "hf-hub"
+        "hf-hub",
+        "github"
       ],
       "read": "bounded",
       "ttl": 600,
@@ -51,7 +52,8 @@
         "onedrive",
         "sharepoint",
         "sharepoint-prefix",
-        "hf-hub"
+        "hf-hub",
+        "github"
       ],
       "read": "fresh",
       "scenario": [
@@ -79,7 +81,7 @@
         "stdout": "v1\nv2\n",
         "stderr": ""
       },
-      "note": "Narrowed to the backends that may declare `read: fresh` (the S3 family, OneDrive and SharePoint, and the Hugging Face Hub repos, whose hf-hub target changes the file by commit): the other three cache reads but stamp no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list."
+      "note": "Narrowed to the backends that may declare `read: fresh` (the S3 family, OneDrive and SharePoint, the Hugging Face Hub repos, whose hf-hub target changes the file by commit, and GitHub, whose target changes it by a contents PUT): the other three cache reads but stamp no comparable content token, so the mount-time verdict refuses the policy and the workspace never constructs. The bounded control keeps the full list. The github fake is one shared world, and needs no reset: every scenario starts by writing v1, create or update. Its data-v1 repository starts with an empty main, where GitHub would answer 409 for an empty repository. It serves only blobs in current trees, so a read by a superseded sha 404s rather than returning old bytes; the bounded row's second read must therefore be a cache hit."
     }
   ]
 }

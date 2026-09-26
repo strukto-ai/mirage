@@ -21,6 +21,13 @@
       "name": "repo-cli",
       "defaultBranch": "main",
       "sourceDir": "github/repo-v1"
+    },
+    {
+      "fullName": "integ/data-v1",
+      "owner": "integ",
+      "name": "data-v1",
+      "defaultBranch": "main",
+      "sourceDir": ""
     }
   ],
   "settings": [

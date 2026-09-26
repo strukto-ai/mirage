@@ -29,6 +29,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 from types import ModuleType
+from urllib.parse import quote
 
 import aiohttp
 import asyncpg
@@ -41,6 +42,7 @@ from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient, models
 
 from mirage import MountMode, Workspace
+from mirage.accessor.github import GitHubAccessor
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
@@ -49,6 +51,7 @@ from mirage.commands.cli.types import CLISpec
 from mirage.core.databricks_volume.path import configured_root
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.email.config import EmailConfig
+from mirage.core.github.client import GitHubApiError, github_request
 from mirage.core.hf_hub.commit import Addition, commit
 from mirage.runtime.types import ScriptSource
 from mirage.shell.console import JobConsole
@@ -2811,6 +2814,58 @@ async def mutate_commit(shadow_ws: Workspace, path: str,
                  additions=[Addition(accessor.repo_path(rel), content)])
 
 
+async def mutate_github(shadow_ws: Workspace, path: str,
+                        content: bytes) -> None:
+    """Change a repository file the way GitHub changes one: a contents PUT.
+
+    A github mount is read-only, so the out-of-band change a consistency
+    case needs goes through the contents API on the shadow mount's config,
+    against the same fake the read side is looking at. It creates the file
+    when absent and replaces it otherwise, so a scenario runs the same on a
+    fresh fake and on one an earlier run left behind.
+
+    Args:
+        shadow_ws (Workspace): the workspace the case does not read from.
+        path (str): the virtual path to change.
+        content (bytes): the new content.
+    """
+    mount = shadow_ws.mount(path)
+    accessor = getattr(mount.vfs, "accessor", None)
+    if not isinstance(accessor, GitHubAccessor):
+        raise ValueError(f"github cannot change {path}")
+    rel = path[len(mount.prefix.rstrip("/")):].lstrip("/")
+    endpoint = (f"/repos/{accessor.owner}/{accessor.repo}/contents/"
+                f"{quote(rel)}")
+    body: dict[str, str] = {
+        "message": f"integ: change {rel}",
+        "content": base64.b64encode(content).decode(),
+    }
+    config = accessor.config
+    try:
+        current = await github_request(config.token,
+                                       "GET",
+                                       endpoint,
+                                       base_url=config.base_url)
+    except GitHubApiError as exc:
+        # Absent: create it. GitHub refuses a sha for a new file.
+        if exc.status != 404:
+            raise
+        logging.getLogger(__name__).debug("creating %s: %s", rel, exc)
+    else:
+        body["sha"] = str(current["sha"])
+    await github_request(config.token,
+                         "PUT",
+                         endpoint,
+                         body,
+                         base_url=config.base_url)
+
+
+MUTATORS: dict[str, Callable[[Workspace, str, bytes], Awaitable[None]]] = {
+    "hf-hub": mutate_commit,
+    "github": mutate_github,
+}
+
+
 async def teardown_target(
     workspaces: list[Workspace],
     cleanups: list[Callable[[], Awaitable[None]]],
@@ -2934,8 +2989,7 @@ async def open_consistency(
     # would silently run under a different one.
     read_ws.env = {**read_ws.env, **target.get("env", {})}
     shadow_ws.env = {**shadow_ws.env, **target.get("env", {})}
-    mutate = (mutate_commit
-              if target.get("service") == "hf-hub" else mutate_write)
+    mutate = MUTATORS.get(target.get("service") or "", mutate_write)
     return (
         read_ws,
         functools.partial(mutate, shadow_ws),

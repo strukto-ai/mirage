@@ -160,8 +160,8 @@ export class Reconciler {
   // short-circuit this function, dropping every cached copy on a resource
   // that declares it false. That is a proxy for "the stat carries no content
   // token", and it is the wrong one: box and dropbox stamp a fingerprint
-  // without setting the flag (as do ssh and github on the python side, whose
-  // rosters differ here), so the shortcut threw away entries this probe can
+  // without setting the flag (as does ssh on the python side, whose roster
+  // differs here), so the shortcut threw away entries this probe can
   // verify. The backends that really cannot be checked are answered by
   // probe's own UNKNOWN arm, one stat later.
   async mayServeCached(mount: MountEntry, path: string): Promise<boolean> {

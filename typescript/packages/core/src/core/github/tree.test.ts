@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { fetchDirTree, fetchTree, type GitHubTransport } from './client.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fetchDirTree, fetchTree, GitHubApiError, type GitHubTransport } from './client.ts'
 import { GitHubAccessor } from '../../accessor/github.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { ensureLiveIndex, populateIndex } from './tree.ts'
+import { ensureLiveIndex, pointRow, populateIndex, refillIndex } from './tree.ts'
+import { FakeGitHub, blobSha, servedAccessor } from './_test_util.ts'
 
 const ITEMS = [
   { path: 'extern', mode: '160000', type: 'commit', sha: 'ccc' },
@@ -144,5 +145,139 @@ describe('populateIndex', () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     await populateIndex(index, {}, '/gh')
     expect((await index.listDir('/gh')).entries).toEqual([])
+  })
+})
+
+describe('the refill count', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('counts each refill, and never one that failed or had no index', async () => {
+    const gh = new FakeGitHub({ 'a.txt': 'a' })
+    vi.stubGlobal('fetch', gh.fetch)
+    const accessor = servedAccessor()
+    expect(accessor.refills).toBe(0)
+    await refillIndex(accessor, new RAMIndexCacheStore(), '/gh')
+    await refillIndex(accessor, new RAMIndexCacheStore(), '/gh')
+    expect(accessor.refills).toBe(2)
+    // No index means nothing was listed into one.
+    await refillIndex(accessor, undefined, '/gh')
+    expect(accessor.refills).toBe(2)
+    gh.fail.set('recursive', [401, 'Bad credentials'])
+    await expect(refillIndex(accessor, new RAMIndexCacheStore(), '/gh')).rejects.toBeInstanceOf(
+      GitHubApiError,
+    )
+    expect(accessor.refills).toBe(2)
+  })
+})
+
+// The same rows as python's test_tree.py: a parent Octokit would rewrite
+// unencoded (two or more lowercase letters, measured on
+// @octokit/endpoint@11.0.4: `main:src` is sent as `main`), its uppercase
+// control, a nested parent a raw slash would split, characters that truncate
+// or template a URL, and a ref with a slash in it.
+const ENCODED: [string, string][] = [
+  ['main', 'src'],
+  ['main', 'Src'],
+  ['main', 'docs/sub'],
+  ['main', 'a b'],
+  ['main', 'a#b'],
+  ['main', 'a?b'],
+  ['main', 'a%b'],
+  ['main', 'ü'],
+  ['main', 'x:y'],
+  ['main', 'a{b}'],
+  ['release/1.80', 'docs/sub'],
+]
+
+describe('the point request', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  for (const [ref, parent] of ENCODED) {
+    it(`sends ${ref}:${parent} as one segment`, async () => {
+      const gh = new FakeGitHub({ [`${parent}/f.txt`]: 'payload', 'src/decoy.txt': 'decoy' })
+      gh.ref = ref
+      const seen: string[] = []
+      vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push(new Request(input, init).url)
+        return gh.fetch(input, init)
+      })
+      const found = await pointRow(servedAccessor(ref), `${parent}/f.txt`)
+      expect(found?.entry?.sha).toBe(await blobSha('payload'))
+      expect(seen).toHaveLength(1)
+      const segment = (seen[0] ?? '').split('/git/trees/')[1] ?? ''
+      expect(segment).not.toContain('/')
+      expect(decodeURIComponent(segment)).toBe(`${ref}:${parent}`)
+      if (parent === 'src')
+        expect(seen[0]).toBe('http://github.test/repos/o/r/git/trees/main%3Asrc')
+    })
+  }
+
+  it('asks a root child through the ref itself', async () => {
+    const gh = new FakeGitHub({ 'a.txt': 'a' })
+    vi.stubGlobal('fetch', gh.fetch)
+    expect((await pointRow(servedAccessor(), 'a.txt'))?.entry).not.toBeNull()
+    expect(gh.log).toEqual([['dir', 'main']])
+  })
+
+  it('answers each kind of listing', async () => {
+    const gh = new FakeGitHub({ 'docs/a.txt': 'alpha', 'docs/b.txt': 'bravo' })
+    vi.stubGlobal('fetch', gh.fetch)
+    const accessor = servedAccessor()
+    const found = await pointRow(accessor, 'docs/a.txt')
+    expect([found?.entry?.sha, found?.truncated]).toEqual([await blobSha('alpha'), false])
+    expect(await pointRow(accessor, 'docs/nope.txt')).toEqual({ entry: null, truncated: false })
+    gh.truncatedDirs.set('docs', 1)
+    expect(await pointRow(accessor, 'docs/b.txt')).toEqual({ entry: null, truncated: true })
+    gh.truncatedDirs.clear()
+    // A missing directory, a deleted ref and a path through a file all
+    // defer to the tree rather than answering absent.
+    expect(await pointRow(accessor, 'gone/a.txt')).toBeNull()
+    expect(await pointRow(accessor, 'docs/a.txt/x')).toBeNull()
+    for (const status of [401, 403]) {
+      gh.fail.set('dir', [status, 'refused'])
+      const err = await pointRow(accessor, 'docs/a.txt').catch((e: unknown) => e)
+      expect((err as GitHubApiError).status).toBe(status)
+    }
+    gh.fail.set('dir', [404, 'Not Found'])
+    expect(await pointRow(accessor, 'docs/a.txt')).toBeNull()
+  })
+
+  // Octokit's retry plugin retries these statuses with a multi-second
+  // backoff, so they are raised by a transport rather than served.
+  for (const status of [409, 429, 500]) {
+    it(`raises ${String(status)} rather than deferring`, async () => {
+      const transport = {
+        get: () => Promise.reject(new GitHubApiError('refused', status)),
+        request: () => Promise.reject(new Error('unused')),
+      } as unknown as GitHubTransport
+      const accessor = new GitHubAccessor({
+        transport,
+        owner: 'o',
+        repo: 'r',
+        ref: 'main',
+        defaultBranch: 'main',
+      })
+      const err = await pointRow(accessor, 'docs/a.txt').catch((e: unknown) => e)
+      expect((err as GitHubApiError).status).toBe(status)
+    })
+  }
+
+  it('refuses an answer that carries no tree', async () => {
+    const transport = {
+      get: () => Promise.resolve({ message: 'something else' }),
+      request: () => Promise.reject(new Error('unused')),
+    } as unknown as GitHubTransport
+    const accessor = new GitHubAccessor({
+      transport,
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      defaultBranch: 'main',
+    })
+    await expect(pointRow(accessor, 'docs/a.txt')).rejects.toBeInstanceOf(GitHubApiError)
   })
 })

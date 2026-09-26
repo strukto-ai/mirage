@@ -213,16 +213,47 @@ function dropSubmodules(tree: GitHubTreeItem[]): GitHubTreeItem[] {
   return tree.filter((item) => item.type !== 'commit')
 }
 
+/**
+ * Fetch one directory's tree (non-recursive), and whether GitHub cut it.
+ *
+ * Args:
+ *   treeSha (string): a tree sha, or a `{ref}:{dir}` expression the caller
+ *     has already percent-encoded as one path segment.
+ *
+ * Returns:
+ *   { tree, truncated }: the rows, submodule gitlinks excluded, and
+ *   GitHub's `truncated` flag.
+ *
+ * Throws:
+ *   GitHubApiError: the response carries no tree, which must not read as
+ *   an empty directory.
+ */
+export async function fetchDirTreePage(
+  transport: GitHubTransport,
+  owner: string,
+  repo: string,
+  treeSha: string,
+): Promise<{ tree: GitHubTreeItem[]; truncated: boolean }> {
+  const data = (await transport.get(`/repos/${owner}/${repo}/git/trees/${treeSha}`)) as {
+    tree?: GitHubTreeItem[]
+    truncated?: boolean
+  }
+  if (data.tree === undefined) {
+    throw new GitHubApiError(
+      `GitHub tree response for ${owner}/${repo} ${treeSha} carries no tree`,
+      0,
+    )
+  }
+  return { tree: dropSubmodules(data.tree), truncated: data.truncated === true }
+}
+
 export async function fetchDirTree(
   transport: GitHubTransport,
   owner: string,
   repo: string,
   treeSha: string,
 ): Promise<GitHubTreeItem[]> {
-  const data = (await transport.get(`/repos/${owner}/${repo}/git/trees/${treeSha}`)) as {
-    tree?: GitHubTreeItem[]
-  }
-  return dropSubmodules(data.tree ?? [])
+  return (await fetchDirTreePage(transport, owner, repo, treeSha)).tree
 }
 
 export async function fetchBlob(

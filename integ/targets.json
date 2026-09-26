@@ -1599,6 +1599,13 @@
           "backend": "github",
           "repo": "integ/repo-trunc",
           "mode": "read"
+        },
+        {
+          "path": "/data",
+          "vfs": "github",
+          "backend": "github",
+          "repo": "integ/data-v1",
+          "mode": "read"
         }
       ]
     },

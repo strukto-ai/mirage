@@ -13,7 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { GitHubApiError, type GitHubTransport, HttpGitHubTransport, searchCode } from './client.ts'
+import {
+  fetchDirTree,
+  fetchDirTreePage,
+  GitHubApiError,
+  type GitHubTransport,
+  HttpGitHubTransport,
+  searchCode,
+} from './client.ts'
 
 interface Seen {
   url: string
@@ -294,5 +301,25 @@ describe('searchCode', () => {
     )
     expect(out.results.map((r) => r.path)).toEqual(['src/a.py'])
     expect(out.truncated).toBe(false)
+  })
+})
+
+describe('fetchDirTreePage', () => {
+  it('carries truncation and drops gitlinks', async () => {
+    const transport = {
+      get: () =>
+        Promise.resolve({
+          truncated: true,
+          tree: [
+            { path: 'a.py', type: 'blob', sha: 'a', size: 1 },
+            { path: 'vendor', type: 'commit', sha: 'c' },
+          ],
+        }),
+    } as unknown as GitHubTransport
+    const page = await fetchDirTreePage(transport, 'o', 'r', 'sha')
+    expect(page.truncated).toBe(true)
+    // A gitlink has no blob and no size; the page drops it like the tree.
+    expect(page.tree.map((item) => item.path)).toEqual(['a.py'])
+    expect(await fetchDirTree(transport, 'o', 'r', 'sha')).toEqual(page.tree)
   })
 })

@@ -12,12 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import SimpleNamespace
+
 import pytest
 
 from mirage.cache.index import IndexEntry
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.github.stat import stat
 from mirage.types import PathSpec
+
+# stat reads the refill count before an index lookup and nothing else of
+# the accessor while the index answers, so a bare stand-in carries it.
+ACCESSOR = SimpleNamespace(refills=0, truncated=False)
 
 
 @pytest.mark.asyncio
@@ -35,7 +41,7 @@ async def test_github_stat_returns_fingerprint_from_blob_sha():
     await index.set_dir("/src", [("main.py", entry)])
 
     result = await stat(
-        None,
+        ACCESSOR,
         PathSpec(vfs_path="src/main.py",
                  virtual="/src/main.py",
                  directory="/src/main.py"),
@@ -57,7 +63,7 @@ async def test_github_stat_directory_has_no_fingerprint():
     await index.set_dir("/", [("src", entry)])
 
     result = await stat(
-        None,
+        ACCESSOR,
         PathSpec(vfs_path="src", virtual="/src", directory="/src"),
         index,
     )
