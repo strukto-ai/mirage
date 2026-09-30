@@ -37,6 +37,7 @@ import {
   renderPending,
 } from './policies.ts'
 import { RulePolicy } from './rule.ts'
+import { RESULT_BLIND, type ResultBlind } from './mixin.ts'
 import type {
   Action,
   CommandContext,
@@ -825,4 +826,20 @@ it('removes by identity, refreshes hooks and preserves an admission in progress'
   expect(policies.wants('preCommand')).toBe(false)
   expect(policies.remove(first)).toBe(false)
   expect(await policies.preCommand(ctx('weird'))).toBeNull()
+})
+
+describe('Policies.readsResults', () => {
+  class BlindPost implements Policy, ResultBlind {
+    readonly [RESULT_BLIND] = true as const
+    postOps(): null {
+      return null
+    }
+  }
+
+  it('is true only while a result-reading postOps is present', () => {
+    const policies = new Policies([new BlindPost()])
+    expect(policies.readsResults()).toBe(false)
+    policies.add({ postOps: () => null })
+    expect(policies.readsResults()).toBe(true)
+  })
 })

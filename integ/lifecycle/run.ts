@@ -27,6 +27,8 @@ import {
 import { MountMode } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import type { RegisteredOp } from '@struktoai/mirage-core/ops/registry'
+import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import type {
   Workspace,
   WorkspaceOptions,
@@ -57,8 +59,15 @@ interface Case {
 }
 
 type Step = (
-  | ({ op: 'mount'; path: string; mode?: MountMode } & ResourceConfig)
-  | { op: 'unmount' | 'read' | 'readdir' | 'stat' | 'cached'; path: string }
+  | ({
+      op: 'mount'
+      path: string
+      mode?: MountMode
+      command_limits?: Record<string, unknown>
+    } & ResourceConfig)
+  | { op: 'unmount'; path: string; within?: number }
+  | { op: 'read_stream'; path: string; take?: number }
+  | { op: 'read' | 'readdir' | 'stat' | 'cached'; path: string }
   | { op: 'write'; path: string; data: string }
   | { op: 'exec'; command: string; session?: string }
   | { op: 'spawn'; argv: string[]; session?: string }
@@ -121,10 +130,49 @@ class CachedRAMVFS extends RAMVFS {
   override readonly cachesReads = true
 }
 
+// Split a streamed read into one chunk per line.
+function byLine(stream: NonNullable<RegisteredOp['stream']>): RegisteredOp['stream'] {
+  return (...call) =>
+    (async function* lines(): AsyncGenerator<Uint8Array> {
+      for await (const chunk of stream(...call) as AsyncIterable<Uint8Array>) {
+        let start = 0
+        while (start < chunk.byteLength) {
+          const newline = chunk.indexOf(0x0a, start)
+          const end = newline < 0 ? chunk.byteLength : newline + 1
+          yield chunk.subarray(start, end)
+          start = end
+        }
+      }
+    })()
+}
+
+// A RAM fixture whose streamed read yields one chunk per line, so chunk
+// boundaries are the same on every host (a disk mount's read size is not).
+class ChunkedRAMVFS extends RAMVFS {
+  override ops(): readonly RegisteredOp[] {
+    return super
+      .ops()
+      .map((ro) =>
+        ro.name === 'read' && ro.stream !== undefined ? { ...ro, stream: byLine(ro.stream) } : ro,
+      )
+  }
+}
+
 // Register a fixture through the same factory extension point as an embedder.
 for (const register of [registerNodeVfs, registerBrowserVfs]) {
   register('cached-ram', (config) => {
     const vfs = new CachedRAMVFS()
+    const files = (config.files ?? {}) as Record<string, string>
+    vfs.loadState({
+      type: 'ram',
+      files: Object.fromEntries(
+        Object.entries(files).map(([path, data]) => [path, ENC.encode(data)]),
+      ),
+    })
+    return Promise.resolve(vfs)
+  })
+  register('chunked-ram', (config) => {
+    const vfs = new ChunkedRAMVFS()
     const files = (config.files ?? {}) as Record<string, string>
     vfs.loadState({
       type: 'ram',
@@ -160,16 +208,33 @@ async function action(
     }
     case 'mount': {
       const vfs = await host.build(step.vfs, step.config ?? {})
+      let entry
       try {
-        return ws.addMount(step.path, vfs, step.mode ?? MountMode.READ).prefix
+        entry = ws.addMount(step.path, vfs, step.mode ?? MountMode.READ)
       } catch (err) {
         await vfs.close()
         throw err
       }
+      for (const [name, limit] of Object.entries(parseCommandLimits(step.command_limits ?? {}))) {
+        entry.commandLimits.set(name, limit)
+      }
+      return entry.prefix
     }
-    case 'unmount':
-      await ws.unmount(step.path)
+    case 'unmount': {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const deadline = new Promise<never>((_, reject) => {
+        if (step.within === undefined) return
+        timer = setTimeout(() => {
+          reject(new Error(`unmount ${step.path} did not finish within ${String(step.within)}s`))
+        }, step.within * 1000)
+      })
+      try {
+        await Promise.race([ws.unmount(step.path), deadline])
+      } finally {
+        clearTimeout(timer)
+      }
       break
+    }
     case 'set_mode':
       ws.setMountMode(step.path, step.mode)
       break
@@ -230,6 +295,24 @@ async function action(
       break
     case 'read':
       return DEC.decode(await ws.vfs.readFile(step.path))
+    case 'read_stream': {
+      // At most `take` chunks of a streamed read, then it is closed.
+      const stream = (await ws.dispatch('read', step.path, [], { stream: true })) as
+        | Uint8Array
+        | AsyncIterableIterator<Uint8Array>
+      if (stream instanceof Uint8Array) return step.take === 0 ? '' : DEC.decode(stream)
+      const pulled: Uint8Array[] = []
+      try {
+        while (step.take === undefined || pulled.length < step.take) {
+          const next = await stream.next()
+          if (next.done === true) break
+          pulled.push(next.value)
+        }
+      } finally {
+        await stream.return?.()
+      }
+      return pulled.map((chunk) => DEC.decode(chunk)).join('')
+    }
     case 'readdir':
       return (await ws.vfs.readdir(step.path)).sort()
     case 'stat': {

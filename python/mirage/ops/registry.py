@@ -22,11 +22,26 @@ from mirage.types import PathSpec
 
 @dataclass
 class RegisteredOp:
+    """One op a mount answers, by name, VFS and (optionally) filetype.
+
+    Args:
+        name (str): the op name (``read``, ``stat``, ...).
+        vfs (str): the VFS it serves.
+        filetype (str | None): the extension it is scoped to, None for
+            every path on the VFS.
+        fn (Callable[..., Any]): the op itself.
+        write (bool): whether it mutates the mount.
+        stream (Callable[..., Any] | None): the op's streaming form, for
+            a whole-file read asked to stream; None when the op only
+            answers whole.
+    """
+
     name: str
     vfs: str
     filetype: str | None
     fn: Callable[..., Any]
     write: bool = False
+    stream: Callable[..., Any] | None = None
 
 
 def op(

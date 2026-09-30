@@ -29,6 +29,7 @@ from mirage.context import (get_current_session, hidden_paths_intersect,
                             hidden_refusal, path_allowed)
 from mirage.errors import POSIX, FsCondition
 from mirage.io import IOResult, OpReport
+from mirage.io.types import materialize
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpRecord
 from mirage.ops.config import NO_FOLLOW_OPS, STAMP_WRITE_OPS
@@ -38,7 +39,7 @@ from mirage.policy import post_ops_gate, pre_ops_gate
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.types import (DEFAULT_READ_TTL, CacheFacts, FileStat, FileType,
                           PathSpec, VFSName)
-from mirage.utils.errors import (MISS_ERRORS, eloop, enoent, no_mount,
+from mirage.utils.errors import (MISS_ERRORS, eisdir, eloop, enoent, no_mount,
                                  walk_refusal)
 from mirage.utils.hidden import move_reveals
 from mirage.utils.key_prefix import mount_key
@@ -276,6 +277,12 @@ class Dispatcher:
                        *,
                        report: OpReport | None = None,
                        **kwargs: Any) -> tuple[Any, IOResult]:
+        # `stream` asks for a read as a ByteSource the backend fills as
+        # the caller pulls: a way of delivering the one `read` op, so
+        # every gate, cap, renderer and record keyed on "read" holds.
+        streamed = kwargs.pop("stream", False) is True
+        if streamed and op != "read":
+            raise ValueError(f"only read streams, not {op}")
         await self._namespace.ensure_loaded()
         # Pending fingerprint checks from a strict snapshot restore run
         # before the op can touch a mount, whichever surface called:
@@ -454,9 +461,17 @@ class Dispatcher:
         # setattr fork narrows the first assignment to its dict, so the
         # local keeps the op contract's type explicitly.
         result: Any
+        # Only a whole file streams; a window is one ranged read.
+        streams = streamed and _window(kwargs) == (0, None)
         try:
             if op == "setattr":
                 result = await self._apply_setattr(mount, path, kwargs)
+            elif streams:
+                await self._readable(mount, path)
+                result = await mount.execute_op(op,
+                                                path.virtual,
+                                                stream=True,
+                                                **kwargs)
             else:
                 result = await mount.execute_op(op, path.virtual, **kwargs)
         except (FileNotFoundError, NotADirectoryError):
@@ -540,6 +555,10 @@ class Dispatcher:
                                              kwargs["dst"].virtual)
                 await self._namespace.rename_under(path.virtual,
                                                    kwargs["dst"].virtual)
+        if streams and policies.reads_results():
+            # A policy that may read the result is handed the bytes a
+            # whole read hands it, never a stream it cannot inspect.
+            result = await materialize(result)
         bound = await post_ops_gate(policies, op, path, write, mount.prefix,
                                     result)
         if bound is not None:
@@ -548,6 +567,23 @@ class Dispatcher:
             # report above already carries the moved count.
             result = await apply_op_limit(result, bound)
         return result, IOResult()
+
+    async def _readable(self, mount: MountEntry, path: PathSpec) -> None:
+        """Refuse a streamed read with nothing to read before it opens.
+
+        A backend stream does its work on the first pull, after the door
+        has returned, so a missing path or a directory would fail only
+        in the caller's hands. The stat first, as the command tier's
+        ``dir_aware_stream`` does, keeps both at the call: a miss raises
+        into the door's own miss handling, a directory is EISDIR.
+
+        Args:
+            mount (MountEntry): the mount serving the read.
+            path (PathSpec): the followed path.
+        """
+        row = await mount.execute_op("stat", path.virtual)
+        if isinstance(row, FileStat) and row.type is FileType.DIRECTORY:
+            raise eisdir(path)
 
     async def _moved_source_is_dir(self, path: PathSpec) -> bool:
         """Whether a rename's source stats as a directory.

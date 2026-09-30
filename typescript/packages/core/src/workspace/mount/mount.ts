@@ -34,7 +34,7 @@ import type { LinkView } from '../../ops/types.ts'
 
 import { getExtension } from '../../commands/resolve.ts'
 import { resolveLimit } from '../../policy/index.ts'
-import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { maybeWithTimeout, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { CommandTimeoutError, UsageError } from '../../commands/errors.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import { materialize } from '../../io/types.ts'
@@ -824,7 +824,7 @@ export class MountEntry {
                 opName,
               )
               if (result !== null && result !== undefined) {
-                return wrapOpStream(result, this.mountId, this.activity)
+                return wrapOpStream(result, this.mountId, this.activity, opOverride, opName)
               }
             }
             return null
@@ -856,16 +856,30 @@ async function* commandOutput(
   }
 }
 
-/** Preserve a streaming operation's recording owner after its dispatch frame exits. */
-export function wrapOpStream(result: unknown, mountId: string, activity: VFSActivity): unknown {
-  if (result instanceof CachableAsyncIterator) {
-    result.wrapSource((source) => withMountContext(source, mountId))
-    return activity.hold(result)
+/**
+ * Frame an op result that streams the way a command's output is.
+ *
+ * An op that returns an async iterator has not run its body yet: the
+ * backend opens the file on the first pull, after the frame that called
+ * it is gone. `wrapMountStreams` gives each pull its frame back (the
+ * session, the recorder's mount, the revision pins a snapshot replay
+ * reads) and holds the mount until the stream ends or closes; the op's
+ * own timeout, which bounded only the call, bounds the stream too. Call
+ * it inside the op's `runWithRevisions`, so the captured frame is the
+ * op's. Mirrors Python's `_wrap_op_stream`.
+ */
+export function wrapOpStream(
+  result: unknown,
+  mountId: string,
+  activity: VFSActivity,
+  limit: Limit | null = null,
+  opName = '',
+): unknown {
+  if (result === null || typeof result !== 'object' || !(Symbol.asyncIterator in result)) {
+    return result
   }
-  if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
-    return activity.hold(withMountContext(result as AsyncIterable<Uint8Array>, mountId))
-  }
-  return result
+  const timed = maybeWithTimeout(result as AsyncIterable<Uint8Array>, limit, opName)
+  return wrapMountStreams([timed, new IOResult()], mountId, activity)[0]
 }
 
 // Push `mountId` back during lazy consumption of anything the command

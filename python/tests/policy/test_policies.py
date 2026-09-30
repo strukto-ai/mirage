@@ -22,7 +22,7 @@ from mirage.policy import (Action, Ask, CommandContext, CommandRule, Deny,
                            Policy, PolicyError, describe_refusal,
                            post_execute_gate, post_ops_gate, pre_ops_gate,
                            refusal_of, render_deny, render_pending, says_why)
-from mirage.policy.mixin import SessionScopedMixin
+from mirage.policy.mixin import ResultBlindMixin, SessionScopedMixin
 from mirage.policy.rule import RulePolicy
 from mirage.policy.types import SessionContext
 from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
@@ -475,3 +475,22 @@ async def test_remove_by_identity_refreshes_hooks_and_keeps_admission_order():
     assert not policies.wants("pre_command")
     assert not policies.remove(first)
     assert await policies.pre_command(_ctx("weird")) is None
+
+
+class _ReadsResults(Policy):
+
+    async def post_ops(self, ctx) -> Action | None:
+        return None
+
+
+class _BlindPost(Policy, ResultBlindMixin):
+
+    async def post_ops(self, ctx) -> Action | None:
+        return None
+
+
+def test_reads_results_only_with_a_result_reading_post_ops():
+    policies = Policies([_BlindPost()])
+    assert not policies.reads_results()
+    policies.add(_ReadsResults())
+    assert policies.reads_results()

@@ -368,3 +368,16 @@ it('emulated truncate refuses no-create before reading or writing', async () => 
   expect(readBytes).not.toHaveBeenCalled()
   expect(write).not.toHaveBeenCalled()
 })
+
+describe('the read op stream form', () => {
+  it('carries the table stream form, and none without one', () => {
+    const stream = (async function* (): AsyncGenerator<Uint8Array> {
+      yield await Promise.resolve(new Uint8Array([1]))
+    })()
+    const readStream = vi.fn(() => stream)
+    const read = readOp(makeTable({ readStream }))
+    expect(read.stream?.(ACCESSOR, PATH, [], {})).toBe(stream)
+    expect(readStream).toHaveBeenCalledWith(ACCESSOR, PATH, undefined)
+    expect(readOp(makeTable()).stream).toBeUndefined()
+  })
+})

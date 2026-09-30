@@ -17,7 +17,7 @@ import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
 import { PolicyDenied, PolicyError } from './errors.ts'
-import { isSessionScoped } from './mixin.ts'
+import { isResultBlind, isSessionScoped } from './mixin.ts'
 import {
   VALIDITY,
   type Ask,
@@ -223,6 +223,7 @@ export async function preSessionGate(
 export class Policies {
   private readonly policies: Policy[]
   private wanted: ReadonlySet<Hook> = new Set()
+  private resultReaders = false
 
   constructor(policies?: readonly Policy[]) {
     this.policies = [...(policies ?? [])]
@@ -235,6 +236,17 @@ export class Policies {
    */
   wants(hook: Hook): boolean {
     return this.wanted.has(hook)
+  }
+
+  /**
+   * True when some policy's `postOps` may read the op's result. The door
+   * streams a read only past policies that answer from the op alone
+   * (`ResultBlind`); any other `postOps` gets the whole bytes, so a
+   * redaction or size check keeps seeing what it has always seen.
+   * Mirrors Python's `Policies.reads_results`.
+   */
+  readsResults(): boolean {
+    return this.resultReaders
   }
 
   /**
@@ -261,6 +273,7 @@ export class Policies {
       if (this.policies.some((p) => p[hook] !== undefined)) wanted.add(hook)
     }
     this.wanted = wanted
+    this.resultReaders = this.policies.some((p) => p.postOps !== undefined && !isResultBlind(p))
   }
 
   /**

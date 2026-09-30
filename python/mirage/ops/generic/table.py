@@ -26,8 +26,7 @@ class OpsTable(Protocol):
     carries every core function the VFS/FUSE op wrappers forward to, so
     the same table feeds both ``make_generic_commands`` and
     ``make_generic_ops``. The factory reads only these fields;
-    command-only fields (``read_stream``, ``is_mounted``, ``find``, ...)
-    are ignored.
+    command-only fields (``is_mounted``, ``find``, ...) are ignored.
     """
 
     @property
@@ -48,6 +47,10 @@ class OpsTable(Protocol):
 
     @property
     def read_range(self) -> OpFn | None:
+        ...
+
+    @property
+    def read_stream(self) -> OpFn | None:
         ...
 
     @property

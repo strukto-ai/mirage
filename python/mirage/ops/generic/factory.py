@@ -14,6 +14,7 @@
 
 import errno
 import os
+from collections.abc import AsyncIterator
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
@@ -105,6 +106,28 @@ def _make_glob(table: OpsTable) -> OpFn:
         return await resolve(accessor, [path], index)
 
     return glob
+
+
+def _make_read_stream(fn: OpFn) -> OpFn:
+    """Build the streaming form of the generic ``read`` op.
+
+    A plain function, so the mount hands its async iterator straight
+    back instead of awaiting it: the backend opens the file on the
+    first pull, and only a whole-file read streams (a window is the
+    ranged ``read`` above).
+
+    Args:
+        fn (OpFn): the table's ``read_stream``.
+    """
+
+    def read_stream(accessor: Accessor,
+                    path: PathSpec,
+                    *,
+                    index: IndexCacheStore | None = None,
+                    **kwargs) -> AsyncIterator[bytes]:
+        return fn(accessor, path, index)
+
+    return read_stream
 
 
 def _make_data_write(fn: OpFn) -> OpFn:
@@ -237,8 +260,14 @@ def _make_set_attrs(fn: OpFn) -> OpFn:
     return set_attrs
 
 
-def _emit(ops: list[RegisteredOp], vfs_names: list[str], name: str, fn: OpFn,
-          write: bool, filetype: str | None, overrides: set[str]) -> None:
+def _emit(ops: list[RegisteredOp],
+          vfs_names: list[str],
+          name: str,
+          fn: OpFn,
+          write: bool,
+          filetype: str | None,
+          overrides: set[str],
+          stream: OpFn | None = None) -> None:
     if name in overrides:
         return
     for res in vfs_names:
@@ -247,7 +276,8 @@ def _emit(ops: list[RegisteredOp], vfs_names: list[str], name: str, fn: OpFn,
                          vfs=res,
                          filetype=filetype,
                          fn=fn,
-                         write=write))
+                         write=write,
+                         stream=stream))
 
 
 def make_generic_ops(
@@ -299,7 +329,10 @@ def make_generic_ops(
     skip = overrides or set()
     ops: list[RegisteredOp] = []
 
-    _emit(ops, vfs_names, "read", _make_ranged_read(table), False, None, skip)
+    stream = (_make_read_stream(table.read_stream)
+              if table.read_stream is not None else None)
+    _emit(ops, vfs_names, "read", _make_ranged_read(table), False, None, skip,
+          stream)
     _emit(ops, vfs_names, "readdir", _make_read(table.readdir), False, None,
           skip)
     _emit(ops, vfs_names, "stat", _make_read(table.stat), False, None, skip)

@@ -32,6 +32,12 @@ export type OpFn = (
 ) => unknown
 
 /* eslint-disable @typescript-eslint/no-invalid-void-type */
+/**
+ * One op a mount answers, by name, VFS and (optionally) filetype.
+ * `stream` is the op's streaming form, for a whole-file read asked to
+ * stream; an op without one answers whole. Mirrors Python's
+ * `RegisteredOp`.
+ */
 export interface RegisteredOp {
   name: string
   vfs: string | null
@@ -44,6 +50,13 @@ export interface RegisteredOp {
     kwargs: OpKwargs,
   ): unknown
   write: boolean
+  stream?(
+    this: void,
+    accessor: Accessor,
+    path: PathSpec,
+    args: readonly unknown[],
+    kwargs: OpKwargs,
+  ): unknown
 }
 /* eslint-enable @typescript-eslint/no-invalid-void-type */
 
@@ -186,6 +199,13 @@ export class OpsRegistry {
     throw err
   }
 
+  /**
+   * Run the op at the first level that answers: filetype-specific, then
+   * by VFS, then global. `stream` asks each level for its streaming form
+   * where it has one; a level without one answers the way it always
+   * does, so a filetype renderer still wins over the generic read.
+   * Mirrors Python's `MountEntry.execute_op`.
+   */
   async call(
     name: string,
     vfsKind: string | BaseVFS,
@@ -193,19 +213,19 @@ export class OpsRegistry {
     path: PathSpec,
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
+    stream = false,
   ): Promise<unknown> {
     const filetype = kwargs.filetype ?? null
     const owner = typeof vfsKind === 'string' ? null : vfsKind
     const kind = typeof vfsKind === 'string' ? vfsKind : vfsKind.name
     const levels: OpFn[] = []
-    if (filetype !== null) {
-      const specific = this.entry(keyFor(name, filetype, kind), owner)
-      if (specific) levels.push(specific.fn)
+    const add = (ro: RegisteredOp | null): void => {
+      if (ro === null) return
+      levels.push(stream && ro.stream !== undefined ? ro.stream : ro.fn)
     }
-    const byVfs = this.entry(keyFor(name, null, kind), owner)
-    if (byVfs) levels.push(byVfs.fn)
-    const global = this.entry(keyFor(name, null, null), owner)
-    if (global) levels.push(global.fn)
+    if (filetype !== null) add(this.entry(keyFor(name, filetype, kind), owner))
+    add(this.entry(keyFor(name, null, kind), owner))
+    add(this.entry(keyFor(name, null, null), owner))
 
     if (levels.length === 0) {
       throw enotsup(kind, name, path)

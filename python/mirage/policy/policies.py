@@ -22,7 +22,7 @@ from mirage.commands.spec.usage import operand_exit_code
 from mirage.policy.base import Policy
 from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.errors import PolicyDenied, PolicyError
-from mirage.policy.mixin import SessionScopedMixin
+from mirage.policy.mixin import ResultBlindMixin, SessionScopedMixin
 from mirage.policy.types import (VALIDITY, Ask, CommandContext, Deny,
                                  DenyScope, ExecuteResultContext, OpsContext,
                                  OpsResultContext, Pending, SessionContext)
@@ -271,6 +271,7 @@ class Policies:
     def __init__(self, policies: list[Policy] | None = None) -> None:
         self._policies: list[Policy] = list(policies or [])
         self._wanted: frozenset[str] = frozenset()
+        self._reads_results = False
         self._rescan()
 
     def add(self, policy: Policy) -> None:
@@ -311,6 +312,16 @@ class Policies:
         """
         return hook in self._wanted
 
+    def reads_results(self) -> bool:
+        """True when some policy's ``post_ops`` may read the op's result.
+
+        The door streams a read only past policies that answer from the
+        op alone (``ResultBlindMixin``); any other ``post_ops`` gets the
+        whole bytes, so a redaction or size check keeps seeing what it
+        has always seen.
+        """
+        return self._reads_results
+
     async def wants_for(self, hook: str, session_id: str) -> bool:
         """True when some policy will speak at ``hook`` for this session.
 
@@ -345,6 +356,10 @@ class Policies:
                     wanted.add(hook)
                     break
         self._wanted = frozenset(wanted)
+        self._reads_results = any(
+            type(policy).post_ops is not Policy.post_ops
+            and not isinstance(policy, ResultBlindMixin)
+            for policy in self._policies)
 
     async def _fire(
             self, hook: str,

@@ -2842,6 +2842,126 @@
           "id": "capped"
         }
       ]
+    },
+    {
+      "id": "stream_read_matches_read_and_fails_at_open",
+      "settings": {
+        "mode": "write",
+        "mounts": {}
+      },
+      "steps": [
+        {
+          "op": "mount",
+          "path": "/data",
+          "vfs": "chunked-ram",
+          "config": { "files": { "/lines.txt": "line 01\nline 02\nline 03\n" } },
+          "mode": "write",
+          "expect": { "value": "/data/" }
+        },
+        {
+          "op": "read_stream",
+          "path": "/data/lines.txt",
+          "expect": { "value": "line 01\nline 02\nline 03\n" }
+        },
+        {
+          "op": "read",
+          "path": "/data/lines.txt",
+          "expect": { "value": "line 01\nline 02\nline 03\n" }
+        },
+        {
+          "op": "read_stream",
+          "path": "/data/nope.txt",
+          "expect": { "errno": "ENOENT" }
+        },
+        {
+          "op": "register_policy",
+          "id": "seal",
+          "paths": ["/data/lines.txt"],
+          "reason": "sealed"
+        },
+        {
+          "op": "read_stream",
+          "path": "/data/lines.txt",
+          "expect": { "errno": "EACCES" }
+        }
+      ]
+    },
+    {
+      "id": "stream_read_early_close_releases_mount",
+      "settings": {
+        "mode": "write",
+        "mounts": {}
+      },
+      "steps": [
+        {
+          "op": "mount",
+          "path": "/data",
+          "vfs": "chunked-ram",
+          "config": { "files": { "/lines.txt": "line 01\nline 02\nline 03\nline 04\nline 05\nline 06\nline 07\nline 08\nline 09\nline 10\n" } },
+          "expect": { "value": "/data/" }
+        },
+        {
+          "op": "read_stream",
+          "path": "/data/lines.txt",
+          "take": 1,
+          "expect": { "value": "line 01\n" }
+        },
+        {
+          "op": "unmount",
+          "path": "/data",
+          "within": 5
+        }
+      ]
+    },
+    {
+      "id": "stream_read_capped_by_mount_limit",
+      "settings": {
+        "mode": "write",
+        "mounts": {}
+      },
+      "steps": [
+        {
+          "op": "mount",
+          "path": "/data",
+          "vfs": "chunked-ram",
+          "config": { "files": { "/lines.txt": "line 01\nline 02\nline 03\nline 04\nline 05\nline 06\nline 07\nline 08\nline 09\nline 10\n" } },
+          "command_limits": { "read": { "max_lines": 2 } },
+          "expect": { "value": "/data/" }
+        },
+        {
+          "op": "read_stream",
+          "path": "/data/lines.txt",
+          "expect": { "value": "line 01\nline 02\n" }
+        },
+        {
+          "op": "read",
+          "path": "/data/lines.txt",
+          "expect": { "value": "line 01\nline 02\n" }
+        },
+        {
+          "op": "mount",
+          "path": "/strict",
+          "vfs": "chunked-ram",
+          "config": { "files": { "/lines.txt": "line 01\nline 02\nline 03\nline 04\nline 05\nline 06\nline 07\nline 08\nline 09\nline 10\n", "/short.txt": "a\nb\n" } },
+          "command_limits": { "read": { "max_lines": 2, "on_exceed": "error" } },
+          "expect": { "value": "/strict/" }
+        },
+        {
+          "op": "read_stream",
+          "path": "/strict/lines.txt",
+          "expect": { "error_contains": "output truncated at limit (2 lines)" }
+        },
+        {
+          "op": "read",
+          "path": "/strict/lines.txt",
+          "expect": { "error_contains": "output truncated at limit (2 lines)" }
+        },
+        {
+          "op": "read_stream",
+          "path": "/strict/short.txt",
+          "expect": { "value": "a\nb\n" }
+        }
+      ]
     }
   ]
 }

@@ -39,3 +39,16 @@ class SessionScopedMixin(ABC):
                 ``pre_session``, ...).
             session_id (str): the session, empty when none is bound.
         """
+
+
+class ResultBlindMixin:
+    """A policy whose ``post_ops`` answers without reading ``ctx.result``.
+
+    A true mixin: no state, no methods, only the fact. A policy that
+    inherits this bounds or refuses an op by its name, path and mount
+    alone (the built-in output cap answers with the mount's per-op
+    limit), so the door may hand it a streamed read as the stream
+    itself. ``Policies.reads_results`` is true while any other policy
+    answers ``post_ops``, and then a streamed read is gathered first so
+    the hook sees the bytes a whole read has always handed it.
+    """

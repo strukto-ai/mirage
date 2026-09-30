@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from mirage.policy.base import Policy
+from mirage.policy.mixin import ResultBlindMixin
 from mirage.policy.types import Action, OpsResultContext
 from mirage.types import Limit, Producer
 
@@ -117,12 +118,14 @@ def resolve_producer(
     return Limit.aggr(per_mount)
 
 
-class OutputCapPolicy(Policy):
+class OutputCapPolicy(Policy, ResultBlindMixin):
     """The built-in output cap, seeded by the registry.
 
     Answers post_ops with a mount's per-op bound. Command output is finalized
     at its terminal destination using resolve_producer; post_execute remains
-    the hook for explicit whole-invocation policies.
+    the hook for explicit whole-invocation policies. The bound depends on
+    the op and the mount alone, never on the result, so a streamed read
+    reaches this hook as the stream and is capped as it flows.
 
     Args:
         override_for (OverrideLookup): maps (mount prefix, command or

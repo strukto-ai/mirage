@@ -14,6 +14,7 @@
 
 import { Limit, OnExceed, type Producer } from '../../types.ts'
 import type { Policy } from '../base.ts'
+import { RESULT_BLIND, type ResultBlind } from '../mixin.ts'
 import type { Action, OpsResultContext } from '../types.ts'
 
 const DEFAULT_MAX_LINES = 2000
@@ -122,9 +123,12 @@ export function resolveProducer(
 /**
  * Per-op output bounds, seeded by the registry. Command output uses
  * resolveProducer at its terminal destination; postExecute is reserved
- * for explicit whole-invocation policies.
+ * for explicit whole-invocation policies. The bound depends on the op
+ * and the mount alone, never on the result, so a streamed read reaches
+ * this hook as the stream and is capped as it flows.
  */
-export class OutputCapPolicy implements Policy {
+export class OutputCapPolicy implements Policy, ResultBlind {
+  readonly [RESULT_BLIND] = true as const
   private readonly overrideFor: OverrideLookup
 
   constructor(overrideFor: OverrideLookup) {

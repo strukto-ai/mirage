@@ -26,7 +26,8 @@ from mirage.cache.index.config import IndexConfig
 from mirage.cache.index.factory import build_index
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.utils.limit import run_with_timeout
+from mirage.commands.builtin.utils.limit import (maybe_with_timeout,
+                                                 run_with_timeout)
 from mirage.commands.builtin.utils.paths import dispatch_stat, link_follow
 from mirage.commands.config import (CommandOpts, ExecContext,
                                     RegisteredCommand, has_injected_version)
@@ -143,26 +144,34 @@ def _wrap_cmd_streams(
     return stream, io
 
 
-def _wrap_op_stream(result: Any, mount_id: str, activity: VFSActivity) -> Any:
-    """Hold the host-I/O bypass around an op result that streams.
+def _wrap_op_stream(result: Any, mount_id: str, activity: VFSActivity,
+                    revisions: dict[str, str] | None, limit: Limit | None,
+                    op_name: str) -> Any:
+    """Frame an op result that streams the way a command's output is.
 
     An op that returns an async iterator has not run its body yet: the
     backend opens the file on the first ``__anext__``, after the frame
-    that called it (and its ``host_io`` scope) is gone. Same reason
-    ``_wrap_cmd_streams`` re-establishes the recorder state.
+    that called it is gone. ``_wrap_cmd_streams`` gives each pull its
+    frame back (the session, the recorder's mount, the revision pins a
+    snapshot replay reads, the host-I/O bypass) and holds the mount
+    until the stream ends or closes; the op's own timeout, which bounded
+    only the call, bounds the stream too.
 
     Args:
         result (Any): whatever the op returned.
         mount_id (str): identity of the serving mount.
+        activity (VFSActivity): the mount's use count.
+        revisions (dict[str, str] | None): the mount's pins, None for none.
+        limit (Limit | None): the mount's limit for this op.
+        op_name (str): the op, for the timeout message.
     """
-    if isinstance(result, CachableAsyncIterator):
-        result.replace_source(
-            with_host_io(with_mount_context(result.source, mount_id)))
-        return activity.hold(result)
-    if hasattr(result, "__aiter__"):
-        return activity.hold(with_host_io(with_mount_context(result,
-                                                             mount_id)))
-    return result
+    if isinstance(result,
+                  (bytes, bytearray)) or not hasattr(result, "__aiter__"):
+        return result
+    timed = maybe_with_timeout(result, limit, op_name)
+    stream, _ = _wrap_cmd_streams((timed, IOResult()), revisions, mount_id,
+                                  activity)
+    return stream
 
 
 class MountEntry:
@@ -850,6 +859,7 @@ class MountEntry:
         op_name: str,
         path: str,
         *args,
+        stream: bool = False,
         **kwargs,
     ) -> Any:
         """Execute a VFS op on this mount's VFS.
@@ -865,9 +875,15 @@ class MountEntry:
         over the file. TypeScript spells the same override
         ``readFile(path, {raw: true})``.
 
+        ``stream`` asks each level for its streaming form where it has
+        one (``RegisteredOp.stream``); a level without one answers the
+        way it always does, so a filetype renderer still wins over the
+        generic read and hands back its whole rendering.
+
         Args:
             op_name (str): operation name (e.g. "read", "stat").
             path (str): virtual path.
+            stream (bool): prefer each level's streaming form.
         """
         async with self.use():
             filetype = (kwargs.pop("filetype")
@@ -903,20 +919,22 @@ class MountEntry:
             revs_token = push_revisions(self.revisions or None)
             try:
                 for op in levels:
+                    fn = (op.stream
+                          if stream and op.stream is not None else op.fn)
                     # The backend's own paths are host paths, so the process
                     # patch (ops/os_patch.py, ops/open.py) must not answer
                     # them: a disk mount rooted at its own virtual prefix
                     # spells the two the same, and routing the physical one
                     # hands the op back to the backend serving it.
                     with host_io():
-                        result = op.fn(self.vfs.accessor, scope, *args,
-                                       **kwargs)
+                        result = fn(self.vfs.accessor, scope, *args, **kwargs)
                         if inspect.isawaitable(result):
                             result = await run_with_timeout(
                                 result, op_timeout, op_name)
                     if result is not None:
                         return _wrap_op_stream(result, self.mount_id,
-                                               self.activity)
+                                               self.activity, self.revisions
+                                               or None, op_override, op_name)
                 return None
             finally:
                 reset_revisions(revs_token)

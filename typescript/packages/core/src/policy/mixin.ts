@@ -45,3 +45,28 @@ export interface SessionScoped {
 export function isSessionScoped(policy: Policy): policy is Policy & SessionScoped {
   return (policy as Partial<SessionScoped>)[SESSION_SCOPED] === true
 }
+
+/**
+ * The nominal result-blind brand (python's ResultBlindMixin
+ * inheritance). Detection is by this marker. `Symbol.for` keeps the
+ * brand stable even when two copies of the package are loaded.
+ */
+export const RESULT_BLIND: unique symbol = Symbol.for('mirage.policy.resultBlind')
+
+/**
+ * A policy whose `postOps` answers without reading `ctx.result`: it
+ * bounds or refuses an op by its name, path and mount alone (the
+ * built-in output cap answers with the mount's per-op limit), so the
+ * door may hand it a streamed read as the stream itself.
+ * `Policies.readsResults` is true while any other policy answers
+ * `postOps`, and then a streamed read is gathered first so the hook
+ * sees the bytes a whole read has always handed it.
+ */
+export interface ResultBlind {
+  readonly [RESULT_BLIND]: true
+}
+
+/** Whether this policy's postOps never reads the op's result. */
+export function isResultBlind(policy: Policy): policy is Policy & ResultBlind {
+  return (policy as Partial<ResultBlind>)[RESULT_BLIND] === true
+}

@@ -19,8 +19,10 @@ shell command can answer directly through a backend's command handler.
 """
 
 import asyncio
+import dataclasses
 import errno
 import json
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +30,13 @@ from mirage.commands.cli.types import CLISpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
+from mirage.ops.registry import RegisteredOp
 from mirage.policy import Policy
 from mirage.policy.types import (CommandContext, Deny, OpsContext,
                                  SessionContext)
 from mirage.process.types import SpawnRequest
 from mirage.runtime.types import ScriptSource
-from mirage.types import MountMode
+from mirage.types import Limit, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
 from mirage.workspace import Workspace
@@ -57,7 +60,46 @@ class CachedRAMVFS(RAMVFS):
         })
 
 
+def by_line(
+    stream: Callable[..., AsyncIterator[bytes]]
+) -> Callable[..., AsyncIterator[bytes]]:
+    """Split a streamed read into one chunk per line."""
+
+    async def lines(*args: Any, **kwargs: Any) -> AsyncIterator[bytes]:
+        async for chunk in stream(*args, **kwargs):
+            start = 0
+            while start < len(chunk):
+                end = chunk.find(b"\n", start) + 1 or len(chunk)
+                yield chunk[start:end]
+                start = end
+
+    return lines
+
+
+class ChunkedRAMVFS(RAMVFS):
+    """A RAM fixture whose streamed read yields one chunk per line, so
+    chunk boundaries are the same on every host (a disk mount's read
+    size is not)."""
+
+    def __init__(self, files: dict[str, str] | None = None) -> None:
+        super().__init__()
+        self.load_state({
+            "files": {
+                path: data.encode()
+                for path, data in (files or {}).items()
+            }
+        })
+
+    def ops(self) -> list[RegisteredOp]:
+        return [
+            dataclasses.replace(ro, stream=by_line(ro.stream))
+            if ro.name == "read" and ro.stream is not None else ro
+            for ro in super().ops()
+        ]
+
+
 register_vfs("cached-ram", CachedRAMVFS)
+register_vfs("chunked-ram", ChunkedRAMVFS)
 
 
 class RulePolicy(Policy):
@@ -120,13 +162,16 @@ async def action(ws: Workspace, step: dict[str, Any],
     if op == "mount":
         vfs = build_vfs(step["vfs"], step.get("config", {}))
         try:
-            return ws.add_mount(step["path"], vfs,
-                                MountMode(step.get("mode", "read"))).prefix
+            entry = ws.add_mount(step["path"], vfs,
+                                 MountMode(step.get("mode", "read")))
         except Exception:
             await vfs.close()
             raise
+        for name, raw in step.get("command_limits", {}).items():
+            entry.command_limits[name] = Limit.model_validate(raw)
+        return entry.prefix
     if op == "unmount":
-        await ws.unmount(step["path"])
+        await asyncio.wait_for(ws.unmount(step["path"]), step.get("within"))
     elif op == "set_mode":
         ws.set_mount_mode(step["path"], MountMode(step["mode"]))
     elif op == "session":
@@ -164,6 +209,24 @@ async def action(ws: Workspace, step: dict[str, Any],
         await ws.vfs.write(step["path"], step["data"].encode())
     elif op == "read":
         return (await ws.vfs.read(step["path"])).decode()
+    elif op == "read_stream":
+        # At most `take` chunks of a streamed read, then it is closed.
+        stream, _ = await ws.dispatch("read",
+                                      PathSpec.from_str_path(step["path"]),
+                                      stream=True)
+        take = step.get("take")
+        if isinstance(stream, bytes):
+            return stream.decode() if take != 0 else ""
+        pulled: list[bytes] = []
+        try:
+            while take is None or len(pulled) < take:
+                chunk = await anext(stream, None)
+                if chunk is None:
+                    break
+                pulled.append(chunk)
+        finally:
+            await stream.aclose()
+        return b"".join(pulled).decode()
     elif op == "readdir":
         return sorted(await ws.vfs.readdir(step["path"]))
     elif op == "stat":

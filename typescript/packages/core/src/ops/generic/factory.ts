@@ -29,7 +29,7 @@ type OpCoreFn = (...args: any[]) => unknown
  * The table in `commands/builtin/<b>/ops.ts` already carries every core
  * function the VFS/FUSE op wrappers forward to, so the same table feeds
  * both `makeGenericCommands` and `makeGenericOps`. Command-only fields
- * (`readStream`, `isMounted`, `find`, ...) are ignored.
+ * (`isMounted`, `find`, ...) are ignored.
  */
 export interface OpsTable<A extends Accessor = Accessor> {
   readdir: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => unknown
@@ -43,6 +43,7 @@ export interface OpsTable<A extends Accessor = Accessor> {
   ) => Promise<Uint8Array>
   stat: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => unknown
   maxGlobMatches?: number
+  readStream?: (accessor: A, path: PathSpec, index?: OpKwargs['index']) => AsyncIterable<Uint8Array>
   write?: OpCoreFn
   mkdir?: OpCoreFn
   unlink?: OpCoreFn
@@ -107,14 +108,20 @@ export function makeGenericOps<A extends Accessor>(
     fn: RegisteredOp['fn'],
     write: boolean,
     filetype: string | null = null,
+    stream?: RegisteredOp['stream'],
   ): void => {
     if (skip.has(name)) return
     for (const res of vfsNames) {
-      ops.push({ name, vfs: res, filetype, fn, write })
+      ops.push(
+        stream === undefined
+          ? { name, vfs: res, filetype, fn, write }
+          : { name, vfs: res, filetype, fn, write, stream },
+      )
     }
   }
 
   const asA = (accessor: Accessor): A => accessor as A
+  const readStream = table.readStream
 
   // A backend that can fetch a range natively does so, which is the whole
   // point on an object store: one ranged GET instead of the whole file. Every
@@ -149,6 +156,14 @@ export function makeGenericOps<A extends Accessor>(
       return whole ? data : sliceWindow(data, offset, size)
     },
     false,
+    null,
+    // The streaming form: the backend's own stream, returned unstarted,
+    // so it opens the file on the first pull. Only a whole-file read
+    // streams; a window is the ranged read above. Mirrors Python's
+    // `_make_read_stream`.
+    readStream === undefined
+      ? undefined
+      : (accessor, path, _args, kwargs) => readStream(asA(accessor), path, kwargs.index),
   )
   emit(
     'readdir',

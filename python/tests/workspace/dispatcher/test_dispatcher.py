@@ -12,17 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
+from collections.abc import AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from mirage.commands.errors import CommandTimeoutError, LimitExceededError
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, posix_errno
+from mirage.io.types import ByteSource, materialize
+from mirage.observe.context import revision_for
 from mirage.policy import (Action, CommandRule, Deny, OpsContext, Policies,
                            Policy, PolicyDenied)
 from mirage.policy.rule import RulePolicy
-from mirage.types import FileStat, FileType, HiddenPaths, MountMode, PathSpec
+from mirage.types import (FileStat, FileType, HiddenPaths, Limit, MountMode,
+                          OnExceed, PathSpec)
 from mirage.utils.errors import ReadOnlyError
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -1016,3 +1023,145 @@ async def test_rmdir_keeps_a_link_created_while_the_backend_removes():
             reset_current_session(token)
         assert not ws.namespace.is_link("/data/d/old")
         assert ws.namespace.readlink("/data/d/late") == "nowhere"
+
+
+class _Pulls:
+    """What a spied stream form handed out, and whether it was closed."""
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.closed = False
+
+
+def _spy_stream(monkeypatch, ws: Workspace, prefix: str) -> _Pulls:
+    pulls = _Pulls()
+    op = ws.mount(prefix)._ops[("read", None)]
+    inner = op.stream
+
+    def stream(accessor, path, **kwargs) -> AsyncIterator[bytes]:
+
+        async def body() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in inner(accessor, path, **kwargs):
+                    pulls.count += 1
+                    yield chunk
+            finally:
+                pulls.closed = True
+
+        return body()
+
+    monkeypatch.setattr(op, "stream", stream)
+    return pulls
+
+
+async def _stream(ws: Workspace, path: str, **kwargs: Any) -> ByteSource:
+    stream, _ = await ws.dispatch("read",
+                                  PathSpec.from_str_path(path),
+                                  stream=True,
+                                  **kwargs)
+    return stream
+
+
+def _disk(tmp_path) -> Workspace:
+    (tmp_path / "big.txt").write_bytes(b"x" * 100_000)
+    (tmp_path / "leak.txt").write_bytes(b"x" * 20_000 + b"SECRET")
+    (tmp_path / "sub").mkdir()
+    return Workspace({"/d/": DiskVFS(root=str(tmp_path))},
+                     mode=MountMode.WRITE)
+
+
+class _Seal(Policy):
+
+    async def pre_ops(self, ctx: OpsContext) -> Action | None:
+        return Deny("sealed") if ctx.path.virtual == "/d/big.txt" else None
+
+
+class _DenySecret(Policy):
+
+    async def post_ops(self, ctx) -> Action | None:
+        data = ctx.result if isinstance(ctx.result, bytes) else b""
+        return Deny("secret") if b"SECRET" in data else None
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_answers_what_the_whole_read_does(
+        tmp_path, monkeypatch):
+    with _disk(tmp_path) as ws:
+        pulls = _spy_stream(monkeypatch, ws, "/d/")
+        whole, _ = await ws.dispatch("read",
+                                     PathSpec.from_str_path("/d/big.txt"))
+        assert await materialize(await _stream(ws, "/d/big.txt")) == whole
+        assert pulls.count > 1
+        assert await _stream(ws, "/d/big.txt", offset=5, size=3) == b"xxx"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path, error, policy", [
+    ("/d/nope", FileNotFoundError, None),
+    ("/d/sub", IsADirectoryError, None),
+    ("/d/big.txt", PermissionError, _Seal()),
+    ("/d/leak.txt", PermissionError, _DenySecret()),
+])
+async def test_a_streamed_read_is_refused_at_the_call(tmp_path, path, error,
+                                                      policy):
+    with _disk(tmp_path) as ws:
+        if policy is not None:
+            ws.policies.add(policy)
+        with pytest.raises(error):
+            await _stream(ws, path)
+
+
+@pytest.mark.asyncio
+async def test_closing_a_streamed_read_early_stops_the_backend(
+        tmp_path, monkeypatch):
+    with _disk(tmp_path) as ws:
+        pulls = _spy_stream(monkeypatch, ws, "/d/")
+        stream = await _stream(ws, "/d/big.txt")
+        assert not isinstance(stream, bytes)
+        assert await anext(stream) == b"x" * 8192
+        await stream.aclose()
+        assert (pulls.count, pulls.closed) == (1, True)
+        await asyncio.wait_for(ws.unmount("/d/"), 2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on_exceed", [OnExceed.TRUNCATE, OnExceed.ERROR])
+async def test_a_read_cap_stops_the_stream_at_the_cap(tmp_path, monkeypatch,
+                                                      on_exceed):
+    with _disk(tmp_path) as ws:
+        ws.mount("/d/").command_limits["read"] = Limit(max_bytes=10,
+                                                       on_exceed=on_exceed)
+        pulls = _spy_stream(monkeypatch, ws, "/d/")
+        if on_exceed is OnExceed.ERROR:
+            with pytest.raises(LimitExceededError):
+                await _stream(ws, "/d/big.txt")
+        else:
+            assert await _stream(ws, "/d/big.txt") == b"x" * 10
+        assert (pulls.count, pulls.closed) == (1, True)
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_keeps_the_ops_frame(monkeypatch):
+
+    async def pinned(accessor, path, **kwargs) -> AsyncIterator[bytes]:
+        yield (revision_for(path.virtual) or "unpinned").encode()
+
+    async def slow(accessor, path, **kwargs) -> AsyncIterator[bytes]:
+        await asyncio.sleep(1)
+        yield b"late"
+
+    with Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        mount = ws.mount("/r/")
+        op = mount._ops[("read", None)]
+        await ws.vfs.write("/r/f.txt", b"stored")
+        mount.revisions = {"/r/f.txt": "v1"}
+        monkeypatch.setattr(op, "stream", pinned)
+        assert await materialize(await _stream(ws, "/r/f.txt")) == b"v1"
+        mount.command_limits["read"] = Limit(timeout_seconds=0.05)
+        monkeypatch.setattr(op, "stream", slow)
+        with pytest.raises(CommandTimeoutError):
+            await materialize(await _stream(ws, "/r/f.txt"))
+        with pytest.raises(ValueError):
+            await ws.dispatch("stat",
+                              PathSpec.from_str_path("/r/f.txt"),
+                              stream=True)

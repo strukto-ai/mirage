@@ -13,13 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { CommandTimeoutError, LimitExceededError } from '../../commands/errors.ts'
 import { materialize } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { revisionFor } from '../../observe/context.ts'
 import { OpsRegistry, type RegisteredOp } from '../../ops/registry.ts'
 import { POLICY_WRITE_OPS } from './constants.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
+import type { Policy } from '../../policy/base.ts'
+import type { Action, OpsContext, OpsResultContext } from '../../policy/types.ts'
+import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
 import { getTestParser } from '../fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -844,6 +847,157 @@ describe('rmdir namespace entries', () => {
       await runWithSession(session, () => ws.vfs.rmdir('/data/d'))
       expect(ws.namespace.isLink('/data/d/old')).toBe(false)
       expect(ws.namespace.readlink('/data/d/late')).toBe('nowhere')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a streamed read through the door', () => {
+  interface Pulls {
+    count: number
+    closed: boolean
+  }
+
+  class Seal implements Policy {
+    preOps(ctx: OpsContext): Action | null {
+      return ctx.path.virtual === '/m/big.txt' ? { kind: 'deny', reason: 'sealed' } : null
+    }
+  }
+
+  class DenySecret implements Policy {
+    postOps(ctx: OpsResultContext): Action | null {
+      const data = ctx.result instanceof Uint8Array ? DEC.decode(ctx.result) : ''
+      return data.includes('SECRET') ? { kind: 'deny', reason: 'secret' } : null
+    }
+  }
+
+  // A RAM read hands its file over in one piece; the spy re-chunks it so
+  // a test can count what the door pulled and see whether it closed. It
+  // goes in after the workspace has registered the mount's own ops.
+  async function spiedWorkspace(policies: Policy[] = []): Promise<[Workspace, Pulls]> {
+    const pulls: Pulls = { count: 0, closed: false }
+    const ram = new RAMVFS()
+    const registry = new OpsRegistry()
+    const ws = new Workspace({ '/m': ram }, { mode: MountMode.WRITE, ops: registry })
+    await ws.vfs.writeFile('/m/big.txt', ENC.encode('x'.repeat(100_000)))
+    await ws.vfs.writeFile('/m/leak.txt', ENC.encode(`${'x'.repeat(20_000)}SECRET`))
+    await ws.vfs.mkdir('/m/sub')
+    const generic = registry.find('read', 'ram')
+    const inner = generic?.stream
+    if (generic === null || inner === undefined) throw new Error('no stream form')
+    registry.register({
+      ...generic,
+      stream: (accessor, path, args, kwargs) =>
+        (async function* body(): AsyncGenerator<Uint8Array> {
+          try {
+            const whole = inner(accessor, path, args, kwargs) as AsyncIterable<Uint8Array>
+            for await (const data of whole) {
+              for (let at = 0; at < data.byteLength; at += 1024) {
+                pulls.count++
+                yield data.subarray(at, at + 1024)
+              }
+            }
+          } finally {
+            pulls.closed = true
+          }
+        })(),
+    })
+    for (const policy of policies) ws.policies.add(policy)
+    return [ws, pulls]
+  }
+
+  const streamed = (ws: Workspace, path: string, kwargs: Record<string, unknown> = {}) =>
+    ws.dispatch('read', path, [], { ...kwargs, stream: true })
+
+  it('answers what the whole read does', async () => {
+    const [ws, pulls] = await spiedWorkspace()
+    try {
+      const whole = (await ws.dispatch('read', '/m/big.txt')) as Uint8Array
+      const all = await materialize((await streamed(ws, '/m/big.txt')) as AsyncIterable<Uint8Array>)
+      expect(all).toEqual(whole)
+      expect(pulls.count).toBeGreaterThan(1)
+      const window = (await streamed(ws, '/m/big.txt', { offset: 5, size: 3 })) as Uint8Array
+      expect(DEC.decode(window)).toBe('xxx')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['/m/nope', 'ENOENT', []],
+    ['/m/sub', 'EISDIR', []],
+    ['/m/big.txt', 'EACCES', [new Seal()]],
+    ['/m/leak.txt', 'EACCES', [new DenySecret()]],
+  ] as const)('refuses %s at the call (%s)', async (path, code, policies) => {
+    const [ws] = await spiedWorkspace([...policies])
+    try {
+      await expect(streamed(ws, path)).rejects.toMatchObject({ code })
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('stops the backend when closed early and frees the mount', async () => {
+    const [ws, pulls] = await spiedWorkspace()
+    const stream = (await streamed(ws, '/m/big.txt')) as AsyncIterableIterator<Uint8Array>
+    expect((await stream.next()).value).toHaveLength(1024)
+    await stream.return?.()
+    expect(pulls).toEqual({ count: 1, closed: true })
+    await ws.unmount('/m')
+    await ws.close()
+  })
+
+  it.each([OnExceed.TRUNCATE, OnExceed.ERROR])(
+    'stops the stream at a read cap (%s)',
+    async (onExceed) => {
+      const [ws, pulls] = await spiedWorkspace()
+      try {
+        const mount = ws.mounts().find((m) => m.prefix === '/m/')
+        mount?.commandLimits.set('read', new Limit({ maxBytes: 10, onExceed }))
+        if (onExceed === OnExceed.ERROR) {
+          await expect(streamed(ws, '/m/big.txt')).rejects.toThrow(LimitExceededError)
+        } else {
+          expect(((await streamed(ws, '/m/big.txt')) as Uint8Array).byteLength).toBe(10)
+        }
+        expect(pulls).toEqual({ count: 1, closed: true })
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('keeps the op frame: revision pins and the op timeout reach the lazy body', async () => {
+    const registry = new OpsRegistry()
+    const ws = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE, ops: registry })
+    const generic = registry.find('read', 'ram')
+    if (generic === null) throw new Error('no read')
+    try {
+      await ws.vfs.writeFile('/m/f.txt', ENC.encode('stored'))
+      const mount = ws.mounts().find((m) => m.prefix === '/m/')
+      mount?.revisions.set('/m/f.txt', 'v1')
+      registry.register({
+        ...generic,
+        stream: (_accessor, path) =>
+          (async function* pinned(): AsyncGenerator<Uint8Array> {
+            await Promise.resolve()
+            yield ENC.encode(revisionFor(path.virtual) ?? 'unpinned')
+          })(),
+      })
+      const pinned = (await streamed(ws, '/m/f.txt')) as AsyncIterable<Uint8Array>
+      expect(DEC.decode(await materialize(pinned))).toBe('v1')
+      mount?.commandLimits.set('read', new Limit({ timeoutSeconds: 0.05 }))
+      registry.register({
+        ...generic,
+        stream: () =>
+          (async function* slow(): AsyncGenerator<Uint8Array> {
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+            yield ENC.encode('late')
+          })(),
+      })
+      const slow = (await streamed(ws, '/m/f.txt')) as AsyncIterable<Uint8Array>
+      await expect(materialize(slow)).rejects.toThrow(CommandTimeoutError)
+      await expect(ws.dispatch('stat', '/m/f.txt', [], { stream: true })).rejects.toThrow(TypeError)
     } finally {
       await ws.close()
     }

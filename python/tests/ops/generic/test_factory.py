@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
-from unittest.mock import AsyncMock
+from dataclasses import replace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -335,3 +336,13 @@ async def test_emulated_truncate_refuses_no_create_before_io():
     assert error.value.errno == errno.ENOTSUP
     read.assert_not_called()
     write.assert_not_called()
+
+
+def test_the_generic_read_carries_the_tables_stream_form():
+    table = replace(make_table(), read_stream=MagicMock())
+    read = next(o for o in make_generic_ops("x", table) if o.name == "read")
+    accessor = NOOPAccessor()
+    assert read.stream is not None
+    assert read.stream(accessor, PATH,
+                       index=NULL_INDEX) is table.read_stream.return_value
+    table.read_stream.assert_called_once_with(accessor, PATH, NULL_INDEX)
