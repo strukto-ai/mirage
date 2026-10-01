@@ -73,6 +73,43 @@
       "flags": [
         "group"
       ]
+    },
+    {
+      "id": "uniq_group_invalid_argument",
+      "seq": 610214,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq --group=x /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "uniq: invalid argument 'x' for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.\n"
+      },
+      "flags": [
+        "group"
+      ]
     }
   ]
 }

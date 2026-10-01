@@ -156,12 +156,12 @@ describe('grep -e pattern flag', () => {
     const ws = await makeWs()
     // Each program refuses a missing pattern in its own words: GNU grep
     // prints its synopsis and the help hint (3.11), ripgrep one sentence
-    // (14.1.1), and zgrep keeps mirage's own line since the real one is a
-    // shell script printing its $0 path.
+    // (14.1.1), and zgrep its shell script's own line, minus the script
+    // line number and $0 path that line carries on a real host.
     const expected: Record<string, string> = {
       grep: "Usage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.\n",
       rg: 'rg: ripgrep requires at least one pattern to execute a search\n',
-      zgrep: 'zgrep: usage: zgrep [flags] pattern [path]\n',
+      zgrep: "zgrep: missing pattern; try `zgrep --help' for help\n",
     }
     for (const cmd of ['grep', 'rg', 'zgrep']) {
       const io = await ws.shell(cmd)

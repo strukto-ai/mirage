@@ -73,6 +73,43 @@
       "flags": [
         "all-repeated"
       ]
+    },
+    {
+      "id": "uniq_all_repeated_invalid_argument",
+      "seq": 610213,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq --all-repeated=x /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "uniq: invalid argument 'x' for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.\n"
+      },
+      "flags": [
+        "all-repeated"
+      ]
     }
   ]
 }

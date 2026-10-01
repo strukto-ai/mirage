@@ -31,7 +31,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "zgrep: usage: zgrep [flags] pattern [path]\n"
+        "stderr": "zgrep: missing pattern; try `zgrep --help' for help\n"
       }
     }
   ]

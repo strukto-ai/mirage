@@ -153,6 +153,82 @@
       ]
     },
     {
+      "id": "wc_total_invalid_argument",
+      "seq": 610215,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc -l --total=x /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "wc: invalid argument 'x' for '--total'\nValid arguments are:\n  - 'auto'\n  - 'always'\n  - 'only'\n  - 'never'\nTry 'wc --help' for more information.\n"
+      },
+      "flags": [
+        "l",
+        "total"
+      ]
+    },
+    {
+      "id": "wc_total_empty_is_ambiguous",
+      "seq": 610216,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "wc -l --total= /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "wc: ambiguous argument '' for '--total'\nValid arguments are:\n  - 'auto'\n  - 'always'\n  - 'only'\n  - 'never'\nTry 'wc --help' for more information.\n"
+      },
+      "flags": [
+        "l",
+        "total"
+      ]
+    },
+    {
       "id": "wc_total_prefix_spanning_two_values_is_ambiguous",
       "seq": 991018,
       "targets": [
