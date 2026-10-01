@@ -52,7 +52,10 @@ function stamp(n: number): string {
  * a live URL can tell a token read before the bytes from one read after;
  * `/content` answers 200 so no client has to follow a 302; and
  * `/versions/{id}/content` serves the bytes that version was written with, so
- * a pinned read after a rewrite gets the old content. A real server
+ * a pinned read after a rewrite gets the old content. A `PUT` to `/content`
+ * stores the body as a new version and answers the item; `onUpload` can
+ * rewrite what is stored, the way SharePoint property promotion writes
+ * library metadata into an uploaded Office file. A real server
  * rather than a stubbed fetch, because the hf rows beside it in the contract
  * use the real fetch.
  */
@@ -65,6 +68,7 @@ export class FakeGraph {
   private readonly rows = new Map<string, GraphRow>()
   private seq = 0
   private onBytesHook: (() => void) | null = null
+  private onUploadHook: ((path: string, data: Uint8Array) => Uint8Array) | null = null
   private server: Server | null = null
 
   /**
@@ -132,6 +136,14 @@ export class FakeGraph {
 
   onBytes(fn: () => void): void {
     this.onBytesHook = fn
+  }
+
+  onUpload(fn: (path: string, data: Uint8Array) => Uint8Array): void {
+    this.onUploadHook = fn
+  }
+
+  data(drive: string, path: string): Uint8Array {
+    return this.row(drive, path).data
   }
 
   async start(): Promise<this> {
@@ -214,6 +226,18 @@ export class FakeGraph {
   }
 
   private handle(req: IncomingMessage, res: ServerResponse): void {
+    if (req.method !== 'PUT') {
+      this.route(req, res, null)
+      return
+    }
+    const chunks: Buffer[] = []
+    req.on('data', (chunk: Buffer) => chunks.push(chunk))
+    req.on('end', () => {
+      this.route(req, res, new Uint8Array(Buffer.concat(chunks)))
+    })
+  }
+
+  private route(req: IncomingMessage, res: ServerResponse, body: Uint8Array | null): void {
     const url = new URL(req.url ?? '/', 'http://x')
     const query = url.search.startsWith('?') ? decodeURIComponent(url.search.slice(1)) : ''
     const raw = url.pathname.replace(/^\/v1\.0\//, '')
@@ -244,11 +268,11 @@ export class FakeGraph {
       return
     }
     if (parts[0] === 'me' && parts[1] === 'drive') {
-      this.drive(req, res, ME, parts.slice(2).join('/'), query, expand)
+      this.drive(req, res, ME, parts.slice(2).join('/'), query, expand, body)
       return
     }
     if (parts[0] === 'drives' && parts.length >= 2) {
-      this.drive(req, res, parts[1] ?? '', parts.slice(2).join('/'), query, expand)
+      this.drive(req, res, parts[1] ?? '', parts.slice(2).join('/'), query, expand, body)
       return
     }
     this.unrouted(res, raw, query)
@@ -267,6 +291,7 @@ export class FakeGraph {
     rest: string,
     query: string,
     expand: string,
+    body: Uint8Array | null = null,
   ): void {
     let path: string
     let action: string
@@ -303,6 +328,13 @@ export class FakeGraph {
       }
       const value = this.children(drive, path).map((child) => this.item(drive, child, ''))
       json(res, 200, { value })
+      return
+    }
+    if (action === '/content' && body !== null) {
+      this.log.push(['upload', path, query])
+      const hook = this.onUploadHook
+      this.write(drive, path, hook === null ? body : hook(path, body))
+      json(res, 201, this.item(drive, path, ''))
       return
     }
     if (action === '/content') {

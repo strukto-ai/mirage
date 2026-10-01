@@ -40,6 +40,13 @@ class FakeManager {
   writes: string[] = []
   ancestors: string[] = []
 
+  readonly generation = 0
+
+  settleAfterWrite(path: PathSpec): Promise<void> {
+    this.writes.push(path.mountPath)
+    return Promise.resolve()
+  }
+
   invalidateAfterWrite(path: PathSpec): Promise<void> {
     this.writes.push(path.mountPath)
     return Promise.resolve()

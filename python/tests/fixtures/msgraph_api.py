@@ -64,6 +64,10 @@ class FakeGraph:
     - ``/versions/{id}/content`` serves the bytes that version was written
       with, and 404s an id the item never had, so a pinned read after a
       rewrite gets the old content.
+    - A ``PUT`` to ``/content`` stores the body as a new version and answers
+      the item. ``on_upload`` can rewrite what is stored, the way
+      SharePoint property promotion writes library metadata into an
+      uploaded Office file.
 
     Args:
         drives (dict): drive id (``me`` for OneDrive) to ``{path: bytes}``.
@@ -81,6 +85,7 @@ class FakeGraph:
     _rows: dict[tuple[str, str], _Row] = field(default_factory=dict)
     _seq: int = 0
     _on_bytes: Callable[[], None] | None = None
+    _on_upload: Callable[[str, bytes], bytes] | None = None
 
     def __post_init__(self) -> None:
         for drive, files in self.drives.items():
@@ -135,6 +140,12 @@ class FakeGraph:
 
     def on_bytes(self, fn: Callable[[], None]) -> None:
         self._on_bytes = fn
+
+    def on_upload(self, fn: Callable[[str, bytes], bytes]) -> None:
+        self._on_upload = fn
+
+    def data(self, drive: str, path: str) -> bytes:
+        return self._rows[(drive, path)].data
 
     def _item(
         self, drive: str, path: str, request: web.Request | None
@@ -198,10 +209,13 @@ class FakeGraph:
         if parts[0] == "download" and len(parts) >= 3:
             self.log.append(("download", "/".join(parts[2:]), query))
             return self._bytes(request, parts[1], "/".join(parts[2:]))
+        body = await request.read() if request.method == "PUT" else None
         if parts[:2] == ["me", "drive"]:
-            return self._drive(request, ME, "/".join(parts[2:]), query)
+            return self._drive(request, ME, "/".join(parts[2:]), query, body)
         if parts[0] == "drives" and len(parts) >= 2:
-            return self._drive(request, parts[1], "/".join(parts[2:]), query)
+            return self._drive(
+                request, parts[1], "/".join(parts[2:]), query, body
+            )
         return self._unrouted(tail, query)
 
     def _unrouted(self, tail: str, query: str) -> web.Response:
@@ -236,7 +250,12 @@ class FakeGraph:
         )
 
     def _drive(
-        self, request: web.Request, drive: str, rest: str, query: str
+        self,
+        request: web.Request,
+        drive: str,
+        rest: str,
+        query: str,
+        body: bytes | None = None,
     ) -> web.StreamResponse:
         if rest == "root":
             path, action = "", ""
@@ -265,6 +284,12 @@ class FakeGraph:
                 for child in self._children(drive, path)
             ]
             return web.json_response({"value": items})
+        if action == "/content" and body is not None:
+            self.log.append(("upload", path, query))
+            if self._on_upload is not None:
+                body = self._on_upload(path, body)
+            self.write(drive, path, body)
+            return web.json_response(self._item(drive, path, None), status=201)
         if action == "/content":
             self.log.append(("content", path, query))
             return self._bytes(request, drive, path)
@@ -326,6 +351,7 @@ def serve(graph: FakeGraph | None = None) -> Iterator[FakeGraph]:
     graph = graph or FakeGraph()
     app = web.Application()
     app.router.add_get("/v1.0/{tail:.*}", graph.handle)
+    app.router.add_put("/v1.0/{tail:.*}", graph.handle)
     loop = asyncio.new_event_loop()
     ready = threading.Event()
     runner = web.AppRunner(app)
