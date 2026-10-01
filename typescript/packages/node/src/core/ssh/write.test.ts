@@ -18,6 +18,8 @@ import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from './_test_utils.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
+import { runWithCacheManager, type CacheInvalidator } from '@struktoai/mirage-core/cache/context'
+import type { WriteReceipt } from '@struktoai/mirage-core/cache/types'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -81,5 +83,48 @@ describe('core/ssh/write', () => {
     expect(records[0]?.op).toBe('write')
     expect(records[0]?.source).toBe(VFSName.SSH)
     expect(records[0]?.bytes).toBe(5)
+  })
+})
+
+function recorder(): [CacheInvalidator, [string, string, WriteReceipt | null, number | null][], string[]] {
+  const settled: [string, string, WriteReceipt | null, number | null][] = []
+  const writes: string[] = []
+  const manager: CacheInvalidator = {
+    generation: 5,
+    settleAfterWrite(path, data, receipt, started) {
+      settled.push([path.virtual, new TextDecoder().decode(data), receipt, started])
+      return Promise.resolve()
+    },
+    invalidateAfterWrite(path) {
+      writes.push(typeof path === 'string' ? path : path.virtual)
+      return Promise.resolve()
+    },
+    invalidateAfterUnlink: () => Promise.resolve(),
+    invalidateSubtree: () => Promise.resolve(),
+    invalidateAncestors: () => Promise.resolve(),
+    cachedBytes: () => Promise.resolve(null),
+    readThrough: (_path, fetch) => fetch(),
+    cachedSize: () => Promise.resolve(null),
+    listingTrusted: () => false,
+    probedStat: () => null,
+  }
+  return [manager, settled, writes]
+}
+
+describe('core/ssh/write settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    const accessor = makeFakeAccessor({
+      files: new Map(),
+      dirs: new Map([
+        ['/', {}],
+        ['/data', {}],
+      ]),
+    })
+    const [manager, settled, writes] = recorder()
+    await runWithCacheManager(manager, () =>
+      writeBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('hello')),
+    )
+    expect(settled).toEqual([['/data/a.txt', 'hello', null, 5]])
+    expect(writes).toEqual([])
   })
 })

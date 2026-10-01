@@ -267,3 +267,65 @@ async def test_a_write_then_a_read_on_one_line_serves_the_write(line):
     await _out(ws, "printf 'old\\n' > /r/a; cat /r/a")
     await _out(ws, line)
     assert await _out(ws, "cat /r/a") == b"new\n"
+
+
+def _caching_ram_under(policy: ReadPolicy) -> Workspace:
+    ram = RAMVFS()
+    ram.caches_reads = True
+    ram.read_revalidatable = True
+    return Workspace(
+        {"/r/": ram},
+        mode=MountMode.WRITE,
+        read=ReadSpec(policy=policy),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,path",
+    [
+        ("echo new | tee /r/a", "/r/a"),
+        ("cp /r/b /r/c", "/r/c"),
+        ("split -l 1 /r/b /r/x", "/r/xaa"),
+        ("shuf -o /r/s /r/b", "/r/s"),
+        ("iconv -f utf-8 -t utf-8 -o /r/i /r/b", "/r/i"),
+        ("csplit -f /r/cs /r/b 2", "/r/cs00"),
+        ("sort -o /r/so /r/b", "/r/so"),
+        (
+            "mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out",
+            "/r/out/b",
+        ),
+        ("zip -q /r/z.zip /r/b", "/r/z.zip"),
+    ],
+)
+async def test_a_same_mount_write_keeps_its_output_under_bounded(line, path):
+    # Every command whose output goes through the backend's whole-file
+    # write settles it: on a bounded mount the bytes stay warm, so the
+    # next read of the output makes no backend read.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+    await _out(ws, line)
+    held = await ws._cache.get(path)
+    assert held is not None
+    assert held == await _out(ws, f"cat {path}")
+
+
+@pytest.mark.asyncio
+async def test_a_silent_write_is_not_kept_under_fresh():
+    # RAM's write answers no token, so nothing could verify the bytes on a
+    # fresh mount: the entry is dropped rather than kept unverifiable.
+    ws = _caching_ram_under(ReadPolicy.FRESH)
+    await _out(ws, "echo new | tee /r/a")
+    assert await ws._cache.exists("/r/a") is False
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_is_still_evicted():
+    # A redirect writes through the dispatcher, which runs no cache manager
+    # and evicts after the op; it keeps nothing until that path settles.
+    ws = _caching_ram_under(ReadPolicy.BOUNDED)
+    await _out(ws, "echo old > /r/a")
+    await _out(ws, "cat /r/a")
+    assert await ws._cache.exists("/r/a") is True
+    await _out(ws, "echo new > /r/a")
+    assert await ws._cache.exists("/r/a") is False

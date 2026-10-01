@@ -143,6 +143,14 @@ export async function applyIo(
   const cacheSet = new Set(io.cache)
   for (const path of io.cache) {
     if (cacheFacts !== undefined && !cacheFacts(path).cacheable) continue
+    if (io.reads[path] !== undefined && io.writes[path] !== undefined) {
+      // The line both read and wrote the path, and an IOResult keeps no
+      // order between the two: the read may be the pre-write bytes
+      // (`cat a; tee a`), and the write side may be `cp`'s empty eviction
+      // marker. Neither is safe to keep.
+      await cache.remove(path)
+      continue
+    }
     // The token has to describe the bytes actually stored, so the lookup
     // asks about the side this branch took. Set in the branch rather
     // than recovered from the result, so the two cannot disagree.

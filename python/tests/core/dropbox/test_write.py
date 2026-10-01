@@ -22,6 +22,7 @@ from mirage.core.dropbox.create import create
 from mirage.core.dropbox.write import write_bytes
 from mirage.types import PathSpec
 from mirage.vfs.dropbox.config import DropboxConfig
+from tests.fixtures.settle import Settled, settling
 
 
 def make_accessor(root_path: str = "/") -> DropboxAccessor:
@@ -56,3 +57,19 @@ async def test_create_uploads_empty_bytes():
         await create(make_accessor(), PathSpec.from_str_path("/new.txt"))
     assert upload.await_args.args[1] == "/new.txt"
     assert upload.await_args.args[2] == b""
+
+
+@pytest.mark.asyncio
+async def test_write_settles_its_bytes_without_a_receipt():
+    with (
+        patch(
+            "mirage.core.dropbox.write.dropbox_upload",
+            new_callable=AsyncMock,
+        ),
+        settling() as manager,
+    ):
+        await write_bytes(
+            make_accessor(), PathSpec.from_str_path("/a.txt"), b"hello"
+        )
+    assert manager.settled == [Settled("/a.txt", b"hello", None, 5)]
+    assert manager.writes == []

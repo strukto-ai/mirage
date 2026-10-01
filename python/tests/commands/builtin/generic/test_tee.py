@@ -95,7 +95,7 @@ async def test_every_operand_is_written_and_reported():
     assert await materialize(source) == b"hi"
     assert io.exit_code == 0
     assert io.writes == {"/a": b"hi", "/b": b"hi", "/c": b"hi"}
-    assert io.cache == ["/a", "/b", "/c"]
+    assert io.cache == []
 
 
 @pytest.mark.asyncio
@@ -150,7 +150,7 @@ async def test_an_output_that_fails_to_empty_is_the_one_reported():
     )
     assert source is None
     assert written == {"/good": b""}
-    assert (io.writes, io.cache) == ({"/good": b""}, ["/good"])
+    assert (io.writes, io.cache) == ({"/good": b""}, [])
     assert io.exit_code == 1
     assert await materialize(io.stderr) == b"tee: /denied: disk full\n"
 
@@ -245,8 +245,7 @@ async def test_a_native_append_skips_the_read_modify_write():
     )
     assert appended == {"/n": b"add"}
     assert written == {}
-    # Listed as written but not as cacheable: the resulting content is not
-    # in hand, so the stale cache entry must be dropped, not replaced.
+    # Listed as written; the native append drops the stale entry itself.
     assert list(io.writes) == ["/n"]
     assert io.cache == []
 
@@ -267,7 +266,7 @@ async def test_without_a_native_append_it_reads_and_rewrites():
         flags={"append": True},
     )
     assert written == {"/n": b"oldadd"}
-    assert io.cache == ["/n"]
+    assert io.cache == []
 
 
 @pytest.mark.asyncio

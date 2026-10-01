@@ -28,7 +28,9 @@ from mirage.core.object_store.driver import (
     ObjectStoreDriver,
     TreeEntry,
 )
+from mirage.cache.types import WriteReceipt
 from mirage.types import PathSpec
+from tests.fixtures.settle import Settled
 
 MODIFIED = "2026-01-01T00:00:00Z"
 
@@ -220,11 +222,24 @@ class FakeManager:
     def probed_stat(self, _path):
         return None
 
+    generation = 5
+
     def __init__(self) -> None:
         self.writes: list[str] = []
+        self.settled: list[Settled] = []
         self.ancestors: list[str] = []
         self.unlinks: list[str] = []
         self.subtrees: list[str] = []
+
+    async def settle_after_write(
+        self,
+        path: PathSpec,
+        data: bytes,
+        receipt: WriteReceipt | None,
+        started: int | None,
+    ) -> None:
+        self.writes.append(path.mount_path)
+        self.settled.append(Settled(path.virtual, data, receipt, started))
 
     async def invalidate_ancestors(self, path: PathSpec) -> None:
         self.ancestors.append(path.virtual)

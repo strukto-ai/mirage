@@ -253,3 +253,36 @@ describe('object store write records the put token', () => {
     expect(records).toEqual([])
   })
 })
+
+describe('object_store write settles with the token its put answered', () => {
+  it('carries the token and no size', async () => {
+    // The size a put reports is the request's length, not one the store
+    // read back, so the receipt carries the token alone.
+    const store = new FakeStore()
+    const manager = await managed(() =>
+      makeWriteBytes(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
+    )
+    expect(manager.settled).toEqual([
+      ['/mnt/a/b/c.txt', 'hi', { storedSize: null, token: 'fp-a/b/c.txt' }, 5],
+    ])
+  })
+
+  it('a put that answers nothing settles a silent receipt', async () => {
+    const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+      ...makeDriver(new FakeStore()),
+      put: () => Promise.resolve(null),
+    }
+    const manager = await managed(() =>
+      makeWriteBytes(driver)(accessor, spec('/a/b/c.txt'), ENC.encode('hi')),
+    )
+    expect(manager.settled).toEqual([
+      ['/mnt/a/b/c.txt', 'hi', { storedSize: null, token: null }, 5],
+    ])
+  })
+
+  it('create still only invalidates', async () => {
+    const manager = await managed(() => makeCreate(makeDriver(new FakeStore()))(accessor, spec('/a/c.txt')))
+    expect(manager.settled).toEqual([])
+    expect(manager.writes).toEqual(['/a/c.txt'])
+  })
+})

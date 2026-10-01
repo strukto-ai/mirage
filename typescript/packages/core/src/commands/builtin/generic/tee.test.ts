@@ -71,7 +71,9 @@ describe('writeOutput', () => {
     expect(s.written).toEqual({ '/a': 'hi', '/b': 'hi', '/c': 'hi' })
     expect(DEC.decode(out as Uint8Array)).toBe('hi')
     expect(io.exitCode).toBe(0)
-    expect(io.cache).toEqual(['/a', '/b', '/c'])
+    // The writer settles what it wrote with the cache itself; the IOResult
+    // offers reads only.
+    expect(io.cache).toEqual([])
   })
 
   it('keeps writing the others when one operand fails', async () => {
@@ -123,7 +125,7 @@ describe('writeOutput', () => {
     )
     expect(out).toBeNull()
     expect(s.written).toEqual({ '/good': '' })
-    expect([Object.keys(io.writes), io.cache]).toEqual([['/good'], ['/good']])
+    expect([Object.keys(io.writes), io.cache]).toEqual([['/good'], []])
     expect(io.exitCode).toBe(1)
     expect(DEC.decode(io.stderr as Uint8Array)).toBe('tee: /denied: disk full\n')
   })
@@ -206,8 +208,7 @@ describe('writeOutput', () => {
     )
     expect(appended).toEqual({ '/n': 'add' })
     expect(s.written).toEqual({})
-    // Listed as written but not as cacheable: the resulting content is not
-    // in hand, so the stale cache entry must be dropped, not replaced.
+    // Listed as written; the native append drops the stale entry itself.
     expect(Object.keys(io.writes)).toEqual(['/n'])
     expect(io.cache).toEqual([])
   })
@@ -226,6 +227,6 @@ describe('writeOutput', () => {
       s.write,
     )
     expect(s.written).toEqual({ '/n': 'oldadd' })
-    expect(io.cache).toEqual(['/n'])
+    expect(io.cache).toEqual([])
   })
 })

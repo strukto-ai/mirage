@@ -22,6 +22,7 @@ import { create } from './create.ts'
 import { mkdir } from './mkdir.ts'
 import { truncate } from './truncate.ts'
 import { writeBytes } from './write.ts'
+import { settling } from '../../cache/_test_util.ts'
 
 const ENC = new TextEncoder()
 
@@ -188,5 +189,14 @@ describe('core/ram mkdir destination parents', () => {
     const acc = mkAccessor()
     await mkdir(acc, mkPath('/d/sub'))
     expect(acc.store.dirs.has('/d/sub')).toBe(true)
+  })
+})
+
+describe('core/ram writeBytes settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    const acc = mkAccessor()
+    const manager = await settling(() => writeBytes(acc, mkPath('/d/f.txt'), ENC.encode('hi')))
+    expect(manager.settled).toEqual([{ path: '/d/f.txt', data: 'hi', receipt: null, started: 5 }])
+    expect(manager.writes).toEqual([])
   })
 })

@@ -18,6 +18,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../test-utils.ts'
 import { writeBytes } from './write.ts'
+import { runWithCacheManager, type CacheInvalidator } from '@struktoai/mirage-core/cache/context'
+import type { WriteReceipt } from '@struktoai/mirage-core/cache/types'
 
 let root: string
 let accessor: DiskAccessor
@@ -63,5 +65,41 @@ describe('core/disk/write', () => {
     await expect(
       writeBytes(accessor, spec('/plain/c.txt'), new TextEncoder().encode('deep')),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
+})
+
+function recorder(): [CacheInvalidator, [string, string, WriteReceipt | null, number | null][], string[]] {
+  const settled: [string, string, WriteReceipt | null, number | null][] = []
+  const writes: string[] = []
+  const manager: CacheInvalidator = {
+    generation: 5,
+    settleAfterWrite(path, data, receipt, started) {
+      settled.push([path.virtual, new TextDecoder().decode(data), receipt, started])
+      return Promise.resolve()
+    },
+    invalidateAfterWrite(path) {
+      writes.push(typeof path === 'string' ? path : path.virtual)
+      return Promise.resolve()
+    },
+    invalidateAfterUnlink: () => Promise.resolve(),
+    invalidateSubtree: () => Promise.resolve(),
+    invalidateAncestors: () => Promise.resolve(),
+    cachedBytes: () => Promise.resolve(null),
+    readThrough: (_path, fetch) => fetch(),
+    cachedSize: () => Promise.resolve(null),
+    listingTrusted: () => false,
+    probedStat: () => null,
+  }
+  return [manager, settled, writes]
+}
+
+describe('core/disk/write settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    const [manager, settled, writes] = recorder()
+    await runWithCacheManager(manager, () =>
+      writeBytes(accessor, spec('/x.txt'), new TextEncoder().encode('hi')),
+    )
+    expect(settled).toEqual([['/x.txt', 'hi', null, 5]])
+    expect(writes).toEqual([])
   })
 })

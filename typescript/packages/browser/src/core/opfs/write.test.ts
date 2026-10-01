@@ -17,6 +17,8 @@ import { makeMockAccessor, spec } from '../../test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
 import { writeBytes } from './write.ts'
+import { runWithCacheManager, type CacheInvalidator } from '@struktoai/mirage-core/cache/context'
+import type { WriteReceipt } from '@struktoai/mirage-core/cache/types'
 
 let accessor: ReturnType<typeof makeMockAccessor>
 beforeEach(() => {
@@ -56,5 +58,41 @@ describe('opfs/write.writeBytes', () => {
     await expect(
       writeBytes(accessor, spec('/a'), new TextEncoder().encode('x')),
     ).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+})
+
+function recorder(): [CacheInvalidator, [string, string, WriteReceipt | null, number | null][], string[]] {
+  const settled: [string, string, WriteReceipt | null, number | null][] = []
+  const writes: string[] = []
+  const manager: CacheInvalidator = {
+    generation: 5,
+    settleAfterWrite(path, data, receipt, started) {
+      settled.push([path.virtual, new TextDecoder().decode(data), receipt, started])
+      return Promise.resolve()
+    },
+    invalidateAfterWrite(path) {
+      writes.push(typeof path === 'string' ? path : path.virtual)
+      return Promise.resolve()
+    },
+    invalidateAfterUnlink: () => Promise.resolve(),
+    invalidateSubtree: () => Promise.resolve(),
+    invalidateAncestors: () => Promise.resolve(),
+    cachedBytes: () => Promise.resolve(null),
+    readThrough: (_path, fetch) => fetch(),
+    cachedSize: () => Promise.resolve(null),
+    listingTrusted: () => false,
+    probedStat: () => null,
+  }
+  return [manager, settled, writes]
+}
+
+describe('opfs/write.writeBytes settles', () => {
+  it('settles its bytes without a receipt', async () => {
+    const [manager, settled, writes] = recorder()
+    await runWithCacheManager(manager, () =>
+      writeBytes(accessor, spec('/x'), new TextEncoder().encode('hi')),
+    )
+    expect(settled).toEqual([['/x', 'hi', null, 5]])
+    expect(writes).toEqual([])
   })
 })

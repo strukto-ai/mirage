@@ -36,6 +36,8 @@ vi.mock('../../cache/context.ts', () => {
     invalidateAfterWrite: vi.fn(),
     invalidateAfterUnlink: vi.fn(),
     invalidateSubtree: vi.fn(),
+    settleAfterWrite: vi.fn(),
+    writeGeneration: vi.fn(() => 5),
   }
 })
 
@@ -44,6 +46,7 @@ import {
   invalidateAfterUnlink,
   invalidateAfterWrite,
   invalidateSubtree,
+  settleAfterWrite,
 } from '../../cache/context.ts'
 import { PathSpec } from '../../types.ts'
 import { BoxApiError, type BoxTokenManager } from './client.ts'
@@ -102,6 +105,25 @@ describe('box write ops', () => {
       new Uint8Array([9]),
     )
   })
+
+  for (const [target, upload] of [
+    ['/data/new.txt', 'uploadNewFile'],
+    ['/data/a.txt', 'uploadFileVersion'],
+  ] as const) {
+    it(`settles its bytes without a receipt (${upload})`, async () => {
+      vi.mocked(settleAfterWrite).mockClear()
+      vi.mocked(invalidateAfterWrite).mockClear()
+      await write(makeAccessor(), spec(target), new Uint8Array([7]))
+      expect(vi.mocked(api[upload])).toHaveBeenCalled()
+      expect(vi.mocked(settleAfterWrite)).toHaveBeenCalledWith(
+        spec(target),
+        new Uint8Array([7]),
+        null,
+        5,
+      )
+      expect(vi.mocked(invalidateAfterWrite)).not.toHaveBeenCalled()
+    })
+  }
 
   it('mkdir creates under the resolved parent', async () => {
     vi.mocked(api.createFolder).mockResolvedValue({ type: 'folder', id: '400', name: 'x' })

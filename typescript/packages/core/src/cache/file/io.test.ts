@@ -479,11 +479,10 @@ describe('the token describes the bytes stored', () => {
     expect(await cache.isFresh('/s3/f.txt', 'etag-put-2')).toBe(true)
   })
 
-  it('read bytes take the read token, not the write', async () => {
-    // A line that reads and writes one path caches the read's bytes --
-    // applyIo prefers io.reads -- so the entry must carry the read's
-    // token. Stamping the write's would make isFresh call stale bytes
-    // fresh for as long as the entry lives.
+  it('a path read and written keeps neither token', async () => {
+    // Neither side's token may label an entry for a line that read and wrote
+    // one path: the write's would make isFresh call the read's bytes fresh,
+    // the read's would make it call pre-write bytes fresh.
     const cache = new RAMFileCacheStore()
     const io = new IOResult({
       reads: { '/s3/f.txt': ENC.encode('old') },
@@ -494,9 +493,7 @@ describe('the token describes the bytes stored', () => {
       opRecord('read', '/s3/f.txt', 'etag-old-2', 3),
       opRecord('write', '/s3/f.txt', 'etag-new-2', 3),
     ])
-    expect(DEC.decode((await cache.get('/s3/f.txt')) ?? undefined)).toBe('old')
-    expect(await cache.isFresh('/s3/f.txt', 'etag-old-2')).toBe(true)
-    expect(await cache.isFresh('/s3/f.txt', 'etag-new-2')).toBe(false)
+    expect(await cache.exists('/s3/f.txt')).toBe(false)
   })
 
   it('written bytes ignore an earlier read token', async () => {
@@ -512,7 +509,7 @@ describe('the token describes the bytes stored', () => {
     expect(await cache.isFresh('/s3/f.txt', 'etag-old-2')).toBe(false)
   })
 
-  it('a streamed read takes the read token', async () => {
+  it('a streamed read of a written path is dropped', async () => {
     const cache = new RAMFileCacheStore()
     const stream = makeStream('old')
     expect(DEC.decode(await stream.drain())).toBe('old')
@@ -525,7 +522,7 @@ describe('the token describes the bytes stored', () => {
       opRecord('read', '/s3/f.txt', 'etag-old-2', 3),
       opRecord('write', '/s3/f.txt', 'etag-new-2', 3),
     ])
-    expect(await cache.isFresh('/s3/f.txt', 'etag-old-2')).toBe(true)
+    expect(await cache.exists('/s3/f.txt')).toBe(false)
   })
 
   it('drops a write token of a different length', async () => {

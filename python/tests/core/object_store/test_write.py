@@ -24,7 +24,9 @@ from mirage.core.object_store.write import (
     make_truncate,
     make_write_bytes,
 )
+from mirage.cache.types import WriteReceipt
 from mirage.observe.context import RecordingScope
+from tests.fixtures.settle import Settled
 from tests.core.object_store.conftest import (
     FakeManager,
     FakeStore,
@@ -275,3 +277,38 @@ def test_mkdir_records_nothing(accessor):
         make_mkdir(make_driver(store))(accessor, spec("/a/b"), True)
     )
     assert records == []
+
+
+# ── a write settles with the token its put answered ─────────────────────
+
+
+def test_write_settles_with_the_puts_token_and_no_size(accessor):
+    # The size a put reports is the request's length, not one the store
+    # read back, so the receipt carries the token alone.
+    manager = _managed(
+        make_write_bytes(make_driver(store := FakeStore()))(
+            accessor, spec("/a/b/c.txt"), b"hi"
+        )
+    )
+    assert store.objects == {"a/b/c.txt": b"hi"}
+    assert manager.settled == [
+        Settled("/mnt/a/b/c.txt", b"hi", WriteReceipt(None, "fp-a/b/c.txt"), 5)
+    ]
+
+
+def test_a_put_that_answers_nothing_settles_a_silent_receipt(accessor):
+    driver = replace(make_driver(FakeStore()), put=_put_silently)
+    manager = _managed(
+        make_write_bytes(driver)(accessor, spec("/a/b/c.txt"), b"hi")
+    )
+    assert manager.settled == [
+        Settled("/mnt/a/b/c.txt", b"hi", WriteReceipt(None, None), 5)
+    ]
+
+
+def test_create_and_truncate_still_only_invalidate(accessor):
+    manager = _managed(
+        make_create(make_driver(FakeStore()))(accessor, spec("/a/c.txt"))
+    )
+    assert manager.settled == []
+    assert manager.writes == ["/a/c.txt"]

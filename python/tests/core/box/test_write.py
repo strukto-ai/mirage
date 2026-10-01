@@ -26,6 +26,7 @@ from mirage.core.box.unlink import unlink
 from mirage.core.box.write import write_bytes
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from tests.fixtures.settle import Settled, settling
 
 _TREE = {
     "0": [
@@ -64,10 +65,6 @@ async def test_write_new_file_uploads_under_parent(root_accessor):
         patch(
             "mirage.core.box.write.upload_new_file", new_callable=AsyncMock
         ) as up,
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         await write_bytes(root_accessor, _spec("/data/new.txt"), b"hello")
     up.assert_awaited_once_with(
@@ -82,10 +79,6 @@ async def test_write_existing_file_uploads_version(root_accessor):
         patch(
             "mirage.core.box.write.upload_file_version", new_callable=AsyncMock
         ) as ver,
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         await write_bytes(root_accessor, _spec("/data/a.txt"), b"OVER")
     ver.assert_awaited_once_with(
@@ -97,10 +90,6 @@ async def test_write_existing_file_uploads_version(root_accessor):
 async def test_write_missing_parent_raises(root_accessor):
     with (
         patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
-        patch(
-            "mirage.core.box.write.invalidate_after_write",
-            new_callable=AsyncMock,
-        ),
     ):
         with pytest.raises(FileNotFoundError):
             await write_bytes(root_accessor, _spec("/data/ghost/x.txt"), b"x")
@@ -492,3 +481,21 @@ async def test_write_records_the_virtual_path(root_accessor):
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "target,upload", [("/data/new.txt", "upload_new_file"),
+                      ("/data/a.txt", "upload_file_version")]
+)
+async def test_write_settles_its_bytes_without_a_receipt(
+    root_accessor, target, upload
+):
+    with (
+        patch("mirage.core.box.resolve.list_folder_items", new=_fake_list),
+        patch(f"mirage.core.box.write.{upload}", new_callable=AsyncMock),
+        settling() as manager,
+    ):
+        await write_bytes(root_accessor, _spec(target), b"hello")
+    assert manager.settled == [Settled(target, b"hello", None, 5)]
+    assert manager.writes == []

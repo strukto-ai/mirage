@@ -523,11 +523,10 @@ async def test_a_write_token_for_other_bytes_leaves_the_entry_tokenless(cache):
 
 
 @pytest.mark.asyncio
-async def test_apply_io_read_bytes_take_the_read_token_not_the_write(cache):
-    """A line that reads and writes one path caches the read's bytes --
-    apply_io prefers io.reads -- so the entry must carry the read's
-    token. Stamping the write's would make is_fresh call stale bytes
-    fresh for as long as the entry lives."""
+async def test_apply_io_a_path_read_and_written_keeps_neither_token(cache):
+    """Neither side's token may label an entry for a line that read and
+    wrote one path: the write's would make is_fresh call the read's bytes
+    fresh, the read's would make it call pre-write bytes fresh."""
     io = IOResult(
         reads={"/s3/f.txt": b"old"},
         writes={"/s3/f.txt": b"new"},
@@ -541,9 +540,7 @@ async def test_apply_io_read_bytes_take_the_read_token_not_the_write(cache):
             _record("write", "/s3/f.txt", "etag-new-2", 3),
         ],
     )
-    assert await cache.get("/s3/f.txt") == b"old"
-    assert await cache.is_fresh("/s3/f.txt", "etag-old-2")
-    assert not await cache.is_fresh("/s3/f.txt", "etag-new-2")
+    assert await cache.exists("/s3/f.txt") is False
 
 
 @pytest.mark.asyncio
@@ -564,7 +561,7 @@ async def test_apply_io_written_bytes_ignore_an_earlier_read_token(cache):
 
 
 @pytest.mark.asyncio
-async def test_apply_io_streamed_read_takes_the_read_token(cache):
+async def test_apply_io_a_streamed_read_of_a_written_path_is_dropped(cache):
     """The stream branch is the same fork, so it answers the same way."""
     stream = CachableAsyncIterator(_one_chunk(b"old"))
     assert await stream.drain() == b"old"
@@ -581,7 +578,7 @@ async def test_apply_io_streamed_read_takes_the_read_token(cache):
             _record("write", "/s3/f.txt", "etag-new-2", 3),
         ],
     )
-    assert await cache.is_fresh("/s3/f.txt", "etag-old-2")
+    assert await cache.exists("/s3/f.txt") is False
 
 
 @pytest.mark.asyncio

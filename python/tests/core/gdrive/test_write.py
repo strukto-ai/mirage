@@ -17,6 +17,7 @@ import pytest
 from mirage.core.gdrive.write import write_bytes
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from tests.fixtures.settle import Settled, settling
 
 DOC_MIME = "application/vnd.google-apps.document"
 
@@ -78,3 +79,17 @@ async def test_write_records_the_virtual_path(fake_drive, gdrive_accessor):
         scope.close()
     assert fake_drive.find("k.txt")["content"] == b"hello"
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [False, True])
+async def test_write_settles_its_bytes_without_a_receipt(
+    fake_drive, gdrive_accessor, existing
+):
+    fake_drive.folder("a")
+    if existing:
+        await write_bytes(gdrive_accessor, spec("/a/new.txt"), b"old")
+    with settling() as manager:
+        await write_bytes(gdrive_accessor, spec("/a/new.txt"), b"hello")
+    assert manager.settled == [Settled("/a/new.txt", b"hello", None, 5)]
+    assert manager.writes == []

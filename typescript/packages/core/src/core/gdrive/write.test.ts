@@ -25,6 +25,7 @@ import { PathSpec } from '../../types.ts'
 import type { FakeDrive } from './_test_util.ts'
 import { DOC_MIME, makeGDriveAccessor, resetFakeDrive } from './_test_util.ts'
 import { write } from './write.ts'
+import { settling } from '../../cache/_test_util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -74,4 +75,18 @@ describe('gdrive write', () => {
       { code: 'EACCES' },
     )
   })
+})
+
+describe('gdrive write settles', () => {
+  for (const existing of [false, true]) {
+    it(`settles its bytes without a receipt (existing: ${existing})`, async () => {
+      fake.folder('a')
+      if (existing) await write(accessor, spec('/a/new.txt'), ENC.encode('old'))
+      const manager = await settling(() => write(accessor, spec('/a/new.txt'), ENC.encode('hello')))
+      expect(manager.settled).toEqual([
+        { path: '/a/new.txt', data: 'hello', receipt: null, started: 5 },
+      ])
+      expect(manager.writes).toEqual([])
+    })
+  }
 })

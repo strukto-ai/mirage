@@ -387,3 +387,78 @@ describe('a line that reads and writes one path (MIRAGE-14)', () => {
     })
   }
 })
+
+describe('a whole-file write settles with the cache', () => {
+  async function caching(policy: ReadPolicy): Promise<Workspace> {
+    const ram = new RAMVFS()
+    Object.assign(ram, { cachesReads: true, readRevalidatable: true })
+    return new Workspace(
+      { '/r/': ram },
+      {
+        mode: MountMode.WRITE,
+        read: { policy, ttl: DEFAULT_READ_TTL },
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+  }
+
+  async function out(ws: Workspace, line: string): Promise<string> {
+    const result = await ws.shell(line)
+    expect(result.exitCode, line).toBe(0)
+    return DEC.decode(result.stdout)
+  }
+
+  for (const [line, path] of [
+    ['echo new | tee /r/a', '/r/a'],
+    ['cp /r/b /r/c', '/r/c'],
+    ['split -l 1 /r/b /r/x', '/r/xaa'],
+    ['shuf -o /r/s /r/b', '/r/s'],
+    ['iconv -f utf-8 -t utf-8 -o /r/i /r/b', '/r/i'],
+    ['csplit -f /r/cs /r/b 2', '/r/cs00'],
+    ['sort -o /r/so /r/b', '/r/so'],
+    ['mkdir /r/out; tar -cf /r/t.tar -C /r b; tar -xf /r/t.tar -C /r/out', '/r/out/b'],
+    ['zip -q /r/z.zip /r/b', '/r/z.zip'],
+  ] as const) {
+    it(`a same-mount write keeps its output under bounded: ${line}`, async () => {
+      // Every command whose output goes through the backend's whole-file
+      // write settles it: on a bounded mount the bytes stay warm.
+      const ws = await caching(ReadPolicy.BOUNDED)
+      try {
+        await out(ws, "printf 'one\\ntwo\\nthree\\n' > /r/b")
+        await out(ws, line)
+        const held = await ws.cache.get(path)
+        expect(held).not.toBeNull()
+        expect(DEC.decode(held ?? undefined)).toBe(await out(ws, `cat ${path}`))
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  it('a silent write is not kept under fresh', async () => {
+    // RAM's write answers no token, so nothing could verify the bytes on a
+    // fresh mount: the entry is dropped rather than kept unverifiable.
+    const ws = await caching(ReadPolicy.FRESH)
+    try {
+      await out(ws, 'echo new | tee /r/a')
+      expect(await ws.cache.exists('/r/a')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a redirect is still evicted', async () => {
+    // A redirect writes through the dispatcher, which runs no cache manager
+    // and evicts after the op; it keeps nothing until that path settles.
+    const ws = await caching(ReadPolicy.BOUNDED)
+    try {
+      await out(ws, 'echo old > /r/a')
+      await out(ws, 'cat /r/a')
+      expect(await ws.cache.exists('/r/a')).toBe(true)
+      await out(ws, 'echo new > /r/a')
+      expect(await ws.cache.exists('/r/a')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+})
