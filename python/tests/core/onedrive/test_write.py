@@ -3,9 +3,11 @@ from aioresponses import CallbackResult, aioresponses
 
 import mirage.core.msgraph.drive as drive_ops
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
+from mirage.cache.types import WriteReceipt
 from mirage.core.onedrive.write import write_bytes
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from tests.fixtures.settle import Settled, settling
 
 
 def _accessor(**kw) -> OneDriveAccessor:
@@ -125,3 +127,46 @@ async def test_write_records_the_virtual_path():
     finally:
         scope.close()
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply,receipt",
+    [
+        ({"id": "X", "size": 7, "cTag": "c2"}, WriteReceipt(7, "c2")),
+        ({"id": "X"}, WriteReceipt(None, None)),
+    ],
+)
+async def test_write_settles_with_the_upload_reply(reply, receipt):
+    # The PUT answers the stored item: its size and cTag are what the
+    # drive holds, which property promotion can make differ from the body.
+    with settling() as manager, aioresponses() as m:
+        m.put(_CONTENT, status=201, payload=reply)
+        await write_bytes(
+            _accessor(), PathSpec.from_str_path("/Docs/a.txt"), b"hello"
+        )
+    assert manager.settled == [Settled("/Docs/a.txt", b"hello", receipt, 5)]
+    assert manager.writes == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_upload_settles_with_the_final_chunk_reply(
+    monkeypatch,
+):
+    monkeypatch.setattr(drive_ops, "SIMPLE_UPLOAD_MAX", 4)
+    monkeypatch.setattr(drive_ops, "UPLOAD_CHUNK", 4)
+    upload_url = "https://upload.example/session4"
+    with settling() as manager, aioresponses() as m:
+        m.post(_SESSION, payload={"uploadUrl": upload_url})
+        m.put(upload_url, status=202, payload={"nextExpectedRanges": ["4-"]})
+        m.put(
+            upload_url,
+            status=201,
+            payload={"id": "X", "size": 9, "cTag": "c3"},
+        )
+        await write_bytes(
+            _accessor(), PathSpec.from_str_path("/Docs/a.txt"), b"abcdef"
+        )
+    assert manager.settled == [
+        Settled("/Docs/a.txt", b"abcdef", WriteReceipt(9, "c3"), 5)
+    ]
