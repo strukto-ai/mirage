@@ -30,7 +30,9 @@ function recorder(): [CacheInvalidator, string[]] {
     return Promise.resolve()
   }
   const manager: CacheInvalidator = {
+    generation: 0,
     invalidateAfterWrite: note('write'),
+    settleAfterWrite: note('write'),
     invalidateAfterUnlink: note('unlink'),
     invalidateSubtree: note('subtree'),
     invalidateAncestors: note('ancestors'),

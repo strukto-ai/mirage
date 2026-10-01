@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from typing import Protocol, TypeVar
 
+from mirage.cache.types import WriteReceipt
 from mirage.types import FileStat, PathSpec
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,18 @@ class CacheInvalidator(Protocol):
     core mutators -> cache.context <- mount (pushes a manager).
     """
 
+    @property
+    def generation(self) -> int: ...
+
     async def invalidate_after_write(self, path: PathSpec) -> None: ...
+
+    async def settle_after_write(
+        self,
+        path: PathSpec,
+        data: bytes,
+        receipt: WriteReceipt | None,
+        started: int | None,
+    ) -> None: ...
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None: ...
 
@@ -97,6 +109,42 @@ async def invalidate_after_write(path: PathSpec) -> None:
     manager = _active.get()
     if manager is not None:
         await manager.invalidate_after_write(path)
+
+
+def write_generation() -> int | None:
+    """The active manager's generation, noted before a whole-file upload.
+
+    ``settle_after_write`` compares it with the generation after the
+    upload: any mutation of the mount in between means the written bytes
+    may no longer be what the backend holds. None without a manager.
+    """
+    manager = _active.get()
+    return manager.generation if manager is not None else None
+
+
+async def settle_after_write(
+    path: PathSpec,
+    data: bytes,
+    receipt: WriteReceipt | None,
+    started: int | None,
+) -> None:
+    """Report a whole-file write and let the cache keep what it sent.
+
+    Takes the place of :func:`invalidate_after_write` for a writer that
+    holds the file's full new bytes. The manager keeps them only where the
+    backend's reply vouches for them, and drops them otherwise. No-op if
+    no cache manager is active.
+
+    Args:
+        path (PathSpec): VFS-relative path that was written.
+        data (bytes): the bytes the write sent.
+        receipt (WriteReceipt | None): what the upload reply said it
+            stored, or None for a backend whose reply carries nothing.
+        started (int | None): :func:`write_generation` before the upload.
+    """
+    manager = _active.get()
+    if manager is not None:
+        await manager.settle_after_write(path, data, receipt, started)
 
 
 async def invalidate_after_unlink(path: PathSpec) -> None:

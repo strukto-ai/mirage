@@ -14,7 +14,7 @@
 
 import { activeRecords } from '../observe/context.ts'
 import { READ_FINGERPRINT_OPS } from '../observe/record.ts'
-import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
+import { DEFAULT_READ_TTL, type FileStat, PathSpec, ReadPolicy } from '../types.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import type { FileCache } from './file/mixin.ts'
@@ -24,6 +24,7 @@ import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/const
 import { commandStarted, tick } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { withCacheMutation, latestFingerprint } from './file/io.ts'
+import type { WriteReceipt } from './types.ts'
 
 /**
  * Default read gate: trust the cache. A manager built outside a workspace
@@ -88,6 +89,9 @@ export class CacheManager {
     // cached listing; undefined serves them all.
     private readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>,
     private readonly excludedPrefixes: () => readonly string[] = () => [],
+    // The mount's read policy; a write the backend did not vouch for is
+    // kept under bounded only.
+    private readonly readPolicy: ReadPolicy = ReadPolicy.BOUNDED,
   ) {
     this.fileCache = fileCache
     this.index = index
@@ -495,6 +499,52 @@ export class CacheManager {
       await this.fileCache.remove(key)
     }
     await this.invalidateParent(key)
+  }
+
+  /**
+   * Keep or drop the bytes a whole-file write just sent.
+   *
+   * Decided once, at the write, under the fill lock: any mutation of the
+   * mount since the upload started drops, a stored size other than the bytes
+   * sent drops (SharePoint promotes properties into an uploaded Office file),
+   * a token keeps the bytes with it, and a reply that says nothing keeps them
+   * only under bounded, where nothing would verify them anyway. Keep or drop,
+   * in-flight reads and probe answers are retired, so a read that began
+   * before the write cannot stamp its bytes over these.
+   */
+  async settleAfterWrite(
+    path: PathSpec,
+    data: Uint8Array,
+    receipt: WriteReceipt | null,
+    started: number | null,
+  ): Promise<void> {
+    const key = this.cacheKey(path)
+    const cache = this.fileCache
+    if (this.cachesReads && cache !== null) {
+      await withCacheMutation(cache, async () => {
+        const keep =
+          started === this.readGeneration &&
+          this.ownsPath(key) &&
+          this.vouched(receipt, data.byteLength)
+        this.retire()
+        // Removed first even on a keep: removal disowns a drain still
+        // filling the old bytes in the background.
+        await cache.remove(key)
+        if (keep) {
+          await cache.set(key, data, { fingerprint: receipt?.token ?? null, ttl: this.readTtl })
+        }
+      })
+    } else {
+      this.retire()
+    }
+    await this.invalidateParent(key)
+  }
+
+  private vouched(receipt: WriteReceipt | null, sent: number): boolean {
+    if (receipt === null) return this.readPolicy === ReadPolicy.BOUNDED
+    if (receipt.storedSize !== null && receipt.storedSize !== sent) return false
+    if (receipt.token) return true
+    return this.readPolicy === ReadPolicy.BOUNDED
   }
 
   /** Invalidate caches after a deletion of `path`; only `virtual` is read. */

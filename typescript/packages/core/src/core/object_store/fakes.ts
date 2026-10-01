@@ -271,6 +271,13 @@ export class FakeManager {
   readonly unlinks: string[] = []
   readonly subtrees: string[] = []
 
+  readonly generation = 0
+
+  settleAfterWrite(path: PathSpec): Promise<void> {
+    this.writes.push(path.mountPath)
+    return Promise.resolve()
+  }
+
   invalidateAfterWrite(path: string | PathSpec): Promise<void> {
     this.writes.push(typeof path === 'string' ? path : path.mountPath)
     return Promise.resolve()

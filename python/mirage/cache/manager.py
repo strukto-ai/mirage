@@ -29,9 +29,10 @@ from mirage.cache.index.constants import (
 from mirage.cache.index.scope import command_started, tick
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
+from mirage.cache.types import WriteReceipt
 from mirage.observe.context import active_recorder
 from mirage.observe.record import READ_FINGERPRINT_OPS
-from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec
+from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec, ReadPolicy
 from mirage.utils.key_prefix import mount_key
 
 T = TypeVar("T")
@@ -80,6 +81,7 @@ class CacheManager:
         may_serve_listing: Callable[[str, str | None], Awaitable[bool]]
         | None = None,
         excluded_prefixes: Callable[[], tuple[str, ...]] = tuple,
+        read_policy: ReadPolicy = ReadPolicy.BOUNDED,
     ) -> None:
         """Args:
         file_cache (FileCacheMixin | None): Workspace file cache
@@ -108,6 +110,8 @@ class CacheManager:
             cached listing; None serves them all.
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
+        read_policy (ReadPolicy): the mount's read policy; a write the
+            backend did not vouch for is kept under ``bounded`` only.
         """
         self._file_cache = file_cache
         self._index = index
@@ -116,6 +120,7 @@ class CacheManager:
         self._owns_path = owns_path
         self._may_serve_cached = may_serve_cached
         self._read_ttl = read_ttl
+        self._read_policy = read_policy
         self._on_gone = on_gone
         self._excluded_prefixes = excluded_prefixes
         self._may_serve_listing = may_serve_listing
@@ -605,6 +610,63 @@ class CacheManager:
         if self._caches_reads and self._file_cache is not None:
             await self._file_cache.remove(key)
         await self._invalidate_parent(key)
+
+    async def settle_after_write(
+        self,
+        path: PathSpec,
+        data: bytes,
+        receipt: WriteReceipt | None,
+        started: int | None,
+    ) -> None:
+        """Keep or drop the bytes a whole-file write just sent.
+
+        Decided once, at the write, under the fill lock: any mutation of
+        the mount since the upload started drops, a stored size other than
+        the bytes sent drops (SharePoint promotes properties into an
+        uploaded Office file), a token keeps the bytes with it, and a reply
+        that says nothing keeps them only under ``bounded``, where nothing
+        would verify them anyway. Keep or drop, in-flight reads and probe
+        answers are retired, so a read that began before the write cannot
+        stamp its bytes over these.
+
+        Args:
+            path (PathSpec): Path that was written; only ``virtual`` is
+                read.
+            data (bytes): the bytes the write sent.
+            receipt (WriteReceipt | None): the upload reply's account.
+            started (int | None): ``generation`` before the upload.
+        """
+        key = self._cache_key(path)
+        if self._caches_reads and self._file_cache is not None:
+            async with mutation_lock(self._file_cache):
+                keep = (
+                    started == self._read_generation
+                    and self._owns_path(key)
+                    and self._vouched(receipt, len(data))
+                )
+                self._retire()
+                # Removed first even on a keep: removal disowns a drain
+                # still filling the old bytes in the background.
+                await self._file_cache.remove(key)
+                if keep:
+                    await self._file_cache.set(
+                        key,
+                        data,
+                        fingerprint=receipt.token if receipt else None,
+                        ttl=self._read_ttl,
+                    )
+        else:
+            self._retire()
+        await self._invalidate_parent(key)
+
+    def _vouched(self, receipt: WriteReceipt | None, sent: int) -> bool:
+        if receipt is None:
+            return self._read_policy is ReadPolicy.BOUNDED
+        if receipt.stored_size is not None and receipt.stored_size != sent:
+            return False
+        if receipt.token:
+            return True
+        return self._read_policy is ReadPolicy.BOUNDED
 
     async def invalidate_after_unlink(self, path: PathSpec) -> None:
         """Invalidate caches after a deletion of ``path``.
