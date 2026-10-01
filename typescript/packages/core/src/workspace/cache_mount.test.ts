@@ -322,3 +322,68 @@ describe('a guarded cp reads past the cache without refilling it', () => {
     }
   })
 })
+
+describe('a line that reads and writes one path (MIRAGE-14)', () => {
+  async function caching(): Promise<Workspace> {
+    const ram = new RAMVFS()
+    ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
+    return new Workspace(
+      { '/r/': ram },
+      {
+        mode: MountMode.WRITE,
+        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
+      },
+    )
+  }
+
+  async function out(ws: Workspace, line: string): Promise<string> {
+    const result = await ws.shell(line)
+    expect(result.exitCode, line).toBe(0)
+    return DEC.decode(result.stdout)
+  }
+
+  for (const line of [
+    'cat /r/a; echo new | tee /r/a',
+    'cat /r/a; echo new > /r/a',
+    'cat /r/a; cat /r/b > /r/a',
+  ]) {
+    it(`a read earlier on the line does not outlive the write: ${line}`, async () => {
+      // The read's bytes used to be cached over the write's, so the next cat
+      // served the pre-write content until the ttl ran out.
+      const ws = await caching()
+      try {
+        await out(ws, "printf 'old\\n' > /r/a; printf 'new\\n' > /r/b")
+        await out(ws, line)
+        expect(await out(ws, 'cat /r/a')).toBe('new\n')
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+
+  it('a same-mount cp over a path read on the line is never empty', async () => {
+    // cp lists its target in writes as an empty eviction marker; taking the
+    // write side for a path also read would cache an empty file.
+    const ws = await caching()
+    try {
+      await out(ws, "printf 'old\\n' > /r/a; printf 'bee\\n' > /r/b")
+      await out(ws, 'cat /r/a; cp /r/b /r/a')
+      expect(await out(ws, 'cat /r/a')).toBe('bee\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  for (const line of ['echo new | tee /r/a; cat /r/a', 'echo new | tee /r/a']) {
+    it(`a write then a read on one line serves the write: ${line}`, async () => {
+      const ws = await caching()
+      try {
+        await out(ws, "printf 'old\\n' > /r/a; cat /r/a")
+        await out(ws, line)
+        expect(await out(ws, 'cat /r/a')).toBe('new\n')
+      } finally {
+        await ws.close()
+      }
+    })
+  }
+})

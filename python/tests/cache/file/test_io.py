@@ -82,15 +82,22 @@ async def test_apply_io_caches_writes(cache):
 
 
 @pytest.mark.asyncio
-async def test_apply_io_reads_preferred_over_writes(cache):
-    """When both reads and writes exist for same path, read data wins."""
+@pytest.mark.parametrize("written", [b"write-data", b""])
+async def test_apply_io_drops_a_path_read_and_written_on_one_line(
+    cache, written
+):
+    # A line's IOResult carries no order between a path's read and its
+    # write, so neither side can be trusted to be current: the read may be
+    # the pre-write bytes (cat a; tee a), and the write side may be cp's
+    # empty eviction marker rather than content.
+    await cache.set("/f.txt", b"stale")
     io = IOResult(
         reads={"/f.txt": b"read-data"},
-        writes={"/f.txt": b"write-data"},
+        writes={"/f.txt": written},
         cache=["/f.txt"],
     )
     await cache_io.apply_io(cache, io)
-    assert await cache.get("/f.txt") == b"read-data"
+    assert await cache.exists("/f.txt") is False
 
 
 @pytest.mark.asyncio

@@ -67,16 +67,23 @@ describe('cache population via applyIo', () => {
     expect(DEC.decode((await cache.get('/data/out.txt')) ?? undefined)).toBe('output')
   })
 
-  it('prefers reads over writes for the same path', async () => {
-    const cache = new RAMFileCacheStore()
-    const io = new IOResult({
-      reads: { '/f.txt': ENC.encode('read-data') },
-      writes: { '/f.txt': ENC.encode('write-data') },
-      cache: ['/f.txt'],
+  for (const written of ['write-data', '']) {
+    it(`drops a path read and written on one line (${JSON.stringify(written)})`, async () => {
+      // A line's IOResult carries no order between a path's read and its
+      // write, so neither side can be trusted to be current: the read may be
+      // the pre-write bytes (cat a; tee a), and the write side may be cp's
+      // empty eviction marker rather than content.
+      const cache = new RAMFileCacheStore()
+      await cache.set('/f.txt', ENC.encode('stale'))
+      const io = new IOResult({
+        reads: { '/f.txt': ENC.encode('read-data') },
+        writes: { '/f.txt': ENC.encode(written) },
+        cache: ['/f.txt'],
+      })
+      await applyIo(cache, io)
+      expect(await cache.exists('/f.txt')).toBe(false)
     })
-    await applyIo(cache, io)
-    expect(DEC.decode((await cache.get('/f.txt')) ?? undefined)).toBe('read-data')
-  })
+  }
 
   it('stores all paths in the cache list', async () => {
     const cache = new RAMFileCacheStore()

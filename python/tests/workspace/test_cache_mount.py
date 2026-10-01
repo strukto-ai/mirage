@@ -215,3 +215,55 @@ async def test_a_guarded_cp_leaves_the_entry_it_read_past(tmp_path):
     assert served == "v1\n", (
         "the guarded walk overwrote the entry it read past"
     )
+
+
+def _caching_ram() -> Workspace:
+    ram = RAMVFS()
+    ram.caches_reads = True
+    return Workspace({"/r/": ram}, mode=MountMode.WRITE)
+
+
+async def _out(ws: Workspace, line: str) -> bytes:
+    result = await ws.shell(line)
+    out = await result.materialize_stdout()
+    assert result.exit_code == 0, (line, await result.stderr_str())
+    return out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cat /r/a; echo new | tee /r/a",
+        "cat /r/a; echo new > /r/a",
+        "cat /r/a; cat /r/b > /r/a",
+    ],
+)
+async def test_a_read_earlier_on_the_line_does_not_outlive_the_write(line):
+    # MIRAGE-14: the read's bytes used to be cached over the write's, so
+    # the next cat served the pre-write content until the ttl ran out.
+    ws = _caching_ram()
+    await _out(ws, "printf 'old\\n' > /r/a; printf 'new\\n' > /r/b")
+    await _out(ws, line)
+    assert await _out(ws, "cat /r/a") == b"new\n"
+
+
+@pytest.mark.asyncio
+async def test_a_same_mount_cp_over_a_path_read_on_the_line_is_never_empty():
+    # cp lists its target in writes as an empty eviction marker; taking
+    # the write side for a path also read would cache an empty file.
+    ws = _caching_ram()
+    await _out(ws, "printf 'old\\n' > /r/a; printf 'bee\\n' > /r/b")
+    await _out(ws, "cat /r/a; cp /r/b /r/a")
+    assert await _out(ws, "cat /r/a") == b"bee\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["echo new | tee /r/a; cat /r/a", "echo new | tee /r/a"]
+)
+async def test_a_write_then_a_read_on_one_line_serves_the_write(line):
+    ws = _caching_ram()
+    await _out(ws, "printf 'old\\n' > /r/a; cat /r/a")
+    await _out(ws, line)
+    assert await _out(ws, "cat /r/a") == b"new\n"
