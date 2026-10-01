@@ -25,7 +25,8 @@ from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.view import IndexView
 from mirage.cache.manager import CacheManager
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.cache.types import WriteReceipt
+from mirage.types import FileStat, FileType, PathSpec, ReadPolicy
 from mirage.utils.key_prefix import mount_key
 
 
@@ -853,3 +854,153 @@ async def test_one_large_command_does_not_rescan_its_probes_on_every_insert(
             )
         assert len(manager._probed) == 64
     assert len(scans) <= 5
+
+
+async def _settled(
+    receipt: WriteReceipt | None,
+    policy: ReadPolicy = ReadPolicy.BOUNDED,
+    data: bytes = b"new\n",
+) -> RAMFileCacheStore:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"old\n", fingerprint="t-old", ttl=600)
+    manager = CacheManager(cache, index, "/data/", True, read_policy=policy)
+    started = manager.generation
+    await manager.settle_after_write(_spec(), data, receipt, started)
+    return cache
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", [ReadPolicy.BOUNDED, ReadPolicy.FRESH])
+async def test_settle_drops_bytes_the_backend_stored_differently(policy):
+    # SharePoint property promotion: 4 bytes sent, 15 stored.
+    cache = await _settled(WriteReceipt(stored_size=15, token="t1"), policy)
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", [ReadPolicy.BOUNDED, ReadPolicy.FRESH])
+@pytest.mark.parametrize("size", [4, None])
+async def test_settle_keeps_vouched_bytes_with_the_backend_token(policy, size):
+    cache = await _settled(WriteReceipt(stored_size=size, token="t1"), policy)
+    assert await cache.get("/data/x.txt") == b"new\n"
+    assert await cache.is_fresh("/data/x.txt", "t1") is True
+    assert await cache.is_unbounded("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "receipt", [None, WriteReceipt(stored_size=None, token=None)]
+)
+async def test_settle_keeps_a_silent_write_tokenless_on_bounded(receipt):
+    cache = await _settled(receipt, ReadPolicy.BOUNDED)
+    assert await cache.get("/data/x.txt") == b"new\n"
+    assert await cache.is_fresh("/data/x.txt", "t-old") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "receipt",
+    [None, WriteReceipt(stored_size=None, token=None),
+     WriteReceipt(stored_size=4, token=None)],
+)
+async def test_settle_drops_a_silent_write_on_fresh(receipt):
+    cache = await _settled(receipt, ReadPolicy.FRESH)
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_settle_drops_when_another_mutation_landed_mid_upload():
+    # Two writes race on one path and the earlier upload settles last: its
+    # bytes may no longer be what the backend holds.
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    started = manager.generation
+    await manager.invalidate_after_write(_spec("/data/y.txt"))
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), started
+    )
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_settle_drops_without_a_started_generation():
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"old\n")
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), None
+    )
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_settle_keeps_nothing_for_a_key_the_mount_does_not_own():
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"old\n")
+    manager = CacheManager(cache, index, "/data/", True, lambda _: False)
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+    )
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_settle_leaves_a_non_caching_mount_uncached():
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", False)
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+    )
+    assert await cache.exists("/data/x.txt") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("receipt", [WriteReceipt(4, "t1"), None])
+async def test_settle_evicts_the_parent_listing(receipt):
+    cache, index = _stores()
+    await index.set_dir(
+        "/data",
+        [("x.txt", IndexEntry(id="x", name="x.txt", resource_type="file"))],
+    )
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.settle_after_write(
+        _spec(), b"new\n", receipt, manager.generation
+    )
+    assert (await index.list_dir("/data")).entries is None
+
+
+@pytest.mark.asyncio
+async def test_settle_retires_a_read_that_began_before_the_keep():
+    # A read_through that fetched the pre-write bytes and lands after the
+    # keep must not put them back over what the write kept.
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    fetched = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fetch() -> bytes:
+        fetched.set()
+        await release.wait()
+        return b"old\n"
+
+    reader = asyncio.create_task(manager.read_through(_spec(), fetch))
+    await fetched.wait()
+    started = manager.generation
+    await manager.settle_after_write(
+        _spec(), b"new\n", WriteReceipt(4, "t1"), started
+    )
+    release.set()
+    assert await reader == b"old\n"
+    assert await cache.get("/data/x.txt") == b"new\n"
+
+
+@pytest.mark.asyncio
+async def test_settle_retires_the_commands_probe_answers():
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    async with command_scope():
+        manager.note_probed(_spec(), _probed())
+        await manager.settle_after_write(
+            _spec(), b"new\n", WriteReceipt(4, "t1"), manager.generation
+        )
+        assert manager.probed_stat(_spec()) is None

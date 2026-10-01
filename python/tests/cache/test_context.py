@@ -26,11 +26,14 @@ from mirage.cache.context import (
     invalidate_subtree,
     listing_refreshed,
     push_cache_manager,
+    settle_after_write,
+    write_generation,
 )
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.manager import CacheManager
+from mirage.cache.types import WriteReceipt
 from mirage.types import PathSpec
 
 
@@ -229,3 +232,31 @@ async def test_evict_after_evicts_and_keeps_the_ops_error(
     with pytest.raises(raised) if raised else contextlib.nullcontext():
         assert await evict_after(_op(op_error), evict) == "done"
     assert results == [seen]
+
+
+@pytest.mark.asyncio
+async def test_settle_and_generation_are_noops_without_an_active_manager():
+    prev = push_cache_manager(None)
+    try:
+        assert write_generation() is None
+        await settle_after_write(
+            _spec("/a.txt"), b"x", WriteReceipt(1, "t"), None
+        )
+    finally:
+        push_cache_manager(prev)
+
+
+@pytest.mark.asyncio
+async def test_settle_reaches_the_active_manager_with_its_generation():
+    cache = RAMFileCacheStore()
+    manager = CacheManager(cache, RAMIndexCacheStore(ttl=600), "/", True)
+    prev = push_cache_manager(manager)
+    try:
+        started = write_generation()
+        assert started == manager.generation
+        await settle_after_write(
+            _spec("/a.txt"), b"x", WriteReceipt(1, "t"), started
+        )
+    finally:
+        push_cache_manager(prev)
+    assert await cache.get("/a.txt") == b"x"

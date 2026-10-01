@@ -15,7 +15,7 @@
 import { mountKey } from '../utils/key_prefix.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { FileStat, FileType, PathSpec } from '../types.ts'
+import { FileStat, FileType, PathSpec, ReadPolicy } from '../types.ts'
 import { withCacheMutation } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { IndexEntry } from './index/config.ts'
@@ -24,6 +24,7 @@ import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
+import type { WriteReceipt } from './types.ts'
 import { shiftPerformanceNow } from './_test_util.ts'
 import { enoent } from '../utils/errors.ts'
 
@@ -617,6 +618,180 @@ describe('what a probe saw this command', () => {
       expect(manager.probedStat(mine)).not.toBeNull()
       expect((manager as unknown as { probed: Map<string, unknown> }).probed.size).toBe(1)
       return Promise.resolve()
+    })
+  })
+})
+
+describe('settleAfterWrite', () => {
+  const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
+  const dec = (b: Uint8Array | null): string | null => (b === null ? null : new TextDecoder().decode(b))
+  const spec = (): PathSpec => PathSpec.fromStrPath('/data/x.txt')
+
+  async function settled(
+    receipt: WriteReceipt | null,
+    policy: ReadPolicy = ReadPolicy.BOUNDED,
+  ): Promise<RAMFileCacheStore> {
+    const cache = new RAMFileCacheStore()
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    await cache.set('/data/x.txt', enc('old\n'), { fingerprint: 't-old', ttl: 600 })
+    const manager = newManager(cache, index, true, policy)
+    await manager.settleAfterWrite(spec(), enc('new\n'), receipt, manager.generation)
+    return cache
+  }
+
+  function newManager(
+    cache: RAMFileCacheStore,
+    index: RAMIndexCacheStore,
+    cachesReads = true,
+    policy: ReadPolicy = ReadPolicy.BOUNDED,
+    ownsPath: (path: string) => boolean = () => true,
+  ): CacheManager {
+    return new CacheManager(
+      cache,
+      index,
+      '/data/',
+      cachesReads,
+      ownsPath,
+      undefined,
+      600,
+      undefined,
+      undefined,
+      undefined,
+      policy,
+    )
+  }
+
+  for (const policy of [ReadPolicy.BOUNDED, ReadPolicy.FRESH]) {
+    it(`drops bytes the backend stored differently (${policy})`, async () => {
+      // SharePoint property promotion: 4 bytes sent, 15 stored.
+      const cache = await settled({ storedSize: 15, token: 't1' }, policy)
+      expect(await cache.exists('/data/x.txt')).toBe(false)
+    })
+
+    for (const size of [4, null]) {
+      it(`keeps vouched bytes with the backend token (${policy}, size ${size})`, async () => {
+        const cache = await settled({ storedSize: size, token: 't1' }, policy)
+        expect(dec(await cache.get('/data/x.txt'))).toBe('new\n')
+        expect(await cache.isFresh('/data/x.txt', 't1')).toBe(true)
+        expect(await cache.isUnbounded('/data/x.txt')).toBe(false)
+      })
+    }
+  }
+
+  for (const receipt of [null, { storedSize: null, token: null }]) {
+    it(`keeps a silent write tokenless on bounded (${JSON.stringify(receipt)})`, async () => {
+      const cache = await settled(receipt, ReadPolicy.BOUNDED)
+      expect(dec(await cache.get('/data/x.txt'))).toBe('new\n')
+      expect(await cache.isFresh('/data/x.txt', 't-old')).toBe(false)
+    })
+  }
+
+  for (const receipt of [null, { storedSize: null, token: null }, { storedSize: 4, token: null }]) {
+    it(`drops a silent write on fresh (${JSON.stringify(receipt)})`, async () => {
+      const cache = await settled(receipt, ReadPolicy.FRESH)
+      expect(await cache.exists('/data/x.txt')).toBe(false)
+    })
+  }
+
+  it('drops when another mutation landed mid-upload', async () => {
+    // Two writes race on one path and the earlier upload settles last: its
+    // bytes may no longer be what the backend holds.
+    const cache = new RAMFileCacheStore()
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    const started = manager.generation
+    await manager.invalidateAfterWrite(PathSpec.fromStrPath('/data/y.txt'))
+    await manager.settleAfterWrite(spec(), enc('new\n'), { storedSize: 4, token: 't1' }, started)
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+  })
+
+  it('drops without a started generation', async () => {
+    const cache = new RAMFileCacheStore()
+    await cache.set('/data/x.txt', enc('old\n'))
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    await manager.settleAfterWrite(spec(), enc('new\n'), { storedSize: 4, token: 't1' }, null)
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+  })
+
+  it('keeps nothing for a key the mount does not own', async () => {
+    const cache = new RAMFileCacheStore()
+    await cache.set('/data/x.txt', enc('old\n'))
+    const manager = newManager(
+      cache,
+      new RAMIndexCacheStore({ ttl: 600 }),
+      true,
+      ReadPolicy.BOUNDED,
+      () => false,
+    )
+    await manager.settleAfterWrite(
+      spec(),
+      enc('new\n'),
+      { storedSize: 4, token: 't1' },
+      manager.generation,
+    )
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+  })
+
+  it('leaves a non-caching mount uncached', async () => {
+    const cache = new RAMFileCacheStore()
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }), false)
+    await manager.settleAfterWrite(
+      spec(),
+      enc('new\n'),
+      { storedSize: 4, token: 't1' },
+      manager.generation,
+    )
+    expect(await cache.exists('/data/x.txt')).toBe(false)
+  })
+
+  for (const receipt of [{ storedSize: 4, token: 't1' }, null]) {
+    it(`evicts the parent listing (${JSON.stringify(receipt)})`, async () => {
+      const index = new RAMIndexCacheStore({ ttl: 600 })
+      await index.setDir('/data', [
+        ['x.txt', new IndexEntry({ id: 'x', name: 'x.txt', resourceType: 'file' })],
+      ])
+      const manager = newManager(new RAMFileCacheStore(), index)
+      await manager.settleAfterWrite(spec(), enc('new\n'), receipt, manager.generation)
+      expect((await index.listDir('/data')).entries ?? null).toBeNull()
+    })
+  }
+
+  it('retires a read that began before the keep', async () => {
+    // A readThrough that fetched the pre-write bytes and lands after the
+    // keep must not put them back over what the write kept.
+    const cache = new RAMFileCacheStore()
+    const manager = newManager(cache, new RAMIndexCacheStore({ ttl: 600 }))
+    let fetched!: () => void
+    const fetchedP = new Promise<void>((r) => (fetched = r))
+    let release!: () => void
+    const releaseP = new Promise<void>((r) => (release = r))
+    const reader = manager.readThrough(spec(), async () => {
+      fetched()
+      await releaseP
+      return enc('old\n')
+    })
+    await fetchedP
+    await manager.settleAfterWrite(
+      spec(),
+      enc('new\n'),
+      { storedSize: 4, token: 't1' },
+      manager.generation,
+    )
+    release()
+    expect(dec(await reader)).toBe('old\n')
+    expect(dec(await cache.get('/data/x.txt'))).toBe('new\n')
+  })
+
+  it("retires the command's probe answers", async () => {
+    const manager = newManager(new RAMFileCacheStore(), new RAMIndexCacheStore({ ttl: 600 }))
+    await runInCommandScope(async () => {
+      manager.noteProbed(spec(), new FileStat({ name: 'x.txt', size: 4, type: FileType.FILE }))
+      await manager.settleAfterWrite(
+        spec(),
+        enc('new\n'),
+        { storedSize: 4, token: 't1' },
+        manager.generation,
+      )
+      expect(manager.probedStat(spec())).toBeNull()
     })
   })
 })

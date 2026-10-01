@@ -20,6 +20,7 @@ import { RAMIndexCacheStore } from './index/ram.ts'
 import { CacheManager } from './manager.ts'
 import { shiftPerformanceNow } from './_test_util.ts'
 import { PathSpec } from '../types.ts'
+import type { WriteReceipt } from './types.ts'
 import {
   activeCacheManager,
   evictAfter,
@@ -29,6 +30,8 @@ import {
   invalidateSubtree,
   listingRefreshed,
   runWithCacheManager,
+  settleAfterWrite,
+  writeGeneration,
 } from './context.ts'
 
 class FakeManager {
@@ -42,6 +45,19 @@ class FakeManager {
 
   readThrough(_path: PathSpec, fetch: () => Promise<Uint8Array>): Promise<Uint8Array> {
     return fetch()
+  }
+
+  generation = 7
+  settled: [string, number | null][] = []
+
+  settleAfterWrite(
+    path: PathSpec,
+    _data: Uint8Array,
+    _receipt: WriteReceipt | null,
+    started: number | null,
+  ): Promise<void> {
+    this.settled.push([path.virtual, started])
+    return Promise.resolve()
   }
 
   writes: string[] = []
@@ -96,6 +112,25 @@ describe('cache context', () => {
     await invalidateAfterUnlink('/b.txt')
     await invalidateSubtree('/c')
     await invalidateAncestors(PathSpec.fromStrPath('/c/d'))
+  })
+
+  it('settle and generation are no-ops without an active manager', async () => {
+    expect(writeGeneration()).toBeNull()
+    await settleAfterWrite(PathSpec.fromStrPath('/a.txt'), new Uint8Array([1]), null, null)
+  })
+
+  it('settle reaches the active manager only, with its generation', async () => {
+    const outer = new FakeManager()
+    const inner = new FakeManager()
+    await runWithCacheManager(outer, async () => {
+      await runWithCacheManager(inner, async () => {
+        const started = writeGeneration()
+        await settleAfterWrite(PathSpec.fromStrPath('/a.txt'), new Uint8Array([1]), null, started)
+      })
+    })
+    expect(inner.settled).toEqual([['/a.txt', 7]])
+    expect(outer.settled).toEqual([])
+    expect(outer.writes).toEqual([])
   })
 
   it('scopes the manager to the run', async () => {
