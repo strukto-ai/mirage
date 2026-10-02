@@ -17,6 +17,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.cache.context import push_cache_manager
+from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.cache.index.ram import RAMIndexCacheStore
+from mirage.cache.manager import CacheManager
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.copy import copy
 from mirage.core.box.mkdir import mkdir
@@ -528,3 +532,59 @@ async def test_a_change_during_the_lookup_reaches_settle(
         ):
             await write_bytes(root_accessor, _spec(target), b"hello")
     assert [s.generation for s in manager.settled] == [5]
+
+
+_MERGE_TREE = {
+    "0": [{"id": "100", "name": "data", "type": "folder"}],
+    "100": [
+        {"id": "300", "name": "sub", "type": "folder"},
+        {"id": "400", "name": "dst", "type": "folder"},
+    ],
+    "300": [{"id": "310", "name": "x.txt", "type": "file", "size": 3}],
+    "400": [{"id": "410", "name": "x.txt", "type": "file", "size": 3}],
+}
+
+
+async def _merge_list(_tm, folder_id, limit=1000):
+    return _MERGE_TREE.get(folder_id, [])
+
+
+async def _merge_case(
+    root_accessor, copy_file, cache: RAMFileCacheStore
+) -> None:
+    await cache.set("/data/dst/x.txt", b"old")
+    manager = CacheManager(cache, RAMIndexCacheStore(ttl=600), "/", True)
+    prev_manager = push_cache_manager(manager)
+    try:
+        with (
+            patch(
+                "mirage.core.box.resolve.list_folder_items", new=_merge_list
+            ),
+            patch("mirage.core.box.copy.list_folder_items", new=_merge_list),
+            patch("mirage.core.box.copy.delete_file", new_callable=AsyncMock),
+            patch("mirage.core.box.copy.copy_file", new=copy_file),
+        ):
+            await copy(root_accessor, _spec("/data/sub"), _spec("/data/dst"))
+    finally:
+        push_cache_manager(prev_manager)
+
+
+@pytest.mark.asyncio
+async def test_copy_folder_merge_evicts_a_replaced_childs_bytes(root_accessor):
+    # Merging into an existing folder replaces children the caller never
+    # named, and their bytes were cached under their own keys: evicting
+    # only the folder left `cat /data/dst/x.txt` serving the old file.
+    cache = RAMFileCacheStore()
+    await _merge_case(root_accessor, AsyncMock(), cache)
+    assert await cache.exists("/data/dst/x.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_copy_folder_merge_that_fails_evicts_too(root_accessor):
+    # The replaced child was deleted before the copy failed, so its cached
+    # bytes are stale either way.
+    failing = AsyncMock(side_effect=OSError("copy failed"))
+    cache = RAMFileCacheStore()
+    with pytest.raises(OSError):
+        await _merge_case(root_accessor, failing, cache)
+    assert await cache.exists("/data/dst/x.txt") is False

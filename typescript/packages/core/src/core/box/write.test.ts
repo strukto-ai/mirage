@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ApiModule from './api.ts'
+import type * as ContextModule from '../../cache/context.ts'
 
 vi.mock('./api.ts', async () => {
   const actual = await vi.importActual<typeof ApiModule>('./api.ts')
@@ -31,8 +32,10 @@ vi.mock('./api.ts', async () => {
   }
 })
 
-vi.mock('../../cache/context.ts', () => {
+vi.mock('../../cache/context.ts', async () => {
+  const actual = await vi.importActual<typeof ContextModule>('../../cache/context.ts')
   return {
+    evictAfter: actual.evictAfter,
     invalidateAfterWrite: vi.fn(),
     invalidateAfterUnlink: vi.fn(),
     invalidateSubtree: vi.fn(),
@@ -305,4 +308,30 @@ describe('box write ops', () => {
     await copy(makeAccessor(), spec('/data/a.txt'), spec('/data/c.txt'))
     expect(vi.mocked(api.copyFile)).toHaveBeenCalledWith(STUB_TM, '200', '100', 'c.txt')
   })
+  for (const [label, copyFile] of [
+    ['', () => Promise.resolve({})],
+    [' that fails', () => Promise.reject(new Error('copy failed'))],
+  ] as const) {
+    it(`copy of a folder${label} evicts the merged destination subtree`, async () => {
+      // Merging into an existing folder replaces children the caller never
+      // named, and their bytes were cached under their own keys: evicting
+      // only the folder left the old child served. A merge that fails
+      // partway may have landed some children already.
+      const merge: Record<string, ApiModule.BoxItem[]> = {
+        ...TREE,
+        '300': [{ type: 'file', id: '310', name: 'x.txt', size: 3 }],
+        '400': [{ type: 'file', id: '410', name: 'x.txt', size: 3 }],
+      }
+      vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
+        Promise.resolve(merge[folderId] ?? []),
+      )
+      vi.mocked(api.copyFile).mockImplementation(copyFile as typeof api.copyFile)
+      vi.mocked(invalidateSubtree).mockClear()
+      await copy(makeAccessor(), spec('/data/sub'), spec('/data/dst')).catch(() => undefined)
+      expect(vi.mocked(invalidateSubtree)).toHaveBeenCalledWith(
+        expect.objectContaining({ virtual: '/data/dst' }),
+      )
+      vi.mocked(api.copyFile).mockReset()
+    })
+  }
 })
