@@ -73,3 +73,19 @@ async def test_a_file_stored_as_sent_stays_warm_after_tee(policy):
             assert graph.fetches() - before == 0
         finally:
             await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", [ReadPolicy.BOUNDED, ReadPolicy.FRESH])
+async def test_a_read_earlier_on_the_line_does_not_outlive_the_write(policy):
+    # The read stamps the pre-write cTag; storing its bytes after the line
+    # would serve "old" under bounded, and cost a download under fresh.
+    with serve(FakeGraph(drives={ME: {"a.txt": b"old\n"}})) as graph:
+        ws = _ws(graph, policy)
+        try:
+            await _out(ws, "cat /m/a.txt; echo hi | tee /m/a.txt")
+            before = graph.fetches()
+            assert await _out(ws, "cat /m/a.txt") == b"hi\n"
+            assert graph.fetches() - before == 0
+        finally:
+            await ws.close()

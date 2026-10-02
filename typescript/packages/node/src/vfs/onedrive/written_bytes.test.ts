@@ -86,5 +86,22 @@ describe('onedrive written bytes', () => {
         await ws.close()
       }
     })
+
+    it(`a read earlier on the line does not outlive the write (${policy})`, async () => {
+      // The read stamps the pre-write cTag; storing its bytes after the line
+      // would serve "old" under bounded, and cost a download under fresh.
+      const graph = new FakeGraph({ [ME]: { 'a.txt': ENC.encode('old\n') } })
+      graphs.push(graph)
+      await serveGraph(graph)
+      const ws = await wsOf(graph, policy)
+      try {
+        await out(ws, 'cat /m/a.txt; echo hi | tee /m/a.txt')
+        const before = graph.fetches()
+        expect(await out(ws, 'cat /m/a.txt')).toBe('hi\n')
+        expect(graph.fetches() - before).toBe(0)
+      } finally {
+        await ws.close()
+      }
+    })
   }
 })
